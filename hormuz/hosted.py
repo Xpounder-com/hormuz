@@ -248,6 +248,7 @@ def main(argv=None) -> int:
             check_initialized(config)
             from .onboarding import TeamDirectory
             from .session_store import SQLiteSessionStore
+            from .postgres import verify_postgres_deployment_runtime
             from .store_router import create_postgres_runtime_pool, create_usage_store
 
             session_settings = config.session_broker
@@ -270,6 +271,15 @@ def main(argv=None) -> int:
                 raise HostedError("hosted_provider_organization_required")
             pool = create_postgres_runtime_pool(config, environ=settings)
             try:
+                verify_postgres_deployment_runtime(
+                    settings[PROVIDER_RUNTIME_DSN_ENV],
+                    schema=config.usage_storage.postgres_schema,
+                    runtime_role=config.usage_storage.postgres_runtime_role,
+                    policy_control_role=config.policy_control.postgres_control_role,
+                    custody_control_role=config.custody_control.postgres_control_role,
+                    custody_executor_role=config.custody_executor.postgres_executor_role,
+                    connection_pool=pool,
+                )
                 store = create_usage_store(
                     config,
                     environ=settings,

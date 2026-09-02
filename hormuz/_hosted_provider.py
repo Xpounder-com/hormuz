@@ -176,6 +176,14 @@ def _safe_configuration_file(path: Path) -> None:
 
 
 def _validate_credentials(credentials: dict[str, str]) -> None:
+    if (
+        credentials.get("HORMUZ_HOSTED_MODE") == "provider-pilot"
+        and credentials.get(PROVIDER_MIGRATION_DSN_ENV, "")
+    ):
+        # The supervisor and gateway child share one container UID. Keeping an
+        # owner credential in the supervisor environment would therefore make
+        # it recoverable through process inspection after inference starts.
+        raise HostedError("hosted_provider_migration_credential_forbidden")
     values = [credentials.get(name, "") for name in PROVIDER_SECRET_NAMES]
     if len(set(values)) != len(values):
         raise HostedError("hosted_provider_credentials_must_be_distinct")

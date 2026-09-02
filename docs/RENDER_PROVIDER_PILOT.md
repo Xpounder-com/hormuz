@@ -94,8 +94,9 @@ The service uses these secret environment values:
 | `HORMUZ_POSTGRES_MIGRATION_DSN` | Maintenance command only | Original database owner, internal URL |
 
 All values must be distinct. The provider backend receives only the first seven
-values plus validated Render metadata. The migration DSN is excluded from its
-environment and should be removed from the service after maintenance. Keep the
+values plus validated Render metadata. Remove the migration DSN from the whole
+service after maintenance; `provider-pilot` refuses to start while it is
+nonempty because the supervisor and backend share a container UID. Keep the
 owner DSN in an approved secret manager for future reviewed migrations.
 
 Never put a credential in JSON, a command argument, logs, artifacts, Caddy, or
@@ -137,9 +138,11 @@ python -I -m hormuz.hosted \
 The command requires distinct owner and runtime credentials. It creates four
 fixed `NOLOGIN`, `NOINHERIT`, non-superuser roles; changes only the managed
 runtime login from `INHERIT` to `NOINHERIT`; rejects elevated or unexpected
-memberships; grants only `hormuz_runtime`; applies all migrations as the owner;
-removes any direct runtime-login grants; and verifies schema ownership, role
-membership, runtime access, and RLS through the runtime DSN. Its output is
+memberships; grants only `hormuz_runtime`; applies all migrations as the
+authenticated owner; removes direct runtime-login and `PUBLIC` grants; and
+verifies that the owner owns every schema object and that every schema, table,
+sequence, and function ACL names only the owner or one of the four fixed roles.
+It then proves runtime access and RLS through the runtime DSN. Its output is
 content-free and inference remains disabled. Safe completed work can be rerun.
 
 For a later schema upgrade, temporarily restore the owner DSN while still in
@@ -159,11 +162,14 @@ python -I -m hormuz.hosted \
 
 The initialized login state must already contain at least one operator-created
 managed organization. `provider-check` reads the exact organization IDs from
-that server-local directory and proves the restricted PostgreSQL runtime path
-under each tenant's RLS context; an empty directory fails closed. The provider
-process pins the same allowlist at startup. Creating another managed
-organization therefore requires a maintenance preflight and a fresh deployment
-before that organization's members can send inference requests. Member,
+that server-local directory, revalidates `session_user` before any `SET ROLE`,
+and proves the restricted PostgreSQL runtime path under each tenant's RLS
+context. It rejects an owner or superuser DSN, startup-role impersonation,
+unexpected memberships, ownership drift, or an unexpected ACL principal. An
+empty directory fails closed. The provider process repeats the credential and
+ownership checks and pins the same tenant allowlist at startup. Creating
+another managed organization therefore requires a maintenance preflight and a
+fresh deployment before that organization's members can send inference requests. Member,
 invitation, and session revocation continue to take effect without widening
 this tenant allowlist.
 

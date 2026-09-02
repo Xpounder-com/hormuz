@@ -35,7 +35,6 @@ def provider_profile(root: Path):
         "HORMUZ_ANTHROPIC_PROVIDER_KEY": "synthetic-anthropic-provider-key",
         "HORMUZ_FAILOVER_REHEARSAL_KEY": "synthetic_rehearsal_" + "r" * 43,
         "HORMUZ_POSTGRES_DSN": "postgresql://runtime:synthetic@db.example.test/hormuz",
-        "HORMUZ_POSTGRES_MIGRATION_DSN": "postgresql://migration:synthetic@db.example.test/hormuz",
     })
     state = Path(hosted_document["state_directory"])
     routes = {

@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from ._hosted_config import HostedError
 from ._hosted_provider import PROVIDER_FAILOVER_REHEARSAL_ENV, deployment_metadata
 from ._hosted_state import DATABASES, MARKER, _private, check_initialized
+from .postgres import verify_postgres_deployment_runtime
 from .server import GatewayRequestHandler, GatewayServer
 
 
@@ -106,6 +107,15 @@ class ProviderPilotGatewayServer(GatewayServer):
             config.upstream_timeout_seconds + PROVIDER_CONNECTION_LIFETIME_MARGIN,
             630,
         )
+        if config.usage_storage.backend == "postgresql":
+            verify_postgres_deployment_runtime(
+                environ.get(config.usage_storage.postgres_dsn_env, ""),
+                schema=config.usage_storage.postgres_schema,
+                runtime_role=config.usage_storage.postgres_runtime_role,
+                policy_control_role=config.policy_control.postgres_control_role,
+                custody_control_role=config.custody_control.postgres_control_role,
+                custody_executor_role=config.custody_executor.postgres_executor_role,
+            )
         super().__init__(config, environ=environ)
         self.RequestHandlerClass = ProviderPilotRequestHandler
 

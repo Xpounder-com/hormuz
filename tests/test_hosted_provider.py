@@ -165,6 +165,20 @@ class HostedProviderConfigTests(unittest.TestCase):
             with self.subTest(change=tuple(change)), self.assertRaises(HostedError):
                 self.load(settings={**self.settings, **change})
 
+    def test_provider_mode_rejects_the_operator_migration_credential(self):
+        with self.assertRaisesRegex(
+            HostedError,
+            "hosted_provider_migration_credential_forbidden",
+        ):
+            self.load(
+                settings={
+                    **self.settings,
+                    "HORMUZ_POSTGRES_MIGRATION_DSN": (
+                        "postgresql://migration:synthetic@db.example.test/hormuz"
+                    ),
+                }
+            )
+
     def test_render_provider_process_is_bound_to_main_small_compute_and_exact_source(self):
         hosted_document = json.loads(self.staging.source_path.read_text())
         render_state = Path("/var/lib/hormuz/private/state").resolve()
@@ -266,6 +280,7 @@ class HostedProviderConfigTests(unittest.TestCase):
             patch("hormuz.hosted.logging.disable"),
             patch("hormuz.store_router.create_postgres_runtime_pool", return_value=pool) as create_pool,
             patch("hormuz.store_router.create_usage_store", return_value=store) as create_store,
+            patch("hormuz.postgres.verify_postgres_deployment_runtime") as verify_runtime,
             redirect_stdout(output),
             redirect_stderr(error),
         ):
@@ -293,6 +308,7 @@ class HostedProviderConfigTests(unittest.TestCase):
             "RENDER_SERVICE_ID": "",
             "RENDER_SERVICE_TYPE": "",
             "RENDER_WEB_CONCURRENCY": "",
+            "HORMUZ_POSTGRES_MIGRATION_DSN": "",
         }
         create_pool.assert_called_once_with(self.config, environ=runtime_settings)
         create_store.assert_called_once_with(
@@ -300,6 +316,15 @@ class HostedProviderConfigTests(unittest.TestCase):
             environ=runtime_settings,
             connection_pool=pool,
             organization_ids=("customer-a",),
+        )
+        verify_runtime.assert_called_once_with(
+            self.settings["HORMUZ_POSTGRES_DSN"],
+            schema="hormuz",
+            runtime_role="hormuz_runtime",
+            policy_control_role="hormuz_policy_control",
+            custody_control_role="hormuz_custody_control",
+            custody_executor_role="hormuz_custody_executor",
+            connection_pool=pool,
         )
         store.verify_ready.assert_called_once_with()
         pool.close.assert_called_once_with()
@@ -325,6 +350,32 @@ class HostedProviderConfigTests(unittest.TestCase):
         self.assertEqual(set(child), set(PROVIDER_CHILD_ENV_NAMES))
         self.assertEqual(child["RENDER"], "")
         self.assertEqual(child["HORMUZ_OPENAI_PROVIDER_KEY"], self.settings["HORMUZ_OPENAI_PROVIDER_KEY"])
+
+    def test_provider_server_rejects_runtime_identity_before_binding(self):
+        initialize(self.staging)
+        with (
+            patch(
+                "hormuz._hosted_server.verify_postgres_deployment_runtime",
+                side_effect=PostgresStorageError(
+                    "postgres_runtime_identity_invalid"
+                ),
+            ) as verify_runtime,
+            patch("hormuz._hosted_server.GatewayServer.__init__") as initialize_server,
+            self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_identity_invalid",
+            ),
+        ):
+            ProviderPilotGatewayServer(self.config, environ=self.settings)
+        verify_runtime.assert_called_once_with(
+            self.settings["HORMUZ_POSTGRES_DSN"],
+            schema="hormuz",
+            runtime_role="hormuz_runtime",
+            policy_control_role="hormuz_policy_control",
+            custody_control_role="hormuz_custody_control",
+            custody_executor_role="hormuz_custody_executor",
+        )
+        initialize_server.assert_not_called()
 
     def test_provider_check_refuses_an_empty_managed_tenant_allowlist(self):
         initialize(self.staging)
@@ -352,7 +403,13 @@ class HostedProviderConfigTests(unittest.TestCase):
     def test_provider_migration_is_explicit_maintenance_only_and_uses_operator_dsn(self):
         migrated = SimpleNamespace(version=14, complete=True)
         output, error = io.StringIO(), io.StringIO()
-        settings = {**self.settings, "HORMUZ_HOSTED_MODE": "maintenance"}
+        settings = {
+            **self.settings,
+            "HORMUZ_HOSTED_MODE": "maintenance",
+            "HORMUZ_POSTGRES_MIGRATION_DSN": (
+                "postgresql://migration:synthetic@db.example.test/hormuz"
+            ),
+        }
         with (
             patch.dict(os.environ, settings, clear=True),
             patch("hormuz.hosted.logging.disable"),
@@ -405,7 +462,13 @@ class HostedProviderConfigTests(unittest.TestCase):
             runtime_membership_verified=True,
         )
         output, error = io.StringIO(), io.StringIO()
-        settings = {**self.settings, "HORMUZ_HOSTED_MODE": "maintenance"}
+        settings = {
+            **self.settings,
+            "HORMUZ_HOSTED_MODE": "maintenance",
+            "HORMUZ_POSTGRES_MIGRATION_DSN": (
+                "postgresql://migration:synthetic@db.example.test/hormuz"
+            ),
+        }
         with (
             patch.dict(os.environ, settings, clear=True),
             patch("hormuz.hosted.logging.disable"),
@@ -457,7 +520,13 @@ class HostedProviderConfigTests(unittest.TestCase):
 
     def test_provider_postgres_bootstrap_reports_only_stable_storage_code(self):
         output, error = io.StringIO(), io.StringIO()
-        settings = {**self.settings, "HORMUZ_HOSTED_MODE": "maintenance"}
+        settings = {
+            **self.settings,
+            "HORMUZ_HOSTED_MODE": "maintenance",
+            "HORMUZ_POSTGRES_MIGRATION_DSN": (
+                "postgresql://migration:synthetic@db.example.test/hormuz"
+            ),
+        }
         with (
             patch.dict(os.environ, settings, clear=True),
             patch("hormuz.hosted.logging.disable"),
