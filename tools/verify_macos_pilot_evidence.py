@@ -36,6 +36,8 @@ SCHEMA_ID = "hormuz.macos-pilot-qualification"
 SCHEMA_VERSION = 1
 CLAIM_SCOPE = "signed_macos_controlled_external_pilot_readiness"
 EVIDENCE_KINDS = {"pilot_qualification", "synthetic_test_fixture"}
+PRODUCTION_BUNDLE_IDENTIFIER = "com.xpounder.hormuz"
+SYNTHETIC_BUNDLE_IDENTIFIER = "com.example.hormuzpilot"
 
 _MAX_FILE_BYTES = 1024 * 1024
 _MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
@@ -102,6 +104,7 @@ _DISTRIBUTION_PROOF_FIELDS = {
     "hardened_runtime",
     "entitlements",
     "system_runtime_dependencies_only",
+    "executable_version_verified",
     "notarization_ticket_stapled",
     "team_identifier",
     "signing_authority",
@@ -301,6 +304,17 @@ def _reject_json_constant(_value: str) -> object:
     raise MacPilotEvidenceError("non_finite_json_number")
 
 
+def _file_identity(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
 def _read_bounded_regular(path: Path, maximum: int, label: str) -> bytes:
     try:
         before = path.lstat()
@@ -315,8 +329,7 @@ def _read_bounded_regular(path: Path, maximum: int, label: str) -> bytes:
         opened = os.fstat(descriptor)
         if (
             not stat.S_ISREG(opened.st_mode)
-            or (before.st_dev, before.st_ino, before.st_size)
-            != (opened.st_dev, opened.st_ino, opened.st_size)
+            or _file_identity(before) != _file_identity(opened)
         ):
             raise MacPilotEvidenceError(f"{label}_changed_during_open")
         with os.fdopen(descriptor, "rb") as source:
@@ -331,8 +344,7 @@ def _read_bounded_regular(path: Path, maximum: int, label: str) -> bytes:
     if (
         len(payload) > maximum
         or not stat.S_ISREG(after.st_mode)
-        or (before.st_dev, before.st_ino, before.st_size)
-        != (after.st_dev, after.st_ino, after.st_size)
+        or _file_identity(before) != _file_identity(after)
     ):
         raise MacPilotEvidenceError(f"{label}_changed_during_read")
     return payload
@@ -354,8 +366,7 @@ def _digest_bounded_regular(path: Path, maximum: int, label: str) -> tuple[int, 
         opened = os.fstat(descriptor)
         if (
             not stat.S_ISREG(opened.st_mode)
-            or (before.st_dev, before.st_ino, before.st_size)
-            != (opened.st_dev, opened.st_ino, opened.st_size)
+            or _file_identity(before) != _file_identity(opened)
         ):
             raise MacPilotEvidenceError(f"{label}_changed_during_open")
         with os.fdopen(descriptor, "rb") as source:
@@ -374,8 +385,7 @@ def _digest_bounded_regular(path: Path, maximum: int, label: str) -> tuple[int, 
     if (
         total != before.st_size
         or not stat.S_ISREG(after.st_mode)
-        or (before.st_dev, before.st_ino, before.st_size)
-        != (after.st_dev, after.st_ino, after.st_size)
+        or _file_identity(before) != _file_identity(after)
     ):
         raise MacPilotEvidenceError(f"{label}_changed_during_read")
     return total, digest.hexdigest()
@@ -388,7 +398,7 @@ def _parse_json(payload: bytes, label: str) -> object:
             object_pairs_hook=_strict_object,
             parse_constant=_reject_json_constant,
         )
-    except (UnicodeError, json.JSONDecodeError) as error:
+    except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
         raise MacPilotEvidenceError(f"{label}_json_invalid") from error
 
 
@@ -432,7 +442,7 @@ def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _validate_distribution_proof(value: object) -> dict[str, Any]:
+def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str, Any]:
     proof = _require_fields(value, _DISTRIBUTION_PROOF_FIELDS, "distribution_proof")
     _require_int(proof["schema_version"], 1, 1, "distribution_proof_schema_version")
     if (
@@ -451,6 +461,7 @@ def _validate_distribution_proof(value: object) -> dict[str, Any]:
     bundle_id = _require_pattern(proof["bundle_identifier"], _BUNDLE_ID_RE, "proof_bundle_identifier")
     if bundle_id.endswith(".local"):
         raise MacPilotEvidenceError("proof_bundle_identifier_local")
+    _require_bool(proof["executable_version_verified"], "proof_executable_version_verified")
     _require_pattern(proof["version"], _VERSION_RE, "proof_version")
     _require_pattern(proof["build"], _BUILD_RE, "proof_build")
     team_id = _require_pattern(proof["team_identifier"], _TEAM_ID_RE, "proof_team_identifier")
@@ -461,6 +472,19 @@ def _validate_distribution_proof(value: object) -> dict[str, Any]:
         or not authority.endswith(f"({team_id})")
     ):
         raise MacPilotEvidenceError("proof_signing_authority_invalid")
+    if evidence_kind == "pilot_qualification":
+        if (
+            bundle_id != PRODUCTION_BUNDLE_IDENTIFIER
+            or team_id == "ABCDEFGHIJ"
+            or "Synthetic Fixture" in authority
+        ):
+            raise MacPilotEvidenceError("distribution_proof_product_identity_invalid")
+    elif (
+        bundle_id != SYNTHETIC_BUNDLE_IDENTIFIER
+        or team_id != "ABCDEFGHIJ"
+        or authority != "Developer ID Application: Synthetic Fixture (ABCDEFGHIJ)"
+    ):
+        raise MacPilotEvidenceError("synthetic_distribution_proof_identity_invalid")
     _require_int(proof["archive_bytes"], 1, _MAX_ARCHIVE_BYTES, "proof_archive_bytes")
     for field in ("archive_sha256", "executable_sha256", "icon_sha256"):
         _require_pattern(proof[field], _SHA256_RE, f"proof_{field}")
@@ -552,7 +576,7 @@ def _validate_clean_machines(
         if started_at > generated_at:
             raise MacPilotEvidenceError(f"{label}_after_generated_at")
         architecture = run["architecture"]
-        if architecture not in {"arm64", "x86_64"}:
+        if not isinstance(architecture, str) or architecture not in {"arm64", "x86_64"}:
             raise MacPilotEvidenceError(f"{label}_architecture_invalid")
         _require_int(run["macos_major"], 14, 99, f"{label}_macos_major")
         booleans = {
@@ -698,7 +722,7 @@ def _validate_review(value: object, label: str, reasons: list[str]) -> None:
     reference_type = review["reference_type"]
     reference = review["reference"]
     independent = _require_bool(review["independent_reviewer"], f"{label}_independent_reviewer")
-    if status not in {"not_started", "failed", "passed"}:
+    if not isinstance(status, str) or status not in {"not_started", "failed", "passed"}:
         raise MacPilotEvidenceError(f"{label}_status_invalid")
     if reference_type == "none":
         if reference != "none" or status == "passed":
@@ -739,7 +763,7 @@ def validate_evidence(
     if generated_at > current + _MAX_FUTURE_CLOCK_SKEW:
         raise MacPilotEvidenceError("generated_at_in_future")
 
-    proof = _validate_distribution_proof(distribution_proof)
+    proof = _validate_distribution_proof(distribution_proof, evidence_kind)
     notarization = _validate_notarization(notarization_summary)
     artifact = _validate_artifact(
         root["artifact"],

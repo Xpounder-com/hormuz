@@ -10,6 +10,7 @@
   "distribution_ready": true,
   "entitlements": [],
   "executable_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "executable_version_verified": false,
   "hardened_runtime": true,
   "icon_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "minimum_macos": "14.0",

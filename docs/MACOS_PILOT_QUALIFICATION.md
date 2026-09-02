@@ -82,6 +82,14 @@ local path, log, screenshot, or free-form feedback. Unknown fields, duplicate
 JSON members, non-finite numbers, symlinks, changing files, and oversized input
 fail closed.
 
+Real qualification evidence must carry the permanent `com.xpounder.hormuz`
+bundle identity and a non-fixture Developer ID team. The checked-in synthetic
+identity is accepted only while `evidence_kind` remains
+`synthetic_test_fixture`; changing that marker cannot promote the fixture into
+a qualifying artifact. The distribution-proof schema matches the exact
+`distribution-proof.json` emitted by the protected signing workflow, including
+its `executable_version_verified` field.
+
 `provider_attempt_record_count` is content-free operational evidence. It does
 not contain request or response content. Provider credentials remain only in
 the hosted gateway's managed secret boundary; neither the signed Mac app nor

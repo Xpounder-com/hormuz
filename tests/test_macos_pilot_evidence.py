@@ -82,11 +82,37 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertEqual(result["external_initial_completion_count"], 0)
         self.assertEqual(result["external_returning_completion_count"], 0)
 
-    def test_same_complete_shape_can_qualify_only_as_real_operator_evidence(self) -> None:
+    def test_synthetic_fixture_cannot_be_promoted_by_changing_its_kind(self) -> None:
         inputs = list(self._inputs())
         evidence = copy.deepcopy(inputs[0])
         evidence["evidence_kind"] = "pilot_qualification"
         inputs[0] = evidence
+
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "distribution_proof_product_identity_invalid"
+        ):
+            self._validate(*inputs)
+
+    def test_production_shaped_complete_evidence_can_qualify(self) -> None:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        proof = copy.deepcopy(inputs[1])
+        evidence["evidence_kind"] = "pilot_qualification"
+        artifact = evidence["artifact"]  # type: ignore[assignment]
+        artifact["source_commit"] = "e" * 40
+        artifact["workflow_run_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999999"
+        )
+        artifact["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
+        artifact["team_identifier"] = "ZYXWVUTSRQ"
+        proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
+        proof["team_identifier"] = "ZYXWVUTSRQ"
+        proof["signing_authority"] = "Developer ID Application: Xpounder (ZYXWVUTSRQ)"
+        proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
+        artifact["distribution_proof_sha256"] = hashlib.sha256(proof_payload).hexdigest()
+        inputs[0] = evidence
+        inputs[1] = proof
+        inputs[3] = proof_payload
 
         result = self._validate(*inputs)
 
@@ -234,6 +260,13 @@ class MacPilotEvidenceTests(unittest.TestCase):
 
         inputs = list(self._inputs())
         evidence = copy.deepcopy(inputs[0])
+        evidence["clean_machine_runs"][0]["architecture"] = {}  # type: ignore[index]
+        inputs[0] = evidence
+        with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "architecture_invalid"):
+            self._validate(*inputs)
+
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
         evidence["hosted_gateway"]["provider_protocols"] = [{}]  # type: ignore[index]
         inputs[0] = evidence
         with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "gateway_provider_protocols_invalid"):
@@ -244,6 +277,13 @@ class MacPilotEvidenceTests(unittest.TestCase):
         evidence["open_blockers"] = [{}]
         inputs[0] = evidence
         with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "open_blockers_invalid"):
+            self._validate(*inputs)
+
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        evidence["reviews"]["security"]["status"] = {}  # type: ignore[index]
+        inputs[0] = evidence
+        with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "security_review_status_invalid"):
             self._validate(*inputs)
 
     def test_cli_requires_explicit_synthetic_flag_and_rejects_symlinks(self) -> None:
