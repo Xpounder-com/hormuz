@@ -114,6 +114,88 @@ public actor SessionController {
         return try await Dashboard(identity: who, usage: use, checkedAt: now())
     }
 
+    /// Content-free operational checks used by the signed pilot workflow. They
+    /// deliberately return no credential or server body to their caller.
+    public func verifySession(profileID: UUID) async throws {
+        let lock = try await directory.lock()
+        defer { lock.unlock() }
+        let record = try await credentialWhileLocked(profileID: profileID)
+        _ = try await identity(record.profile, token: record.accessToken)
+    }
+
+    public func reliability(profileID: UUID) async throws -> ProviderReliabilitySnapshot {
+        let lock = try await directory.lock()
+        defer { lock.unlock() }
+        let record = try await credentialWhileLocked(profileID: profileID)
+        let reply = try await transport.request(
+            profile: record.profile,
+            path: "/v1/gateway/reliability",
+            body: nil,
+            accessToken: record.accessToken
+        )
+        guard reply.status != 401 else { throw ClientError.loginRequired }
+        guard reply.status == 200 else { throw ClientError.gatewayUnavailable }
+        let value = try reply.decode(ProviderReliabilitySnapshot.self)
+        try value.validate()
+        return value
+    }
+
+    public func refreshSession(profileID: UUID) async throws {
+        let lock = try await directory.lock()
+        defer { lock.unlock() }
+        _ = try await credentialWhileLocked(profileID: profileID, forceRefresh: true)
+    }
+
+    /// Revoke the current server session while retaining the Keychain record so
+    /// a subsequent check can prove that the gateway rejects that exact session.
+    public func revokeServerSession(profileID: UUID) async throws {
+        let lock = try await directory.lock()
+        defer { lock.unlock() }
+        guard let profile = try directory.loadProfile(), profile.id == profileID,
+              let saved = try store.load() else { throw ClientError.loginRequired }
+        let record = try saved.validated(for: profile)
+        guard record.state == .active else { throw ClientError.refreshInterrupted }
+        let reply = try await post(profile, "/v1/auth/logout", ["credential": record.refreshToken])
+        struct Revoked: Decodable { let revoked: Bool }
+        guard reply.status == 200, try reply.decode(Revoked.self).revoked else {
+            throw ClientError.gatewayUnavailable
+        }
+    }
+
+    public func verifyServerRevocation(profileID: UUID) async throws {
+        let lock = try await directory.lock()
+        defer { lock.unlock() }
+        guard let profile = try directory.loadProfile(), profile.id == profileID,
+              let saved = try store.load() else { throw ClientError.loginRequired }
+        let record = try saved.validated(for: profile)
+        guard record.state == .active else { throw ClientError.refreshInterrupted }
+        let reply = try await transport.request(
+            profile: profile,
+            path: "/v1/gateway/whoami",
+            body: nil,
+            accessToken: record.accessToken
+        )
+        guard reply.status == 401 else { throw ClientError.invalidResponse }
+    }
+
+    public func verifySessionAbsent(profileID: UUID) async throws {
+        let lock = try await directory.lock()
+        defer { lock.unlock() }
+        guard let profile = try directory.loadProfile(), profile.id == profileID else {
+            throw ClientError.loginRequired
+        }
+        guard try store.load() == nil else { throw ClientError.alreadySignedIn }
+    }
+
+    /// Prove that the shared Keychain slot is empty before a controlled-pilot
+    /// login. This deliberately does not trust a profile file: a stale or
+    /// removed profile must not hide a retained session record.
+    public func verifySessionStoreEmpty() async throws {
+        let lock = try await directory.lock()
+        defer { lock.unlock() }
+        guard try store.load() == nil else { throw ClientError.alreadySignedIn }
+    }
+
     public func signOut() async throws {
         let lock = try await directory.lock()
         defer { lock.unlock() }

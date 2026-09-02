@@ -505,6 +505,128 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_macos_pilot_operations_approval_and_clean_runner_boundaries_are_fixed(
+        self,
+    ) -> None:
+        mutations = (
+            (
+                "    environment: macos-pilot-operations\n",
+                "",
+                "workflow environment contract changed",
+            ),
+            (
+                "      gateway_deployment_evidence_url:\n",
+                (
+                    "      operator_attested:\n"
+                    "        description: Caller-authored pass\n"
+                    "        required: true\n"
+                    "        type: boolean\n"
+                    "      gateway_deployment_evidence_url:\n"
+                ),
+                "macOS pilot operations job contract changed",
+            ),
+            (
+                "    runs-on: [self-hosted, macOS, hormuz-pilot-clean-arm64]\n",
+                "    runs-on: macos-14\n",
+                "macOS pilot operations job contract changed",
+            ),
+            (
+                (
+                    "  arm64-operations:\n"
+                    "    name: Clean Apple Silicon install, lifecycle and client recovery\n"
+                    "    needs: prepare\n"
+                ),
+                (
+                    "  arm64-operations:\n"
+                    "    name: Clean Apple Silicon install, lifecycle and client recovery\n"
+                    "    needs: prepare\n"
+                    "    environment: unprotected\n"
+                ),
+                "workflow environment contract changed",
+            ),
+            (
+                "          path: ${{ runner.temp }}/hormuz-macos-pilot-operations\n",
+                "          path: ${{ runner.temp }}\n",
+                "macOS pilot operations artifact boundary changed",
+            ),
+        )
+        for original, replacement, expected in mutations:
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/macos-pilot-operations.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertEqual(value.count(original), 1)
+                workflow.write_text(
+                    value.replace(original, replacement, 1), encoding="utf-8"
+                )
+                with self.assertRaisesRegex(RepositoryGovernanceError, expected):
+                    validate_repository_governance(root)
+
+    def test_macos_pilot_clean_runners_cannot_checkout_or_receive_tokens(self) -> None:
+        additions = (
+            (
+                "      - name: Download authenticated operation inputs\n",
+                (
+                    "      - name: Unsafe checkout\n"
+                    "        uses: actions/checkout@"
+                    "3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+                    "      - name: Download authenticated operation inputs\n"
+                ),
+            ),
+            (
+                "      - name: Download authenticated operation inputs\n",
+                (
+                    "      - name: Unsafe token\n"
+                    "        env:\n"
+                    "          GH_TOKEN: ${{ github.token }}\n"
+                    "        run: 'true'\n"
+                    "      - name: Download authenticated operation inputs\n"
+                ),
+            ),
+        )
+        for original, replacement in additions:
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/macos-pilot-operations.yml"
+                value = workflow.read_text(encoding="utf-8")
+                arm_start = value.index("  arm64-operations:\n")
+                intel_start = value.index("  x86-64-install:\n")
+                arm = value[arm_start:intel_start]
+                self.assertEqual(arm.count(original), 1)
+                workflow.write_text(
+                    value[:arm_start]
+                    + arm.replace(original, replacement, 1)
+                    + value[intel_start:],
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    RepositoryGovernanceError,
+                    "macOS pilot .* boundary changed",
+                ):
+                    validate_repository_governance(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-pilot-operations.yml"
+            value = workflow.read_text(encoding="utf-8")
+            invocation = (
+                '/bin/bash "$RUNNER_TEMP/hormuz-macos-pilot-inputs/'
+                'collect_macos_clean_machine.sh"'
+            )
+            self.assertEqual(value.count(invocation), 2)
+            workflow.write_text(
+                value.replace(invocation, invocation.removeprefix("/bin/bash "), 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "downloaded collector invocation changed",
+            ):
+                validate_repository_governance(root)
+
     def test_macos_distribution_rejects_unapproved_secret(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

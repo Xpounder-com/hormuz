@@ -102,6 +102,109 @@ final class SessionTests: PrivateStorageTestCase {
         XCTAssertNil(try store.load())
     }
 
+    func testContentFreePilotOperationsRefreshRevokeProveDenialAndRemoveSession() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        let profile = try profile()
+        try await controller.verifySessionStoreEmpty()
+        try await controller.signIn(profile: profile) { _ in }
+
+        do {
+            try await controller.verifySessionStoreEmpty()
+            XCTFail("Expected a retained session to fail the clean-login preflight")
+        } catch {
+            XCTAssertEqual(error as? ClientError, .alreadySignedIn)
+        }
+
+        try await controller.verifySession(profileID: profile.id)
+        let reliability = try await controller.reliability(profileID: profile.id)
+        XCTAssertEqual(
+            reliability,
+            ProviderReliabilitySnapshot(
+                schemaId: "hormuz.provider-reliability-summary",
+                schemaVersion: 1,
+                scope: "current_actor",
+                liveProviderRequestCount: 4,
+                providerAttemptRecordCount: 5,
+                deployment: ProviderDeploymentIdentity(
+                    platform: "render",
+                    sourceCommit: String(repeating: "a", count: 40),
+                    sourceBranch: "main",
+                    repository: "Xpounder-com/hormuz",
+                    cpuCount: "0.5",
+                    webConcurrency: "1",
+                    externalOrigin: "https://hormuz-pilot.onrender.com",
+                    serviceId: "srv-aaaaaaaaaaaaaaaaaaaa",
+                    instanceFingerprint: String(repeating: "b", count: 16)
+                )
+            )
+        )
+        try await controller.refreshSession(profileID: profile.id)
+        var counts = await transport.counts()
+        XCTAssertEqual(counts.0, 1)
+
+        try await controller.revokeServerSession(profileID: profile.id)
+        XCTAssertNotNil(try store.load())
+        try await controller.verifyServerRevocation(profileID: profile.id)
+
+        // Logout is deliberately idempotent at the gateway and removes the
+        // locally retained record only after the second revocation succeeds.
+        try await controller.signOut()
+        try await controller.verifySessionAbsent(profileID: profile.id)
+        try await controller.verifySessionStoreEmpty()
+        XCTAssertNil(try store.load())
+        counts = await transport.counts()
+        XCTAssertEqual(counts.1, 2)
+    }
+
+    func testPilotOperationsRemainBoundToTheSavedProfile() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: clock)
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        let profile = try profile()
+        try await controller.signIn(profile: profile) { _ in }
+        let other = UUID()
+
+        for operation in [
+            { try await controller.verifySession(profileID: other) },
+            { try await controller.refreshSession(profileID: other) },
+            { try await controller.revokeServerSession(profileID: other) },
+            { try await controller.verifyServerRevocation(profileID: other) },
+        ] {
+            do { try await operation(); XCTFail("Expected profile binding failure") }
+            catch { XCTAssertEqual(error as? ClientError, .loginRequired) }
+        }
+    }
+
+    func testPilotReliabilityRejectsImpossibleCounterRelationship() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: clock)
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        let profile = try profile()
+        try await controller.signIn(profile: profile) { _ in }
+        await transport.setBadReliability()
+
+        do {
+            _ = try await controller.reliability(profileID: profile.id)
+            XCTFail("Expected invalid reliability evidence")
+        } catch {
+            XCTAssertEqual(error as? ClientError, .invalidResponse)
+        }
+    }
+
+    func testPilotReliabilityRejectsInvalidDeploymentIdentity() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: clock)
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        let profile = try profile()
+        try await controller.signIn(profile: profile) { _ in }
+        await transport.setBadDeploymentIdentity()
+
+        do {
+            _ = try await controller.reliability(profileID: profile.id)
+            XCTFail("Expected invalid deployment evidence")
+        } catch {
+            XCTAssertEqual(error as? ClientError, .invalidResponse)
+        }
+    }
+
     func testCrossOrganizationIdentityAndUnsafeBrowserURLAreRejected() async throws {
         let clock = TestClock(), store = MemorySessions()
         let transport = FixtureTransport(clock: clock)

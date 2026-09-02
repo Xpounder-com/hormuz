@@ -84,6 +84,11 @@ binds these gates to the exact notarized archive, distribution proof, and Apple
 notarization summary. For real evidence it also authenticates the protected
 workflow run and exact retained Actions-artifact members through GitHub's API.
 Its synthetic fixture validates only the contract shape; it can never qualify a
-pilot or change the external-onboarding counts.
+pilot or change the external-onboarding counts. The protected **Mac
+controlled-pilot operations** workflow now collects gates for clean install,
+session lifecycle, and pinned-client authentication. It still requires separate
+clean Apple Silicon and Intel self-hosted runners and a completed real run; a
+developer workstation with Xcode or Command Line Tools is deliberately
+rejected.
 
 There is no authenticated automatic updater yet. Distribute versioned archives manually during the pilot and retain the previous notarized archive and digest for controlled rollback. Do not promise an availability or latency SLA from signing, notarization, or a single-node Render staging deployment.
