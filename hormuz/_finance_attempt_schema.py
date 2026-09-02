@@ -53,6 +53,8 @@ SQLITE_FINANCE_ATTEMPT_TRIGGERS = {
         "OR length(NEW.configured_rate_card_id) NOT BETWEEN 1 AND 128 "
         "OR NOT (substr(NEW.configured_rate_card_id, 1, 1) GLOB '[A-Za-z0-9]') "
         "OR NEW.configured_rate_card_id GLOB '*[^A-Za-z0-9._:-]*' "
+        "OR NEW.configured_rate_card_version IS NULL "
+        "OR typeof(NEW.configured_rate_card_version) <> 'integer' "
         "OR NEW.configured_rate_card_version NOT BETWEEN 1 AND 2147483647 "
         "OR NEW.configured_rate_card_digest IS NULL "
         "OR length(NEW.configured_rate_card_digest) <> 64 "

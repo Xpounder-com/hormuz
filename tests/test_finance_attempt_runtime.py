@@ -861,11 +861,13 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                 placeholders = ", ".join("?" for _ in columns)
                 for field, invalid in (
                     ("configured_rate_card_id", "-invalid"),
+                    ("configured_rate_card_version", None),
+                    ("configured_rate_card_version", 1.5),
                     ("configured_rate_card_digest", "g" * 64),
                     ("configured_rate_card_currency", "usd"),
                 ):
                     candidate = {**root, "attempt_id": f"invalid-{field}", field: invalid}
-                    with self.subTest(field=field), self.assertRaisesRegex(
+                    with self.subTest(field=field, invalid=invalid), self.assertRaisesRegex(
                         sqlite3.IntegrityError,
                         "finance_attempt_binding_required",
                     ):
