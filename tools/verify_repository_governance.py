@@ -1225,6 +1225,54 @@ def _validate_workflows(
                 raise RepositoryGovernanceError(
                     "macOS distribution build/sign isolation changed"
                 )
+            if (
+                "\n      build_number:\n" in text
+                or "\n      bundle_identifier:\n" in text
+                or text.count("HORMUZ_BUNDLE_ID: com.xpounder.hormuz") != 2
+                or text.count(
+                    "HORMUZ_BUILD_NUMBER=$((GITHUB_RUN_NUMBER * 1000 + "
+                    "GITHUB_RUN_ATTEMPT))"
+                )
+                != 2
+                or text.count('test "$GITHUB_RUN_ATTEMPT" -lt 1000') != 2
+                or text.count(
+                    "HORMUZ_BUILD_NUMBER: ${{ steps.release.outputs.build_number }}"
+                )
+                != 3
+                or text.count(
+                    "HORMUZ_BUNDLE_ID: ${{ steps.release.outputs.bundle_identifier }}"
+                )
+                != 3
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution release identity changed"
+                )
+            if (
+                "--ad-hoc" not in build_job
+                or '"executable_version_verified": True' not in build_job
+                or build_job.count(
+                    '"credential_free_runtime_version_verified": True'
+                )
+                != 1
+                or signing_job.count(
+                    '"credential_free_runtime_version_verified": True'
+                )
+                != 1
+                or "--verify-executable-version" in signing_job
+                or '"$HORMUZ_UNSIGNED_PAYLOAD/Hormuz" --version' in signing_job
+                or 'rm -f "$HORMUZ_CERTIFICATE" "$HORMUZ_NOTARY_KEY"'
+                not in signing_job
+                or "unset HORMUZ_CERTIFICATE_BASE64 HORMUZ_CERTIFICATE_PASSWORD"
+                not in signing_job
+                or (
+                    "unset HORMUZ_NOTARY_KEY_BASE64 HORMUZ_NOTARY_KEY_ID "
+                    "HORMUZ_NOTARY_ISSUER_ID"
+                )
+                not in signing_job
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution credential execution boundary changed"
+                )
         if path.name == "macos-client.yml":
             change_job = job_blocks.get("changes")
             native_job = job_blocks.get("native-client")

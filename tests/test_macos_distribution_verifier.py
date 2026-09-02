@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import plistlib
 import stat
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -12,6 +15,7 @@ from tools.verify_macos_distribution import (
     EXPECTED_DIRECTORIES,
     STAPLED_TICKET,
     VerificationError,
+    main,
     signing_details,
     verify_archive,
     verify_reported_version,
@@ -19,6 +23,78 @@ from tools.verify_macos_distribution import (
 
 
 class MacOSDistributionArchiveTests(unittest.TestCase):
+    def _run_distribution_main(
+        self, root: Path, *, verify_executable_version: bool
+    ) -> tuple[dict[str, object], object]:
+        bundle = root / "Hormuz.app"
+        executable = bundle / "Contents/MacOS/Hormuz"
+        information = bundle / "Contents/Info.plist"
+        icon = bundle / "Contents/Resources/Hormuz.icns"
+        executable.parent.mkdir(parents=True)
+        icon.parent.mkdir(parents=True)
+        executable.write_bytes(b"unexecuted-test-binary")
+        icon.write_bytes(b"icon")
+        with information.open("wb") as output:
+            plistlib.dump(
+                {
+                    "CFBundleExecutable": "Hormuz",
+                    "CFBundleIdentifier": "com.xpounder.hormuz",
+                    "CFBundlePackageType": "APPL",
+                    "CFBundleShortVersionString": "2.3.4",
+                    "CFBundleVersion": "17",
+                    "CFBundleIconFile": "Hormuz",
+                    "LSMinimumSystemVersion": "14.0",
+                    "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
+                },
+                output,
+            )
+        archive = root / "Hormuz.zip"
+        archive.write_bytes(b"archive")
+        proof = root / "proof.json"
+        arguments = [
+            "verify_macos_distribution.py",
+            "--bundle",
+            str(bundle),
+            "--archive",
+            str(archive),
+            "--mode",
+            "ad-hoc",
+            "--expected-bundle-id",
+            "com.xpounder.hormuz",
+            "--expected-version",
+            "2.3.4",
+            "--expected-build",
+            "17",
+            "--output",
+            str(proof),
+        ]
+        if verify_executable_version:
+            arguments.append("--verify-executable-version")
+        with (
+            patch.object(sys, "argv", arguments),
+            patch(
+                "tools.verify_macos_distribution.run",
+                side_effect=(
+                    ("arm64 x86_64\n", ""),
+                    (
+                        (
+                            f"{executable}:\n"
+                            "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n"
+                        ),
+                        "",
+                    ),
+                ),
+            ),
+            patch(
+                "tools.verify_macos_distribution.signing_details",
+                return_value={"team_identifier": None, "authority": None},
+            ),
+            patch("tools.verify_macos_distribution.verify_archive"),
+            patch("tools.verify_macos_distribution.verify_reported_version") as runtime,
+        ):
+            self.assertEqual(main(), 0)
+        return json.loads(proof.read_text(encoding="utf-8")), runtime
+
     def _write_archive(self, root: Path, *, include_ticket: bool) -> tuple[Path, Path]:
         bundle = root / "Hormuz.app"
         files = set(BASE_EXPECTED_FILES)
@@ -101,6 +177,22 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
                 VerificationError, "reported_release_version_mismatch"
             ):
                 verify_reported_version(executable, "2.3.4")
+
+    def test_distribution_verifier_does_not_execute_payload_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            proof, runtime = self._run_distribution_main(
+                Path(temporary), verify_executable_version=False
+            )
+        runtime.assert_not_called()
+        self.assertFalse(proof["executable_version_verified"])
+
+    def test_distribution_verifier_executes_payload_only_with_explicit_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            proof, runtime = self._run_distribution_main(
+                Path(temporary), verify_executable_version=True
+            )
+        runtime.assert_called_once()
+        self.assertTrue(proof["executable_version_verified"])
 
 
 if __name__ == "__main__":

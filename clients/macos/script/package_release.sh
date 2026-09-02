@@ -175,14 +175,20 @@ if [ -n "$HORMUZ_DSYM_SOURCE" ] && [ -d "$HORMUZ_DSYM_SOURCE" ]; then
   COPYFILE_DISABLE=1 ditto --norsrc --noextattr --noqtn --noacl -c -k --keepParent \
     "$HORMUZ_DSYM_SOURCE" "$HORMUZ_OUTPUT_DIRECTORY/Hormuz-$HORMUZ_VERSION.dSYM.zip"
 fi
-python3 "$HORMUZ_REPO_ROOT/tools/verify_macos_distribution.py" \
-  --bundle "$HORMUZ_BUNDLE" \
-  --archive "$HORMUZ_ARCHIVE" \
-  --mode "$HORMUZ_MODE" \
-  --expected-bundle-id "$HORMUZ_BUNDLE_ID" \
-  --expected-version "$HORMUZ_VERSION" \
-  --expected-build "$HORMUZ_BUILD_NUMBER" \
+HORMUZ_VERIFICATION_ARGS=(
+  --bundle "$HORMUZ_BUNDLE"
+  --archive "$HORMUZ_ARCHIVE"
+  --mode "$HORMUZ_MODE"
+  --expected-bundle-id "$HORMUZ_BUNDLE_ID"
+  --expected-version "$HORMUZ_VERSION"
+  --expected-build "$HORMUZ_BUILD_NUMBER"
   --output "$HORMUZ_OUTPUT_DIRECTORY/package-metadata.json"
+)
+if [ "$HORMUZ_AD_HOC" -eq 1 ]; then
+  HORMUZ_VERIFICATION_ARGS+=(--verify-executable-version)
+fi
+python3 "$HORMUZ_REPO_ROOT/tools/verify_macos_distribution.py" \
+  "${HORMUZ_VERIFICATION_ARGS[@]}"
 
 HORMUZ_SUCCEEDED=1
 printf 'Bundle: %s\nArchive: %s\nMetadata: %s\n' \
