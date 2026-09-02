@@ -164,12 +164,12 @@ runtime successor may add local operator commands for `finance source bind`,
 ## Recovery and acceptance gates
 
 The exact predecessor is protected merged main
-`38309f6984e336862d94cf35ed0b9e2605a5be81`, archived deterministically with
+`cf30256760b68b133208b4013bdd31b22639b172`, archived deterministically with
 prefix `hormuz-finance-native-runtime-baseline/`, umask `0000`, and SHA-256
-`f0c2fc86c1e6198bcf58a2476941d6584b1efcdcf33708aa485da04106ed8c65`.
+`35cecfb4dbb1b4a972a4f43a30941e91e38c049636bd98cc4869cb145c65d1da`.
 It runs SQLite 11 and PostgreSQL 15 and contains 144 verified runtime files
 whose canonical path-and-byte digest is
-`98fd9711ff120ee1478c4f6d9c1c56ffc2f26db11eb3a8dae3844dfd9724b503`.
+`00b01cf3347f9fcaa482778513b0415eb81c30a21e8fee1d0232390bb94fda32`.
 
 The preflight must prove that the current runtime tree matches those exact
 predecessor bytes, the absent 12/16 migrations fail without partial state,
