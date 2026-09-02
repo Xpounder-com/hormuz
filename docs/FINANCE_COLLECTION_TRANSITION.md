@@ -95,6 +95,14 @@ interval. Thus a January 15 through January 31 refresh replaces duplicate
 daily buckets without dropping January 1 through January 14 or adding either
 interval twice. Overlapping buckets with non-identical boundaries remain
 separate evidence and cannot be silently summed or selected as one partition.
+The snapshot content digest covers canonical typed observations and stable
+source identity: organization, binding ID and version, collection profile, and
+query window. Attempt identity, requested page size, page boundaries, raw
+cursors, and page-chain mechanics are excluded from that digest. A separate
+page-chain digest binds validated pagination provenance, including requested
+page size and canonical returned page boundaries or counts, while raw cursors
+are discarded after validation. A page-size change can therefore preserve
+content identity without erasing how the evidence was collected.
 Historical gateway attempts and rate-card estimates are not repriced or rebound.
 
 The initial coverage explicitly excludes ChatGPT seat/Work analytics, unmapped
@@ -130,6 +138,12 @@ the expected production fingerprint from the database under test. This
 preflight does not consume either migration number or alter the current 185-row
 schema-15 ACL boundary.
 
+All six collection tables are append-only. Their reviewed migrations must
+reject every update and delete, and PostgreSQL must reject `TRUNCATE`. SQLite
+must additionally reject `INSERT OR REPLACE` whenever any primary or unique
+identity would conflict, so replacement cannot delete a source row behind an
+existing audit entry.
+
 No current usage repository protocol, request-attempt schema, native finance
 record, route, command, public wire contract, role, or error changes. The
 runtime successor may add local operator commands for `finance source bind`,
@@ -147,8 +161,9 @@ whose canonical path-and-byte digest is
 
 The preflight must prove that the current runtime tree matches those exact
 predecessor bytes, the absent 12/16 migrations fail without partial state,
-representative six-table DDL plus the SQLite audit-table rebuild and PostgreSQL
-audit constraint/function changes roll back and retry idempotently,
+representative append-only six-table DDL plus the SQLite audit-table rebuild
+and PostgreSQL audit constraint/function changes roll back and retry
+idempotently,
 partial and newer states are refused by current and exact predecessor binaries,
 an old-pair restore preserves every accepted populated fact and audit byte, and
 post-checkpoint writes require retained-candidate forward recovery without

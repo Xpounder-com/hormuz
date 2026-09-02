@@ -147,16 +147,16 @@
     "retry": "persistence_retry_may_reuse_the_same_in_memory_normalized_evidence_but_never_recontacts_provider_automatically"
   },
   "snapshot": {
-    "grain": "one_organization_binding_version_collection_profile_query_window_and_complete_page_chain",
+    "grain": "one_organization_binding_id_and_version_collection_profile_query_window_and_complete_page_chain",
     "immutable": true,
     "published_only_when_complete": true,
-    "page_chain_digest": "sha256_of_canonical_ordered_page_evidence_after_validation_not_raw_bytes",
-    "content_digest": "sha256_of_canonical_typed_observations_and_provenance",
+    "page_chain_digest": "sha256_of_canonical_validated_pagination_provenance_including_requested_page_size_and_returned_page_boundaries_or_counts_not_raw_bytes_or_stored_opaque_cursors",
+    "content_digest": "sha256_of_canonical_typed_observations_and_stable_source_identity_including_organization_binding_id_and_version_collection_profile_and_query_window_excluding_attempt_identity_page_size_page_boundaries_cursors_and_page_chain_mechanics",
     "authenticated_evidence": "authenticated_query_pagination_complete_not_invoice_finality_account_ownership_or_point_in_time_consistency",
     "file_evidence": "customer_supplied_profile_bundle_contract_validated_scope_unverified_never_live_verified_from_file_fields",
     "mutable_source": true,
-    "whole_snapshot_supersession": "only_exact_same_organization_binding_version_collection_profile_and_query_window_may_append_an_explicit_successor_relationship_partial_overlap_never_supersedes_a_whole_snapshot",
-    "overlap": "within_one_organization_binding_version_and_collection_profile_reporting_partitions_by_exact_provider_native_bucket_start_and_end_then_selects_the_newest_complete_snapshot_by_database_commit_sequence_for_each_exact_bucket_never_sums_duplicate_intervals",
+    "whole_snapshot_supersession": "only_exact_same_organization_binding_id_and_version_collection_profile_and_query_window_may_append_an_explicit_successor_relationship_partial_overlap_never_supersedes_a_whole_snapshot",
+    "overlap": "within_one_organization_binding_id_and_version_and_collection_profile_reporting_partitions_by_exact_provider_native_bucket_start_and_end_then_selects_the_newest_complete_snapshot_by_database_commit_sequence_for_each_exact_bucket_never_sums_duplicate_intervals",
     "nonidentical_overlap": "overlapping_nonidentical_bucket_intervals_remain_separate_evidence_and_must_not_be_summed_or_silently_selected_as_one_partition",
     "selection": "deterministic_per_exact_provider_native_bucket_interval_as_of_database_commit_sequence_not_wall_clock_last_write_wins",
     "no_historical_repricing": true
@@ -217,10 +217,10 @@
     "actor_attribution_from_provider_identifiers": false
   },
   "idempotency": {
-    "identity": "organization_binding_version_profile_query_window_and_operator_idempotency_digest",
+    "identity": "organization_binding_id_and_version_profile_query_window_and_operator_idempotency_digest",
     "same_identity_same_canonical_content": "return_original_receipt_without_new_snapshot_or_provider_io",
     "same_identity_different_content": "fail_conflict_without_mutation",
-    "same_content_different_page_size": "same_content_digest_but_distinct_attempt_provenance_may_resolve_to_original_snapshot",
+    "same_content_different_page_size": "same_content_digest_but_distinct_attempt_and_page_chain_provenance_with_a_distinct_page_chain_digest_may_resolve_to_original_snapshot",
     "concurrency": "database_unique_constraints_make_two_replica_identical_publish_converge_and_conflicting_publish_fail_closed"
   },
   "failure_and_limits": {

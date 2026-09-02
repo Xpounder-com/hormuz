@@ -47,6 +47,30 @@ AUDIT_SOURCE_SCHEMAS = (
     "hormuz.finance-snapshot",
 )
 
+SQLITE_APPEND_ONLY_IDENTITIES = {
+    "portfolio_finance_source_binding_versions": (
+        "(existing.binding_id=NEW.binding_id AND existing.version=NEW.version)",
+        "existing.binding_event_id=NEW.binding_event_id",
+    ),
+    "portfolio_finance_collection_attempts": (
+        "existing.attempt_id=NEW.attempt_id",
+    ),
+    "portfolio_finance_collection_events": (
+        "existing.event_id=NEW.event_id",
+        "existing.attempt_id=NEW.attempt_id",
+    ),
+    "portfolio_finance_snapshots": (
+        "existing.snapshot_id=NEW.snapshot_id",
+        "existing.attempt_id=NEW.attempt_id",
+    ),
+    "portfolio_finance_usage_observations": (
+        "existing.observation_id=NEW.observation_id",
+    ),
+    "portfolio_finance_cost_observations": (
+        "existing.observation_id=NEW.observation_id",
+    ),
+}
+
 
 def _append_synthetic_audit_entry(
     connection,
@@ -90,6 +114,78 @@ def _append_synthetic_audit_entry(
             source_schema_id,
             1,
             source_event_id,
+        ),
+    )
+
+
+def _seed_synthetic_collection_rows(connection):
+    connection.execute(
+        "INSERT INTO portfolio_finance_source_binding_versions "
+        "(organization_id, binding_id, version, binding_event_id, "
+        "evidence_json) VALUES (?, ?, ?, ?, ?)",
+        ("acme", "binding", 1, "binding-event", '{"kind":"binding"}'),
+    )
+    connection.execute(
+        "INSERT INTO portfolio_finance_collection_attempts "
+        "(organization_id, attempt_id, binding_id, binding_version) "
+        "VALUES (?, ?, ?, ?)",
+        ("acme", "attempt", "binding", 1),
+    )
+    connection.execute(
+        "INSERT INTO portfolio_finance_collection_events "
+        "(organization_id, event_id, attempt_id, state, evidence_json) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            "acme",
+            "collection-event",
+            "attempt",
+            "succeeded",
+            '{"kind":"terminal"}',
+        ),
+    )
+    connection.execute(
+        "INSERT INTO portfolio_finance_snapshots "
+        "(organization_id, snapshot_id, attempt_id, content_digest, "
+        "evidence_json) VALUES (?, ?, ?, ?, ?)",
+        (
+            "acme",
+            "snapshot-event",
+            "attempt",
+            "a" * 64,
+            '{"kind":"snapshot"}',
+        ),
+    )
+    for table, observation_id in (
+        ("portfolio_finance_usage_observations", "usage-observation"),
+        ("portfolio_finance_cost_observations", "cost-observation"),
+    ):
+        connection.execute(
+            f"INSERT INTO {table} "
+            "(organization_id, observation_id, snapshot_id, "
+            "bucket_start_at, bucket_end_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                "acme",
+                observation_id,
+                "snapshot-event",
+                "2026-09-01T00:00:00Z",
+                "2026-09-02T00:00:00Z",
+            ),
+        )
+    return (
+        (
+            "hormuz.finance-source-binding-version",
+            "binding-event",
+            '{"kind":"binding"}',
+        ),
+        (
+            "hormuz.finance-collection-event",
+            "collection-event",
+            '{"kind":"terminal"}',
+        ),
+        (
+            "hormuz.finance-snapshot",
+            "snapshot-event",
+            '{"kind":"snapshot"}',
         ),
     )
 
@@ -172,6 +268,24 @@ def _synthetic_collection_migration(connection, *, fail=False):
                         (organization_id, snapshot_id)
             )
             """
+        )
+    for table, identities in SQLITE_APPEND_ONLY_IDENTITIES.items():
+        conflict = " OR ".join(f"({identity})" for identity in identities)
+        for action in ("UPDATE", "DELETE"):
+            connection.execute(
+                f"CREATE TRIGGER {table}_no_{action.lower()} "
+                f"BEFORE {action} ON {table} "
+                "BEGIN SELECT RAISE(ABORT, "
+                "'finance_collection_append_only'); END"
+            )
+        connection.execute(
+            f"CREATE TRIGGER {table}_no_replace "
+            f"BEFORE INSERT ON {table} "
+            f"WHEN EXISTS (SELECT 1 FROM {table} existing "
+            f"WHERE existing.organization_id=NEW.organization_id "
+            f"AND ({conflict})) "
+            "BEGIN SELECT RAISE(ABORT, "
+            "'finance_collection_replace_refused'); END"
         )
     for statement in (
         "DROP TRIGGER gateway_audit_chain_entries_no_update",
@@ -327,6 +441,9 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
             ("trigger", "gateway_finance_collection_audit_source_required"),
         ):
             self.assertIn(object_key, objects)
+        for table in PLANNED_TABLES:
+            for suffix in ("no_update", "no_delete", "no_replace"):
+                self.assertIn(("trigger", f"{table}_{suffix}"), objects)
         self.assertEqual(
             snapshot["rows"]["gateway_audit_chain_entries"],
             self.before["rows"]["gateway_audit_chain_entries"],
@@ -398,58 +515,8 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
     def test_audit_source_guard_requires_exact_source_identity_and_json(self):
         self.probe()
         with managed_sqlite_connection(self.path) as connection:
-            connection.execute(
-                "INSERT INTO portfolio_finance_source_binding_versions "
-                "(organization_id, binding_id, version, binding_event_id, "
-                "evidence_json) VALUES (?, ?, ?, ?, ?)",
-                ("acme", "binding", 1, "binding-event", '{"kind":"binding"}'),
-            )
-            connection.execute(
-                "INSERT INTO portfolio_finance_collection_attempts "
-                "(organization_id, attempt_id, binding_id, binding_version) "
-                "VALUES (?, ?, ?, ?)",
-                ("acme", "attempt", "binding", 1),
-            )
-            connection.execute(
-                "INSERT INTO portfolio_finance_collection_events "
-                "(organization_id, event_id, attempt_id, state, evidence_json) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (
-                    "acme",
-                    "collection-event",
-                    "attempt",
-                    "succeeded",
-                    '{"kind":"terminal"}',
-                ),
-            )
-            connection.execute(
-                "INSERT INTO portfolio_finance_snapshots "
-                "(organization_id, snapshot_id, attempt_id, content_digest, "
-                "evidence_json) VALUES (?, ?, ?, ?, ?)",
-                (
-                    "acme",
-                    "snapshot-event",
-                    "attempt",
-                    "a" * 64,
-                    '{"kind":"snapshot"}',
-                ),
-            )
             for source_schema, event_id, evidence_json in (
-                (
-                    "hormuz.finance-source-binding-version",
-                    "binding-event",
-                    '{"kind":"binding"}',
-                ),
-                (
-                    "hormuz.finance-collection-event",
-                    "collection-event",
-                    '{"kind":"terminal"}',
-                ),
-                (
-                    "hormuz.finance-snapshot",
-                    "snapshot-event",
-                    '{"kind":"snapshot"}',
-                ),
+                _seed_synthetic_collection_rows(connection)
             ):
                 _append_synthetic_audit_entry(
                     connection,
@@ -483,6 +550,43 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
                 [row[0] for row in observed],
                 sorted(AUDIT_SOURCE_SCHEMAS),
             )
+
+    def test_collection_tables_reject_update_delete_and_replace(self):
+        self.probe()
+        with managed_sqlite_connection(self.path) as connection:
+            for source_schema, event_id, evidence_json in (
+                _seed_synthetic_collection_rows(connection)
+            ):
+                _append_synthetic_audit_entry(
+                    connection,
+                    source_schema_id=source_schema,
+                    source_event_id=event_id,
+                    evidence_json=evidence_json,
+                )
+            for table in PLANNED_TABLES:
+                with self.subTest(table=table, mutation="update"):
+                    with self.assertRaisesRegex(
+                        sqlite3.IntegrityError,
+                        "finance_collection_append_only",
+                    ):
+                        connection.execute(
+                            f"UPDATE {table} SET organization_id=organization_id"
+                        )
+                with self.subTest(table=table, mutation="delete"):
+                    with self.assertRaisesRegex(
+                        sqlite3.IntegrityError,
+                        "finance_collection_append_only",
+                    ):
+                        connection.execute(f"DELETE FROM {table}")
+                with self.subTest(table=table, mutation="replace"):
+                    with self.assertRaisesRegex(
+                        sqlite3.IntegrityError,
+                        "finance_collection_replace_refused",
+                    ):
+                        connection.execute(
+                            f"INSERT OR REPLACE INTO {table} "
+                            f"SELECT * FROM {table} LIMIT 1"
+                        )
 
     def test_current_binary_refuses_newer_and_partial_state_without_repair(self):
         self.probe()

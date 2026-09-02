@@ -243,9 +243,29 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         )
         self.assertIn("exact_provider_native_bucket_start_and_end", snapshot["overlap"])
         self.assertIn("never_sums_duplicate_intervals", snapshot["overlap"])
+        self.assertIn(
+            "within_one_organization_binding_id_and_version",
+            snapshot["overlap"],
+        )
         self.assertIn("nonidentical_bucket_intervals", snapshot["nonidentical_overlap"])
         self.assertIn("commit_sequence", snapshot["selection"])
         self.assertIn("never_live_verified", snapshot["file_evidence"])
+        self.assertIn(
+            "including_organization_binding_id_and_version_collection_profile_and_query_window",
+            snapshot["content_digest"],
+        )
+        self.assertIn(
+            "excluding_attempt_identity_page_size_page_boundaries_cursors_and_page_chain_mechanics",
+            snapshot["content_digest"],
+        )
+        self.assertIn(
+            "including_requested_page_size_and_returned_page_boundaries_or_counts",
+            snapshot["page_chain_digest"],
+        )
+        self.assertIn(
+            "distinct_attempt_and_page_chain_provenance_with_a_distinct_page_chain_digest",
+            self.contract()["idempotency"]["same_content_different_page_size"],
+        )
         self.assertIn(
             "exact_provider_native_bucket_start_and_end",
             self.contract()["observation"]["granularity"],
@@ -303,6 +323,18 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         self.assertEqual(
             plan["planned_storage"]["audit_source_schemas"],
             verifier.AUDIT_SOURCE_SCHEMAS,
+        )
+        self.assertIn(
+            "all_six_collection_tables_reject_update_and_delete",
+            plan["planned_storage"]["mutation_protection"],
+        )
+        self.assertIn(
+            "PostgreSQL_rejects_TRUNCATE",
+            plan["planned_storage"]["mutation_protection"],
+        )
+        self.assertIn(
+            "SQLite_rejects_INSERT_OR_REPLACE",
+            plan["planned_storage"]["mutation_protection"],
         )
         compatibility = plan["compatibility"]
         self.assertEqual(compatibility["new_http_routes"], [])

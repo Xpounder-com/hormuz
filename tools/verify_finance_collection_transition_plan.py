@@ -27,8 +27,8 @@ from tools.verify_finance_transition_plan import (
 PLAN_PATH = "docs/finance-transition-plan-v5.json"
 CONTRACT_PATH = "docs/finance-collection-contract-v1.json"
 SOURCE_CONTRACT_PATH = "docs/finance-source-contract-v1.json"
-PLAN_CANONICAL_SHA256 = "083088b6083c12a3496416b2eddb658537f2ebe3bba88d9172f45587bbc572f0"
-CONTRACT_CANONICAL_SHA256 = "792b0db1375bb814cefa519ae72681b4c5ea7732bbef6670377c2a3e3de271c1"
+PLAN_CANONICAL_SHA256 = "f934e19f6164e3c55663fd94ed109df87e624c1cd800be22a2d947c827c35a6c"
+CONTRACT_CANONICAL_SHA256 = "91f43e96b26cb93999687730640400a809007fdf0ce1bf029184adfe73a84b69"
 SOURCE_CONTRACT_CANONICAL_SHA256 = "290def8f2cd7026d4e0f0512db9254906f8592a026ee4beb9cac3623d7a1d9f4"
 AUDIT_SOURCE_SCHEMAS = {
     "hormuz.finance-source-binding-version": {
@@ -259,11 +259,23 @@ def verify_finance_collection_transition_plan(
             or storage["audit_source_schemas"] != AUDIT_SOURCE_SCHEMAS
             or contract["audit_source_schemas"] != AUDIT_SOURCE_SCHEMAS
             or "partial_overlap_never_supersedes" not in snapshot["whole_snapshot_supersession"]
-            or "within_one_organization_binding_version_and_collection_profile"
+            or "within_one_organization_binding_id_and_version_and_collection_profile"
             not in snapshot["overlap"]
             or "exact_provider_native_bucket_start_and_end" not in snapshot["overlap"]
             or "nonidentical_bucket_intervals" not in snapshot["nonidentical_overlap"]
             or "exact_provider_native_bucket_start_and_end" not in observation["granularity"]
+            or "including_organization_binding_id_and_version_collection_profile_and_query_window"
+            not in snapshot["content_digest"]
+            or "excluding_attempt_identity_page_size_page_boundaries_cursors_and_page_chain_mechanics"
+            not in snapshot["content_digest"]
+            or "including_requested_page_size_and_returned_page_boundaries_or_counts"
+            not in snapshot["page_chain_digest"]
+            or "all_six_collection_tables_reject_update_and_delete"
+            not in storage["mutation_protection"]
+            or "PostgreSQL_rejects_TRUNCATE"
+            not in storage["mutation_protection"]
+            or "SQLite_rejects_INSERT_OR_REPLACE"
+            not in storage["mutation_protection"]
             or compatibility["new_http_routes"]
             or compatibility["preflight_new_cli_commands"]
             or plan["provider_collection_implemented"] is not False

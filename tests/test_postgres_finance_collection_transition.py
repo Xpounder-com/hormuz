@@ -48,6 +48,16 @@ AUDIT_SOURCE_SCHEMAS = (
 
 
 def _synthetic_collection_migration(quoted_schema: str, *, fail=False) -> str:
+    append_only = "\n".join(
+        f"""
+        CREATE TRIGGER {table}_immutable
+        BEFORE UPDATE OR DELETE OR TRUNCATE
+        ON {quoted_schema}.{table}
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION {quoted_schema}.portfolio_reject_mutation();
+        """
+        for table in PLANNED_TABLES
+    )
     statement = f"""
     CREATE TABLE {quoted_schema}.portfolio_finance_source_binding_versions (
         organization_id TEXT NOT NULL,
@@ -114,6 +124,8 @@ def _synthetic_collection_migration(quoted_schema: str, *, fail=False) -> str:
             REFERENCES {quoted_schema}.portfolio_finance_snapshots
                 (organization_id, snapshot_id)
     );
+
+    {append_only}
 
     ALTER TABLE {quoted_schema}.gateway_audit_chain_entries
         DROP CONSTRAINT gateway_audit_chain_entries_source_identity_check;
@@ -295,6 +307,16 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
                 for row in snapshot["triggers"]
             )
         )
+        triggers = {
+            (table, trigger): definition
+            for table, trigger, _, definition in snapshot["triggers"]
+        }
+        for table in PLANNED_TABLES:
+            trigger = triggers[(table, f"{table}_immutable")]
+            for operation in ("UPDATE", "DELETE", "TRUNCATE"):
+                self.assertIn(operation, trigger)
+            self.assertIn("FOR EACH STATEMENT", trigger)
+            self.assertIn("portfolio_reject_mutation()", trigger)
         self.assertNotEqual(snapshot["functions"], self.before["functions"])
         self.assertEqual(
             snapshot["rows"]["gateway_audit_chain_entries"],
@@ -350,6 +372,107 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
                 1,
                 source_event_id,
                 "acme",
+            ),
+        )
+
+    def seed_synthetic_collection_rows(self, connection):
+        binding_event = "11111111-1111-4111-8111-111111111118"
+        collection_event = "11111111-1111-4111-8111-111111111119"
+        snapshot_event = "11111111-1111-4111-8111-111111111120"
+        connection.execute(
+            self.sql.SQL(
+                "INSERT INTO {}.portfolio_finance_source_binding_versions "
+                "(organization_id, binding_id, version, binding_event_id, "
+                "evidence_json) VALUES (%s, %s, %s, %s, %s)"
+            ).format(self.sql.Identifier(self.schema)),
+            (
+                "acme",
+                "binding",
+                1,
+                binding_event,
+                '{"kind":"binding"}',
+            ),
+        )
+        connection.execute(
+            self.sql.SQL(
+                "INSERT INTO {}.portfolio_finance_collection_attempts "
+                "(organization_id, attempt_id, binding_id, binding_version) "
+                "VALUES (%s, %s, %s, %s)"
+            ).format(self.sql.Identifier(self.schema)),
+            ("acme", "attempt", "binding", 1),
+        )
+        connection.execute(
+            self.sql.SQL(
+                "INSERT INTO {}.portfolio_finance_collection_events "
+                "(organization_id, event_id, attempt_id, state, "
+                "evidence_json) VALUES (%s, %s, %s, %s, %s)"
+            ).format(self.sql.Identifier(self.schema)),
+            (
+                "acme",
+                collection_event,
+                "attempt",
+                "succeeded",
+                '{"kind":"terminal"}',
+            ),
+        )
+        connection.execute(
+            self.sql.SQL(
+                "INSERT INTO {}.portfolio_finance_snapshots "
+                "(organization_id, snapshot_id, attempt_id, "
+                "content_digest, evidence_json) "
+                "VALUES (%s, %s, %s, %s, %s)"
+            ).format(self.sql.Identifier(self.schema)),
+            (
+                "acme",
+                snapshot_event,
+                "attempt",
+                "a" * 64,
+                '{"kind":"snapshot"}',
+            ),
+        )
+        for table, observation_id in (
+            (
+                "portfolio_finance_usage_observations",
+                "11111111-1111-4111-8111-111111111124",
+            ),
+            (
+                "portfolio_finance_cost_observations",
+                "11111111-1111-4111-8111-111111111125",
+            ),
+        ):
+            connection.execute(
+                self.sql.SQL(
+                    "INSERT INTO {}.{} "
+                    "(organization_id, observation_id, snapshot_id, "
+                    "bucket_start_at, bucket_end_at) "
+                    "VALUES (%s, %s, %s, %s, %s)"
+                ).format(
+                    self.sql.Identifier(self.schema),
+                    self.sql.Identifier(table),
+                ),
+                (
+                    "acme",
+                    observation_id,
+                    snapshot_event,
+                    "2026-09-01T00:00:00Z",
+                    "2026-09-02T00:00:00Z",
+                ),
+            )
+        return (
+            (
+                "hormuz.finance-source-binding-version",
+                binding_event,
+                '{"kind":"binding"}',
+            ),
+            (
+                "hormuz.finance-collection-event",
+                collection_event,
+                '{"kind":"terminal"}',
+            ),
+            (
+                "hormuz.finance-snapshot",
+                snapshot_event,
+                '{"kind":"snapshot"}',
             ),
         )
 
@@ -489,79 +612,11 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
 
     def test_audit_source_guard_requires_exact_source_identity_and_json(self):
         self.probe()
-        binding_event = "11111111-1111-4111-8111-111111111118"
-        collection_event = "11111111-1111-4111-8111-111111111119"
-        snapshot_event = "11111111-1111-4111-8111-111111111120"
         mismatch_event = "11111111-1111-4111-8111-111111111121"
         unsupported_event = "11111111-1111-4111-8111-111111111122"
         with self.psycopg.connect(self.owner_dsn) as connection:
-            connection.execute(
-                self.sql.SQL(
-                    "INSERT INTO {}.portfolio_finance_source_binding_versions "
-                    "(organization_id, binding_id, version, binding_event_id, "
-                    "evidence_json) VALUES (%s, %s, %s, %s, %s)"
-                ).format(self.sql.Identifier(self.schema)),
-                (
-                    "acme",
-                    "binding",
-                    1,
-                    binding_event,
-                    '{"kind":"binding"}',
-                ),
-            )
-            connection.execute(
-                self.sql.SQL(
-                    "INSERT INTO {}.portfolio_finance_collection_attempts "
-                    "(organization_id, attempt_id, binding_id, binding_version) "
-                    "VALUES (%s, %s, %s, %s)"
-                ).format(self.sql.Identifier(self.schema)),
-                ("acme", "attempt", "binding", 1),
-            )
-            connection.execute(
-                self.sql.SQL(
-                    "INSERT INTO {}.portfolio_finance_collection_events "
-                    "(organization_id, event_id, attempt_id, state, "
-                    "evidence_json) VALUES (%s, %s, %s, %s, %s)"
-                ).format(self.sql.Identifier(self.schema)),
-                (
-                    "acme",
-                    collection_event,
-                    "attempt",
-                    "succeeded",
-                    '{"kind":"terminal"}',
-                ),
-            )
-            connection.execute(
-                self.sql.SQL(
-                    "INSERT INTO {}.portfolio_finance_snapshots "
-                    "(organization_id, snapshot_id, attempt_id, "
-                    "content_digest, evidence_json) "
-                    "VALUES (%s, %s, %s, %s, %s)"
-                ).format(self.sql.Identifier(self.schema)),
-                (
-                    "acme",
-                    snapshot_event,
-                    "attempt",
-                    "a" * 64,
-                    '{"kind":"snapshot"}',
-                ),
-            )
             for source_schema, event_id, evidence_json in (
-                (
-                    "hormuz.finance-source-binding-version",
-                    binding_event,
-                    '{"kind":"binding"}',
-                ),
-                (
-                    "hormuz.finance-collection-event",
-                    collection_event,
-                    '{"kind":"terminal"}',
-                ),
-                (
-                    "hormuz.finance-snapshot",
-                    snapshot_event,
-                    '{"kind":"snapshot"}',
-                ),
+                self.seed_synthetic_collection_rows(connection)
             ):
                 self.append_synthetic_audit_entry(
                     connection,
@@ -614,6 +669,56 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
                 [row[0] for row in observed],
                 sorted(AUDIT_SOURCE_SCHEMAS),
             )
+
+    def test_collection_tables_reject_update_delete_and_truncate(self):
+        self.probe()
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            for source_schema, event_id, evidence_json in (
+                self.seed_synthetic_collection_rows(connection)
+            ):
+                self.append_synthetic_audit_entry(
+                    connection,
+                    source_schema_id=source_schema,
+                    source_event_id=event_id,
+                    evidence_json=evidence_json,
+                )
+            for table in PLANNED_TABLES:
+                statements = (
+                    (
+                        "update",
+                        self.sql.SQL(
+                            "UPDATE {}.{} SET organization_id=organization_id"
+                        ).format(
+                            self.sql.Identifier(self.schema),
+                            self.sql.Identifier(table),
+                        ),
+                    ),
+                    (
+                        "delete",
+                        self.sql.SQL("DELETE FROM {}.{}").format(
+                            self.sql.Identifier(self.schema),
+                            self.sql.Identifier(table),
+                        ),
+                    ),
+                    (
+                        "truncate",
+                        self.sql.SQL("TRUNCATE {}.{} CASCADE").format(
+                            self.sql.Identifier(self.schema),
+                            self.sql.Identifier(table),
+                        ),
+                    ),
+                )
+                for mutation, statement in statements:
+                    with self.subTest(table=table, mutation=mutation):
+                        with self.assertRaisesRegex(
+                            self.psycopg.errors.CheckViolation,
+                            "portfolio_append_only",
+                        ):
+                            with connection.transaction():
+                                connection.execute(statement)
+        snapshot = self.snapshot()
+        for table in PLANNED_TABLES:
+            self.assertEqual(len(snapshot["rows"][table]), 1)
 
     def test_current_binary_refuses_newer_and_partial_state_without_repair(self):
         self.probe()
