@@ -49,7 +49,14 @@ class ResponseUsageParser:
         self._output_tokens_observed = False
         self._native = NativeUsageAccumulator(protocol)
         self._provider_terminal_state: str | None = None
+        self._provider_completed = False
         self._finished: ParsedUsage | None = None
+
+    @property
+    def provider_completed(self) -> bool:
+        """Whether a successful provider terminal marker was observed."""
+
+        return self._provider_completed
 
     def feed(self, data: bytes) -> None:
         if self._finished is not None:
@@ -88,10 +95,24 @@ class ResponseUsageParser:
         return self._finished
 
     def _parse_sse_line(self, line: str) -> None:
+        if line.startswith("event:"):
+            event = line[6:].strip()
+            if self.protocol == "openai" and event in _OPENAI_TERMINAL_RESPONSE_EVENTS:
+                self._observe_provider_terminal_state(
+                    event.removeprefix("response."),
+                )
+            if (self.protocol == "openai" and event == "response.completed") or (
+                self.protocol == "anthropic" and event == "message_stop"
+            ):
+                self._provider_completed = True
+            return
         if not line.startswith("data:"):
             return
         payload = line[5:].strip()
-        if not payload or payload == "[DONE]":
+        if not payload:
+            return
+        if payload == "[DONE]":
+            self._provider_completed = True
             return
         try:
             value = _strict_json_loads(payload)
@@ -109,6 +130,8 @@ class ResponseUsageParser:
                 self._observe_provider_terminal_state(
                     event_type.removeprefix("response."),
                 )
+                if event_type == "response.completed":
+                    self._provider_completed = True
             elif not self.is_event_stream:
                 self._observe_provider_terminal_state(value.get("status"))
             response = (
@@ -122,6 +145,8 @@ class ResponseUsageParser:
                 self._apply_openai_usage(response.get("usage"))
                 self._native.observe_openai_response(response)
         elif self.protocol == "anthropic":
+            if self.is_event_stream and value.get("type") == "message_stop":
+                self._provider_completed = True
             if value.get("type") == "message_start" and isinstance(value.get("message"), dict):
                 self._apply_provider_model(value["message"].get("model"))
                 self._apply_anthropic_usage(

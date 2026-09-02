@@ -1,7 +1,5 @@
 from dataclasses import replace
-import os
 from pathlib import Path
-from unittest import mock
 
 from hormuz.config import UsageStorageConfig
 
@@ -19,9 +17,6 @@ class PostgresAttributionGatewayTests(AttributionGatewayAssertions, PostgresTest
     def setUp(self):
         super().setUp()
         environment = {"HORMUZ_POSTGRES_DSN": self.runtime_dsn}
-        patch = mock.patch.dict(os.environ, environment)
-        patch.start()
-        self.addCleanup(patch.stop)
         config = replace(registry_config(Path("/unused/native-attribution")), usage_storage=UsageStorageConfig(
             backend="postgresql", postgres_schema=self.schema, postgres_runtime_role=self.runtime_role))
         self.setup_gateway(config, environment=environment)

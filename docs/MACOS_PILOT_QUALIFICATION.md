@@ -93,8 +93,9 @@ affected gate on a new build when artifact bytes change.
    creation time. While any of gates 3
    through 5 is incomplete, `macos_operational_evidence_url` may be `none` and
    the verifier reports not ready; once all three record groups qualify, a real
-   authenticated run URL is required. The operational workflow does not exist
-   yet, so caller-authored booleans cannot qualify a real pilot.
+   authenticated run URL is required. Until the operational workflow and its
+   machine-side collectors are implemented and complete a protected run,
+   caller-authored booleans cannot qualify a real pilot.
 6. **Qualify the hosted gateway.** Use a separately deployed
    `external_pilot` profile with HTTPS, real Okta login, server-only provider
    credentials, PostgreSQL durability and tenant RLS, durable sessions,
@@ -124,9 +125,10 @@ affected gate on a new build when artifact bytes change.
    hosted-gateway field and is validated through the same live contract before
    exact comparison. Both artifact ZIPs are downloaded through authenticated
    GitHub API calls and reject duplicate, path-bearing, encrypted, oversized,
-   expired, malformed, or extra members. That gateway workflow does not
-   exist yet, so the current repository remains fail-closed for real pilot
-   qualification. Until the hosted controls otherwise qualify, both gateway
+   expired, malformed, or extra members. The gateway workflow is implemented,
+   but successful protected deployment and qualification runs against the
+   exact live candidate do not exist yet. Until the hosted controls otherwise
+   qualify, both gateway
    evidence URLs may be `none`; once they qualify, distinct authenticated
    deployment and recovery run URLs are required.
 7. **Complete independent review.** An independent reviewer must close both the

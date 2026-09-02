@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import hashlib
 from importlib import resources
+import json
 import re
 from typing import Any, Iterator, Mapping
 
@@ -19,6 +21,21 @@ from .config import PostgresPoolConfig
 POSTGRES_SCHEMA_VERSION = 15
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
+# Each tuple is the count and SHA-256 digest of the canonical non-owner ACL
+# entries created by the reviewed migrations for that schema version.  The
+# canonical rows include object kind/name, column, logical grantor/grantee,
+# privilege type, and grant-option flag.  A migration that intentionally
+# changes a grant must update this boundary from a clean disposable database.
+_POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION = {
+    14: (
+        183,
+        "052ec56ed318d781be974529b256f8e6008454b91ca87aa08985fc57cab2cc92",
+    ),
+    15: (
+        185,
+        "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a",
+    ),
+}
 
 
 class PostgresStorageError(RuntimeError):
@@ -33,6 +50,17 @@ class PostgresStorageError(RuntimeError):
 class PostgresSchemaStatus:
     version: int
     complete: bool
+
+
+@dataclass(frozen=True)
+class PostgresDeploymentBootstrapStatus:
+    """Content-free result for a least-privilege deployment bootstrap."""
+
+    schema_version: int
+    schema_complete: bool
+    restricted_roles: int
+    runtime_login_restricted: bool
+    runtime_membership_verified: bool
 
 
 def _rearm_pool_after_reconnect_failure(pool: Any) -> None:
@@ -113,6 +141,51 @@ class PostgresConnectionPool:
     def closed(self) -> bool:
         return self._closed
 
+    def operational_stats(self) -> dict[str, int | bool]:
+        """Return a stable, content-free projection of bounded pool pressure.
+
+        Psycopg's counters contain no SQL, DSN, tenant, or connection details.
+        Keep the public projection explicit so a dependency upgrade cannot add
+        an unexpected field to Hormuz operational evidence.
+        """
+
+        if self._closed or self._pool is None:
+            return {
+                "configured": True,
+                "closed": True,
+                "min_connections": self._settings.min_connections,
+                "max_connections": self._settings.max_connections,
+                "pool_size": 0,
+                "available_connections": 0,
+                "requests_waiting": 0,
+                "requests_total": 0,
+                "requests_queued_total": 0,
+                "requests_error_total": 0,
+                "requests_wait_milliseconds_total": 0,
+            }
+        try:
+            raw = self._pool.get_stats()
+        except Exception as error:
+            raise self._storage_error(error) from None
+
+        def counter(name: str) -> int:
+            value = raw.get(name, 0)
+            return value if type(value) is int and value >= 0 else 0
+
+        return {
+            "configured": True,
+            "closed": False,
+            "min_connections": self._settings.min_connections,
+            "max_connections": self._settings.max_connections,
+            "pool_size": counter("pool_size"),
+            "available_connections": counter("pool_available"),
+            "requests_waiting": counter("requests_waiting"),
+            "requests_total": counter("requests_num"),
+            "requests_queued_total": counter("requests_queued"),
+            "requests_error_total": counter("requests_errors"),
+            "requests_wait_milliseconds_total": counter("requests_wait_ms"),
+        }
+
     @contextmanager
     def connection(self) -> Iterator[Any]:
         """Lease one verified connection, mapping pool failures content-free."""
@@ -174,6 +247,839 @@ def validate_postgres_identifier(value: str, field: str) -> str:
     return value
 
 
+def bootstrap_postgres_deployment(
+    migration_dsn: str,
+    runtime_dsn: str,
+    *,
+    schema: str = "hormuz",
+    runtime_role: str = "hormuz_runtime",
+    policy_control_role: str = "hormuz_policy_control",
+    custody_control_role: str = "hormuz_custody_control",
+    custody_executor_role: str = "hormuz_custody_executor",
+) -> PostgresDeploymentBootstrapStatus:
+    """Prepare and verify a separate owner/login boundary for one deployment.
+
+    The migration credential must own schema objects.  The runtime DSN must
+    identify a different, pre-existing managed login.  Hormuz never creates or
+    receives that login's password: it creates stable NOLOGIN authorization
+    roles, removes inheritance from the managed login, grants only the runtime
+    role, applies the schema as the owner, and finally proves that the runtime
+    credential can use the schema only by explicitly assuming that role.
+
+    Safe, already-complete work is accepted so an interrupted maintenance run
+    can be repeated.  Unexpected roles, memberships, ownership, or elevated
+    login attributes fail closed instead of being repaired silently.
+    """
+
+    schema = validate_postgres_identifier(schema, "postgres_schema")
+    role_names = (
+        validate_postgres_identifier(runtime_role, "postgres_runtime_role"),
+        validate_postgres_identifier(
+            policy_control_role, "postgres_policy_control_role"
+        ),
+        validate_postgres_identifier(
+            custody_control_role, "postgres_custody_control_role"
+        ),
+        validate_postgres_identifier(
+            custody_executor_role, "postgres_custody_executor_role"
+        ),
+    )
+    if len(set(role_names)) != len(role_names):
+        raise PostgresStorageError("postgres_bootstrap_roles_not_distinct")
+    if (
+        not isinstance(migration_dsn, str)
+        or not migration_dsn
+        or not isinstance(runtime_dsn, str)
+        or not runtime_dsn
+        or migration_dsn == runtime_dsn
+    ):
+        raise PostgresStorageError("postgres_bootstrap_credentials_invalid")
+
+    psycopg, sql = _driver()
+    runtime_connection = None
+    runtime_identity = None
+    try:
+        runtime_connection = psycopg.connect(runtime_dsn, connect_timeout=10)
+        with runtime_connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT session_user, current_user, current_database()"
+            )
+            runtime_identity = cursor.fetchone()
+    except psycopg.Error as error:
+        raise _storage_error(error) from None
+    finally:
+        if runtime_connection is not None:
+            runtime_connection.close()
+    if not runtime_identity or len(runtime_identity) != 3:
+        raise PostgresStorageError("postgres_bootstrap_runtime_identity_invalid")
+    runtime_login, runtime_effective_role, runtime_database = map(
+        str, runtime_identity
+    )
+    if (
+        runtime_login != runtime_effective_role
+        or _IDENTIFIER_PATTERN.fullmatch(runtime_login) is None
+        or runtime_login in role_names
+        or not runtime_database
+    ):
+        raise PostgresStorageError("postgres_bootstrap_runtime_identity_invalid")
+
+    migration_connection = None
+    migration_login = ""
+    try:
+        migration_connection = psycopg.connect(migration_dsn, connect_timeout=10)
+        with migration_connection.transaction():
+            with migration_connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT session_user, current_user, current_database()"
+                )
+                migration_identity = cursor.fetchone()
+                if (
+                    not migration_identity
+                    or len(migration_identity) != 3
+                    or str(migration_identity[0])
+                    != str(migration_identity[1])
+                    or str(migration_identity[0]) == runtime_login
+                    or str(migration_identity[2]) != runtime_database
+                ):
+                    raise PostgresStorageError(
+                        "postgres_bootstrap_credential_boundary_invalid"
+                    )
+                migration_login = str(migration_identity[0])
+                _verify_postgres_migration_ownership(
+                    cursor,
+                    schema=schema,
+                    migration_login=migration_login,
+                    allow_missing_schema=True,
+                )
+
+                runtime_attributes = _postgres_role_attributes(cursor, runtime_login)
+                if runtime_attributes is None or not runtime_attributes[0] or any(
+                    runtime_attributes[index] for index in (1, 2, 3, 5, 6)
+                ):
+                    raise PostgresStorageError(
+                        "postgres_bootstrap_runtime_role_unsafe"
+                    )
+                unexpected_memberships = _postgres_role_memberships(
+                    cursor, runtime_login
+                ) - {runtime_role}
+                if unexpected_memberships or _postgres_role_member_grants(
+                    cursor, runtime_login
+                ):
+                    raise PostgresStorageError(
+                        "postgres_bootstrap_runtime_membership_unsafe"
+                    )
+                cursor.execute(
+                    sql.SQL(
+                        "ALTER ROLE {} NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                        "NOINHERIT NOREPLICATION NOBYPASSRLS"
+                    ).format(sql.Identifier(runtime_login))
+                )
+
+                for role in role_names:
+                    attributes = _postgres_role_attributes(cursor, role)
+                    if attributes is None:
+                        cursor.execute(
+                            sql.SQL(
+                                "CREATE ROLE {} NOLOGIN NOSUPERUSER NOCREATEDB "
+                                "NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS"
+                            ).format(sql.Identifier(role))
+                        )
+                    elif attributes != (False, False, False, False, False, False, False):
+                        raise PostgresStorageError(
+                            "postgres_bootstrap_authorization_role_unsafe"
+                        )
+                    if _postgres_role_memberships(cursor, role):
+                        raise PostgresStorageError(
+                            "postgres_bootstrap_authorization_membership_unsafe"
+                        )
+                    expected_members = (
+                        {(runtime_login, False, False, True)}
+                        if role == runtime_role
+                        else set()
+                    )
+                    if _postgres_role_member_grants(cursor, role) - expected_members:
+                        raise PostgresStorageError(
+                            "postgres_bootstrap_authorization_membership_unsafe"
+                        )
+                cursor.execute(
+                    sql.SQL(
+                        "GRANT {} TO {} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE"
+                    ).format(
+                        sql.Identifier(runtime_role), sql.Identifier(runtime_login)
+                    )
+                )
+                cursor.execute(
+                    sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA public FROM {}").format(
+                        sql.Identifier(runtime_login)
+                    )
+                )
+    except PostgresStorageError:
+        raise
+    except psycopg.Error as error:
+        raise _storage_error(error) from None
+    finally:
+        if migration_connection is not None:
+            migration_connection.close()
+
+    migration = migrate_postgres(
+        migration_dsn,
+        schema=schema,
+        runtime_role=runtime_role,
+        policy_control_role=policy_control_role,
+        custody_control_role=custody_control_role,
+        custody_executor_role=custody_executor_role,
+    )
+
+    migration_connection = None
+    try:
+        migration_connection = psycopg.connect(migration_dsn, connect_timeout=10)
+        with migration_connection.transaction():
+            with migration_connection.cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {}").format(
+                        sql.Identifier(schema), sql.Identifier(runtime_login)
+                    )
+                )
+                cursor.execute(
+                    sql.SQL(
+                        "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} FROM {}"
+                    ).format(sql.Identifier(schema), sql.Identifier(runtime_login))
+                )
+                cursor.execute(
+                    sql.SQL(
+                        "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} FROM {}"
+                    ).format(sql.Identifier(schema), sql.Identifier(runtime_login))
+                )
+                cursor.execute(
+                    sql.SQL(
+                        "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA {} FROM {}"
+                    ).format(sql.Identifier(schema), sql.Identifier(runtime_login))
+                )
+                # PostgreSQL grants EXECUTE on new functions to PUBLIC by
+                # default. Close that default for every helper and trigger
+                # function before accepting the deployment boundary.
+                cursor.execute(
+                    sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA {} FROM PUBLIC").format(
+                        sql.Identifier(schema)
+                    )
+                )
+                cursor.execute(
+                    sql.SQL(
+                        "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} FROM PUBLIC"
+                    ).format(sql.Identifier(schema))
+                )
+                cursor.execute(
+                    sql.SQL(
+                        "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} FROM PUBLIC"
+                    ).format(sql.Identifier(schema))
+                )
+                cursor.execute(
+                    sql.SQL(
+                        "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA {} FROM PUBLIC"
+                    ).format(sql.Identifier(schema))
+                )
+                _verify_postgres_deployment_roles(
+                    cursor,
+                    schema=schema,
+                    database=runtime_database,
+                    migration_login=migration_login,
+                    runtime_login=runtime_login,
+                    role_names=role_names,
+                    error_scope="bootstrap",
+                )
+    except PostgresStorageError:
+        raise
+    except psycopg.Error as error:
+        raise _storage_error(error) from None
+    finally:
+        if migration_connection is not None:
+            migration_connection.close()
+
+    verified = verify_postgres_schema(
+        runtime_dsn,
+        schema=schema,
+        runtime_role=runtime_role,
+    )
+    if verified != migration:
+        raise PostgresStorageError("postgres_bootstrap_schema_verification_failed")
+    return PostgresDeploymentBootstrapStatus(
+        schema_version=verified.version,
+        schema_complete=verified.complete,
+        restricted_roles=len(role_names),
+        runtime_login_restricted=True,
+        runtime_membership_verified=True,
+    )
+
+
+def verify_postgres_deployment_runtime(
+    dsn: str,
+    *,
+    schema: str = "hormuz",
+    runtime_role: str = "hormuz_runtime",
+    policy_control_role: str = "hormuz_policy_control",
+    custody_control_role: str = "hormuz_custody_control",
+    custody_executor_role: str = "hormuz_custody_executor",
+    connection_pool: PostgresConnectionPool | None = None,
+) -> None:
+    """Revalidate a hosted deployment's authenticated runtime boundary.
+
+    This deliberately runs before ``SET ROLE``. It proves that the DSN
+    authenticated as the restricted managed login, that the login can assume
+    only the fixed runtime authorization role, and that no unexpected
+    principal owns or has an ACL on the Hormuz schema.
+    """
+
+    schema = validate_postgres_identifier(schema, "postgres_schema")
+    role_names = (
+        validate_postgres_identifier(runtime_role, "postgres_runtime_role"),
+        validate_postgres_identifier(
+            policy_control_role, "postgres_policy_control_role"
+        ),
+        validate_postgres_identifier(
+            custody_control_role, "postgres_custody_control_role"
+        ),
+        validate_postgres_identifier(
+            custody_executor_role, "postgres_custody_executor_role"
+        ),
+    )
+    if len(set(role_names)) != len(role_names):
+        raise PostgresStorageError("postgres_runtime_roles_not_distinct")
+    if not isinstance(dsn, str) or not dsn:
+        raise PostgresStorageError("postgres_dsn_unavailable")
+
+    psycopg, _ = _driver()
+
+    def verify(connection: Any) -> None:
+        with connection.transaction():
+            with connection.cursor() as cursor:
+                runtime_login, current_role, database = _postgres_connection_identity(
+                    cursor
+                )
+                if (
+                    runtime_login != current_role
+                    or _IDENTIFIER_PATTERN.fullmatch(runtime_login) is None
+                    or runtime_login in role_names
+                    or not database
+                ):
+                    raise PostgresStorageError(
+                        "postgres_runtime_identity_invalid"
+                    )
+                migration_login = _postgres_schema_owner(cursor, schema)
+                if migration_login is None:
+                    raise PostgresStorageError(
+                        "postgres_runtime_ownership_boundary_invalid"
+                    )
+                _verify_postgres_deployment_roles(
+                    cursor,
+                    schema=schema,
+                    database=database,
+                    migration_login=migration_login,
+                    runtime_login=runtime_login,
+                    role_names=role_names,
+                    error_scope="runtime",
+                )
+
+    if connection_pool is not None:
+        with connection_pool.connection() as connection:
+            verify(connection)
+        return
+
+    connection = None
+    try:
+        connection = psycopg.connect(dsn, connect_timeout=10)
+        verify(connection)
+    except PostgresStorageError:
+        raise
+    except psycopg.Error as error:
+        raise _storage_error(error) from None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def _postgres_connection_identity(cursor: Any) -> tuple[str, str, str]:
+    cursor.execute("SELECT session_user, current_user, current_database()")
+    row = cursor.fetchone()
+    if row is None:
+        raise PostgresStorageError("postgres_runtime_identity_invalid")
+    if isinstance(row, Mapping):
+        values = (
+            row.get("session_user"),
+            row.get("current_user"),
+            row.get("current_database"),
+        )
+    else:
+        values = tuple(row)
+    if len(values) != 3 or any(value is None for value in values):
+        raise PostgresStorageError("postgres_runtime_identity_invalid")
+    return str(values[0]), str(values[1]), str(values[2])
+
+
+def _postgres_role_attributes(cursor: Any, role: str) -> tuple[bool, ...] | None:
+    cursor.execute(
+        """
+        SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolinherit,
+               rolreplication, rolbypassrls
+        FROM pg_roles
+        WHERE rolname = %s
+        """,
+        (role,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    values = (
+        (
+            row["rolcanlogin"],
+            row["rolsuper"],
+            row["rolcreatedb"],
+            row["rolcreaterole"],
+            row["rolinherit"],
+            row["rolreplication"],
+            row["rolbypassrls"],
+        )
+        if isinstance(row, Mapping)
+        else tuple(row)
+    )
+    return tuple(bool(value) for value in values)
+
+
+def _postgres_role_memberships(cursor: Any, role: str) -> set[str]:
+    cursor.execute(
+        """
+        SELECT granted.rolname
+        FROM pg_auth_members AS membership
+        JOIN pg_roles AS granted ON granted.oid = membership.roleid
+        JOIN pg_roles AS member ON member.oid = membership.member
+        WHERE member.rolname = %s
+        """,
+        (role,),
+    )
+    return {
+        str(row["rolname"] if isinstance(row, Mapping) else row[0])
+        for row in cursor.fetchall()
+    }
+
+
+def _postgres_role_member_grants(
+    cursor: Any, role: str
+) -> set[tuple[str, bool, bool, bool]]:
+    """Return role members and their admin, inherit, and set options."""
+
+    cursor.execute(
+        """
+        SELECT member.rolname, membership.admin_option,
+               membership.inherit_option, membership.set_option
+        FROM pg_auth_members AS membership
+        JOIN pg_roles AS granted ON granted.oid = membership.roleid
+        JOIN pg_roles AS member ON member.oid = membership.member
+        WHERE granted.rolname = %s
+        """,
+        (role,),
+    )
+    return {
+        (
+            str(row["rolname"] if isinstance(row, Mapping) else row[0]),
+            bool(row["admin_option"] if isinstance(row, Mapping) else row[1]),
+            bool(row["inherit_option"] if isinstance(row, Mapping) else row[2]),
+            bool(row["set_option"] if isinstance(row, Mapping) else row[3]),
+        )
+        for row in cursor.fetchall()
+    }
+
+
+def _verify_postgres_deployment_roles(
+    cursor: Any,
+    *,
+    schema: str,
+    database: str,
+    migration_login: str,
+    runtime_login: str,
+    role_names: tuple[str, ...],
+    error_scope: str,
+) -> None:
+    def fail(suffix: str) -> None:
+        raise PostgresStorageError(f"postgres_{error_scope}_{suffix}")
+
+    runtime_role = role_names[0]
+    attributes = _postgres_role_attributes(cursor, runtime_login)
+    if attributes != (True, False, False, False, False, False, False):
+        fail("runtime_role_unsafe" if error_scope == "bootstrap" else "role_unsafe")
+    if _postgres_role_memberships(cursor, runtime_login) != {runtime_role}:
+        fail(
+            "runtime_membership_unsafe"
+            if error_scope == "bootstrap"
+            else "membership_unsafe"
+        )
+    if _postgres_role_member_grants(cursor, runtime_login):
+        fail(
+            "runtime_membership_unsafe"
+            if error_scope == "bootstrap"
+            else "membership_unsafe"
+        )
+    for role in role_names:
+        expected_members = (
+            {(runtime_login, False, False, True)}
+            if role == runtime_role
+            else set()
+        )
+        if _postgres_role_attributes(cursor, role) != (
+            False,
+            False,
+            False,
+            False,
+            False,
+            False,
+            False,
+        ) or _postgres_role_memberships(cursor, role) or _postgres_role_member_grants(
+            cursor, role
+        ) != expected_members:
+            fail("authorization_role_unsafe")
+    _verify_postgres_migration_ownership(
+        cursor,
+        schema=schema,
+        migration_login=migration_login,
+        allow_missing_schema=False,
+        error_scope=error_scope,
+    )
+    cursor.execute(
+        """
+        SELECT
+            pg_get_userbyid(database_owner) = %s,
+            has_schema_privilege(%s, %s, 'CREATE'),
+            EXISTS (
+                SELECT 1
+                FROM pg_class AS relation
+                JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = %s
+                  AND pg_get_userbyid(relation.relowner) = %s
+            ),
+            has_database_privilege(%s, %s, 'CREATE')
+        FROM
+            (SELECT datdba AS database_owner FROM pg_database WHERE datname = %s) AS database
+        """,
+        (
+            runtime_login,
+            runtime_login,
+            schema,
+            schema,
+            runtime_login,
+            runtime_login,
+            database,
+            database,
+        ),
+    )
+    boundary = cursor.fetchone()
+    boundary_values = (
+        tuple(boundary.values())
+        if isinstance(boundary, Mapping)
+        else tuple(boundary or ())
+    )
+    if len(boundary_values) != 4 or any(bool(value) for value in boundary_values):
+        fail("ownership_boundary_invalid")
+    acl_entries = _postgres_acl_entries(
+        cursor,
+        schema=schema,
+        migration_login=migration_login,
+        error_scope=error_scope,
+    )
+    allowed_principals = {migration_login, *role_names}
+    principals = {
+        principal
+        for entry in acl_entries
+        for principal in (entry[3], entry[4])
+    }
+    expected_acl_boundary = _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(
+        POSTGRES_SCHEMA_VERSION
+    )
+    observed_acl_boundary = _postgres_acl_boundary(
+        acl_entries,
+        schema=schema,
+        migration_login=migration_login,
+        role_names=role_names,
+    )
+    if (
+        principals - allowed_principals
+        or expected_acl_boundary is None
+        or observed_acl_boundary != expected_acl_boundary
+    ):
+        fail("acl_boundary_invalid")
+
+
+def _postgres_schema_owner(cursor: Any, schema: str) -> str | None:
+    cursor.execute(
+        """
+        SELECT pg_get_userbyid(nspowner) AS schema_owner
+        FROM pg_namespace
+        WHERE nspname = %s
+        """,
+        (schema,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    value = row.get("schema_owner") if isinstance(row, Mapping) else row[0]
+    return None if value is None else str(value)
+
+
+def _verify_postgres_migration_ownership(
+    cursor: Any,
+    *,
+    schema: str,
+    migration_login: str,
+    allow_missing_schema: bool,
+    error_scope: str = "bootstrap",
+) -> None:
+    if _postgres_role_member_grants(cursor, migration_login):
+        raise PostgresStorageError(
+            f"postgres_{error_scope}_ownership_boundary_invalid"
+        )
+    owner = _postgres_schema_owner(cursor, schema)
+    if owner is None:
+        if allow_missing_schema:
+            return
+        raise PostgresStorageError(
+            f"postgres_{error_scope}_ownership_boundary_invalid"
+        )
+    cursor.execute(
+        """
+        SELECT
+            EXISTS (
+                SELECT 1 FROM pg_class AS relation
+                JOIN pg_namespace AS namespace
+                  ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = %s
+                  AND pg_get_userbyid(relation.relowner) <> %s
+            ) AS relation_owner_invalid,
+            EXISTS (
+                SELECT 1 FROM pg_proc AS routine
+                JOIN pg_namespace AS namespace
+                  ON namespace.oid = routine.pronamespace
+                WHERE namespace.nspname = %s
+                  AND pg_get_userbyid(routine.proowner) <> %s
+            ) AS routine_owner_invalid,
+            EXISTS (
+                SELECT 1 FROM pg_type AS data_type
+                JOIN pg_namespace AS namespace
+                  ON namespace.oid = data_type.typnamespace
+                WHERE namespace.nspname = %s
+                  AND pg_get_userbyid(data_type.typowner) <> %s
+            ) AS type_owner_invalid
+        """,
+        (
+            schema,
+            migration_login,
+            schema,
+            migration_login,
+            schema,
+            migration_login,
+        ),
+    )
+    row = cursor.fetchone()
+    values = tuple(row.values()) if isinstance(row, Mapping) else tuple(row or ())
+    if owner != migration_login or len(values) != 3 or any(
+        bool(value) for value in values
+    ):
+        raise PostgresStorageError(
+            f"postgres_{error_scope}_ownership_boundary_invalid"
+        )
+
+
+def _postgres_acl_entries(
+    cursor: Any,
+    *,
+    schema: str,
+    migration_login: str,
+    error_scope: str = "runtime",
+) -> set[tuple[str, str, str, str, str, str, bool]]:
+    """Return the complete ACL surface governed by the migration login."""
+
+    cursor.execute(
+        """
+        WITH acl_entries AS (
+            SELECT
+                'schema'::TEXT AS object_kind,
+                namespace.nspname::TEXT AS object_name,
+                ''::TEXT AS column_name,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
+            FROM pg_namespace AS namespace
+            CROSS JOIN LATERAL aclexplode(
+                COALESCE(namespace.nspacl, acldefault('n', namespace.nspowner))
+            ) AS acl
+            WHERE namespace.nspname = %s
+            UNION ALL
+            SELECT
+                CASE WHEN relation.relkind = 'S' THEN 'sequence'::TEXT
+                     ELSE 'relation'::TEXT END,
+                relation.relname::TEXT,
+                ''::TEXT,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
+            FROM pg_class AS relation
+            JOIN pg_namespace AS namespace
+              ON namespace.oid = relation.relnamespace
+            CROSS JOIN LATERAL aclexplode(
+                COALESCE(
+                    relation.relacl,
+                    acldefault(
+                        CASE WHEN relation.relkind = 'S' THEN 'S'::"char"
+                             ELSE 'r'::"char" END,
+                        relation.relowner
+                    )
+                )
+            ) AS acl
+            WHERE namespace.nspname = %s
+              AND relation.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+            UNION ALL
+            SELECT
+                'column'::TEXT,
+                relation.relname::TEXT,
+                attribute.attname::TEXT,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
+            FROM pg_attribute AS attribute
+            JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+            JOIN pg_namespace AS namespace
+              ON namespace.oid = relation.relnamespace
+            CROSS JOIN LATERAL aclexplode(attribute.attacl) AS acl
+            WHERE namespace.nspname = %s
+              AND attribute.attnum > 0
+              AND NOT attribute.attisdropped
+            UNION ALL
+            SELECT
+                'routine'::TEXT,
+                routine.proname || '(' || oidvectortypes(routine.proargtypes) || ')',
+                ''::TEXT,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
+            FROM pg_proc AS routine
+            JOIN pg_namespace AS namespace
+              ON namespace.oid = routine.pronamespace
+            CROSS JOIN LATERAL aclexplode(
+                COALESCE(routine.proacl, acldefault('f', routine.proowner))
+            ) AS acl
+            WHERE namespace.nspname = %s
+            UNION ALL
+            SELECT
+                'default'::TEXT,
+                CASE WHEN defaults.defaclnamespace = 0 THEN '*'
+                     ELSE namespace.nspname END || ':' || defaults.defaclobjtype::TEXT,
+                ''::TEXT,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
+            FROM pg_default_acl AS defaults
+            JOIN pg_roles AS owner_role ON owner_role.oid = defaults.defaclrole
+            LEFT JOIN pg_namespace AS namespace
+              ON namespace.oid = defaults.defaclnamespace
+            CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
+            WHERE owner_role.rolname = %s
+              AND (defaults.defaclnamespace = 0 OR namespace.nspname = %s)
+        )
+        SELECT DISTINCT
+            object_kind,
+            object_name,
+            column_name,
+            CASE WHEN grantor = 0 THEN 'PUBLIC'
+                 ELSE pg_get_userbyid(grantor) END AS grantor_name,
+            CASE WHEN grantee = 0 THEN 'PUBLIC'
+                 ELSE pg_get_userbyid(grantee) END AS grantee_name,
+            privilege_type,
+            is_grantable
+        FROM acl_entries
+        """,
+        (schema, schema, schema, schema, migration_login, schema),
+    )
+    entries: set[tuple[str, str, str, str, str, str, bool]] = set()
+    for row in cursor.fetchall():
+        values = (
+            (
+                row.get("object_kind"),
+                row.get("object_name"),
+                row.get("column_name"),
+                row.get("grantor_name"),
+                row.get("grantee_name"),
+                row.get("privilege_type"),
+                row.get("is_grantable"),
+            )
+            if isinstance(row, Mapping)
+            else tuple(row)
+        )
+        if len(values) != 7 or any(value is None for value in values):
+            raise PostgresStorageError(
+                f"postgres_{error_scope}_acl_boundary_invalid"
+            )
+        entries.add(
+            (
+                str(values[0]),
+                str(values[1]),
+                str(values[2]),
+                str(values[3]),
+                str(values[4]),
+                str(values[5]),
+                bool(values[6]),
+            )
+        )
+    return entries
+
+
+def _postgres_acl_boundary(
+    entries: set[tuple[str, str, str, str, str, str, bool]],
+    *,
+    schema: str,
+    migration_login: str,
+    role_names: tuple[str, ...],
+) -> tuple[int, str]:
+    """Return a role-name-independent fingerprint of all non-owner ACLs."""
+
+    labels = {
+        migration_login: "migration_owner",
+        role_names[0]: "runtime",
+        role_names[1]: "policy_control",
+        role_names[2]: "custody_control",
+        role_names[3]: "custody_executor",
+    }
+    canonical = []
+    for (
+        object_kind,
+        object_name,
+        column_name,
+        grantor,
+        grantee,
+        privilege_type,
+        is_grantable,
+    ) in entries:
+        if grantor == migration_login and grantee == migration_login:
+            continue
+        canonical.append(
+            (
+                object_kind,
+                (
+                    "<schema>"
+                    if object_kind == "schema" and object_name == schema
+                    else object_name
+                ),
+                column_name,
+                labels.get(grantor, "unexpected_principal"),
+                labels.get(grantee, "unexpected_principal"),
+                privilege_type,
+                is_grantable,
+            )
+        )
+    payload = json.dumps(sorted(canonical), separators=(",", ":"))
+    return len(canonical), hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def migrate_postgres(
     dsn: str,
     *,
@@ -203,6 +1109,23 @@ def migrate_postgres(
     try:
         with connection.transaction():
             with connection.cursor() as cursor:
+                migration_login, current_role, _ = _postgres_connection_identity(
+                    cursor
+                )
+                if (
+                    migration_login != current_role
+                    or _IDENTIFIER_PATTERN.fullmatch(migration_login) is None
+                ):
+                    raise PostgresStorageError(
+                        "postgres_migration_identity_invalid"
+                    )
+                _verify_postgres_migration_ownership(
+                    cursor,
+                    schema=schema,
+                    migration_login=migration_login,
+                    allow_missing_schema=True,
+                    error_scope="migration",
+                )
                 cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
                 cursor.execute(
                     sql.SQL(
@@ -304,6 +1227,13 @@ def migrate_postgres(
                 if POSTGRES_SCHEMA_VERSION >= 15:
                     from ._finance_attempt_schema import verify_postgres_finance_attempt
                     verify_postgres_finance_attempt(cursor, schema, PostgresStorageError)
+                _verify_postgres_migration_ownership(
+                    cursor,
+                    schema=schema,
+                    migration_login=migration_login,
+                    allow_missing_schema=False,
+                    error_scope="migration",
+                )
         return PostgresSchemaStatus(version=POSTGRES_SCHEMA_VERSION, complete=True)
     except PostgresStorageError:
         raise

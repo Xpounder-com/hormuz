@@ -33,6 +33,8 @@ def provider_profile(root: Path):
         "HORMUZ_HOSTED_MODE": "provider-pilot",
         "HORMUZ_OPENAI_PROVIDER_KEY": "synthetic-openai-provider-key",
         "HORMUZ_ANTHROPIC_PROVIDER_KEY": "synthetic-anthropic-provider-key",
+        "HORMUZ_FAILOVER_REHEARSAL_KEY": "synthetic_rehearsal_" + "r" * 43,
+        "HORMUZ_POSTGRES_DSN": "postgresql://runtime:synthetic@db.example.test/hormuz",
     })
     state = Path(hosted_document["state_directory"])
     routes = {
@@ -66,6 +68,21 @@ def provider_profile(root: Path):
             "credential_env": "HORMUZ_INGRESS_CREDENTIAL",
         },
         "database": str(state / "usage.sqlite3"),
+        "usage_storage": {
+            "backend": "postgresql",
+            "postgres_dsn_env": "HORMUZ_POSTGRES_DSN",
+            "postgres_migration_dsn_env": "HORMUZ_POSTGRES_MIGRATION_DSN",
+            "postgres_schema": "hormuz",
+            "postgres_runtime_role": "hormuz_runtime",
+            "postgres_pool": {
+                "min_connections": 1,
+                "max_connections": 4,
+                "acquire_timeout_seconds": 5,
+                "max_waiting": 8,
+                "max_lifetime_seconds": 1800,
+                "max_idle_seconds": 300,
+            },
+        },
         "max_request_bytes": 2 * 1024 * 1024,
         "upstream_timeout_seconds": 60,
         "upstreams": {

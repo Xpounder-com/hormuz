@@ -8,7 +8,22 @@
     "trusted_proxy_cidrs": ["127.0.0.1/32"],
     "credential_env": "HORMUZ_INGRESS_CREDENTIAL"
   },
-  "database": "/var/lib/hormuz/state/usage.sqlite3",
+  "database": "/var/lib/hormuz/private/state/usage.sqlite3",
+  "usage_storage": {
+    "backend": "postgresql",
+    "postgres_dsn_env": "HORMUZ_POSTGRES_DSN",
+    "postgres_migration_dsn_env": "HORMUZ_POSTGRES_MIGRATION_DSN",
+    "postgres_schema": "hormuz",
+    "postgres_runtime_role": "hormuz_runtime",
+    "postgres_pool": {
+      "min_connections": 1,
+      "max_connections": 4,
+      "acquire_timeout_seconds": 5,
+      "max_waiting": 8,
+      "max_lifetime_seconds": 1800,
+      "max_idle_seconds": 300
+    }
+  },
   "max_request_bytes": 2097152,
   "upstream_timeout_seconds": 600,
   "upstreams": {
@@ -29,7 +44,7 @@
     "session_broker": {
       "enabled": true,
       "public_base_url": "https://gateway.example.com",
-      "database": "/var/lib/hormuz/state/sessions.sqlite3",
+      "database": "/var/lib/hormuz/private/state/sessions.sqlite3",
       "master_key_env": "HORMUZ_SESSION_MASTER_KEY",
       "access_ttl_seconds": 600,
       "absolute_ttl_seconds": 43200,

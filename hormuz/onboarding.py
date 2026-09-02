@@ -91,6 +91,18 @@ class TeamDirectory:
                 "SELECT id FROM onboarding_organizations WHERE issuer = ? ORDER BY id", (issuer,),
             ))
 
+    def managed_organization_ids(self) -> tuple[str, ...]:
+        """Return the server-local tenant allowlist in stable order."""
+
+        self._enabled()
+        with self.store._connection() as connection:
+            return tuple(
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT id FROM onboarding_organizations ORDER BY id"
+                )
+            )
+
     def manages_organization(self, organization_id: str | None) -> bool:
         with self.store._connection() as connection:
             return connection.execute(

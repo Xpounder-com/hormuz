@@ -16,7 +16,10 @@ COPY pyproject.toml README.md LICENSE ./
 COPY hormuz/ ./hormuz/
 RUN python -m pip wheel --no-build-isolation --no-deps --wheel-dir /wheelhouse . \
     && python -m venv /opt/hormuz \
-    && /opt/hormuz/bin/pip install --no-index --no-compile --find-links=/wheelhouse hormuz==1.0.0 \
+    && /opt/hormuz/bin/pip install --no-index --no-compile --require-hashes \
+        --find-links=/wheelhouse -r requirements/oci-runtime-linux-amd64.lock \
+    && /opt/hormuz/bin/pip install --no-index --no-compile --no-deps \
+        --find-links=/wheelhouse hormuz==1.0.0 \
     && /opt/hormuz/bin/pip uninstall --yes pip setuptools
 
 FROM ${PYTHON_BASE}
