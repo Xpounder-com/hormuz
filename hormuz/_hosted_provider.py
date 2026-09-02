@@ -122,7 +122,7 @@ def deployment_metadata(values: dict[str, str]) -> dict[str, object]:
         or any(character.isspace() or ord(character) < 33 or ord(character) == 127 for character in instance_id)
         or re.fullmatch(r"srv-[a-z0-9]{16,32}", service_id) is None
         or values.get("RENDER_SERVICE_TYPE") != "web"
-        or values.get("RENDER_CPU_COUNT") != "0.5"
+        or values.get("RENDER_CPU_COUNT") not in {"0.5", "0.50"}
         or values.get("RENDER_WEB_CONCURRENCY") != "1"
     ):
         raise HostedError("hosted_provider_deployment_metadata_invalid")
