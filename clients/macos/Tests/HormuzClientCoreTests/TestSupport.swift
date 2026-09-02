@@ -33,13 +33,18 @@ actor FixtureTransport: GatewayTransport {
     var logoutFails = false
     var wrongOrganization = false
     var badLoginURL = false
+    var badReliability = false
+    var badDeploymentIdentity = false
     var generation = 0
+    var sessionRevoked = false
 
     init(clock: TestClock) { self.clock = clock; absoluteExpiry = clock.now().addingTimeInterval(43_200) }
     func setRefreshFailure() { refreshFails = true }
     func setLogoutFailure(_ flag: Bool) { logoutFails = flag }
     func setWrongOrganization() { wrongOrganization = true }
     func setBadLoginURL() { badLoginURL = true }
+    func setBadReliability() { badReliability = true }
+    func setBadDeploymentIdentity() { badDeploymentIdentity = true }
     func counts() -> (Int, Int) { (refreshCount, logoutCount) }
 
     func request(profile: ConnectionProfile, path: String, body: Data?, accessToken: String?) async throws -> GatewayReply {
@@ -59,8 +64,10 @@ actor FixtureTransport: GatewayTransport {
         case "/v1/auth/logout":
             logoutCount += 1
             if logoutFails { throw ClientError.gatewayUnavailable }
+            sessionRevoked = true
             return try reply(200, ["revoked": true])
         case "/v1/gateway/whoami":
+            if sessionRevoked { return try reply(401, ["error": "unauthorized"]) }
             return try reply(200, ["schema_id": "hormuz.gateway-identity", "schema_version": 1,
                 "actor_id": "alice", "actor_name": "Alice", "team_id": "engineering", "team_name": "Engineering",
                 "organization_id": wrongOrganization ? "other-org" : profile.organization,
@@ -69,6 +76,24 @@ actor FixtureTransport: GatewayTransport {
             return try reply(200, ["schema_id": "hormuz.gateway-usage-summary", "schema_version": 1, "month": "current",
                 "requests": 4, "denied_requests": 1, "rate_limited_requests": 0, "input_tokens": 11, "output_tokens": 7,
                 "cost_usd": 0.012, "cost_basis": "configured_rate_card_estimate", "coverage": "gateway_captured_requests_only", "redactions": 2])
+        case "/v1/gateway/reliability":
+            if sessionRevoked { return try reply(401, ["error": "unauthorized"]) }
+            return try reply(200, [
+                "schema_id": "hormuz.provider-reliability-summary", "schema_version": 1,
+                "scope": "current_actor", "live_provider_request_count": 4,
+                "provider_attempt_record_count": badReliability ? 3 : 5,
+                "deployment": [
+                    "platform": "render",
+                    "source_commit": String(
+                        repeating: badDeploymentIdentity ? "z" : "a", count: 40
+                    ),
+                    "source_branch": "main", "repository": "Xpounder-com/hormuz",
+                    "cpu_count": "0.5", "web_concurrency": "1",
+                    "external_origin": "https://hormuz-pilot.onrender.com",
+                    "service_id": "srv-aaaaaaaaaaaaaaaaaaaa",
+                    "instance_fingerprint": String(repeating: "b", count: 16),
+                ],
+            ])
         default: throw ClientError.invalidArguments
         }
     }
