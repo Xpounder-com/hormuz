@@ -194,10 +194,14 @@ reviewed `main` commit, and keep auto-deploy disabled. Then run the protected
    failover, verifies latency and pressure counters, revokes the qualification
    session, and emits content-free evidence.
 
-The qualification environment must require review and contain only
-`HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN`, `HORMUZ_FAILOVER_REHEARSAL_KEY`, and
-`HORMUZ_RENDER_DEPLOY_HOOK_URL`. The refresh token must belong to the dedicated
-qualification member and is rotated before the first provider request.
+The qualification environment must require review. Pin its non-secret
+`HORMUZ_GATEWAY_ORIGIN` and `HORMUZ_RENDER_SERVICE_ID` environment variables to
+the approved service, and keep only `HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN`,
+`HORMUZ_FAILOVER_REHEARSAL_KEY`, and `HORMUZ_RENDER_DEPLOY_HOOK_URL` as secrets.
+The refresh token must belong to the dedicated qualification member. The
+workflow rotates it, writes one governed attempt before the restart, and then
+requires the same actor-scoped PostgreSQL counters to survive before it sends
+the remaining qualification traffic.
 
 The protected workflow is evidence, not activation authority. Do not invite a
 customer until both runs pass and the signed-Mac gates in

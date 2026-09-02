@@ -30,7 +30,9 @@ DEPLOYMENT_RUN = "https://github.com/Xpounder-com/hormuz/actions/runs/100"
 QUALIFICATION_RUN = "https://github.com/Xpounder-com/hormuz/actions/runs/101"
 REFRESH = "hox_r_" + "r" * 43
 ROTATED_REFRESH = "hox_r_" + "s" * 43
+ROTATED_REFRESH_AFTER_RESTART = "hox_r_" + "t" * 43
 ACCESS = "hox_a_" + "a" * 43
+ACCESS_AFTER_RESTART = "hox_a_" + "b" * 43
 REHEARSAL = "k" * 43
 
 
@@ -358,7 +360,9 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             )
 
     def test_restart_and_live_provider_observations_bind_strict_evidence(self) -> None:
-        provider_results = []
+        provider_results = [
+            ({"server-timing": "hormuz_upstream_headers;dur=1.000"}, False, False)
+        ]
         for _protocol in ("anthropic", "openai"):
             for _suffix in ("primary", "secondary"):
                 provider_results.extend([
@@ -374,15 +378,23 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         ])
         snapshots = [
             _counters(live=0, attempts=0, first=0, failovers=0),
-            _counters(live=8, attempts=8, first=8, failovers=0),
-            _counters(live=8, attempts=8, first=8, failovers=0),
-            _counters(live=9, attempts=9, first=9, failovers=0, unknown=1, cancellations=1),
-            _counters(live=10, attempts=11, first=10, failovers=1, unknown=1, cancellations=1),
+            _counters(live=1, attempts=1, first=1, failovers=0),
+            _counters(live=1, attempts=1, first=1, failovers=0),
+            _counters(live=9, attempts=9, first=9, failovers=0),
+            _counters(live=9, attempts=9, first=9, failovers=0),
+            _counters(live=10, attempts=10, first=10, failovers=0, unknown=1, cancellations=1),
+            _counters(live=11, attempts=12, first=11, failovers=1, unknown=1, cancellations=1),
         ]
         with (
             patch("tools.qualify_external_pilot._authenticate_deployment_evidence") as deployment,
             patch("tools.qualify_external_pilot._restart_and_wait", return_value="c" * 16) as restart,
-            patch("tools.qualify_external_pilot._refresh", return_value=(ACCESS, ROTATED_REFRESH)) as refresh,
+            patch(
+                "tools.qualify_external_pilot._refresh",
+                side_effect=[
+                    (ACCESS, ROTATED_REFRESH),
+                    (ACCESS_AFTER_RESTART, ROTATED_REFRESH_AFTER_RESTART),
+                ],
+            ) as refresh,
             patch("tools.qualify_external_pilot._reliability", side_effect=snapshots) as reliability,
             patch("tools.qualify_external_pilot._provider_request", side_effect=provider_results) as provider,
             patch("tools.qualify_external_pilot._logout") as logout,
@@ -405,22 +417,78 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             service_id=SERVICE_ID,
             origin=ORIGIN,
         )
-        refresh.assert_called_once_with(ORIGIN, REFRESH)
-        self.assertEqual(reliability.call_count, 5)
+        self.assertEqual(
+            refresh.call_args_list,
+            [
+                unittest.mock.call(ORIGIN, REFRESH),
+                unittest.mock.call(ORIGIN, ROTATED_REFRESH),
+            ],
+        )
+        self.assertEqual(reliability.call_count, 7)
         sleep.assert_called_once()
-        self.assertEqual(provider.call_count, 10)
+        self.assertEqual(provider.call_count, 11)
         self.assertTrue(provider.call_args_list[-2].kwargs["disconnect_after_first_chunk"])
-        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH)
+        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH_AFTER_RESTART)
         self.assertEqual(evidence["schema_id"], "hormuz.external-pilot-qualification-evidence")
         self.assertEqual(evidence["deployment_evidence_url"], DEPLOYMENT_RUN)
         self.assertEqual(evidence["recovery_evidence_url"], QUALIFICATION_RUN)
-        self.assertEqual(evidence["live_provider_request_count"], 10)
-        self.assertEqual(evidence["provider_attempt_record_count"], 11)
+        self.assertEqual(evidence["live_provider_request_count"], 11)
+        self.assertEqual(evidence["provider_attempt_record_count"], 12)
         self.assertEqual(evidence["failover_link_record_count"], 1)
         self.assertEqual(evidence["cancellation_replay_count"], 0)
         rendered = repr(evidence)
-        for secret in (REFRESH, ROTATED_REFRESH, ACCESS, REHEARSAL):
+        for secret in (
+            REFRESH,
+            ROTATED_REFRESH,
+            ROTATED_REFRESH_AFTER_RESTART,
+            ACCESS,
+            ACCESS_AFTER_RESTART,
+            REHEARSAL,
+        ):
             self.assertNotIn(secret, rendered)
+
+    def test_restart_requires_the_seeded_postgres_counters_to_survive(self) -> None:
+        snapshots = [
+            _counters(live=0, attempts=0, first=0, failovers=0),
+            _counters(live=1, attempts=1, first=1, failovers=0),
+            _counters(live=0, attempts=0, first=0, failovers=0),
+        ]
+        with (
+            patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+            patch("tools.qualify_external_pilot._restart_and_wait"),
+            patch(
+                "tools.qualify_external_pilot._refresh",
+                side_effect=[
+                    (ACCESS, ROTATED_REFRESH),
+                    (ACCESS_AFTER_RESTART, ROTATED_REFRESH_AFTER_RESTART),
+                ],
+            ),
+            patch("tools.qualify_external_pilot._reliability", side_effect=snapshots),
+            patch(
+                "tools.qualify_external_pilot._provider_request",
+                return_value=(
+                    {"server-timing": "hormuz_upstream_headers;dur=1.000"},
+                    False,
+                    False,
+                ),
+            ),
+            patch("tools.qualify_external_pilot._logout") as logout,
+            self.assertRaisesRegex(
+                QualificationError,
+                "^postgresql_recovery_evidence_missing$",
+            ),
+        ):
+            qualify(
+                origin=ORIGIN,
+                expected_commit=COMMIT,
+                service_id=SERVICE_ID,
+                deployment_evidence_url=DEPLOYMENT_RUN,
+                workflow_run_url=QUALIFICATION_RUN,
+                refresh_token=REFRESH,
+                rehearsal_key=REHEARSAL,
+                deploy_hook=f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}",
+            )
+        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH_AFTER_RESTART)
 
     def test_cancellation_evidence_wait_is_bounded(self) -> None:
         snapshot = _counters(live=8, attempts=8, first=8, failovers=0)
@@ -445,7 +513,9 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         reliability.assert_called_once()
 
     def test_unexpected_unknown_provider_outcome_rejects_qualification(self) -> None:
-        provider_results = []
+        provider_results = [
+            ({"server-timing": "hormuz_upstream_headers;dur=1.000"}, False, False)
+        ]
         for _protocol in ("anthropic", "openai"):
             for _suffix in ("primary", "secondary"):
                 provider_results.extend([
@@ -461,16 +531,21 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         ])
         snapshots = [
             _counters(live=0, attempts=0, first=0, failovers=0),
-            _counters(live=8, attempts=8, first=8, failovers=0, unknown=1),
-            _counters(live=9, attempts=9, first=9, failovers=0, unknown=2, cancellations=1),
-            _counters(live=10, attempts=11, first=10, failovers=1, unknown=2, cancellations=1),
+            _counters(live=1, attempts=1, first=1, failovers=0),
+            _counters(live=1, attempts=1, first=1, failovers=0),
+            _counters(live=9, attempts=9, first=9, failovers=0, unknown=1),
+            _counters(live=10, attempts=10, first=10, failovers=0, unknown=2, cancellations=1),
+            _counters(live=11, attempts=12, first=11, failovers=1, unknown=2, cancellations=1),
         ]
         with (
             patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
             patch("tools.qualify_external_pilot._restart_and_wait"),
             patch(
                 "tools.qualify_external_pilot._refresh",
-                return_value=(ACCESS, ROTATED_REFRESH),
+                side_effect=[
+                    (ACCESS, ROTATED_REFRESH),
+                    (ACCESS_AFTER_RESTART, ROTATED_REFRESH_AFTER_RESTART),
+                ],
             ),
             patch(
                 "tools.qualify_external_pilot._reliability",
@@ -496,7 +571,7 @@ class ExternalPilotQualificationTests(unittest.TestCase):
                 rehearsal_key=REHEARSAL,
                 deploy_hook=f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}",
             )
-        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH)
+        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH_AFTER_RESTART)
 
     def test_rotated_qualification_session_is_revoked_after_failure(self) -> None:
         with (
@@ -560,6 +635,14 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         self.assertEqual(workflow.count("${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}"), 1)
         self.assertEqual(workflow.count("${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}"), 1)
         self.assertEqual(workflow.count("${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}"), 1)
+        self.assertEqual(workflow.count("${{ vars.HORMUZ_GATEWAY_ORIGIN }}"), 1)
+        self.assertEqual(workflow.count("${{ vars.HORMUZ_RENDER_SERVICE_ID }}"), 1)
+        credential_step = workflow.split(
+            "- name: Restart exact deployment and run content-free qualification",
+            1,
+        )[1]
+        self.assertNotIn("inputs.gateway_origin", credential_step)
+        self.assertNotIn("inputs.render_service_id", credential_step)
         self.assertIn("actions: read", workflow)
         self.assertIn("GH_TOKEN: ${{ github.token }}", workflow)
         self.assertIn("qualify_external_pilot.py", workflow)

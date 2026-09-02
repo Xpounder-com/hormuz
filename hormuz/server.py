@@ -1127,7 +1127,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
         usage = parser.finish()
         if account_usage and attempt is not None:
-            successful = 200 <= status < 300 and downstream_ok
+            # A terminal provider event is authoritative even if writing that
+            # same final chunk discovers a downstream disconnect. Account for
+            # the completed provider work instead of misclassifying it as a
+            # cancellation/outcome-unknown attempt.
+            successful = 200 <= status < 300 and (
+                downstream_ok or parser.provider_completed
+            )
             if successful:
                 request_status = "succeeded"
             elif status == HTTPStatus.TOO_MANY_REQUESTS:

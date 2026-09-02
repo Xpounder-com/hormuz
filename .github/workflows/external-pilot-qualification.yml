@@ -83,6 +83,9 @@ jobs:
     timeout-minutes: 20
     environment: external-pilot-qualification
     if: ${{ inputs.operation == 'qualification' }}
+    env:
+      HORMUZ_GATEWAY_ORIGIN: ${{ vars.HORMUZ_GATEWAY_ORIGIN }}
+      HORMUZ_RENDER_SERVICE_ID: ${{ vars.HORMUZ_RENDER_SERVICE_ID }}
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -96,10 +99,18 @@ jobs:
           test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
+      - name: Require the protected gateway identity
+        env:
+          HORMUZ_REQUESTED_GATEWAY_ORIGIN: ${{ inputs.gateway_origin }}
+          HORMUZ_REQUESTED_RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+        run: |
+          set -euo pipefail
+          test -n "$HORMUZ_GATEWAY_ORIGIN"
+          test -n "$HORMUZ_RENDER_SERVICE_ID"
+          test "$HORMUZ_REQUESTED_GATEWAY_ORIGIN" = "$HORMUZ_GATEWAY_ORIGIN"
+          test "$HORMUZ_REQUESTED_RENDER_SERVICE_ID" = "$HORMUZ_RENDER_SERVICE_ID"
       - name: Restart exact deployment and run content-free qualification
         env:
-          HORMUZ_GATEWAY_ORIGIN: ${{ inputs.gateway_origin }}
-          HORMUZ_RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
           HORMUZ_DEPLOYMENT_EVIDENCE_URL: ${{ inputs.deployment_evidence_url }}
           HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN: ${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}

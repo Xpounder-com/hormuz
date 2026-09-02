@@ -69,6 +69,16 @@ MAX_GITHUB_ARTIFACT_BYTES = 2 * 1024 * 1024
 MIN_STREAM_COMPLETION_SEPARATION_SECONDS = 0.25
 CANCELLATION_EVIDENCE_TIMEOUT_SECONDS = 10.0
 CANCELLATION_EVIDENCE_POLL_SECONDS = 0.1
+_DURABLE_RELIABILITY_FIELDS = (
+    "live_provider_request_count",
+    "provider_attempt_record_count",
+    "latency_header_sample_count",
+    "latency_first_body_byte_sample_count",
+    "latency_total_sample_count",
+    "failover_link_record_count",
+    "outcome_unknown_count",
+    "cancellation_outcome_unknown_count",
+)
 RELIABILITY_FIELDS = {
     "schema_id",
     "schema_version",
@@ -774,23 +784,64 @@ def qualify(
         origin=origin,
     )
 
-    _restart_and_wait(
-        origin,
-        expected_commit=expected_commit,
-        service_id=service_id,
-        deploy_hook=deploy_hook,
-    )
     access_token = ""
     rotated_refresh = ""
     primary_error: BaseException | None = None
     try:
         access_token, rotated_refresh = _refresh(origin, refresh_token)
+        before_restart_write = _reliability(
+            origin,
+            access_token,
+            expected_commit=expected_commit,
+            service_id=service_id,
+        )
+        _provider_request(
+            origin,
+            access_token,
+            protocol="openai",
+            alias="openai-secondary",
+            stream=False,
+        )
+        after_restart_write = _reliability(
+            origin,
+            access_token,
+            expected_commit=expected_commit,
+            service_id=service_id,
+        )
+        expected_seed_deltas = {
+            "live_provider_request_count": 1,
+            "provider_attempt_record_count": 1,
+            "latency_header_sample_count": 1,
+            "latency_first_body_byte_sample_count": 1,
+            "latency_total_sample_count": 1,
+            "failover_link_record_count": 0,
+            "outcome_unknown_count": 0,
+            "cancellation_outcome_unknown_count": 0,
+        }
+        if any(
+            _delta(after_restart_write, before_restart_write, field) != expected
+            for field, expected in expected_seed_deltas.items()
+        ):
+            raise QualificationError("postgresql_recovery_seed_failed")
+
+        _restart_and_wait(
+            origin,
+            expected_commit=expected_commit,
+            service_id=service_id,
+            deploy_hook=deploy_hook,
+        )
+        access_token, rotated_refresh = _refresh(origin, rotated_refresh)
         baseline = _reliability(
             origin,
             access_token,
             expected_commit=expected_commit,
             service_id=service_id,
         )
+        if any(
+            baseline[field] != after_restart_write[field]
+            for field in _DURABLE_RELIABILITY_FIELDS
+        ):
+            raise QualificationError("postgresql_recovery_evidence_missing")
         first_chunk_before_completion = True
         request_count = 0
         for protocol in ("anthropic", "openai"):

@@ -898,6 +898,51 @@ class HostedProviderHTTPTests(unittest.TestCase):
         self.assertEqual(summary["provider_attempt_record_count"], 1)
         self.assertEqual(summary["cancellation_outcome_unknown_count"], 0)
 
+    def test_disconnect_on_terminal_chunk_records_completed_provider_work(self):
+        directory_setup(self.gateway.session_broker.directory, self.config)
+        invitation, pair = activate_member(
+            self.gateway.session_broker.store,
+            self.gateway.session_broker.directory,
+        )
+        response = _ProviderResponse(200)
+        response.headers["Content-Type"] = "text/event-stream"
+        response._body = (
+            b'event: response.completed\n'
+            b'data: {"type":"response.completed","response":{"model":"openai-primary-model",'
+            b'"usage":{"input_tokens":2,"output_tokens":1}}}\n\n'
+        )
+        with (
+            patch("hormuz.server.urllib.request.urlopen", return_value=response),
+            patch(
+                "hormuz.server.GatewayRequestHandler._write_downstream_chunk",
+                side_effect=BrokenPipeError,
+            ),
+        ):
+            status, _, body = self.request(
+                "POST",
+                "/v1/responses",
+                body={"model": "openai-primary", "input": "terminal disconnect", "stream": True},
+                headers={"Authorization": "Bearer " + pair.access_token},
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"")
+        self.assertTrue(response.closed)
+        summary_status, _, summary_body = self.request(
+            "GET",
+            "/v1/gateway/reliability",
+            headers={"Authorization": "Bearer " + pair.access_token},
+        )
+        self.assertEqual(summary_status, 200)
+        summary = json.loads(summary_body)
+        self.assertEqual(summary["live_provider_request_count"], 1)
+        self.assertEqual(summary["provider_attempt_record_count"], 1)
+        self.assertEqual(summary["outcome_unknown_count"], 0)
+        self.assertEqual(summary["cancellation_outcome_unknown_count"], 0)
+        self.assertEqual(
+            self.gateway.store.monthly_totals(actor_id=invitation.membership_id).requests,
+            1,
+        )
+
     def test_unknown_route_and_oversized_body_stop_at_private_boundary(self):
         self.assertEqual(self.request("POST", "/v1/models", body={})[0], 503)
         connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=2)
