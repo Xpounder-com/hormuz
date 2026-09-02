@@ -1003,6 +1003,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 if first_body_byte_us is None:
                     first_body_byte_us = self._elapsed_us(started_ns)
                 provider_bytes_read += len(partial)
+                parser.feed(partial)
             downstream_ok = False
             LOGGER.warning(
                 "upstream_stream_failed actor=%s team=%s client=%s protocol=%s requested_model=%s error=%s",

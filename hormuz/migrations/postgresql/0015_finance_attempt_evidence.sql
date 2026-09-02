@@ -147,6 +147,31 @@ CREATE TABLE {schema}.gateway_finance_attempt_evidence (
         OR (configured_estimate_availability = 'unavailable' AND configured_estimate_amount IS NULL AND configured_estimate_microusd IS NULL AND configured_estimate_reason_code <> 'estimated')
     ),
     CHECK (
+        configured_estimate_availability <> 'available'
+        OR (
+            provider_input_tokens IS NOT NULL
+            AND provider_output_tokens IS NOT NULL
+            AND cache_read_input_tokens IS NOT NULL
+            AND cache_write_input_tokens IS NOT NULL
+            AND (
+                provider_schema_id <> 'openai.responses.usage.v1'
+                OR (
+                    cache_write_input_tokens <= provider_input_tokens
+                    AND cache_read_input_tokens <= provider_input_tokens - cache_write_input_tokens
+                )
+            )
+        )
+    ),
+    CHECK (
+        provider_schema_id <> 'anthropic.messages.usage.v1'
+        OR observation_state <> 'complete'
+        OR provider_input_tokens IS NULL
+        OR provider_output_tokens IS NULL
+        OR cache_read_input_tokens IS NULL
+        OR cache_write_input_tokens IS NULL
+        OR total_tokens IS NOT NULL
+    ),
+    CHECK (
         (terminal_state = 'outcome_unknown' AND configured_estimate_availability = 'unavailable' AND configured_estimate_reason_code = 'attempt_outcome_unknown')
         OR (terminal_state <> 'outcome_unknown' AND configured_estimate_reason_code <> 'attempt_outcome_unknown')
     ),
@@ -254,6 +279,20 @@ BEGIN
         IF NEW.configured_estimate_amount::NUMERIC * 1000000
            IS DISTINCT FROM NEW.configured_estimate_microusd::NUMERIC THEN
             RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'finance attempt estimate is invalid';
+        END IF;
+        IF NEW.provider_input_tokens IS NULL
+           OR NEW.provider_output_tokens IS NULL
+           OR NEW.cache_read_input_tokens IS NULL
+           OR NEW.cache_write_input_tokens IS NULL
+           OR (
+               NEW.provider_schema_id = 'openai.responses.usage.v1'
+               AND (
+                   NEW.cache_write_input_tokens > NEW.provider_input_tokens
+                   OR NEW.cache_read_input_tokens
+                      > NEW.provider_input_tokens - NEW.cache_write_input_tokens
+               )
+           ) THEN
+            RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'finance attempt estimate lacks native pricing support';
         END IF;
     ELSIF NEW.configured_estimate_amount IS NOT NULL
        OR NEW.configured_estimate_microusd IS NOT NULL
@@ -527,13 +566,17 @@ BEGIN
         v_fetch_requests := (v_native #>> '{{server_tool_use,web_fetch_requests}}')::BIGINT;
         v_required_present := v_provider_input IS NOT NULL AND v_provider_output IS NOT NULL;
         IF v_provider_input IS NOT NULL AND v_cache_read IS NOT NULL
-           AND v_cache_write IS NOT NULL AND v_provider_output IS NOT NULL
-           AND v_provider_input::NUMERIC + v_cache_read::NUMERIC
+           AND v_cache_write IS NOT NULL AND v_provider_output IS NOT NULL THEN
+            IF v_provider_input::NUMERIC + v_cache_read::NUMERIC
                + v_cache_write::NUMERIC + v_provider_output::NUMERIC <= 9223372036854775807 THEN
-            v_total := (
-                v_provider_input::NUMERIC + v_cache_read::NUMERIC
-                + v_cache_write::NUMERIC + v_provider_output::NUMERIC
-            )::BIGINT;
+                v_total := (
+                    v_provider_input::NUMERIC + v_cache_read::NUMERIC
+                    + v_cache_write::NUMERIC + v_provider_output::NUMERIC
+                )::BIGINT;
+            ELSE
+                v_total := NULL;
+                v_intrinsically_invalid := TRUE;
+            END IF;
         ELSE
             v_total := NULL;
         END IF;

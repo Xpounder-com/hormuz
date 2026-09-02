@@ -484,29 +484,10 @@ def estimate_configured_route(
     except (ValueError, InvalidOperation, ArithmeticError):
         return unavailable_estimate(binding, "estimate_outside_precision")
 
-    values: tuple[int | None, int | None, int | None, int | None]
-    if observation.provider_schema_id == _PROFILES["openai"]:
-        input_total = observation.provider_input_tokens
-        cache_read = observation.cache_read_input_tokens
-        cache_write = observation.cache_write_input_tokens
-        output = observation.provider_output_tokens
-        if any(value is None for value in (input_total, cache_read, cache_write, output)):
-            return unavailable_estimate(binding, "missing_native_usage")
-        assert input_total is not None and cache_read is not None and cache_write is not None
-        if cache_read > input_total or cache_write > input_total or cache_read + cache_write > input_total:
-            return unavailable_estimate(binding, "invalid_native_usage")
-        values = (input_total - cache_read - cache_write, cache_read, cache_write, output)
-    elif observation.provider_schema_id == _PROFILES["anthropic"]:
-        values = (
-            observation.provider_input_tokens,
-            observation.cache_read_input_tokens,
-            observation.cache_write_input_tokens,
-            observation.provider_output_tokens,
-        )
-        if any(value is None for value in values):
-            return unavailable_estimate(binding, "missing_native_usage")
-    else:  # Defensive after observation validation.
-        return unavailable_estimate(binding, "invalid_native_usage")
+    values, unavailable_reason = _configured_pricing_values(observation)
+    if unavailable_reason is not None:
+        return unavailable_estimate(binding, unavailable_reason)
+    assert values is not None
 
     try:
         with exact_context():
@@ -534,6 +515,30 @@ def estimate_configured_route(
         rate_card_version=binding.rate_card_version,
         rate_card_digest=binding.rate_card_digest,
     )
+
+
+def _configured_pricing_values(
+    observation: NativeUsageObservation,
+) -> tuple[tuple[int, int, int, int] | None, str | None]:
+    """Return the four rate-card quantities or one explicit absence reason."""
+
+    input_total = observation.provider_input_tokens
+    cache_read = observation.cache_read_input_tokens
+    cache_write = observation.cache_write_input_tokens
+    output = observation.provider_output_tokens
+    if any(value is None for value in (input_total, cache_read, cache_write, output)):
+        return None, "missing_native_usage"
+    assert input_total is not None and cache_read is not None
+    assert cache_write is not None and output is not None
+    if observation.provider_schema_id == _PROFILES["openai"]:
+        # Avoid an overflowing addition while proving that the two cached
+        # partitions fit within the provider's inclusive input total.
+        if cache_write > input_total or cache_read > input_total - cache_write:
+            return None, "invalid_native_usage"
+        return (input_total - cache_read - cache_write, cache_read, cache_write, output), None
+    if observation.provider_schema_id == _PROFILES["anthropic"]:
+        return (input_total, cache_read, cache_write, output), None
+    return None, "invalid_native_usage"
 
 
 def absent_native_observation(protocol: str, reason_code: str = "provider_usage_absent") -> NativeUsageObservation:
@@ -779,6 +784,11 @@ def _normalize_native_values(
             invalid = True
     elif protocol == "anthropic":
         total = _checked_sum(provider_input, cache_read, cache_write, provider_output)
+        if (
+            all(item is not None for item in (provider_input, cache_read, cache_write, provider_output))
+            and total is None
+        ):
+            invalid = True
         if all(item is not None for item in (cache_5m, cache_1h)) and cache_write is not None:
             assert cache_5m is not None and cache_1h is not None
             if cache_5m + cache_1h != cache_write:
@@ -977,6 +987,9 @@ def validate_finance_attempt_event(value: Mapping[str, object]) -> None:
             or estimate.rate_card_digest != binding.rate_card_digest
             or type(value["provider_final"]) is not bool
         ):
+            raise ValueError
+        _, unavailable_reason = _configured_pricing_values(observation)
+        if estimate.availability == "available" and unavailable_reason is not None:
             raise ValueError
         if state == "outcome_unknown" and observation.state == "complete":
             raise ValueError

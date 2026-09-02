@@ -1160,7 +1160,17 @@ class GatewayIntegrationTests(unittest.TestCase):
 
     def test_interrupted_provider_response_becomes_unknown_without_replay(self) -> None:
         self._restart_gateway(self._config_with_failover())
-        partial_body = b"{\"partial\": true"
+        partial_body = json.dumps({
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {
+                    "cached_tokens": 2,
+                    "cache_write_tokens": 1,
+                },
+                "output_tokens": 4,
+                "total_tokens": 14,
+            },
+        }).encode()
 
         class InterruptedResponse:
             status = 200
@@ -1198,6 +1208,12 @@ class GatewayIntegrationTests(unittest.TestCase):
             "provider_bytes_read, downstream_bytes_sent "
             "FROM gateway_provider_attempt_metrics"
         ).fetchone()
+        finance = connection.execute(
+            "SELECT observation_state, observation_reason_code, provider_input_tokens, "
+            "provider_output_tokens, cache_read_input_tokens, cache_write_input_tokens, "
+            "configured_estimate_availability, configured_estimate_reason_code "
+            "FROM gateway_finance_attempt_evidence"
+        ).fetchone()
         connection.close()
         self.assertIsNotNone(metrics)
         assert metrics is not None
@@ -1208,6 +1224,13 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(
             events,
             [(1, "pending", None, None), (2, "outcome_unknown", "provider_stream_interrupted", None)],
+        )
+        self.assertEqual(
+            finance,
+            (
+                "partial", "provider_stream_interrupted", 10, 4, 2, 1,
+                "unavailable", "attempt_outcome_unknown",
+            ),
         )
 
     def test_event_stream_releases_available_chunk_before_provider_completion(self) -> None:

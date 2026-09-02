@@ -8,7 +8,11 @@ import threading
 import unittest
 from unittest import mock
 
-from hormuz.finance_attempts import estimate_configured_route, finance_attempt_storage_row
+from hormuz.finance_attempts import (
+    MAX_INTEGER,
+    estimate_configured_route,
+    finance_attempt_storage_row,
+)
 from hormuz.postgres import PostgresStorageError, postgres_transaction
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.store import RequestAttemptStateError, ReservationScope
@@ -16,10 +20,20 @@ from hormuz.usage import ResponseUsageParser
 
 if __package__:
     from ._postgres_fixture import PostgresTestCase, _identity
-    from .test_finance_attempt_runtime import binding, complete_estimate, complete_observation
+    from .test_finance_attempt_runtime import (
+        binding,
+        complete_estimate,
+        complete_observation,
+        replace_storage_row_fields,
+    )
 else:  # Isolated wheel compatibility discovery uses the tests directory as its import root.
     from _postgres_fixture import PostgresTestCase, _identity
-    from test_finance_attempt_runtime import binding, complete_estimate, complete_observation
+    from test_finance_attempt_runtime import (
+        binding,
+        complete_estimate,
+        complete_observation,
+        replace_storage_row_fields,
+    )
 
 
 def begin(
@@ -49,6 +63,41 @@ def begin(
 
 
 class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
+    def test_available_estimate_without_observation_rolls_back_terminal_transition(self) -> None:
+        attempt = begin(self.store)
+
+        with self.assertRaisesRegex(
+            PostgresStorageError,
+            "finance_attempt_evidence_invalid",
+        ):
+            self.store._finalize_request_attempt_with_provider_metrics(
+                attempt=attempt,
+                organization_id="acme",
+                status="succeeded",
+                provider_metrics=None,
+                finance_observation=None,
+                configured_estimate=complete_estimate(),
+            )
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id="acme",
+        ) as connection:
+            self.assertEqual(
+                [row["state"] for row in connection.execute(
+                    "SELECT state FROM gateway_request_attempt_events ORDER BY sequence"
+                ).fetchall()],
+                ["pending"],
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) AS count FROM gateway_finance_attempt_evidence"
+                ).fetchone()["count"],
+                0,
+            )
+
     def test_anthropic_canonical_native_profile_passes_database_guard(self) -> None:
         attempt = begin(self.store, protocol="anthropic")
         parser = ResponseUsageParser("anthropic", is_event_stream=False)
@@ -490,6 +539,27 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                 )
         self.assertEqual(estimate_error.exception.code, "storage_unavailable")
 
+        def unsupported_available_estimate(event):
+            return replace_storage_row_fields(
+                event,
+                cache_write_input_tokens=None,
+            )
+
+        with mock.patch(
+            "hormuz.postgres_usage_store.finance_attempt_storage_row",
+            side_effect=unsupported_available_estimate,
+        ):
+            with self.assertRaises(PostgresStorageError) as unsupported_error:
+                self.store._finalize_request_attempt_with_provider_metrics(
+                    attempt=attempt,
+                    organization_id="acme",
+                    status="succeeded",
+                    provider_metrics=None,
+                    finance_observation=complete_observation(),
+                    configured_estimate=complete_estimate(),
+                )
+        self.assertEqual(unsupported_error.exception.code, "storage_unavailable")
+
         self.store._finalize_request_attempt_with_provider_metrics(
             attempt=attempt,
             organization_id="acme",
@@ -509,6 +579,82 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     "SELECT COUNT(*) AS count FROM gateway_finance_attempt_evidence"
                 ).fetchone()["count"],
                 1,
+            )
+
+    def test_postgres_guard_rejects_complete_anthropic_total_overflow(self) -> None:
+        attempt = begin(self.store, protocol="anthropic")
+        parser = ResponseUsageParser("anthropic", is_event_stream=False)
+        parser.feed(json.dumps({
+            "usage": {
+                "input_tokens": 1,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "output_tokens": 1,
+            },
+        }).encode())
+        observation = parser.finish_with_finance().finance
+        estimate = estimate_configured_route(
+            binding(), observation,
+            input_cost_per_million=1,
+            cache_read_cost_per_million=1,
+            cache_write_cost_per_million=1,
+            output_cost_per_million=1,
+        )
+
+        def overflow_total(event):
+            native = json.dumps(
+                {
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "input_tokens": MAX_INTEGER,
+                    "output_tokens": 1,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            return replace_storage_row_fields(
+                event,
+                native_payload_json=native,
+                native_payload_digest=hashlib.sha256(native.encode()).hexdigest(),
+                provider_input_tokens=MAX_INTEGER,
+                provider_output_tokens=1,
+                cache_read_input_tokens=0,
+                cache_write_input_tokens=0,
+                total_tokens=None,
+            )
+
+        with mock.patch(
+            "hormuz.postgres_usage_store.finance_attempt_storage_row",
+            side_effect=overflow_total,
+        ):
+            with self.assertRaises(PostgresStorageError) as caught:
+                self.store._finalize_request_attempt_with_provider_metrics(
+                    attempt=attempt,
+                    organization_id="acme",
+                    status="succeeded",
+                    provider_metrics=None,
+                    finance_observation=observation,
+                    configured_estimate=estimate,
+                )
+        self.assertEqual(caught.exception.code, "storage_unavailable")
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id="acme",
+        ) as connection:
+            self.assertEqual(
+                [row["state"] for row in connection.execute(
+                    "SELECT state FROM gateway_request_attempt_events ORDER BY sequence"
+                ).fetchall()],
+                ["pending"],
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) AS count FROM gateway_finance_attempt_evidence"
+                ).fetchone()["count"],
+                0,
             )
 
     def test_two_instances_serialize_one_terminal_finance_fact(self) -> None:

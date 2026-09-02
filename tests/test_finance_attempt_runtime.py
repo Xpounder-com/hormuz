@@ -14,6 +14,7 @@ from unittest import mock
 from hormuz._persistence import RequestAttemptStateError
 from hormuz.config import Identity
 from hormuz.finance_attempts import (
+    MAX_INTEGER,
     ConfiguredRateCardBinding,
     NativeUsageObservation,
     absent_native_observation,
@@ -60,11 +61,11 @@ def identity() -> Identity:
     )
 
 
-def begin(store: UsageStore, *, ttl_seconds: int = 60):
+def begin(store: UsageStore, *, ttl_seconds: int = 60, protocol: str = "openai"):
     return store._begin_request_attempt_with_work_budget(
         identity=identity(),
         client="codex",
-        protocol="openai",
+        protocol=protocol,
         requested_model="smart",
         resolved_alias="smart",
         upstream_model="gpt-test",
@@ -102,6 +103,23 @@ def complete_estimate():
         cache_write_cost_per_million=3,
         output_cost_per_million=4,
     )
+
+
+def replace_storage_row_fields(event, **updates):
+    """Keep the canonical event bytes aligned while exercising database guards."""
+
+    row = finance_attempt_storage_row(event)
+    evidence = json.loads(str(row["evidence_json"]))
+    evidence.update(updates)
+    row.update(updates)
+    row["evidence_json"] = json.dumps(
+        evidence,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    return row
 
 
 class NativeAttemptParserTests(unittest.TestCase):
@@ -228,6 +246,23 @@ class NativeAttemptParserTests(unittest.TestCase):
         self.assertEqual(observation.server_tool_request_count, 3)
         self.assertEqual(observation.provider_service_tier, "standard")
         self.assertEqual(observation.provider_inference_geo, "us")
+
+    def test_anthropic_total_overflow_is_partial_invalid_evidence(self) -> None:
+        parser = ResponseUsageParser("anthropic", is_event_stream=False)
+        parser.feed(json.dumps({
+            "usage": {
+                "input_tokens": MAX_INTEGER,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "output_tokens": 1,
+            },
+        }).encode())
+
+        observation = parser.finish_with_finance().finance
+
+        self.assertEqual(observation.state, "partial")
+        self.assertEqual(observation.reason_code, "provider_usage_invalid")
+        self.assertIsNone(observation.total_tokens)
 
     def test_missing_pricing_category_is_unavailable_never_zero(self) -> None:
         parser = ResponseUsageParser("openai", is_event_stream=False)
@@ -482,8 +517,184 @@ class NativeAttemptEventTests(unittest.TestCase):
             "2026-09-02T14:00:00+00:00",
         )
 
+    def test_available_estimate_requires_every_native_pricing_category(self) -> None:
+        with self.assertRaisesRegex(ValueError, "finance_attempt_evidence_invalid"):
+            build_finance_attempt_event(
+                protocol="openai",
+                organization_id="acme",
+                request_attempt_id="attempt-1",
+                terminal_attempt_event_id="22222222-2222-4222-8222-222222222222",
+                usage_event_id="33333333-3333-4333-8333-333333333333",
+                terminal_state="succeeded",
+                occurred_at="2026-09-02T14:00:00.123456+00:00",
+                observation=absent_native_observation("openai"),
+                estimate=complete_estimate(),
+                binding=binding(),
+            )
+
+        parser = ResponseUsageParser("openai", is_event_stream=False)
+        parser.feed(json.dumps({
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {
+                    "cached_tokens": 2,
+                    "cache_write_tokens": 1,
+                },
+                "output_tokens": 4,
+            },
+        }).encode())
+        partial = parser.finish_with_finance().finance
+        estimate = estimate_configured_route(
+            binding(), partial,
+            input_cost_per_million=2,
+            cache_read_cost_per_million=1,
+            cache_write_cost_per_million=3,
+            output_cost_per_million=4,
+        )
+        self.assertEqual((partial.state, estimate.availability), ("partial", "available"))
+        build_finance_attempt_event(
+            protocol="openai",
+            organization_id="acme",
+            request_attempt_id="attempt-2",
+            terminal_attempt_event_id="44444444-4444-4444-8444-444444444444",
+            usage_event_id="55555555-5555-4555-8555-555555555555",
+            terminal_state="succeeded",
+            occurred_at="2026-09-02T14:00:00.123456+00:00",
+            observation=partial,
+            estimate=estimate,
+            binding=binding(),
+        )
+
 
 class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
+    def test_available_estimate_without_observation_rolls_back_terminal_transition(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            attempt = begin(store)
+
+            with self.assertRaisesRegex(
+                StorageSchemaError,
+                "finance_attempt_evidence_invalid",
+            ):
+                store._finalize_request_attempt_with_provider_metrics(
+                    attempt=attempt,
+                    organization_id="acme",
+                    status="succeeded",
+                    provider_metrics=None,
+                    finance_observation=None,
+                    configured_estimate=complete_estimate(),
+                )
+
+            with managed_sqlite_connection(path) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT state FROM gateway_request_attempt_events ORDER BY sequence"
+                    ).fetchall(),
+                    [("pending",)],
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM gateway_finance_attempt_evidence"
+                    ).fetchone()[0],
+                    0,
+                )
+
+    def test_sqlite_guards_reject_unsupported_estimates_and_complete_overflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            unsupported = begin(store)
+
+            def remove_pricing_category(event):
+                return replace_storage_row_fields(
+                    event,
+                    cache_write_input_tokens=None,
+                )
+
+            with mock.patch(
+                "hormuz.store.finance_attempt_storage_row",
+                side_effect=remove_pricing_category,
+            ):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    store._finalize_request_attempt_with_provider_metrics(
+                        attempt=unsupported,
+                        organization_id="acme",
+                        status="succeeded",
+                        provider_metrics=None,
+                        finance_observation=complete_observation(),
+                        configured_estimate=complete_estimate(),
+                    )
+
+            overflow = begin(store, protocol="anthropic")
+            parser = ResponseUsageParser("anthropic", is_event_stream=False)
+            parser.feed(json.dumps({
+                "usage": {
+                    "input_tokens": 1,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "output_tokens": 1,
+                },
+            }).encode())
+            observation = parser.finish_with_finance().finance
+            estimate = estimate_configured_route(
+                binding(), observation,
+                input_cost_per_million=1,
+                cache_read_cost_per_million=1,
+                cache_write_cost_per_million=1,
+                output_cost_per_million=1,
+            )
+
+            def overflow_total(event):
+                native = json.dumps(
+                    {
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                        "input_tokens": MAX_INTEGER,
+                        "output_tokens": 1,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                return replace_storage_row_fields(
+                    event,
+                    native_payload_json=native,
+                    native_payload_digest=hashlib.sha256(native.encode()).hexdigest(),
+                    provider_input_tokens=MAX_INTEGER,
+                    provider_output_tokens=1,
+                    cache_read_input_tokens=0,
+                    cache_write_input_tokens=0,
+                    total_tokens=None,
+                )
+
+            with mock.patch(
+                "hormuz.store.finance_attempt_storage_row",
+                side_effect=overflow_total,
+            ):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    store._finalize_request_attempt_with_provider_metrics(
+                        attempt=overflow,
+                        organization_id="acme",
+                        status="succeeded",
+                        provider_metrics=None,
+                        finance_observation=observation,
+                        configured_estimate=estimate,
+                    )
+
+            with managed_sqlite_connection(path) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT state FROM gateway_request_attempt_events ORDER BY attempt_id, sequence"
+                    ).fetchall(),
+                    [("pending",), ("pending",)],
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM gateway_finance_attempt_evidence"
+                    ).fetchone()[0],
+                    0,
+                )
+
     def test_protocol_profile_mismatch_rolls_back_the_terminal_transition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"

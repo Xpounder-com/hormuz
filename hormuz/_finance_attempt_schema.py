@@ -214,6 +214,31 @@ CREATE TABLE gateway_finance_attempt_evidence (
         OR (configured_estimate_availability = 'unavailable' AND configured_estimate_amount IS NULL AND configured_estimate_microusd IS NULL AND configured_estimate_reason_code <> 'estimated')
     ),
     CHECK (
+        configured_estimate_availability <> 'available'
+        OR (
+            provider_input_tokens IS NOT NULL
+            AND provider_output_tokens IS NOT NULL
+            AND cache_read_input_tokens IS NOT NULL
+            AND cache_write_input_tokens IS NOT NULL
+            AND (
+                provider_schema_id <> 'openai.responses.usage.v1'
+                OR (
+                    cache_write_input_tokens <= provider_input_tokens
+                    AND cache_read_input_tokens <= provider_input_tokens - cache_write_input_tokens
+                )
+            )
+        )
+    ),
+    CHECK (
+        provider_schema_id <> 'anthropic.messages.usage.v1'
+        OR observation_state <> 'complete'
+        OR provider_input_tokens IS NULL
+        OR provider_output_tokens IS NULL
+        OR cache_read_input_tokens IS NULL
+        OR cache_write_input_tokens IS NULL
+        OR total_tokens IS NOT NULL
+    ),
+    CHECK (
         (terminal_state = 'outcome_unknown' AND configured_estimate_availability = 'unavailable' AND configured_estimate_reason_code = 'attempt_outcome_unknown')
         OR (terminal_state <> 'outcome_unknown' AND configured_estimate_reason_code <> 'attempt_outcome_unknown')
     ),
@@ -281,6 +306,31 @@ POSTGRES_FINANCE_TABLE_DDL = """
     CHECK (
         (configured_estimate_availability = 'available' AND configured_estimate_amount IS NOT NULL AND configured_estimate_microusd IS NOT NULL AND configured_estimate_reason_code = 'estimated')
         OR (configured_estimate_availability = 'unavailable' AND configured_estimate_amount IS NULL AND configured_estimate_microusd IS NULL AND configured_estimate_reason_code <> 'estimated')
+    ),
+    CHECK (
+        configured_estimate_availability <> 'available'
+        OR (
+            provider_input_tokens IS NOT NULL
+            AND provider_output_tokens IS NOT NULL
+            AND cache_read_input_tokens IS NOT NULL
+            AND cache_write_input_tokens IS NOT NULL
+            AND (
+                provider_schema_id <> 'openai.responses.usage.v1'
+                OR (
+                    cache_write_input_tokens <= provider_input_tokens
+                    AND cache_read_input_tokens <= provider_input_tokens - cache_write_input_tokens
+                )
+            )
+        )
+    ),
+    CHECK (
+        provider_schema_id <> 'anthropic.messages.usage.v1'
+        OR observation_state <> 'complete'
+        OR provider_input_tokens IS NULL
+        OR provider_output_tokens IS NULL
+        OR cache_read_input_tokens IS NULL
+        OR cache_write_input_tokens IS NULL
+        OR total_tokens IS NOT NULL
     ),
     CHECK (
         (terminal_state = 'outcome_unknown' AND configured_estimate_availability = 'unavailable' AND configured_estimate_reason_code = 'attempt_outcome_unknown')
