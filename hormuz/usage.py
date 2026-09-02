@@ -8,6 +8,13 @@ from typing import Any
 from .finance_attempts import NativeUsageAccumulator, NativeUsageObservation
 
 
+_OPENAI_TERMINAL_RESPONSE_EVENTS = frozenset({
+    "response.completed",
+    "response.failed",
+    "response.incomplete",
+})
+
+
 @dataclass
 class Usage:
     input_tokens: int = 0
@@ -91,7 +98,13 @@ class ResponseUsageParser:
         if not isinstance(value, dict):
             return
         if self.protocol == "openai":
-            response = value.get("response") if value.get("type") == "response.completed" else value
+            event_type = value.get("type")
+            response = (
+                value.get("response")
+                if isinstance(event_type, str)
+                and event_type in _OPENAI_TERMINAL_RESPONSE_EVENTS
+                else value
+            )
             if isinstance(response, dict):
                 self._apply_provider_model(response.get("model"))
                 self._apply_openai_usage(response.get("usage"))

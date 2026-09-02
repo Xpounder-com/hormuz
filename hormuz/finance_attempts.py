@@ -31,13 +31,15 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _CURRENCY = re.compile(r"[A-Z]{3}\Z")
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "rate_limited", "outcome_unknown"})
 _OBSERVATION_STATES = frozenset({"complete", "partial", "absent"})
-_OBSERVATION_REASONS = frozenset({
-    "provider_usage_absent",
-    "provider_usage_incomplete",
-    "provider_usage_invalid",
+_UNKNOWN_OUTCOME_OBSERVATION_REASONS = frozenset({
     "stale_pending",
     "provider_transport_ambiguous",
     "provider_stream_interrupted",
+})
+_OBSERVATION_REASONS = _UNKNOWN_OUTCOME_OBSERVATION_REASONS | frozenset({
+    "provider_usage_absent",
+    "provider_usage_incomplete",
+    "provider_usage_invalid",
 })
 _ESTIMATE_REASONS = frozenset({
     "estimated",
@@ -563,9 +565,7 @@ def unknown_native_observation(
 ) -> NativeUsageObservation:
     """Retain bounded partial evidence without claiming a known outcome."""
 
-    if reason_code not in {
-        "stale_pending", "provider_transport_ambiguous", "provider_stream_interrupted",
-    }:
+    if reason_code not in _UNKNOWN_OUTCOME_OBSERVATION_REASONS:
         raise ValueError("finance_attempt_evidence_invalid")
     if observation is None or observation.state == "absent":
         return absent_native_observation(protocol, reason_code)
@@ -981,6 +981,11 @@ def validate_finance_attempt_event(value: Mapping[str, object]) -> None:
             value["provider_final"],  # type: ignore[arg-type]
         )
         validate_native_usage_observation(observation)
+        if (
+            state != "outcome_unknown"
+            and observation.reason_code in _UNKNOWN_OUTCOME_OBSERVATION_REASONS
+        ):
+            raise ValueError
         if (
             estimate.rate_card_id != binding.rate_card_id
             or estimate.rate_card_version != binding.rate_card_version

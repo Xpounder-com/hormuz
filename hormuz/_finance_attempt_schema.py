@@ -83,7 +83,9 @@ SQLITE_FINANCE_ATTEMPT_TRIGGERS = {
         "OR (r.protocol='anthropic' AND NEW.provider_schema_id='anthropic.messages.usage.v1')) "
         "AND e.organization_id=NEW.organization_id AND e.id=NEW.terminal_attempt_event_id "
         "AND e.state=NEW.terminal_state AND e.occurred_at=NEW.occurred_at "
-        "AND e.usage_event_id IS NEW.usage_event_id) "
+        "AND e.usage_event_id IS NEW.usage_event_id "
+        "AND (NEW.usage_event_id IS NULL OR EXISTS (SELECT 1 FROM gateway_usage_events u "
+        "WHERE u.organization_id=NEW.organization_id AND u.id=NEW.usage_event_id))) "
         "BEGIN SELECT RAISE(ABORT, 'finance_attempt_evidence_inconsistent'); END"
     ),
     "gateway_finance_attempt_evidence_no_update": (
@@ -205,6 +207,13 @@ CREATE TABLE gateway_finance_attempt_evidence (
         REFERENCES gateway_usage_events (organization_id, id),
     CHECK ((terminal_state = 'outcome_unknown') = (usage_event_id IS NULL)),
     CHECK (
+        terminal_state = 'outcome_unknown'
+        OR observation_reason_code IS NULL
+        OR observation_reason_code NOT IN (
+            'stale_pending','provider_transport_ambiguous','provider_stream_interrupted'
+        )
+    ),
+    CHECK (
         (observation_state = 'complete' AND observation_reason_code IS NULL AND native_payload_json IS NOT NULL AND native_payload_digest IS NOT NULL)
         OR (observation_state = 'partial' AND observation_reason_code IS NOT NULL AND native_payload_json IS NOT NULL AND native_payload_digest IS NOT NULL)
         OR (observation_state = 'absent' AND observation_reason_code IS NOT NULL AND native_payload_json IS NULL AND native_payload_digest IS NULL)
@@ -298,6 +307,13 @@ POSTGRES_FINANCE_TABLE_DDL = """
     FOREIGN KEY (organization_id, usage_event_id)
         REFERENCES {prefix}gateway_usage_events (organization_id, id),
     CHECK ((terminal_state = 'outcome_unknown') = (usage_event_id IS NULL)),
+    CHECK (
+        terminal_state = 'outcome_unknown'
+        OR observation_reason_code IS NULL
+        OR observation_reason_code NOT IN (
+            'stale_pending','provider_transport_ambiguous','provider_stream_interrupted'
+        )
+    ),
     CHECK (
         (observation_state = 'complete' AND observation_reason_code IS NULL AND native_payload_json IS NOT NULL AND native_payload_digest IS NOT NULL)
         OR (observation_state = 'partial' AND observation_reason_code IS NOT NULL AND native_payload_json IS NOT NULL AND native_payload_digest IS NOT NULL)

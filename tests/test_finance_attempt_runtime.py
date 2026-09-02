@@ -23,6 +23,7 @@ from hormuz.finance_attempts import (
     finance_attempt_event_from_row,
     finance_attempt_storage_row,
     repository_contract_binding,
+    unknown_native_observation,
     unavailable_estimate,
     validate_finance_attempt_event,
 )
@@ -190,6 +191,45 @@ class NativeAttemptParserTests(unittest.TestCase):
         self.assertEqual(estimate.amount, "0.000035")
         self.assertEqual(estimate.reason_code, "estimated")
         self.assertFalse(estimate.provider_final)
+
+    def test_openai_noncompleted_terminal_events_retain_nested_usage(self) -> None:
+        for event_type in ("response.incomplete", "response.failed"):
+            with self.subTest(event_type=event_type):
+                parser = ResponseUsageParser("openai", is_event_stream=True)
+                parser.feed(("data: " + json.dumps({
+                    "type": event_type,
+                    "response": {
+                        "model": "gpt-test",
+                        "service_tier": "priority",
+                        "usage": {
+                            "input_tokens": 10,
+                            "input_tokens_details": {
+                                "cached_tokens": 2,
+                                "cache_write_tokens": 1,
+                            },
+                            "output_tokens": 4,
+                            "output_tokens_details": {"reasoning_tokens": 3},
+                            "total_tokens": 14,
+                        },
+                    },
+                    "sequence_number": 1,
+                }) + "\n\n").encode())
+
+                result = parser.finish_with_finance()
+                self.assertEqual(
+                    (
+                        result.usage.input_tokens,
+                        result.usage.output_tokens,
+                        result.usage.provider_reported_model,
+                        result.usage.evidence_complete,
+                    ),
+                    (10, 4, "gpt-test", True),
+                )
+                self.assertEqual(result.finance.state, "complete")
+                self.assertEqual(result.finance.cache_read_input_tokens, 2)
+                self.assertEqual(result.finance.cache_write_input_tokens, 1)
+                self.assertEqual(result.finance.reasoning_output_tokens, 3)
+                self.assertEqual(result.finance.provider_service_tier, "priority")
 
     def test_anthropic_stream_combines_terminal_allowlist_without_double_counting(self) -> None:
         parser = ResponseUsageParser("anthropic", is_event_stream=True)
@@ -431,6 +471,35 @@ class NativeAttemptEventTests(unittest.TestCase):
                 native_payload_json=None,
                 native_payload_digest=None,
             )
+
+        for terminal_state, reason_code in (
+            ("succeeded", "stale_pending"),
+            ("failed", "provider_transport_ambiguous"),
+            ("rate_limited", "provider_stream_interrupted"),
+        ):
+            with self.subTest(
+                terminal_state=terminal_state,
+                reason_code=reason_code,
+            ), self.assertRaisesRegex(
+                ValueError,
+                "finance_attempt_evidence_invalid",
+            ):
+                build_finance_attempt_event(
+                    protocol="openai",
+                    organization_id="acme",
+                    request_attempt_id="attempt-1",
+                    terminal_attempt_event_id="22222222-2222-4222-8222-222222222222",
+                    usage_event_id="33333333-3333-4333-8333-333333333333",
+                    terminal_state=terminal_state,
+                    occurred_at="2026-09-02T14:00:00.123456+00:00",
+                    observation=unknown_native_observation(
+                        "openai",
+                        complete_observation(),
+                        reason_code,
+                    ),
+                    estimate=complete_estimate(),
+                    binding=binding(),
+                )
 
     def test_event_binds_terminal_timestamp_usage_and_rate_card(self) -> None:
         parser = ResponseUsageParser("openai", is_event_stream=False)
@@ -737,6 +806,142 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                     ).fetchone()[0],
                     0,
                 )
+
+    def test_known_terminal_storage_rejects_unknown_only_observation_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            attempt = begin(store)
+            with self.assertRaisesRegex(
+                StorageSchemaError,
+                "finance_attempt_evidence_invalid",
+            ):
+                store._finalize_request_attempt_with_provider_metrics(
+                    attempt=attempt,
+                    organization_id="acme",
+                    status="succeeded",
+                    provider_metrics=None,
+                    finance_observation=unknown_native_observation(
+                        "openai",
+                        complete_observation(),
+                        "provider_stream_interrupted",
+                    ),
+                    configured_estimate=complete_estimate(),
+                )
+
+            with managed_sqlite_connection(path) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT state FROM gateway_request_attempt_events ORDER BY sequence"
+                    ).fetchall(),
+                    [("pending",)],
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM gateway_finance_attempt_evidence"
+                    ).fetchone()[0],
+                    0,
+                )
+
+    def test_sqlite_schema_rejects_known_terminal_unknown_only_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            attempt = begin(store)
+
+            def contradictory_sidecar(event):
+                return replace_storage_row_fields(
+                    event,
+                    observation_state="partial",
+                    observation_reason_code="provider_stream_interrupted",
+                )
+
+            with mock.patch(
+                "hormuz.store.finance_attempt_storage_row",
+                side_effect=contradictory_sidecar,
+            ):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    store._finalize_request_attempt_with_provider_metrics(
+                        attempt=attempt,
+                        organization_id="acme",
+                        status="succeeded",
+                        provider_metrics=None,
+                        finance_observation=complete_observation(),
+                        configured_estimate=complete_estimate(),
+                    )
+
+            with managed_sqlite_connection(path) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT state FROM gateway_request_attempt_events ORDER BY sequence"
+                    ).fetchall(),
+                    [("pending",)],
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM gateway_finance_attempt_evidence"
+                    ).fetchone()[0],
+                    0,
+                )
+
+    def test_sidecar_rejects_orphan_usage_even_when_terminal_event_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            attempt = begin(store)
+            terminal_event_id = "22222222-2222-4222-8222-222222222222"
+            orphan_usage_event_id = "33333333-3333-4333-8333-333333333333"
+            occurred_at = "2026-09-02T14:00:00.123456+00:00"
+
+            event = build_finance_attempt_event(
+                protocol="openai",
+                organization_id="acme",
+                request_attempt_id=attempt.attempt_id,
+                terminal_attempt_event_id=terminal_event_id,
+                usage_event_id=orphan_usage_event_id,
+                terminal_state="succeeded",
+                occurred_at=occurred_at,
+                observation=complete_observation(),
+                estimate=complete_estimate(),
+                binding=binding(),
+            )
+            row = finance_attempt_storage_row(event)
+            columns = tuple(row)
+            placeholders = ", ".join("?" for _ in columns)
+
+            with managed_sqlite_connection(path) as connection:
+                pending = connection.execute(
+                    "SELECT event_schema_id, event_schema_version "
+                    "FROM gateway_request_attempt_events WHERE attempt_id=? AND sequence=1",
+                    (attempt.attempt_id,),
+                ).fetchone()
+                connection.execute(
+                    "INSERT INTO gateway_request_attempt_events ("
+                    "id, attempt_id, organization_id, occurred_at, event_schema_id, "
+                    "event_schema_version, sequence, state, reason_code, usage_event_id"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        terminal_event_id,
+                        attempt.attempt_id,
+                        "acme",
+                        occurred_at,
+                        pending[0],
+                        pending[1],
+                        2,
+                        "succeeded",
+                        None,
+                        orphan_usage_event_id,
+                    ),
+                )
+                with self.assertRaisesRegex(
+                    sqlite3.IntegrityError,
+                    "finance_attempt_evidence_inconsistent",
+                ):
+                    connection.execute(
+                        f"INSERT INTO gateway_finance_attempt_evidence "
+                        f"({', '.join(columns)}) VALUES ({placeholders})",
+                        tuple(row[column] for column in columns),
+                    )
 
     def test_terminal_transition_is_one_atomic_query_friendly_finance_fact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

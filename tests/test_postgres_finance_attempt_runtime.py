@@ -12,6 +12,7 @@ from hormuz.finance_attempts import (
     MAX_INTEGER,
     estimate_configured_route,
     finance_attempt_storage_row,
+    unknown_native_observation,
 )
 from hormuz.postgres import PostgresStorageError, postgres_transaction
 from hormuz.postgres_usage_store import PostgresUsageStore
@@ -579,6 +580,88 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     "SELECT COUNT(*) AS count FROM gateway_finance_attempt_evidence"
                 ).fetchone()["count"],
                 1,
+            )
+
+    def test_known_terminal_guard_rejects_unknown_only_observation_reason(self) -> None:
+        attempt = begin(self.store)
+        with self.assertRaisesRegex(
+            PostgresStorageError,
+            "finance_attempt_evidence_invalid",
+        ):
+            self.store._finalize_request_attempt_with_provider_metrics(
+                attempt=attempt,
+                organization_id="acme",
+                status="succeeded",
+                provider_metrics=None,
+                finance_observation=unknown_native_observation(
+                    "openai",
+                    complete_observation(),
+                    "provider_stream_interrupted",
+                ),
+                configured_estimate=complete_estimate(),
+            )
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id="acme",
+        ) as connection:
+            self.assertEqual(
+                [row["state"] for row in connection.execute(
+                    "SELECT state FROM gateway_request_attempt_events ORDER BY sequence"
+                ).fetchall()],
+                ["pending"],
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) AS count FROM gateway_finance_attempt_evidence"
+                ).fetchone()["count"],
+                0,
+            )
+
+    def test_postgres_schema_guard_rejects_known_terminal_unknown_only_reason(self) -> None:
+        attempt = begin(self.store)
+
+        def contradictory_sidecar(event):
+            return replace_storage_row_fields(
+                event,
+                observation_state="partial",
+                observation_reason_code="provider_stream_interrupted",
+            )
+
+        with mock.patch(
+            "hormuz.postgres_usage_store.finance_attempt_storage_row",
+            side_effect=contradictory_sidecar,
+        ):
+            with self.assertRaises(PostgresStorageError) as caught:
+                self.store._finalize_request_attempt_with_provider_metrics(
+                    attempt=attempt,
+                    organization_id="acme",
+                    status="succeeded",
+                    provider_metrics=None,
+                    finance_observation=complete_observation(),
+                    configured_estimate=complete_estimate(),
+                )
+        self.assertEqual(caught.exception.code, "storage_unavailable")
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id="acme",
+        ) as connection:
+            self.assertEqual(
+                [row["state"] for row in connection.execute(
+                    "SELECT state FROM gateway_request_attempt_events ORDER BY sequence"
+                ).fetchall()],
+                ["pending"],
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) AS count FROM gateway_finance_attempt_evidence"
+                ).fetchone()["count"],
+                0,
             )
 
     def test_postgres_guard_rejects_complete_anthropic_total_overflow(self) -> None:

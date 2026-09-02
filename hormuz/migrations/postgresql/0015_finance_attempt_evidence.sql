@@ -136,6 +136,13 @@ CREATE TABLE {schema}.gateway_finance_attempt_evidence (
         REFERENCES {schema}.gateway_usage_events (organization_id, id),
     CHECK ((terminal_state = 'outcome_unknown') = (usage_event_id IS NULL)),
     CHECK (
+        terminal_state = 'outcome_unknown'
+        OR observation_reason_code IS NULL
+        OR observation_reason_code NOT IN (
+            'stale_pending','provider_transport_ambiguous','provider_stream_interrupted'
+        )
+    ),
+    CHECK (
         (observation_state = 'complete' AND observation_reason_code IS NULL AND native_payload_json IS NOT NULL AND native_payload_digest IS NOT NULL)
         OR (observation_state = 'partial' AND observation_reason_code IS NOT NULL AND native_payload_json IS NOT NULL AND native_payload_digest IS NOT NULL)
         OR (observation_state = 'absent' AND observation_reason_code IS NOT NULL AND native_payload_json IS NULL AND native_payload_digest IS NULL)
@@ -259,7 +266,14 @@ BEGIN
     IF (NEW.observation_state = 'complete' AND NEW.observation_reason_code IS NOT NULL)
        OR (NEW.observation_state <> 'complete' AND NEW.observation_reason_code IS NULL)
        OR (NEW.observation_state = 'partial' AND NEW.observation_reason_code = 'provider_usage_absent')
-       OR (NEW.observation_state = 'absent' AND NEW.observation_reason_code = 'provider_usage_incomplete') THEN
+       OR (NEW.observation_state = 'absent' AND NEW.observation_reason_code = 'provider_usage_incomplete')
+       OR (
+           NEW.terminal_state <> 'outcome_unknown'
+           AND NEW.observation_reason_code IN (
+               'stale_pending', 'provider_transport_ambiguous',
+               'provider_stream_interrupted'
+           )
+       ) THEN
         RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'finance attempt observation is invalid';
     END IF;
     IF NEW.configured_estimate_reason_code NOT IN (
