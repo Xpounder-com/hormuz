@@ -193,7 +193,8 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                     )
                     cursor.execute(
                         """
-                        SELECT granted.rolname
+                        SELECT granted.rolname, membership.admin_option,
+                               membership.inherit_option, membership.set_option
                         FROM pg_auth_members AS membership
                         JOIN pg_roles AS granted ON granted.oid = membership.roleid
                         JOIN pg_roles AS member ON member.oid = membership.member
@@ -201,7 +202,10 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                         """,
                         (runtime_login,),
                     )
-                    self.assertEqual(cursor.fetchall(), [(runtime_role,)])
+                    self.assertEqual(
+                        cursor.fetchall(),
+                        [(runtime_role, False, False, True)],
+                    )
 
             with self.assertRaises(self.psycopg.errors.InsufficientPrivilege):
                 with self.psycopg.connect(runtime_dsn) as connection:
@@ -247,6 +251,64 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                             self.sql.Identifier(runtime_login),
                         )
                     )
+
+            for membership_option in (
+                "INHERIT TRUE",
+                "INHERIT FALSE, SET FALSE",
+            ):
+                with self.subTest(membership_option=membership_option):
+                    with self.psycopg.connect(
+                        self.owner_dsn, autocommit=True
+                    ) as connection:
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                self.sql.SQL(
+                                    "GRANT {} TO {} WITH " + membership_option
+                                ).format(
+                                    self.sql.Identifier(runtime_role),
+                                    self.sql.Identifier(runtime_login),
+                                )
+                            )
+                    for operation, expected in (
+                        (
+                            lambda: bootstrap_postgres_deployment(
+                                self.owner_dsn,
+                                runtime_dsn,
+                                schema=schema,
+                                runtime_role=runtime_role,
+                                policy_control_role=policy_role,
+                                custody_control_role=custody_role,
+                                custody_executor_role=executor_role,
+                            ),
+                            "postgres_bootstrap_authorization_membership_unsafe",
+                        ),
+                        (
+                            lambda: verify_postgres_deployment_runtime(
+                                runtime_dsn,
+                                schema=schema,
+                                runtime_role=runtime_role,
+                                policy_control_role=policy_role,
+                                custody_control_role=custody_role,
+                                custody_executor_role=executor_role,
+                            ),
+                            "postgres_runtime_authorization_role_unsafe",
+                        ),
+                    ):
+                        with self.assertRaisesRegex(PostgresStorageError, expected):
+                            operation()
+                    with self.psycopg.connect(
+                        self.owner_dsn, autocommit=True
+                    ) as connection:
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                self.sql.SQL(
+                                    "GRANT {} TO {} WITH ADMIN FALSE, "
+                                    "INHERIT FALSE, SET TRUE"
+                                ).format(
+                                    self.sql.Identifier(runtime_role),
+                                    self.sql.Identifier(runtime_login),
+                                )
+                            )
 
             with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
                 with connection.cursor() as cursor:
