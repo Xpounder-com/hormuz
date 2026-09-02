@@ -449,7 +449,8 @@ non-owner roles (runtime, policy-control, custody-control, and custody-executor)
 applies Hormuz's normal PostgreSQL migrations to the source, and seeds only
 fixed two-tenant metadata: one usage record, one secret-egress record, one
 active budget reservation, one `outcome_unknown` request attempt with its
-retained reservation, and one managed-policy lifecycle per tenant. No
+retained reservation and finance-attempt sidecar, and one managed-policy
+lifecycle per tenant. No
 provider call, customer database, customer role, prompt, response, secret
 value, or provider credential is used.
 
@@ -460,12 +461,13 @@ is then restored into a clean recovery database. The verifier uses the
 restricted runtime and policy-control roles to require the migration ledger,
 tenant-scoped repository behavior, active policy versions, active budget
 reservations (including uncertain attempt holds), request-attempt event state,
-and RLS denial without an organization context. It computes a
+finance-attempt evidence plus its audit-chain entry, and RLS denial without an
+organization context. It computes a
 SHA-256 state fingerprint over the restored metadata in memory and requires it
 to exactly match the source before writing evidence.
 
 Only `summary.json` is retained. It is schema-versioned as
-`hormuz.postgresql-recovery-drill-summary` v1 and contains the pinned database
+`hormuz.postgresql-recovery-drill-summary` v2 and contains the pinned database
 image/version, custom-dump checksum and byte count, content-free state
 fingerprints/counts, passed checks, and measured durations. It contains no
 connection string, role, database name, policy document, event row, or dump.

@@ -894,10 +894,11 @@ uses `pg_dump` custom format for the source and `pg_restore` from that same
 pinned image. A corrupted archive is restored only into quarantine and must
 fail; a target that cannot be verified from restricted Hormuz roles is never
 promoted. The valid recovery target must exactly match the source metadata
-fingerprint before the tool writes an artifact.
+fingerprint—including finance-attempt sidecars and their audit-chain
+entries—before the tool writes an artifact.
 
 On a successful run, CI retains only the strict, content-free
-`hormuz.postgresql-recovery-drill-summary` v1 `summary.json` for seven days.
+`hormuz.postgresql-recovery-drill-summary` v2 `summary.json` for seven days.
 It includes the database image/version, dump hash and size, record counts,
 fingerprints, passed checks, and measured durations; it excludes the archive,
 connection strings, roles, database names, policy documents, records, and
