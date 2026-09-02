@@ -1,7 +1,9 @@
-"""Explicit operator commands and supervisor for hosted authentication staging.
+"""Explicit operator commands and supervisor for bounded hosted modes.
 
 The container starts closed in maintenance. No initialization, administrator,
-invitation, migration or recovery is inferred from an application restart.
+invitation, migration, recovery or provider activation is inferred from an
+application restart. Authentication staging and provider traffic use distinct
+configuration and process-secret boundaries.
 """
 
 from __future__ import annotations
@@ -20,6 +22,11 @@ from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
 from ._hosted_config import BACKEND_PORT, SECRET_NAMES, HostedError, load_profile
+from ._hosted_provider import (
+    PROVIDER_CONFIG_ENV,
+    PROVIDER_SECRET_NAMES,
+    load_provider_profile,
+)
 from ._hosted_state import (
     check_initialized,
     check_recovered_closed,
@@ -41,6 +48,9 @@ def runtime_settings() -> dict[str, str]:
         "HORMUZ_INGRESS_CREDENTIAL": os.environ.get("HORMUZ_INGRESS_CREDENTIAL", ""),
         "HORMUZ_SESSION_MASTER_KEY": os.environ.get("HORMUZ_SESSION_MASTER_KEY", ""),
         "HORMUZ_OIDC_CLIENT_SECRET": os.environ.get("HORMUZ_OIDC_CLIENT_SECRET", ""),
+        PROVIDER_CONFIG_ENV: os.environ.get(PROVIDER_CONFIG_ENV, "/etc/secrets/hormuz-provider.json"),
+        "HORMUZ_OPENAI_PROVIDER_KEY": os.environ.get("HORMUZ_OPENAI_PROVIDER_KEY", ""),
+        "HORMUZ_ANTHROPIC_PROVIDER_KEY": os.environ.get("HORMUZ_ANTHROPIC_PROVIDER_KEY", ""),
     }
 
 
@@ -90,24 +100,36 @@ def _backend_ready(process, config, stopped) -> None:
     raise HostedError("hosted_backend_not_ready")
 
 
-def supervise(settings: dict[str, str], config_path: Path) -> int:
+def supervise(settings: dict[str, str], config_path: Path, provider_config_path: Path) -> int:
     mode = settings["HORMUZ_HOSTED_MODE"]
-    if mode not in {"maintenance", "active"}:
+    if mode not in {"maintenance", "active", "provider-pilot"}:
         raise HostedError("hosted_mode_invalid")
-    child_settings = proxy_settings(settings, active=mode == "active")
+    child_settings = proxy_settings(settings, active=mode != "maintenance")
     stopped = threading.Event()
     previous = {sig: signal.signal(sig, lambda *_: stopped.set()) for sig in (signal.SIGINT, signal.SIGTERM)}
     backend = proxy = None
     successful = False
     try:
+        inference_enabled = mode == "provider-pilot"
         if mode == "active":
             config = load_profile(config_path, settings)
             check_initialized(config)
             backend = _spawn([sys.executable, "-I", "-m", "hormuz.hosted", "--config", str(config_path), "backend"],
                              {name: settings[name] for name in SECRET_NAMES})
             _backend_ready(backend, config, stopped)
+        elif mode == "provider-pilot":
+            config = load_provider_profile(config_path, provider_config_path, settings)
+            check_initialized(config)
+            backend = _spawn([
+                sys.executable, "-I", "-m", "hormuz.hosted",
+                "--config", str(config_path),
+                "--provider-config", str(provider_config_path),
+                "provider-backend",
+            ], {name: settings[name] for name in PROVIDER_SECRET_NAMES})
+            _backend_ready(backend, config, stopped)
         proxy = _spawn(["/usr/bin/caddy", "run", "--config", f"/etc/hormuz/caddy/{mode}.Caddyfile", "--adapter", "caddyfile"], child_settings)
-        print(json.dumps({"event": "hosted_starting", "mode": mode, "inference_enabled": False}), flush=True)
+        print(json.dumps({"event": "hosted_starting", "mode": mode,
+                          "inference_enabled": inference_enabled}), flush=True)
         while not stopped.wait(0.1):
             if proxy.poll() is not None or backend is not None and backend.poll() is not None:
                 raise HostedError("hosted_child_exited")
@@ -123,11 +145,15 @@ def supervise(settings: dict[str, str], config_path: Path) -> int:
     return 0 if successful and proxy_clean and backend_clean else 1
 
 
-def backend(config) -> None:
-    from ._hosted_server import StagingGatewayServer
+def backend(config, *, provider: bool = False, environ=None) -> None:
+    from ._hosted_server import ProviderPilotGatewayServer, StagingGatewayServer
 
     with state_lock(config, exclusive=False):
-        server = StagingGatewayServer(config)
+        server = (
+            ProviderPilotGatewayServer(config, environ=environ or {})
+            if provider
+            else StagingGatewayServer(config)
+        )
         stopping = threading.Event()
 
         def terminate(*_):
@@ -152,10 +178,14 @@ def main(argv=None) -> int:
     logging.disable(logging.CRITICAL)
     os.umask(0o077)
     settings = runtime_settings()
-    parser = argparse.ArgumentParser(description="Provider-free hosted authentication staging; defaults to maintenance.")
+    parser = argparse.ArgumentParser(description="Maintenance-first hosted authentication and provider pilot.")
     parser.add_argument("--config", type=Path, default=Path(settings["HORMUZ_CONFIG"]))
+    parser.add_argument("--provider-config", type=Path, default=Path(settings[PROVIDER_CONFIG_ENV]))
     commands = parser.add_subparsers(dest="command")
-    for name in ("serve", "backend", "initialize", "check", "recovery-check"):
+    for name in (
+        "serve", "backend", "provider-backend", "provider-check",
+        "initialize", "check", "recovery-check",
+    ):
         commands.add_parser(name)
     commands.add_parser("snapshot").add_argument("--output-directory", type=Path, required=True)
     commands.add_parser("migrate").add_argument("--snapshot-directory", type=Path, required=True)
@@ -172,16 +202,29 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command in {None, "serve"}:
-            return supervise(settings, args.config)
+            return supervise(settings, args.config, args.provider_config)
         if args.command == "backup-verify":
             result = verify_backup(args.archive_file, read_backup_key(args.key_file))
             print(json.dumps({"event": "hosted_operator_complete", "operation": args.command,
                               "inference_enabled": False, **result}, sort_keys=True))
             return 0
-        config = load_profile(args.config, settings)
+        config = (
+            load_provider_profile(args.config, args.provider_config, settings)
+            if args.command in {"provider-backend", "provider-check"}
+            else load_profile(args.config, settings)
+        )
         result = {}
         if args.command == "backend":
             backend(config)
+        elif args.command == "provider-backend":
+            backend(
+                config,
+                provider=True,
+                environ={name: settings[name] for name in PROVIDER_SECRET_NAMES},
+            )
+        elif args.command == "provider-check":
+            check_initialized(config)
+            result = {"provider_configuration_valid": True}
         elif args.command == "initialize":
             initialize(config)
         elif args.command == "snapshot":
