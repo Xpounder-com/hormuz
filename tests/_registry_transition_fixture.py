@@ -9,21 +9,30 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+from typing import Any, Iterator
 
 from hormuz.config import Identity
 from hormuz.store import ReservationScope, StorageSchemaError, UsageStore
-if __package__:
-    from ._sqlite import managed_sqlite_connection
-else:
-    from _sqlite import managed_sqlite_connection
 
 
 ARCHIVE_SHA256 = "2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a"
 PROBE_TABLE = "registry_transition_test_probe"
+
+
+@contextmanager
+def managed_sqlite_connection(*args: Any, **kwargs: Any) -> Iterator[sqlite3.Connection]:
+    """Keep the released-v1 standalone driver independent of sibling test modules."""
+    connection = sqlite3.connect(*args, **kwargs)
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def seed_registry_ledger(store) -> None:
