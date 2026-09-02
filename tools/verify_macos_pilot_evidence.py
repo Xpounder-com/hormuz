@@ -25,6 +25,7 @@ import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 try:
     from tools.client_release_versions import (
@@ -87,6 +88,7 @@ _PRIVATE_REFERENCE_RE = re.compile(rf"private-(?:security-)?review:{_UUID}\Z")
 _GITHUB_LOGIN_RE = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z"
 )
+_RENDER_SERVICE_ID_RE = re.compile(r"srv-[a-z0-9]{16,32}\Z")
 
 _ROOT_FIELDS = {
     "schema_id",
@@ -260,6 +262,8 @@ _GATEWAY_DEPLOYMENT_EVIDENCE_FIELDS = {
     "profile",
     "source_commit",
     "workflow_run_url",
+    "gateway_origin",
+    "render_service_id",
     "identity_provider",
     "provider_protocols",
     "https",
@@ -590,6 +594,30 @@ def _require_timestamp(value: object, label: str) -> datetime:
     if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != value:
         raise MacPilotEvidenceError(f"{label}_invalid")
     return parsed
+
+
+def _require_https_origin(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise MacPilotEvidenceError(f"{label}_invalid")
+    try:
+        parsed = urlsplit(value)
+        invalid = (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in {None, 443}
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or not value.isascii()
+            or any(character.isspace() or ord(character) < 33 for character in value)
+        )
+    except ValueError:
+        invalid = True
+    if invalid:
+        raise MacPilotEvidenceError(f"{label}_invalid")
+    return value
 
 
 def _sha256(payload: bytes) -> str:
@@ -1719,6 +1747,14 @@ def _validate_gateway_evidence_payload(
             "availability_sla_claimed": gateway["availability_sla_claimed"],
             "max_inflight_streams": gateway["max_inflight_streams"],
         }
+        _require_https_origin(
+            evidence["gateway_origin"], f"{label}_evidence_gateway_origin"
+        )
+        _require_pattern(
+            evidence["render_service_id"],
+            _RENDER_SERVICE_ID_RE,
+            f"{label}_evidence_render_service_id",
+        )
         if any(
             not _json_values_equal(evidence[field], expected_value)
             for field, expected_value in expected.items()

@@ -72,6 +72,8 @@ class ExternalPilotDeploymentTests(unittest.TestCase):
         unauthorized.assert_called_once_with(ORIGIN, "/v1/responses", method="POST")
         self.assertEqual(evidence["schema_id"], "hormuz.external-pilot-deployment-evidence")
         self.assertEqual(evidence["source_commit"], COMMIT)
+        self.assertEqual(evidence["gateway_origin"], ORIGIN)
+        self.assertEqual(evidence["render_service_id"], SERVICE_ID)
         self.assertTrue(evidence["support_path_published"])
         rendered = repr(evidence).lower()
         for forbidden in ("prompt", "response_body", "credential", "token_value"):

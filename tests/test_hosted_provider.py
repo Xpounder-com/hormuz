@@ -15,7 +15,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from hormuz._hosted_config import HostedError
-from hormuz._hosted_provider import PROVIDER_FAILOVER_REHEARSAL_ENV, load_provider_profile
+from hormuz._hosted_provider import (
+    PROVIDER_CHILD_ENV_NAMES,
+    PROVIDER_FAILOVER_REHEARSAL_ENV,
+    load_provider_profile,
+)
 from hormuz._hosted_server import (
     PROVIDER_MAX_CONNECTIONS,
     PROVIDER_MAX_INFERENCE_CONNECTIONS,
@@ -299,6 +303,28 @@ class HostedProviderConfigTests(unittest.TestCase):
         )
         store.verify_ready.assert_called_once_with()
         pool.close.assert_called_once_with()
+
+    def test_provider_backend_preserves_only_reviewed_secrets_and_deployment_metadata(self):
+        output, error = io.StringIO(), io.StringIO()
+        with (
+            patch.dict(os.environ, self.settings, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            patch("hormuz.hosted.backend") as run_backend,
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.staging.source_path),
+                "--provider-config", str(self.path),
+                "provider-backend",
+            ])
+        self.assertEqual((status, error.getvalue()), (0, ""))
+        run_backend.assert_called_once()
+        self.assertIs(run_backend.call_args.kwargs["provider"], True)
+        child = run_backend.call_args.kwargs["environ"]
+        self.assertEqual(set(child), set(PROVIDER_CHILD_ENV_NAMES))
+        self.assertEqual(child["RENDER"], "")
+        self.assertEqual(child["HORMUZ_OPENAI_PROVIDER_KEY"], self.settings["HORMUZ_OPENAI_PROVIDER_KEY"])
 
     def test_provider_check_refuses_an_empty_managed_tenant_allowlist(self):
         initialize(self.staging)
@@ -593,8 +619,27 @@ class HostedProviderHTTPTests(unittest.TestCase):
         self.assertEqual(value["schema_id"], "hormuz.provider-operations")
         self.assertEqual(value["content_boundary"], "aggregate_content_free_counters")
         self.assertEqual(value["provider"]["capacity"], PROVIDER_MAX_INFERENCE_CONNECTIONS)
+        self.assertEqual(value["provider"]["connection_capacity"], PROVIDER_MAX_CONNECTIONS)
         self.assertFalse(value["postgresql_pool"]["configured"])
         self.assertNotIn("organization", json.dumps(value))
+
+    def test_connection_slot_rejections_are_counted_as_worker_pressure(self):
+        held = []
+        try:
+            for _ in range(PROVIDER_MAX_CONNECTIONS):
+                acquired = self.gateway._connection_slots.acquire(blocking=False)
+                self.assertTrue(acquired)
+                held.append(acquired)
+            request = Mock()
+            with patch.object(self.gateway, "shutdown_request") as shutdown_request:
+                self.gateway.process_request(request, ("127.0.0.1", 1))
+            shutdown_request.assert_called_once_with(request)
+            snapshot = self.gateway.operational_stats()
+            self.assertEqual(snapshot["provider"]["connection_capacity"], PROVIDER_MAX_CONNECTIONS)
+            self.assertEqual(snapshot["provider"]["connection_saturated_total"], 1)
+        finally:
+            for _ in held:
+                self.gateway._connection_slots.release()
 
     def test_proxy_limits_preserve_liveness_and_backend_timeout_margin(self):
         caddy = (
@@ -736,6 +781,47 @@ class HostedProviderHTTPTests(unittest.TestCase):
         self.assertEqual(summary["provider_attempt_record_count"], 1)
         self.assertEqual(summary["cancellation_outcome_unknown_count"], 1)
         self.assertEqual(summary["failover_link_record_count"], 0)
+
+    def test_cancellation_rehearsal_does_not_accept_an_already_completed_stream(self):
+        directory_setup(self.gateway.session_broker.directory, self.config)
+        _, pair = activate_member(
+            self.gateway.session_broker.store,
+            self.gateway.session_broker.directory,
+        )
+        response = _ProviderResponse(200)
+        response.headers["Content-Type"] = "text/event-stream"
+        response._body = (
+            b'event: response.completed\n'
+            b'data: {"type":"response.completed","response":{"model":"openai-primary-model",'
+            b'"usage":{"input_tokens":2,"output_tokens":1}}}\n\n'
+        )
+        with patch("hormuz.server.urllib.request.urlopen", return_value=response) as provider:
+            status, headers, body = self.request(
+                "POST",
+                "/v1/responses",
+                body={"model": "openai-primary", "input": "synthetic completed stream", "stream": True},
+                headers={
+                    "Authorization": "Bearer " + pair.access_token,
+                    "X-Hormuz-Cancellation-Rehearsal": self.settings[
+                        PROVIDER_FAILOVER_REHEARSAL_ENV
+                    ],
+                },
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["X-Hormuz-Cancellation-Rehearsal"], "v1")
+        self.assertIn(b"response.completed", body)
+        provider.assert_called_once()
+        self.assertTrue(response.closed)
+        summary_status, _, summary_body = self.request(
+            "GET",
+            "/v1/gateway/reliability",
+            headers={"Authorization": "Bearer " + pair.access_token},
+        )
+        self.assertEqual(summary_status, 200)
+        summary = json.loads(summary_body)
+        self.assertEqual(summary["live_provider_request_count"], 1)
+        self.assertEqual(summary["provider_attempt_record_count"], 1)
+        self.assertEqual(summary["cancellation_outcome_unknown_count"], 0)
 
     def test_unknown_route_and_oversized_body_stop_at_private_boundary(self):
         self.assertEqual(self.request("POST", "/v1/models", body={})[0], 503)

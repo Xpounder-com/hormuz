@@ -242,7 +242,7 @@ def main(argv=None) -> int:
             backend(
                 config,
                 provider=True,
-                environ={name: settings[name] for name in PROVIDER_SECRET_NAMES},
+                environ={name: settings[name] for name in PROVIDER_CHILD_ENV_NAMES},
             )
         elif args.command == "provider-check":
             check_initialized(config)

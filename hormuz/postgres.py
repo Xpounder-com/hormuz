@@ -328,7 +328,9 @@ def bootstrap_postgres_deployment(
                 unexpected_memberships = _postgres_role_memberships(
                     cursor, runtime_login
                 ) - {runtime_role}
-                if unexpected_memberships:
+                if unexpected_memberships or _postgres_role_member_grants(
+                    cursor, runtime_login
+                ):
                     raise PostgresStorageError(
                         "postgres_bootstrap_runtime_membership_unsafe"
                     )
@@ -353,6 +355,13 @@ def bootstrap_postgres_deployment(
                             "postgres_bootstrap_authorization_role_unsafe"
                         )
                     if _postgres_role_memberships(cursor, role):
+                        raise PostgresStorageError(
+                            "postgres_bootstrap_authorization_membership_unsafe"
+                        )
+                    expected_members = (
+                        {(runtime_login, False)} if role == runtime_role else set()
+                    )
+                    if _postgres_role_member_grants(cursor, role) - expected_members:
                         raise PostgresStorageError(
                             "postgres_bootstrap_authorization_membership_unsafe"
                         )
@@ -467,6 +476,22 @@ def _postgres_role_memberships(cursor: Any, role: str) -> set[str]:
     return {str(row[0]) for row in cursor.fetchall()}
 
 
+def _postgres_role_member_grants(cursor: Any, role: str) -> set[tuple[str, bool]]:
+    """Return principals that can assume a role and their admin option."""
+
+    cursor.execute(
+        """
+        SELECT member.rolname, membership.admin_option
+        FROM pg_auth_members AS membership
+        JOIN pg_roles AS granted ON granted.oid = membership.roleid
+        JOIN pg_roles AS member ON member.oid = membership.member
+        WHERE granted.rolname = %s
+        """,
+        (role,),
+    )
+    return {(str(row[0]), bool(row[1])) for row in cursor.fetchall()}
+
+
 def _verify_postgres_deployment_roles(
     cursor: Any,
     *,
@@ -481,7 +506,12 @@ def _verify_postgres_deployment_roles(
         raise PostgresStorageError("postgres_bootstrap_runtime_role_unsafe")
     if _postgres_role_memberships(cursor, runtime_login) != {runtime_role}:
         raise PostgresStorageError("postgres_bootstrap_runtime_membership_unsafe")
+    if _postgres_role_member_grants(cursor, runtime_login):
+        raise PostgresStorageError("postgres_bootstrap_runtime_membership_unsafe")
     for role in role_names:
+        expected_members = (
+            {(runtime_login, False)} if role == runtime_role else set()
+        )
         if _postgres_role_attributes(cursor, role) != (
             False,
             False,
@@ -490,7 +520,9 @@ def _verify_postgres_deployment_roles(
             False,
             False,
             False,
-        ) or _postgres_role_memberships(cursor, role):
+        ) or _postgres_role_memberships(cursor, role) or _postgres_role_member_grants(
+            cursor, role
+        ) != expected_members:
             raise PostgresStorageError(
                 "postgres_bootstrap_authorization_role_unsafe"
             )

@@ -27,6 +27,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: external-pilot-deployment-${{ github.ref }}
@@ -104,6 +105,7 @@ jobs:
           HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN: ${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}
           HORMUZ_FAILOVER_REHEARSAL_KEY: ${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}
           HORMUZ_RENDER_DEPLOY_HOOK_URL: ${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           umask 077

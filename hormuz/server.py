@@ -519,6 +519,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "provider_inflight": provider["inflight"],
                     "provider_peak_inflight": provider["peak_inflight"],
                     "provider_saturated_total": provider["saturated_total"],
+                    "connection_capacity": provider["connection_capacity"],
+                    "connection_saturated_total": provider[
+                        "connection_saturated_total"
+                    ],
                     "postgresql_pool_max_connections": pool["max_connections"],
                     "postgresql_pool_requests_waiting": pool["requests_waiting"],
                     "postgresql_pool_requests_queued_total": pool[
@@ -1081,7 +1085,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 parser.feed(chunk)
                 self._write_downstream_chunk(chunk)
                 downstream_bytes_sent += len(chunk)
-                if getattr(self, "_cancellation_rehearsal_requested", False):
+                if (
+                    getattr(self, "_cancellation_rehearsal_requested", False)
+                    and not parser.provider_completed
+                ):
                     downstream_ok = False
                     break
         except (BrokenPipeError, ConnectionResetError):

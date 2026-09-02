@@ -4,14 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 from pathlib import Path
 import re
 import ssl
+import stat
+import subprocess
 import sys
 import time
 from typing import Any
+import zipfile
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
@@ -24,7 +28,7 @@ COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
 SERVICE_ID_RE = re.compile(r"srv-[a-z0-9]{16,32}\Z")
 TOKEN_RE = re.compile(r"hox_[ar]_[A-Za-z0-9_-]{43,128}\Z")
 RUN_URL_RE = re.compile(
-    r"https://github\.com/Xpounder-com/hormuz/actions/runs/[1-9][0-9]{0,19}\Z"
+    r"https://github\.com/Xpounder-com/hormuz/actions/runs/([1-9][0-9]{0,19})\Z"
 )
 TIMING_RE = re.compile(r"hormuz_upstream_headers;dur=[0-9]+(?:\.[0-9]{3})?\Z")
 EXPECTED_CONTRACT = {
@@ -44,6 +48,21 @@ EXPECTED_CONTRACT = {
     "availability_sla_claimed": False,
     "max_inflight_streams": 8,
 }
+DEPLOYMENT_EVIDENCE_FIELDS = {
+    "schema_id",
+    "schema_version",
+    "evidence_kind",
+    *EXPECTED_CONTRACT,
+    "source_commit",
+    "workflow_run_url",
+    "gateway_origin",
+    "render_service_id",
+    "support_path_published",
+}
+EXTERNAL_PILOT_WORKFLOW = ".github/workflows/external-pilot-qualification.yml"
+MAX_GITHUB_METADATA_BYTES = 1024 * 1024
+MAX_GITHUB_ARTIFACT_BYTES = 2 * 1024 * 1024
+MIN_STREAM_COMPLETION_SEPARATION_SECONDS = 0.25
 RELIABILITY_FIELDS = {
     "schema_id",
     "schema_version",
@@ -60,6 +79,8 @@ RELIABILITY_FIELDS = {
     "provider_inflight",
     "provider_peak_inflight",
     "provider_saturated_total",
+    "connection_capacity",
+    "connection_saturated_total",
     "postgresql_pool_max_connections",
     "postgresql_pool_requests_waiting",
     "postgresql_pool_requests_queued_total",
@@ -116,6 +137,195 @@ def _read(response, maximum: int) -> bytes:
     if len(payload) > maximum:
         raise QualificationError("response_size_invalid")
     return payload
+
+
+def _github_api_bytes(endpoint: str, maximum: int) -> bytes:
+    """Read one authenticated GitHub API response without exposing CLI errors."""
+
+    try:
+        completed = subprocess.run(
+            [
+                "gh",
+                "api",
+                "--hostname",
+                "github.com",
+                "--method",
+                "GET",
+                endpoint,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise QualificationError("deployment_evidence_unavailable") from None
+    if completed.returncode != 0 or not 1 <= len(completed.stdout) <= maximum:
+        raise QualificationError("deployment_evidence_unavailable")
+    return completed.stdout
+
+
+def _github_api_json(endpoint: str) -> dict[str, Any]:
+    try:
+        value = json.loads(_github_api_bytes(endpoint, MAX_GITHUB_METADATA_BYTES))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise QualificationError("deployment_evidence_invalid") from None
+    if not isinstance(value, dict):
+        raise QualificationError("deployment_evidence_invalid")
+    return value
+
+
+def _deployment_evidence_from_artifact(payload: bytes) -> dict[str, Any]:
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload)) as package:
+            members = package.infolist()
+            if len(members) != 1:
+                raise QualificationError("deployment_evidence_artifact_invalid")
+            member = members[0]
+            file_type = (member.external_attr >> 16) & 0o170000
+            if (
+                member.filename != "external-pilot-deployment-evidence.json"
+                or member.is_dir()
+                or "/" in member.filename
+                or "\\" in member.filename
+                or file_type not in {0, stat.S_IFREG}
+                or member.flag_bits & 0x1
+                or not 1 <= member.file_size <= MAX_RESPONSE_BYTES
+            ):
+                raise QualificationError("deployment_evidence_artifact_invalid")
+            with package.open(member) as source:
+                evidence_payload = source.read(MAX_RESPONSE_BYTES + 1)
+            if len(evidence_payload) != member.file_size:
+                raise QualificationError("deployment_evidence_artifact_invalid")
+        evidence = json.loads(evidence_payload)
+    except QualificationError:
+        raise
+    except (
+        OSError,
+        RuntimeError,
+        EOFError,
+        KeyError,
+        ValueError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+    ):
+        raise QualificationError("deployment_evidence_artifact_invalid") from None
+    if not isinstance(evidence, dict):
+        raise QualificationError("deployment_evidence_artifact_invalid")
+    return evidence
+
+
+def _authenticate_deployment_evidence(
+    deployment_evidence_url: str,
+    *,
+    expected_commit: str,
+    service_id: str,
+    origin: str,
+) -> dict[str, Any]:
+    """Bind one successful protected deployment run and its exact JSON artifact."""
+
+    match = RUN_URL_RE.fullmatch(deployment_evidence_url)
+    if match is None:
+        raise QualificationError("deployment_evidence_url_invalid")
+    run_id = int(match.group(1))
+    run = _github_api_json(
+        f"repos/Xpounder-com/hormuz/actions/runs/{run_id}"
+    )
+    repository = run.get("repository")
+    run_number = run.get("run_number")
+    run_attempt = run.get("run_attempt")
+    if (
+        isinstance(run.get("id"), bool)
+        or run.get("id") != run_id
+        or run.get("html_url") != deployment_evidence_url
+        or run.get("head_sha") != expected_commit
+        or run.get("head_branch") != "main"
+        or run.get("event") != "workflow_dispatch"
+        or run.get("status") != "completed"
+        or run.get("conclusion") != "success"
+        or run.get("path") != EXTERNAL_PILOT_WORKFLOW
+        or not isinstance(repository, dict)
+        or repository.get("full_name") != "Xpounder-com/hormuz"
+        or isinstance(run_number, bool)
+        or not isinstance(run_number, int)
+        or not 1 <= run_number <= 999_999_999_999_999
+        or isinstance(run_attempt, bool)
+        or not isinstance(run_attempt, int)
+        or not 1 <= run_attempt < 1000
+    ):
+        raise QualificationError("deployment_evidence_run_not_trusted")
+
+    artifact_response = _github_api_json(
+        f"repos/Xpounder-com/hormuz/actions/runs/{run_id}/artifacts?per_page=100"
+    )
+    artifacts = artifact_response.get("artifacts")
+    total_count = artifact_response.get("total_count")
+    if (
+        isinstance(total_count, bool)
+        or not isinstance(total_count, int)
+        or not 0 <= total_count <= 100
+        or not isinstance(artifacts, list)
+        or len(artifacts) != total_count
+    ):
+        raise QualificationError("deployment_evidence_artifacts_invalid")
+    expected_name = (
+        f"hormuz-external-pilot-deployment-{run_number}-{run_attempt}"
+    )
+    matches = [
+        artifact
+        for artifact in artifacts
+        if isinstance(artifact, dict) and artifact.get("name") == expected_name
+    ]
+    if len(matches) != 1:
+        raise QualificationError("deployment_evidence_artifact_not_unique")
+    artifact = matches[0]
+    artifact_id = artifact.get("id")
+    artifact_size = artifact.get("size_in_bytes")
+    workflow_run = artifact.get("workflow_run")
+    if (
+        isinstance(artifact_id, bool)
+        or not isinstance(artifact_id, int)
+        or artifact_id < 1
+        or isinstance(artifact_size, bool)
+        or not isinstance(artifact_size, int)
+        or not 1 <= artifact_size <= MAX_GITHUB_ARTIFACT_BYTES
+        or artifact.get("expired") is not False
+        or artifact.get("url")
+        != f"https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/{artifact_id}"
+        or artifact.get("archive_download_url")
+        != f"https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/{artifact_id}/zip"
+        or not isinstance(workflow_run, dict)
+        or workflow_run.get("id") != run_id
+        or workflow_run.get("head_branch") != "main"
+        or workflow_run.get("head_sha") != expected_commit
+    ):
+        raise QualificationError("deployment_evidence_artifact_not_trusted")
+    artifact_payload = _github_api_bytes(
+        f"repos/Xpounder-com/hormuz/actions/artifacts/{artifact_id}/zip",
+        MAX_GITHUB_ARTIFACT_BYTES,
+    )
+    if len(artifact_payload) != artifact_size:
+        raise QualificationError("deployment_evidence_artifact_changed")
+    evidence = _deployment_evidence_from_artifact(artifact_payload)
+    expected = {
+        "schema_id": "hormuz.external-pilot-deployment-evidence",
+        "schema_version": 1,
+        "evidence_kind": "live_external_pilot",
+        **EXPECTED_CONTRACT,
+        "source_commit": expected_commit,
+        "workflow_run_url": deployment_evidence_url,
+        "gateway_origin": origin,
+        "render_service_id": service_id,
+        "support_path_published": True,
+    }
+    if set(evidence) != DEPLOYMENT_EVIDENCE_FIELDS or any(
+        evidence.get(name) != value for name, value in expected.items()
+    ):
+        raise QualificationError("deployment_evidence_binding_invalid")
+    return evidence
 
 
 def _open_gateway(
@@ -319,6 +529,7 @@ def _reliability(
         "provider_inflight",
         "provider_peak_inflight",
         "provider_saturated_total",
+        "connection_saturated_total",
         "postgresql_pool_requests_waiting",
         "postgresql_pool_requests_queued_total",
         "postgresql_pool_wait_milliseconds_total",
@@ -335,6 +546,7 @@ def _reliability(
         or value.get("provider_capacity") != 8
         or value.get("provider_inflight") != 0
         or value.get("provider_peak_inflight", 9) > 8
+        or value.get("connection_capacity") != 9
         or value.get("postgresql_pool_max_connections") != 4
         or value.get("postgresql_pool_requests_waiting", 9) > 8
         or not isinstance(deployment, dict)
@@ -348,19 +560,35 @@ def _reliability(
 
 
 def _provider_body(protocol: str, alias: str, *, stream: bool) -> tuple[str, dict[str, Any]]:
+    prompt = (
+        "Emit the integers 1 through 256 in order, separated by single spaces, and nothing else."
+        if stream
+        else "Return only the word PONG."
+    )
     if protocol == "openai":
         return "/v1/responses", {
             "model": alias,
-            "input": "Return only the word PONG.",
-            "max_output_tokens": 16,
+            "input": prompt,
+            "max_output_tokens": 1024 if stream else 16,
             "stream": stream,
         }
     return "/v1/messages", {
         "model": alias,
-        "messages": [{"role": "user", "content": "Return only the word PONG."}],
-        "max_tokens": 16,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 1024 if stream else 16,
         "stream": stream,
     }
+
+
+def _provider_stream_completed(protocol: str, payload: bytes) -> bool:
+    marker = b"response.completed" if protocol == "openai" else b"message_stop"
+    return bool(
+        re.search(rb"(?m)^event:[ \t]*" + re.escape(marker) + rb"[ \t]*\r?$", payload)
+        or re.search(
+            rb'"type"[ \t\r\n]*:[ \t\r\n]*"' + re.escape(marker) + rb'"',
+            payload,
+        )
+    )
 
 
 def _provider_request(
@@ -393,11 +621,40 @@ def _provider_request(
         ):
             raise QualificationError("provider_request_failed")
         if stream:
-            first = response.read(1)
-            remainder = _read(response, MAX_PROVIDER_RESPONSE_BYTES)
+            read_chunk = getattr(response, "read1", None)
+            if not callable(read_chunk):
+                read_chunk = response.read
+            first = read_chunk(min(16 * 1024, MAX_PROVIDER_RESPONSE_BYTES + 1))
             if not first:
                 raise QualificationError("provider_stream_empty")
-            return headers, True, bool(remainder)
+            first_observed_at = time.monotonic()
+            if len(first) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise QualificationError("response_size_invalid")
+            terminal_in_first_chunk = _provider_stream_completed(protocol, first)
+            terminal_observed_at = first_observed_at if terminal_in_first_chunk else None
+            payload = bytearray(first)
+            while len(payload) <= MAX_PROVIDER_RESPONSE_BYTES:
+                chunk = read_chunk(
+                    min(16 * 1024, MAX_PROVIDER_RESPONSE_BYTES + 1 - len(payload))
+                )
+                if not chunk:
+                    break
+                payload.extend(chunk)
+                if terminal_observed_at is None and _provider_stream_completed(
+                    protocol,
+                    bytes(payload[max(0, len(payload) - len(chunk) - 256) :]),
+                ):
+                    terminal_observed_at = time.monotonic()
+            if len(payload) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise QualificationError("response_size_invalid")
+            terminal_observed = _provider_stream_completed(protocol, bytes(payload))
+            first_chunk_before_completion = not terminal_in_first_chunk and (
+                not terminal_observed
+                or terminal_observed_at is not None
+                and terminal_observed_at - first_observed_at
+                >= MIN_STREAM_COMPLETION_SEPARATION_SECONDS
+            )
+            return headers, first_chunk_before_completion, terminal_observed
         payload = _read(response, MAX_PROVIDER_RESPONSE_BYTES)
         if not payload:
             raise QualificationError("provider_response_empty")
@@ -436,6 +693,13 @@ def qualify(
     ):
         raise QualificationError("qualification_input_invalid")
 
+    _authenticate_deployment_evidence(
+        deployment_evidence_url,
+        expected_commit=expected_commit,
+        service_id=service_id,
+        origin=origin,
+    )
+
     _restart_and_wait(
         origin,
         expected_commit=expected_commit,
@@ -466,7 +730,7 @@ def qualify(
                     stream=False,
                 )
                 request_count += 1
-                _, first, remainder = _provider_request(
+                _, first_before_completion, terminal_observed = _provider_request(
                     origin,
                     access_token,
                     protocol=protocol,
@@ -474,7 +738,11 @@ def qualify(
                     stream=True,
                 )
                 request_count += 1
-                first_chunk_before_completion = first_chunk_before_completion and first and remainder
+                first_chunk_before_completion = (
+                    first_chunk_before_completion
+                    and first_before_completion
+                    and terminal_observed
+                )
 
         before_cancellation = _reliability(
             origin,
@@ -482,7 +750,7 @@ def qualify(
             expected_commit=expected_commit,
             service_id=service_id,
         )
-        cancellation_headers, first, _ = _provider_request(
+        cancellation_headers, first_before_completion, terminal_observed = _provider_request(
             origin,
             access_token,
             protocol="openai",
@@ -505,7 +773,8 @@ def qualify(
         )
         if (
             cancellation_headers.get("x-hormuz-cancellation-rehearsal") != "v1"
-            or not first
+            or not first_before_completion
+            or terminal_observed
             or _delta(
                 after_cancellation,
                 before_cancellation,
@@ -601,9 +870,10 @@ def qualify(
         primary_error = error
         raise
     finally:
-        if rotated_refresh:
+        cleanup_refresh = rotated_refresh or refresh_token
+        if cleanup_refresh:
             try:
-                _logout(origin, rotated_refresh)
+                _logout(origin, cleanup_refresh)
             except Exception:
                 if primary_error is None:
                     raise

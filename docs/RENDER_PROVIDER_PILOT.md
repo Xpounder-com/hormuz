@@ -179,10 +179,11 @@ reviewed `main` commit, and keep auto-deploy disabled. Then run the protected
    PostgreSQL readiness, the published support path, and denial of
    unauthenticated inference. Retain its exact artifact and run URL.
 2. `qualification` binds a deploy hook to that service and commit, restarts the
-   instance, proves the encrypted session survived, runs non-streaming and
-   streaming requests through all four aliases, exercises cancellation and
-   one-hop failover, verifies latency and pressure counters, revokes the
-   qualification session, and emits content-free evidence.
+   instance, authenticates the successful deployment run and its exact artifact,
+   proves the encrypted session survived, runs non-streaming and streaming
+   requests through all four aliases, exercises cancellation and one-hop
+   failover, verifies latency and pressure counters, revokes the qualification
+   session, and emits content-free evidence.
 
 The qualification environment must require review and contain only
 `HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN`, `HORMUZ_FAILOVER_REHEARSAL_KEY`, and

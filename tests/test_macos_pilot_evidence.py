@@ -1053,6 +1053,8 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "profile": gateway["profile"],
             "source_commit": gateway["source_commit"],
             "workflow_run_url": gateway["deployment_evidence_url"],
+            "gateway_origin": "https://hormuz-test.onrender.com",
+            "render_service_id": "srv-" + "a" * 20,
             "identity_provider": gateway["identity_provider"],
             "provider_protocols": gateway["provider_protocols"],
             "https": gateway["https"],

@@ -36,6 +36,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
         suffix = uuid4().hex[:12]
         schema = f"hormuz_bootstrap_{suffix}"
         runtime_login = f"hormuz_login_{suffix}"
+        unexpected_member = f"hormuz_old_login_{suffix}"
         runtime_role = f"hormuz_runtime_b_{suffix}"
         policy_role = f"hormuz_policy_b_{suffix}"
         custody_role = f"hormuz_custody_b_{suffix}"
@@ -120,12 +121,101 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 runtime_role=runtime_role,
             )
             self.assertTrue(status.complete)
+
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("GRANT {} TO {} WITH ADMIN OPTION").format(
+                            self.sql.Identifier(runtime_role),
+                            self.sql.Identifier(runtime_login),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_authorization_membership_unsafe",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("REVOKE ADMIN OPTION FOR {} FROM {}").format(
+                            self.sql.Identifier(runtime_role),
+                            self.sql.Identifier(runtime_login),
+                        )
+                    )
+
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("CREATE ROLE {} NOLOGIN").format(
+                            self.sql.Identifier(unexpected_member)
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("GRANT {} TO {}").format(
+                            self.sql.Identifier(runtime_role),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_authorization_membership_unsafe",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("REVOKE {} FROM {}").format(
+                            self.sql.Identifier(runtime_role),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("GRANT {} TO {}").format(
+                            self.sql.Identifier(runtime_login),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_runtime_membership_unsafe",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
         finally:
             with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         self.sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
                             self.sql.Identifier(schema)
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("DROP ROLE IF EXISTS {}").format(
+                            self.sql.Identifier(unexpected_member)
                         )
                     )
                     cursor.execute(

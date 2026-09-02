@@ -101,6 +101,7 @@ class ProviderPilotGatewayServer(GatewayServer):
         self._provider_peak_inflight = 0
         self._provider_admitted_total = 0
         self._provider_saturated_total = 0
+        self._connection_saturated_total = 0
         self.connection_lifetime = min(
             config.upstream_timeout_seconds + PROVIDER_CONNECTION_LIFETIME_MARGIN,
             630,
@@ -139,6 +140,8 @@ class ProviderPilotGatewayServer(GatewayServer):
                 "peak_inflight": self._provider_peak_inflight,
                 "admitted_total": self._provider_admitted_total,
                 "saturated_total": self._provider_saturated_total,
+                "connection_capacity": PROVIDER_MAX_CONNECTIONS,
+                "connection_saturated_total": self._connection_saturated_total,
             }
         if self.postgres_pool is None:
             postgres: dict[str, object] = {
@@ -210,6 +213,8 @@ class ProviderPilotGatewayServer(GatewayServer):
 
     def process_request(self, request, client_address):
         if not self._connection_slots.acquire(blocking=False):
+            with self._provider_metrics_lock:
+                self._connection_saturated_total += 1
             self.shutdown_request(request)
             return
         try:

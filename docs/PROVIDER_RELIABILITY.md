@@ -114,7 +114,9 @@ depend on waiting for a real provider incident:
   normal failover reason and rehearsal version.
 - `X-Hormuz-Cancellation-Rehearsal` makes one real streaming request, relays its
   first available chunk, closes the upstream response, records the attempt as
-  outcome-unknown, and makes no alternate call.
+  outcome-unknown, and makes no alternate call. If that first read already
+  contains the provider's terminal event, the response is treated as completed
+  and cannot count as cancellation evidence.
 
 Each header must contain the exact high-entropy
 `HORMUZ_FAILOVER_REHEARSAL_KEY`. Supplying both headers, repeating one, or using
@@ -146,7 +148,9 @@ The main pressure points are deliberate and visible:
 
 There is no hidden retry storm: the hop count is fixed at one, the accept queue
 is bounded, reservations remain conservative, and ambiguous provider work is
-never replayed. Capacity planning still needs live traffic, a paid runtime,
+never replayed. Provider-slot and connection-slot rejections have separate
+content-free counters, so slow headers or non-inference connections cannot hide
+worker pressure. Capacity planning still needs live traffic, a paid runtime,
 provider quotas, and customer-specific latency targets. The stored observations
 are the inputs for that later qualification; they do not establish it by
 themselves.
@@ -161,7 +165,11 @@ tests prove exact PostgreSQL schema v14, SQLite schema v10 rollback/retry,
 append-only evidence, and tenant-bound links. The Render qualification tool
 also checks actor-scoped counters, the eight-stream admission limit, the
 four-connection PostgreSQL pool, the exact service and source commit, restart
-survival, and qualification-session revocation.
+survival, and qualification-session revocation. It accepts deployment evidence
+only after authenticating the successful exact-main GitHub run and downloading
+the uniquely named artifact that binds the same Render origin and service. A
+normal streaming observation counts only when its first socket read excludes a
+provider terminal event and a later read contains that terminal event.
 
 Successful protected live runs, Render resource measurements under sustained
 load, alerts, availability targets, and customer pilot results remain separate

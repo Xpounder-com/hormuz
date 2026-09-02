@@ -187,6 +187,8 @@ def build_evidence(
         **EXPECTED_CONTRACT,
         "source_commit": expected_commit,
         "workflow_run_url": workflow_run_url,
+        "gateway_origin": origin,
+        "render_service_id": expected_service_id,
         "support_path_published": True,
     }
 
