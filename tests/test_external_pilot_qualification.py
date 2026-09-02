@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import io
 import json
 from pathlib import Path
@@ -220,6 +221,43 @@ class ExternalPilotQualificationTests(unittest.TestCase):
                 (first_before_completion, terminal_observed),
                 expected,
             )
+
+    def test_provider_transport_failure_is_content_free(self) -> None:
+        class Response:
+            status = 200
+            headers = {
+                "X-Hormuz-Requested-Model": "openai-primary",
+                "X-Hormuz-Routed-Model": "gpt-test",
+                "Server-Timing": "hormuz_upstream_headers;dur=1.000",
+            }
+
+            def __init__(self):
+                self.closed = False
+
+            def read1(self, _size):
+                raise http.client.IncompleteRead(b"sensitive-partial-response", 1)
+
+            def close(self):
+                self.closed = True
+
+        response = Response()
+        with (
+            patch(
+                "tools.qualify_external_pilot._open_gateway",
+                return_value=response,
+            ),
+            self.assertRaisesRegex(
+                QualificationError, "^provider_response_invalid$"
+            ),
+        ):
+            _provider_request(
+                ORIGIN,
+                ACCESS,
+                protocol="openai",
+                alias="openai-primary",
+                stream=True,
+            )
+        self.assertTrue(response.closed)
 
     def test_reliability_summary_proves_bounded_worker_and_pool_monitoring(self) -> None:
         value = _counters(live=1, attempts=1, first=1, failovers=0)

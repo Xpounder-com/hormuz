@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import io
 import json
 import os
@@ -16,6 +17,7 @@ import sys
 import time
 from typing import Any
 import zipfile
+import zlib
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
@@ -211,6 +213,7 @@ def _deployment_evidence_from_artifact(payload: bytes) -> dict[str, Any]:
         json.JSONDecodeError,
         zipfile.BadZipFile,
         zipfile.LargeZipFile,
+        zlib.error,
     ):
         raise QualificationError("deployment_evidence_artifact_invalid") from None
     if not isinstance(evidence, dict):
@@ -659,8 +662,15 @@ def _provider_request(
         if not payload:
             raise QualificationError("provider_response_empty")
         return headers, False, False
+    except QualificationError:
+        raise
+    except (http.client.HTTPException, TimeoutError, OSError):
+        raise QualificationError("provider_response_invalid") from None
     finally:
-        response.close()
+        try:
+            response.close()
+        except (http.client.HTTPException, OSError):
+            pass
 
 
 def _delta(after: dict[str, Any], before: dict[str, Any], name: str) -> int:

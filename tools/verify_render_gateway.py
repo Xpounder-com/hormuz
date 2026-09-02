@@ -333,13 +333,31 @@ def verify(image: str) -> dict:
             time.sleep(0.5)
         else:
             raise RuntimeError("staging_postgres_startup_timeout")
-        docker(
-            "exec", database, "psql", "-v", "ON_ERROR_STOP=1",
-            "-U", "postgres", "-d", "hormuz", "-c",
-            "CREATE ROLE hormuz_managed_runtime LOGIN PASSWORD "
-            "'synthetic-runtime-password' NOSUPERUSER NOCREATEDB "
-            "NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS",
+        # The official image briefly accepts connections on its temporary
+        # initialization postmaster before restarting the final postmaster.
+        # A health transition can therefore race this first command. Make the
+        # synthetic setup idempotent and retry only inside the bounded startup
+        # window.
+        role_sql = (
+            "DO $hormuz$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles "
+            "WHERE rolname = 'hormuz_managed_runtime') THEN CREATE ROLE "
+            "hormuz_managed_runtime LOGIN PASSWORD 'synthetic-runtime-password' "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION "
+            "NOBYPASSRLS; END IF; END $hormuz$"
         )
+        role_deadline = time.monotonic() + 35
+        while True:
+            try:
+                docker(
+                    "exec", database, "psql", "-v", "ON_ERROR_STOP=1",
+                    "-U", "postgres", "-d", "hormuz", "-c", role_sql,
+                    failure_context="postgres_runtime_fixture",
+                )
+                break
+            except RuntimeError:
+                if time.monotonic() >= role_deadline:
+                    raise
+                time.sleep(0.5)
         installed_sources = json.loads(docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image,
                                               "-I", "-", input_text=IMAGE_SOURCES))
         passed("installed_sources_match_checkout", all(hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest
