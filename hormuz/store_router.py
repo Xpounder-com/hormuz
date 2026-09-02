@@ -321,8 +321,14 @@ def create_usage_store(
     environ: Mapping[str, str] | None = None,
     connection_pool: PostgresConnectionPool | None = None,
     read_only: bool = False,
+    organization_ids: tuple[str, ...] | None = None,
 ) -> UsageRepository:
-    """Return the configured store, never placing a PostgreSQL DSN in config."""
+    """Return the configured store, never placing a PostgreSQL DSN in config.
+
+    ``organization_ids`` lets an authenticated server-local directory provide
+    the PostgreSQL tenant allowlist when identities are enrolled dynamically.
+    Omitting it preserves the immutable configuration-owned allowlist.
+    """
 
     storage = config.usage_storage
     audit_chain_maximum_anchor_age_seconds = (
@@ -343,7 +349,9 @@ def create_usage_store(
         raise PostgresStorageError("postgres_dsn_unavailable")
     return PostgresUsageStore(
         dsn,
-        organization_ids=config.organization_ids,
+        organization_ids=(
+            config.organization_ids if organization_ids is None else organization_ids
+        ),
         schema=storage.postgres_schema,
         runtime_role=storage.postgres_runtime_role,
         connection_pool=connection_pool,
@@ -358,6 +366,7 @@ def create_repository_bundle(
     environ: Mapping[str, str] | None = None,
     connection_pool: PostgresConnectionPool | None = None,
     read_only: bool = False,
+    usage_organization_ids: tuple[str, ...] | None = None,
 ) -> RepositoryBundle[RepositoryT]:
     """Compose an explicitly supplied owner beside the unchanged v1 usage ledger.
 
@@ -370,9 +379,21 @@ def create_repository_bundle(
     The legacy create_usage_store path does not call this composition helper.
     """
 
-    usage = create_usage_store(
-        config, environ=environ, connection_pool=connection_pool, read_only=read_only,
-    )
+    if usage_organization_ids is None:
+        usage = create_usage_store(
+            config,
+            environ=environ,
+            connection_pool=connection_pool,
+            read_only=read_only,
+        )
+    else:
+        usage = create_usage_store(
+            config,
+            environ=environ,
+            connection_pool=connection_pool,
+            read_only=read_only,
+            organization_ids=usage_organization_ids,
+        )
     portfolio = portfolio_factory(
         config, environ=environ, connection_pool=connection_pool, read_only=read_only,
     )

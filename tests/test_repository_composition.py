@@ -120,10 +120,15 @@ class RepositoryCompositionTests(unittest.TestCase):
         factory = mock.Mock(return_value=object())
         with mock.patch.object(router, "PostgresUsageStore") as adapter:
             bundle = router.create_repository_bundle(
-                config, portfolio_factory=factory, environ=environ, connection_pool=pool, read_only=True,
+                config,
+                portfolio_factory=factory,
+                environ=environ,
+                connection_pool=pool,
+                read_only=True,
+                usage_organization_ids=("directory-tenant",),
             )
             adapter.assert_called_once_with(
-                environ[storage.postgres_dsn_env], organization_ids=config.organization_ids,
+                environ[storage.postgres_dsn_env], organization_ids=("directory-tenant",),
                 schema=storage.postgres_schema, runtime_role=storage.postgres_runtime_role,
                 connection_pool=pool, audit_chain_maximum_anchor_age_seconds=None,
             )

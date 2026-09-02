@@ -28,7 +28,32 @@ SECRETS = {
 PROVIDER_SECRETS = {
     "HORMUZ_OPENAI_PROVIDER_KEY": "synthetic-openai-provider-key",
     "HORMUZ_ANTHROPIC_PROVIDER_KEY": "synthetic-anthropic-provider-key",
+    "HORMUZ_POSTGRES_DSN": (
+        "postgresql://hormuz_managed_runtime:synthetic-runtime-password"
+        "@database:5432/hormuz"
+    ),
+    "HORMUZ_FAILOVER_REHEARSAL_KEY": "r" * 43,
 }
+PROVIDER_METADATA_NAMES = {
+    "RENDER",
+    "RENDER_CPU_COUNT",
+    "RENDER_EXTERNAL_HOSTNAME",
+    "RENDER_EXTERNAL_URL",
+    "RENDER_GIT_BRANCH",
+    "RENDER_GIT_COMMIT",
+    "RENDER_GIT_REPO_SLUG",
+    "RENDER_INSTANCE_ID",
+    "RENDER_SERVICE_ID",
+    "RENDER_SERVICE_TYPE",
+    "RENDER_WEB_CONCURRENCY",
+}
+POSTGRES_MIGRATION_DSN = (
+    "postgresql://postgres:synthetic-owner-password@database:5432/hormuz"
+)
+POSTGRES_IMAGE = (
+    "postgres@sha256:"
+    "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+)
 PYTHON = "/opt/hormuz/bin/python"
 SETUP = '''
 import base64, json
@@ -62,6 +87,12 @@ provider.write_text(json.dumps({
     'ingress': {'mode': 'external_tls_proxy', 'trusted_proxy_cidrs': ['127.0.0.1/32'],
         'credential_env': 'HORMUZ_INGRESS_CREDENTIAL'},
     'database': str(root / 'state' / 'usage.sqlite3'),
+    'usage_storage': {'backend': 'postgresql', 'postgres_dsn_env': 'HORMUZ_POSTGRES_DSN',
+        'postgres_migration_dsn_env': 'HORMUZ_POSTGRES_MIGRATION_DSN',
+        'postgres_schema': 'hormuz', 'postgres_runtime_role': 'hormuz_runtime',
+        'postgres_pool': {'min_connections': 1, 'max_connections': 4,
+            'acquire_timeout_seconds': 5, 'max_waiting': 8,
+            'max_lifetime_seconds': 1800, 'max_idle_seconds': 300}},
     'max_request_bytes': 2097152, 'upstream_timeout_seconds': 60,
     'upstreams': {
         'openai': {'base_url': 'https://api.openai.com', 'api_key_env': 'HORMUZ_OPENAI_PROVIDER_KEY',
@@ -144,7 +175,11 @@ def docker(*arguments, input_text=None, timeout=45, expected=0):
 def verify(image: str) -> dict:
     prefix = "hormuz-staging-check-" + uuid.uuid4().hex[:12]
     volume = prefix + "-state"
+    network = prefix + "-network"
+    database = prefix + "-database"
     containers = []
+    volume_created = False
+    network_created = False
     checks = []
     environment = ["--env", "HORMUZ_CONFIG=/var/lib/hormuz/profile.json",
                    "--env", "HORMUZ_PROVIDER_CONFIG=/var/lib/hormuz/provider.json"]
@@ -154,7 +189,8 @@ def verify(image: str) -> dict:
     # Match the paid pilot's compute ceiling. Provider hostnames resolve only to
     # container loopback so a regression cannot turn this provider-free proof
     # into an external request.
-    common = ["--platform", "linux/amd64", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+    common = ["--platform", "linux/amd64", "--network", network,
+              "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
               "--cpus", "0.5", "--memory", "512m", "--pids-limit", "128",
               "--add-host", "api.openai.com:127.0.0.1",
               "--add-host", "api.anthropic.com:127.0.0.1",
@@ -176,8 +212,16 @@ def verify(image: str) -> dict:
     def execute(name, *command, input_text=None, expected=0):
         return docker("exec", "-i", name, *command, input_text=input_text, expected=expected)
 
-    def operator(*command, expected=0):
-        return docker("run", "--rm", *common, image, *command, expected=expected)
+    def operator(*command, expected=0, migration=False):
+        operator_environment = (
+            ["--env", "HORMUZ_POSTGRES_MIGRATION_DSN=" + POSTGRES_MIGRATION_DSN]
+            if migration
+            else []
+        )
+        return docker(
+            "run", "--rm", *common, *operator_environment,
+            image, *command, expected=expected,
+        )
 
     def port(name):
         return int(docker("port", name, "10000/tcp").rsplit(":", 1)[1])
@@ -216,8 +260,38 @@ def verify(image: str) -> dict:
         passed("clean_shutdown_" + name.rsplit("-", 1)[1],
                time.monotonic() - started < 25 and docker("inspect", "--format", "{{.State.ExitCode}}", name) == "0")
 
-    docker("volume", "create", volume)
     try:
+        docker("volume", "create", volume)
+        volume_created = True
+        docker("network", "create", network)
+        network_created = True
+        containers.append(database)
+        docker(
+            "run", "--detach", "--name", database,
+            "--network", network, "--network-alias", "database",
+            "--env", "POSTGRES_DB=hormuz",
+            "--env", "POSTGRES_PASSWORD=synthetic-owner-password",
+            "--health-cmd", "pg_isready -U postgres -d hormuz",
+            "--health-interval", "1s", "--health-timeout", "5s",
+            "--health-retries", "30", POSTGRES_IMAGE,
+            timeout=120,
+        )
+        deadline = time.monotonic() + 35
+        while time.monotonic() < deadline:
+            if docker(
+                "inspect", "--format", "{{.State.Health.Status}}", database
+            ) == "healthy":
+                break
+            time.sleep(0.5)
+        else:
+            raise RuntimeError("staging_postgres_startup_timeout")
+        docker(
+            "exec", database, "psql", "-v", "ON_ERROR_STOP=1",
+            "-U", "postgres", "-d", "hormuz", "-c",
+            "CREATE ROLE hormuz_managed_runtime LOGIN PASSWORD "
+            "'synthetic-runtime-password' NOSUPERUSER NOCREATEDB "
+            "NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS",
+        )
         installed_sources = json.loads(docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image,
                                               "-I", "-", input_text=IMAGE_SOURCES))
         passed("installed_sources_match_checkout", all(hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest
@@ -269,7 +343,18 @@ def verify(image: str) -> dict:
         for path in ("/v1/responses", "/v1/messages", "/v1/models", "/v1/portfolio/projects"):
             status, headers, body = request(active, "POST", path, body=CANARY.encode())
             passed("inference_closed_" + path, status == 503 and b'"inference_enabled":false' in body and CANARY.encode() not in body and "Server" not in headers)
-        passed("large_body_rejected", request(active, "POST", "/v1/auth/enrollments", body=b"x" * 16385)[0] == 413)
+        # Caddy's 16KB unit is exactly 16,000 bytes. Stay below the private
+        # parser's 16 KiB limit so this proves the public proxy rejects first,
+        # without a backend-close race being translated into a 502.
+        oversized_status = request(
+            active, "POST", "/v1/auth/enrollments", body=b"x" * 16001
+        )[0]
+        if oversized_status != 413:
+            raise RuntimeError(
+                "staging_check_failed:large_body_rejected:"
+                + str(oversized_status)
+            )
+        passed("large_body_rejected")
         denied = execute(active, PYTHON, "-I", "-m", "hormuz.hosted", "snapshot", "--output-directory", "/var/lib/hormuz/blocked", expected=1)
         passed("online_snapshot_refused", json.loads(denied)["code"] == "hosted_state_in_use")
         # No backend port is published, and every direct hop still needs its secret.
@@ -286,20 +371,35 @@ def verify(image: str) -> dict:
         organizations = json.loads(execute(active, PYTHON, "-I", "-m", "hormuz.hosted", "team", "organization", "list"))
         passed("restart_preserves_operator_directory", "staging-fixture" in json.dumps(organizations))
         stop(active)
+        bootstrap = json.loads(operator(
+            "--provider-config", "/var/lib/hormuz/provider.json",
+            "provider-bootstrap-postgres",
+            migration=True,
+        ))
+        passed(
+            "provider_postgres_bootstrap_is_least_privilege",
+            bootstrap.get("postgresql_schema_complete") is True
+            and bootstrap.get("postgresql_restricted_roles") == 4
+            and bootstrap.get("postgresql_runtime_login_restricted") is True
+            and bootstrap.get("postgresql_runtime_membership_verified") is True,
+        )
         provider_check = json.loads(operator(
             "--provider-config", "/var/lib/hormuz/provider.json", "provider-check",
         ))
         passed("provider_profile_preflight_is_content_free_and_closed",
                provider_check.get("provider_configuration_valid") is True
+               and provider_check.get("postgresql_runtime_verified") is True
+               and provider_check.get("postgresql_pool_max_connections") == 4
                and provider_check.get("inference_enabled") is False)
         provider_pilot = start("provider", "provider-pilot")
         await_health(provider_pilot, "provider_pilot")
         boundary = json.loads(execute(provider_pilot, PYTHON, "-I", "-", input_text=PROCESS_BOUNDARY))
         passed("provider_proxy_has_only_ingress_secret",
                set(boundary["caddy_names"]) == {"PORT", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HORMUZ_INGRESS_CREDENTIAL"})
-        passed("provider_backend_has_only_owned_secrets",
+        passed("provider_backend_has_only_owned_secrets_and_metadata",
                boundary["backend_present"]
-               and set(boundary["backend_names"]) - {"LC_CTYPE"} == set(SECRETS) | set(PROVIDER_SECRETS))
+               and set(boundary["backend_names"]) - {"LC_CTYPE"}
+               == set(SECRETS) | set(PROVIDER_SECRETS) | PROVIDER_METADATA_NAMES)
         status, headers, body = request(
             provider_pilot, "POST", "/v1/responses",
             body=b'{"model":"openai-primary","input":"synthetic-no-egress"}',
@@ -345,7 +445,13 @@ def verify(image: str) -> dict:
         for name in containers:
             logs = docker("logs", name)
             passed("no_canary_or_secret_in_logs_" + name.rsplit("-", 1)[1], all(
-                value not in logs for value in (CANARY, *SECRETS.values(), *PROVIDER_SECRETS.values())
+                value not in logs for value in (
+                    CANARY,
+                    *SECRETS.values(),
+                    *PROVIDER_SECRETS.values(),
+                    POSTGRES_MIGRATION_DSN,
+                    "synthetic-owner-password",
+                )
             ))
         return {"schema_id": "hormuz.hosted-staging-verification", "schema_version": 1,
                 "passed": True, "image_id": docker("image", "inspect", "--format", "{{.Id}}", image),
@@ -355,7 +461,10 @@ def verify(image: str) -> dict:
     finally:
         for name in reversed(containers):
             subprocess.run(["docker", "rm", "--force", name], capture_output=True, timeout=30)
-        subprocess.run(["docker", "volume", "rm", volume], capture_output=True, timeout=30)
+        if network_created:
+            subprocess.run(["docker", "network", "rm", network], capture_output=True, timeout=30)
+        if volume_created:
+            subprocess.run(["docker", "volume", "rm", volume], capture_output=True, timeout=30)
 
 
 def main():

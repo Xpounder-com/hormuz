@@ -245,14 +245,35 @@ def main(argv=None) -> int:
             )
         elif args.command == "provider-check":
             check_initialized(config)
+            from .onboarding import TeamDirectory
+            from .session_store import SQLiteSessionStore
             from .store_router import create_postgres_runtime_pool, create_usage_store
 
+            session_settings = config.session_broker
+            if session_settings.database_path is None:
+                raise HostedError("hosted_provider_session_store_unavailable")
+            session_store = SQLiteSessionStore(
+                session_settings.database_path,
+                master_key=session_settings.master_key,
+                audience=session_settings.public_base_url,
+                access_ttl_seconds=session_settings.access_ttl_seconds,
+                absolute_ttl_seconds=session_settings.absolute_ttl_seconds,
+                enrollment_ttl_seconds=session_settings.enrollment_ttl_seconds,
+            )
+            organization_ids = tuple(sorted(
+                set(config.organization_ids).union(
+                    TeamDirectory(config, session_store).managed_organization_ids()
+                )
+            ))
+            if not organization_ids:
+                raise HostedError("hosted_provider_organization_required")
             pool = create_postgres_runtime_pool(config, environ=settings)
             try:
                 store = create_usage_store(
                     config,
                     environ=settings,
                     connection_pool=pool,
+                    organization_ids=organization_ids,
                 )
                 store.verify_ready()
             finally:

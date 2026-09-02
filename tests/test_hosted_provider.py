@@ -24,6 +24,8 @@ from hormuz._hosted_server import (
 from hormuz._hosted_state import initialize
 from hormuz.config import UsageStorageConfig
 from hormuz.hosted import main
+from hormuz.onboarding import TeamDirectory
+from hormuz.session_store import SQLiteSessionStore
 from tests._console_fixtures import activate_member
 from tests._hosted_fixtures import console_credential, directory_setup, provider_profile
 
@@ -236,6 +238,21 @@ class HostedProviderConfigTests(unittest.TestCase):
 
     def test_provider_check_validates_state_without_enabling_inference(self):
         initialize(self.staging)
+        session_settings = self.config.session_broker
+        assert session_settings.database_path is not None
+        session_store = SQLiteSessionStore(
+            session_settings.database_path,
+            master_key=session_settings.master_key,
+            audience=session_settings.public_base_url,
+            access_ttl_seconds=session_settings.access_ttl_seconds,
+            absolute_ttl_seconds=session_settings.absolute_ttl_seconds,
+            enrollment_ttl_seconds=session_settings.enrollment_ttl_seconds,
+        )
+        TeamDirectory(self.config, session_store).create_organization(
+            organization_id="customer-a",
+            name="Customer A",
+            issuer=next(iter(self.config.oidc_issuers)),
+        )
         output, error = io.StringIO(), io.StringIO()
         pool = Mock()
         store = Mock()
@@ -277,9 +294,33 @@ class HostedProviderConfigTests(unittest.TestCase):
             self.config,
             environ=runtime_settings,
             connection_pool=pool,
+            organization_ids=("customer-a",),
         )
         store.verify_ready.assert_called_once_with()
         pool.close.assert_called_once_with()
+
+    def test_provider_check_refuses_an_empty_managed_tenant_allowlist(self):
+        initialize(self.staging)
+        output, error = io.StringIO(), io.StringIO()
+        with (
+            patch.dict(os.environ, self.settings, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            patch("hormuz.store_router.create_postgres_runtime_pool") as create_pool,
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.staging.source_path),
+                "--provider-config", str(self.path),
+                "provider-check",
+            ])
+        self.assertEqual(status, 1)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(
+            json.loads(error.getvalue())["code"],
+            "hosted_provider_organization_required",
+        )
+        create_pool.assert_not_called()
 
     def test_provider_migration_is_explicit_maintenance_only_and_uses_operator_dsn(self):
         migrated = SimpleNamespace(version=14, complete=True)

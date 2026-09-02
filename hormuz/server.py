@@ -200,13 +200,31 @@ class GatewayServer(ThreadingHTTPServer):
                     absolute_ttl_seconds=settings.absolute_ttl_seconds,
                     enrollment_ttl_seconds=settings.enrollment_ttl_seconds,
                 ))
+            storage_organizations: tuple[str, ...] | None = None
+            if (
+                self.session_broker is not None
+                and config.session_broker.onboarding_enabled
+            ):
+                usage_organization_ids = set(config.organization_ids)
+                usage_organization_ids.update(
+                    self.session_broker.directory.managed_organization_ids()
+                )
+                storage_organizations = tuple(sorted(usage_organization_ids))
             self.store: UsageRepository
             if config.portfolio_control is None:
-                self.store = create_usage_store(
-                    config,
-                    environ=environ,
-                    connection_pool=self.postgres_pool,
-                )
+                if storage_organizations is None:
+                    self.store = create_usage_store(
+                        config,
+                        environ=environ,
+                        connection_pool=self.postgres_pool,
+                    )
+                else:
+                    self.store = create_usage_store(
+                        config,
+                        environ=environ,
+                        connection_pool=self.postgres_pool,
+                        organization_ids=storage_organizations,
+                    )
                 portfolio = create_portfolio_repository(config, connection_pool=self.postgres_pool, environ=environ)
             else:
                 repositories = create_repository_bundle(
@@ -214,6 +232,7 @@ class GatewayServer(ThreadingHTTPServer):
                     portfolio_factory=create_portfolio_repository,
                     environ=environ,
                     connection_pool=self.postgres_pool,
+                    usage_organization_ids=storage_organizations,
                 )
                 self.store, portfolio = repositories.usage, repositories.portfolio
             if self.session_broker is not None and config.session_broker.console_enabled:

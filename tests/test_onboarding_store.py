@@ -46,6 +46,17 @@ class OnboardingStoreTests(unittest.TestCase):
         args.update(changes)
         return self.directory.invite(**args)
 
+    def test_managed_organization_ids_are_complete_and_stably_ordered(self):
+        self.directory.create_organization(
+            organization_id="another-customer",
+            name="Another Customer",
+            issuer=self.issuer,
+        )
+        self.assertEqual(
+            self.directory.managed_organization_ids(),
+            ("another-customer", "customer-a"),
+        )
+
     def enrollment(self, invitation=None, *, organization="customer-a", client="codex"):
         secret = secrets.token_urlsafe(32)
         enrollment = self.store.create_enrollment(issuer=self.issuer, client_name=client, enrollment_secret=secret, organization_id=organization)

@@ -47,7 +47,7 @@ Local verification additionally enforces a read-only root filesystem, no Linux
 capabilities, no new privileges, 512 MiB memory and a 128-task limit. These local
 Docker flags are not a claim about Render's platform-level container settings.
 
-Headers and bodies are limited to 16 KiB at the proxy; header/body reads have
+Headers and bodies are limited to 16,000 bytes at the proxy; header/body reads have
 five-second limits. The backend admits at most 32 connections and rejects
 ambiguous framing. Each connection closes after one request, with five-second
 socket waits and a 30-second maximum connection lifetime. IdP network operations

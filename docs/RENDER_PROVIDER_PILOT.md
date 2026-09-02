@@ -19,7 +19,8 @@ idle compute:
 - One Python process accepts at most eight concurrent provider requests. A
   ninth connection is reserved for health and readiness. No worker process is
   duplicated through `WEB_CONCURRENCY`.
-- Request bodies are capped at 2 MiB, provider response headers at 16 KiB, and
+- Public request bodies are capped at 2,000,000 bytes, provider response
+  headers at 16,000 bytes, and
   provider calls at 600 seconds. A client write can block for at most 45
   seconds and a connection for at most 630 seconds.
 - A bounded PostgreSQL pool keeps one warm connection and permits four total.
@@ -155,6 +156,16 @@ python -I -m hormuz.hosted \
   --provider-config /var/lib/hormuz/operator/hormuz-provider-runtime.json \
   provider-check
 ```
+
+The initialized login state must already contain at least one operator-created
+managed organization. `provider-check` reads the exact organization IDs from
+that server-local directory and proves the restricted PostgreSQL runtime path
+under each tenant's RLS context; an empty directory fails closed. The provider
+process pins the same allowlist at startup. Creating another managed
+organization therefore requires a maintenance preflight and a fresh deployment
+before that organization's members can send inference requests. Member,
+invitation, and session revocation continue to take effect without widening
+this tenant allowlist.
 
 Require `provider_configuration_valid`, `postgresql_runtime_verified`, and a
 pool maximum of four. Remove `HORMUZ_POSTGRES_MIGRATION_DSN`, deploy again in
