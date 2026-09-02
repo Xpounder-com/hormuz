@@ -41,6 +41,11 @@ from .contracts import (
 from .custody_runtime import resolve_upstream_credentials
 from .custody_runtime_projection import CustodyRuntimeProjection, CustodyRuntimeProjectionError
 from .evidence import EvidenceStorageError
+from .finance_attempts import (
+    ConfiguredRateCardBinding,
+    configured_rate_card_binding,
+    estimate_configured_route,
+)
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
@@ -145,6 +150,22 @@ def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) ->
                 return False
         pending.extend(value.values())
     return True
+
+
+def _configured_route_binding(decision: PolicyDecision) -> ConfiguredRateCardBinding:
+    """Freeze the exact configured prices selected for one provider attempt."""
+
+    route = decision.route
+    assert route is not None
+    return configured_rate_card_binding(configured_route_rate_card(
+        alias=decision.resolved_alias or route.alias,
+        protocol=route.protocol,
+        upstream_model=route.upstream_model,
+        input_cost_per_million=route.input_cost_per_million,
+        cache_read_cost_per_million=route.cache_read_cost_per_million,
+        cache_write_cost_per_million=route.cache_write_cost_per_million,
+        output_cost_per_million=route.output_cost_per_million,
+    ))
 
 
 class GatewayServer(ThreadingHTTPServer):
@@ -1014,7 +1035,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             provider_bytes_read=provider_bytes_read,
             downstream_bytes_sent=downstream_bytes_sent,
         )
-        usage = parser.finish()
+        parsed_usage = parser.finish_with_finance()
+        usage = parsed_usage.usage
         if account_usage and attempt is not None:
             successful = 200 <= status < 300 and downstream_ok
             if successful:
@@ -1027,6 +1049,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     organization_id=identity.organization_id,
                     reason_code="provider_stream_interrupted",
                     provider_metrics=provider_metrics,
+                    finance_observation=parsed_usage.finance,
                 )
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s requested_model=%s reason=provider_stream_interrupted",
@@ -1045,6 +1068,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     organization_id=identity.organization_id,
                     reason_code="provider_transport_ambiguous",
                     provider_metrics=provider_metrics,
+                    finance_observation=parsed_usage.finance,
                 )
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s "
@@ -1062,6 +1086,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cache_read_tokens=usage.cache_read_tokens,
                 cache_write_tokens=usage.cache_write_tokens,
             )
+            rate_card_binding = _configured_route_binding(decision)
+            configured_estimate = estimate_configured_route(
+                rate_card_binding,
+                parsed_usage.finance,
+                input_cost_per_million=route.input_cost_per_million,
+                cache_read_cost_per_million=route.cache_read_cost_per_million,
+                cache_write_cost_per_million=route.cache_write_cost_per_million,
+                output_cost_per_million=route.output_cost_per_million,
+            )
             self.server.provider_reliability_store.finalize_request_attempt(
                 attempt=attempt,
                 organization_id=identity.organization_id,
@@ -1075,6 +1108,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cost_microusd=cost,
                 provider_request_id=provider_request_id,
                 provider_metrics=provider_metrics,
+                finance_observation=parsed_usage.finance,
+                configured_estimate=configured_estimate,
             )
             LOGGER.info(
                 "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d redactions=%d",
@@ -1124,15 +1159,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             input_tokens=reserved_input_tokens,
             output_tokens=max(0, reserved_output_tokens),
         )
-        route_rate_card = configured_route_rate_card(
-            alias=decision.resolved_alias or route.alias,
-            protocol=route.protocol,
-            upstream_model=route.upstream_model,
-            input_cost_per_million=route.input_cost_per_million,
-            cache_read_cost_per_million=route.cache_read_cost_per_million,
-            cache_write_cost_per_million=route.cache_write_cost_per_million,
-            output_cost_per_million=route.output_cost_per_million,
-        )
+        rate_card_binding = _configured_route_binding(decision)
         policy_digest = (
             decision.snapshot.content_sha256
             or local_policy_content_sha256(self.server.config)
@@ -1170,13 +1197,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         input_tokens_bounded=input_tokens_bounded,
                         policy_version=decision.policy_version,
                         policy_digest=policy_digest,
-                        rate_card_id=str(route_rate_card["id"]),
-                        rate_card_version=int(route_rate_card["version"]),
-                        rate_card_digest=str(route_rate_card["content_digest"]),
-                        rate_card_currency=str(route_rate_card["currency"]),
+                        rate_card_id=rate_card_binding.rate_card_id,
+                        rate_card_version=rate_card_binding.rate_card_version,
+                        rate_card_digest=rate_card_binding.rate_card_digest,
+                        rate_card_currency=rate_card_binding.currency,
                     )
                 ),
                 provider_failover=provider_failover,
+                configured_rate_card=rate_card_binding,
             )
         except _STORAGE_FAILURES:
             if admission is not None:

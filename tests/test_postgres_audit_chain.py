@@ -20,15 +20,28 @@ else:  # Isolated wheel compatibility discovery uses the tests directory as its 
 
 class PostgresAuditChainTests(PostgresTestCase):
     def _clear_audit_evidence(self) -> None:
-        with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+        with self.psycopg.connect(self.owner_dsn) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     self.sql.SQL(
-                        "TRUNCATE TABLE {}.gateway_audit_chain_checkpoints, "
+                        "ALTER TABLE {}.gateway_finance_attempt_evidence "
+                        "DISABLE TRIGGER gateway_finance_attempt_evidence_immutable"
+                    ).format(self.sql.Identifier(self.schema))
+                )
+                cursor.execute(
+                    self.sql.SQL(
+                        "TRUNCATE TABLE {}.gateway_finance_attempt_evidence, "
+                        "{}.gateway_audit_chain_checkpoints, "
                         "{}.gateway_audit_chain_entries, {}.gateway_audit_chain_heads, "
                         "{}.gateway_audit_chain_epochs, {}.gateway_secret_events, "
                         "{}.gateway_usage_events CASCADE"
-                    ).format(*(self.sql.Identifier(self.schema) for _ in range(6)))
+                    ).format(*(self.sql.Identifier(self.schema) for _ in range(7)))
+                )
+                cursor.execute(
+                    self.sql.SQL(
+                        "ALTER TABLE {}.gateway_finance_attempt_evidence "
+                        "ENABLE TRIGGER gateway_finance_attempt_evidence_immutable"
+                    ).format(self.sql.Identifier(self.schema))
                 )
 
     @staticmethod

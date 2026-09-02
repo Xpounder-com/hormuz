@@ -182,8 +182,13 @@ REQUIRED_FINANCE_HISTORY_SDIST_PATHS = (
 )
 REQUIRED_FINANCE_NATIVE_ATTEMPT_PREFLIGHT_SDIST_PATHS = (
     "docs/FINANCE_NATIVE_ATTEMPT_TRANSITION.md",
+    "docs/FINANCE_NATIVE_ATTEMPT_RUNTIME.md",
     "docs/finance-transition-plan-v3.json",
+    "docs/finance-transition-plan-v4.json",
     "docs/finance-attempt-evidence-contract-v1.json",
+    "hormuz/_finance_attempt_schema.py",
+    "hormuz/finance_attempts.py",
+    "hormuz/migrations/postgresql/0015_finance_attempt_evidence.sql",
     "tools/verify_finance_native_attempt_transition_plan.py",
     "tools/verify_budget_transition_plan.py",
     "tests/_finance_native_predecessor_fixture.py",
@@ -193,6 +198,8 @@ REQUIRED_FINANCE_NATIVE_ATTEMPT_PREFLIGHT_SDIST_PATHS = (
     "tests/test_sqlite_finance_native_attempt_transition.py",
     "tests/test_postgres_finance_native_attempt_transition.py",
     "tests/test_finance_native_attempt_packaging.py",
+    "tests/test_finance_attempt_runtime.py",
+    "tests/test_postgres_finance_attempt_runtime.py",
 )
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
@@ -475,7 +482,7 @@ def _assert_finance_native_attempt_preflight_sdist_boundary(path: Path) -> None:
     ]
     if missing:
         raise RuntimeError(
-            "Finance native-attempt preflight incomplete in "
+            "Finance native-attempt source kit incomplete in "
             f"{path.name}: {', '.join(sorted(missing))}"
         )
 

@@ -292,7 +292,7 @@ class PostgresCustodyControlTests(PostgresTestCase):
                                 "missing-custody-source",
                             ),
                         )
-                    self.assertIn("custody audit source evidence mismatch", str(raised.exception))
+                    self.assertIn("audit source evidence mismatch", str(raised.exception))
                     cursor.execute("ROLLBACK TO SAVEPOINT malformed_v2_chain_entry")
 
     def test_bootstrap_authority_is_separate_from_runtime_policy_and_kms_entitlement(self) -> None:

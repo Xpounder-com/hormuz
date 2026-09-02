@@ -561,6 +561,23 @@ not establish production database failover, HA, automatic promotion,
 multi-instance coordination, production RPO/RTO, customer topology, automatic
 provider replay, or an incident-response program.
 
+### SQLite schema v11 / PostgreSQL schema v15 attempt finance evidence
+
+The native-attempt finance migration adds one append-only,
+tenant-qualified `gateway_finance_attempt_evidence` row for every new terminal
+provider attempt and five immutable configured-rate binding columns on the
+attempt root. PostgreSQL forces RLS and grants its runtime role only select and
+insert. SQLite enforces the same tenant/link/cardinality invariants with
+foreign keys, unique keys, and mutation guards.
+
+The sidecar is a reviewed commit-audit-chain version-2 source. SQLite 11
+transactionally rebuilds the historical entry table to add source identity
+columns while copying every old entry unchanged. PostgreSQL 15 extends the
+existing finite source constraint and security-definer guard by exactly
+`hormuz.finance-attempt-evidence` version 1; arbitrary source JSON remains
+rejected. Pre-migration attempts keep explicit legacy coverage and are not
+backfilled or repriced.
+
 ## Failure behavior
 
 Before provider egress, Hormuz atomically persists a content-free `pending` request attempt and its conservative budget reservation. If that transaction cannot commit, the gateway returns a content-free 503 with the stable classification `hormuz_storage_unavailable`; the provider is not called. The same classification appears in the metadata-only gateway error envelope for control-plane reads.

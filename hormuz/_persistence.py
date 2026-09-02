@@ -22,6 +22,11 @@ from .audit_chain import (
     audit_chain_checkpoint_position,
 )
 from .config import Identity
+from .finance_attempts import (
+    ConfiguredRateCardBinding,
+    ConfiguredRouteEstimate,
+    NativeUsageObservation,
+)
 from .provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -175,7 +180,8 @@ class ProviderReliabilityRepository(Protocol):
         reserved_cost_microusd: int,
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
-        provider_failover: ProviderFailoverContext,
+        provider_failover: ProviderFailoverContext | None,
+        configured_rate_card: ConfiguredRateCardBinding | None = None,
     ) -> RequestAttempt: ...
 
     def finalize_request_attempt(
@@ -193,6 +199,8 @@ class ProviderReliabilityRepository(Protocol):
         cost_microusd: int = 0,
         provider_request_id: str | None = None,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
+        configured_estimate: ConfiguredRouteEstimate | None = None,
     ) -> None: ...
 
     def mark_request_attempt_outcome_unknown(
@@ -202,6 +210,7 @@ class ProviderReliabilityRepository(Protocol):
         organization_id: str,
         reason_code: str,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
     ) -> bool: ...
 
 

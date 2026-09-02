@@ -29,6 +29,21 @@ from .contracts import (
     validate_request_status,
 )
 from .evidence import EvidenceStorageError, security_audit_event, usage_audit_event
+from .finance_attempts import (
+    FINANCE_ATTEMPT_SCHEMA_ID,
+    FINANCE_ATTEMPT_SCHEMA_VERSION,
+    ConfiguredRateCardBinding,
+    ConfiguredRouteEstimate,
+    NativeUsageObservation,
+    absent_native_observation,
+    binding_from_attempt_row,
+    build_finance_attempt_event,
+    finance_attempt_event_from_row,
+    finance_attempt_storage_row,
+    repository_contract_binding,
+    unavailable_estimate,
+    unknown_native_observation,
+)
 from .provider_reliability import (
     ProviderAttemptMetrics,
     ProviderFailoverContext,
@@ -325,11 +340,12 @@ class PostgresUsageStore:
         cursor: Any,
         *,
         event: Mapping[str, object],
+        source: AuditChainSource | None = None,
     ) -> AuditChainHead:
         """Append one event and head update in the caller's existing transaction."""
 
         organization_id = event.get("organization_id")
-        event_id = event.get("id")
+        event_id = event.get("id") if source is None else source.event_id
         if not isinstance(organization_id, str) or not organization_id or not isinstance(event_id, str) or not event_id:
             raise PostgresStorageError("audit_chain_event_malformed")
         head = self._audit_chain_head_in_cursor(
@@ -346,6 +362,8 @@ class PostgresUsageStore:
                 chain_epoch=head.chain_epoch,
                 sequence=head.sequence + 1,
                 previous_digest=head.head_digest,
+                entry_schema_version=1 if source is None else 2,
+                source=source,
             )
         except AuditChainError as error:
             raise PostgresStorageError(error.code) from None
@@ -357,8 +375,9 @@ class PostgresUsageStore:
             INSERT INTO {self._table('gateway_audit_chain_entries')} (
                 organization_id, chain_version, chain_epoch, sequence,
                 entry_schema_id, entry_schema_version, event_id, previous_digest,
-                event_digest, event_json, appended_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                event_digest, event_json, appended_at,
+                source_schema_id, source_schema_version, source_event_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
             """,
             (
                 organization_id,
@@ -371,6 +390,9 @@ class PostgresUsageStore:
                 entry["previous_digest"],
                 entry["event_digest"],
                 canonical_json_text(dict(event_value)),
+                None if source is None else source.schema_id,
+                None if source is None else source.schema_version,
+                None if source is None else source.event_id,
             ),
         )
         if cursor.rowcount != 1:
@@ -752,6 +774,7 @@ class PostgresUsageStore:
         reserved_cost_microusd: int,
         ttl_seconds: int,
     ) -> RequestAttempt:
+        configured_rate_card = repository_contract_binding()
         return self._begin_request_attempt_with_work_budget(
             identity=identity,
             client=client,
@@ -768,6 +791,7 @@ class PostgresUsageStore:
             reserved_cost_microusd=reserved_cost_microusd,
             ttl_seconds=ttl_seconds,
             work_budget=None,
+            configured_rate_card=configured_rate_card,
         )
 
     @audit_work_budget_denials
@@ -790,10 +814,12 @@ class PostgresUsageStore:
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
         provider_failover: ProviderFailoverContext | None = None,
+        configured_rate_card: ConfiguredRateCardBinding | None = None,
     ) -> RequestAttempt:
         """Atomically persist a pending pre-egress attempt and its budget hold."""
 
         organization_id = self._organization(identity.organization_id)
+        binding = configured_rate_card or repository_contract_binding()
         attempt_id = str(uuid.uuid4())
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
@@ -807,6 +833,17 @@ class PostgresUsageStore:
                     next(iter(budget_schema_row.values()))
                     if isinstance(budget_schema_row, dict)
                     else budget_schema_row[0]
+                )
+                cursor.execute(
+                    f"SELECT EXISTS (SELECT 1 FROM "
+                    f"{self._table('hormuz_schema_migrations')} "
+                    "WHERE version=15 AND state='applied')"
+                )
+                finance_schema_row = cursor.fetchone()
+                finance_schema_ready = bool(
+                    next(iter(finance_schema_row.values()))
+                    if isinstance(finance_schema_row, dict)
+                    else finance_schema_row[0]
                 )
                 if work_budget is not None and not budget_schema_ready:
                     raise PostgresStorageError("storage_schema_partial_upgrade")
@@ -872,43 +909,37 @@ class PostgresUsageStore:
                     ),
                     organization_id=organization_id,
                 )
+                columns = [
+                    "attempt_id", "created_at", "evidence_schema_id", "evidence_schema_version",
+                    "organization_id", "actor_id", "actor_name", "team_id", "team_name",
+                    "identity_type", "authentication_source", "client", "protocol", "requested_model",
+                    "resolved_alias", "upstream_model", "policy_version", "policy_action",
+                    "redaction_count", "redaction_rules", "reserved_tokens", "reserved_cost_microusd",
+                ]
+                values: list[object] = [
+                    root["attempt_id"], now, root["evidence_schema_id"],
+                    root["evidence_schema_version"], root["organization_id"], root["actor_id"],
+                    root["actor_name"], root["team_id"], root["team_name"], root["identity_type"],
+                    root["authentication_source"], root["client"], root["protocol"],
+                    root["requested_model"], root["resolved_alias"], root["upstream_model"],
+                    root["policy_version"], root["policy_action"], root["redaction_count"],
+                    json.dumps(root["redaction_rules"], separators=(",", ":")),
+                    root["reserved_tokens"], root["reserved_cost_microusd"],
+                ]
+                if finance_schema_ready:
+                    columns.extend((
+                        "configured_rate_card_state", "configured_rate_card_id",
+                        "configured_rate_card_version", "configured_rate_card_digest",
+                        "configured_rate_card_currency",
+                    ))
+                    values.extend((
+                        "configured", binding.rate_card_id, binding.rate_card_version,
+                        binding.rate_card_digest, binding.currency,
+                    ))
                 cursor.execute(
-                    f"""
-                    INSERT INTO {self._table('gateway_request_attempts')} (
-                        attempt_id, created_at, evidence_schema_id, evidence_schema_version,
-                        organization_id, actor_id, actor_name, team_id, team_name,
-                        identity_type, authentication_source, client, protocol, requested_model,
-                        resolved_alias, upstream_model, policy_version, policy_action,
-                        redaction_count, redaction_rules, reserved_tokens, reserved_cost_microusd
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                    """,
-                    (
-                        root["attempt_id"],
-                        now,
-                        root["evidence_schema_id"],
-                        root["evidence_schema_version"],
-                        root["organization_id"],
-                        root["actor_id"],
-                        root["actor_name"],
-                        root["team_id"],
-                        root["team_name"],
-                        root["identity_type"],
-                        root["authentication_source"],
-                        root["client"],
-                        root["protocol"],
-                        root["requested_model"],
-                        root["resolved_alias"],
-                        root["upstream_model"],
-                        root["policy_version"],
-                        root["policy_action"],
-                        root["redaction_count"],
-                        json.dumps(root["redaction_rules"], separators=(",", ":")),
-                        root["reserved_tokens"],
-                        root["reserved_cost_microusd"],
-                    ),
+                    f"INSERT INTO {self._table('gateway_request_attempts')} "
+                    f"({', '.join(columns)}) VALUES ({', '.join('%s' for _ in columns)})",
+                    tuple(values),
                 )
                 self._append_request_attempt_event_in_cursor(
                     cursor,
@@ -1024,6 +1055,8 @@ class PostgresUsageStore:
         cost_microusd: int = 0,
         provider_request_id: str | None = None,
         provider_metrics: ProviderAttemptMetrics | None,
+        finance_observation: NativeUsageObservation | None = None,
+        configured_estimate: ConfiguredRouteEstimate | None = None,
     ) -> None:
         """Finalize an attempt and atomically append optional provider timing."""
 
@@ -1059,7 +1092,7 @@ class PostgresUsageStore:
                     redaction_count=result.redaction_count,
                     redaction_rules=result.redaction_rules,
                 )
-                self._append_request_attempt_event_in_cursor(
+                terminal_event_id = self._append_request_attempt_event_in_cursor(
                     cursor,
                     attempt_id=attempt.attempt_id,
                     organization_id=organization,
@@ -1068,6 +1101,16 @@ class PostgresUsageStore:
                     state=status,
                     reason_code=None,
                     usage_event_id=usage_event_id,
+                )
+                self._append_finance_attempt_evidence_in_cursor(
+                    cursor,
+                    root=root,
+                    terminal_attempt_event_id=terminal_event_id,
+                    usage_event_id=usage_event_id,
+                    terminal_state=status,
+                    occurred_at=terminal_at,
+                    observation=finance_observation,
+                    estimate=configured_estimate,
                 )
                 if provider_metrics is not None:
                     self._append_provider_metrics_in_cursor(
@@ -1109,18 +1152,21 @@ class PostgresUsageStore:
         organization_id: str,
         reason_code: str,
         provider_metrics: ProviderAttemptMetrics | None,
+        finance_observation: NativeUsageObservation | None = None,
     ) -> bool:
         """Record an unknown outcome and optional timing in one transaction."""
 
         organization = self._organization(organization_id)
         with self._transaction(organization) as connection:
             with connection.cursor() as cursor:
-                self._request_attempt_root_in_cursor(cursor, attempt.attempt_id, organization, for_update=True)
+                root = self._request_attempt_root_in_cursor(
+                    cursor, attempt.attempt_id, organization, for_update=True,
+                )
                 latest = self._latest_request_attempt_state_in_cursor(cursor, attempt.attempt_id)
                 if not should_mark_request_attempt_unknown(latest.state):
                     return False
                 terminal_at = self._database_now_in_cursor(cursor)
-                self._append_request_attempt_event_in_cursor(
+                terminal_event_id = self._append_request_attempt_event_in_cursor(
                     cursor,
                     attempt_id=attempt.attempt_id,
                     organization_id=organization,
@@ -1129,6 +1175,18 @@ class PostgresUsageStore:
                     state="outcome_unknown",
                     reason_code=reason_code,
                     usage_event_id=None,
+                )
+                self._append_finance_attempt_evidence_in_cursor(
+                    cursor,
+                    root=root,
+                    terminal_attempt_event_id=terminal_event_id,
+                    usage_event_id=None,
+                    terminal_state="outcome_unknown",
+                    occurred_at=terminal_at,
+                    observation=unknown_native_observation(
+                        str(root["protocol"]), finance_observation, reason_code,
+                    ),
+                    estimate=None,
                 )
                 if provider_metrics is not None:
                     self._append_provider_metrics_in_cursor(
@@ -1291,11 +1349,13 @@ class PostgresUsageStore:
         count = 0
         for row in rows:
             attempt_id = str(row["attempt_id"])
-            self._request_attempt_root_in_cursor(cursor, attempt_id, organization_id, for_update=True)
+            root = self._request_attempt_root_in_cursor(
+                cursor, attempt_id, organization_id, for_update=True,
+            )
             latest = self._latest_request_attempt_state_in_cursor(cursor, attempt_id)
             if latest.state != "pending":
                 continue
-            self._append_request_attempt_event_in_cursor(
+            terminal_event_id = self._append_request_attempt_event_in_cursor(
                 cursor,
                 attempt_id=attempt_id,
                 organization_id=organization_id,
@@ -1304,6 +1364,18 @@ class PostgresUsageStore:
                 state="outcome_unknown",
                 reason_code="stale_pending",
                 usage_event_id=None,
+            )
+            self._append_finance_attempt_evidence_in_cursor(
+                cursor,
+                root=root,
+                terminal_attempt_event_id=terminal_event_id,
+                usage_event_id=None,
+                terminal_state="outcome_unknown",
+                occurred_at=occurred_at,
+                observation=unknown_native_observation(
+                    str(root["protocol"]), None, "stale_pending",
+                ),
+                estimate=None,
             )
             count += 1
         return count
@@ -1412,6 +1484,66 @@ class PostgresUsageStore:
             ),
         )
         return str(event["id"])
+
+    def _append_finance_attempt_evidence_in_cursor(
+        self,
+        cursor: object,
+        *,
+        root: Mapping[str, object],
+        terminal_attempt_event_id: str,
+        usage_event_id: str | None,
+        terminal_state: str,
+        occurred_at: datetime,
+        observation: NativeUsageObservation | None,
+        estimate: ConfiguredRouteEstimate | None,
+    ) -> str | None:
+        """Append one sidecar and its chain entry in the active transaction."""
+
+        try:
+            binding = binding_from_attempt_row(root)
+            if binding is None:
+                # A root created before schema 15 remains an explicit coverage
+                # gap and is never backfilled or repriced.
+                return None
+            native = observation or absent_native_observation(str(root["protocol"]))
+            configured = estimate or unavailable_estimate(
+                binding,
+                "attempt_outcome_unknown"
+                if terminal_state == "outcome_unknown"
+                else "missing_native_usage",
+            )
+            event = build_finance_attempt_event(
+                protocol=str(root["protocol"]),
+                organization_id=str(root["organization_id"]),
+                request_attempt_id=str(root["attempt_id"]),
+                terminal_attempt_event_id=terminal_attempt_event_id,
+                usage_event_id=usage_event_id,
+                terminal_state=terminal_state,
+                occurred_at=occurred_at.isoformat(),
+                observation=native,
+                estimate=configured,
+                binding=binding,
+            )
+            row = finance_attempt_storage_row(event)
+        except ValueError:
+            raise PostgresStorageError("finance_attempt_evidence_invalid") from None
+        columns = ", ".join(row)
+        placeholders = ", ".join("%s" for _ in row)
+        cursor.execute(
+            f"INSERT INTO {self._table('gateway_finance_attempt_evidence')} "
+            f"({columns}) VALUES ({placeholders})",
+            tuple(row.values()),
+        )
+        self._append_audit_chain_entry_in_cursor(
+            cursor,
+            event=event,
+            source=AuditChainSource(
+                FINANCE_ATTEMPT_SCHEMA_ID,
+                FINANCE_ATTEMPT_SCHEMA_VERSION,
+                str(event["evidence_event_id"]),
+            ),
+        )
+        return str(event["evidence_event_id"])
 
     def _append_provider_failover_in_cursor(
         self,
@@ -2115,6 +2247,25 @@ class PostgresUsageStore:
             (organization_id,),
         )
         secret_rows = cursor.fetchall()
+        cursor.execute(
+            f"SELECT EXISTS (SELECT 1 FROM {self._table('hormuz_schema_migrations')} "
+            "WHERE version=15 AND state='applied') AS finance_ready"
+        )
+        finance_ready_row = cursor.fetchone()
+        finance_ready = bool(
+            next(iter(finance_ready_row.values()))
+            if isinstance(finance_ready_row, dict)
+            else finance_ready_row[0]
+        )
+        if finance_ready:
+            cursor.execute(
+                f"SELECT * FROM {self._table('gateway_finance_attempt_evidence')} "
+                "WHERE organization_id = %s",
+                (organization_id,),
+            )
+            finance_rows = cursor.fetchall()
+        else:
+            finance_rows = ()
         for row in usage_rows:
             try:
                 event = usage_audit_event(dict(row))
@@ -2137,6 +2288,25 @@ class PostgresUsageStore:
                 event,
                 error_factory=PostgresStorageError,
             )
+            if source.source in source_identities:
+                raise PostgresStorageError("audit_chain_source_event_malformed")
+            source_identities.add(source.source)
+            sources.append(source)
+        for row in finance_rows:
+            try:
+                event = finance_attempt_event_from_row(dict(row))
+                source_identity = AuditChainSource(
+                    FINANCE_ATTEMPT_SCHEMA_ID,
+                    FINANCE_ATTEMPT_SCHEMA_VERSION,
+                    str(event["evidence_event_id"]),
+                )
+                source = normalize_audit_chain_source_event_input(
+                    event,
+                    source=source_identity,
+                    error_factory=PostgresStorageError,
+                )
+            except ValueError:
+                raise PostgresStorageError("audit_chain_source_event_malformed") from None
             if source.source in source_identities:
                 raise PostgresStorageError("audit_chain_source_event_malformed")
             source_identities.add(source.source)
@@ -2164,6 +2334,10 @@ class PostgresUsageStore:
             if entry.get("entry_schema_version") != 2:
                 continue
             source_schema_id = entry.get("source_schema_id")
+            if source_schema_id == FINANCE_ATTEMPT_SCHEMA_ID:
+                # Finance evidence is directly readable by the runtime role
+                # and was loaded by _audit_chain_source_events_in_cursor.
+                continue
             source_schema_version = entry.get("source_schema_version")
             source_event_id = entry.get("source_event_id")
             if (

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify #8's native-attempt finance preflight, never runtime acceptance."""
+"""Verify #8's native-attempt finance runtime candidate, never acceptance."""
 
 from __future__ import annotations
 
@@ -21,8 +21,10 @@ from tools.verify_budget_transition_plan import (
 
 
 PLAN_PATH = "docs/finance-transition-plan-v3.json"
+IMPLEMENTATION_PLAN_PATH = "docs/finance-transition-plan-v4.json"
 CONTRACT_PATH = "docs/finance-attempt-evidence-contract-v1.json"
 PLAN_CANONICAL_SHA256 = "9cf10dc4072aa3827d5c7a561850f57acf4f9a8cb5d9a4f920596604232642a7"
+IMPLEMENTATION_PLAN_CANONICAL_SHA256 = "b84cca2b4809483bc2f146d6d347a35f9d4b210f4db4824f91d4dec9187d41b2"
 CONTRACT_CANONICAL_SHA256 = "fdb0026e4efb601b241239c6b53b967f017aa637c131b49cff8af13af50362c9"
 PREDECESSOR_SOURCE_COMMIT = "4e3133f19db4c34d7a181848ebc36754bce164ea"
 PREDECESSOR_ARCHIVE_SHA256 = "86a29497ac0f4e9a2ba177fba54a3b36179077ce402a1ce0fbe37a95c61920a0"
@@ -30,8 +32,13 @@ MAX_JSON_BYTES = 256 * 1024
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 REQUIRED_FILES = (
     PLAN_PATH,
+    IMPLEMENTATION_PLAN_PATH,
     CONTRACT_PATH,
     "docs/FINANCE_NATIVE_ATTEMPT_TRANSITION.md",
+    "docs/FINANCE_NATIVE_ATTEMPT_RUNTIME.md",
+    "hormuz/_finance_attempt_schema.py",
+    "hormuz/finance_attempts.py",
+    "hormuz/migrations/postgresql/0015_finance_attempt_evidence.sql",
     "tools/verify_finance_native_attempt_transition_plan.py",
     "tools/verify_budget_transition_plan.py",
     "tests/_finance_native_predecessor_fixture.py",
@@ -41,6 +48,8 @@ REQUIRED_FILES = (
     "tests/test_sqlite_finance_native_attempt_transition.py",
     "tests/test_postgres_finance_native_attempt_transition.py",
     "tests/test_finance_native_attempt_packaging.py",
+    "tests/test_finance_attempt_runtime.py",
+    "tests/test_postgres_finance_attempt_runtime.py",
 )
 
 
@@ -73,6 +82,11 @@ def validate_finance_native_attempt_plan(value: object) -> None:
 def validate_finance_attempt_evidence_contract(value: object) -> None:
     if _canonical_digest(value) != CONTRACT_CANONICAL_SHA256:
         _fail("finance_attempt_evidence_contract_changed")
+
+
+def validate_finance_native_attempt_implementation_plan(value: object) -> None:
+    if _canonical_digest(value) != IMPLEMENTATION_PLAN_CANONICAL_SHA256:
+        _fail("finance_native_runtime_contract_changed")
 
 
 def _read_json(root: Path, relative: str) -> object:
@@ -126,17 +140,43 @@ def verify_finance_native_attempt_transition_plan(
         if not (root / relative).is_file():
             _fail("finance_native_source_kit_incomplete")
     plan = _read_json(root, PLAN_PATH)
+    implementation = _read_json(root, IMPLEMENTATION_PLAN_PATH)
     contract = _read_json(root, CONTRACT_PATH)
     validate_finance_native_attempt_plan(plan)
+    validate_finance_native_attempt_implementation_plan(implementation)
     validate_finance_attempt_evidence_contract(contract)
     try:
         predecessor = verify_budget_implementation_plan(root)
     except BudgetTransitionError:
         _fail("finance_native_budget_predecessor_invalid")
+    try:
+        from hormuz._sqlite_schema import SQLITE_SCHEMA_VERSION
+        from hormuz.postgres import POSTGRES_SCHEMA_VERSION
+
+        if SQLITE_SCHEMA_VERSION != 11 or POSTGRES_SCHEMA_VERSION != 15:
+            _fail("finance_native_runtime_schema_version_invalid")
+        if not isinstance(implementation, dict):
+            _fail("finance_native_runtime_contract_changed")
+        candidate = implementation["candidate"]
+        storage = implementation["storage"]
+        if (
+            candidate["sqlite_schema_version"] != SQLITE_SCHEMA_VERSION
+            or candidate["postgresql_schema_version"] != POSTGRES_SCHEMA_VERSION
+            or candidate["native_request_cost_capture_implemented"] is not True
+            or candidate["native_attempt_runtime_accepted"] is not False
+            or set(storage["altered_tables"]) != {
+                "gateway_request_attempts", "gateway_audit_chain_entries",
+            }
+        ):
+            _fail("finance_native_runtime_contract_changed")
+    except FinanceNativeAttemptTransitionError:
+        raise
+    except (ImportError, KeyError, TypeError):
+        _fail("finance_native_runtime_source_invalid")
     return {
         "schema_id": "hormuz.finance-transition-plan",
-        "schema_version": 3,
-        "status": "finance_native_attempt_preflight_verified",
+        "schema_version": 4,
+        "status": "finance_native_attempt_runtime_candidate_verified",
         "target_release": "1.1.0",
         "feature_issue": 8,
         "gate_issue": 214,
@@ -148,15 +188,17 @@ def verify_finance_native_attempt_transition_plan(
         "planned_postgresql_schema_version": 15,
         "provider_profile_count": 2,
         "new_table_count": 1,
-        "altered_table_count": 1,
+        "altered_table_count": 2,
+        "audit_chain_source_union_expanded": True,
         "request_attempt_price_binding_column_count": 5,
         "post_migration_price_binding_required": True,
         "missing_usage_estimate_is_zero": False,
         "new_http_routes": 0,
         "new_cli_commands": 0,
         "budget_runtime_source_verified": predecessor["budget_implemented"],
-        "native_request_cost_capture_implemented": False,
-        "native_attempt_preflight_accepted": False,
+        "native_request_cost_capture_implemented": True,
+        "native_attempt_preflight_accepted": True,
+        "native_attempt_runtime_accepted": False,
         "finance_implemented": False,
         "live_finance_verified": False,
         "final_candidate_accepted": False,

@@ -24,6 +24,7 @@ include docs/outcome-transition-plan-v2.json
 include docs/finance-transition-plan-v1.json
 include docs/finance-transition-plan-v2.json
 include docs/finance-transition-plan-v3.json
+include docs/finance-transition-plan-v4.json
 include docs/finance-source-contract-v1.json
 include docs/finance-attempt-evidence-contract-v1.json
 include docs/budget-transition-plan-v1.json

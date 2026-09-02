@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from hormuz.config import ConfigError, GatewayConfig, ModelRoute, Policy
-from hormuz.budget_runtime import configured_model_id
+from hormuz.budget_runtime import configured_model_id, configured_route_rate_card
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
 from hormuz.custody import KEY_PURPOSE_PROVIDER_CREDENTIAL, EnvelopeCipher, GeneratedDataKey
 from hormuz.custody_runtime import write_envelope_file
@@ -1249,6 +1249,41 @@ class GatewayIntegrationTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.getheader("Content-Type"), "text/event-stream")
             self.assertTrue(FakeProviderHandler.delayed_stream_started.wait(timeout=1))
+            route = self.config.model_routes["engineering-fast"]
+            expected_binding = configured_route_rate_card(
+                alias=route.alias,
+                protocol=route.protocol,
+                upstream_model=route.upstream_model,
+                input_cost_per_million=route.input_cost_per_million,
+                cache_read_cost_per_million=route.cache_read_cost_per_million,
+                cache_write_cost_per_million=route.cache_write_cost_per_million,
+                output_cost_per_million=route.output_cost_per_million,
+            )
+            database = sqlite3.connect(self.gateway.store.path)
+            binding = database.execute(
+                "SELECT configured_rate_card_state, configured_rate_card_id, "
+                "configured_rate_card_version, configured_rate_card_digest, "
+                "configured_rate_card_currency FROM gateway_request_attempts"
+            ).fetchone()
+            pending = database.execute(
+                "SELECT state FROM gateway_request_attempt_events ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()[0]
+            sidecar_count = database.execute(
+                "SELECT COUNT(*) FROM gateway_finance_attempt_evidence"
+            ).fetchone()[0]
+            database.close()
+            self.assertEqual(
+                binding,
+                (
+                    "configured",
+                    expected_binding["id"],
+                    expected_binding["version"],
+                    expected_binding["content_digest"],
+                    expected_binding["currency"],
+                ),
+            )
+            self.assertEqual(pending, "pending")
+            self.assertEqual(sidecar_count, 0)
             self.assertTrue(
                 first_read_finished.wait(timeout=2),
                 "gateway held an available provider event until stream completion",
@@ -1263,6 +1298,17 @@ class GatewayIntegrationTests(unittest.TestCase):
         connection.close()
         self.assertIn(b"event: response.completed", remainder)
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 1)
+        database = sqlite3.connect(self.gateway.store.path)
+        finance = database.execute(
+            "SELECT observation_state, provider_input_tokens, provider_output_tokens, "
+            "configured_estimate_availability, configured_rate_card_digest "
+            "FROM gateway_finance_attempt_evidence"
+        ).fetchone()
+        database.close()
+        self.assertEqual(
+            finance,
+            ("partial", 1, 1, "unavailable", expected_binding["content_digest"]),
+        )
 
     def test_downstream_disconnect_closes_provider_stream_and_keeps_unknown_attempt(self) -> None:
         self._restart_gateway(self._config_with_failover())

@@ -1,0 +1,132 @@
+{
+  "schema_id": "hormuz.finance-transition-plan",
+  "schema_version": 4,
+  "stage": "native_attempt_runtime_candidate",
+  "target_release": "1.1.0",
+  "feature_issue": 8,
+  "gate_issue": 214,
+  "source_baseline": {
+    "accepted_preflight_main_commit": "45492c99347a13bf0ff36af9661f549d685035a4",
+    "preflight_plan_path": "docs/finance-transition-plan-v3.json",
+    "preflight_plan_canonical_sha256": "9cf10dc4072aa3827d5c7a561850f57acf4f9a8cb5d9a4f920596604232642a7",
+    "attempt_contract_path": "docs/finance-attempt-evidence-contract-v1.json",
+    "attempt_contract_canonical_sha256": "fdb0026e4efb601b241239c6b53b967f017aa637c131b49cff8af13af50362c9"
+  },
+  "transition_predecessor": {
+    "source_commit": "4e3133f19db4c34d7a181848ebc36754bce164ea",
+    "archive_sha256": "86a29497ac0f4e9a2ba177fba54a3b36179077ce402a1ce0fbe37a95c61920a0",
+    "archive_kind": "deterministic_git_snapshot_not_published_release",
+    "verified_runtime_file_count": 141,
+    "sqlite_schema_version": 10,
+    "postgresql_schema_version": 14
+  },
+  "candidate": {
+    "sqlite_schema_version": 11,
+    "postgresql_schema_version": 15,
+    "native_request_cost_capture_implemented": true,
+    "native_attempt_runtime_accepted": false,
+    "finance_implemented": false,
+    "live_finance_verified": false,
+    "final_candidate_accepted": false,
+    "released": false
+  },
+  "runtime": {
+    "provider_profiles": [
+      "openai.responses.usage.v1",
+      "anthropic.messages.usage.v1"
+    ],
+    "parser": "one_typed_parse_yields_provider_native_observation_and_unchanged_usage_v1_projection",
+    "native_payload": "bounded_canonical_allowlist_only_with_sha256_digest",
+    "normalized_values": "nullable_query_friendly_columns_null_is_unknown_zero_is_observed_zero",
+    "configured_estimate": "half_even_microusd_with_exact_currency_and_rate_card_provenance",
+    "missing_or_invalid_estimate": "unavailable_with_null_amount_never_zero_or_reservation_substitution",
+    "provider_final": false,
+    "begin_gate": "configured_rate_card_coordinates_commit_before_provider_egress",
+    "terminal_cardinality": "exactly_one_sidecar_per_post_migration_terminal_attempt_none_while_pending",
+    "stale_sweep": "absent_sidecar_without_provider_replay_or_hold_release"
+  },
+  "storage": {
+    "new_tables": [
+      "gateway_finance_attempt_evidence"
+    ],
+    "altered_tables": {
+      "gateway_request_attempts": {
+        "change": "five_additive_configured_rate_card_binding_columns",
+        "legacy_rows": "legacy_unavailable_with_null_coordinates",
+        "new_rows": "configured_with_all_coordinates_required_and_immutable"
+      },
+      "gateway_audit_chain_entries": {
+        "why_required": "accepted_contract_requires_each_finance_sidecar_to_be_a_commit_audit_chain_v2_source",
+        "sqlite": "transactional_table_rebuild_copies_every_predecessor_entry_and_adds_source_identity_columns_plus_exact_finance_source_union",
+        "postgresql": "existing_source_identity_constraint_and_security_definer_insert_guard_gain_only_hormuz.finance-attempt-evidence_version_1",
+        "rollback_preservation": "predecessor_entry_event_json_digest_order_head_and_checkpoint_bytes_must_remain_unchanged"
+      }
+    },
+    "postgresql_authority": "forced_rls_runtime_select_insert_only_no_superuser_or_bypassrls",
+    "sqlite_authority": "existing_database_transaction_only_no_runtime_schema_creation",
+    "append_only": true,
+    "historical_backfill": false,
+    "historical_repricing": false
+  },
+  "transaction": {
+    "terminal_write": "terminal_event_usage_when_known_finance_sidecar_work_budget_reconciliation_provider_metrics_usage_audit_finance_audit_and_chain_head_commit_or_roll_back_together",
+    "outcome_unknown": "null_usage_link_conservative_hold_retained_and_estimate_unavailable_with_attempt_outcome_unknown_reason",
+    "retry": "new_attempt_identity_no_mutation_and_no_automatic_provider_replay",
+    "sidecar_failure": "attempt_remains_pending_with_hold_and_without_terminal_usage_metrics_sidecar_or_chain_advance"
+  },
+  "compatibility": {
+    "usage_repository_protocol": "unchanged",
+    "usage_v1_projection": "unchanged",
+    "request_attempt_event_schema": "unchanged",
+    "portfolio_wire_v1": "unchanged",
+    "budget_report_v1_and_v2": "unchanged",
+    "new_http_routes": [],
+    "new_cli_commands": [],
+    "new_errors": [],
+    "provider_request_mutation": false,
+    "provider_replay": false
+  },
+  "required_evidence": [
+    "openai_anthropic_json_and_stream_native_profile_parsing",
+    "one_parse_unchanged_usage_v1_projection",
+    "duplicate_nonfinite_invalid_unicode_unsafe_dimension_overflow_and_payload_bound_fail_closed",
+    "pending_terminal_unknown_stale_duplicate_and_retry_cardinality",
+    "configured_binding_pre_egress_and_exact_sidecar_provenance",
+    "terminal_usage_timestamp_budget_metrics_and_two_audit_entries_atomicity",
+    "sidecar_failure_full_transaction_rollback",
+    "sqlite_append_only_and_postgresql_forced_rls_tenant_isolation",
+    "sqlite_10_to_11_and_postgresql_14_to_15_failure_retry_idempotence",
+    "predecessor_audit_rows_and_all_accepted_state_preserved_byte_for_byte",
+    "old_binary_new_schema_refusal_and_forward_only_post_write_recovery",
+    "source_kit_isolated_wheel_and_content_free_artifacts",
+    "exact_pr_head_protected_checks_and_exact_merged_main_transition_evidence"
+  ],
+  "remaining_feature_gates": [
+    "provider_billing_exports_and_invoice_reconciliation",
+    "shared_charge_allocation",
+    "accounting_period_close_and_adjustment_policy",
+    "finance_management_reports_and_role_scoped_delivery",
+    "live_provider_finance_validation"
+  ],
+  "remaining_release_gates": [
+    "8_complete_finance_grade_reconciliation",
+    "222_evidence_qualified_model_scorecards",
+    "223_role_scoped_cli_and_api_views",
+    "224_reviewable_recommendations",
+    "214_exact_final_candidate_transition_and_recovery",
+    "225_real_preregistered_external_organization_pilot",
+    "owner_release_and_tag_authorization"
+  ],
+  "nonclaims": [
+    "provider_invoice_truth",
+    "procurement_authorization",
+    "accounts_payable_or_general_ledger_posting",
+    "contract_discount_credit_tax_or_foreign_exchange_treatment",
+    "causal_value_or_productivity_proof",
+    "automatic_model_policy_or_budget_change",
+    "live_finance_or_customer_validation",
+    "runtime_acceptance",
+    "final_candidate_acceptance",
+    "release_or_deployment_readiness"
+  ]
+}

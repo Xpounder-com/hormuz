@@ -11,8 +11,10 @@ from unittest import mock
 from uuid import uuid4
 
 import hormuz.postgres as postgres_module
+from hormuz.config import Identity
 from hormuz.postgres import PostgresStorageError, migrate_postgres
 from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz.store import ReservationScope
 
 if __package__:
     from ._finance_native_predecessor_fixture import finance_native_predecessor_call
@@ -20,16 +22,6 @@ if __package__:
 else:
     from _finance_native_predecessor_fixture import finance_native_predecessor_call
     from _postgres_fixture import PostgresTestCase
-
-
-PROBE_TABLE = "finance_native_attempt_transition_test_probe"
-PROBE_COLUMNS = (
-    ("configured_rate_card_state", "TEXT"),
-    ("configured_rate_card_id", "TEXT"),
-    ("configured_rate_card_version", "INTEGER"),
-    ("configured_rate_card_digest", "TEXT"),
-    ("configured_rate_card_currency", "TEXT"),
-)
 
 
 @unittest.skipUnless(
@@ -57,7 +49,7 @@ class PostgresFinanceNativeAttemptTransitionTests(PostgresTestCase):
         )
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 14)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
         self._drop_schema(self.schema)
         self.request = {
             "backend": "postgresql",
@@ -129,25 +121,13 @@ class PostgresFinanceNativeAttemptTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            if version != 15:
-                return original(version, schema, *roles)
-            statement = "".join(
-                f"ALTER TABLE {schema}.gateway_request_attempts "
-                f"ADD COLUMN {name} {kind};"
-                for name, kind in PROBE_COLUMNS
-            ) + (
-                f'CREATE TABLE {schema}."{PROBE_TABLE}" '
-                "(id BIGINT PRIMARY KEY, marker TEXT NOT NULL);"
-            )
-            return statement + (" SELECT 1 / 0;" if fail else "")
+            statement = original(version, schema, *roles)
+            return statement + (" SELECT 1 / 0;" if fail and version == 15 else "")
 
-        with (
-            mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15),
-            mock.patch.object(
-                postgres_module,
-                "_migration_sql",
-                side_effect=migration,
-            ),
+        with mock.patch.object(
+            postgres_module,
+            "_migration_sql",
+            side_effect=migration,
         ):
             original_dsn = self.owner_dsn
             if dsn is not None:
@@ -157,15 +137,19 @@ class PostgresFinanceNativeAttemptTransitionTests(PostgresTestCase):
             finally:
                 self.owner_dsn = original_dsn
 
-    def test_missing_migration_is_red_and_rolls_back_cleanly(self):
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15):
-            with self.assertRaises(PostgresStorageError) as caught:
-                self.migrate()
-        self.assertEqual(
-            caught.exception.code,
-            "storage_schema_migration_unsupported",
-        )
-        self.assertEqual(self.snapshot(), self.before)
+    def test_real_migration_materializes_binding_sidecar_audit_and_rls_shape(self):
+        self.probe()
+        after = self.snapshot()
+        self.assertIn("gateway_finance_attempt_evidence", after["rows"])
+        self.assertEqual(after["rows"]["gateway_finance_attempt_evidence"], [])
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            legacy_count = connection.execute(
+                self.sql.SQL(
+                    "SELECT COUNT(*) FROM {}.gateway_request_attempts "
+                    "WHERE configured_rate_card_state='legacy_unavailable'"
+                ).format(self.sql.Identifier(self.schema))
+            ).fetchone()[0]
+        self.assertEqual(legacy_count, len(after["rows"]["gateway_request_attempts"]))
         self.runtime().verify_ready()
 
     def test_probe_failure_rolls_back_and_retry_is_idempotent(self):
@@ -175,17 +159,15 @@ class PostgresFinanceNativeAttemptTransitionTests(PostgresTestCase):
         self.assertEqual(self.snapshot(), self.before)
         self.probe()
         after = self.snapshot()
-        self.assertIn(PROBE_TABLE, after["rows"])
-        self.assertEqual(after["rows"][PROBE_TABLE], [])
+        self.assertIn("gateway_finance_attempt_evidence", after["rows"])
+        self.assertEqual(after["rows"]["gateway_finance_attempt_evidence"], [])
         self.probe()
         self.assertEqual(self.snapshot(), after)
 
-    def test_current_and_predecessor_refuse_newer_and_partial_state(self):
+    def test_current_accepts_candidate_predecessor_refuses_and_both_reject_partial(self):
         self.probe()
         candidate = self.snapshot()
-        with self.assertRaises(PostgresStorageError) as caught:
-            self.runtime()
-        self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
+        self.runtime().verify_ready()
         self.assertEqual(
             finance_native_predecessor_call({**self.request, "mode": "verify"}),
             {"status": "refused", "code": "storage_schema_newer_than_binary"},
@@ -208,6 +190,45 @@ class PostgresFinanceNativeAttemptTransitionTests(PostgresTestCase):
             {"status": "refused", "code": "storage_schema_partial_upgrade"},
         )
         self.assertEqual(self.snapshot(), partial)
+
+    def candidate_write(self, runtime_dsn=None):
+        store = self.runtime(runtime_dsn)
+        identity = Identity(
+            token_env="UNUSED_TRANSITION_TOKEN",
+            token="synthetic-unused-secret",
+            actor_id="candidate",
+            actor_name="Candidate",
+            team_id="finance",
+            team_name="Finance",
+            # The predecessor fixture intentionally activates an attributed
+            # work budget for acme. Keep this recovery probe policy-neutral.
+            organization_id="beta",
+        )
+        attempt = store.begin_request_attempt(
+            identity=identity,
+            client="codex",
+            protocol="openai",
+            requested_model="candidate-model",
+            resolved_alias="candidate-model",
+            upstream_model="candidate-provider-model",
+            policy_version="candidate-policy",
+            policy_action="allowed",
+            redaction_count=0,
+            redaction_rules=(),
+            scopes=(ReservationScope(name="organization"),),
+            reserved_tokens=2,
+            reserved_cost_microusd=3,
+            ttl_seconds=60,
+        )
+        store.finalize_request_attempt(
+            attempt=attempt,
+            organization_id="beta",
+            status="succeeded",
+            input_tokens=1,
+            output_tokens=1,
+            cost_microusd=2,
+        )
+        return attempt.attempt_id
 
     def backup(self):
         info = self.psycopg.conninfo.conninfo_to_dict(self.owner_dsn)
@@ -341,21 +362,19 @@ class PostgresFinanceNativeAttemptTransitionTests(PostgresTestCase):
     )
     def test_post_checkpoint_write_requires_forward_recovery(self):
         self.probe()
-        with self.psycopg.connect(self.owner_dsn) as connection:
-            connection.execute(
-                self.sql.SQL(
-                    "INSERT INTO {}.{} (id, marker) "
-                    "VALUES (1, 'candidate-write')"
-                ).format(
-                    self.sql.Identifier(self.schema),
-                    self.sql.Identifier(PROBE_TABLE),
-                )
-            )
+        attempt_id = self.candidate_write()
         after_write = self.snapshot()
+        self.assertEqual(
+            len(after_write["rows"]["gateway_finance_attempt_evidence"]),
+            1,
+        )
+        self.assertIn(
+            attempt_id,
+            str(after_write["rows"]["gateway_finance_attempt_evidence"][0]),
+        )
         backup = self.backup()
         owner, runtime = self.restore(backup)
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15):
-            self.runtime(runtime).verify_ready()
+        self.runtime(runtime).verify_ready()
         self.assertEqual(self.snapshot(owner), after_write)
         request = {**self.request, "runtime_dsn": runtime, "mode": "verify"}
         self.assertEqual(

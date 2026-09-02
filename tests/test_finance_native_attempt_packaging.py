@@ -8,7 +8,7 @@ from tools import verify_core_wheel as packaging
 
 
 class FinanceNativeAttemptPackagingTests(unittest.TestCase):
-    def test_complete_native_attempt_preflight_source_kit_is_required(self):
+    def test_complete_native_attempt_runtime_source_kit_is_required(self):
         paths = packaging.REQUIRED_FINANCE_NATIVE_ATTEMPT_PREFLIGHT_SDIST_PATHS
         self.assertGreaterEqual(len(paths), 12)
         members = ["hormuz-1.0.0/" + name for name in paths]
@@ -24,7 +24,7 @@ class FinanceNativeAttemptPackagingTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "Finance native-attempt preflight incomplete",
+                    "Finance native-attempt source kit incomplete",
                 ):
                     packaging._assert_finance_native_attempt_preflight_sdist_boundary(
                         Path("test.tar.gz")

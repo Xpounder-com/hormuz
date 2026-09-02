@@ -20,7 +20,7 @@ from hormuz.store import StorageSchemaError, UsageStore
 
 class BudgetSchemaTests(unittest.TestCase):
     def test_budget_nine_remains_exact_in_current_cumulative_schema(self):
-        self.assertEqual(UsageStore.schema_version, 10)
+        self.assertEqual(UsageStore.schema_version, 11)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
             UsageStore(path).verify_ready()
@@ -32,7 +32,7 @@ class BudgetSchemaTests(unittest.TestCase):
                     )
                 }
                 self.assertTrue(set(TABLE_DDL).issubset(tables))
-                self.assertEqual(len(tables), 38)
+                self.assertEqual(len(tables), 39)
                 self.assertEqual(
                     connection.execute(
                         "SELECT state FROM hormuz_schema_migrations WHERE version=9"

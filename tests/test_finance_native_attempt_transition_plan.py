@@ -27,9 +27,12 @@ class FinanceNativeAttemptTransitionPlanTests(unittest.TestCase):
     def contract(self):
         return json.loads((ROOT / verifier.CONTRACT_PATH).read_bytes())
 
-    def test_checkpoint_is_preflight_not_runtime_acceptance_or_release(self):
+    def implementation(self):
+        return json.loads((ROOT / verifier.IMPLEMENTATION_PLAN_PATH).read_bytes())
+
+    def test_checkpoint_is_runtime_candidate_not_runtime_acceptance_or_release(self):
         result = verifier.verify_finance_native_attempt_transition_plan(ROOT)
-        self.assertEqual(result["status"], "finance_native_attempt_preflight_verified")
+        self.assertEqual(result["status"], "finance_native_attempt_runtime_candidate_verified")
         self.assertEqual(result["feature_issue"], 8)
         self.assertEqual(result["gate_issue"], 214)
         self.assertEqual(result["predecessor_sqlite_schema_version"], 10)
@@ -38,16 +41,18 @@ class FinanceNativeAttemptTransitionPlanTests(unittest.TestCase):
         self.assertEqual(result["planned_postgresql_schema_version"], 15)
         self.assertEqual(result["provider_profile_count"], 2)
         self.assertEqual(result["new_table_count"], 1)
-        self.assertEqual(result["altered_table_count"], 1)
+        self.assertEqual(result["altered_table_count"], 2)
+        self.assertTrue(result["audit_chain_source_union_expanded"])
         self.assertEqual(result["request_attempt_price_binding_column_count"], 5)
         self.assertTrue(result["post_migration_price_binding_required"])
         self.assertFalse(result["missing_usage_estimate_is_zero"])
         self.assertEqual(result["new_http_routes"], 0)
         self.assertEqual(result["new_cli_commands"], 0)
         self.assertTrue(result["budget_runtime_source_verified"])
+        self.assertTrue(result["native_request_cost_capture_implemented"])
+        self.assertTrue(result["native_attempt_preflight_accepted"])
         for field in (
-            "native_request_cost_capture_implemented",
-            "native_attempt_preflight_accepted",
+            "native_attempt_runtime_accepted",
             "finance_implemented",
             "live_finance_verified",
             "final_candidate_accepted",
@@ -61,6 +66,11 @@ class FinanceNativeAttemptTransitionPlanTests(unittest.TestCase):
                 self.plan(),
                 verifier.validate_finance_native_attempt_plan,
                 "finance_native_preflight_contract_changed",
+            ),
+            (
+                self.implementation(),
+                verifier.validate_finance_native_attempt_implementation_plan,
+                "finance_native_runtime_contract_changed",
             ),
             (
                 self.contract(),
@@ -242,6 +252,28 @@ class FinanceNativeAttemptTransitionPlanTests(unittest.TestCase):
         self.assertFalse(plan["compatibility"]["historical_usage_repricing"])
         self.assertFalse(plan["compatibility"]["historical_attempt_backfill"])
         self.assertFalse(plan["implementation_decision"]["provider_final"])
+
+    def test_runtime_plan_records_the_required_audit_chain_successor_change(self):
+        plan = self.implementation()
+        self.assertEqual(plan["schema_version"], 4)
+        self.assertTrue(plan["candidate"]["native_request_cost_capture_implemented"])
+        self.assertFalse(plan["candidate"]["native_attempt_runtime_accepted"])
+        self.assertEqual(
+            plan["storage"]["new_tables"],
+            ["gateway_finance_attempt_evidence"],
+        )
+        self.assertEqual(
+            set(plan["storage"]["altered_tables"]),
+            {"gateway_request_attempts", "gateway_audit_chain_entries"},
+        )
+        correction = plan["storage"]["altered_tables"]["gateway_audit_chain_entries"]
+        self.assertIn("each_finance_sidecar", correction["why_required"])
+        self.assertIn("copies_every_predecessor_entry", correction["sqlite"])
+        self.assertIn("gain_only", correction["postgresql"])
+        self.assertIn("must_remain_unchanged", correction["rollback_preservation"])
+        self.assertEqual(plan["compatibility"]["new_http_routes"], [])
+        self.assertEqual(plan["compatibility"]["new_cli_commands"], [])
+        self.assertFalse(plan["runtime"]["provider_final"])
 
     def test_cli_rejects_missing_or_wrong_predecessor_archive(self):
         for payload in (None, b"SYNTHETIC_EXCLUDED"):

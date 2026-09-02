@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from dataclasses import replace
 import hashlib
 import json
@@ -32,13 +31,13 @@ if __package__:
     from ._attribution_predecessor_fixture import registry_predecessor_call
     from ._attribution_fixture import seed_attribution_metadata
     from ._portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
-    from ._postgres_fixture import PostgresTestCase
+    from ._postgres_fixture import PostgresTestCase, without_finance_attempt_successor
     from ._registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
 else:
     from _attribution_predecessor_fixture import registry_predecessor_call
     from _attribution_fixture import seed_attribution_metadata
     from _portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
-    from _postgres_fixture import PostgresTestCase
+    from _postgres_fixture import PostgresTestCase, without_finance_attempt_successor
     from _registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
 
 
@@ -56,7 +55,7 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
                                   runtime_role=self.runtime_role, organization_ids=("acme", "beta"))
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 14)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
         self._drop_schema(self.schema)
         self.predecessor_request = {"backend": "postgresql", "schema": self.schema, "owner_dsn": self.owner_dsn,
                                     "runtime_dsn": self.runtime_dsn, "runtime_role": self.runtime_role,
@@ -88,15 +87,15 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            self.assertIn(version, (10, 11, 12, 13, 14))
+            self.assertIn(version, (10, 11, 12, 13, 14, 15))
             ddl = original(version, schema, *roles)
             return ddl + (" SELECT 1 / 0;" if fail and version == 10 else "")
 
         with mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
-            self.assertEqual(self.migrate().version, 14)
+            self.assertEqual(self.migrate().version, 15)
 
     def assert_prior_state_preserved(self):
-        current = copy.deepcopy(self.snapshot())
+        current = without_finance_attempt_successor(self.snapshot())
         added = (
             set(TABLE_DDL)
             | set(OUTCOME_TABLES)
@@ -143,7 +142,7 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
     def test_postgres_attribution_migration_is_additive_and_idempotent(self):
         for _ in range(2):
             self.probe()
-            self.assertEqual(len(self.snapshot()["rows"]), 60)
+            self.assertEqual(len(self.snapshot()["rows"]), 61)
             self.assert_prior_state_preserved()
 
     def test_postgres_attribution_failure_and_retry_preserve_populated_registry(self):
