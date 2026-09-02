@@ -95,7 +95,22 @@ class MacPilotEvidenceTests(unittest.TestCase):
             patch.object(
                 pilot, "_authenticate_distribution_artifact"
             ) as distribution_authenticator,
-            patch.object(pilot, "_authenticate_github_run") as run_authenticator,
+            patch.object(
+                pilot,
+                "_authenticate_github_run",
+                side_effect=(
+                    {
+                        "created_at": "2026-09-01T14:00:00Z",
+                        "run_started_at": "2026-09-01T14:01:00Z",
+                        "updated_at": "2026-09-01T14:30:00Z",
+                    },
+                    {
+                        "created_at": "2026-09-01T14:31:00Z",
+                        "run_started_at": "2026-09-01T14:32:00Z",
+                        "updated_at": "2026-09-01T15:00:00Z",
+                    },
+                ),
+            ) as run_authenticator,
         ):
             result = self._validate(*self._inputs())
 
@@ -210,7 +225,22 @@ class MacPilotEvidenceTests(unittest.TestCase):
                     },
                 ),
             ) as distribution_authenticator,
-            patch.object(pilot, "_authenticate_github_run") as run_authenticator,
+            patch.object(
+                pilot,
+                "_authenticate_github_run",
+                side_effect=(
+                    {
+                        "created_at": "2026-09-01T14:00:00Z",
+                        "run_started_at": "2026-09-01T14:01:00Z",
+                        "updated_at": "2026-09-01T14:30:00Z",
+                    },
+                    {
+                        "created_at": "2026-09-01T14:31:00Z",
+                        "run_started_at": "2026-09-01T14:32:00Z",
+                        "updated_at": "2026-09-01T15:00:00Z",
+                    },
+                ),
+            ) as run_authenticator,
             patch.object(
                 pilot, "_authenticate_review_reference"
             ) as review_authenticator,
@@ -800,6 +830,46 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 source_commit,
                 pilot.MACOS_DISTRIBUTION_WORKFLOW,
                 "artifact",
+            )
+
+    def test_gateway_runs_must_complete_before_the_evidence_snapshot(self) -> None:
+        generated_at = datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc)
+        deployment = {
+            "created_at": "2026-09-01T14:00:00Z",
+            "run_started_at": "2026-09-01T14:01:00Z",
+            "updated_at": "2026-09-01T14:30:00Z",
+        }
+        recovery = {
+            "created_at": "2026-09-01T14:31:00Z",
+            "run_started_at": "2026-09-01T14:32:00Z",
+            "updated_at": "2026-09-01T15:00:00Z",
+        }
+        pilot._validate_gateway_run_timeline(
+            deployment, recovery, generated_at
+        )
+
+        recovery["updated_at"] = "2026-09-01T17:01:00Z"
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "gateway_recovery_chronology_invalid",
+        ):
+            pilot._validate_github_run_timeline(
+                recovery, generated_at, "gateway_recovery"
+            )
+
+        recovery.update(
+            {
+                "created_at": "2026-09-01T14:10:00Z",
+                "run_started_at": "2026-09-01T14:20:00Z",
+                "updated_at": "2026-09-01T14:50:00Z",
+            }
+        )
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "gateway_run_sequence_invalid",
+        ):
+            pilot._validate_gateway_run_timeline(
+                deployment, recovery, generated_at
             )
 
     def test_huge_build_strings_fail_as_contract_errors(self) -> None:

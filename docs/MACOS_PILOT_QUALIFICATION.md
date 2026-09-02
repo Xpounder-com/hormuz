@@ -85,8 +85,10 @@ affected gate on a new build when artifact bytes change.
    this gate. A real pass also authenticates distinct deployment and recovery
    runs through GitHub's API and requires both to be successful default-branch
    runs of `.github/workflows/external-pilot-qualification.yml` at the recorded
-   gateway commit. That operational workflow does not exist yet, so the current
-   repository remains fail-closed for real pilot qualification.
+   gateway commit. Both authenticated run timelines must finish by the
+   aggregate's `generated_at`, and the recovery run must start after the
+   deployment run finishes. That operational workflow does not exist yet, so
+   the current repository remains fail-closed for real pilot qualification.
 7. **Complete independent review.** An independent reviewer must close both the
    security and accessibility reviews after the candidate artifact exists. Each
    aggregate record binds the candidate archive digest, source commit, and
@@ -134,9 +136,11 @@ rejects a rerun candidate, and binds clean-machine and independent-review
 chronology to the authenticated candidate artifact creation time. Qualifying
 public review comments are fetched through GitHub's API; their exact candidate
 attestation, reviewer identity boundary, and update time are checked without
-retaining the reviewer login. The gateway record also carries an evidence-kind
-discriminator; the synthetic gateway domain is rejected when the aggregate
-claims real pilot qualification.
+retaining the reviewer login. Authenticated gateway deployment and recovery
+timelines must also precede the declared evidence snapshot and occur in that
+order. The gateway record carries an evidence-kind discriminator; the
+synthetic gateway domain is rejected when the aggregate claims real pilot
+qualification.
 
 `provider_attempt_record_count` is content-free operational evidence. It does
 not contain request or response content. Provider credentials remain only in

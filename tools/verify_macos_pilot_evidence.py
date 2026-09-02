@@ -550,6 +550,40 @@ def _github_api_json(endpoint: str, label: str) -> object:
     return _parse_json(result.stdout, label)
 
 
+def _validate_github_run_timeline(
+    run: dict[str, Any], generated_at: datetime, label: str
+) -> tuple[datetime, datetime]:
+    created_at = _require_timestamp(run.get("created_at"), f"{label}_created_at")
+    started_at = _require_timestamp(
+        run.get("run_started_at"), f"{label}_started_at"
+    )
+    completed_at = _require_timestamp(
+        run.get("updated_at"), f"{label}_completed_at"
+    )
+    if (
+        created_at > started_at
+        or started_at > completed_at
+        or completed_at > generated_at
+    ):
+        raise MacPilotEvidenceError(f"{label}_chronology_invalid")
+    return started_at, completed_at
+
+
+def _validate_gateway_run_timeline(
+    deployment_run: dict[str, Any],
+    recovery_run: dict[str, Any],
+    generated_at: datetime,
+) -> None:
+    _, deployment_completed_at = _validate_github_run_timeline(
+        deployment_run, generated_at, "gateway_deployment"
+    )
+    recovery_started_at, _ = _validate_github_run_timeline(
+        recovery_run, generated_at, "gateway_recovery"
+    )
+    if deployment_completed_at > recovery_started_at:
+        raise MacPilotEvidenceError("gateway_run_sequence_invalid")
+
+
 def _verify_distribution_artifact_zip(
     artifact_zip: Path,
     proof: dict[str, Any],
@@ -1359,17 +1393,20 @@ def validate_evidence(
     gateway_reason_count = len(reasons)
     gateway = _validate_hosted_gateway(root["hosted_gateway"], evidence_kind, reasons)
     if evidence_kind == "pilot_qualification" and len(reasons) == gateway_reason_count:
-        _authenticate_github_run(
+        deployment_run = _authenticate_github_run(
             gateway["deployment_evidence_url"],
             gateway["source_commit"],
             EXTERNAL_PILOT_WORKFLOW,
             "gateway_deployment",
         )
-        _authenticate_github_run(
+        recovery_run = _authenticate_github_run(
             gateway["recovery_evidence_url"],
             gateway["source_commit"],
             EXTERNAL_PILOT_WORKFLOW,
             "gateway_recovery",
+        )
+        _validate_gateway_run_timeline(
+            deployment_run, recovery_run, generated_at
         )
 
     reviews = _require_fields(root["reviews"], _REVIEWS_FIELDS, "reviews")
