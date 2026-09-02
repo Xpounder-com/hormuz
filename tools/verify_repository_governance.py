@@ -1199,6 +1199,17 @@ def _validate_workflows(
                 raise RepositoryGovernanceError(
                     "macOS distribution source guard changed"
                 )
+            if (
+                text.count("HORMUZ_SOURCE_COMMIT: ${{ github.sha }}") != 1
+                or text.count(
+                    "HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/"
+                    "${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                )
+                != 1
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution proof provenance binding changed"
+                )
             build_job = job_blocks.get("build-and-test")
             signing_job = job_blocks.get("sign-and-notarize")
             signing_fields = job_fields.get("sign-and-notarize", {})

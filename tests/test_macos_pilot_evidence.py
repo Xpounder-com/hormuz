@@ -19,8 +19,11 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "macos_pilot"
 EVIDENCE_PATH = FIXTURE_ROOT / "complete-synthetic-v1.json"
 ARCHIVE_PATH = FIXTURE_ROOT / "Hormuz-0.1.0-notarized.zip"
-PROOF_PATH = FIXTURE_ROOT / "distribution-proof-v1.json"
+PROOF_PATH = FIXTURE_ROOT / "distribution-proof-v2.json"
 NOTARIZATION_PATH = FIXTURE_ROOT / "notarization-v1.json"
+PREVIOUS_ARCHIVE_PATH = FIXTURE_ROOT / "Hormuz-0.0.9-notarized.zip"
+PREVIOUS_PROOF_PATH = FIXTURE_ROOT / "previous-distribution-proof-v2.json"
+PREVIOUS_NOTARIZATION_PATH = FIXTURE_ROOT / "previous-notarization-v1.json"
 NOW = datetime(2026, 9, 1, 18, 0, tzinfo=timezone.utc)
 
 
@@ -28,18 +31,9 @@ class MacPilotEvidenceTests(unittest.TestCase):
     def _json(self, path: Path) -> dict[str, object]:
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def _inputs(
-        self,
-    ) -> tuple[
-        dict[str, object],
-        dict[str, object],
-        dict[str, object],
-        bytes,
-        bytes,
-        int,
-        str,
-    ]:
+    def _inputs(self) -> tuple[object, ...]:
         archive_payload = ARCHIVE_PATH.read_bytes()
+        previous_archive_payload = PREVIOUS_ARCHIVE_PATH.read_bytes()
         return (
             self._json(EVIDENCE_PATH),
             self._json(PROOF_PATH),
@@ -48,6 +42,12 @@ class MacPilotEvidenceTests(unittest.TestCase):
             NOTARIZATION_PATH.read_bytes(),
             len(archive_payload),
             hashlib.sha256(archive_payload).hexdigest(),
+            self._json(PREVIOUS_PROOF_PATH),
+            self._json(PREVIOUS_NOTARIZATION_PATH),
+            PREVIOUS_PROOF_PATH.read_bytes(),
+            PREVIOUS_NOTARIZATION_PATH.read_bytes(),
+            len(previous_archive_payload),
+            hashlib.sha256(previous_archive_payload).hexdigest(),
         )
 
     def _validate(
@@ -59,6 +59,12 @@ class MacPilotEvidenceTests(unittest.TestCase):
         notarization_payload: bytes,
         archive_size: int,
         archive_sha256: str,
+        previous_proof: dict[str, object],
+        previous_notarization: dict[str, object],
+        previous_proof_payload: bytes,
+        previous_notarization_payload: bytes,
+        previous_archive_size: int,
+        previous_archive_sha256: str,
     ) -> dict[str, object]:
         return pilot.validate_evidence(
             evidence,
@@ -69,6 +75,13 @@ class MacPilotEvidenceTests(unittest.TestCase):
             archive_path=ARCHIVE_PATH,
             archive_size=archive_size,
             archive_sha256=archive_sha256,
+            previous_distribution_proof=previous_proof,
+            previous_distribution_proof_payload=previous_proof_payload,
+            previous_notarization_summary=previous_notarization,
+            previous_notarization_summary_payload=previous_notarization_payload,
+            previous_archive_path=PREVIOUS_ARCHIVE_PATH,
+            previous_archive_size=previous_archive_size,
+            previous_archive_sha256=previous_archive_sha256,
             now=NOW,
         )
 
@@ -97,8 +110,10 @@ class MacPilotEvidenceTests(unittest.TestCase):
         inputs = list(self._inputs())
         evidence = copy.deepcopy(inputs[0])
         proof = copy.deepcopy(inputs[1])
+        previous_proof = copy.deepcopy(inputs[7])
         evidence["evidence_kind"] = "pilot_qualification"
         artifact = evidence["artifact"]  # type: ignore[assignment]
+        previous_artifact = evidence["previous_artifact"]  # type: ignore[assignment]
         artifact["source_commit"] = "e" * 40
         artifact["workflow_run_url"] = (
             "https://github.com/Xpounder-com/hormuz/actions/runs/999999"
@@ -108,11 +123,34 @@ class MacPilotEvidenceTests(unittest.TestCase):
         proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
         proof["team_identifier"] = "ZYXWVUTSRQ"
         proof["signing_authority"] = "Developer ID Application: Xpounder (ZYXWVUTSRQ)"
+        proof["source_commit"] = artifact["source_commit"]
+        proof["workflow_run_url"] = artifact["workflow_run_url"]
+        previous_artifact["source_commit"] = "f" * 40
+        previous_artifact["workflow_run_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999998"
+        )
+        previous_artifact["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
+        previous_artifact["team_identifier"] = "ZYXWVUTSRQ"
+        previous_proof["source_commit"] = previous_artifact["source_commit"]
+        previous_proof["workflow_run_url"] = previous_artifact["workflow_run_url"]
+        previous_proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
+        previous_proof["team_identifier"] = "ZYXWVUTSRQ"
+        previous_proof["signing_authority"] = (
+            "Developer ID Application: Xpounder (ZYXWVUTSRQ)"
+        )
         proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
+        previous_proof_payload = (
+            json.dumps(previous_proof, indent=2, sort_keys=True) + "\n"
+        ).encode()
         artifact["distribution_proof_sha256"] = hashlib.sha256(proof_payload).hexdigest()
+        previous_artifact["distribution_proof_sha256"] = hashlib.sha256(
+            previous_proof_payload
+        ).hexdigest()
         inputs[0] = evidence
         inputs[1] = proof
         inputs[3] = proof_payload
+        inputs[7] = previous_proof
+        inputs[9] = previous_proof_payload
 
         result = self._validate(*inputs)
 
@@ -122,30 +160,54 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertIn("not_external_human_validation", result["nonclaims"])
 
     def test_exact_archive_bytes_and_proof_digests_are_bound(self) -> None:
-        inputs = self._inputs()
+        inputs = list(self._inputs())
+        inputs[5] = inputs[5] + 1
         with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "artifact_archive_binding_invalid"):
-            self._validate(*inputs[:-2], inputs[-2] + 1, inputs[-1])
+            self._validate(*inputs)
 
-        (
-            evidence,
-            proof,
-            notarization,
-            _proof_payload,
-            notarization_payload,
-            archive_size,
-            archive_sha256,
-        ) = inputs
+        inputs = list(self._inputs())
+        evidence, proof = inputs[0], inputs[1]
         altered_proof_payload = json.dumps(proof, sort_keys=True).encode()
+        inputs[3] = altered_proof_payload
         with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "artifact_proof_binding_invalid"):
-            self._validate(
-                evidence,
-                proof,
-                notarization,
-                altered_proof_payload,
-                notarization_payload,
-                archive_size,
-                archive_sha256,
-            )
+            self._validate(*inputs)
+
+        inputs = list(self._inputs())
+        inputs[12] = "0" * 64
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "previous_artifact_archive_binding_invalid"
+        ):
+            self._validate(*inputs)
+
+        inputs = list(self._inputs())
+        inputs[9] = json.dumps(inputs[7], sort_keys=True).encode()
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "previous_artifact_proof_binding_invalid"
+        ):
+            self._validate(*inputs)
+
+        inputs = list(self._inputs())
+        inputs[10] = json.dumps(inputs[8], sort_keys=True).encode()
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "previous_artifact_proof_binding_invalid"
+        ):
+            self._validate(*inputs)
+
+    def test_workflow_provenance_is_bound_inside_both_distribution_proofs(self) -> None:
+        inputs = list(self._inputs())
+        proof = copy.deepcopy(inputs[1])
+        proof["source_commit"] = "c" * 40
+        proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
+        evidence = copy.deepcopy(inputs[0])
+        evidence["artifact"]["distribution_proof_sha256"] = hashlib.sha256(  # type: ignore[index]
+            proof_payload
+        ).hexdigest()
+        inputs[0] = evidence
+        inputs[1] = proof
+        inputs[3] = proof_payload
+
+        with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "artifact_proof_binding_invalid"):
+            self._validate(*inputs)
 
     def test_distribution_and_notarization_must_be_customer_ready(self) -> None:
         inputs = list(self._inputs())
@@ -174,6 +236,17 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertEqual(result["clean_machine_architectures"], ["arm64"])
         self.assertIn("clean_machine_architecture_coverage_incomplete", result["reasons"])
 
+    def test_no_clean_machine_runs_is_valid_incomplete_evidence(self) -> None:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        evidence["clean_machine_runs"] = []
+        inputs[0] = evidence
+
+        result = self._validate(*inputs)
+
+        self.assertEqual(result["status"], "not_ready")
+        self.assertIn("clean_machine_architecture_coverage_incomplete", result["reasons"])
+
     def test_update_rollback_and_keychain_lifecycle_are_required(self) -> None:
         inputs = list(self._inputs())
         evidence = copy.deepcopy(inputs[0])
@@ -186,6 +259,37 @@ class MacPilotEvidenceTests(unittest.TestCase):
 
         self.assertIn("update_rollback_build_sequence_invalid", result["reasons"])
         self.assertIn("keychain_and_session_lifecycle_incomplete", result["reasons"])
+
+    def test_lifecycle_must_name_the_bound_previous_archive_build(self) -> None:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        evidence["lifecycle"]["update_from_build"] = "3"  # type: ignore[index]
+        evidence["lifecycle"]["rollback_to_build"] = "3"  # type: ignore[index]
+        inputs[0] = evidence
+
+        result = self._validate(*inputs)
+
+        self.assertIn("update_rollback_build_sequence_invalid", result["reasons"])
+
+    def test_previous_archive_must_come_from_a_distinct_workflow(self) -> None:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        previous_proof = copy.deepcopy(inputs[7])
+        workflow_run_url = evidence["artifact"]["workflow_run_url"]  # type: ignore[index]
+        evidence["previous_artifact"]["workflow_run_url"] = workflow_run_url  # type: ignore[index]
+        previous_proof["workflow_run_url"] = workflow_run_url
+        previous_proof_payload = (
+            json.dumps(previous_proof, indent=2, sort_keys=True) + "\n"
+        ).encode()
+        evidence["previous_artifact"]["distribution_proof_sha256"] = hashlib.sha256(  # type: ignore[index]
+            previous_proof_payload
+        ).hexdigest()
+        inputs[0] = evidence
+        inputs[7] = previous_proof
+        inputs[9] = previous_proof_payload
+
+        with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "artifact_history_binding_invalid"):
+            self._validate(*inputs)
 
     def test_signed_client_401_semantics_prevent_duplicate_egress(self) -> None:
         inputs = list(self._inputs())
@@ -201,6 +305,17 @@ class MacPilotEvidenceTests(unittest.TestCase):
             pilot.SUPPORTED_CLAUDE_CODE_VERSION,
             client_release_versions.SUPPORTED_CLAUDE_CODE_VERSION,
         )
+
+    def test_no_client_recovery_runs_is_valid_incomplete_evidence(self) -> None:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        evidence["client_auth_recovery"] = []
+        inputs[0] = evidence
+
+        result = self._validate(*inputs)
+
+        self.assertEqual(result["status"], "not_ready")
+        self.assertIn("signed_client_401_recovery_incomplete", result["reasons"])
 
     def test_live_gateway_requires_extra_attempt_for_bounded_failover(self) -> None:
         inputs = list(self._inputs())
@@ -220,6 +335,62 @@ class MacPilotEvidenceTests(unittest.TestCase):
             result["reasons"],
         )
         self.assertIn("unsupported_availability_sla_claimed", result["reasons"])
+
+    def test_gateway_requires_both_protocols_and_one_attempt_per_failover_link(self) -> None:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        evidence["hosted_gateway"]["provider_protocols"] = ["openai"]  # type: ignore[index]
+        inputs[0] = evidence
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "gateway_provider_protocols_invalid"
+        ):
+            self._validate(*inputs)
+
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        gateway = evidence["hosted_gateway"]  # type: ignore[assignment]
+        gateway["provider_attempt_record_count"] = 9
+        gateway["failover_link_record_count"] = 5
+        inputs[0] = evidence
+
+        result = self._validate(*inputs)
+
+        self.assertIn("live_provider_failover_evidence_incomplete", result["reasons"])
+
+    def test_huge_build_strings_fail_as_contract_errors(self) -> None:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        evidence["artifact"]["build"] = "9" * 5_000  # type: ignore[index]
+        inputs[0] = evidence
+
+        with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "artifact_build_invalid"):
+            self._validate(*inputs)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence_path = Path(temporary) / "huge-build.json"
+            evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = pilot.main(
+                    [
+                        str(evidence_path),
+                        "--archive",
+                        str(ARCHIVE_PATH),
+                        "--distribution-proof",
+                        str(PROOF_PATH),
+                        "--notarization-summary",
+                        str(NOTARIZATION_PATH),
+                        "--previous-archive",
+                        str(PREVIOUS_ARCHIVE_PATH),
+                        "--previous-distribution-proof",
+                        str(PREVIOUS_PROOF_PATH),
+                        "--previous-notarization-summary",
+                        str(PREVIOUS_NOTARIZATION_PATH),
+                        "--allow-synthetic-fixture",
+                    ]
+                )
+        self.assertEqual(result, 2)
+        self.assertIn("artifact_build_invalid", stderr.getvalue())
 
     def test_independent_security_and_accessibility_reviews_are_required(self) -> None:
         inputs = list(self._inputs())
@@ -299,6 +470,12 @@ class MacPilotEvidenceTests(unittest.TestCase):
                     str(PROOF_PATH),
                     "--notarization-summary",
                     str(NOTARIZATION_PATH),
+                    "--previous-archive",
+                    str(PREVIOUS_ARCHIVE_PATH),
+                    "--previous-distribution-proof",
+                    str(PREVIOUS_PROOF_PATH),
+                    "--previous-notarization-summary",
+                    str(PREVIOUS_NOTARIZATION_PATH),
                 ]
             )
         self.assertEqual(result, 2)
@@ -311,6 +488,37 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 pilot.MacPilotEvidenceError, "evidence_not_bounded_regular_file"
             ):
                 pilot._read_bounded_regular(link, pilot._MAX_FILE_BYTES, "evidence")
+
+    def test_synthetic_override_succeeds_only_when_fixture_is_the_sole_reason(self) -> None:
+        evidence = self._json(EVIDENCE_PATH)
+        evidence["clean_machine_runs"] = []
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence_path = Path(temporary) / "incomplete-synthetic.json"
+            evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = pilot.main(
+                    [
+                        str(evidence_path),
+                        "--archive",
+                        str(ARCHIVE_PATH),
+                        "--distribution-proof",
+                        str(PROOF_PATH),
+                        "--notarization-summary",
+                        str(NOTARIZATION_PATH),
+                        "--previous-archive",
+                        str(PREVIOUS_ARCHIVE_PATH),
+                        "--previous-distribution-proof",
+                        str(PREVIOUS_PROOF_PATH),
+                        "--previous-notarization-summary",
+                        str(PREVIOUS_NOTARIZATION_PATH),
+                        "--allow-synthetic-fixture",
+                    ]
+                )
+
+        self.assertEqual(result, 1)
+        self.assertIn("clean_machine_architecture_coverage_incomplete", stdout.getvalue())
 
 
 if __name__ == "__main__":

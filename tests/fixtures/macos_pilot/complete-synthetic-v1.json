@@ -5,7 +5,7 @@
     "archive_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
     "build": "2",
     "bundle_identifier": "com.example.hormuzpilot",
-    "distribution_proof_sha256": "8d082e3a4e4156c17a998d8c4a8d51c225d97dfe654672ecf51b30daf6da6303",
+    "distribution_proof_sha256": "6f9d467ab9822de93bee3af45f9db73475e18f8aeecd80a47ecb56dbad65449e",
     "notarization_summary_sha256": "ca4086fbdf115cb260ead3b3a8ac8e8d89ffde294b9f89ab5cf57a160a82c3c6",
     "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "submission_id": "11111111-1111-4111-8111-111111111111",
@@ -141,6 +141,20 @@
     "existing_external_onboarding_counts_unchanged": true,
     "no_availability_sla_claim": true,
     "prompts_responses_absent": true
+  },
+  "previous_artifact": {
+    "archive_bytes": 69,
+    "archive_name": "Hormuz-0.0.9-notarized.zip",
+    "archive_sha256": "d4c596c1319a67644c6a3324e2b34ae0c49071cb79f3cd2d5289109f0a128474",
+    "build": "1",
+    "bundle_identifier": "com.example.hormuzpilot",
+    "distribution_proof_sha256": "acb00f061cf1b50380594060c3c4d25a1deab458646e58d1709ece20010d93ab",
+    "notarization_summary_sha256": "45043440fa15a900858f7adba3a4100a7ca22d0a8b1844f651deb3f9a34939f9",
+    "source_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "submission_id": "22222222-2222-4222-8222-222222222222",
+    "team_identifier": "ABCDEFGHIJ",
+    "version": "0.0.9",
+    "workflow_run_url": "https://github.com/Xpounder-com/hormuz/actions/runs/4"
   },
   "reviews": {
     "accessibility": {

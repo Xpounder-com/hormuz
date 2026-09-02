@@ -240,6 +240,8 @@ jobs:
           HORMUZ_BUILD_NUMBER: ${{ steps.release.outputs.build_number }}
           HORMUZ_BUNDLE_ID: ${{ steps.release.outputs.bundle_identifier }}
           HORMUZ_UNSIGNED_PAYLOAD: ${{ runner.temp }}/hormuz-unsigned-payload
+          HORMUZ_SOURCE_COMMIT: ${{ github.sha }}
+          HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           umask 077

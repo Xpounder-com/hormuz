@@ -47,7 +47,7 @@ _REVISION_RE = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _TEAM_ID_RE = re.compile(r"[A-Z0-9]{10}\Z")
 _VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\Z")
-_BUILD_RE = re.compile(r"[1-9][0-9]*\Z")
+_BUILD_RE = re.compile(r"[1-9][0-9]{0,17}\Z")
 _BUNDLE_ID_RE = re.compile(r"[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)+\Z")
 _CLIENT_VERSION_RE = re.compile(r"[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9.-]+)?\Z")
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
@@ -68,6 +68,7 @@ _ROOT_FIELDS = {
     "generated_at",
     "claim_scope",
     "artifact",
+    "previous_artifact",
     "clean_machine_runs",
     "lifecycle",
     "client_auth_recovery",
@@ -112,6 +113,8 @@ _DISTRIBUTION_PROOF_FIELDS = {
     "archive_sha256",
     "executable_sha256",
     "icon_sha256",
+    "source_commit",
+    "workflow_run_url",
 }
 _NOTARIZATION_FIELDS = {
     "schema_id",
@@ -444,7 +447,7 @@ def _sha256(payload: bytes) -> str:
 
 def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str, Any]:
     proof = _require_fields(value, _DISTRIBUTION_PROOF_FIELDS, "distribution_proof")
-    _require_int(proof["schema_version"], 1, 1, "distribution_proof_schema_version")
+    _require_int(proof["schema_version"], 2, 2, "distribution_proof_schema_version")
     if (
         proof["schema_id"] != "hormuz.macos-distribution-proof"
         or proof["passed"] is not True
@@ -462,6 +465,8 @@ def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str,
     if bundle_id.endswith(".local"):
         raise MacPilotEvidenceError("proof_bundle_identifier_local")
     _require_bool(proof["executable_version_verified"], "proof_executable_version_verified")
+    _require_pattern(proof["source_commit"], _REVISION_RE, "proof_source_commit")
+    _require_pattern(proof["workflow_run_url"], _ACTIONS_RUN_RE, "proof_workflow_run_url")
     _require_pattern(proof["version"], _VERSION_RE, "proof_version")
     _require_pattern(proof["build"], _BUILD_RE, "proof_build")
     team_id = _require_pattern(proof["team_identifier"], _TEAM_ID_RE, "proof_team_identifier")
@@ -517,25 +522,29 @@ def _validate_artifact(
     archive_path: Path,
     archive_size: int,
     archive_sha256: str,
+    *,
+    label: str = "artifact",
 ) -> dict[str, Any]:
-    artifact = _require_fields(value, _ARTIFACT_FIELDS, "artifact")
-    _require_pattern(artifact["source_commit"], _REVISION_RE, "artifact_source_commit")
-    _require_pattern(artifact["workflow_run_url"], _ACTIONS_RUN_RE, "artifact_workflow_run_url")
-    _require_pattern(artifact["bundle_identifier"], _BUNDLE_ID_RE, "artifact_bundle_identifier")
-    _require_pattern(artifact["version"], _VERSION_RE, "artifact_version")
-    _require_pattern(artifact["build"], _BUILD_RE, "artifact_build")
-    _require_pattern(artifact["team_identifier"], _TEAM_ID_RE, "artifact_team_identifier")
-    _require_pattern(artifact["archive_sha256"], _SHA256_RE, "artifact_archive_sha256")
+    artifact = _require_fields(value, _ARTIFACT_FIELDS, label)
+    _require_pattern(artifact["source_commit"], _REVISION_RE, f"{label}_source_commit")
+    _require_pattern(artifact["workflow_run_url"], _ACTIONS_RUN_RE, f"{label}_workflow_run_url")
+    _require_pattern(artifact["bundle_identifier"], _BUNDLE_ID_RE, f"{label}_bundle_identifier")
+    _require_pattern(artifact["version"], _VERSION_RE, f"{label}_version")
+    _require_pattern(artifact["build"], _BUILD_RE, f"{label}_build")
+    _require_pattern(artifact["team_identifier"], _TEAM_ID_RE, f"{label}_team_identifier")
+    _require_pattern(artifact["archive_sha256"], _SHA256_RE, f"{label}_archive_sha256")
     _require_pattern(
-        artifact["distribution_proof_sha256"], _SHA256_RE, "artifact_distribution_proof_sha256"
+        artifact["distribution_proof_sha256"], _SHA256_RE, f"{label}_distribution_proof_sha256"
     )
     _require_pattern(
-        artifact["notarization_summary_sha256"], _SHA256_RE, "artifact_notarization_summary_sha256"
+        artifact["notarization_summary_sha256"], _SHA256_RE, f"{label}_notarization_summary_sha256"
     )
-    _require_pattern(artifact["submission_id"], _SUBMISSION_ID_RE, "artifact_submission_id")
-    _require_int(artifact["archive_bytes"], 1, _MAX_ARCHIVE_BYTES, "artifact_archive_bytes")
+    _require_pattern(artifact["submission_id"], _SUBMISSION_ID_RE, f"{label}_submission_id")
+    _require_int(artifact["archive_bytes"], 1, _MAX_ARCHIVE_BYTES, f"{label}_archive_bytes")
     expected_name = f"Hormuz-{proof['version']}-notarized.zip"
     expected = {
+        "source_commit": proof["source_commit"],
+        "workflow_run_url": proof["workflow_run_url"],
         "bundle_identifier": proof["bundle_identifier"],
         "version": proof["version"],
         "build": proof["build"],
@@ -548,18 +557,18 @@ def _validate_artifact(
         "submission_id": notarization["submission_id"],
     }
     if any(artifact[field] != expected_value for field, expected_value in expected.items()):
-        raise MacPilotEvidenceError("artifact_proof_binding_invalid")
+        raise MacPilotEvidenceError(f"{label}_proof_binding_invalid")
     if archive_path.name != expected_name:
-        raise MacPilotEvidenceError("artifact_archive_name_invalid")
+        raise MacPilotEvidenceError(f"{label}_archive_name_invalid")
     if archive_size != proof["archive_bytes"] or archive_sha256 != proof["archive_sha256"]:
-        raise MacPilotEvidenceError("artifact_archive_binding_invalid")
+        raise MacPilotEvidenceError(f"{label}_archive_binding_invalid")
     return artifact
 
 
 def _validate_clean_machines(
     value: object, artifact_sha256: str, generated_at: datetime, reasons: list[str]
 ) -> list[str]:
-    if not isinstance(value, list) or not 1 <= len(value) <= 8:
+    if not isinstance(value, list) or len(value) > 8:
         raise MacPilotEvidenceError("clean_machine_runs_invalid")
     seen_ids: set[str] = set()
     qualifying_architectures: set[str] = set()
@@ -592,12 +601,19 @@ def _validate_clean_machines(
     return sorted(qualifying_architectures)
 
 
-def _validate_lifecycle(value: object, artifact_build: str, reasons: list[str]) -> None:
+def _validate_lifecycle(
+    value: object, previous_artifact_build: str, artifact_build: str, reasons: list[str]
+) -> None:
     lifecycle = _require_fields(value, _LIFECYCLE_FIELDS, "lifecycle")
     source_build = int(_require_pattern(lifecycle["update_from_build"], _BUILD_RE, "update_from_build"))
     target_build = int(_require_pattern(lifecycle["update_to_build"], _BUILD_RE, "update_to_build"))
     rollback_build = int(_require_pattern(lifecycle["rollback_to_build"], _BUILD_RE, "rollback_to_build"))
-    if not (target_build > source_build and rollback_build == source_build and str(target_build) == artifact_build):
+    if not (
+        source_build == int(previous_artifact_build)
+        and target_build == int(artifact_build)
+        and rollback_build == int(previous_artifact_build)
+        and target_build > source_build
+    ):
         reasons.append("update_rollback_build_sequence_invalid")
     lifecycle_checks = {
         field: _require_bool(lifecycle[field], f"lifecycle_{field}")
@@ -608,7 +624,7 @@ def _validate_lifecycle(value: object, artifact_build: str, reasons: list[str]) 
 
 
 def _validate_client_recovery(value: object, artifact_sha256: str, reasons: list[str]) -> None:
-    if not isinstance(value, list) or not 1 <= len(value) <= 2:
+    if not isinstance(value, list) or len(value) > 2:
         raise MacPilotEvidenceError("client_auth_recovery_invalid")
     seen: set[str] = set()
     complete: set[str] = set()
@@ -664,7 +680,7 @@ def _validate_hosted_gateway(value: object, reasons: list[str]) -> None:
         or not protocols
         or not all(isinstance(protocol, str) for protocol in protocols)
         or protocols != sorted(set(protocols))
-        or not set(protocols) <= {"openai", "anthropic"}
+        or protocols != ["anthropic", "openai"]
     ):
         raise MacPilotEvidenceError("gateway_provider_protocols_invalid")
     live_requests = _require_int(
@@ -710,7 +726,14 @@ def _validate_hosted_gateway(value: object, reasons: list[str]) -> None:
         or total_samples < 1
     ):
         reasons.append("live_streaming_latency_cancellation_evidence_incomplete")
-    if attempts <= live_requests or failover_links < 1 or failover_hops != 1:
+    extra_attempts = attempts - live_requests
+    if (
+        live_requests < 1
+        or extra_attempts < 1
+        or attempts > live_requests * 2
+        or failover_links != extra_attempts
+        or failover_hops != 1
+    ):
         reasons.append("live_provider_failover_evidence_incomplete")
     if sla_claimed:
         reasons.append("unsupported_availability_sla_claimed")
@@ -747,6 +770,13 @@ def validate_evidence(
     archive_path: Path,
     archive_size: int,
     archive_sha256: str,
+    previous_distribution_proof: object,
+    previous_distribution_proof_payload: bytes,
+    previous_notarization_summary: object,
+    previous_notarization_summary_payload: bytes,
+    previous_archive_path: Path,
+    previous_archive_size: int,
+    previous_archive_sha256: str,
     now: datetime | None = None,
 ) -> dict[str, object]:
     root = _require_fields(value, _ROOT_FIELDS, "evidence")
@@ -775,12 +805,36 @@ def validate_evidence(
         archive_size,
         archive_sha256,
     )
+    previous_proof = _validate_distribution_proof(previous_distribution_proof, evidence_kind)
+    previous_notarization = _validate_notarization(previous_notarization_summary)
+    previous_artifact = _validate_artifact(
+        root["previous_artifact"],
+        previous_proof,
+        previous_distribution_proof_payload,
+        previous_notarization,
+        previous_notarization_summary_payload,
+        previous_archive_path,
+        previous_archive_size,
+        previous_archive_sha256,
+        label="previous_artifact",
+    )
+    if (
+        artifact["bundle_identifier"] != previous_artifact["bundle_identifier"]
+        or artifact["team_identifier"] != previous_artifact["team_identifier"]
+        or int(artifact["build"]) <= int(previous_artifact["build"])
+        or artifact["archive_sha256"] == previous_artifact["archive_sha256"]
+        or artifact["workflow_run_url"] == previous_artifact["workflow_run_url"]
+        or artifact["submission_id"] == previous_artifact["submission_id"]
+    ):
+        raise MacPilotEvidenceError("artifact_history_binding_invalid")
 
     reasons: list[str] = []
     architectures = _validate_clean_machines(
         root["clean_machine_runs"], artifact["archive_sha256"], generated_at, reasons
     )
-    _validate_lifecycle(root["lifecycle"], artifact["build"], reasons)
+    _validate_lifecycle(
+        root["lifecycle"], previous_artifact["build"], artifact["build"], reasons
+    )
     _validate_client_recovery(root["client_auth_recovery"], artifact["archive_sha256"], reasons)
     _validate_hosted_gateway(root["hosted_gateway"], reasons)
 
@@ -818,6 +872,7 @@ def validate_evidence(
         "ready_for_controlled_external_pilot": ready,
         "claim_scope": CLAIM_SCOPE,
         "artifact_sha256": artifact["archive_sha256"],
+        "previous_artifact_sha256": previous_artifact["archive_sha256"],
         "source_commit": artifact["source_commit"],
         "clean_machine_architectures": architectures,
         "external_initial_completion_count": 0,
@@ -839,6 +894,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--distribution-proof", type=Path, required=True)
     parser.add_argument("--notarization-summary", type=Path, required=True)
+    parser.add_argument("--previous-archive", type=Path, required=True)
+    parser.add_argument("--previous-distribution-proof", type=Path, required=True)
+    parser.add_argument("--previous-notarization-summary", type=Path, required=True)
     parser.add_argument("--allow-synthetic-fixture", action="store_true")
     return parser
 
@@ -856,6 +914,19 @@ def main(argv: list[str] | None = None) -> int:
         archive_size, archive_sha256 = _digest_bounded_regular(
             args.archive, _MAX_ARCHIVE_BYTES, "archive"
         )
+        previous_proof_payload = _read_bounded_regular(
+            args.previous_distribution_proof,
+            _MAX_FILE_BYTES,
+            "previous_distribution_proof",
+        )
+        previous_notarization_payload = _read_bounded_regular(
+            args.previous_notarization_summary,
+            _MAX_FILE_BYTES,
+            "previous_notarization_summary",
+        )
+        previous_archive_size, previous_archive_sha256 = _digest_bounded_regular(
+            args.previous_archive, _MAX_ARCHIVE_BYTES, "previous_archive"
+        )
         evidence = _parse_json(evidence_payload, "evidence")
         if (
             isinstance(evidence, dict)
@@ -872,6 +943,17 @@ def main(argv: list[str] | None = None) -> int:
             archive_path=args.archive,
             archive_size=archive_size,
             archive_sha256=archive_sha256,
+            previous_distribution_proof=_parse_json(
+                previous_proof_payload, "previous_distribution_proof"
+            ),
+            previous_distribution_proof_payload=previous_proof_payload,
+            previous_notarization_summary=_parse_json(
+                previous_notarization_payload, "previous_notarization_summary"
+            ),
+            previous_notarization_summary_payload=previous_notarization_payload,
+            previous_archive_path=args.previous_archive,
+            previous_archive_size=previous_archive_size,
+            previous_archive_sha256=previous_archive_sha256,
         )
     except MacPilotEvidenceError as error:
         print(f"macos_pilot_evidence=invalid code={error}", file=sys.stderr)
@@ -879,7 +961,7 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(result, indent=2, sort_keys=True))
     if result["ready_for_controlled_external_pilot"]:
         return 0
-    if "synthetic_fixture" in result["reasons"] and args.allow_synthetic_fixture:
+    if result["reasons"] == ["synthetic_fixture"] and args.allow_synthetic_fixture:
         return 0
     return 1
 

@@ -60,8 +60,8 @@ affected gate on a new build when artifact bytes change.
    closes upstream work, records an outcome-unknown attempt, and causes zero
    replay, and header/first-byte/total latency samples are retained. Prove one
    policy-bounded same-protocol failover with a one-hop limit and a durable
-   failover link. The retained request-attempt count must exceed the logical
-   request count so a real fallback attempt is represented. Monitor worker
+   failover link. Each request may have at most one fallback attempt, and the
+   durable failover-link count must equal the extra attempt count. Monitor worker
    saturation and PostgreSQL pool wait. The current Render
    authentication staging profile has inference disabled and cannot satisfy
    this gate.
@@ -87,8 +87,11 @@ bundle identity and a non-fixture Developer ID team. The checked-in synthetic
 identity is accepted only while `evidence_kind` remains
 `synthetic_test_fixture`; changing that marker cannot promote the fixture into
 a qualifying artifact. The distribution-proof schema matches the exact
-`distribution-proof.json` emitted by the protected signing workflow, including
-its `executable_version_verified` field.
+v2 `distribution-proof.json` emitted by the protected signing workflow,
+including its `executable_version_verified`, `source_commit`, and
+`workflow_run_url` fields. The aggregate binds those workflow-origin fields for
+both the candidate and the retained previous archive; operator-entered
+provenance cannot substitute for the protected workflow proof.
 
 `provider_attempt_record_count` is content-free operational evidence. It does
 not contain request or response content. Provider credentials remain only in
@@ -106,7 +109,10 @@ python3 tools/verify_macos_pilot_evidence.py \
   /private/path/macos-pilot-qualification.json \
   --archive /private/path/Hormuz-0.1.0-notarized.zip \
   --distribution-proof /private/path/distribution-proof.json \
-  --notarization-summary /private/path/notarization.json
+  --notarization-summary /private/path/notarization.json \
+  --previous-archive /private/path/Hormuz-0.0.9-notarized.zip \
+  --previous-distribution-proof /private/path/previous-distribution-proof.json \
+  --previous-notarization-summary /private/path/previous-notarization.json
 ```
 
 Exit status `0` means the real aggregate is ready for a controlled external
@@ -121,8 +127,11 @@ shape so CI can execute every branch of the contract:
 python3 tools/verify_macos_pilot_evidence.py \
   tests/fixtures/macos_pilot/complete-synthetic-v1.json \
   --archive tests/fixtures/macos_pilot/Hormuz-0.1.0-notarized.zip \
-  --distribution-proof tests/fixtures/macos_pilot/distribution-proof-v1.json \
+  --distribution-proof tests/fixtures/macos_pilot/distribution-proof-v2.json \
   --notarization-summary tests/fixtures/macos_pilot/notarization-v1.json \
+  --previous-archive tests/fixtures/macos_pilot/Hormuz-0.0.9-notarized.zip \
+  --previous-distribution-proof tests/fixtures/macos_pilot/previous-distribution-proof-v2.json \
+  --previous-notarization-summary tests/fixtures/macos_pilot/previous-notarization-v1.json \
   --allow-synthetic-fixture
 ```
 

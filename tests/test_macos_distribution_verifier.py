@@ -24,7 +24,12 @@ from tools.verify_macos_distribution import (
 
 class MacOSDistributionArchiveTests(unittest.TestCase):
     def _run_distribution_main(
-        self, root: Path, *, verify_executable_version: bool
+        self,
+        root: Path,
+        *,
+        verify_executable_version: bool,
+        source_commit: str | None = None,
+        workflow_run_url: str | None = None,
     ) -> tuple[dict[str, object], object]:
         bundle = root / "Hormuz.app"
         executable = bundle / "Contents/MacOS/Hormuz"
@@ -70,6 +75,10 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
         ]
         if verify_executable_version:
             arguments.append("--verify-executable-version")
+        if source_commit is not None:
+            arguments.extend(("--source-commit", source_commit))
+        if workflow_run_url is not None:
+            arguments.extend(("--workflow-run-url", workflow_run_url))
         with (
             patch.object(sys, "argv", arguments),
             patch(
@@ -185,6 +194,8 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
             )
         runtime.assert_not_called()
         self.assertFalse(proof["executable_version_verified"])
+        self.assertEqual(proof["schema_version"], 1)
+        self.assertNotIn("source_commit", proof)
 
     def test_distribution_verifier_executes_payload_only_with_explicit_opt_in(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -193,6 +204,41 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
             )
         runtime.assert_called_once()
         self.assertTrue(proof["executable_version_verified"])
+
+    def test_distribution_proof_binds_protected_workflow_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            proof, _runtime = self._run_distribution_main(
+                Path(temporary),
+                verify_executable_version=False,
+                source_commit="a" * 40,
+                workflow_run_url=(
+                    "https://github.com/Xpounder-com/hormuz/actions/runs/12345"
+                ),
+            )
+        self.assertEqual(proof["schema_version"], 2)
+        self.assertEqual(proof["source_commit"], "a" * 40)
+        self.assertEqual(
+            proof["workflow_run_url"],
+            "https://github.com/Xpounder-com/hormuz/actions/runs/12345",
+        )
+
+    def test_distribution_provenance_must_be_complete_and_repository_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(VerificationError, "incomplete_workflow_provenance"):
+                self._run_distribution_main(
+                    Path(temporary),
+                    verify_executable_version=False,
+                    source_commit="a" * 40,
+                )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(VerificationError, "invalid_workflow_provenance"):
+                self._run_distribution_main(
+                    Path(temporary),
+                    verify_executable_version=False,
+                    source_commit="a" * 40,
+                    workflow_run_url="https://github.com/other/repo/actions/runs/1",
+                )
 
 
 if __name__ == "__main__":

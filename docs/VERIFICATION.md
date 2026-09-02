@@ -219,8 +219,11 @@ Run the content-free synthetic contract check with:
 python tools/verify_macos_pilot_evidence.py \
   tests/fixtures/macos_pilot/complete-synthetic-v1.json \
   --archive tests/fixtures/macos_pilot/Hormuz-0.1.0-notarized.zip \
-  --distribution-proof tests/fixtures/macos_pilot/distribution-proof-v1.json \
+  --distribution-proof tests/fixtures/macos_pilot/distribution-proof-v2.json \
   --notarization-summary tests/fixtures/macos_pilot/notarization-v1.json \
+  --previous-archive tests/fixtures/macos_pilot/Hormuz-0.0.9-notarized.zip \
+  --previous-distribution-proof tests/fixtures/macos_pilot/previous-distribution-proof-v2.json \
+  --previous-notarization-summary tests/fixtures/macos_pilot/previous-notarization-v1.json \
   --allow-synthetic-fixture
 ```
 

@@ -41,7 +41,7 @@ Submit, staple, and repackage the same app:
   --keychain-profile hormuz-notary
 ```
 
-Packaging refuses an existing output directory, a `.local` identifier, a non-universal binary, an ambiguous signing identity, non-system runtime dependencies, custom entitlements, a missing secure timestamp, or unexpected archive files. Notarization must return `Accepted`; the ticket is then stapled to the app, Gatekeeper is assessed, and a new `Hormuz-<version>-notarized.zip` is produced. `distribution-proof.json` records only digests and content-free verification results.
+Packaging refuses an existing output directory, a `.local` identifier, a non-universal binary, an ambiguous signing identity, non-system runtime dependencies, custom entitlements, a missing secure timestamp, or unexpected archive files. Notarization must return `Accepted`; the ticket is then stapled to the app, Gatekeeper is assessed, and a new `Hormuz-<version>-notarized.zip` is produced. `distribution-proof.json` records only digests and content-free verification results. In the protected workflow its v2 shape also records the exact source commit and GitHub Actions run URL, allowing the pilot gate to verify provenance from the proof rather than an operator assertion.
 
 The notarization step also downloads Apple's private submission log into a temporary directory, requires no reported issues and at least two ticket entries for the universal app, then deletes the raw log. Its retained summary contains only the submission ID, acceptance state, issue counts, and ticket-entry count. The final verifier extracts the customer ZIP and repeats signature, stapler, and Gatekeeper checks on that extracted copy, so packaging cannot silently discard the ticket.
 

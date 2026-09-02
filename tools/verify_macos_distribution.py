@@ -19,6 +19,10 @@ from typing import BinaryIO
 
 
 MODES = {"ad-hoc", "developer-id", "notarized"}
+SOURCE_COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
+WORKFLOW_RUN_URL_RE = re.compile(
+    r"https://github\.com/Xpounder-com/hormuz/actions/runs/[1-9][0-9]*\Z"
+)
 BASE_EXPECTED_FILES = {
     "Hormuz.app/Contents/Info.plist",
     "Hormuz.app/Contents/MacOS/Hormuz",
@@ -165,8 +169,19 @@ def main() -> int:
         action="store_true",
         help="Execute the packaged binary to verify --version; use only without credentials",
     )
+    parser.add_argument("--source-commit")
+    parser.add_argument("--workflow-run-url")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
+
+    provenance_supplied = args.source_commit is not None or args.workflow_run_url is not None
+    if (args.source_commit is None) != (args.workflow_run_url is None):
+        raise VerificationError("incomplete_workflow_provenance")
+    if provenance_supplied and (
+        SOURCE_COMMIT_RE.fullmatch(args.source_commit) is None
+        or WORKFLOW_RUN_URL_RE.fullmatch(args.workflow_run_url) is None
+    ):
+        raise VerificationError("invalid_workflow_provenance")
 
     bundle = args.bundle.resolve()
     archive = args.archive.resolve()
@@ -213,7 +228,7 @@ def main() -> int:
 
     result = {
         "schema_id": "hormuz.macos-distribution-proof",
-        "schema_version": 1,
+        "schema_version": 2 if provenance_supplied else 1,
         "passed": True,
         "mode": args.mode,
         "distribution_ready": args.mode == "notarized",
@@ -234,6 +249,13 @@ def main() -> int:
         "executable_sha256": digest(executable),
         "icon_sha256": digest(icon),
     }
+    if provenance_supplied:
+        result.update(
+            {
+                "source_commit": args.source_commit,
+                "workflow_run_url": args.workflow_run_url,
+            }
+        )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     os.chmod(args.output, 0o600)
