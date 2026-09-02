@@ -73,6 +73,19 @@ affected gate on a new build when artifact bytes change.
    refresh once, avoid automatic replay, and complete only after one explicit
    next request. Both records bind to the notarized archive digest and attest
    that the native Keychain helper supplied the Hormuz session.
+   Real qualification authenticates gates 3 through 5 through one successful
+   default-branch workflow-dispatch run of
+   `.github/workflows/macos-pilot-operations.yml` at the candidate source
+   commit. The run must start after the authenticated candidate artifact is
+   created and finish before the aggregate's `generated_at`. It publishes one
+   unexpired `hormuz-macos-pilot-operations-<run number>-<attempt>` artifact
+   containing only `macos-pilot-operations-evidence.json`. That strict
+   `hormuz.macos-pilot-operations-evidence` v1 proof binds both distribution
+   run URLs, source commits, and archive digests, then reproduces the exact
+   clean-machine, lifecycle, and official-client recovery records. The
+   verifier downloads the artifact through the authenticated GitHub API and
+   exact-compares all three record groups. The operational workflow does not
+   exist yet, so caller-authored booleans cannot qualify a real pilot.
 6. **Qualify the hosted gateway.** Use a separately deployed
    `external_pilot` profile with HTTPS, real Okta login, server-only provider
    credentials, PostgreSQL durability and tenant RLS, durable sessions,
@@ -102,7 +115,7 @@ affected gate on a new build when artifact bytes change.
    hosted-gateway field and is validated through the same live contract before
    exact comparison. Both artifact ZIPs are downloaded through authenticated
    GitHub API calls and reject duplicate, path-bearing, encrypted, oversized,
-   expired, malformed, or extra members. That operational workflow does not
+   expired, malformed, or extra members. That gateway workflow does not
    exist yet, so the current repository remains fail-closed for real pilot
    qualification.
 7. **Complete independent review.** An independent reviewer must close both the
@@ -149,7 +162,10 @@ exact retained files occur in each run's final Actions artifact. Expired,
 duplicate, malformed, oversized, encrypted, path-bearing, or extra artifact
 members fail closed. It also requires consecutive distribution run numbers,
 rejects a rerun candidate, and binds clean-machine and independent-review
-chronology to the authenticated candidate artifact creation time. Qualifying
+chronology to the authenticated candidate artifact creation time. The exact
+clean-machine, lifecycle, and official-client records must also occur in the
+authenticated candidate-bound macOS operations artifact; copying them into the
+aggregate cannot qualify. Qualifying
 public review comments are fetched through GitHub's API; their exact candidate
 attestation, reviewer identity boundary, and update time are checked without
 retaining the reviewer login. Authenticated gateway deployment and recovery
@@ -157,6 +173,12 @@ timelines must also precede the declared evidence snapshot and occur in that
 order. The gateway record carries an evidence-kind discriminator; the
 synthetic gateway domain is rejected when the aggregate claims real pilot
 qualification.
+
+GitHub artifact downloads are streamed through a 64 KiB reader. The verifier
+uses the authenticated `size_in_bytes` value as an exact upper bound, retains a
+separate absolute cap, and terminates the child process before writing a chunk
+that would exceed either bound. A large or inconsistent response therefore
+cannot fill the destination and be rejected only after the download completes.
 
 The CLI never platform-verifies the caller-controlled archive pathname after
 the initial read. It copies the bounded regular file through a no-follow

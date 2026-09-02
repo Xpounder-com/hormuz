@@ -232,9 +232,13 @@ pass must run on macOS with authenticated GitHub CLI access, independently
 recheck both archives with codesign, stapler, and Gatekeeper, require Apple team
 `R267LZMUTY`, authenticate the recorded default-branch workflow runs, download
 their final unexpired Actions artifacts, and byte-bind each supplied archive,
-proof, and notarization summary to the corresponding artifact members. It
-still supports only a
-controlled single-region pilot. It does not prove external-human usability,
+proof, and notarization summary to the corresponding artifact members. The
+clean-machine, lifecycle, and official-client records must exact-match a
+candidate-bound artifact from the authenticated macOS operations workflow;
+hosted gateway records must exact-match its authenticated deployment and
+qualification artifacts. Every download is streamed under its authenticated
+size and an absolute cap. A passing result still supports only a controlled
+single-region pilot. It does not prove external-human usability,
 multi-region availability, zero downtime, an availability or latency SLA, or
 customer production readiness. See
 [MACOS_PILOT_QUALIFICATION.md](MACOS_PILOT_QUALIFICATION.md) for the sequence,

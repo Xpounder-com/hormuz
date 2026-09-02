@@ -14,6 +14,7 @@
     "workflow_run_url": "https://github.com/Xpounder-com/hormuz/actions/runs/1"
   },
   "claim_scope": "signed_macos_controlled_external_pilot_readiness",
+  "macos_operational_evidence_url": "https://github.com/Xpounder-com/hormuz/actions/runs/5",
   "clean_machine_runs": [
     {
       "architecture": "arm64",

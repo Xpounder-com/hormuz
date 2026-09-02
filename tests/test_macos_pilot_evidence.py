@@ -6,13 +6,13 @@ import hashlib
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 import zipfile
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import call, patch
 
 from tools import client_release_versions
@@ -169,6 +169,9 @@ class MacPilotEvidenceTests(unittest.TestCase):
         previous_proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
         previous_proof["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
         previous_proof["signing_authority"] = signing_authority
+        evidence["macos_operational_evidence_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999995"
+        )
         gateway = evidence["hosted_gateway"]  # type: ignore[assignment]
         gateway["evidence_kind"] = "live_external_pilot"
         gateway["source_commit"] = "1" * 40
@@ -247,6 +250,9 @@ class MacPilotEvidenceTests(unittest.TestCase):
             patch.object(
                 pilot, "_authenticate_gateway_evidence_artifact"
             ) as gateway_artifact_authenticator,
+            patch.object(
+                pilot, "_authenticate_macos_operational_evidence"
+            ) as macos_operations_authenticator,
         ):
             result = self._validate(*inputs)
 
@@ -258,6 +264,11 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertEqual(distribution_authenticator.call_count, 2)
         self.assertEqual(review_authenticator.call_count, 2)
         self.assertEqual(gateway_artifact_authenticator.call_count, 2)
+        macos_operations_authenticator.assert_called_once()
+        self.assertEqual(
+            macos_operations_authenticator.call_args.args[0],
+            evidence["macos_operational_evidence_url"],
+        )
         self.assertEqual(
             [item.args[2:] for item in gateway_artifact_authenticator.call_args_list],
             [
@@ -321,16 +332,22 @@ class MacPilotEvidenceTests(unittest.TestCase):
         }
         response = {"total_count": 1, "artifacts": [artifact]}
 
-        def download(_command: list[str], **kwargs: object) -> SimpleNamespace:
-            destination = kwargs["stdout"]
-            destination.write(artifact_payload.getvalue())  # type: ignore[union-attr]
-            destination.flush()  # type: ignore[union-attr]
-            return SimpleNamespace(returncode=0, stderr=b"")
+        def download(
+            _artifact_id: int,
+            destination: Path,
+            _expected_size: int,
+            _maximum: int,
+            _timeout: float,
+            _label: str,
+        ) -> None:
+            destination.write_bytes(artifact_payload.getvalue())
 
         with (
             patch.object(pilot, "_authenticate_github_run", return_value=run),
             patch.object(pilot, "_github_api_json", return_value=response),
-            patch.object(pilot.subprocess, "run", side_effect=download) as command,
+            patch.object(
+                pilot, "_download_github_artifact", side_effect=download
+            ) as command,
         ):
             authentication = pilot._authenticate_distribution_artifact(
                 proof["workflow_run_url"],
@@ -351,17 +368,15 @@ class MacPilotEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(authentication["actor_logins"], {"release-owner"})
         command.assert_called_once()
+        self.assertEqual(command.call_args.args[0], 67890)
         self.assertEqual(
-            command.call_args.args[0],
-            [
-                "gh",
-                "api",
-                "--hostname",
-                "github.com",
-                "--method",
-                "GET",
-                "repos/Xpounder-com/hormuz/actions/artifacts/67890/zip",
-            ],
+            command.call_args.args[2:],
+            (
+                len(artifact_payload.getvalue()),
+                pilot._MAX_ACTIONS_ARTIFACT_BYTES,
+                120,
+                "artifact",
+            ),
         )
 
     def test_authenticated_distribution_artifact_rejects_tampered_or_extra_files(self) -> None:
@@ -801,12 +816,11 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "path": pilot.MACOS_DISTRIBUTION_WORKFLOW,
             "repository": {"full_name": "Xpounder-com/hormuz"},
         }
-        completed = SimpleNamespace(
-            returncode=0,
-            stdout=json.dumps(response).encode(),
-            stderr=b"",
-        )
-        with patch.object(pilot.subprocess, "run", return_value=completed) as command:
+        with patch.object(
+            pilot,
+            "_command_output_bounded",
+            return_value=json.dumps(response).encode(),
+        ) as command:
             pilot._authenticate_github_run(
                 url,
                 source_commit,
@@ -823,15 +837,18 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 "GET",
                 "repos/Xpounder-com/hormuz/actions/runs/12345",
             ],
-            capture_output=True,
-            check=False,
-            timeout=30,
+            pilot._MAX_FILE_BYTES,
+            30,
+            "artifact_github_run",
         )
 
         response["path"] = ".github/workflows/ci.yml"
-        completed.stdout = json.dumps(response).encode()
         with (
-            patch.object(pilot.subprocess, "run", return_value=completed),
+            patch.object(
+                pilot,
+                "_command_output_bounded",
+                return_value=json.dumps(response).encode(),
+            ),
             self.assertRaisesRegex(
                 pilot.MacPilotEvidenceError, "artifact_github_run_not_trusted"
             ),
@@ -958,15 +975,21 @@ class MacPilotEvidenceTests(unittest.TestCase):
         }
         response = {"total_count": 1, "artifacts": [artifact]}
 
-        def download(_command: list[str], **kwargs: object) -> SimpleNamespace:
-            destination = kwargs["stdout"]
-            destination.write(artifact_payload.getvalue())  # type: ignore[union-attr]
-            destination.flush()  # type: ignore[union-attr]
-            return SimpleNamespace(returncode=0, stderr=b"")
+        def download(
+            _artifact_id: int,
+            destination: Path,
+            _expected_size: int,
+            _maximum: int,
+            _timeout: float,
+            _label: str,
+        ) -> None:
+            destination.write_bytes(artifact_payload.getvalue())
 
         with (
             patch.object(pilot, "_github_api_json", return_value=response),
-            patch.object(pilot.subprocess, "run", side_effect=download) as command,
+            patch.object(
+                pilot, "_download_github_artifact", side_effect=download
+            ) as command,
         ):
             pilot._authenticate_gateway_evidence_artifact(
                 run,
@@ -975,10 +998,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 "gateway_recovery",
             )
         command.assert_called_once()
-        self.assertEqual(
-            command.call_args.args[0][-1],
-            "repos/Xpounder-com/hormuz/actions/artifacts/777/zip",
-        )
+        self.assertEqual(command.call_args.args[0], 777)
 
         changed = copy.deepcopy(proof)
         changed["live_provider_request_count"] += 1
@@ -992,6 +1012,214 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 "qualification",
                 "gateway_recovery",
             )
+
+    def test_authenticated_macos_operations_artifact_binds_executed_records(self) -> None:
+        evidence = self._json(EVIDENCE_PATH)
+        artifact = copy.deepcopy(evidence["artifact"])
+        previous_artifact = copy.deepcopy(evidence["previous_artifact"])
+        operations_url = evidence["macos_operational_evidence_url"]
+        proof = {
+            "schema_id": "hormuz.macos-pilot-operations-evidence",
+            "schema_version": 1,
+            "claim_scope": pilot.CLAIM_SCOPE,
+            "source_commit": artifact["source_commit"],
+            "workflow_run_url": operations_url,
+            "candidate_archive_sha256": artifact["archive_sha256"],
+            "candidate_distribution_run_url": artifact["workflow_run_url"],
+            "previous_source_commit": previous_artifact["source_commit"],
+            "previous_archive_sha256": previous_artifact["archive_sha256"],
+            "previous_distribution_run_url": previous_artifact["workflow_run_url"],
+            "clean_machine_runs": evidence["clean_machine_runs"],
+            "lifecycle": evidence["lifecycle"],
+            "client_auth_recovery": evidence["client_auth_recovery"],
+        }
+        proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
+        artifact_payload = io.BytesIO()
+        with zipfile.ZipFile(artifact_payload, "w", zipfile.ZIP_DEFLATED) as package:
+            package.writestr("macos-pilot-operations-evidence.json", proof_payload)
+        run = {
+            "id": 5,
+            "run_number": 9,
+            "run_attempt": 1,
+            "created_at": "2026-09-01T14:01:00Z",
+            "run_started_at": "2026-09-01T14:05:00Z",
+            "updated_at": "2026-09-01T16:30:00Z",
+        }
+        github_artifact = {
+            "id": 888,
+            "name": "hormuz-macos-pilot-operations-9-1",
+            "size_in_bytes": len(artifact_payload.getvalue()),
+            "expired": False,
+            "created_at": "2026-09-01T16:15:00Z",
+            "url": "https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/888",
+            "archive_download_url": (
+                "https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/888/zip"
+            ),
+            "workflow_run": {
+                "id": 5,
+                "head_branch": "main",
+                "head_sha": artifact["source_commit"],
+            },
+        }
+
+        def download(
+            _artifact_id: int,
+            destination: Path,
+            _expected_size: int,
+            _maximum: int,
+            _timeout: float,
+            _label: str,
+        ) -> None:
+            destination.write_bytes(artifact_payload.getvalue())
+
+        with (
+            patch.object(pilot, "_authenticate_github_run", return_value=run) as run_auth,
+            patch.object(
+                pilot,
+                "_github_api_json",
+                return_value={"total_count": 1, "artifacts": [github_artifact]},
+            ),
+            patch.object(
+                pilot, "_download_github_artifact", side_effect=download
+            ) as command,
+        ):
+            pilot._authenticate_macos_operational_evidence(
+                operations_url,
+                artifact,
+                previous_artifact,
+                evidence["clean_machine_runs"],
+                evidence["lifecycle"],
+                evidence["client_auth_recovery"],
+                datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+            )
+        run_auth.assert_called_once_with(
+            operations_url,
+            artifact["source_commit"],
+            pilot.MACOS_PILOT_OPERATIONS_WORKFLOW,
+            "macos_operations",
+        )
+        self.assertEqual(command.call_args.args[0], 888)
+
+        early_run = copy.deepcopy(run)
+        early_run["created_at"] = "2026-09-01T13:55:00Z"
+        early_run["run_started_at"] = "2026-09-01T13:59:00Z"
+        with (
+            patch.object(pilot, "_authenticate_github_run", return_value=early_run),
+            self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError,
+                "macos_operations_predates_artifact",
+            ),
+        ):
+            pilot._authenticate_macos_operational_evidence(
+                operations_url,
+                artifact,
+                previous_artifact,
+                evidence["clean_machine_runs"],
+                evidence["lifecycle"],
+                evidence["client_auth_recovery"],
+                datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+            )
+
+        for field, mutate in (
+            (
+                "clean_machine_runs",
+                lambda value: value[0].update({"launch_succeeded": False}),
+            ),
+            (
+                "lifecycle",
+                lambda value: value.update({"real_oidc_login": False}),
+            ),
+            (
+                "client_auth_recovery",
+                lambda value: value[0].update({"automatic_replay_count": 0}),
+            ),
+        ):
+            with self.subTest(field=field):
+                changed = copy.deepcopy(proof)
+                mutate(changed[field])
+                with self.assertRaisesRegex(
+                    pilot.MacPilotEvidenceError,
+                    "macos_operations_evidence_binding_invalid",
+                ):
+                    pilot._validate_macos_operations_evidence_payload(
+                        changed,
+                        operations_url,
+                        artifact,
+                        previous_artifact,
+                        evidence["clean_machine_runs"],
+                        evidence["lifecycle"],
+                        evidence["client_auth_recovery"],
+                    )
+
+        wrong_nested_type = copy.deepcopy(proof)
+        wrong_nested_type["clean_machine_runs"][0]["developer_tools_absent"] = 1
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "macos_operations_evidence_binding_invalid",
+        ):
+            pilot._validate_macos_operations_evidence_payload(
+                wrong_nested_type,
+                operations_url,
+                artifact,
+                previous_artifact,
+                evidence["clean_machine_runs"],
+                evidence["lifecycle"],
+                evidence["client_auth_recovery"],
+            )
+
+    def test_bounded_artifact_stream_stops_before_disk_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            completed = root / "completed.zip"
+            pilot._stream_command_to_file(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stdout.buffer.write(b'artifact')",
+                ],
+                completed,
+                len(b"artifact"),
+                1024,
+                10,
+                "artifact_github_artifact",
+            )
+            self.assertEqual(completed.read_bytes(), b"artifact")
+
+            destination = root / "oversized.zip"
+            with self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError,
+                "artifact_github_artifact_too_large",
+            ):
+                pilot._stream_command_to_file(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; sys.stdout.buffer.write(b'x' * 262144)",
+                    ],
+                    destination,
+                    1024,
+                    2048,
+                    10,
+                    "artifact_github_artifact",
+                )
+            self.assertLessEqual(destination.stat().st_size, 1024)
+
+            with self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError,
+                "github_metadata_too_large",
+            ):
+                pilot._command_output_bounded(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; sys.stdout.buffer.write(b'x' * 262144)",
+                    ],
+                    1024,
+                    10,
+                    "github_metadata",
+                )
 
     def test_platform_verification_uses_a_stable_archive_snapshot(self) -> None:
         proof = self._json(PROOF_PATH)
