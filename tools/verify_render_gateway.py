@@ -165,10 +165,44 @@ print(json.dumps({'name': account.pw_name, 'uid': account.pw_uid, 'gid': account
 '''
 
 
-def docker(*arguments, input_text=None, timeout=45, expected=0):
+def _safe_failure_code(output: str) -> str:
+    """Return only a bounded machine code from a failed hosted command."""
+
+    for line in reversed(output.splitlines()):
+        try:
+            payload = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        code = payload.get("code") if isinstance(payload, dict) else None
+        if (
+            isinstance(code, str)
+            and 0 < len(code) <= 96
+            and code == code.lower()
+            and code.replace("_", "").isalnum()
+        ):
+            return code
+    return "unclassified"
+
+
+def docker(
+    *arguments,
+    input_text=None,
+    timeout=45,
+    expected=0,
+    failure_context=None,
+):
     result = subprocess.run(["docker", *arguments], input=input_text, text=True, capture_output=True, timeout=timeout)
     if result.returncode != expected:
-        raise RuntimeError("staging_docker_command_failed:" + arguments[0])
+        context = failure_context or arguments[0]
+        code = _safe_failure_code(result.stdout + "\n" + result.stderr)
+        raise RuntimeError(
+            "staging_docker_command_failed:"
+            + context
+            + ":returncode="
+            + str(result.returncode)
+            + ":code="
+            + code
+        )
     return (result.stdout + (result.stderr if arguments[0] == "logs" or expected != 0 else "")).strip()
 
 
@@ -218,10 +252,24 @@ def verify(image: str) -> dict:
             if migration
             else []
         )
-        return docker(
-            "run", "--rm", *common, *operator_environment,
-            image, *command, expected=expected,
-        )
+        operation = command[-1]
+        attempts = 2 if operation == "provider-bootstrap-postgres" else 1
+        for attempt in range(attempts):
+            try:
+                return docker(
+                    "run", "--rm", *common, *operator_environment,
+                    image, *command, expected=expected,
+                    failure_context="operator_" + operation,
+                )
+            except RuntimeError:
+                # The bootstrap is intentionally repeatable after interrupted
+                # maintenance. Permit one bounded retry for a just-started
+                # disposable PostgreSQL container; persistent authorization or
+                # schema failures still fail on the second attempt.
+                if attempt + 1 == attempts:
+                    raise
+                time.sleep(1)
+        raise AssertionError("operator_attempts_exhausted")
 
     def port(name):
         return int(docker("port", name, "10000/tcp").rsplit(":", 1)[1])
