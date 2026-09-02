@@ -4,12 +4,15 @@ import http.client
 import io
 import json
 from pathlib import Path
+import socket
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
 
 from tools.qualify_external_pilot import (
     QualificationError,
+    _abort_gateway_response,
     _authenticate_deployment_evidence,
     _deploy_hook_url,
     _provider_request,
@@ -99,6 +102,23 @@ def _counters(*, live: int, attempts: int, first: int, failovers: int, unknown: 
 
 
 class ExternalPilotQualificationTests(unittest.TestCase):
+    def test_abort_gateway_response_forces_the_underlying_socket_closed(self) -> None:
+        class Response:
+            def __init__(self) -> None:
+                self.connection = socket.socket()
+                self.fp = SimpleNamespace(
+                    raw=SimpleNamespace(_sock=self.connection)
+                )
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        response = Response()
+        _abort_gateway_response(response)
+        self.assertTrue(response.closed)
+        self.assertEqual(response.connection.fileno(), -1)
+
     def test_deployment_run_and_artifact_are_authenticated_before_qualification(self) -> None:
         archive = _deployment_artifact()
         run = {
@@ -259,6 +279,51 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             )
         self.assertTrue(response.closed)
 
+    def test_cancellation_closes_the_live_downstream_after_one_incomplete_chunk(self) -> None:
+        class Response:
+            status = 200
+            headers = {
+                "X-Hormuz-Requested-Model": "openai-primary",
+                "X-Hormuz-Routed-Model": "gpt-test",
+                "Server-Timing": "hormuz_upstream_headers;dur=1.000",
+                "X-Hormuz-Cancellation-Rehearsal": "v1",
+            }
+
+            def __init__(self):
+                self.reads = 0
+                self.closed = False
+
+            def read1(self, _size):
+                self.reads += 1
+                if self.reads > 1:
+                    raise AssertionError("cancellation must not read the stream to EOF")
+                return b'event: response.output_text.delta\ndata: {"delta":"x"}\n\n'
+
+            def close(self):
+                self.closed = True
+
+        response = Response()
+        with (
+            patch("tools.qualify_external_pilot._open_gateway", return_value=response),
+            patch("tools.qualify_external_pilot._abort_gateway_response") as abort,
+        ):
+            headers, first_before_completion, terminal_observed = _provider_request(
+                ORIGIN,
+                ACCESS,
+                protocol="openai",
+                alias="openai-primary",
+                stream=True,
+                rehearsal_header="X-Hormuz-Cancellation-Rehearsal",
+                rehearsal_key=REHEARSAL,
+                disconnect_after_first_chunk=True,
+            )
+
+        abort.assert_called_once_with(response)
+        self.assertEqual(response.reads, 1)
+        self.assertEqual(headers["x-hormuz-cancellation-rehearsal"], "v1")
+        self.assertTrue(first_before_completion)
+        self.assertFalse(terminal_observed)
+
     def test_reliability_summary_proves_bounded_worker_and_pool_monitoring(self) -> None:
         value = _counters(live=1, attempts=1, first=1, failovers=0)
         with patch(
@@ -340,6 +405,7 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         refresh.assert_called_once_with(ORIGIN, REFRESH)
         self.assertEqual(reliability.call_count, 4)
         self.assertEqual(provider.call_count, 10)
+        self.assertTrue(provider.call_args_list[-2].kwargs["disconnect_after_first_chunk"])
         logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH)
         self.assertEqual(evidence["schema_id"], "hormuz.external-pilot-qualification-evidence")
         self.assertEqual(evidence["deployment_evidence_url"], DEPLOYMENT_RUN)

@@ -1085,12 +1085,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 parser.feed(chunk)
                 self._write_downstream_chunk(chunk)
                 downstream_bytes_sent += len(chunk)
-                if (
-                    getattr(self, "_cancellation_rehearsal_requested", False)
-                    and not parser.provider_completed
-                ):
-                    downstream_ok = False
-                    break
         except (BrokenPipeError, ConnectionResetError):
             downstream_ok = False
         except http.client.IncompleteRead as error:

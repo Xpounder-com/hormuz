@@ -10,8 +10,10 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import ssl
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -594,6 +596,28 @@ def _provider_stream_completed(protocol: str, payload: bytes) -> bool:
     )
 
 
+def _abort_gateway_response(response: Any) -> None:
+    """Close the live downstream TCP connection immediately, without reading EOF."""
+
+    try:
+        connection = response.fp.raw._sock
+        if not isinstance(connection, socket.socket):
+            raise AttributeError
+        connection.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_LINGER,
+            struct.pack("ii", 1, 0),
+        )
+        connection.close()
+    except (AttributeError, OSError, struct.error):
+        raise QualificationError("downstream_cancellation_unavailable") from None
+    finally:
+        try:
+            response.close()
+        except (http.client.HTTPException, OSError):
+            pass
+
+
 def _provider_request(
     origin: str,
     access_token: str,
@@ -603,6 +627,7 @@ def _provider_request(
     stream: bool,
     rehearsal_header: str | None = None,
     rehearsal_key: str | None = None,
+    disconnect_after_first_chunk: bool = False,
 ) -> tuple[dict[str, str], bool, bool]:
     path, body = _provider_body(protocol, alias, stream=stream)
     response = _open_gateway(
@@ -634,6 +659,9 @@ def _provider_request(
             if len(first) > MAX_PROVIDER_RESPONSE_BYTES:
                 raise QualificationError("response_size_invalid")
             terminal_in_first_chunk = _provider_stream_completed(protocol, first)
+            if disconnect_after_first_chunk:
+                _abort_gateway_response(response)
+                return headers, not terminal_in_first_chunk, terminal_in_first_chunk
             terminal_observed_at = first_observed_at if terminal_in_first_chunk else None
             payload = bytearray(first)
             while len(payload) <= MAX_PROVIDER_RESPONSE_BYTES:
@@ -768,6 +796,7 @@ def qualify(
             stream=True,
             rehearsal_header="X-Hormuz-Cancellation-Rehearsal",
             rehearsal_key=rehearsal_key,
+            disconnect_after_first_chunk=True,
         )
         request_count += 1
         after_cancellation = _reliability(

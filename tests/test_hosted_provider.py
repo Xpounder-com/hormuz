@@ -822,7 +822,13 @@ class HostedProviderHTTPTests(unittest.TestCase):
         response = _ProviderResponse(200)
         response.headers["Content-Type"] = "text/event-stream"
         response._body = b'data: {"type":"response.output_text.delta","delta":"x"}\n\n'
-        with patch("hormuz.server.urllib.request.urlopen", return_value=response) as provider:
+        with (
+            patch("hormuz.server.urllib.request.urlopen", return_value=response) as provider,
+            patch(
+                "hormuz.server.GatewayRequestHandler._write_downstream_chunk",
+                side_effect=BrokenPipeError,
+            ),
+        ):
             status, headers, body = self.request(
                 "POST",
                 "/v1/responses",
@@ -836,7 +842,7 @@ class HostedProviderHTTPTests(unittest.TestCase):
             )
         self.assertEqual(status, 200)
         self.assertEqual(headers["X-Hormuz-Cancellation-Rehearsal"], "v1")
-        self.assertTrue(body)
+        self.assertEqual(body, b"")
         provider.assert_called_once()
         self.assertTrue(response.closed)
         summary_status, _, summary_body = self.request(
