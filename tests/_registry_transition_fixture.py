@@ -6,6 +6,7 @@ also executed by the interpreter installed from the digest-pinned release.
 
 from __future__ import annotations
 
+import copy
 import importlib.metadata
 import json
 import os
@@ -89,6 +90,51 @@ def sqlite_snapshot(path: Path) -> dict[str, object]:
                 quoted = '"' + name.replace('"', '""') + '"'
                 rows[name] = sorted(connection.execute(f"SELECT * FROM {quoted}").fetchall(), key=repr)
         return {"objects": objects, "rows": rows}
+
+
+def without_sqlite_finance_attempt_successor(
+    snapshot: dict[str, object],
+) -> dict[str, object]:
+    """Normalize schema-11 additions for older cumulative transition proofs."""
+
+    normalized = copy.deepcopy(snapshot)
+    objects = normalized["objects"]
+    rows = normalized["rows"]
+    assert isinstance(objects, list)
+    assert isinstance(rows, dict)
+    migrations = rows.get("hormuz_schema_migrations")
+    successor_applied = isinstance(migrations, list) and any(
+        isinstance(item, tuple) and item and item[0] == 11
+        for item in migrations
+    )
+    changed_tables = {
+        "gateway_request_attempts",
+        "gateway_audit_chain_entries",
+    }
+    added_base_indexes = {
+        "idx_gateway_usage_organization_id",
+        "idx_gateway_attempt_event_organization_id",
+    }
+    normalized["objects"] = [
+        item
+        for item in objects
+        if item[2] not in changed_tables
+        and item[2] != "gateway_finance_attempt_evidence"
+        and item[1] not in added_base_indexes
+    ]
+    rows.pop("gateway_finance_attempt_evidence", None)
+    if successor_applied:
+        attempts = rows.get("gateway_request_attempts")
+        chain_entries = rows.get("gateway_audit_chain_entries")
+        if isinstance(attempts, list):
+            rows["gateway_request_attempts"] = [item[:-5] for item in attempts]
+        if isinstance(chain_entries, list):
+            rows["gateway_audit_chain_entries"] = [item[:-3] for item in chain_entries]
+    if isinstance(migrations, list):
+        rows["hormuz_schema_migrations"] = [
+            item for item in migrations if item[0] != 11
+        ]
+    return normalized
 
 
 def sqlite_backup(source: Path, destination: Path) -> None:
