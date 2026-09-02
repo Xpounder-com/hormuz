@@ -1,0 +1,260 @@
+{
+  "schema_id": "hormuz.finance-attempt-evidence-contract",
+  "schema_version": 1,
+  "stage": "pre_implementation",
+  "target_release": "1.1.0",
+  "feature_issue": 8,
+  "gate_issue": 214,
+  "scope": "internal_attempt_sidecar_no_public_wire_route_or_command",
+  "capture_boundary": {
+    "unit": "one_gateway_generated_provider_egress_attempt",
+    "source": "allowlisted_provider_usage_and_billing_dimensions_from_the_same_terminal_response_or_stream",
+    "content_capture": false,
+    "request_or_response_body_capture": false,
+    "provider_billing_fetch": false,
+    "provider_invoice_import": false,
+    "credentials_or_headers": false
+  },
+  "identity": {
+    "event_schema_id": "hormuz.finance-attempt-evidence",
+    "event_schema_version": 1,
+    "table_primary_key": [
+      "organization_id",
+      "evidence_event_id"
+    ],
+    "one_per_attempt_key": [
+      "organization_id",
+      "request_attempt_id"
+    ],
+    "request_attempt_reference": [
+      "organization_id",
+      "request_attempt_id"
+    ],
+    "terminal_attempt_event_reference": [
+      "organization_id",
+      "terminal_attempt_event_id"
+    ],
+    "usage_event_reference": "required_for_succeeded_failed_and_rate_limited_null_for_outcome_unknown",
+    "provider_identity": "protocol_and_provider_reported_model_remain_distinct_from_configured_route_identity",
+    "occurred_at": "reuse_the_exact_terminal_attempt_event_timestamp_never_sample_a_second_clock"
+  },
+  "terminal_cardinality": {
+    "pending": "sidecar_prohibited",
+    "succeeded": "exactly_one_sidecar_and_usage_event_required",
+    "failed": "exactly_one_sidecar_and_usage_event_required",
+    "rate_limited": "exactly_one_sidecar_and_usage_event_required",
+    "outcome_unknown": "exactly_one_sidecar_usage_event_null_and_observation_partial_or_absent",
+    "post_migration_stale_sweep": "atomically_append_outcome_unknown_and_absent_sidecar",
+    "pre_migration_terminal_attempt": "no_backfill_and_explicit_legacy_coverage_gap",
+    "retry": "new_request_attempt_new_sidecar_never_overwrite_prior_attempt"
+  },
+  "observation": {
+    "states": [
+      "complete",
+      "partial",
+      "absent"
+    ],
+    "null_semantics": "unknown_or_not_returned_never_zero",
+    "zero_semantics": "provider_explicitly_returned_zero",
+    "native_payload": "bounded_canonical_json_of_allowlisted_fields_only",
+    "native_payload_digest": "sha256_of_exact_canonical_native_payload",
+    "complete_payload": "all_profile_required_usage_fields_are_valid_and_present",
+    "partial_payload": "at_least_one_allowlisted_field_is_valid_but_the_complete_profile_is_not_satisfied",
+    "absent_payload": "native_payload_and_native_payload_digest_are_null",
+    "provider_schema_id": "fixed_profile_identifier_selected_by_protocol",
+    "provider_schema_version": 1,
+    "parse_failure": "terminal_attempt_commits_with_partial_or_absent_observation_and_content_free_reason_code",
+    "unknown_fields": "ignored_not_persisted"
+  },
+  "normalized_metrics": {
+    "columns": [
+      "provider_input_tokens",
+      "provider_output_tokens",
+      "cache_read_input_tokens",
+      "cache_write_input_tokens",
+      "cache_write_5m_input_tokens",
+      "cache_write_1h_input_tokens",
+      "reasoning_output_tokens",
+      "total_tokens",
+      "billable_input_tokens",
+      "billable_output_tokens",
+      "server_tool_request_count"
+    ],
+    "type": "nullable_nonnegative_signed_64_bit_integer",
+    "derivation": "only_lossless_provider_profile_rules_may_populate_a_normalized_column",
+    "derived_arithmetic": "checked_integer_arithmetic_overflow_makes_the_derived_field_null_and_observation_partial",
+    "no_double_counting": "aggregate_dimensions_are_labeled_and_never_summed_with_their_components",
+    "legacy_usage_projection": "existing_usage_v1_fields_keep_their_current_protocol_specific_meanings",
+    "dimensions": [
+      "provider_service_tier",
+      "provider_inference_geo"
+    ],
+    "dimension_type": "nullable_exact_profile_value_or_ascii_safe_identifier_bounded_by_identifier_bytes_invalid_values_make_the_dimension_null_and_observation_partial"
+  },
+  "provider_profiles": {
+    "openai.responses.usage.v1": {
+      "required_paths": [
+        "input_tokens",
+        "output_tokens",
+        "total_tokens"
+      ],
+      "allowlisted_paths": [
+        "input_tokens",
+        "input_tokens_details.cached_tokens",
+        "input_tokens_details.cache_write_tokens",
+        "output_tokens",
+        "output_tokens_details.reasoning_tokens",
+        "total_tokens"
+      ],
+      "terminal_metadata_allowlisted_paths": [
+        "service_tier"
+      ],
+      "service_tier_values": [
+        "default",
+        "flex",
+        "priority",
+        "ultrafast"
+      ],
+      "billable_tokens": "unknown_unless_the_provider_explicitly_returns_a_billable_field_in_a_reviewed_successor_profile",
+      "cache_relationship": "cached_tokens_and_cache_write_tokens_are_subsets_of_input_tokens_when_returned",
+      "reference": "https://developers.openai.com/api/reference/cli/resources/responses/methods/retrieve"
+    },
+    "anthropic.messages.usage.v1": {
+      "required_paths": [
+        "input_tokens",
+        "output_tokens"
+      ],
+      "allowlisted_paths": [
+        "input_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "cache_creation.ephemeral_5m_input_tokens",
+        "cache_creation.ephemeral_1h_input_tokens",
+        "output_tokens",
+        "output_tokens_details.thinking_tokens",
+        "server_tool_use.web_search_requests",
+        "server_tool_use.web_fetch_requests",
+        "service_tier",
+        "inference_geo"
+      ],
+      "total_input_rule": "input_tokens_plus_cache_read_input_tokens_plus_cache_creation_input_tokens_only_when_all_terms_are_known",
+      "cache_creation_breakdown": "five_minute_and_one_hour_values_are_components_of_cache_creation_input_tokens",
+      "service_tier_values": [
+        "standard",
+        "priority",
+        "batch"
+      ],
+      "inference_geo_syntax": "ascii_safe_identifier_v1_not_a_semantic_region_mapping",
+      "billable_tokens": "unknown_unless_the_provider_explicitly_returns_a_billable_field_in_a_reviewed_successor_profile",
+      "references": [
+        "https://platform.claude.com/docs/en/api/typescript/messages",
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    }
+  },
+  "attempt_price_binding": {
+    "capture_time": "same_transaction_as_request_attempt_root_before_provider_egress",
+    "source": "gateway_bound_configured_route_snapshot",
+    "fields": [
+      "configured_rate_card_state",
+      "configured_rate_card_id",
+      "configured_rate_card_version",
+      "configured_rate_card_digest",
+      "configured_rate_card_currency"
+    ],
+    "states": [
+      "configured",
+      "legacy_unavailable"
+    ],
+    "post_migration_attempt": "state_configured_and_all_coordinates_required_and_immutable",
+    "pre_migration_attempt": "state_legacy_unavailable_all_coordinates_null_and_explicit_coverage_gap",
+    "storage_constraint": "state_is_nonnull_and_coordinates_are_all_null_or_all_nonnull_exactly_as_the_state_requires",
+    "terminal_sidecar": "copies_the_exact_begin_time_binding_including_for_outcome_unknown_and_stale_sweep",
+    "portfolio_rate_card_relation": "not_a_registered_portfolio_finance_rate_card_unless_a_future_explicit_binding_says_so"
+  },
+  "configured_estimate": {
+    "basis": "configured_rate_card_estimate",
+    "availability_states": [
+      "available",
+      "unavailable"
+    ],
+    "amount": "exact_nonnegative_decimal_string_in_currency_units_when_available_otherwise_null",
+    "storage_amount": "nullable_nonnegative_signed_64_bit_integer_in_currency_microunits",
+    "currency": "exact_three_letter_uppercase_code_from_attempt_price_binding_even_when_estimate_is_unavailable",
+    "rate_card_coordinates": [
+      "rate_card_id",
+      "rate_card_version",
+      "rate_card_digest"
+    ],
+    "valuation_rule": "gateway_route_microusd_v1",
+    "rounding": "decimal_half_even_to_one_microusd",
+    "available": "all_required_native_pricing_categories_are_known_and_the_exact_checked_calculation_succeeds",
+    "unavailable": "amount_and_storage_amount_are_null_with_a_bounded_content_free_reason_code",
+    "missing_usage": "unavailable_never_zero",
+    "zero_estimate": "available_zero_only_when_every_required_pricing_category_is_explicitly_observed_zero",
+    "budget_reservation": "separate_conservative_hold_never_substituted_for_the_terminal_estimate",
+    "provider_final": false,
+    "reprice_historical_attempts": false,
+    "combine_with_provider_invoice": "prohibited_until_explicit_reconciliation_contract"
+  },
+  "transaction": {
+    "terminal_write": "request_attempt_terminal_event_usage_event_when_required_finance_sidecar_budget_reconciliation_and_audit_chain_entries_commit_or_roll_back_together",
+    "unknown_write": "request_attempt_unknown_event_finance_sidecar_and_audit_chain_entries_commit_or_roll_back_together",
+    "sweep_write": "stale_unknown_transition_absent_sidecar_budget_hold_and_audit_chain_entries_commit_or_roll_back_together",
+    "duplicate_terminal": "fail_closed_without_second_sidecar",
+    "provider_egress": "never_triggered_by_persistence_retry_recovery_or_reporting"
+  },
+  "storage": {
+    "table": "gateway_finance_attempt_evidence",
+    "altered_table": "gateway_request_attempts",
+    "additive_attempt_columns": [
+      "configured_rate_card_state",
+      "configured_rate_card_id",
+      "configured_rate_card_version",
+      "configured_rate_card_digest",
+      "configured_rate_card_currency"
+    ],
+    "legacy_attempt_columns": "state_legacy_unavailable_with_one_all_null_coordinate_group_for_pre_migration_rows",
+    "append_only": true,
+    "sqlite": "existing_database_transaction_no_runtime_schema_creation",
+    "postgresql": "forced_row_level_security_tenant_context_select_and_insert_only",
+    "audit_chain": "each_sidecar_is_a_versioned_source_event_with_unique_source_identity",
+    "retention": "customer_owned_backup_policy_no_delete_or_redaction_api",
+    "historical_backfill": false
+  },
+  "bounds": {
+    "native_payload_bytes": 16384,
+    "identifier_bytes": 128,
+    "reason_code_bytes": 128,
+    "provider_profile_count": 2,
+    "native_depth": 4,
+    "native_member_count": 32,
+    "integer_max": 9223372036854775807,
+    "decimal_significant_digits": 38,
+    "decimal_fractional_digits": 6
+  },
+  "compatibility": {
+    "existing_usage_event_schema": "unchanged",
+    "existing_request_attempt_event_schema": "unchanged",
+    "existing_request_attempt_storage": "five_additive_begin_time_price_binding_columns_with_explicit_legacy_state_no_reinterpretation_of_legacy_rows",
+    "existing_provider_reliability_schema": "unchanged",
+    "existing_budget_runtime": "unchanged",
+    "new_http_routes": [],
+    "new_cli_commands": [],
+    "public_wire_schema": "none",
+    "automatic_provider_replay": false,
+    "automatic_budget_or_policy_change": false
+  },
+  "nonclaims": [
+    "provider_invoice_truth",
+    "accounts_payable_or_general_ledger_posting",
+    "contract_discount_or_credit_application",
+    "tax_or_foreign_exchange_treatment",
+    "cross_gateway_allocation",
+    "causal_business_value_or_productivity",
+    "automatic_model_budget_or_policy_change",
+    "live_finance_validation",
+    "final_candidate_acceptance",
+    "release_or_deployment_readiness"
+  ]
+}
