@@ -48,7 +48,7 @@ def binding() -> ConfiguredRateCardBinding:
     )
 
 
-def identity() -> Identity:
+def identity(organization_id: str = "acme") -> Identity:
     return Identity(
         token_env="UNUSED_FINANCE_ATTEMPT_TOKEN",
         token="synthetic-unused-secret",
@@ -56,15 +56,21 @@ def identity() -> Identity:
         actor_name="Alice",
         team_id="engineering",
         team_name="Engineering",
-        organization_id="acme",
+        organization_id=organization_id,
         identity_type="human",
         authentication_source="oidc",
     )
 
 
-def begin(store: UsageStore, *, ttl_seconds: int = 60, protocol: str = "openai"):
+def begin(
+    store: UsageStore,
+    *,
+    ttl_seconds: int = 60,
+    protocol: str = "openai",
+    organization_id: str = "acme",
+):
     return store._begin_request_attempt_with_work_budget(
-        identity=identity(),
+        identity=identity(organization_id),
         client="codex",
         protocol=protocol,
         requested_model="smart",
@@ -117,7 +123,7 @@ def replace_storage_row_fields(event, **updates):
         evidence,
         sort_keys=True,
         separators=(",", ":"),
-        ensure_ascii=True,
+        ensure_ascii=False,
         allow_nan=False,
     )
     return row
@@ -222,8 +228,9 @@ class NativeAttemptParserTests(unittest.TestCase):
                         result.usage.output_tokens,
                         result.usage.provider_reported_model,
                         result.usage.evidence_complete,
+                        result.provider_terminal_state,
                     ),
-                    (10, 4, "gpt-test", True),
+                    (10, 4, "gpt-test", True, event_type.removeprefix("response.")),
                 )
                 self.assertEqual(result.finance.state, "complete")
                 self.assertEqual(result.finance.cache_read_input_tokens, 2)
@@ -501,6 +508,29 @@ class NativeAttemptEventTests(unittest.TestCase):
                     binding=binding(),
                 )
 
+    def test_event_preserves_established_unicode_organization_identity(self) -> None:
+        event = build_finance_attempt_event(
+            protocol="openai",
+            organization_id="München Office",
+            request_attempt_id="attempt-1",
+            terminal_attempt_event_id="22222222-2222-4222-8222-222222222222",
+            usage_event_id="33333333-3333-4333-8333-333333333333",
+            terminal_state="succeeded",
+            occurred_at="2026-09-02T14:00:00.123456+00:00",
+            observation=complete_observation(),
+            estimate=complete_estimate(),
+            binding=binding(),
+        )
+
+        self.assertEqual(event["organization_id"], "München Office")
+        validate_finance_attempt_event(event)
+        for invalid in ("", "x" * 129, "line\nbreak", "\ud800"):
+            with self.subTest(invalid=repr(invalid)), self.assertRaisesRegex(
+                ValueError,
+                "finance_attempt_evidence_invalid",
+            ):
+                validate_finance_attempt_event({**event, "organization_id": invalid})
+
     def test_event_binds_terminal_timestamp_usage_and_rate_card(self) -> None:
         parser = ResponseUsageParser("openai", is_event_stream=False)
         parser.feed(json.dumps({
@@ -636,6 +666,84 @@ class NativeAttemptEventTests(unittest.TestCase):
 
 
 class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
+    def test_unicode_spaced_organization_completes_full_terminal_transition(self) -> None:
+        organization_id = "München Office"
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            attempt = begin(store, organization_id=organization_id)
+
+            store._finalize_request_attempt_with_provider_metrics(
+                attempt=attempt,
+                organization_id=organization_id,
+                status="succeeded",
+                input_tokens=10,
+                output_tokens=4,
+                cache_read_tokens=2,
+                cost_microusd=35,
+                provider_metrics=None,
+                finance_observation=complete_observation(),
+                configured_estimate=complete_estimate(),
+            )
+
+            with managed_sqlite_connection(path) as connection:
+                evidence_json = connection.execute(
+                    "SELECT evidence_json FROM gateway_finance_attempt_evidence"
+                ).fetchone()[0]
+                self.assertIn(organization_id, evidence_json)
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT root.organization_id, terminal.organization_id, "
+                        "usage.organization_id, finance.organization_id "
+                        "FROM gateway_request_attempts AS root "
+                        "JOIN gateway_request_attempt_events AS terminal "
+                        "ON terminal.attempt_id=root.attempt_id AND terminal.sequence=2 "
+                        "JOIN gateway_usage_events AS usage ON usage.id=terminal.usage_event_id "
+                        "JOIN gateway_finance_attempt_evidence AS finance "
+                        "ON finance.request_attempt_id=root.attempt_id"
+                    ).fetchone(),
+                    (organization_id,) * 4,
+                )
+            self.assertEqual(
+                store.verify_audit_chain(organization_id=organization_id).sequence,
+                2,
+            )
+
+    def test_available_estimate_must_match_linked_usage_cost(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            attempt = begin(store)
+
+            with self.assertRaisesRegex(
+                sqlite3.IntegrityError,
+                "finance_attempt_evidence_inconsistent",
+            ):
+                store._finalize_request_attempt_with_provider_metrics(
+                    attempt=attempt,
+                    organization_id="acme",
+                    status="succeeded",
+                    input_tokens=10,
+                    output_tokens=4,
+                    cache_read_tokens=2,
+                    cost_microusd=34,
+                    provider_metrics=None,
+                    finance_observation=complete_observation(),
+                    configured_estimate=complete_estimate(),
+                )
+
+            with managed_sqlite_connection(path) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT state FROM gateway_request_attempt_events ORDER BY sequence"
+                    ).fetchall(),
+                    [("pending",)],
+                )
+                self.assertEqual(
+                    connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0],
+                    0,
+                )
+
     def test_available_estimate_without_observation_rolls_back_terminal_transition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
@@ -690,6 +798,7 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                         attempt=unsupported,
                         organization_id="acme",
                         status="succeeded",
+                        cost_microusd=35,
                         provider_metrics=None,
                         finance_observation=complete_observation(),
                         configured_estimate=complete_estimate(),
@@ -745,6 +854,7 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                         attempt=overflow,
                         organization_id="acme",
                         status="succeeded",
+                        cost_microusd=2,
                         provider_metrics=None,
                         finance_observation=observation,
                         configured_estimate=estimate,
@@ -820,6 +930,7 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                     attempt=attempt,
                     organization_id="acme",
                     status="succeeded",
+                    cost_microusd=35,
                     provider_metrics=None,
                     finance_observation=unknown_native_observation(
                         "openai",
@@ -865,6 +976,7 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                         attempt=attempt,
                         organization_id="acme",
                         status="succeeded",
+                        cost_microusd=35,
                         provider_metrics=None,
                         finance_observation=complete_observation(),
                         configured_estimate=complete_estimate(),
@@ -980,7 +1092,7 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                 output_tokens=4,
                 cache_read_tokens=2,
                 reasoning_tokens=3,
-                cost_microusd=34,
+                cost_microusd=35,
                 provider_request_id="request-1",
                 provider_metrics=None,
                 finance_observation=observation,
@@ -1013,6 +1125,13 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                 self.assertEqual(row["configured_estimate_microusd"], 35)
                 self.assertEqual(row["configured_estimate_amount"], "0.000035")
                 self.assertEqual(row["provider_final"], 0)
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT cost_microusd FROM gateway_usage_events WHERE id=?",
+                        (row["usage_event_id"],),
+                    ).fetchone()[0],
+                    35,
+                )
                 self.assertNotIn("ignored", row["evidence_json"])
                 self.assertEqual(
                     connection.execute(
@@ -1183,6 +1302,7 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                         status="succeeded",
                         input_tokens=10,
                         output_tokens=4,
+                        cost_microusd=35,
                         provider_metrics=None,
                         finance_observation=complete_observation(),
                         configured_estimate=complete_estimate(),
@@ -1201,6 +1321,7 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                 status="succeeded",
                 input_tokens=10,
                 output_tokens=4,
+                cost_microusd=35,
                 provider_metrics=None,
                 finance_observation=complete_observation(),
                 configured_estimate=complete_estimate(),

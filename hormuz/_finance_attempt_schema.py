@@ -48,7 +48,11 @@ SQLITE_FINANCE_ATTEMPT_INDEXES = {
 SQLITE_FINANCE_ATTEMPT_TRIGGERS = {
     "gateway_request_attempt_finance_binding_required": (
         "CREATE TRIGGER gateway_request_attempt_finance_binding_required BEFORE INSERT ON gateway_request_attempts "
-        "WHEN NEW.configured_rate_card_state <> 'configured' "
+        "WHEN length(NEW.organization_id) NOT BETWEEN 1 AND 128 "
+        "OR instr(NEW.organization_id, char(0)) > 0 "
+        "OR instr(NEW.organization_id, char(10)) > 0 "
+        "OR instr(NEW.organization_id, char(13)) > 0 "
+        "OR NEW.configured_rate_card_state <> 'configured' "
         "OR NEW.configured_rate_card_id IS NULL "
         "OR length(NEW.configured_rate_card_id) NOT BETWEEN 1 AND 128 "
         "OR NOT (substr(NEW.configured_rate_card_id, 1, 1) GLOB '[A-Za-z0-9]') "
@@ -85,7 +89,9 @@ SQLITE_FINANCE_ATTEMPT_TRIGGERS = {
         "AND e.state=NEW.terminal_state AND e.occurred_at=NEW.occurred_at "
         "AND e.usage_event_id IS NEW.usage_event_id "
         "AND (NEW.usage_event_id IS NULL OR EXISTS (SELECT 1 FROM gateway_usage_events u "
-        "WHERE u.organization_id=NEW.organization_id AND u.id=NEW.usage_event_id))) "
+        "WHERE u.organization_id=NEW.organization_id AND u.id=NEW.usage_event_id "
+        "AND (NEW.configured_estimate_availability <> 'available' "
+        "OR u.cost_microusd=NEW.configured_estimate_microusd)))) "
         "BEGIN SELECT RAISE(ABORT, 'finance_attempt_evidence_inconsistent'); END"
     ),
     "gateway_finance_attempt_evidence_no_update": (

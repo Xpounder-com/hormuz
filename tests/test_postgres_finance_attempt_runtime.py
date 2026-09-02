@@ -42,9 +42,10 @@ def begin(
     *,
     ttl_seconds: int = 60,
     protocol: str = "openai",
+    organization_id: str = "acme",
 ):
     return store._begin_request_attempt_with_work_budget(
-        identity=_identity("acme"),
+        identity=_identity(organization_id),
         client="codex",
         protocol=protocol,
         requested_model="smart",
@@ -64,6 +65,90 @@ def begin(
 
 
 class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
+    def test_unicode_spaced_organization_completes_full_terminal_transition(self) -> None:
+        organization_id = "München Office"
+        store = PostgresUsageStore(
+            self.runtime_dsn,
+            organization_ids=("acme", "beta", organization_id),
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+        )
+        attempt = begin(store, organization_id=organization_id)
+
+        store._finalize_request_attempt_with_provider_metrics(
+            attempt=attempt,
+            organization_id=organization_id,
+            status="succeeded",
+            input_tokens=10,
+            output_tokens=4,
+            cache_read_tokens=2,
+            cost_microusd=35,
+            provider_metrics=None,
+            finance_observation=complete_observation(),
+            configured_estimate=complete_estimate(),
+        )
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id=organization_id,
+        ) as connection:
+            row = connection.execute(
+                "SELECT root.organization_id AS root_organization_id, "
+                "terminal.organization_id AS terminal_organization_id, "
+                "usage.organization_id AS usage_organization_id, "
+                "finance.organization_id AS finance_organization_id "
+                "FROM gateway_request_attempts AS root "
+                "JOIN gateway_request_attempt_events AS terminal "
+                "ON terminal.attempt_id=root.attempt_id AND terminal.sequence=2 "
+                "JOIN gateway_usage_events AS usage ON usage.id=terminal.usage_event_id "
+                "JOIN gateway_finance_attempt_evidence AS finance "
+                "ON finance.request_attempt_id=root.attempt_id"
+            ).fetchone()
+        self.assertEqual(tuple(row.values()), (organization_id,) * 4)
+        self.assertEqual(
+            store.verify_audit_chain(organization_id=organization_id).sequence,
+            2,
+        )
+
+    def test_available_estimate_must_match_linked_usage_cost(self) -> None:
+        attempt = begin(self.store)
+
+        with self.assertRaises(PostgresStorageError) as caught:
+            self.store._finalize_request_attempt_with_provider_metrics(
+                attempt=attempt,
+                organization_id="acme",
+                status="succeeded",
+                input_tokens=10,
+                output_tokens=4,
+                cache_read_tokens=2,
+                cost_microusd=34,
+                provider_metrics=None,
+                finance_observation=complete_observation(),
+                configured_estimate=complete_estimate(),
+            )
+        self.assertEqual(caught.exception.code, "storage_unavailable")
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id="acme",
+        ) as connection:
+            self.assertEqual(
+                [row["state"] for row in connection.execute(
+                    "SELECT state FROM gateway_request_attempt_events ORDER BY sequence"
+                ).fetchall()],
+                ["pending"],
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) AS count FROM gateway_usage_events"
+                ).fetchone()["count"],
+                0,
+            )
+
     def test_available_estimate_without_observation_rolls_back_terminal_transition(self) -> None:
         attempt = begin(self.store)
 
@@ -178,7 +263,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
             output_tokens=4,
             cache_read_tokens=2,
             reasoning_tokens=3,
-            cost_microusd=34,
+            cost_microusd=35,
             provider_request_id="request-1",
             provider_metrics=None,
             finance_observation=observation,
@@ -196,7 +281,8 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                 SELECT finance.*, terminal.id AS expected_terminal_id,
                        terminal.occurred_at AS expected_occurred_at,
                        terminal.usage_event_id AS expected_usage_event_id,
-                       usage.occurred_at AS expected_usage_occurred_at
+                       usage.occurred_at AS expected_usage_occurred_at,
+                       usage.cost_microusd AS expected_usage_cost_microusd
                 FROM gateway_finance_attempt_evidence AS finance
                 JOIN gateway_request_attempt_events AS terminal
                   ON terminal.organization_id=finance.organization_id
@@ -219,6 +305,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
             self.assertEqual(row["observation_state"], "complete")
             self.assertEqual(row["cache_write_input_tokens"], 1)
             self.assertEqual(row["configured_estimate_microusd"], 35)
+            self.assertEqual(row["expected_usage_cost_microusd"], 35)
             self.assertEqual(row["configured_estimate_amount"], "0.000035")
             self.assertFalse(row["provider_final"])
             self.assertNotIn("ignored", row["evidence_json"])
@@ -388,6 +475,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     status="succeeded",
                     input_tokens=10,
                     output_tokens=4,
+                    cost_microusd=35,
                     provider_metrics=None,
                     finance_observation=complete_observation(),
                     configured_estimate=complete_estimate(),
@@ -421,6 +509,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
             status="succeeded",
             input_tokens=10,
             output_tokens=4,
+            cost_microusd=35,
             provider_metrics=None,
             finance_observation=complete_observation(),
             configured_estimate=complete_estimate(),
@@ -443,6 +532,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     attempt=attempt,
                     organization_id="acme",
                     status="succeeded",
+                    cost_microusd=35,
                     provider_metrics=None,
                     finance_observation=complete_observation(),
                     configured_estimate=complete_estimate(),
@@ -476,6 +566,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     attempt=attempt,
                     organization_id="acme",
                     status="succeeded",
+                    cost_microusd=35,
                     provider_metrics=None,
                     finance_observation=complete_observation(),
                     configured_estimate=complete_estimate(),
@@ -505,6 +596,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     attempt=attempt,
                     organization_id="acme",
                     status="succeeded",
+                    cost_microusd=35,
                     provider_metrics=None,
                     finance_observation=complete_observation(),
                     configured_estimate=complete_estimate(),
@@ -534,6 +626,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     attempt=attempt,
                     organization_id="acme",
                     status="succeeded",
+                    cost_microusd=35,
                     provider_metrics=None,
                     finance_observation=complete_observation(),
                     configured_estimate=complete_estimate(),
@@ -555,6 +648,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     attempt=attempt,
                     organization_id="acme",
                     status="succeeded",
+                    cost_microusd=35,
                     provider_metrics=None,
                     finance_observation=complete_observation(),
                     configured_estimate=complete_estimate(),
@@ -565,6 +659,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
             attempt=attempt,
             organization_id="acme",
             status="succeeded",
+            cost_microusd=35,
             provider_metrics=None,
             finance_observation=complete_observation(),
             configured_estimate=complete_estimate(),
@@ -639,6 +734,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     attempt=attempt,
                     organization_id="acme",
                     status="succeeded",
+                    cost_microusd=35,
                     provider_metrics=None,
                     finance_observation=complete_observation(),
                     configured_estimate=complete_estimate(),
@@ -715,6 +811,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     attempt=attempt,
                     organization_id="acme",
                     status="succeeded",
+                    cost_microusd=2,
                     provider_metrics=None,
                     finance_observation=observation,
                     configured_estimate=estimate,
@@ -761,6 +858,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                     status="succeeded",
                     input_tokens=10,
                     output_tokens=4,
+                    cost_microusd=35,
                     provider_metrics=None,
                     finance_observation=complete_observation(),
                     configured_estimate=complete_estimate(),

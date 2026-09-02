@@ -1039,9 +1039,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         parsed_usage = parser.finish_with_finance()
         usage = parsed_usage.usage
         if account_usage and attempt is not None:
-            successful = 200 <= status < 300 and downstream_ok
-            if successful:
-                request_status = "succeeded"
+            transport_succeeded = 200 <= status < 300 and downstream_ok
+            provider_terminal_failed = parsed_usage.provider_terminal_state in {
+                "failed",
+                "incomplete",
+            }
+            if transport_succeeded:
+                request_status = "failed" if provider_terminal_failed else "succeeded"
             elif status == HTTPStatus.TOO_MANY_REQUESTS:
                 request_status = "rate_limited"
             elif 200 <= status < 300:
@@ -1063,7 +1067,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 return
             else:
                 request_status = "failed"
-            if successful and not usage.evidence_complete:
+            if request_status == "succeeded" and not usage.evidence_complete:
                 self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
                     attempt=attempt,
                     organization_id=identity.organization_id,
@@ -1096,6 +1100,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cache_write_cost_per_million=route.cache_write_cost_per_million,
                 output_cost_per_million=route.output_cost_per_million,
             )
+            if configured_estimate.availability == "available":
+                assert configured_estimate.amount_microusd is not None
+                cost = configured_estimate.amount_microusd
             self.server.provider_reliability_store.finalize_request_attempt(
                 attempt=attempt,
                 organization_id=identity.organization_id,

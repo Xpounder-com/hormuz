@@ -36,7 +36,9 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
 BEGIN
-    IF NEW.configured_rate_card_state IS DISTINCT FROM 'configured'
+    IF length(NEW.organization_id) NOT BETWEEN 1 AND 128
+       OR NEW.organization_id ~ E'[\\r\\n]'
+       OR NEW.configured_rate_card_state IS DISTINCT FROM 'configured'
        OR NEW.configured_rate_card_id IS NULL
        OR NEW.configured_rate_card_version IS NULL
        OR NEW.configured_rate_card_digest IS NULL
@@ -242,16 +244,25 @@ BEGIN
         RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'finance attempt evidence binding mismatch';
     END IF;
 
-    SELECT state, occurred_at, usage_event_id
+    SELECT terminal.state, terminal.occurred_at, terminal.usage_event_id,
+           usage.cost_microusd AS usage_cost_microusd
       INTO v_terminal
-      FROM {schema}.gateway_request_attempt_events
-     WHERE organization_id = NEW.organization_id
-       AND attempt_id = NEW.request_attempt_id
-       AND id = NEW.terminal_attempt_event_id;
+      FROM {schema}.gateway_request_attempt_events AS terminal
+      LEFT JOIN {schema}.gateway_usage_events AS usage
+        ON usage.organization_id = terminal.organization_id
+       AND usage.id = terminal.usage_event_id
+     WHERE terminal.organization_id = NEW.organization_id
+       AND terminal.attempt_id = NEW.request_attempt_id
+       AND terminal.id = NEW.terminal_attempt_event_id;
     IF NOT FOUND
        OR v_terminal.state IS DISTINCT FROM NEW.terminal_state
        OR v_terminal.occurred_at IS DISTINCT FROM NEW.occurred_at
-       OR v_terminal.usage_event_id IS DISTINCT FROM NEW.usage_event_id THEN
+       OR v_terminal.usage_event_id IS DISTINCT FROM NEW.usage_event_id
+       OR (
+           NEW.configured_estimate_availability = 'available'
+           AND v_terminal.usage_cost_microusd
+               IS DISTINCT FROM NEW.configured_estimate_microusd
+       ) THEN
         RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'finance attempt evidence terminal mismatch';
     END IF;
 

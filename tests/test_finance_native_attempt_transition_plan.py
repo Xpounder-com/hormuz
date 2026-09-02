@@ -274,6 +274,18 @@ class FinanceNativeAttemptTransitionPlanTests(unittest.TestCase):
         self.assertEqual(plan["compatibility"]["new_http_routes"], [])
         self.assertEqual(plan["compatibility"]["new_cli_commands"], [])
         self.assertFalse(plan["runtime"]["provider_final"])
+        self.assertIn(
+            "equals_linked_usage_cost",
+            plan["runtime"]["settlement_amount"],
+        )
+        self.assertIn(
+            "failed_or_incomplete_is_known_non_success",
+            plan["runtime"]["provider_terminal_status"],
+        )
+        self.assertIn(
+            "unicode_and_internal_spaces",
+            plan["storage"]["tenant_identity_compatibility"],
+        )
 
     def test_cli_rejects_missing_or_wrong_predecessor_archive(self):
         for payload in (None, b"SYNTHETIC_EXCLUDED"):

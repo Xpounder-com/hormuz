@@ -17,6 +17,7 @@ import re
 import uuid
 from typing import Any, Mapping
 
+from .audit_chain import AuditChainError, canonical_json_text
 from .finance_values import FinanceValueError, decimal_text, exact_context
 
 
@@ -105,6 +106,22 @@ def _identifier(value: object, *, uuid_value: bool = False) -> str:
             raise ValueError("finance_attempt_evidence_invalid") from None
     elif _ID.fullmatch(value) is None:
         raise ValueError("finance_attempt_evidence_invalid")
+    return value
+
+
+def _organization_id(value: object) -> str:
+    """Preserve the established tenant-ID domain used by gateway storage."""
+
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= MAX_IDENTIFIER_BYTES
+        or any(character in value for character in "\x00\r\n")
+    ):
+        raise ValueError("finance_attempt_evidence_invalid")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("finance_attempt_evidence_invalid") from None
     return value
 
 
@@ -929,7 +946,7 @@ def validate_finance_attempt_event(value: Mapping[str, object]) -> None:
         if value["schema_id"] != FINANCE_ATTEMPT_SCHEMA_ID or value["schema_version"] != 1:
             raise ValueError
         _identifier(value["evidence_event_id"], uuid_value=True)
-        _identifier(value["organization_id"])
+        _organization_id(value["organization_id"])
         _identifier(value["request_attempt_id"])
         _identifier(value["terminal_attempt_event_id"], uuid_value=True)
         usage_event_id = value["usage_event_id"]
@@ -1039,9 +1056,13 @@ def finance_attempt_storage_row(event: Mapping[str, object]) -> dict[str, object
     """Return the table row plus the exact canonical audit-source bytes."""
 
     validate_finance_attempt_event(event)
-    canonical = json.dumps(
-        dict(event), sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
-    )
+    try:
+        canonical = canonical_json_text(
+            dict(event),
+            code="finance_attempt_evidence_invalid",
+        )
+    except AuditChainError:
+        raise ValueError("finance_attempt_evidence_invalid") from None
     row = {
         ("event_schema_id" if name == "schema_id" else "event_schema_version" if name == "schema_version" else name): value
         for name, value in event.items()

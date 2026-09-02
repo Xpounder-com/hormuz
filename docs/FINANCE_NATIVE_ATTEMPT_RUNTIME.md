@@ -13,6 +13,14 @@ one sidecar with a null usage link, an explicit `attempt_outcome_unknown`
 estimate reason, and its conservative budget hold intact. Pending attempts
 have no sidecar.
 
+The provider-native estimate is also the amount committed to the linked usage
+fact and budget reconciliation whenever all required price dimensions are
+available. A database guard enforces that equality, so management totals,
+budget settlement, and the sidecar cannot silently disagree. OpenAI
+`response.failed` and `response.incomplete` terminal events remain successful
+HTTP relays to the caller but commit as known non-success attempts rather than
+as successful work.
+
 The sidecar separates three meanings that management and accounting must not
 conflate: provider-observed native usage, Hormuz's configured-rate estimate,
 and future provider-final invoice truth. Unknown values remain null; an
@@ -35,6 +43,9 @@ checkpoint. PostgreSQL already has the source columns, so migration 15 changes
 only the finite source constraint and its security-definer insert guard. The
 runtime still cannot insert arbitrary version-2 JSON: the guard requires an
 exact tenant-local sidecar row with identical canonical evidence bytes.
+Canonical source bytes use the audit chain's UTF-8 JSON representation, so an
+already-valid tenant identity containing Unicode or spaces crosses the root,
+terminal, usage, finance, and audit writes without a post-egress failure.
 
 ## Compatibility and coverage
 

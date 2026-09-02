@@ -27,6 +27,11 @@ from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
 from hormuz.usage import ResponseUsageParser
 
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
+
 
 GATEWAY_TOKEN = "company-user-token-never-forward"
 CLAUDE_ONLY_TOKEN = "company-claude-only-token-never-forward"
@@ -130,6 +135,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             }
             if body.get("force_missing_usage") is True:
                 payload.pop("usage")
+            cache_write_tokens = body.get("force_cache_write_tokens")
+            if type(cache_write_tokens) is int and cache_write_tokens >= 0:
+                payload["usage"]["input_tokens_details"]["cache_write_tokens"] = cache_write_tokens
+            if body.get("force_response_failed") is True:
+                payload["status"] = "failed"
             if body.get("stream") is True:
                 self._send_openai_stream(payload)
                 return
@@ -242,6 +252,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
         message_id = "msg_gateway_probe"
         text = "GATEWAY_OK"
         in_progress = {**completed_response, "status": "in_progress", "output": [], "usage": None}
+        terminal_status = completed_response.get("status", "completed")
         completed_message = {
             "id": message_id,
             "type": "message",
@@ -249,8 +260,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             "role": "assistant",
             "content": [{"type": "output_text", "text": text, "annotations": [], "logprobs": []}],
         }
-        completed = {**completed_response, "output": [completed_message]}
-        events = [
+        completed = {
+            **completed_response,
+            "output": [completed_message] if terminal_status == "completed" else [],
+        }
+        completed_events = [
             {"type": "response.created", "response": in_progress, "sequence_number": 0},
             {
                 "type": "response.output_item.added",
@@ -299,6 +313,14 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 "sequence_number": 6,
             },
             {"type": "response.completed", "response": completed, "sequence_number": 7},
+        ]
+        events = completed_events if terminal_status == "completed" else [
+            completed_events[0],
+            {
+                "type": f"response.{terminal_status}",
+                "response": completed,
+                "sequence_number": 1,
+            },
         ]
         body_bytes = "".join(
             f"event: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n" for event in events
@@ -566,6 +588,62 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.reasoning_tokens, 7)
         self.assertGreater(totals.cost_microusd, 0)
+
+    def test_openai_native_cache_write_cost_settles_usage_and_budget_consistently(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["model_routes"]["engineering-fast"]["cache_write_cost_per_million"] = 5
+        self._restart_gateway(config_value)
+
+        status, _, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "cache-write accounting",
+                "stream": False,
+                "force_cache_write_tokens": 10,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        with managed_sqlite_connection(self.gateway.store.path) as connection:
+            row = connection.execute(
+                "SELECT usage.cost_microusd, finance.configured_estimate_microusd, "
+                "finance.cache_write_input_tokens "
+                "FROM gateway_finance_attempt_evidence AS finance "
+                "JOIN gateway_usage_events AS usage "
+                "ON usage.organization_id=finance.organization_id "
+                "AND usage.id=finance.usage_event_id"
+            ).fetchone()
+        self.assertEqual(row, (202, 202, 10))
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").cost_microusd, 202)
+
+    def test_openai_failed_terminal_stream_is_not_recorded_as_succeeded(self) -> None:
+        status, headers, body = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "known provider failure",
+                "stream": True,
+                "force_response_failed": True,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/event-stream")
+        self.assertIn(b"response.failed", body)
+        with managed_sqlite_connection(self.gateway.store.path) as connection:
+            row = connection.execute(
+                "SELECT terminal.state, usage.status, finance.terminal_state "
+                "FROM gateway_finance_attempt_evidence AS finance "
+                "JOIN gateway_request_attempt_events AS terminal "
+                "ON terminal.organization_id=finance.organization_id "
+                "AND terminal.id=finance.terminal_attempt_event_id "
+                "JOIN gateway_usage_events AS usage "
+                "ON usage.organization_id=finance.organization_id "
+                "AND usage.id=finance.usage_event_id"
+            ).fetchone()
+        self.assertEqual(row, ("failed", "failed", "failed"))
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
 
     def test_gateway_uses_an_encrypted_provider_credential_at_startup(self) -> None:
         """The runtime must prefer the sealed source over any plaintext env value."""

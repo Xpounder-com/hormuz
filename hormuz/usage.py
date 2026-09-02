@@ -32,6 +32,7 @@ class ParsedUsage:
 
     usage: Usage
     finance: NativeUsageObservation
+    provider_terminal_state: str | None
 
 
 class ResponseUsageParser:
@@ -47,6 +48,7 @@ class ResponseUsageParser:
         self._input_tokens_observed = False
         self._output_tokens_observed = False
         self._native = NativeUsageAccumulator(protocol)
+        self._provider_terminal_state: str | None = None
         self._finished: ParsedUsage | None = None
 
     def feed(self, data: bytes) -> None:
@@ -78,7 +80,11 @@ class ResponseUsageParser:
         self.usage.evidence_complete = (
             self._input_tokens_observed and self._output_tokens_observed
         )
-        self._finished = ParsedUsage(self.usage, self._native.finish())
+        self._finished = ParsedUsage(
+            self.usage,
+            self._native.finish(),
+            self._provider_terminal_state,
+        )
         return self._finished
 
     def _parse_sse_line(self, line: str) -> None:
@@ -99,6 +105,12 @@ class ResponseUsageParser:
             return
         if self.protocol == "openai":
             event_type = value.get("type")
+            if isinstance(event_type, str) and event_type in _OPENAI_TERMINAL_RESPONSE_EVENTS:
+                self._observe_provider_terminal_state(
+                    event_type.removeprefix("response."),
+                )
+            elif not self.is_event_stream:
+                self._observe_provider_terminal_state(value.get("status"))
             response = (
                 value.get("response")
                 if isinstance(event_type, str)
@@ -148,6 +160,18 @@ class ResponseUsageParser:
                     observe_input=True,
                     observe_output=True,
                 )
+
+    def _observe_provider_terminal_state(self, value: Any) -> None:
+        if value not in {"completed", "failed", "incomplete"}:
+            return
+        if self._provider_terminal_state is None:
+            self._provider_terminal_state = value
+        elif self._provider_terminal_state != value:
+            # A provider stream cannot truthfully have two different terminal
+            # results. Preserve the conservative non-success classification
+            # and mark its native evidence partial rather than trusting either.
+            self._provider_terminal_state = "failed"
+            self._native.note_parse_failure()
 
     def _apply_provider_model(self, value: Any) -> None:
         if isinstance(value, str) and value and len(value) <= 256 and all(character not in value for character in "\r\n\x00"):
