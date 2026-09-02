@@ -34,6 +34,11 @@ if [ ! -d "$HORMUZ_BUNDLE" ] || [ ! -f "$HORMUZ_UPLOAD" ] || [ -z "$HORMUZ_PROFI
   usage
   exit 2
 fi
+if { [ -n "${HORMUZ_SOURCE_COMMIT:-}" ] && [ -z "${HORMUZ_WORKFLOW_RUN_URL:-}" ]; } || \
+  { [ -z "${HORMUZ_SOURCE_COMMIT:-}" ] && [ -n "${HORMUZ_WORKFLOW_RUN_URL:-}" ]; }; then
+  echo "Source commit and workflow run URL must be supplied together." >&2
+  exit 2
+fi
 if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Developer ]; then
   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
@@ -149,13 +154,22 @@ xcrun stapler staple "$HORMUZ_BUNDLE"
 xcrun stapler validate "$HORMUZ_BUNDLE"
 COPYFILE_DISABLE=1 ditto --norsrc --noextattr --noqtn --noacl -c -k --keepParent \
   "$HORMUZ_BUNDLE" "$HORMUZ_FINAL_ARCHIVE"
-python3 "$HORMUZ_REPO_ROOT/tools/verify_macos_distribution.py" \
-  --bundle "$HORMUZ_BUNDLE" \
-  --archive "$HORMUZ_FINAL_ARCHIVE" \
-  --mode notarized \
-  --expected-bundle-id "$HORMUZ_BUNDLE_ID" \
-  --expected-version "$HORMUZ_VERSION" \
-  --expected-build "$HORMUZ_BUILD_NUMBER" \
+HORMUZ_FINAL_VERIFICATION_ARGS=(
+  --bundle "$HORMUZ_BUNDLE"
+  --archive "$HORMUZ_FINAL_ARCHIVE"
+  --mode notarized
+  --expected-bundle-id "$HORMUZ_BUNDLE_ID"
+  --expected-version "$HORMUZ_VERSION"
+  --expected-build "$HORMUZ_BUILD_NUMBER"
   --output "$HORMUZ_DISTRIBUTION_PROOF"
+)
+if [ -n "${HORMUZ_SOURCE_COMMIT:-}" ]; then
+  HORMUZ_FINAL_VERIFICATION_ARGS+=(
+    --source-commit "$HORMUZ_SOURCE_COMMIT"
+    --workflow-run-url "$HORMUZ_WORKFLOW_RUN_URL"
+  )
+fi
+python3 "$HORMUZ_REPO_ROOT/tools/verify_macos_distribution.py" \
+  "${HORMUZ_FINAL_VERIFICATION_ARGS[@]}"
 
 printf 'Notarized archive: %s\nProof: %s\n' "$HORMUZ_FINAL_ARCHIVE" "$HORMUZ_DISTRIBUTION_PROOF"

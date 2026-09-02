@@ -199,6 +199,60 @@ cannot substitute for that evidence. The result does not establish
 provider-invoice reconciliation, every client feature, traffic bypassing
 Hormuz, or enterprise production readiness.
 
+## Signed Mac controlled-pilot gate
+
+The separate `hormuz.macos-pilot-qualification` v1 contract composes the exact
+notarized archive with its distribution proof and Apple summary, clean
+Gatekeeper installation on Apple Silicon and Intel Macs without developer
+tools, signed Keychain/session update and rollback behavior, the pinned Codex
+and Claude Code `401` semantics, and a real hosted `external_pilot` gateway.
+That gateway evidence requires HTTPS, Okta, server-only provider credentials,
+PostgreSQL durability and tenant RLS, durable sessions, early streaming,
+upstream closure and zero replay on cancellation, header/first-byte/total
+latency samples, a one-hop policy-bounded same-protocol failover, worker and
+pool-wait monitoring, recovery, and a support path. Independent security and
+accessibility reviews are separate required records.
+
+Run the content-free synthetic contract check with:
+
+```bash
+python tools/verify_macos_pilot_evidence.py \
+  tests/fixtures/macos_pilot/complete-synthetic-v1.json \
+  --archive tests/fixtures/macos_pilot/Hormuz-0.1.0-notarized.zip \
+  --distribution-proof tests/fixtures/macos_pilot/distribution-proof-v2.json \
+  --notarization-summary tests/fixtures/macos_pilot/notarization-v1.json \
+  --previous-archive tests/fixtures/macos_pilot/Hormuz-0.0.9-notarized.zip \
+  --previous-distribution-proof tests/fixtures/macos_pilot/previous-distribution-proof-v2.json \
+  --previous-notarization-summary tests/fixtures/macos_pilot/previous-notarization-v1.json \
+  --allow-synthetic-fixture
+```
+
+The fixture always returns `ready_for_controlled_external_pilot: false`. A real
+pass must run on macOS with authenticated GitHub CLI access, independently
+recheck both archives with codesign, stapler, and Gatekeeper, require Apple team
+`R267LZMUTY`, authenticate the recorded default-branch workflow runs, download
+their final unexpired Actions artifacts, and byte-bind each supplied archive,
+proof, and notarization summary to the corresponding artifact members. The
+two distribution workflows must complete by the aggregate snapshot. The
+clean-machine, lifecycle, and official-client records must exact-match a
+candidate-bound artifact from the authenticated macOS operations workflow.
+That artifact also binds the exact gateway source commit and deployment run;
+the deployment must finish before Mac operations start, and clean-machine
+starts must fall within the operations run and precede its artifact creation.
+Incomplete operations gates may retain
+`macos_operational_evidence_url: none` rather than inventing a run URL;
+complete gates require the authenticated URL and artifact. Hosted gateway
+records must exact-match authenticated deployment and qualification artifacts.
+Their URLs may remain `none` while the gateway gate is incomplete, but both
+distinct authenticated URLs are required once its controls otherwise qualify.
+Every download is streamed under its authenticated
+size and an absolute cap. A passing result still supports only a controlled
+single-region pilot. It does not prove external-human usability,
+multi-region availability, zero downtime, an availability or latency SLA, or
+customer production readiness. See
+[MACOS_PILOT_QUALIFICATION.md](MACOS_PILOT_QUALIFICATION.md) for the sequence,
+evidence boundary, and remaining operational gates.
+
 ## Active post-publication onboarding-validation milestone
 
 The v1.0.0 invited-reviewer procedure and strict content-free aggregate are
