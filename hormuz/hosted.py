@@ -23,7 +23,12 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 from ._hosted_config import BACKEND_PORT, SECRET_NAMES, HostedError, load_profile
 from ._hosted_provider import (
+    PROVIDER_CHILD_ENV_NAMES,
     PROVIDER_CONFIG_ENV,
+    PROVIDER_FAILOVER_REHEARSAL_ENV,
+    PROVIDER_MIGRATION_DSN_ENV,
+    PROVIDER_OPERATOR_SECRET_NAMES,
+    PROVIDER_RUNTIME_DSN_ENV,
     PROVIDER_SECRET_NAMES,
     load_provider_profile,
 )
@@ -51,6 +56,20 @@ def runtime_settings() -> dict[str, str]:
         PROVIDER_CONFIG_ENV: os.environ.get(PROVIDER_CONFIG_ENV, "/etc/secrets/hormuz-provider.json"),
         "HORMUZ_OPENAI_PROVIDER_KEY": os.environ.get("HORMUZ_OPENAI_PROVIDER_KEY", ""),
         "HORMUZ_ANTHROPIC_PROVIDER_KEY": os.environ.get("HORMUZ_ANTHROPIC_PROVIDER_KEY", ""),
+        PROVIDER_FAILOVER_REHEARSAL_ENV: os.environ.get(PROVIDER_FAILOVER_REHEARSAL_ENV, ""),
+        PROVIDER_RUNTIME_DSN_ENV: os.environ.get(PROVIDER_RUNTIME_DSN_ENV, ""),
+        PROVIDER_MIGRATION_DSN_ENV: os.environ.get(PROVIDER_MIGRATION_DSN_ENV, ""),
+        "RENDER": os.environ.get("RENDER", ""),
+        "RENDER_CPU_COUNT": os.environ.get("RENDER_CPU_COUNT", ""),
+        "RENDER_EXTERNAL_HOSTNAME": os.environ.get("RENDER_EXTERNAL_HOSTNAME", ""),
+        "RENDER_EXTERNAL_URL": os.environ.get("RENDER_EXTERNAL_URL", ""),
+        "RENDER_GIT_BRANCH": os.environ.get("RENDER_GIT_BRANCH", ""),
+        "RENDER_GIT_COMMIT": os.environ.get("RENDER_GIT_COMMIT", ""),
+        "RENDER_GIT_REPO_SLUG": os.environ.get("RENDER_GIT_REPO_SLUG", ""),
+        "RENDER_INSTANCE_ID": os.environ.get("RENDER_INSTANCE_ID", ""),
+        "RENDER_SERVICE_ID": os.environ.get("RENDER_SERVICE_ID", ""),
+        "RENDER_SERVICE_TYPE": os.environ.get("RENDER_SERVICE_TYPE", ""),
+        "RENDER_WEB_CONCURRENCY": os.environ.get("RENDER_WEB_CONCURRENCY", ""),
     }
 
 
@@ -125,7 +144,7 @@ def supervise(settings: dict[str, str], config_path: Path, provider_config_path:
                 "--config", str(config_path),
                 "--provider-config", str(provider_config_path),
                 "provider-backend",
-            ], {name: settings[name] for name in PROVIDER_SECRET_NAMES})
+            ], {name: settings[name] for name in PROVIDER_CHILD_ENV_NAMES})
             _backend_ready(backend, config, stopped)
         proxy = _spawn(["/usr/bin/caddy", "run", "--config", f"/etc/hormuz/caddy/{mode}.Caddyfile", "--adapter", "caddyfile"], child_settings)
         print(json.dumps({"event": "hosted_starting", "mode": mode,
@@ -183,7 +202,7 @@ def main(argv=None) -> int:
     parser.add_argument("--provider-config", type=Path, default=Path(settings[PROVIDER_CONFIG_ENV]))
     commands = parser.add_subparsers(dest="command")
     for name in (
-        "serve", "backend", "provider-backend", "provider-check",
+        "serve", "backend", "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate",
         "initialize", "check", "recovery-check",
     ):
         commands.add_parser(name)
@@ -210,7 +229,9 @@ def main(argv=None) -> int:
             return 0
         config = (
             load_provider_profile(args.config, args.provider_config, settings)
-            if args.command in {"provider-backend", "provider-check"}
+            if args.command in {
+                "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate"
+            }
             else load_profile(args.config, settings)
         )
         result = {}
@@ -224,7 +245,79 @@ def main(argv=None) -> int:
             )
         elif args.command == "provider-check":
             check_initialized(config)
-            result = {"provider_configuration_valid": True}
+            from .store_router import create_postgres_runtime_pool, create_usage_store
+
+            pool = create_postgres_runtime_pool(config, environ=settings)
+            try:
+                store = create_usage_store(
+                    config,
+                    environ=settings,
+                    connection_pool=pool,
+                )
+                store.verify_ready()
+            finally:
+                if pool is not None:
+                    pool.close()
+            result = {
+                "provider_configuration_valid": True,
+                "postgresql_runtime_verified": True,
+                "postgresql_pool_max_connections": config.usage_storage.postgres_pool.max_connections,
+            }
+        elif args.command == "provider-bootstrap-postgres":
+            if settings["HORMUZ_HOSTED_MODE"] != "maintenance":
+                raise HostedError("hosted_provider_bootstrap_requires_maintenance")
+            from .postgres import bootstrap_postgres_deployment
+            from .store_router import postgres_migration_dsn
+
+            migration_dsn = postgres_migration_dsn(config, environ=settings)
+            runtime_dsn = settings[PROVIDER_RUNTIME_DSN_ENV]
+            if migration_dsn in {
+                settings[name]
+                for name in PROVIDER_OPERATOR_SECRET_NAMES
+                if name != PROVIDER_MIGRATION_DSN_ENV
+            }:
+                raise HostedError("hosted_provider_credentials_must_be_distinct")
+            status = bootstrap_postgres_deployment(
+                migration_dsn,
+                runtime_dsn,
+                schema=config.usage_storage.postgres_schema,
+                runtime_role=config.usage_storage.postgres_runtime_role,
+                policy_control_role=config.policy_control.postgres_control_role,
+                custody_control_role=config.custody_control.postgres_control_role,
+                custody_executor_role=config.custody_executor.postgres_executor_role,
+            )
+            result = {
+                "postgresql_schema_version": status.schema_version,
+                "postgresql_schema_complete": status.schema_complete,
+                "postgresql_restricted_roles": status.restricted_roles,
+                "postgresql_runtime_login_restricted": status.runtime_login_restricted,
+                "postgresql_runtime_membership_verified": status.runtime_membership_verified,
+            }
+        elif args.command == "provider-migrate":
+            if settings["HORMUZ_HOSTED_MODE"] != "maintenance":
+                raise HostedError("hosted_provider_migration_requires_maintenance")
+            from .postgres import migrate_postgres
+            from .store_router import postgres_migration_dsn
+
+            migration_dsn = postgres_migration_dsn(config, environ=settings)
+            if migration_dsn in {
+                settings[name]
+                for name in PROVIDER_OPERATOR_SECRET_NAMES
+                if name != PROVIDER_MIGRATION_DSN_ENV
+            }:
+                raise HostedError("hosted_provider_credentials_must_be_distinct")
+            status = migrate_postgres(
+                migration_dsn,
+                schema=config.usage_storage.postgres_schema,
+                runtime_role=config.usage_storage.postgres_runtime_role,
+                policy_control_role=config.policy_control.postgres_control_role,
+                custody_control_role=config.custody_control.postgres_control_role,
+                custody_executor_role=config.custody_executor.postgres_executor_role,
+            )
+            result = {
+                "postgresql_schema_version": status.version,
+                "postgresql_schema_complete": status.complete,
+            }
         elif args.command == "initialize":
             initialize(config)
         elif args.command == "snapshot":

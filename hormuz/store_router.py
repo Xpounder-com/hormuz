@@ -8,6 +8,7 @@ from typing import Generic, Mapping, Protocol, TypeVar
 
 from ._persistence import (
     ProviderReliabilityRepository,
+    ProviderReliabilityTotals,
     RequestAttempt,
     ReservationScope,
     UsageRepository,
@@ -113,6 +114,15 @@ class _ProviderReliabilityMarkUnknown(Protocol):
     ) -> bool: ...
 
 
+class _ProviderReliabilityTotalsRead(Protocol):
+    def __call__(
+        self,
+        *,
+        actor_id: str,
+        organization_id: str,
+    ) -> ProviderReliabilityTotals: ...
+
+
 @dataclass(frozen=True, repr=False)
 class WorkBudgetRequestAdapter:
     """Typed bridge to the adapters' private atomic v1.1 transaction."""
@@ -164,6 +174,7 @@ class ProviderReliabilityAdapter:
     _begin: _ProviderReliabilityBegin
     _finalize: _ProviderReliabilityFinalize
     _mark_unknown: _ProviderReliabilityMarkUnknown
+    _read_totals: _ProviderReliabilityTotalsRead
 
     def begin_request_attempt(
         self,
@@ -250,6 +261,17 @@ class ProviderReliabilityAdapter:
             provider_metrics=provider_metrics,
         )
 
+    def totals(
+        self,
+        *,
+        actor_id: str,
+        organization_id: str,
+    ) -> ProviderReliabilityTotals:
+        return self._read_totals(
+            actor_id=actor_id,
+            organization_id=organization_id,
+        )
+
 
 @dataclass(frozen=True, repr=False)
 class RepositoryBundle(Generic[RepositoryT]):
@@ -281,12 +303,14 @@ def create_provider_reliability_repository(
             usage._begin_request_attempt_with_work_budget,
             usage._finalize_request_attempt_with_provider_metrics,
             usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
+            usage._provider_reliability_totals,
         )
     if type(usage) is PostgresUsageStore:
         return ProviderReliabilityAdapter(
             usage._begin_request_attempt_with_work_budget,
             usage._finalize_request_attempt_with_provider_metrics,
             usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
+            usage._provider_reliability_totals,
         )
     return None
 

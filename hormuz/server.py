@@ -84,6 +84,21 @@ _ANTHROPIC_INLINE_TOOL_TYPES = frozenset({"custom"})
 _INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
 
 
+class _ProviderRehearsalResponse:
+    """A zero-egress 429 used only after hosted rehearsal authorization."""
+
+    status = int(HTTPStatus.TOO_MANY_REQUESTS)
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+
+    @classmethod
+    def getcode(cls) -> int:
+        return int(cls.status)
+
+    @staticmethod
+    def close() -> None:
+        return None
+
+
 def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) -> bool:
     """Recognize request inputs whose billed content is self-contained.
 
@@ -169,7 +184,11 @@ class GatewayServer(ThreadingHTTPServer):
         self.session_request_limit = SessionRequestLimit()
         self.console_request_limit = SessionRequestLimit()
         self.console: ConsoleService | None = None
-        self.postgres_pool = create_postgres_runtime_pool(config)
+        # Keep injected-process tests and the hosted child's reviewed secret
+        # inventory authoritative. Falling back to ``os.environ`` here would
+        # let storage silently use a credential that the caller deliberately
+        # omitted from its bounded environment.
+        self.postgres_pool = create_postgres_runtime_pool(config, environ=environ)
         try:
             if config.session_broker.enabled:
                 settings = config.session_broker
@@ -183,11 +202,18 @@ class GatewayServer(ThreadingHTTPServer):
                 ))
             self.store: UsageRepository
             if config.portfolio_control is None:
-                self.store = create_usage_store(config, connection_pool=self.postgres_pool)
+                self.store = create_usage_store(
+                    config,
+                    environ=environ,
+                    connection_pool=self.postgres_pool,
+                )
                 portfolio = create_portfolio_repository(config, connection_pool=self.postgres_pool, environ=environ)
             else:
                 repositories = create_repository_bundle(
-                    config, portfolio_factory=create_portfolio_repository, connection_pool=self.postgres_pool,
+                    config,
+                    portfolio_factory=create_portfolio_repository,
+                    environ=environ,
+                    connection_pool=self.postgres_pool,
                 )
                 self.store, portfolio = repositories.usage, repositories.portfolio
             if self.session_broker is not None and config.session_broker.console_enabled:
@@ -433,6 +459,57 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "identity_type": identity.identity_type,
                     "allowed_clients": list(identity.allowed_clients),
                     "authentication_source": identity.authentication_source,
+                },
+            )
+            return
+        if path == "/v1/gateway/reliability":
+            operational_stats = getattr(self.server, "operational_stats", None)
+            if not callable(operational_stats):
+                self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
+                return
+            try:
+                totals = self.server.provider_reliability_store.totals(
+                    actor_id=identity.actor_id,
+                    organization_id=identity.organization_id,
+                )
+                operations = operational_stats()
+            except _STORAGE_FAILURES as error:
+                self._send_storage_failure(None, error)
+                return
+            provider = operations["provider"]
+            pool = operations["postgresql_pool"]
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "schema_id": "hormuz.provider-reliability-summary",
+                    "schema_version": 1,
+                    "scope": "current_actor",
+                    "live_provider_request_count": totals.live_provider_request_count,
+                    "provider_attempt_record_count": totals.provider_attempt_record_count,
+                    "latency_header_sample_count": totals.latency_header_sample_count,
+                    "latency_first_body_byte_sample_count": (
+                        totals.latency_first_body_byte_sample_count
+                    ),
+                    "latency_total_sample_count": totals.latency_total_sample_count,
+                    "failover_link_record_count": totals.failover_link_record_count,
+                    "outcome_unknown_count": totals.outcome_unknown_count,
+                    "cancellation_outcome_unknown_count": (
+                        totals.cancellation_outcome_unknown_count
+                    ),
+                    "provider_capacity": provider["capacity"],
+                    "provider_inflight": provider["inflight"],
+                    "provider_peak_inflight": provider["peak_inflight"],
+                    "provider_saturated_total": provider["saturated_total"],
+                    "postgresql_pool_max_connections": pool["max_connections"],
+                    "postgresql_pool_requests_waiting": pool["requests_waiting"],
+                    "postgresql_pool_requests_queued_total": pool[
+                        "requests_queued_total"
+                    ],
+                    "postgresql_pool_wait_milliseconds_total": pool[
+                        "requests_wait_milliseconds_total"
+                    ],
+                    "postgresql_pool_error_total": pool["requests_error_total"],
+                    "deployment": operations["deployment"],
                 },
             )
             return
@@ -793,7 +870,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         started_ns = time.monotonic_ns()
         try:
-            response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
+            if (
+                getattr(self, "_failover_rehearsal_requested", False)
+                and failover_decision is not None
+                and failover_applied_reason is None
+            ):
+                response = _ProviderRehearsalResponse()
+            else:
+                response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
@@ -931,6 +1015,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
         if failover_applied_reason is not None:
             self.send_header("X-Hormuz-Failover", f"v1;reason={failover_applied_reason}")
+            if getattr(self, "_failover_rehearsal_requested", False):
+                self.send_header("X-Hormuz-Failover-Rehearsal", "v1")
+        if getattr(self, "_cancellation_rehearsal_requested", False):
+            self.send_header("X-Hormuz-Cancellation-Rehearsal", "v1")
         self._send_attribution_header()
         if redaction_count:
             self.send_header("X-Hormuz-Redactions", str(redaction_count))
@@ -974,6 +1062,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 parser.feed(chunk)
                 self._write_downstream_chunk(chunk)
                 downstream_bytes_sent += len(chunk)
+                if getattr(self, "_cancellation_rehearsal_requested", False):
+                    downstream_ok = False
+                    break
         except (BrokenPipeError, ConnectionResetError):
             downstream_ok = False
         except http.client.IncompleteRead as error:

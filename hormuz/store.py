@@ -47,6 +47,7 @@ from .budget_runtime import (
 )
 from ._persistence import (
     MonthlyTotals,
+    ProviderReliabilityTotals,
     RequestAttempt,
     RequestAttemptState,
     RequestAttemptStateError,
@@ -1367,6 +1368,58 @@ class UsageStore:
                 parameters,
             ).fetchone()
         return int(row["count"])
+
+    def _provider_reliability_totals(
+        self,
+        *,
+        actor_id: str,
+        organization_id: str,
+    ) -> ProviderReliabilityTotals:
+        """Read only one actor's content-free provider evidence."""
+
+        with self._lock, self._connection() as connection:
+            attempt_count = connection.execute(
+                "SELECT COUNT(*) FROM gateway_request_attempts "
+                "WHERE organization_id = ? AND actor_id = ?",
+                (organization_id, actor_id),
+            ).fetchone()[0]
+            metrics = connection.execute(
+                "SELECT COUNT(*) AS records, COUNT(m.response_headers_us) AS headers, "
+                "COUNT(m.first_body_byte_us) AS first_bytes, COUNT(m.total_us) AS totals "
+                "FROM gateway_provider_attempt_metrics m "
+                "JOIN gateway_request_attempts a ON a.organization_id = m.organization_id "
+                "AND a.attempt_id = m.attempt_id "
+                "WHERE m.organization_id = ? AND a.actor_id = ?",
+                (organization_id, actor_id),
+            ).fetchone()
+            failovers = connection.execute(
+                "SELECT COUNT(*) FROM gateway_provider_failover_events f "
+                "JOIN gateway_request_attempts a ON a.organization_id = f.organization_id "
+                "AND a.attempt_id = f.original_attempt_id "
+                "WHERE f.organization_id = ? AND a.actor_id = ?",
+                (organization_id, actor_id),
+            ).fetchone()[0]
+            unknown = connection.execute(
+                "SELECT COUNT(*) AS records, "
+                "COALESCE(SUM(CASE WHEN e.reason_code = 'provider_stream_interrupted' "
+                "THEN 1 ELSE 0 END), 0) AS cancellations "
+                "FROM gateway_request_attempt_events e "
+                "JOIN gateway_request_attempts a ON a.organization_id = e.organization_id "
+                "AND a.attempt_id = e.attempt_id "
+                "WHERE e.organization_id = ? AND a.actor_id = ? "
+                "AND e.state = 'outcome_unknown'",
+                (organization_id, actor_id),
+            ).fetchone()
+        return ProviderReliabilityTotals(
+            attempt_count=int(attempt_count),
+            provider_attempt_record_count=int(metrics["records"]),
+            latency_header_sample_count=int(metrics["headers"]),
+            latency_first_body_byte_sample_count=int(metrics["first_bytes"]),
+            latency_total_sample_count=int(metrics["totals"]),
+            failover_link_record_count=int(failovers),
+            outcome_unknown_count=int(unknown["records"]),
+            cancellation_outcome_unknown_count=int(unknown["cancellations"]),
+        )
 
     def monthly_totals(
         self,

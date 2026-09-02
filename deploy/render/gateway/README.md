@@ -15,15 +15,19 @@ Render supplies public TLS. Caddy listens on `0.0.0.0:$PORT`; the Python gateway
 listens only on `127.0.0.1:8787`. Caddy replaces all incoming ingress credential
 values with its dedicated injected secret. The backend independently checks the
 loopback peer, credential and exact configured Host. Existing Origin, CSRF,
-membership and session checks remain in force. Both layers refuse inference,
-portfolio, policy and custody routes. There are no upstreams or static identities
-in the staging configuration.
+membership and session checks remain in force. In authentication staging both
+layers refuse inference, portfolio, policy and custody routes. There are no
+upstreams or static identities in that staging configuration. The separately
+validated `provider-pilot` profile enables only its fixed inference routes.
 
 The proxy receives only its port, temporary Caddy paths and ingress secret. The
 authentication-staging backend receives only the three explicitly named
-credentials below; the provider backend receives those plus the two fixed
-provider credentials documented in the provider-pilot guide. Neither
-inherits unrelated deployment secrets or HTTP proxy settings. Caddy's admin
+credentials below. The provider backend receives those three plus two provider
+keys, the restricted PostgreSQL runtime DSN, and the rehearsal credential
+documented in the provider-pilot guide. It also receives an allowlisted set of
+non-secret Render deployment metadata. The PostgreSQL migration-owner DSN is
+never passed to either backend. Neither inherits unrelated deployment secrets
+or HTTP proxy settings. Caddy's admin
 endpoint, configuration persistence, retries and upstream keepalive are disabled.
 No secret is written into a configuration file. The processes share one UID;
 this limits accidental environment inheritance, not a compromised process's OS
@@ -52,9 +56,9 @@ still occupy a worker after its client disconnects. These are staging resource
 limits, not a distributed abuse-control or total IdP-work deadline guarantee.
 Shutdown stops Caddy first, then drains the backend, with forced termination if
 necessary within the supervisor's budget. No paid inference runs in `active`.
-The separate provider mode uses eight backend connections, an at-most-2-MiB
-body cap and streaming-safe timeouts; see its guide for compute limits and
-bottlenecks.
+The separate provider mode uses eight generation slots, one reserved liveness
+connection, a 1-to-4 PostgreSQL pool, an at-most-2-MiB body cap and
+streaming-safe timeouts; see its guide for compute limits and bottlenecks.
 
 Application output contains fixed lifecycle/error codes only; child stdout and
 stderr are suppressed. This makes private diagnostics deliberately limited.
@@ -369,7 +373,10 @@ deletes only its own objects and emits content-free results. CI builds this prof
 separately from release images and runs no cloud deployment.
 
 Real public HTTPS/Okta code exchange, Safari cookie behavior and Mac Keychain login
-have separate staging evidence. Fresh independent Render-disk recovery, recovery
-timing, provider streaming/failover qualification, signed client distribution and
-independent onboarding remain open. These tests do not increase external-onboarding
-counts or establish release/pilot readiness.
+have separate staging evidence. The provider implementation now has strict
+PostgreSQL bootstrap, deployment, restart, streaming, latency, cancellation and
+failover qualification workflows. Those workflows still require successful
+protected runs against the exact live candidate. Signed client operations on
+clean Apple Silicon and Intel machines, independent review, and external
+onboarding also remain separate gates. Local tests do not increase
+external-onboarding counts or establish pilot readiness.

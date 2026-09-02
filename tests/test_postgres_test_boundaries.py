@@ -84,6 +84,8 @@ EXPECTED_OWNERS = {
     "test_postgres_migration_rls": (
         "PostgresMigrationRLSTests",
         {
+            "test_deployment_bootstrap_separates_managed_login_from_schema_owner",
+            "test_provider_reliability_totals_are_actor_and_tenant_scoped",
             "test_migration_is_visible_to_the_restricted_runtime_role",
             "test_policy_control_role_verifies_only_the_shared_migration_ledger",
             "test_schema_v2_upgrade_preserves_evidence_and_rejects_an_old_reader",
@@ -222,7 +224,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 108)
+        self.assertEqual(len(owned), 110)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

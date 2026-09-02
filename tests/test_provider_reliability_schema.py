@@ -122,6 +122,27 @@ class ProviderReliabilitySchemaTests(unittest.TestCase):
                     ):
                         connection.execute(statement)
 
+            totals = reliability.totals(
+                actor_id="alice",
+                organization_id="acme",
+            )
+            self.assertEqual(totals.attempt_count, 2)
+            self.assertEqual(totals.live_provider_request_count, 1)
+            self.assertEqual(totals.provider_attempt_record_count, 2)
+            self.assertEqual(totals.latency_header_sample_count, 2)
+            self.assertEqual(totals.latency_first_body_byte_sample_count, 1)
+            self.assertEqual(totals.latency_total_sample_count, 2)
+            self.assertEqual(totals.failover_link_record_count, 1)
+            self.assertEqual(totals.outcome_unknown_count, 0)
+            self.assertEqual(totals.cancellation_outcome_unknown_count, 0)
+            self.assertEqual(
+                reliability.totals(
+                    actor_id="bob",
+                    organization_id="acme",
+                ).attempt_count,
+                0,
+            )
+
             other = Identity(
                 token_env=IDENTITY.token_env,
                 token=IDENTITY.token,

@@ -1,119 +1,153 @@
-# Render provider pilot
+# Render external provider pilot
 
-This is the first deployable bridge between hosted login and governed model
-traffic. It is a separate, explicit `provider-pilot` mode. The existing
-`active` mode remains authentication staging and still returns 503 for every
-inference route. Maintenance remains the container default.
+This profile connects hosted Okta login to governed OpenAI and Anthropic
+traffic. It is an explicit `provider-pilot` mode. The existing `active` mode
+continues to serve login and the administrator console while returning 503 for
+inference, and `maintenance` remains the container default.
 
-The pilot is intended for one controlled paid customer evaluation. It is not a
-production availability tier, a multi-region service, a cross-provider
-failover implementation, or an SLA. It must not be activated on the current
-staging service until the configuration, credentials, real-provider checks,
-recovery drill, and customer scope are approved together.
+The first deployment is a controlled, single-region external pilot. It has no
+availability SLA. Customer invitations, public distribution, and an SLA remain
+separate decisions after the evidence gates below pass.
 
-## Compute envelope
+## Compute and data topology
 
-The profile is deliberately sized for Render's 0.5 CPU / 512 MiB service:
+The fixed envelope fits Render's 0.5 CPU / 512 MiB web service and minimizes
+idle compute:
 
-- Caddy owns the only public listener and accepts HTTP/1.1 only. It removes
-  spoofable control headers, disables retries and keepalive to the backend, and
-  flushes response fragments without buffering a complete model response.
-- The Python gateway listens on loopback and admits at most eight concurrent
-  generation requests. One additional bounded connection is reserved so
-  `/health` remains responsive at generation saturation. Every request closes
-  its connection. A stalled client socket is bounded to 45 seconds, and a
-  connection cannot outlive the configured provider timeout plus 30 seconds,
-  capped at 630 seconds.
-- Caddy caps request bodies at `2MB`; Python independently caps them at 2 MiB.
-  Response headers are capped at 16 KiB. Provider calls are capped at 600
-  seconds, and Caddy allows 660 seconds for the bounded backend to return its
-  first response headers.
-- SQLite stores sessions, authorization, usage, reservations, provider timing,
-  and failover evidence on one persistent disk. No background response storage
-  or provider-side asynchronous work is permitted.
-- The gateway loads exactly two provider credentials, one for each supported
-  protocol. Caddy receives neither. The backend receives no unrelated service
-  environment or ambient HTTP proxy setting.
+- Caddy owns the public HTTP/1.1 listener, streams without response buffering,
+  disables retries, and holds no provider or database credential.
+- One Python process accepts at most eight concurrent provider requests. A
+  ninth connection is reserved for health and readiness. No worker process is
+  duplicated through `WEB_CONCURRENCY`.
+- Request bodies are capped at 2 MiB, provider response headers at 16 KiB, and
+  provider calls at 600 seconds. A client write can block for at most 45
+  seconds and a connection for at most 630 seconds.
+- A bounded PostgreSQL pool keeps one warm connection and permits four total.
+  Each evidence transaction applies the restricted role, schema, and tenant
+  context with `SET LOCAL`; pool state cannot carry a tenant into the next
+  request.
+- PostgreSQL stores usage, reservations, request attempts, provider latency,
+  cancellation outcomes, and failover links. The persistent Render disk stores
+  only the encrypted login/session database and its state binding.
+- Responses and prompts are not retained. Provider-side background work and
+  response storage remain disabled.
 
-The first saturation point is eight long-running streams. A ninth generation
-request fails closed while the reserved liveness connection remains available.
-Large JSON parsing, secret inspection, and usage parsing share the half CPU.
-SQLite serializes writes, and one capacity failover creates two reservations,
-attempt records, metric rows, and provider calls. The persistent disk prevents
-horizontal scaling and zero-downtime deploys. A process, instance, disk, region,
-or Render outage therefore interrupts this pilot. These are the main reasons it
-cannot be sold as the availability product yet.
+The main choke point is eight long streams. CPU-heavy JSON parsing, response
+usage parsing, and secret inspection share half a CPU. Four short PostgreSQL
+connections can queue behind concurrent accounting transactions. The session
+database still makes this a single gateway instance, and the attached disk
+prevents horizontal scaling and zero-downtime deploys. A process, disk, region,
+or Render outage can interrupt active streams.
 
-Render CPU, memory, restart, disk, and request-latency observations should be
-reviewed after each controlled workload. The current code records content-free
-per-attempt provider header, first-byte, and total timing, but it does not yet
-export worker saturation or SQLite lock-wait metrics. Those two signals and a
-shared PostgreSQL session/authorization store are gates for a horizontally
-scalable service.
+`GET /v1/gateway/reliability` gives each authenticated actor their own
+content-free request, latency, cancellation, failover, worker-pressure, and
+pool-pressure counters. A `member_admin` can inspect aggregate pressure at
+`GET /v1/admin/operations`. Neither endpoint exposes prompts, responses,
+credentials, provider request IDs, tenant names, or DSNs.
 
-## Fixed configuration contract
+## Fixed provider contract
 
 Copy
 [`deploy/render/gateway/provider-profile.example.json`](../deploy/render/gateway/provider-profile.example.json)
-to a private operator file. The loader accepts it only when all of these
-conditions hold:
+to an operator-owned file and replace only reviewed tenant values. The strict
+loader requires:
 
-- its public origin, OIDC issuer, login client, session settings, state paths,
-  master key, and proxy credential match the already initialized hosted profile;
-- there are no static or pre-mapped OIDC identities; access comes from the
-  hosted team directory and revocable sessions;
-- the only upstreams are `https://api.openai.com` and
-  `https://api.anthropic.com`, using the fixed environment names below;
-- each protocol has fixed primary and secondary aliases, and the primary has
-  exactly one same-protocol failover hop to a different model;
-- all four aliases have positive configured uncached-input, cache-read,
-  cache-write, and output rates so cost figures are explicit estimates rather
-  than zeros;
-- the organization policy allows only Codex and Claude Code, permits exactly
-  those aliases, sets both organization and per-actor monthly spend caps, and
-  caps output at no more than 32,768 tokens;
-- built-in secret inspection remains in `redact` or `deny` mode; and
-- PostgreSQL, static policy administrators, custody, portfolio, attribution,
-  audit anchoring, custom secret sources, response storage, and background work
-  remain outside this first single-node composition.
+- the same public origin, Okta issuer, login client, state paths, master key,
+  and ingress credential as the initialized hosted-login profile;
+- Render source metadata for the exact `main` commit, the
+  `Xpounder-com/hormuz` repository, a web service, 0.5 CPU, and one web worker;
+- PostgreSQL schema `hormuz`, stable runtime role `hormuz_runtime`, and the
+  fixed 1-to-4 connection pool;
+- only the OpenAI Responses and Anthropic Messages upstreams;
+- one primary and one secondary alias per protocol, with one same-protocol
+  failover hop from primary to secondary;
+- positive reviewed rates for uncached input, cache read, cache write, and
+  output on all four routes;
+- Codex and Claude Code as the only clients, explicit organization and actor
+  spend caps, and a maximum output cap no larger than 32,768 tokens; and
+- built-in secret inspection in `redact` or `deny` mode.
 
-The alternate route is a model on the same provider protocol. Hormuz does not
-switch an OpenAI request to Anthropic, or vice versa. It retries only a 429 or
-529 response before response bytes reach the customer, with one alternate call
-maximum. Transport ambiguity, timeouts, generic 5xx responses, partial streams,
-and downstream cancellation never replay work. See
-[`PROVIDER_RELIABILITY.md`](PROVIDER_RELIABILITY.md) for the exact evidence
-contract.
+Failover is deliberately narrow. Hormuz retries only a provider 429 or 529,
+only before any response byte reaches the client, and only once to the
+configured alternate model on the same provider protocol. It never replays a
+timeout, transport ambiguity, generic 5xx, partial stream, or downstream
+cancellation. See [provider reliability](PROVIDER_RELIABILITY.md).
 
-The example contains placeholder model names and rate-card values. Replace them
-with approved current model identifiers and prices during a reviewed customer
-configuration change. Do not commit the resulting tenant profile.
+Model names and rates change. Confirm both model IDs against the provider
+account and update the four rates from current provider pricing immediately
+before qualification. Never commit the tenant profile.
 
-## Secrets and process custody
+## Secret boundary
 
-Keep the original three hosted credentials and add only:
+The service uses these secret environment values:
 
-| Name | Consumer | Purpose |
+| Name | Runtime consumer | Purpose |
 | --- | --- | --- |
-| `HORMUZ_OPENAI_PROVIDER_KEY` | Python backend | OpenAI upstream authorization |
-| `HORMUZ_ANTHROPIC_PROVIDER_KEY` | Python backend | Anthropic upstream authorization |
+| `HORMUZ_INGRESS_CREDENTIAL` | Caddy and Python | Private loopback boundary |
+| `HORMUZ_SESSION_MASTER_KEY` | Python | Encrypt hosted session secrets |
+| `HORMUZ_OIDC_CLIENT_SECRET` | Python | Okta confidential client |
+| `HORMUZ_OPENAI_PROVIDER_KEY` | Provider backend | OpenAI authorization |
+| `HORMUZ_ANTHROPIC_PROVIDER_KEY` | Provider backend | Anthropic authorization |
+| `HORMUZ_POSTGRES_DSN` | Provider backend | Restricted runtime login, internal URL |
+| `HORMUZ_FAILOVER_REHEARSAL_KEY` | Provider backend | Protected deterministic qualification |
+| `HORMUZ_POSTGRES_MIGRATION_DSN` | Maintenance command only | Original database owner, internal URL |
 
-All five credential values must be printable, nonempty, and distinct. Provider
-keys must be 16 to 512 ASCII characters with no whitespace. Store them as
-service-scoped secret environment values. Never place them in JSON, shell
-arguments, logs, CI artifacts, or the Caddy configuration.
+All values must be distinct. The provider backend receives only the first seven
+values plus validated Render metadata. The migration DSN is excluded from its
+environment and should be removed from the service after maintenance. Keep the
+owner DSN in an approved secret manager for future reviewed migrations.
 
-Render secret files are symlinks in the observed service, while this loader
-requires a regular, single-linked, non-writable file. During maintenance, copy
-the approved provider JSON into a new owner-only file such as
-`/var/lib/hormuz/operator/hormuz-provider-runtime.json`, using the same guarded
-copy pattern as the hosted profile. Set `HORMUZ_PROVIDER_CONFIG` to that private
-path.
+Never put a credential in JSON, a command argument, logs, artifacts, Caddy, or
+GitHub workflow inputs. The protected qualification workflow receives a
+dedicated refresh token, rehearsal key, and Render deploy hook only through
+environment secrets.
 
-## Qualification sequence
+Render secret files appear as symlinks, while Hormuz deliberately accepts only
+a regular, single-linked, non-writable provider profile. In maintenance, copy
+the approved profile into
+`/var/lib/hormuz/operator/hormuz-provider-runtime.json` with the guarded copy
+procedure in the [Render gateway runbook](../deploy/render/gateway/README.md),
+then set `HORMUZ_PROVIDER_CONFIG` to that path.
 
-Keep `HORMUZ_HOSTED_MODE=maintenance` while preparing the profile and secrets.
-Run the content-free preflight against the exact paths:
+## First PostgreSQL deployment
+
+Create a dedicated Render Postgres database in the same region as the gateway.
+Use its internal URL to avoid public-network latency. Perform these steps in
+order because creating a new Render-managed credential makes it the default and
+the previous credential stops being visible in the dashboard:
+
+1. While the original credential is still the default, save its internal URL
+   as the operator-held `HORMUZ_POSTGRES_MIGRATION_DSN`.
+2. In the database Credentials panel, create a new managed credential with a
+   deployment-specific login name such as `hormuz_runtime_login_20260902`.
+3. Save the new default internal URL as `HORMUZ_POSTGRES_DSN`. Do not use the
+   external URL and do not delete the original owner.
+4. Keep the web service in `maintenance`, inject both DSNs and the other
+   provider secrets, and prepare the private provider profile.
+5. Run the idempotent bootstrap from the Render service Shell:
+
+```sh
+python -I -m hormuz.hosted \
+  --config /var/lib/hormuz/operator/hormuz-runtime.json \
+  --provider-config /var/lib/hormuz/operator/hormuz-provider-runtime.json \
+  provider-bootstrap-postgres
+```
+
+The command requires distinct owner and runtime credentials. It creates four
+fixed `NOLOGIN`, `NOINHERIT`, non-superuser roles; changes only the managed
+runtime login from `INHERIT` to `NOINHERIT`; rejects elevated or unexpected
+memberships; grants only `hormuz_runtime`; applies all migrations as the owner;
+removes any direct runtime-login grants; and verifies schema ownership, role
+membership, runtime access, and RLS through the runtime DSN. Its output is
+content-free and inference remains disabled. Safe completed work can be rerun.
+
+For a later schema upgrade, temporarily restore the owner DSN while still in
+maintenance and run `provider-migrate`. That command never creates roles or
+relaxes the bootstrap boundary.
+
+## Preflight and activation
+
+Still in maintenance, run:
 
 ```sh
 python -I -m hormuz.hosted \
@@ -122,37 +156,46 @@ python -I -m hormuz.hosted \
   provider-check
 ```
 
-The command validates the complete provider envelope and the existing state
-binding without making a provider request or enabling inference. It must return
-`provider_configuration_valid: true`.
+Require `provider_configuration_valid`, `postgresql_runtime_verified`, and a
+pool maximum of four. Remove `HORMUZ_POSTGRES_MIGRATION_DSN`, deploy again in
+maintenance, and repeat `provider-check` before changing mode.
 
-Before any customer invitation or traffic, require all of the following:
+Activation is manual: set `HORMUZ_HOSTED_MODE=provider-pilot`, deploy the exact
+reviewed `main` commit, and keep auto-deploy disabled. Then run the protected
+`External pilot deployment qualification` workflow twice in sequence:
 
-1. The reviewed image passes the disposable Render container verifier. Its
-   `active` mode must still reject inference, and its `provider-pilot` mode must
-   start with synthetic keys while an unauthenticated generation stops before
-   provider egress.
-2. A real IdP login, session refresh, administrator removal, encrypted backup,
-   closed restore, reinvitation, and administrator regrant complete on the exact
-   candidate revision.
-3. Each configured real provider/model pair completes one non-streaming and one
-   streaming request. Verify request count, timing rows, model rewriting, token
-   accounting, configured-rate cost, cancellation behavior, and the one-hop
-   capacity failover. Use synthetic content only.
-4. A clean signed Mac installation logs in and drives the official Codex and
-   Claude Code clients through the hosted origin. Confirm the documented 401
-   refresh/retry behavior without duplicating provider work.
-5. The operator records the paid service size, disk size, observed peak CPU and
-   memory, longest stream, SQLite lock behavior, restart behavior, rollback
-   revision, and customer spend caps.
+1. `deployment` verifies HTTPS, exact Render service/source/compute identity,
+   PostgreSQL readiness, the published support path, and denial of
+   unauthenticated inference. Retain its exact artifact and run URL.
+2. `qualification` binds a deploy hook to that service and commit, restarts the
+   instance, proves the encrypted session survived, runs non-streaming and
+   streaming requests through all four aliases, exercises cancellation and
+   one-hop failover, verifies latency and pressure counters, revokes the
+   qualification session, and emits content-free evidence.
 
-Only after those checks should an operator set
-`HORMUZ_HOSTED_MODE=provider-pilot` and deploy the same reviewed revision.
-Changing the mode is a production traffic decision. It is separate from merging
-this implementation and must remain manual with auto-deploy disabled.
+The qualification environment must require review and contain only
+`HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN`, `HORMUZ_FAILOVER_REHEARSAL_KEY`, and
+`HORMUZ_RENDER_DEPLOY_HOOK_URL`. The refresh token must belong to the dedicated
+qualification member and is rotated before the first provider request.
 
-Rollback sets the mode back to `active` to preserve login and console access
-while returning every inference route to 503. Use `maintenance` for schema,
-backup, restore, or profile repair work. Do not delete provider keys during an
-incident until request/evidence reconciliation is complete; revoke or rotate
-them through a separate credential-custody procedure.
+The protected workflow is evidence, not activation authority. Do not invite a
+customer until both runs pass and the signed-Mac gates in
+[signed Mac pilot qualification](MACOS_PILOT_QUALIFICATION.md) are complete.
+
+## Rollback and operating limits
+
+Set the mode to `active` to preserve hosted login and the console while closing
+all inference routes. Use `maintenance` for role work, schema changes, profile
+repair, backup, or restore. Keep the last passing commit and notarized Mac
+archive available for rollback.
+
+Do not delete provider keys during an unresolved request. First close
+admission, reconcile content-free request evidence, then rotate credentials
+through a separate custody procedure. A failing PostgreSQL check makes
+`/ready` fail and blocks startup; the gateway does not substitute SQLite for
+durable provider evidence.
+
+This single instance can support a bounded pilot and measure latency. Selling
+an availability SLA requires at least shared session state, more than one
+gateway instance, multi-region routing, database HA/recovery evidence, alerting,
+and sustained load results beyond this profile.

@@ -11,19 +11,21 @@ import unittest
 from contextlib import closing, redirect_stderr, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from hormuz._hosted_config import HostedError
-from hormuz._hosted_provider import load_provider_profile
+from hormuz._hosted_provider import PROVIDER_FAILOVER_REHEARSAL_ENV, load_provider_profile
 from hormuz._hosted_server import (
     PROVIDER_MAX_CONNECTIONS,
     PROVIDER_MAX_INFERENCE_CONNECTIONS,
     ProviderPilotGatewayServer,
 )
 from hormuz._hosted_state import initialize
+from hormuz.config import UsageStorageConfig
 from hormuz.hosted import main
 from tests._console_fixtures import activate_member
-from tests._hosted_fixtures import directory_setup, provider_profile
+from tests._hosted_fixtures import console_credential, directory_setup, provider_profile
 
 
 class _ProviderResponse:
@@ -66,6 +68,9 @@ class HostedProviderConfigTests(unittest.TestCase):
         self.assertEqual(self.config.session_broker, self.staging.session_broker)
         self.assertEqual(self.config.oidc_issuers, self.staging.oidc_issuers)
         self.assertEqual(self.config.max_request_bytes, 2 * 1024 * 1024)
+        self.assertEqual(self.config.usage_storage.backend, "postgresql")
+        self.assertEqual(self.config.usage_storage.postgres_pool.max_connections, 4)
+        self.assertEqual(self.config.usage_storage.postgres_pool.max_waiting, 8)
 
     def test_state_provider_route_policy_and_limit_expansions_fail_closed(self):
         mutations = []
@@ -110,6 +115,9 @@ class HostedProviderConfigTests(unittest.TestCase):
         value["usage_storage"] = {"backend": "sqlite", "postgres_dsn_env": "UNUSED_POSTGRES_DSN"}
         mutations.append(value)
         value = json.loads(json.dumps(self.document))
+        value["usage_storage"]["postgres_pool"]["max_connections"] = 8
+        mutations.append(value)
+        value = json.loads(json.dumps(self.document))
         value["policy_control"] = {"mode": "local", "postgres_control_role": "unused_policy_role"}
         mutations.append(value)
         value = json.loads(json.dumps(self.document))
@@ -136,10 +144,85 @@ class HostedProviderConfigTests(unittest.TestCase):
             {"HORMUZ_OPENAI_PROVIDER_KEY": "short"},
             {"HORMUZ_OPENAI_PROVIDER_KEY": "bad-provider-key\nvalue"},
             {"HORMUZ_OPENAI_PROVIDER_KEY": self.settings["HORMUZ_ANTHROPIC_PROVIDER_KEY"]},
+            {"HORMUZ_POSTGRES_DSN": ""},
+            {"HORMUZ_POSTGRES_DSN": "sqlite:///not-postgres"},
+            {"HORMUZ_POSTGRES_DSN": self.settings["HORMUZ_OPENAI_PROVIDER_KEY"]},
+            {PROVIDER_FAILOVER_REHEARSAL_ENV: "short"},
+            {
+                PROVIDER_FAILOVER_REHEARSAL_ENV: self.settings[
+                    "HORMUZ_OPENAI_PROVIDER_KEY"
+                ]
+            },
         )
         for change in changes:
             with self.subTest(change=tuple(change)), self.assertRaises(HostedError):
                 self.load(settings={**self.settings, **change})
+
+    def test_render_provider_process_is_bound_to_main_small_compute_and_exact_source(self):
+        hosted_document = json.loads(self.staging.source_path.read_text())
+        render_state = Path("/var/lib/hormuz/private/state").resolve()
+        hosted_document.update({
+            "public_origin": "https://hormuz-test.onrender.com",
+            "oidc_issuer": "https://hormuz-test.okta.com/oauth2/default",
+            "state_directory": str(render_state),
+        })
+        self.staging.source_path.write_text(json.dumps(hosted_document))
+        self.staging.source_path.chmod(0o600)
+        render_document = json.loads(json.dumps(self.document))
+        render_document["database"] = str(render_state / "usage.sqlite3")
+        render_document["authentication"]["session_broker"].update({
+            "public_base_url": hosted_document["public_origin"],
+            "database": str(render_state / "sessions.sqlite3"),
+        })
+        render_document["authentication"]["oidc"]["issuers"][0]["issuer"] = hosted_document[
+            "oidc_issuer"
+        ]
+        render = {
+            **self.settings,
+            "RENDER": "true",
+            "RENDER_CPU_COUNT": "0.5",
+            "RENDER_EXTERNAL_HOSTNAME": "hormuz-test.onrender.com",
+            "RENDER_EXTERNAL_URL": "https://hormuz-test.onrender.com",
+            "RENDER_GIT_BRANCH": "main",
+            "RENDER_GIT_COMMIT": "a" * 40,
+            "RENDER_GIT_REPO_SLUG": "Xpounder-com/hormuz",
+            "RENDER_INSTANCE_ID": "synthetic-instance-a",
+            "RENDER_SERVICE_ID": "srv-" + "a" * 20,
+            "RENDER_SERVICE_TYPE": "web",
+            "RENDER_WEB_CONCURRENCY": "1",
+        }
+        self.assertEqual(
+            self.load(render_document, settings=render).usage_storage.postgres_pool.max_connections,
+            4,
+        )
+        for name, value in (
+            ("RENDER_CPU_COUNT", "1"),
+            ("RENDER_EXTERNAL_HOSTNAME", "wrong.example.test"),
+            ("RENDER_EXTERNAL_URL", "http://hormuz-test.onrender.com"),
+            ("RENDER_GIT_BRANCH", "feature"),
+            ("RENDER_GIT_COMMIT", "not-a-commit"),
+            ("RENDER_GIT_REPO_SLUG", "someone/fork"),
+            ("RENDER_INSTANCE_ID", "bad instance"),
+            ("RENDER_SERVICE_ID", "not-a-service"),
+            ("RENDER_SERVICE_TYPE", "worker"),
+            ("RENDER_WEB_CONCURRENCY", "2"),
+        ):
+            with self.subTest(name=name), self.assertRaisesRegex(
+                HostedError,
+                "deployment_metadata_invalid",
+            ):
+                self.load(render_document, settings={**render, name: value})
+
+        unsafe_hosted = json.loads(json.dumps(hosted_document))
+        unsafe_hosted["oidc_issuer"] = "https://identity.example.test/oauth2/default"
+        self.staging.source_path.write_text(json.dumps(unsafe_hosted))
+        self.staging.source_path.chmod(0o600)
+        unsafe_runtime = json.loads(json.dumps(render_document))
+        unsafe_runtime["authentication"]["oidc"]["issuers"][0]["issuer"] = unsafe_hosted[
+            "oidc_issuer"
+        ]
+        with self.assertRaisesRegex(HostedError, "render_runtime_invalid"):
+            self.load(unsafe_runtime, settings=render)
 
     def test_provider_configuration_must_be_regular_private_and_single_linked(self):
         self.path.chmod(0o666)
@@ -154,9 +237,13 @@ class HostedProviderConfigTests(unittest.TestCase):
     def test_provider_check_validates_state_without_enabling_inference(self):
         initialize(self.staging)
         output, error = io.StringIO(), io.StringIO()
+        pool = Mock()
+        store = Mock()
         with (
             patch.dict(os.environ, self.settings, clear=True),
             patch("hormuz.hosted.logging.disable"),
+            patch("hormuz.store_router.create_postgres_runtime_pool", return_value=pool) as create_pool,
+            patch("hormuz.store_router.create_usage_store", return_value=store) as create_store,
             redirect_stdout(output),
             redirect_stderr(error),
         ):
@@ -168,7 +255,137 @@ class HostedProviderConfigTests(unittest.TestCase):
         self.assertEqual((status, error.getvalue()), (0, ""))
         event = json.loads(output.getvalue())
         self.assertTrue(event["provider_configuration_valid"])
+        self.assertTrue(event["postgresql_runtime_verified"])
+        self.assertEqual(event["postgresql_pool_max_connections"], 4)
         self.assertFalse(event["inference_enabled"])
+        runtime_settings = {
+            **self.settings,
+            "RENDER": "",
+            "RENDER_CPU_COUNT": "",
+            "RENDER_EXTERNAL_HOSTNAME": "",
+            "RENDER_EXTERNAL_URL": "",
+            "RENDER_GIT_BRANCH": "",
+            "RENDER_GIT_COMMIT": "",
+            "RENDER_GIT_REPO_SLUG": "",
+            "RENDER_INSTANCE_ID": "",
+            "RENDER_SERVICE_ID": "",
+            "RENDER_SERVICE_TYPE": "",
+            "RENDER_WEB_CONCURRENCY": "",
+        }
+        create_pool.assert_called_once_with(self.config, environ=runtime_settings)
+        create_store.assert_called_once_with(
+            self.config,
+            environ=runtime_settings,
+            connection_pool=pool,
+        )
+        store.verify_ready.assert_called_once_with()
+        pool.close.assert_called_once_with()
+
+    def test_provider_migration_is_explicit_maintenance_only_and_uses_operator_dsn(self):
+        migrated = SimpleNamespace(version=14, complete=True)
+        output, error = io.StringIO(), io.StringIO()
+        settings = {**self.settings, "HORMUZ_HOSTED_MODE": "maintenance"}
+        with (
+            patch.dict(os.environ, settings, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            patch("hormuz.postgres.migrate_postgres", return_value=migrated) as migrate,
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.staging.source_path),
+                "--provider-config", str(self.path),
+                "provider-migrate",
+            ])
+        self.assertEqual((status, error.getvalue()), (0, ""))
+        event = json.loads(output.getvalue())
+        self.assertEqual(event["postgresql_schema_version"], 14)
+        self.assertTrue(event["postgresql_schema_complete"])
+        self.assertFalse(event["inference_enabled"])
+        migrate.assert_called_once_with(
+            settings["HORMUZ_POSTGRES_MIGRATION_DSN"],
+            schema="hormuz",
+            runtime_role="hormuz_runtime",
+            policy_control_role="hormuz_policy_control",
+            custody_control_role="hormuz_custody_control",
+            custody_executor_role="hormuz_custody_executor",
+        )
+
+        output, error = io.StringIO(), io.StringIO()
+        with (
+            patch.dict(os.environ, self.settings, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            patch("hormuz.postgres.migrate_postgres") as migrate,
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.staging.source_path),
+                "--provider-config", str(self.path),
+                "provider-migrate",
+            ])
+        self.assertEqual(status, 1)
+        self.assertIn("hosted_provider_migration_requires_maintenance", error.getvalue())
+        migrate.assert_not_called()
+
+    def test_provider_postgres_bootstrap_is_maintenance_only_and_separates_credentials(self):
+        bootstrapped = SimpleNamespace(
+            schema_version=14,
+            schema_complete=True,
+            restricted_roles=4,
+            runtime_login_restricted=True,
+            runtime_membership_verified=True,
+        )
+        output, error = io.StringIO(), io.StringIO()
+        settings = {**self.settings, "HORMUZ_HOSTED_MODE": "maintenance"}
+        with (
+            patch.dict(os.environ, settings, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            patch(
+                "hormuz.postgres.bootstrap_postgres_deployment",
+                return_value=bootstrapped,
+            ) as bootstrap,
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.staging.source_path),
+                "--provider-config", str(self.path),
+                "provider-bootstrap-postgres",
+            ])
+        self.assertEqual((status, error.getvalue()), (0, ""))
+        event = json.loads(output.getvalue())
+        self.assertEqual(event["postgresql_schema_version"], 14)
+        self.assertEqual(event["postgresql_restricted_roles"], 4)
+        self.assertTrue(event["postgresql_runtime_login_restricted"])
+        self.assertTrue(event["postgresql_runtime_membership_verified"])
+        self.assertFalse(event["inference_enabled"])
+        bootstrap.assert_called_once_with(
+            settings["HORMUZ_POSTGRES_MIGRATION_DSN"],
+            settings["HORMUZ_POSTGRES_DSN"],
+            schema="hormuz",
+            runtime_role="hormuz_runtime",
+            policy_control_role="hormuz_policy_control",
+            custody_control_role="hormuz_custody_control",
+            custody_executor_role="hormuz_custody_executor",
+        )
+
+        output, error = io.StringIO(), io.StringIO()
+        with (
+            patch.dict(os.environ, self.settings, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            patch("hormuz.postgres.bootstrap_postgres_deployment") as bootstrap,
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.staging.source_path),
+                "--provider-config", str(self.path),
+                "provider-bootstrap-postgres",
+            ])
+        self.assertEqual(status, 1)
+        self.assertIn("hosted_provider_bootstrap_requires_maintenance", error.getvalue())
+        bootstrap.assert_not_called()
 
 
 @unittest.skipUnless(os.name == "posix", "The hosted runtime uses POSIX file permissions")
@@ -179,10 +396,21 @@ class HostedProviderHTTPTests(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         config, self.staging, self.settings, _ = provider_profile(self.root)
         initialize(self.staging)
-        self.config = replace(config, listen=replace(config.listen, port=0))
+        # HTTP behavior is exercised against a disposable local SQLite store;
+        # the configuration tests above separately require the live profile's
+        # exact PostgreSQL contract.
+        self.config = replace(
+            config,
+            listen=replace(config.listen, port=0),
+            usage_storage=UsageStorageConfig(),
+        )
         provider_environment = {
             name: self.settings[name]
-            for name in ("HORMUZ_OPENAI_PROVIDER_KEY", "HORMUZ_ANTHROPIC_PROVIDER_KEY")
+            for name in (
+                "HORMUZ_OPENAI_PROVIDER_KEY",
+                "HORMUZ_ANTHROPIC_PROVIDER_KEY",
+                PROVIDER_FAILOVER_REHEARSAL_ENV,
+            )
         }
         self.gateway = ProviderPilotGatewayServer(self.config, environ=provider_environment)
         self.thread = threading.Thread(
@@ -218,6 +446,9 @@ class HostedProviderHTTPTests(unittest.TestCase):
         status, _, body = self.request("GET", "/health")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["status"], "provider_pilot")
+        self.assertEqual(json.loads(body)["deployment"]["platform"], "local")
+        self.assertEqual(json.loads(body)["contract"]["profile"], "local_provider_fixture")
+        self.assertFalse(json.loads(body)["contract"]["postgresql_durable"])
         self.assertEqual(self.gateway._connection_slots._initial_value, PROVIDER_MAX_CONNECTIONS)
         self.assertEqual(self.gateway._provider_slots._initial_value, PROVIDER_MAX_INFERENCE_CONNECTIONS)
         with patch("hormuz.server.urllib.request.urlopen") as provider:
@@ -262,9 +493,41 @@ class HostedProviderHTTPTests(unittest.TestCase):
             self.assertEqual(json.loads(body)["error"]["code"], "hormuz_provider_capacity_exhausted")
             provider.assert_not_called()
             self.assertEqual(self.request("GET", "/health")[0], 200)
+            snapshot = self.gateway.operational_stats()
+            self.assertEqual(snapshot["provider"]["saturated_total"], 1)
+            self.assertEqual(snapshot["provider"]["inflight"], 0)
         finally:
             for _ in held:
                 self.gateway._provider_slots.release()
+
+    def test_member_admin_can_read_only_content_free_operational_counters(self):
+        directory_setup(self.gateway.session_broker.directory, self.config)
+        invitation, _ = activate_member(
+            self.gateway.session_broker.store,
+            self.gateway.session_broker.directory,
+        )
+        self.gateway.console.sessions.grant(
+            organization_id="customer-a",
+            membership_id=invitation.membership_id,
+            role="member_admin",
+        )
+        _, credential = console_credential(
+            self.gateway.session_broker.store,
+            self.gateway.session_broker.directory,
+        )
+        status, headers, body = self.request(
+            "GET",
+            "/v1/admin/operations",
+            headers={"Cookie": "__Host-hormuz_console=" + credential},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        value = json.loads(body)
+        self.assertEqual(value["schema_id"], "hormuz.provider-operations")
+        self.assertEqual(value["content_boundary"], "aggregate_content_free_counters")
+        self.assertEqual(value["provider"]["capacity"], PROVIDER_MAX_INFERENCE_CONNECTIONS)
+        self.assertFalse(value["postgresql_pool"]["configured"])
+        self.assertNotIn("organization", json.dumps(value))
 
     def test_proxy_limits_preserve_liveness_and_backend_timeout_margin(self):
         caddy = (
@@ -305,6 +568,107 @@ class HostedProviderHTTPTests(unittest.TestCase):
             self.assertEqual(connection.execute(
                 "SELECT count(*) FROM gateway_provider_failover_events"
             ).fetchone()[0], 1)
+
+        status, reliability_headers, reliability_body = self.request(
+            "GET",
+            "/v1/gateway/reliability",
+            headers={"Authorization": "Bearer " + pair.access_token},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(reliability_headers["Cache-Control"], "no-store")
+        summary = json.loads(reliability_body)
+        self.assertEqual(summary["scope"], "current_actor")
+        self.assertEqual(summary["live_provider_request_count"], 1)
+        self.assertEqual(summary["provider_attempt_record_count"], 2)
+        self.assertEqual(summary["latency_header_sample_count"], 2)
+        self.assertEqual(summary["latency_first_body_byte_sample_count"], 1)
+        self.assertEqual(summary["latency_total_sample_count"], 2)
+        self.assertEqual(summary["failover_link_record_count"], 1)
+        self.assertEqual(summary["outcome_unknown_count"], 0)
+        self.assertEqual(summary["provider_capacity"], PROVIDER_MAX_INFERENCE_CONNECTIONS)
+        self.assertEqual(summary["deployment"]["platform"], "local")
+
+    def test_authorized_failover_rehearsal_simulates_only_the_first_egress(self):
+        directory_setup(self.gateway.session_broker.directory, self.config)
+        _, pair = activate_member(
+            self.gateway.session_broker.store,
+            self.gateway.session_broker.directory,
+        )
+        success = _ProviderResponse(200, {
+            "id": "resp_rehearsal", "object": "response", "status": "completed",
+            "model": "openai-secondary-model", "output": [],
+            "usage": {"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
+        })
+        with patch("hormuz.server.urllib.request.urlopen", return_value=success) as provider:
+            status, headers, body = self.request(
+                "POST",
+                "/v1/responses",
+                body={"model": "openai-primary", "input": "synthetic rehearsal", "max_output_tokens": 4},
+                headers={
+                    "Authorization": "Bearer " + pair.access_token,
+                    "X-Hormuz-Failover-Rehearsal": self.settings[
+                        PROVIDER_FAILOVER_REHEARSAL_ENV
+                    ],
+                },
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["X-Hormuz-Failover"], "v1;reason=provider_rate_limited")
+        self.assertEqual(headers["X-Hormuz-Failover-Rehearsal"], "v1")
+        self.assertEqual(json.loads(body)["model"], "openai-secondary-model")
+        provider.assert_called_once()
+        self.assertEqual(json.loads(provider.call_args.args[0].data)["model"], "openai-secondary-model")
+
+        with patch("hormuz.server.urllib.request.urlopen") as provider:
+            status, _, body = self.request(
+                "POST",
+                "/v1/responses",
+                body={"model": "openai-primary", "input": "synthetic rejected rehearsal"},
+                headers={
+                    "Authorization": "Bearer " + pair.access_token,
+                    "X-Hormuz-Failover-Rehearsal": "wrong-rehearsal-key",
+                },
+            )
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(body)["error"]["code"], "hormuz_failover_rehearsal_rejected")
+        provider.assert_not_called()
+
+    def test_authorized_cancellation_rehearsal_closes_upstream_and_never_replays(self):
+        directory_setup(self.gateway.session_broker.directory, self.config)
+        _, pair = activate_member(
+            self.gateway.session_broker.store,
+            self.gateway.session_broker.directory,
+        )
+        response = _ProviderResponse(200)
+        response.headers["Content-Type"] = "text/event-stream"
+        response._body = b'data: {"type":"response.output_text.delta","delta":"x"}\n\n'
+        with patch("hormuz.server.urllib.request.urlopen", return_value=response) as provider:
+            status, headers, body = self.request(
+                "POST",
+                "/v1/responses",
+                body={"model": "openai-primary", "input": "synthetic cancellation", "stream": True},
+                headers={
+                    "Authorization": "Bearer " + pair.access_token,
+                    "X-Hormuz-Cancellation-Rehearsal": self.settings[
+                        PROVIDER_FAILOVER_REHEARSAL_ENV
+                    ],
+                },
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["X-Hormuz-Cancellation-Rehearsal"], "v1")
+        self.assertTrue(body)
+        provider.assert_called_once()
+        self.assertTrue(response.closed)
+        summary_status, _, summary_body = self.request(
+            "GET",
+            "/v1/gateway/reliability",
+            headers={"Authorization": "Bearer " + pair.access_token},
+        )
+        self.assertEqual(summary_status, 200)
+        summary = json.loads(summary_body)
+        self.assertEqual(summary["live_provider_request_count"], 1)
+        self.assertEqual(summary["provider_attempt_record_count"], 1)
+        self.assertEqual(summary["cancellation_outcome_unknown_count"], 1)
+        self.assertEqual(summary["failover_link_record_count"], 0)
 
     def test_unknown_route_and_oversized_body_stop_at_private_boundary(self):
         self.assertEqual(self.request("POST", "/v1/models", body={})[0], 503)
