@@ -265,7 +265,7 @@ SESSION_PROOF_TEST_MODULES = (
 SESSION_PROOF_SDIST_PATHS = (
     "tests/__init__.py", "tests/_session_fixtures.py", "tests/fixtures/session-store-v2.json",
     "tests/_console_fixtures.py", "tests/fixtures/session-store-v3.json",
-    "tests/_hosted_fixtures.py",
+    "tests/_hosted_fixtures.py", "deploy/render/gateway/provider-pilot.Caddyfile",
     *(name.replace(".", "/") + ".py" for name in SESSION_PROOF_TEST_MODULES),
 )
 
