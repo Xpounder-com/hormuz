@@ -284,18 +284,23 @@ def bootstrap_postgres_deployment(
     try:
         runtime_connection = psycopg.connect(runtime_dsn, connect_timeout=10)
         with runtime_connection.cursor() as cursor:
-            cursor.execute("SELECT current_user, current_database()")
+            cursor.execute(
+                "SELECT session_user, current_user, current_database()"
+            )
             runtime_identity = cursor.fetchone()
     except psycopg.Error as error:
         raise _storage_error(error) from None
     finally:
         if runtime_connection is not None:
             runtime_connection.close()
-    if not runtime_identity or len(runtime_identity) != 2:
+    if not runtime_identity or len(runtime_identity) != 3:
         raise PostgresStorageError("postgres_bootstrap_runtime_identity_invalid")
-    runtime_login, runtime_database = map(str, runtime_identity)
+    runtime_login, runtime_effective_role, runtime_database = map(
+        str, runtime_identity
+    )
     if (
-        _IDENTIFIER_PATTERN.fullmatch(runtime_login) is None
+        runtime_login != runtime_effective_role
+        or _IDENTIFIER_PATTERN.fullmatch(runtime_login) is None
         or runtime_login in role_names
         or not runtime_database
     ):
@@ -306,13 +311,17 @@ def bootstrap_postgres_deployment(
         migration_connection = psycopg.connect(migration_dsn, connect_timeout=10)
         with migration_connection.transaction():
             with migration_connection.cursor() as cursor:
-                cursor.execute("SELECT current_user, current_database()")
+                cursor.execute(
+                    "SELECT session_user, current_user, current_database()"
+                )
                 migration_identity = cursor.fetchone()
                 if (
                     not migration_identity
-                    or len(migration_identity) != 2
+                    or len(migration_identity) != 3
+                    or str(migration_identity[0])
+                    != str(migration_identity[1])
                     or str(migration_identity[0]) == runtime_login
-                    or str(migration_identity[1]) != runtime_database
+                    or str(migration_identity[2]) != runtime_database
                 ):
                     raise PostgresStorageError(
                         "postgres_bootstrap_credential_boundary_invalid"

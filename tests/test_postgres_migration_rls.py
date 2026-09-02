@@ -32,6 +32,38 @@ else:  # Isolated wheel compatibility discovery uses the tests directory as its 
 
 
 class PostgresMigrationRLSTests(PostgresTestCase):
+    def test_deployment_bootstrap_rejects_startup_role_impersonation(self) -> None:
+        suffix = uuid4().hex[:12]
+        runtime_role = f"hormuz_runtime_i_{suffix}"
+        policy_role = f"hormuz_policy_i_{suffix}"
+        custody_role = f"hormuz_custody_i_{suffix}"
+        executor_role = f"hormuz_executor_i_{suffix}"
+        impersonated_runtime_dsn = self.psycopg.conninfo.make_conninfo(
+            self.owner_dsn,
+            options=f"-c role={self.runtime_role}",
+        )
+
+        with self.psycopg.connect(impersonated_runtime_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT session_user, current_user")
+                session_user, current_user = map(str, cursor.fetchone())
+        self.assertNotEqual(session_user, current_user)
+        self.assertEqual(current_user, self.runtime_role)
+
+        with self.assertRaisesRegex(
+            PostgresStorageError,
+            "postgres_bootstrap_runtime_identity_invalid",
+        ):
+            bootstrap_postgres_deployment(
+                self.owner_dsn,
+                impersonated_runtime_dsn,
+                schema=f"hormuz_impersonation_{suffix}",
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+            )
+
     def test_deployment_bootstrap_separates_managed_login_from_schema_owner(self) -> None:
         suffix = uuid4().hex[:12]
         schema = f"hormuz_bootstrap_{suffix}"
