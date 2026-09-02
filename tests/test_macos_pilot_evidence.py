@@ -244,6 +244,9 @@ class MacPilotEvidenceTests(unittest.TestCase):
             patch.object(
                 pilot, "_authenticate_review_reference"
             ) as review_authenticator,
+            patch.object(
+                pilot, "_authenticate_gateway_evidence_artifact"
+            ) as gateway_artifact_authenticator,
         ):
             result = self._validate(*inputs)
 
@@ -254,6 +257,14 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertEqual(platform_verifier.call_count, 2)
         self.assertEqual(distribution_authenticator.call_count, 2)
         self.assertEqual(review_authenticator.call_count, 2)
+        self.assertEqual(gateway_artifact_authenticator.call_count, 2)
+        self.assertEqual(
+            [item.args[2:] for item in gateway_artifact_authenticator.call_args_list],
+            [
+                ("deployment", "gateway_deployment"),
+                ("qualification", "gateway_recovery"),
+            ],
+        )
         self.assertEqual(
             run_authenticator.call_args_list,
             [
@@ -871,6 +882,153 @@ class MacPilotEvidenceTests(unittest.TestCase):
             pilot._validate_gateway_run_timeline(
                 deployment, recovery, generated_at
             )
+
+    def test_authenticated_gateway_artifact_binds_run_produced_evidence(self) -> None:
+        evidence = self._json(EVIDENCE_PATH)
+        gateway = copy.deepcopy(evidence["hosted_gateway"])
+        gateway["evidence_kind"] = "live_external_pilot"
+        deployment_proof = {
+            "schema_id": "hormuz.external-pilot-deployment-evidence",
+            "schema_version": 1,
+            "evidence_kind": gateway["evidence_kind"],
+            "profile": gateway["profile"],
+            "source_commit": gateway["source_commit"],
+            "workflow_run_url": gateway["deployment_evidence_url"],
+            "identity_provider": gateway["identity_provider"],
+            "provider_protocols": gateway["provider_protocols"],
+            "https": gateway["https"],
+            "inference_enabled": gateway["inference_enabled"],
+            "provider_credentials_server_only": gateway[
+                "provider_credentials_server_only"
+            ],
+            "postgresql_durable": gateway["postgresql_durable"],
+            "tenant_rls": gateway["tenant_rls"],
+            "durable_sessions": gateway["durable_sessions"],
+            "monitoring_configured": gateway["monitoring_configured"],
+            "worker_saturation_monitoring": gateway[
+                "worker_saturation_monitoring"
+            ],
+            "postgresql_pool_wait_monitoring": gateway[
+                "postgresql_pool_wait_monitoring"
+            ],
+            "support_path_published": gateway["support_path_published"],
+            "single_region_acknowledged": gateway["single_region_acknowledged"],
+            "availability_sla_claimed": gateway["availability_sla_claimed"],
+            "max_inflight_streams": gateway["max_inflight_streams"],
+        }
+        pilot._validate_gateway_evidence_payload(
+            deployment_proof,
+            gateway,
+            "deployment",
+            "gateway_deployment",
+        )
+        proof = {
+            "schema_id": "hormuz.external-pilot-qualification-evidence",
+            "schema_version": 1,
+            **gateway,
+        }
+        proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
+        artifact_payload = io.BytesIO()
+        with zipfile.ZipFile(artifact_payload, "w", zipfile.ZIP_DEFLATED) as package:
+            package.writestr(
+                "external-pilot-qualification-evidence.json", proof_payload
+            )
+        run = {
+            "id": 3,
+            "run_number": 7,
+            "run_attempt": 1,
+            "run_started_at": "2026-09-01T14:00:00Z",
+            "updated_at": "2026-09-01T15:00:00Z",
+        }
+        artifact = {
+            "id": 777,
+            "name": "hormuz-external-pilot-qualification-7-1",
+            "size_in_bytes": len(artifact_payload.getvalue()),
+            "expired": False,
+            "created_at": "2026-09-01T14:45:00Z",
+            "url": "https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/777",
+            "archive_download_url": (
+                "https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/777/zip"
+            ),
+            "workflow_run": {
+                "id": 3,
+                "head_branch": "main",
+                "head_sha": gateway["source_commit"],
+            },
+        }
+        response = {"total_count": 1, "artifacts": [artifact]}
+
+        def download(_command: list[str], **kwargs: object) -> SimpleNamespace:
+            destination = kwargs["stdout"]
+            destination.write(artifact_payload.getvalue())  # type: ignore[union-attr]
+            destination.flush()  # type: ignore[union-attr]
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with (
+            patch.object(pilot, "_github_api_json", return_value=response),
+            patch.object(pilot.subprocess, "run", side_effect=download) as command,
+        ):
+            pilot._authenticate_gateway_evidence_artifact(
+                run,
+                gateway,
+                "qualification",
+                "gateway_recovery",
+            )
+        command.assert_called_once()
+        self.assertEqual(
+            command.call_args.args[0][-1],
+            "repos/Xpounder-com/hormuz/actions/artifacts/777/zip",
+        )
+
+        changed = copy.deepcopy(proof)
+        changed["live_provider_request_count"] += 1
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "gateway_recovery_evidence_binding_invalid",
+        ):
+            pilot._validate_gateway_evidence_payload(
+                changed,
+                gateway,
+                "qualification",
+                "gateway_recovery",
+            )
+
+    def test_platform_verification_uses_a_stable_archive_snapshot(self) -> None:
+        proof = self._json(PROOF_PATH)
+        archive_payload = ARCHIVE_PATH.read_bytes()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / ARCHIVE_PATH.name
+            destination = root / "private"
+            destination.mkdir(mode=0o700)
+            source.write_bytes(archive_payload)
+            snapshot, size, digest = pilot._snapshot_bounded_regular(
+                source,
+                pilot._MAX_ARCHIVE_BYTES,
+                "archive",
+                destination,
+            )
+            source.write_bytes(b"replacement")
+            self.assertEqual(snapshot.read_bytes(), archive_payload)
+            self.assertEqual((size, digest), (proof["archive_bytes"], proof["archive_sha256"]))
+
+            def replace_verified_archive(*_args: object) -> dict[str, object]:
+                snapshot.write_bytes(b"changed during platform verification")
+                return {
+                    "team_identifier": pilot.PRODUCTION_TEAM_IDENTIFIER,
+                    "authority": proof["signing_authority"],
+                }
+
+            with (
+                patch.object(
+                    pilot, "verify_archive", side_effect=replace_verified_archive
+                ),
+                self.assertRaisesRegex(
+                    pilot.MacPilotEvidenceError,
+                    "artifact_platform_archive_changed",
+                ),
+            ):
+                pilot._verify_production_archive(snapshot, proof, "artifact")
 
     def test_huge_build_strings_fail_as_contract_errors(self) -> None:
         inputs = list(self._inputs())

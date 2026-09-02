@@ -60,6 +60,7 @@ EXTERNAL_PILOT_WORKFLOW = ".github/workflows/external-pilot-qualification.yml"
 _MAX_FILE_BYTES = 1024 * 1024
 _MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
 _MAX_ACTIONS_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024
+_MAX_GATEWAY_ARTIFACT_BYTES = 2 * 1024 * 1024
 _MAX_FUTURE_CLOCK_SKEW = timedelta(minutes=5)
 
 _REVISION_RE = re.compile(r"[0-9a-f]{40}\Z")
@@ -230,6 +231,34 @@ _HOSTED_GATEWAY_FIELDS = {
     "live_provider_request_count",
     "provider_attempt_record_count",
     "max_inflight_streams",
+}
+_GATEWAY_DEPLOYMENT_EVIDENCE_FIELDS = {
+    "schema_id",
+    "schema_version",
+    "evidence_kind",
+    "profile",
+    "source_commit",
+    "workflow_run_url",
+    "identity_provider",
+    "provider_protocols",
+    "https",
+    "inference_enabled",
+    "provider_credentials_server_only",
+    "postgresql_durable",
+    "tenant_rls",
+    "durable_sessions",
+    "monitoring_configured",
+    "worker_saturation_monitoring",
+    "postgresql_pool_wait_monitoring",
+    "support_path_published",
+    "single_region_acknowledged",
+    "availability_sla_claimed",
+    "max_inflight_streams",
+}
+_GATEWAY_QUALIFICATION_EVIDENCE_FIELDS = {
+    "schema_id",
+    "schema_version",
+    *_HOSTED_GATEWAY_FIELDS,
 }
 _REVIEWS_FIELDS = {"security", "accessibility"}
 _REVIEW_FIELDS = {
@@ -431,6 +460,53 @@ def _digest_bounded_regular(path: Path, maximum: int, label: str) -> tuple[int, 
     return total, digest.hexdigest()
 
 
+def _snapshot_bounded_regular(
+    path: Path, maximum: int, label: str, destination_directory: Path
+) -> tuple[Path, int, str]:
+    try:
+        before = path.lstat()
+    except OSError as error:
+        raise MacPilotEvidenceError(f"{label}_unavailable") from error
+    if not stat.S_ISREG(before.st_mode) or not 1 <= before.st_size <= maximum:
+        raise MacPilotEvidenceError(f"{label}_not_bounded_regular_file")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = -1
+    digest = hashlib.sha256()
+    total = 0
+    snapshot = destination_directory / path.name
+    try:
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _file_identity(before) != _file_identity(opened)
+        ):
+            raise MacPilotEvidenceError(f"{label}_changed_during_open")
+        source = os.fdopen(descriptor, "rb")
+        descriptor = -1
+        with source, snapshot.open("xb") as destination:
+            os.chmod(snapshot, 0o600)
+            while chunk := source.read(1024 * 1024):
+                total += len(chunk)
+                if total > maximum:
+                    raise MacPilotEvidenceError(f"{label}_not_bounded_regular_file")
+                digest.update(chunk)
+                destination.write(chunk)
+        after = path.lstat()
+    except OSError as error:
+        raise MacPilotEvidenceError(f"{label}_unavailable") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if (
+        total != before.st_size
+        or not stat.S_ISREG(after.st_mode)
+        or _file_identity(before) != _file_identity(after)
+    ):
+        raise MacPilotEvidenceError(f"{label}_changed_during_read")
+    return snapshot, total, digest.hexdigest()
+
+
 def _parse_json(payload: bytes, label: str) -> object:
     try:
         return json.loads(
@@ -582,6 +658,178 @@ def _validate_gateway_run_timeline(
     )
     if deployment_completed_at > recovery_started_at:
         raise MacPilotEvidenceError("gateway_run_sequence_invalid")
+
+
+def _read_gateway_evidence_zip(
+    artifact_zip: Path, member_name: str, label: str
+) -> object:
+    try:
+        with zipfile.ZipFile(artifact_zip) as package:
+            members = package.infolist()
+            if len(members) != 1 or members[0].filename != member_name:
+                raise MacPilotEvidenceError(
+                    f"{label}_github_artifact_members_invalid"
+                )
+            member = members[0]
+            file_type = (member.external_attr >> 16) & 0o170000
+            if (
+                member.is_dir()
+                or "/" in member.filename
+                or "\\" in member.filename
+                or file_type not in {0, stat.S_IFREG}
+                or member.flag_bits & 0x1
+                or not 1 <= member.file_size <= _MAX_FILE_BYTES
+            ):
+                raise MacPilotEvidenceError(
+                    f"{label}_github_artifact_members_invalid"
+                )
+            with package.open(member) as source:
+                payload = source.read(_MAX_FILE_BYTES + 1)
+            if len(payload) != member.file_size or len(payload) > _MAX_FILE_BYTES:
+                raise MacPilotEvidenceError(
+                    f"{label}_github_artifact_member_changed"
+                )
+    except MacPilotEvidenceError:
+        raise
+    except (
+        OSError,
+        RuntimeError,
+        EOFError,
+        KeyError,
+        ValueError,
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+        zlib.error,
+    ) as error:
+        raise MacPilotEvidenceError(f"{label}_github_artifact_zip_invalid") from error
+    return _parse_json(payload, f"{label}_evidence")
+
+
+def _authenticate_gateway_evidence_artifact(
+    run: dict[str, Any],
+    gateway: dict[str, Any],
+    evidence_role: str,
+    label: str,
+) -> None:
+    if evidence_role not in {"deployment", "qualification"}:
+        raise MacPilotEvidenceError(f"{label}_role_invalid")
+    run_id = run.get("id")
+    run_number = run.get("run_number")
+    run_attempt = run.get("run_attempt")
+    if (
+        isinstance(run_id, bool)
+        or not isinstance(run_id, int)
+        or run_id < 1
+        or isinstance(run_number, bool)
+        or not isinstance(run_number, int)
+        or not 1 <= run_number <= 999_999_999_999_999
+        or isinstance(run_attempt, bool)
+        or not isinstance(run_attempt, int)
+        or not 1 <= run_attempt < 1000
+    ):
+        raise MacPilotEvidenceError(f"{label}_github_run_identity_invalid")
+    response = _github_api_json(
+        f"repos/Xpounder-com/hormuz/actions/runs/{run_id}/artifacts?per_page=100",
+        f"{label}_github_artifacts",
+    )
+    if not isinstance(response, dict):
+        raise MacPilotEvidenceError(f"{label}_github_artifacts_invalid")
+    total_count = response.get("total_count")
+    artifacts = response.get("artifacts")
+    if (
+        isinstance(total_count, bool)
+        or not isinstance(total_count, int)
+        or not 0 <= total_count <= 100
+        or not isinstance(artifacts, list)
+        or len(artifacts) != total_count
+    ):
+        raise MacPilotEvidenceError(f"{label}_github_artifacts_invalid")
+    expected_name = (
+        f"hormuz-external-pilot-{evidence_role}-{run_number}-{run_attempt}"
+    )
+    matches = [
+        artifact
+        for artifact in artifacts
+        if isinstance(artifact, dict) and artifact.get("name") == expected_name
+    ]
+    if len(matches) != 1:
+        raise MacPilotEvidenceError(f"{label}_github_artifact_not_unique")
+    artifact = matches[0]
+    artifact_id = artifact.get("id")
+    artifact_size = artifact.get("size_in_bytes")
+    workflow_run = artifact.get("workflow_run")
+    artifact_created_at = _require_timestamp(
+        artifact.get("created_at"), f"{label}_github_artifact_created_at"
+    )
+    run_started_at = _require_timestamp(
+        run.get("run_started_at"), f"{label}_github_run_started_at"
+    )
+    run_completed_at = _require_timestamp(
+        run.get("updated_at"), f"{label}_github_run_completed_at"
+    )
+    if (
+        isinstance(artifact_id, bool)
+        or not isinstance(artifact_id, int)
+        or artifact_id < 1
+        or isinstance(artifact_size, bool)
+        or not isinstance(artifact_size, int)
+        or not 1 <= artifact_size <= _MAX_GATEWAY_ARTIFACT_BYTES
+        or artifact.get("expired") is not False
+        or artifact.get("url")
+        != f"https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/{artifact_id}"
+        or artifact.get("archive_download_url")
+        != f"https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/{artifact_id}/zip"
+        or not isinstance(workflow_run, dict)
+        or isinstance(workflow_run.get("id"), bool)
+        or workflow_run.get("id") != run_id
+        or workflow_run.get("head_branch") != "main"
+        or workflow_run.get("head_sha") != gateway["source_commit"]
+        or not run_started_at <= artifact_created_at <= run_completed_at
+    ):
+        raise MacPilotEvidenceError(f"{label}_github_artifact_not_trusted")
+
+    with tempfile.TemporaryDirectory(prefix="hormuz-gateway-artifact-") as temporary:
+        artifact_zip = Path(temporary) / "artifact.zip"
+        try:
+            with artifact_zip.open("xb") as destination:
+                result = subprocess.run(
+                    [
+                        "gh",
+                        "api",
+                        "--hostname",
+                        "github.com",
+                        "--method",
+                        "GET",
+                        f"repos/Xpounder-com/hormuz/actions/artifacts/{artifact_id}/zip",
+                    ],
+                    stdout=destination,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    timeout=30,
+                )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise MacPilotEvidenceError(
+                f"{label}_github_artifact_unavailable"
+            ) from error
+        try:
+            downloaded_size = artifact_zip.stat().st_size
+        except OSError as error:
+            raise MacPilotEvidenceError(
+                f"{label}_github_artifact_unavailable"
+            ) from error
+        if (
+            result.returncode != 0
+            or downloaded_size < 1
+            or downloaded_size != artifact_size
+            or downloaded_size > _MAX_GATEWAY_ARTIFACT_BYTES
+        ):
+            raise MacPilotEvidenceError(f"{label}_github_artifact_unavailable")
+        payload = _read_gateway_evidence_zip(
+            artifact_zip,
+            f"external-pilot-{evidence_role}-evidence.json",
+            label,
+        )
+    _validate_gateway_evidence_payload(payload, gateway, evidence_role, label)
 
 
 def _verify_distribution_artifact_zip(
@@ -827,6 +1075,10 @@ def _verify_production_archive(
     proof: dict[str, Any],
     label: str,
 ) -> None:
+    before = _digest_bounded_regular(archive_path, _MAX_ARCHIVE_BYTES, label)
+    expected = (proof["archive_bytes"], proof["archive_sha256"])
+    if before != expected:
+        raise MacPilotEvidenceError(f"{label}_platform_archive_binding_invalid")
     try:
         signature = verify_archive(
             archive_path,
@@ -836,6 +1088,9 @@ def _verify_production_archive(
         )
     except (DistributionVerificationError, OSError) as error:
         raise MacPilotEvidenceError(f"{label}_platform_verification_failed") from error
+    after = _digest_bounded_regular(archive_path, _MAX_ARCHIVE_BYTES, label)
+    if after != before:
+        raise MacPilotEvidenceError(f"{label}_platform_archive_changed")
     if signature != {
         "team_identifier": PRODUCTION_TEAM_IDENTIFIER,
         "authority": proof["signing_authority"],
@@ -1155,6 +1410,80 @@ def _validate_hosted_gateway(
     return gateway
 
 
+def _validate_gateway_evidence_payload(
+    value: object,
+    gateway: dict[str, Any],
+    evidence_role: str,
+    label: str,
+) -> None:
+    if evidence_role == "deployment":
+        evidence = _require_fields(
+            value, _GATEWAY_DEPLOYMENT_EVIDENCE_FIELDS, f"{label}_evidence"
+        )
+        _require_int(
+            evidence["schema_version"],
+            1,
+            1,
+            f"{label}_evidence_schema_version",
+        )
+        expected = {
+            "schema_id": "hormuz.external-pilot-deployment-evidence",
+            "schema_version": 1,
+            "evidence_kind": gateway["evidence_kind"],
+            "profile": gateway["profile"],
+            "source_commit": gateway["source_commit"],
+            "workflow_run_url": gateway["deployment_evidence_url"],
+            "identity_provider": gateway["identity_provider"],
+            "provider_protocols": gateway["provider_protocols"],
+            "https": gateway["https"],
+            "inference_enabled": gateway["inference_enabled"],
+            "provider_credentials_server_only": gateway[
+                "provider_credentials_server_only"
+            ],
+            "postgresql_durable": gateway["postgresql_durable"],
+            "tenant_rls": gateway["tenant_rls"],
+            "durable_sessions": gateway["durable_sessions"],
+            "monitoring_configured": gateway["monitoring_configured"],
+            "worker_saturation_monitoring": gateway[
+                "worker_saturation_monitoring"
+            ],
+            "postgresql_pool_wait_monitoring": gateway[
+                "postgresql_pool_wait_monitoring"
+            ],
+            "support_path_published": gateway["support_path_published"],
+            "single_region_acknowledged": gateway["single_region_acknowledged"],
+            "availability_sla_claimed": gateway["availability_sla_claimed"],
+            "max_inflight_streams": gateway["max_inflight_streams"],
+        }
+        if any(
+            type(evidence[field]) is not type(expected_value)
+            or evidence[field] != expected_value
+            for field, expected_value in expected.items()
+        ):
+            raise MacPilotEvidenceError(f"{label}_evidence_binding_invalid")
+        return
+    if evidence_role != "qualification":
+        raise MacPilotEvidenceError(f"{label}_role_invalid")
+    evidence = _require_fields(
+        value, _GATEWAY_QUALIFICATION_EVIDENCE_FIELDS, f"{label}_evidence"
+    )
+    _require_int(
+        evidence["schema_version"],
+        1,
+        1,
+        f"{label}_evidence_schema_version",
+    )
+    if evidence["schema_id"] != "hormuz.external-pilot-qualification-evidence":
+        raise MacPilotEvidenceError(f"{label}_evidence_identity_invalid")
+    evidence_gateway = {field: evidence[field] for field in _HOSTED_GATEWAY_FIELDS}
+    evidence_reasons: list[str] = []
+    _validate_hosted_gateway(
+        evidence_gateway, "pilot_qualification", evidence_reasons
+    )
+    if evidence_reasons or evidence_gateway != gateway:
+        raise MacPilotEvidenceError(f"{label}_evidence_binding_invalid")
+
+
 def _validate_review(
     value: object,
     label: str,
@@ -1408,6 +1737,18 @@ def validate_evidence(
         _validate_gateway_run_timeline(
             deployment_run, recovery_run, generated_at
         )
+        _authenticate_gateway_evidence_artifact(
+            deployment_run,
+            gateway,
+            "deployment",
+            "gateway_deployment",
+        )
+        _authenticate_gateway_evidence_artifact(
+            recovery_run,
+            gateway,
+            "qualification",
+            "gateway_recovery",
+        )
 
     reviews = _require_fields(root["reviews"], _REVIEWS_FIELDS, "reviews")
     validated_reviews = {
@@ -1517,9 +1858,6 @@ def main(argv: list[str] | None = None) -> int:
         notarization_payload = _read_bounded_regular(
             args.notarization_summary, _MAX_FILE_BYTES, "notarization_summary"
         )
-        archive_size, archive_sha256 = _digest_bounded_regular(
-            args.archive, _MAX_ARCHIVE_BYTES, "archive"
-        )
         previous_proof_payload = _read_bounded_regular(
             args.previous_distribution_proof,
             _MAX_FILE_BYTES,
@@ -1530,9 +1868,6 @@ def main(argv: list[str] | None = None) -> int:
             _MAX_FILE_BYTES,
             "previous_notarization_summary",
         )
-        previous_archive_size, previous_archive_sha256 = _digest_bounded_regular(
-            args.previous_archive, _MAX_ARCHIVE_BYTES, "previous_archive"
-        )
         evidence = _parse_json(evidence_payload, "evidence")
         if (
             isinstance(evidence, dict)
@@ -1540,27 +1875,48 @@ def main(argv: list[str] | None = None) -> int:
             and not args.allow_synthetic_fixture
         ):
             raise MacPilotEvidenceError("synthetic_fixture_not_allowed")
-        result = validate_evidence(
-            evidence,
-            distribution_proof=_parse_json(proof_payload, "distribution_proof"),
-            distribution_proof_payload=proof_payload,
-            notarization_summary=_parse_json(notarization_payload, "notarization_summary"),
-            notarization_summary_payload=notarization_payload,
-            archive_path=args.archive,
-            archive_size=archive_size,
-            archive_sha256=archive_sha256,
-            previous_distribution_proof=_parse_json(
-                previous_proof_payload, "previous_distribution_proof"
-            ),
-            previous_distribution_proof_payload=previous_proof_payload,
-            previous_notarization_summary=_parse_json(
-                previous_notarization_payload, "previous_notarization_summary"
-            ),
-            previous_notarization_summary_payload=previous_notarization_payload,
-            previous_archive_path=args.previous_archive,
-            previous_archive_size=previous_archive_size,
-            previous_archive_sha256=previous_archive_sha256,
-        )
+        with tempfile.TemporaryDirectory(prefix="hormuz-pilot-archives-") as temporary:
+            snapshot_root = Path(temporary)
+            archive_directory = snapshot_root / "candidate"
+            previous_archive_directory = snapshot_root / "previous"
+            archive_directory.mkdir(mode=0o700)
+            previous_archive_directory.mkdir(mode=0o700)
+            archive_path, archive_size, archive_sha256 = _snapshot_bounded_regular(
+                args.archive, _MAX_ARCHIVE_BYTES, "archive", archive_directory
+            )
+            (
+                previous_archive_path,
+                previous_archive_size,
+                previous_archive_sha256,
+            ) = _snapshot_bounded_regular(
+                args.previous_archive,
+                _MAX_ARCHIVE_BYTES,
+                "previous_archive",
+                previous_archive_directory,
+            )
+            result = validate_evidence(
+                evidence,
+                distribution_proof=_parse_json(proof_payload, "distribution_proof"),
+                distribution_proof_payload=proof_payload,
+                notarization_summary=_parse_json(
+                    notarization_payload, "notarization_summary"
+                ),
+                notarization_summary_payload=notarization_payload,
+                archive_path=archive_path,
+                archive_size=archive_size,
+                archive_sha256=archive_sha256,
+                previous_distribution_proof=_parse_json(
+                    previous_proof_payload, "previous_distribution_proof"
+                ),
+                previous_distribution_proof_payload=previous_proof_payload,
+                previous_notarization_summary=_parse_json(
+                    previous_notarization_payload, "previous_notarization_summary"
+                ),
+                previous_notarization_summary_payload=previous_notarization_payload,
+                previous_archive_path=previous_archive_path,
+                previous_archive_size=previous_archive_size,
+                previous_archive_sha256=previous_archive_sha256,
+            )
     except MacPilotEvidenceError as error:
         print(f"macos_pilot_evidence=invalid code={error}", file=sys.stderr)
         return 2

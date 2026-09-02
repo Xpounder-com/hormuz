@@ -48,7 +48,10 @@ affected gate on a new build when artifact bytes change.
    workflow run-number/run-attempt build identity. The authenticated Actions
    artifact creation time becomes the lower bound for every clean-machine run
    and completed review. Apple acceptance must contain zero issues and at least
-   two ticket entries.
+   two ticket entries. The CLI streams each supplied archive into a private,
+   owner-only snapshot before validation. It verifies that snapshot's digest
+   immediately before and after the macOS platform checks, so custody and
+   platform verification cannot observe different pathname contents.
 3. **Exercise clean machines.** Use one Apple Silicon Mac and one Intel Mac
    without developer tools. Download through the intended delivery channel so
    normal quarantine is present. Confirm Gatekeeper accepts the archive,
@@ -87,8 +90,21 @@ affected gate on a new build when artifact bytes change.
    runs of `.github/workflows/external-pilot-qualification.yml` at the recorded
    gateway commit. Both authenticated run timelines must finish by the
    aggregate's `generated_at`, and the recovery run must start after the
-   deployment run finishes. That operational workflow does not exist yet, so
-   the current repository remains fail-closed for real pilot qualification.
+   deployment run finishes. The deployment run must publish one unexpired
+   `hormuz-external-pilot-deployment-<run number>-<attempt>` artifact containing
+   only `external-pilot-deployment-evidence.json`. That strict JSON proof binds
+   the live profile, source and run URL, IdP/protocols, HTTPS and custody,
+   PostgreSQL/RLS/session controls, monitoring/support, regional/SLA boundary,
+   and stream cap. The recovery run must publish one unexpired
+   `hormuz-external-pilot-qualification-<run number>-<attempt>` artifact
+   containing only `external-pilot-qualification-evidence.json`; its strict
+   `hormuz.external-pilot-qualification-evidence` v1 record reproduces every
+   hosted-gateway field and is validated through the same live contract before
+   exact comparison. Both artifact ZIPs are downloaded through authenticated
+   GitHub API calls and reject duplicate, path-bearing, encrypted, oversized,
+   expired, malformed, or extra members. That operational workflow does not
+   exist yet, so the current repository remains fail-closed for real pilot
+   qualification.
 7. **Complete independent review.** An independent reviewer must close both the
    security and accessibility reviews after the candidate artifact exists. Each
    aggregate record binds the candidate archive digest, source commit, and
@@ -141,6 +157,12 @@ timelines must also precede the declared evidence snapshot and occur in that
 order. The gateway record carries an evidence-kind discriminator; the
 synthetic gateway domain is rejected when the aggregate claims real pilot
 qualification.
+
+The CLI never platform-verifies the caller-controlled archive pathname after
+the initial read. It copies the bounded regular file through a no-follow
+descriptor into a private temporary directory, binds the copy's digest to the
+proof and Actions artifact, and confirms its digest remains unchanged across
+codesign, stapler, and Gatekeeper checks.
 
 `provider_attempt_record_count` is content-free operational evidence. It does
 not contain request or response content. Provider credentials remain only in
