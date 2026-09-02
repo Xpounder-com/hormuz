@@ -81,6 +81,10 @@
           {
             "context": "Python 3.14",
             "integration_id": 15368
+          },
+          {
+            "context": "Native Mac client and loopback contract",
+            "integration_id": 15368
           }
         ],
         "strict_required_status_checks_policy": true

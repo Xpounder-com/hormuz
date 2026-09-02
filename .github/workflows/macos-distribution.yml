@@ -1,0 +1,314 @@
+name: Mac signed distribution
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Three-component marketing version
+        required: true
+        default: 0.1.0
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-distribution-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    name: Build and test unsigned client
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require reviewed default-branch source
+        env:
+          HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Derive immutable release identity
+        id: release
+        env:
+          HORMUZ_INPUT_VERSION: ${{ inputs.version }}
+          HORMUZ_BUNDLE_ID: com.xpounder.hormuz
+        run: |
+          set -euo pipefail
+          [[ "$HORMUZ_INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$GITHUB_RUN_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_RUN_ATTEMPT" -lt 1000
+          HORMUZ_BUILD_NUMBER=$((GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT))
+          printf 'version=%s\nbuild_number=%s\nbundle_identifier=%s\n' \
+            "$HORMUZ_INPUT_VERSION" "$HORMUZ_BUILD_NUMBER" "$HORMUZ_BUNDLE_ID" \
+            >> "$GITHUB_OUTPUT"
+      - name: Record native toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+      - name: Test native client without signing credentials
+        run: swift test --package-path clients/macos
+      - name: Build unsigned universal payload
+        env:
+          HORMUZ_VERSION: ${{ steps.release.outputs.version }}
+          HORMUZ_BUILD_NUMBER: ${{ steps.release.outputs.build_number }}
+          HORMUZ_BUNDLE_ID: ${{ steps.release.outputs.bundle_identifier }}
+        run: |
+          set -euo pipefail
+          umask 077
+          HORMUZ_PAYLOAD="$RUNNER_TEMP/hormuz-unsigned-payload"
+          HORMUZ_SCRATCH="$RUNNER_TEMP/hormuz-unsigned-build"
+          mkdir "$HORMUZ_PAYLOAD"
+          swift build --package-path clients/macos --scratch-path "$HORMUZ_SCRATCH" \
+            --configuration release --arch arm64 --arch x86_64 --product Hormuz
+          HORMUZ_BINARY_SOURCE="$(swift build --package-path clients/macos \
+            --scratch-path "$HORMUZ_SCRATCH" --configuration release \
+            --arch arm64 --arch x86_64 --show-bin-path)/Hormuz"
+          cp "$HORMUZ_BINARY_SOURCE" "$HORMUZ_PAYLOAD/Hormuz"
+          chmod 755 "$HORMUZ_PAYLOAD/Hormuz"
+          HORMUZ_DSYM_SOURCE="$(dirname "$HORMUZ_BINARY_SOURCE")/Hormuz.dSYM"
+          if [ -d "$HORMUZ_DSYM_SOURCE" ]; then
+            cp -R "$HORMUZ_DSYM_SOURCE" "$HORMUZ_PAYLOAD/Hormuz.dSYM"
+          fi
+          HORMUZ_REHEARSAL="$RUNNER_TEMP/hormuz-credential-free-rehearsal"
+          HORMUZ_REHEARSAL_ARGS=(
+            --output-directory "$HORMUZ_REHEARSAL"
+            --bundle-id "$HORMUZ_BUNDLE_ID"
+            --version "$HORMUZ_VERSION"
+            --build "$HORMUZ_BUILD_NUMBER"
+            --prebuilt-binary "$HORMUZ_PAYLOAD/Hormuz"
+            --ad-hoc
+          )
+          if [ -d "$HORMUZ_PAYLOAD/Hormuz.dSYM" ]; then
+            HORMUZ_REHEARSAL_ARGS+=(--prebuilt-dsym "$HORMUZ_PAYLOAD/Hormuz.dSYM")
+          fi
+          ./script/package_macos_release.sh "${HORMUZ_REHEARSAL_ARGS[@]}"
+          python3 - "$HORMUZ_REHEARSAL/package-metadata.json" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          proof = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          expected = {
+              "bundle_identifier": os.environ["HORMUZ_BUNDLE_ID"],
+              "version": os.environ["HORMUZ_VERSION"],
+              "build": os.environ["HORMUZ_BUILD_NUMBER"],
+              "executable_version_verified": True,
+              "distribution_ready": False,
+          }
+          if any(proof.get(key) != value for key, value in expected.items()):
+              raise SystemExit("credential-free runtime version rehearsal failed")
+          PY
+          python3 - "$HORMUZ_PAYLOAD/Hormuz" "$HORMUZ_PAYLOAD/payload-manifest.json" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          binary = Path(sys.argv[1])
+          manifest = Path(sys.argv[2])
+          architectures = sorted(
+              subprocess.check_output(
+                  ["lipo", "-archs", str(binary)], text=True
+              ).split()
+          )
+          if architectures != ["arm64", "x86_64"]:
+              raise SystemExit("unsigned payload is not exactly universal")
+          manifest.write_text(
+              json.dumps(
+                  {
+                      "schema_id": "hormuz.macos-unsigned-payload",
+                      "schema_version": 1,
+                      "source_commit": os.environ["GITHUB_SHA"],
+                      "bundle_identifier": os.environ["HORMUZ_BUNDLE_ID"],
+                      "version": os.environ["HORMUZ_VERSION"],
+                      "build": os.environ["HORMUZ_BUILD_NUMBER"],
+                      "architectures": architectures,
+                      "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                      "credential_free_runtime_version_verified": True,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - name: Transfer only the unsigned binary, symbols and digest manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-macos-unsigned-${{ github.sha }}
+          path: ${{ runner.temp }}/hormuz-unsigned-payload
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-and-notarize:
+    name: Sign, notarize, staple and verify
+    needs: build-and-test
+    runs-on: macos-15
+    timeout-minutes: 45
+    environment: macos-distribution
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require reviewed default-branch source
+        env:
+          HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Derive immutable release identity
+        id: release
+        env:
+          HORMUZ_INPUT_VERSION: ${{ inputs.version }}
+          HORMUZ_BUNDLE_ID: com.xpounder.hormuz
+        run: |
+          set -euo pipefail
+          [[ "$HORMUZ_INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$GITHUB_RUN_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_RUN_ATTEMPT" -lt 1000
+          HORMUZ_BUILD_NUMBER=$((GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT))
+          printf 'version=%s\nbuild_number=%s\nbundle_identifier=%s\n' \
+            "$HORMUZ_INPUT_VERSION" "$HORMUZ_BUILD_NUMBER" "$HORMUZ_BUNDLE_ID" \
+            >> "$GITHUB_OUTPUT"
+      - name: Download the unsigned payload from the isolated build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hormuz-macos-unsigned-${{ github.sha }}
+          path: ${{ runner.temp }}/hormuz-unsigned-payload
+      - name: Verify the exact unsigned payload before credential access
+        env:
+          HORMUZ_VERSION: ${{ steps.release.outputs.version }}
+          HORMUZ_BUILD_NUMBER: ${{ steps.release.outputs.build_number }}
+          HORMUZ_BUNDLE_ID: ${{ steps.release.outputs.bundle_identifier }}
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/hormuz-unsigned-payload" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          payload = Path(sys.argv[1])
+          binary = payload / "Hormuz"
+          manifest_path = payload / "payload-manifest.json"
+          if not binary.is_file() or binary.is_symlink():
+              raise SystemExit("unsigned Hormuz binary is missing or unsafe")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          architectures = sorted(
+              subprocess.check_output(
+                  ["lipo", "-archs", str(binary)], text=True
+              ).split()
+          )
+          expected = {
+              "schema_id": "hormuz.macos-unsigned-payload",
+              "schema_version": 1,
+              "source_commit": os.environ["GITHUB_SHA"],
+              "bundle_identifier": os.environ["HORMUZ_BUNDLE_ID"],
+              "version": os.environ["HORMUZ_VERSION"],
+              "build": os.environ["HORMUZ_BUILD_NUMBER"],
+              "architectures": ["arm64", "x86_64"],
+              "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "credential_free_runtime_version_verified": True,
+          }
+          if manifest != expected or architectures != ["arm64", "x86_64"]:
+              raise SystemExit("unsigned payload identity changed")
+          PY
+      - name: Import protected Apple credentials, sign and notarize
+        env:
+          HORMUZ_CERTIFICATE_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          HORMUZ_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          HORMUZ_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          HORMUZ_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          HORMUZ_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          HORMUZ_VERSION: ${{ steps.release.outputs.version }}
+          HORMUZ_BUILD_NUMBER: ${{ steps.release.outputs.build_number }}
+          HORMUZ_BUNDLE_ID: ${{ steps.release.outputs.bundle_identifier }}
+          HORMUZ_UNSIGNED_PAYLOAD: ${{ runner.temp }}/hormuz-unsigned-payload
+        run: |
+          set -euo pipefail
+          umask 077
+          for name in HORMUZ_CERTIFICATE_BASE64 HORMUZ_CERTIFICATE_PASSWORD HORMUZ_NOTARY_KEY_BASE64 HORMUZ_NOTARY_KEY_ID HORMUZ_NOTARY_ISSUER_ID; do
+            test -n "${!name}"
+          done
+          HORMUZ_KEYCHAIN="$RUNNER_TEMP/hormuz-signing.keychain-db"
+          HORMUZ_CERTIFICATE="$RUNNER_TEMP/developer-id.p12"
+          HORMUZ_NOTARY_KEY="$RUNNER_TEMP/AuthKey_$HORMUZ_NOTARY_KEY_ID.p8"
+          export HORMUZ_CERTIFICATE HORMUZ_NOTARY_KEY
+          HORMUZ_KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          HORMUZ_NOTARY_PROFILE="hormuz-ci-$GITHUB_RUN_ID"
+          cleanup() {
+            security delete-keychain "$HORMUZ_KEYCHAIN" >/dev/null 2>&1 || true
+            rm -f "$HORMUZ_CERTIFICATE" "$HORMUZ_NOTARY_KEY"
+          }
+          trap cleanup EXIT
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+          Path(os.environ["HORMUZ_CERTIFICATE"]).write_bytes(base64.b64decode(os.environ["HORMUZ_CERTIFICATE_BASE64"], validate=True))
+          Path(os.environ["HORMUZ_NOTARY_KEY"]).write_bytes(base64.b64decode(os.environ["HORMUZ_NOTARY_KEY_BASE64"], validate=True))
+          PY
+          security create-keychain -p "$HORMUZ_KEYCHAIN_PASSWORD" "$HORMUZ_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$HORMUZ_KEYCHAIN"
+          security unlock-keychain -p "$HORMUZ_KEYCHAIN_PASSWORD" "$HORMUZ_KEYCHAIN"
+          security import "$HORMUZ_CERTIFICATE" -k "$HORMUZ_KEYCHAIN" -P "$HORMUZ_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -f pkcs12
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$HORMUZ_KEYCHAIN_PASSWORD" "$HORMUZ_KEYCHAIN"
+          security list-keychains -d user -s "$HORMUZ_KEYCHAIN"
+          security default-keychain -d user -s "$HORMUZ_KEYCHAIN"
+          HORMUZ_IDENTITIES="$(security find-identity -v -p codesigning "$HORMUZ_KEYCHAIN" | sed -n 's/.*"\(Developer ID Application: [^"]*\)"/\1/p')"
+          test "$(printf '%s\n' "$HORMUZ_IDENTITIES" | sed '/^$/d' | wc -l | tr -d ' ')" = 1
+          HORMUZ_CODESIGN_IDENTITY="$HORMUZ_IDENTITIES"
+          xcrun notarytool store-credentials "$HORMUZ_NOTARY_PROFILE" \
+            --key "$HORMUZ_NOTARY_KEY" \
+            --key-id "$HORMUZ_NOTARY_KEY_ID" \
+            --issuer "$HORMUZ_NOTARY_ISSUER_ID" \
+            --keychain "$HORMUZ_KEYCHAIN" \
+            --validate
+          rm -f "$HORMUZ_CERTIFICATE" "$HORMUZ_NOTARY_KEY"
+          unset HORMUZ_CERTIFICATE_BASE64 HORMUZ_CERTIFICATE_PASSWORD
+          unset HORMUZ_NOTARY_KEY_BASE64 HORMUZ_NOTARY_KEY_ID HORMUZ_NOTARY_ISSUER_ID
+          HORMUZ_OUTPUT="$RUNNER_TEMP/hormuz-macos-release"
+          HORMUZ_PACKAGE_ARGS=(
+            --output-directory "$HORMUZ_OUTPUT"
+            --bundle-id "$HORMUZ_BUNDLE_ID"
+            --version "$HORMUZ_VERSION"
+            --build "$HORMUZ_BUILD_NUMBER"
+            --prebuilt-binary "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz"
+          )
+          if [ -d "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz.dSYM" ]; then
+            HORMUZ_PACKAGE_ARGS+=(--prebuilt-dsym "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz.dSYM")
+          fi
+          HORMUZ_CODESIGN_IDENTITY="$HORMUZ_CODESIGN_IDENTITY" ./script/package_macos_release.sh \
+            "${HORMUZ_PACKAGE_ARGS[@]}"
+          ./script/notarize_macos_release.sh \
+            --bundle "$HORMUZ_OUTPUT/Hormuz.app" \
+            --upload-archive "$HORMUZ_OUTPUT/Hormuz-$HORMUZ_VERSION-notarization-upload.zip" \
+            --keychain-profile "$HORMUZ_NOTARY_PROFILE" \
+            --keychain "$HORMUZ_KEYCHAIN"
+      - name: Retain only the signed notarized archive and content-free evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-macos-${{ inputs.version }}-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/hormuz-macos-release/Hormuz-*-notarized.zip
+            ${{ runner.temp }}/hormuz-macos-release/Hormuz-*.dSYM.zip
+            ${{ runner.temp }}/hormuz-macos-release/notarization.json
+            ${{ runner.temp }}/hormuz-macos-release/distribution-proof.json
+          if-no-files-found: error
+          retention-days: 30

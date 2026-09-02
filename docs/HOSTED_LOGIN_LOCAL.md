@@ -1,5 +1,10 @@
 # Local browser-login milestone
 
+The follow-up [native Mac client milestone](MACOS_CLIENT_LOCAL.md) exercises this
+broker with a browser, Keychain-backed helper and dedicated client launchers.
+It remains a local development preview, separate from production deployment and
+signed/notarized distribution.
+
 This is the first implementation slice for the hosted direction: **we operate
 your team's governed access**. It provides browser login, client-bound opaque
 sessions, governed requests, personal usage, refresh, and logout without a
