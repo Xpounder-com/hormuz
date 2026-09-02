@@ -208,6 +208,8 @@ _MACOS_OPERATIONS_EVIDENCE_FIELDS = {
     "previous_source_commit",
     "previous_archive_sha256",
     "previous_distribution_run_url",
+    "gateway_source_commit",
+    "gateway_deployment_evidence_url",
     "clean_machine_runs",
     "lifecycle",
     "client_auth_recovery",
@@ -806,7 +808,7 @@ def _validate_gateway_run_timeline(
     deployment_run: dict[str, Any],
     recovery_run: dict[str, Any],
     generated_at: datetime,
-) -> None:
+) -> datetime:
     _, deployment_completed_at = _validate_github_run_timeline(
         deployment_run, generated_at, "gateway_deployment"
     )
@@ -815,6 +817,7 @@ def _validate_gateway_run_timeline(
     )
     if deployment_completed_at > recovery_started_at:
         raise MacPilotEvidenceError("gateway_run_sequence_invalid")
+    return deployment_completed_at
 
 
 def _read_single_json_artifact_zip(
@@ -1470,6 +1473,7 @@ def _validate_macos_operations_evidence_payload(
     operations_url: str,
     artifact: dict[str, Any],
     previous_artifact: dict[str, Any],
+    gateway: dict[str, Any],
     clean_machine_runs: object,
     lifecycle: object,
     client_auth_recovery: object,
@@ -1496,6 +1500,8 @@ def _validate_macos_operations_evidence_payload(
         "previous_source_commit": previous_artifact["source_commit"],
         "previous_archive_sha256": previous_artifact["archive_sha256"],
         "previous_distribution_run_url": previous_artifact["workflow_run_url"],
+        "gateway_source_commit": gateway["source_commit"],
+        "gateway_deployment_evidence_url": gateway["deployment_evidence_url"],
         "clean_machine_runs": clean_machine_runs,
         "lifecycle": lifecycle,
         "client_auth_recovery": client_auth_recovery,
@@ -1511,12 +1517,14 @@ def _authenticate_macos_operational_evidence(
     operations_url: str,
     artifact: dict[str, Any],
     previous_artifact: dict[str, Any],
+    gateway: dict[str, Any],
     clean_machine_runs: object,
     lifecycle: object,
     client_auth_recovery: object,
     artifact_created_at: datetime | None,
+    gateway_deployment_completed_at: datetime,
     generated_at: datetime,
-) -> None:
+) -> datetime:
     label = "macos_operations"
     run = _authenticate_github_run(
         operations_url,
@@ -1527,6 +1535,8 @@ def _authenticate_macos_operational_evidence(
     run_started_at, _ = _validate_github_run_timeline(run, generated_at, label)
     if artifact_created_at is None or run_started_at < artifact_created_at:
         raise MacPilotEvidenceError("macos_operations_predates_artifact")
+    if run_started_at < gateway_deployment_completed_at:
+        raise MacPilotEvidenceError("macos_operations_predates_gateway_deployment")
     _, run_number, run_attempt = _require_github_run_identity(run, label)
     payload, operations_artifact_created_at = _authenticate_run_json_artifact(
         run,
@@ -1540,6 +1550,7 @@ def _authenticate_macos_operational_evidence(
         operations_url,
         artifact,
         previous_artifact,
+        gateway,
         clean_machine_runs,
         lifecycle,
         client_auth_recovery,
@@ -1557,12 +1568,18 @@ def _authenticate_macos_operational_evidence(
             raise MacPilotEvidenceError(
                 f"clean_machine_run_{index}_after_operations_artifact"
             )
+        if started_at < run_started_at:
+            raise MacPilotEvidenceError(
+                f"clean_machine_run_{index}_predates_operations_run"
+            )
+    return run_started_at
 
 
 def _validate_hosted_gateway(
     value: object, evidence_kind: str, reasons: list[str]
 ) -> dict[str, Any]:
     gateway = _require_fields(value, _HOSTED_GATEWAY_FIELDS, "hosted_gateway")
+    initial_reason_count = len(reasons)
     expected_evidence_kind = (
         "live_external_pilot"
         if evidence_kind == "pilot_qualification"
@@ -1571,9 +1588,17 @@ def _validate_hosted_gateway(
     if gateway["evidence_kind"] != expected_evidence_kind:
         raise MacPilotEvidenceError("gateway_evidence_kind_invalid")
     _require_pattern(gateway["source_commit"], _REVISION_RE, "gateway_source_commit")
-    _require_pattern(gateway["deployment_evidence_url"], _ACTIONS_RUN_RE, "deployment_evidence_url")
-    _require_pattern(gateway["recovery_evidence_url"], _ACTIONS_RUN_RE, "recovery_evidence_url")
-    if gateway["deployment_evidence_url"] == gateway["recovery_evidence_url"]:
+    for field in ("deployment_evidence_url", "recovery_evidence_url"):
+        url = gateway[field]
+        if (
+            not isinstance(url, str)
+            or (url != "none" and _ACTIONS_RUN_RE.fullmatch(url) is None)
+        ):
+            raise MacPilotEvidenceError(f"{field}_invalid")
+    if (
+        gateway["deployment_evidence_url"] != "none"
+        and gateway["deployment_evidence_url"] == gateway["recovery_evidence_url"]
+    ):
         raise MacPilotEvidenceError("gateway_evidence_urls_not_distinct")
     protocols = gateway["provider_protocols"]
     if (
@@ -1638,6 +1663,14 @@ def _validate_hosted_gateway(
         reasons.append("live_provider_failover_evidence_incomplete")
     if sla_claimed:
         reasons.append("unsupported_availability_sla_claimed")
+    if (
+        len(reasons) == initial_reason_count
+        and (
+            gateway["deployment_evidence_url"] == "none"
+            or gateway["recovery_evidence_url"] == "none"
+        )
+    ):
+        reasons.append("hosted_gateway_evidence_missing")
     return gateway
 
 
@@ -1961,26 +1994,15 @@ def validate_evidence(
         root["lifecycle"], previous_artifact["build"], artifact["build"], reasons
     )
     _validate_client_recovery(root["client_auth_recovery"], artifact["archive_sha256"], reasons)
-    if (
-        evidence_kind == "pilot_qualification"
-        and len(reasons) == macos_operations_reason_count
-    ):
-        if operations_url == "none":
-            reasons.append("macos_operational_evidence_missing")
-        else:
-            _authenticate_macos_operational_evidence(
-                operations_url,
-                artifact,
-                previous_artifact,
-                root["clean_machine_runs"],
-                root["lifecycle"],
-                root["client_auth_recovery"],
-                artifact_created_at,
-                generated_at,
-            )
+    macos_records_complete = len(reasons) == macos_operations_reason_count
     gateway_reason_count = len(reasons)
     gateway = _validate_hosted_gateway(root["hosted_gateway"], evidence_kind, reasons)
-    if evidence_kind == "pilot_qualification" and len(reasons) == gateway_reason_count:
+    gateway_complete = len(reasons) == gateway_reason_count
+    gateway_deployment_completed_at: datetime | None = None
+    if (
+        evidence_kind == "pilot_qualification"
+        and gateway_complete
+    ):
         deployment_run = _authenticate_github_run(
             gateway["deployment_evidence_url"],
             gateway["source_commit"],
@@ -1993,7 +2015,7 @@ def validate_evidence(
             EXTERNAL_PILOT_WORKFLOW,
             "gateway_recovery",
         )
-        _validate_gateway_run_timeline(
+        gateway_deployment_completed_at = _validate_gateway_run_timeline(
             deployment_run, recovery_run, generated_at
         )
         _authenticate_gateway_evidence_artifact(
@@ -2008,6 +2030,22 @@ def validate_evidence(
             "qualification",
             "gateway_recovery",
         )
+    if evidence_kind == "pilot_qualification" and macos_records_complete:
+        if operations_url == "none":
+            reasons.append("macos_operational_evidence_missing")
+        elif gateway_deployment_completed_at is not None:
+            _authenticate_macos_operational_evidence(
+                operations_url,
+                artifact,
+                previous_artifact,
+                gateway,
+                root["clean_machine_runs"],
+                root["lifecycle"],
+                root["client_auth_recovery"],
+                artifact_created_at,
+                gateway_deployment_completed_at,
+                generated_at,
+            )
 
     reviews = _require_fields(root["reviews"], _REVIEWS_FIELDS, "reviews")
     validated_reviews = {

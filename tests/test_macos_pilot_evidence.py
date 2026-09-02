@@ -274,7 +274,11 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 pilot, "_authenticate_gateway_evidence_artifact"
             ) as gateway_artifact_authenticator,
             patch.object(
-                pilot, "_authenticate_macos_operational_evidence"
+                pilot,
+                "_authenticate_macos_operational_evidence",
+                return_value=datetime(
+                    2026, 9, 1, 14, 31, tzinfo=timezone.utc
+                ),
             ) as macos_operations_authenticator,
         ):
             result = self._validate(*inputs)
@@ -291,6 +295,14 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertEqual(
             macos_operations_authenticator.call_args.args[0],
             evidence["macos_operational_evidence_url"],
+        )
+        self.assertEqual(
+            macos_operations_authenticator.call_args.args[3],
+            gateway,
+        )
+        self.assertEqual(
+            macos_operations_authenticator.call_args.args[8],
+            datetime(2026, 9, 1, 14, 30, tzinfo=timezone.utc),
         )
         self.assertEqual(
             [item.args[2:] for item in gateway_artifact_authenticator.call_args_list],
@@ -323,6 +335,8 @@ class MacPilotEvidenceTests(unittest.TestCase):
         )
         evidence["clean_machine_runs"] = []
         evidence["macos_operational_evidence_url"] = "none"
+        gateway["deployment_evidence_url"] = "none"
+        gateway["recovery_evidence_url"] = "none"
         inputs[0] = evidence
         with (
             patch.object(
@@ -358,19 +372,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
             patch.object(
                 pilot,
                 "_authenticate_github_run",
-                side_effect=(
-                    {
-                        "created_at": "2026-09-01T14:00:00Z",
-                        "run_started_at": "2026-09-01T14:01:00Z",
-                        "updated_at": "2026-09-01T14:30:00Z",
-                    },
-                    {
-                        "created_at": "2026-09-01T14:31:00Z",
-                        "run_started_at": "2026-09-01T14:32:00Z",
-                        "updated_at": "2026-09-01T15:00:00Z",
-                    },
-                ),
-            ),
+            ) as run_authenticator,
             patch.object(pilot, "_authenticate_review_reference"),
             patch.object(pilot, "_authenticate_gateway_evidence_artifact"),
             patch.object(
@@ -384,7 +386,9 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "clean_machine_architecture_coverage_incomplete", result["reasons"]
         )
         self.assertNotIn("macos_operational_evidence_missing", result["reasons"])
+        self.assertIn("hosted_gateway_evidence_missing", result["reasons"])
         operations_authenticator.assert_not_called()
+        run_authenticator.assert_not_called()
         self.assertEqual(gateway["evidence_kind"], "live_external_pilot")
 
     def test_authenticated_distribution_artifact_binds_exact_retained_files(self) -> None:
@@ -919,6 +923,24 @@ class MacPilotEvidenceTests(unittest.TestCase):
         ):
             pilot._validate_hosted_gateway(gateway, "pilot_qualification", [])
 
+    def test_incomplete_gateway_accepts_absent_workflow_urls(self) -> None:
+        evidence = self._json(EVIDENCE_PATH)
+        gateway = copy.deepcopy(evidence["hosted_gateway"])
+        gateway["evidence_kind"] = "live_external_pilot"
+        gateway["deployment_evidence_url"] = "none"
+        gateway["recovery_evidence_url"] = "none"
+        reasons: list[str] = []
+
+        pilot._validate_hosted_gateway(gateway, "pilot_qualification", reasons)
+
+        self.assertEqual(reasons, ["hosted_gateway_evidence_missing"])
+
+        gateway["deployment_evidence_url"] = "https://example.com/actions/runs/2"
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "deployment_evidence_url_invalid"
+        ):
+            pilot._validate_hosted_gateway(gateway, "pilot_qualification", [])
+
     def test_github_run_authentication_binds_repository_workflow_and_commit(self) -> None:
         url = "https://github.com/Xpounder-com/hormuz/actions/runs/12345"
         source_commit = "a" * 40
@@ -989,8 +1011,11 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "run_started_at": "2026-09-01T14:32:00Z",
             "updated_at": "2026-09-01T15:00:00Z",
         }
-        pilot._validate_gateway_run_timeline(
-            deployment, recovery, generated_at
+        self.assertEqual(
+            pilot._validate_gateway_run_timeline(
+                deployment, recovery, generated_at
+            ),
+            datetime(2026, 9, 1, 14, 30, tzinfo=timezone.utc),
         )
 
         recovery["updated_at"] = "2026-09-01T17:01:00Z"
@@ -1146,6 +1171,10 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "previous_source_commit": previous_artifact["source_commit"],
             "previous_archive_sha256": previous_artifact["archive_sha256"],
             "previous_distribution_run_url": previous_artifact["workflow_run_url"],
+            "gateway_source_commit": evidence["hosted_gateway"]["source_commit"],
+            "gateway_deployment_evidence_url": evidence["hosted_gateway"][
+                "deployment_evidence_url"
+            ],
             "clean_machine_runs": evidence["clean_machine_runs"],
             "lifecycle": evidence["lifecycle"],
             "client_auth_recovery": evidence["client_auth_recovery"],
@@ -1204,10 +1233,12 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 operations_url,
                 artifact,
                 previous_artifact,
+                evidence["hosted_gateway"],
                 evidence["clean_machine_runs"],
                 evidence["lifecycle"],
                 evidence["client_auth_recovery"],
                 datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+                datetime(2026, 9, 1, 14, 4, tzinfo=timezone.utc),
                 datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
             )
         run_auth.assert_called_once_with(
@@ -1232,10 +1263,32 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 operations_url,
                 artifact,
                 previous_artifact,
+                evidence["hosted_gateway"],
                 evidence["clean_machine_runs"],
                 evidence["lifecycle"],
                 evidence["client_auth_recovery"],
                 datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+                datetime(2026, 9, 1, 13, 58, tzinfo=timezone.utc),
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+            )
+
+        with (
+            patch.object(pilot, "_authenticate_github_run", return_value=run),
+            self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError,
+                "macos_operations_predates_gateway_deployment",
+            ),
+        ):
+            pilot._authenticate_macos_operational_evidence(
+                operations_url,
+                artifact,
+                previous_artifact,
+                evidence["hosted_gateway"],
+                evidence["clean_machine_runs"],
+                evidence["lifecycle"],
+                evidence["client_auth_recovery"],
+                datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+                datetime(2026, 9, 1, 14, 6, tzinfo=timezone.utc),
                 datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
             )
 
@@ -1262,12 +1315,39 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 operations_url,
                 artifact,
                 previous_artifact,
+                evidence["hosted_gateway"],
                 future_clean_machine_runs,
                 evidence["lifecycle"],
                 evidence["client_auth_recovery"],
                 datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+                datetime(2026, 9, 1, 14, 4, tzinfo=timezone.utc),
                 datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
             )
+
+        for field, invalid_value in (
+            ("gateway_source_commit", "f" * 40),
+            (
+                "gateway_deployment_evidence_url",
+                "https://github.com/Xpounder-com/hormuz/actions/runs/999999",
+            ),
+        ):
+            with self.subTest(field=field):
+                changed = copy.deepcopy(proof)
+                changed[field] = invalid_value
+                with self.assertRaisesRegex(
+                    pilot.MacPilotEvidenceError,
+                    "macos_operations_evidence_binding_invalid",
+                ):
+                    pilot._validate_macos_operations_evidence_payload(
+                        changed,
+                        operations_url,
+                        artifact,
+                        previous_artifact,
+                        evidence["hosted_gateway"],
+                        evidence["clean_machine_runs"],
+                        evidence["lifecycle"],
+                        evidence["client_auth_recovery"],
+                    )
 
         for field, mutate in (
             (
@@ -1295,6 +1375,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
                         operations_url,
                         artifact,
                         previous_artifact,
+                        evidence["hosted_gateway"],
                         evidence["clean_machine_runs"],
                         evidence["lifecycle"],
                         evidence["client_auth_recovery"],
@@ -1311,6 +1392,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 operations_url,
                 artifact,
                 previous_artifact,
+                evidence["hosted_gateway"],
                 evidence["clean_machine_runs"],
                 evidence["lifecycle"],
                 evidence["client_auth_recovery"],

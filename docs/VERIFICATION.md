@@ -235,12 +235,17 @@ their final unexpired Actions artifacts, and byte-bind each supplied archive,
 proof, and notarization summary to the corresponding artifact members. The
 two distribution workflows must complete by the aggregate snapshot. The
 clean-machine, lifecycle, and official-client records must exact-match a
-candidate-bound artifact from the authenticated macOS operations workflow;
-clean-machine starts must also precede that artifact's creation. Incomplete
-operations gates may retain `macos_operational_evidence_url: none` rather than
-inventing a run URL; complete gates require the authenticated URL and artifact.
-hosted gateway records must exact-match its authenticated deployment and
-qualification artifacts. Every download is streamed under its authenticated
+candidate-bound artifact from the authenticated macOS operations workflow.
+That artifact also binds the exact gateway source commit and deployment run;
+the deployment must finish before Mac operations start, and clean-machine
+starts must fall within the operations run and precede its artifact creation.
+Incomplete operations gates may retain
+`macos_operational_evidence_url: none` rather than inventing a run URL;
+complete gates require the authenticated URL and artifact. Hosted gateway
+records must exact-match authenticated deployment and qualification artifacts.
+Their URLs may remain `none` while the gateway gate is incomplete, but both
+distinct authenticated URLs are required once its controls otherwise qualify.
+Every download is streamed under its authenticated
 size and an absolute cap. A passing result still supports only a controlled
 single-region pilot. It does not prove external-human usability,
 multi-region availability, zero downtime, an availability or latency SLA, or

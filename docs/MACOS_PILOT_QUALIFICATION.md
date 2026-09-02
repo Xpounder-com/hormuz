@@ -83,11 +83,14 @@ affected gate on a new build when artifact bytes change.
    unexpired `hormuz-macos-pilot-operations-<run number>-<attempt>` artifact
    containing only `macos-pilot-operations-evidence.json`. That strict
    `hormuz.macos-pilot-operations-evidence` v1 proof binds both distribution
-   run URLs, source commits, and archive digests, then reproduces the exact
-   clean-machine, lifecycle, and official-client recovery records. The
-   verifier downloads the artifact through the authenticated GitHub API and
-   exact-compares all three record groups. Every clean-machine start must be no
-   later than this immutable artifact's creation time. While any of gates 3
+   run URLs, source commits, and archive digests, plus the exact hosted-gateway
+   source commit and deployment run URL, then reproduces the clean-machine,
+   lifecycle, and official-client recovery records. The verifier downloads the
+   artifact through the authenticated GitHub API and exact-compares all three
+   record groups and the gateway identity. The authenticated gateway deployment
+   must finish before the operations run starts. Every clean-machine start must
+   fall within the operations run and no later than this immutable artifact's
+   creation time. While any of gates 3
    through 5 is incomplete, `macos_operational_evidence_url` may be `none` and
    the verifier reports not ready; once all three record groups qualify, a real
    authenticated run URL is required. The operational workflow does not exist
@@ -123,7 +126,9 @@ affected gate on a new build when artifact bytes change.
    GitHub API calls and reject duplicate, path-bearing, encrypted, oversized,
    expired, malformed, or extra members. That gateway workflow does not
    exist yet, so the current repository remains fail-closed for real pilot
-   qualification.
+   qualification. Until the hosted controls otherwise qualify, both gateway
+   evidence URLs may be `none`; once they qualify, distinct authenticated
+   deployment and recovery run URLs are required.
 7. **Complete independent review.** An independent reviewer must close both the
    security and accessibility reviews after the candidate artifact exists. Each
    aggregate record binds the candidate archive digest, source commit, and
