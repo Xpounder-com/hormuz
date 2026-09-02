@@ -2,6 +2,8 @@ name: Mac client
 
 on:
   pull_request:
+  push:
+    branches: [main]
     paths:
       - "clients/macos/**"
       - "script/build_and_run.sh"
@@ -16,18 +18,6 @@ on:
       - "tests/test_gateway.py"
       - ".github/workflows/macos-client.yml"
       - ".github/workflows/macos-distribution.yml"
-  push:
-    branches: [main]
-    paths:
-      - "clients/macos/**"
-      - "script/build_and_run.sh"
-      - "script/package_macos_release.sh"
-      - "script/notarize_macos_release.sh"
-      - "tools/verify_macos_client.py"
-      - "tools/verify_macos_distribution.py"
-      - "tests/test_macos_distribution_verifier.py"
-      - "hormuz/**"
-      - ".github/workflows/macos-client.yml"
   workflow_dispatch:
 
 permissions:
@@ -38,8 +28,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  local-client:
-    name: Native Mac client and loopback contract
+  changes:
+    name: Detect native Mac changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      macos: ${{ steps.scope.outputs.macos }}
+    steps:
+      - name: Check out source history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Determine whether native verification is required
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+            clients/macos \
+            script/build_and_run.sh \
+            script/package_macos_release.sh \
+            script/notarize_macos_release.sh \
+            tools/verify_macos_client.py \
+            tools/verify_macos_distribution.py \
+            tools/verify_macos_installed_client.py \
+            tests/_session_fixtures.py \
+            tests/test_gateway.py \
+            tests/test_macos_distribution_verifier.py \
+            hormuz \
+            .github/workflows/macos-client.yml \
+            .github/workflows/macos-distribution.yml; then
+            echo "macos=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  native-client:
+    name: Native Mac client verification
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
     runs-on: macos-15
     timeout-minutes: 15
     steps:
@@ -89,3 +121,24 @@ jobs:
             ${{ runner.temp }}/hormuz-macos-package/package-metadata.json
           if-no-files-found: error
           retention-days: 7
+
+  native-client-gate:
+    name: Native Mac client and loopback contract
+    if: always()
+    needs: [changes, native-client]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require native verification for relevant changes
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          NATIVE_REQUIRED: ${{ needs.changes.outputs.macos }}
+          NATIVE_RESULT: ${{ needs.native-client.result }}
+        run: |
+          test "$CHANGES_RESULT" = "success"
+          if [ "$NATIVE_REQUIRED" = "true" ]; then
+            test "$NATIVE_RESULT" = "success"
+          else
+            test "$NATIVE_REQUIRED" = "false"
+            test "$NATIVE_RESULT" = "skipped"
+          fi

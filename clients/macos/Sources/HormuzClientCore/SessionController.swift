@@ -54,8 +54,10 @@ public actor SessionController {
         else { throw ClientError.invalidResponse }
         try Task.checkCancellation()
         try await openBrowser(loginURL)
-        let seconds = min(300, max(1, enrollment.expiresAt.timeIntervalSince(now())))
-        let deadline = ContinuousClock.now + .milliseconds(Int(seconds * 1000))
+        guard let pollingMilliseconds = Self.enrollmentPollingMilliseconds(
+            expiresAt: enrollment.expiresAt, now: now()
+        ) else { throw ClientError.loginTimedOut }
+        let deadline = ContinuousClock.now + .milliseconds(pollingMilliseconds)
         while ContinuousClock.now < deadline {
             try Task.checkCancellation()
             let result = try await post(profile, "/v1/auth/enrollments/" + enrollment.enrollmentId + "/redeem",
@@ -87,6 +89,12 @@ public actor SessionController {
             try await Task.sleep(for: .seconds(enrollment.pollIntervalSeconds))
         }
         throw ClientError.loginTimedOut
+    }
+
+    static func enrollmentPollingMilliseconds(expiresAt: Date, now: Date) -> Int? {
+        let milliseconds = expiresAt.timeIntervalSince(now) * 1_000
+        guard milliseconds > 0, milliseconds <= Double(Int.max) else { return nil }
+        return max(1, Int(milliseconds.rounded(.up)))
     }
 
     /// The only intentional secret output is the credential command's stdout.

@@ -283,6 +283,7 @@ class SessionBrokerTests(SessionHTTPTestCase):
             from hormuz.credential_store import CredentialStoreError
             with self.assertRaises(CredentialStoreError):
                 access_token(gateway=self.gateway_url, profile="client-test", allow_insecure_http=True, force_refresh=True, store=store)
+        self.assertIsNone(store.get("client-test"))
         with closing(sqlite3.connect(self.config.session_broker.database_path)) as db, db:
             self.assertEqual(db.execute("SELECT count(*) FROM human_sessions WHERE revoked_at IS NULL").fetchone()[0], 0)
 

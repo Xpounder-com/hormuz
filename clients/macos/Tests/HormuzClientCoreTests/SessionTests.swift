@@ -2,6 +2,19 @@ import XCTest
 @testable import HormuzClientCore
 
 final class SessionTests: PrivateStorageTestCase {
+    func testEnrollmentDeadlineHonorsGatewayExpirationBeyondFiveMinutes() {
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        XCTAssertEqual(
+            SessionController.enrollmentPollingMilliseconds(
+                expiresAt: now.addingTimeInterval(600), now: now
+            ),
+            600_000
+        )
+        XCTAssertNil(
+            SessionController.enrollmentPollingMilliseconds(expiresAt: now, now: now)
+        )
+    }
+
     func testCancellationAfterSecureStoreCommitStillRevokesAndRemovesSession() async throws {
         let clock = TestClock(), store = MemorySessions()
         let transport = FixtureTransport(clock: clock)

@@ -9,6 +9,10 @@ import unittest
 from hormuz._outcome_schema import TABLE_DDL
 from hormuz.outcome_repository import OutcomeRepository
 from hormuz.store import UsageStore
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._outcome_fixture import OutcomeAssertions
@@ -89,7 +93,7 @@ class SQLiteOutcomeTests(OutcomeAssertions, unittest.TestCase):
         self.repository.tombstone(self.principal, "github-one", page["items"][0]["source_event_id"], idempotency_key="immutable-retention", keys=self.keys)
         self.error("invalid_request", lambda: self.ingest(raw=b'{"observations":[{}]}'))
         self.assertTrue(all(self.outcome_rows()[table] for table in TABLE_DDL))
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             for table in TABLE_DDL:
                 with self.assertRaisesRegex(sqlite3.IntegrityError, "portfolio_append_only"):
                     connection.execute(f"DELETE FROM {table}")

@@ -66,6 +66,34 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         XCTAssertEqual(try directory.read(plan.files[0].name), ownChange)
     }
 
+    func testEditAtAtomicExchangeBoundaryIsRestored() throws {
+        let name = "connector.json"
+        let preview = Data("preview\n".utf8)
+        let replacement = Data("hormuz\n".utf8)
+        let externalEdit = Data("external edit\n".utf8)
+        try directory.write(preview, to: name, expected: nil)
+
+        do {
+            try directory.writeAtomically(
+                replacement,
+                to: name,
+                expected: preview,
+                beforeExchange: {
+                    try externalEdit.write(to: self.directory.fileURL(name))
+                }
+            )
+            XCTFail("Expected concurrent edit rejection")
+        } catch {
+            XCTAssertEqual(error as? ClientError, .configurationChanged)
+        }
+
+        XCTAssertEqual(try directory.read(name), externalEdit)
+        XCTAssertFalse(
+            try FileManager.default.contentsOfDirectory(atPath: directory.root.path)
+                .contains(where: { $0.hasPrefix(".write-") })
+        )
+    }
+
     func testConfigurationUpdatesPreserveBackup() async throws {
         let profile = try profile()
         try directory.saveProfile(profile)

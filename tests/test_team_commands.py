@@ -6,7 +6,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import closing, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -44,7 +44,7 @@ class TeamCommandTests(unittest.TestCase):
                             "--name", "New Member", "--email-file", str(self.email), "--client", "codex", "--output", str(self.output))
 
     def count_invitations(self):
-        with sqlite3.connect(self.root / "sessions.sqlite3") as connection:
+        with closing(sqlite3.connect(self.root / "sessions.sqlite3")) as connection:
             return connection.execute("SELECT COUNT(*) FROM onboarding_invitations").fetchone()[0]
 
     def test_operator_setup_invite_list_revoke_and_reinvite_use_private_files(self):
@@ -107,7 +107,7 @@ class TeamCommandTests(unittest.TestCase):
         self.assertEqual(out, "")
         self.assertIn("onboarding_private_output_unavailable", err)
         self.assertFalse(self.output.exists())
-        with sqlite3.connect(self.root / "sessions.sqlite3") as connection:
+        with closing(sqlite3.connect(self.root / "sessions.sqlite3")) as connection:
             self.assertEqual(connection.execute("SELECT status, secret_hash FROM onboarding_invitations").fetchone(), ("revoked", None))
             self.assertEqual(connection.execute("SELECT status FROM onboarding_memberships").fetchone()[0], "disabled")
 

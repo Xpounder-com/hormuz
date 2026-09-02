@@ -42,21 +42,56 @@ public final class PrivateDirectory: @unchecked Sendable {
         catch { throw ClientError.storageUnavailable }
     }
 
-    /// Compare with the preview snapshot, then atomically replace an owned file.
-    /// Callers hold the process lock; a concurrent non-Hormuz edit fails closed.
+    /// Atomically install a new file only when the displaced snapshot matches
+    /// the preview. Callers hold the process lock; path-level external edits
+    /// that arrive before the exchange are restored instead of overwritten.
     public func write(_ data: Data, to name: String, expected: Data?, executable: Bool = false) throws {
+        try writeAtomically(data, to: name, expected: expected, executable: executable)
+    }
+
+    func writeAtomically(_ data: Data, to name: String, expected: Data?, executable: Bool = false,
+                         beforeExchange: (() throws -> Void)? = nil) throws {
         guard data.count <= 1_048_576 else { throw ClientError.storageUnavailable }
-        guard try read(name) == expected else { throw ClientError.configurationChanged }
         let target = try fileURL(name)
-        let temporary = try fileURL(".write-" + UUID().uuidString)
+        let temporaryName = ".write-" + UUID().uuidString
+        let temporary = try fileURL(temporaryName)
         let fd = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, executable ? 0o700 : 0o600)
         guard fd >= 0 else { throw ClientError.storageUnavailable }
-        defer { close(fd); unlink(temporary.path) }
+        var removeTemporary = true
+        defer {
+            close(fd)
+            if removeTemporary { unlink(temporary.path) }
+        }
         do {
             try FileHandle(fileDescriptor: fd, closeOnDealloc: false).write(contentsOf: data)
             guard fsync(fd) == 0 else { throw ClientError.storageUnavailable }
-            guard try read(name) == expected else { throw ClientError.configurationChanged }
-            guard rename(temporary.path, target.path) == 0 else { throw ClientError.storageUnavailable }
+            try beforeExchange?()
+            if expected == nil {
+                guard renamex_np(temporary.path, target.path, UInt32(RENAME_EXCL)) == 0 else {
+                    if errno == EEXIST { throw ClientError.configurationChanged }
+                    throw ClientError.storageUnavailable
+                }
+                removeTemporary = false
+                return
+            }
+
+            guard renamex_np(temporary.path, target.path, UInt32(RENAME_SWAP)) == 0 else {
+                if errno == ENOENT { throw ClientError.configurationChanged }
+                throw ClientError.storageUnavailable
+            }
+            do {
+                guard try read(temporaryName) == expected else {
+                    throw ClientError.configurationChanged
+                }
+            } catch {
+                let comparisonError = error
+                guard renamex_np(temporary.path, target.path, UInt32(RENAME_SWAP)) == 0 else {
+                    // Preserve both files if the rollback itself cannot complete.
+                    removeTemporary = false
+                    throw ClientError.storageUnavailable
+                }
+                throw comparisonError
+            }
         } catch let error as ClientError { throw error }
         catch { throw ClientError.storageUnavailable }
     }

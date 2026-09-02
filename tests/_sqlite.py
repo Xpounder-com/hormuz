@@ -1,0 +1,16 @@
+from __future__ import annotations
+
+import sqlite3
+from contextlib import contextmanager
+from typing import Any, Iterator
+
+
+@contextmanager
+def managed_sqlite_connection(*args: Any, **kwargs: Any) -> Iterator[sqlite3.Connection]:
+    """Commit or roll back like sqlite3.Connection, then always close it."""
+    connection = sqlite3.connect(*args, **kwargs)
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()

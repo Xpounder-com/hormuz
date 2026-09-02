@@ -112,7 +112,7 @@ class SQLiteSessionStore:
         if len(master_key) != 32:
             raise SessionStoreError("session_store_invalid_master_key")
         _require_binding(audience, "session_store_invalid_audience")
-        self.path = path
+        self.path = path.absolute()
         binding = audience.encode("utf-8")
         self._hash_key = hmac.new(
             master_key,
@@ -131,7 +131,7 @@ class SQLiteSessionStore:
         self._lock = threading.RLock()
         if self.path.exists() and self.path.is_symlink():
             raise SessionStoreError("session_store_symlink_refused")
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._prepare_storage_parent()
         self._prepare_storage_file()
         self._initialize()
 
@@ -711,8 +711,49 @@ class SQLiteSessionStore:
         if self.path.is_symlink():
             raise SessionStoreError("session_store_symlink_refused")
 
+    def _prepare_storage_parent(self) -> None:
+        configured_parent = self.path.parent
+        try:
+            configured_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        except OSError as error:
+            raise SessionStoreError("session_store_open_failed") from error
+        self._validate_parent_chain(configured_parent, allow_trusted_symlinks=True)
+        try:
+            resolved_parent = configured_parent.resolve(strict=True)
+        except OSError as error:
+            raise SessionStoreError("session_store_open_failed") from error
+        self._validate_parent_chain(resolved_parent, allow_trusted_symlinks=False)
+        self.path = resolved_parent / self.path.name
+
+    def _validate_storage_parent(self) -> None:
+        self._validate_parent_chain(self.path.parent, allow_trusted_symlinks=False)
+
+    @staticmethod
+    def _validate_parent_chain(current: Path, *, allow_trusted_symlinks: bool) -> None:
+        effective_uid = os.geteuid() if hasattr(os, "geteuid") else None
+        while True:
+            try:
+                metadata = os.lstat(current)
+            except OSError as error:
+                raise SessionStoreError("session_store_open_failed") from error
+            trusted_owner = effective_uid is None or metadata.st_uid in {0, effective_uid}
+            if stat.S_ISLNK(metadata.st_mode):
+                insecure = not allow_trusted_symlinks or not trusted_owner
+            else:
+                insecure = (
+                    not stat.S_ISDIR(metadata.st_mode)
+                    or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+                    or not trusted_owner
+                )
+            if insecure:
+                raise SessionStoreError("session_store_insecure_parent")
+            if current.parent == current:
+                return
+            current = current.parent
+
     def _connect(self) -> sqlite3.Connection:
         try:
+            self._validate_storage_parent()
             if self.path.is_symlink():
                 raise SessionStoreError("session_store_symlink_refused")
             connection = sqlite3.connect(self.path.absolute().as_uri() + "?mode=rw", uri=True, timeout=5)

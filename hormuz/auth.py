@@ -469,6 +469,11 @@ def _fetch_json(url: str, *, allow_insecure_http: bool, maximum_bytes: int) -> d
             _validate_remote_url(response.geturl(), allow_insecure_http=allow_insecure_http)
             body = response.read(maximum_bytes + 1)
     except (urllib.error.URLError, TimeoutError, ValueError) as error:
+        if isinstance(error, urllib.error.HTTPError):
+            try:
+                error.close()
+            except Exception:
+                pass
         LOGGER.warning("oidc_metadata_fetch_failed url_host=%s", urlparse(url).hostname)
         raise AuthenticationError("oidc_metadata_unavailable") from error
     if len(body) > maximum_bytes:

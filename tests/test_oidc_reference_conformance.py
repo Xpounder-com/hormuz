@@ -124,6 +124,7 @@ class OIDCReferenceConformanceToolTests(unittest.TestCase):
                 method = getattr(handler, f"http_error_{status}")
                 with self.assertRaises(urllib.error.HTTPError) as raised:
                     method(request, None, status, "redirect", Message())
+                self.addCleanup(raised.exception.close)
                 self.assertEqual(raised.exception.code, status)
 
         redirect_error = urllib.error.HTTPError(
@@ -133,6 +134,7 @@ class OIDCReferenceConformanceToolTests(unittest.TestCase):
             Message(),
             None,
         )
+        self.addCleanup(redirect_error.close)
         with mock.patch.object(oidc_reference._NO_REDIRECT_OPENER, "open", side_effect=redirect_error):
             with self.assertRaisesRegex(oidc_reference.ConformanceError, "oidc_metadata_unavailable"):
                 oidc_reference._fetch_json("https://identity.example/metadata", "oidc_metadata_unavailable")

@@ -99,6 +99,12 @@ def signing_details(bundle: Path, mode: str, expected_identifier: str) -> dict[s
     return {"team_identifier": team_id or None, "authority": authorities[0] if authorities else None}
 
 
+def verify_reported_version(executable: Path, expected_version: str) -> None:
+    output, diagnostic = run(str(executable), "--version")
+    if output != f"Hormuz Mac {expected_version}\n" or diagnostic:
+        raise VerificationError("reported_release_version_mismatch")
+
+
 def verify_archive(archive: Path, bundle: Path, mode: str, expected_identifier: str) -> None:
     required_files = expected_files(mode)
     try:
@@ -154,6 +160,11 @@ def main() -> int:
     parser.add_argument("--expected-bundle-id", required=True)
     parser.add_argument("--expected-version", required=True)
     parser.add_argument("--expected-build", required=True)
+    parser.add_argument(
+        "--verify-executable-version",
+        action="store_true",
+        help="Execute the packaged binary to verify --version; use only without credentials",
+    )
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -191,6 +202,8 @@ def main() -> int:
     dependencies = [line.strip().split(" (", 1)[0] for line in dependency_output.splitlines() if line.startswith("\t")]
     if not dependencies or any(not item.startswith(("/System/Library/", "/usr/lib/")) for item in dependencies):
         raise VerificationError("non_system_runtime_dependency")
+    if args.verify_executable_version:
+        verify_reported_version(executable, args.expected_version)
 
     signature = signing_details(bundle, args.mode, args.expected_bundle_id)
     if args.mode == "notarized":
@@ -212,6 +225,7 @@ def main() -> int:
         "hardened_runtime": True,
         "entitlements": [],
         "system_runtime_dependencies_only": True,
+        "executable_version_verified": args.verify_executable_version,
         "notarization_ticket_stapled": args.mode == "notarized",
         "team_identifier": signature["team_identifier"],
         "signing_authority": signature["authority"],

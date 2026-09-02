@@ -262,7 +262,7 @@ class TeamDirectory:
             """
             UPDATE session_enrollments SET status = 'failed', secret_hash = NULL,
                 encrypted_flow = NULL, state_hash = NULL, browser_cookie_hash = NULL
-            WHERE organization_id = ? AND (membership_id = ? OR membership_id IS NULL)
+            WHERE organization_id = ? AND membership_id = ?
               AND status IN ('pending', 'authorizing', 'exchanging', 'authorized')
             """, scope,
         ).rowcount

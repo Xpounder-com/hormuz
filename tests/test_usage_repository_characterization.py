@@ -6,6 +6,10 @@ import unittest
 from pathlib import Path
 
 from hormuz.store import UsageStore
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._usage_repository_contract import exercise_usage_repository, ledger_clock, read_usage_repository
@@ -27,14 +31,14 @@ class UsageRepositoryCharacterizationTests(unittest.TestCase):
                 with self.subTest(populated=populated):
                     if populated:
                         exercise_usage_repository(self, writable)
-                    with sqlite3.connect(path) as connection:
+                    with managed_sqlite_connection(path) as connection:
                         before = list(connection.iterdump())
                     reader = UsageStore(path, read_only=True)
                     with ledger_clock():
                         read_usage_repository(reader)
                     with self.assertRaises(sqlite3.OperationalError):
                         reader.audit_chain_head(organization_id="acme")
-                    with sqlite3.connect(path) as connection:
+                    with managed_sqlite_connection(path) as connection:
                         self.assertEqual(list(connection.iterdump()), before)
 
 
