@@ -59,7 +59,9 @@ include deploy/render/gateway/Dockerfile
 include deploy/render/gateway/Dockerfile.dockerignore
 include deploy/render/gateway/active.Caddyfile
 include deploy/render/gateway/maintenance.Caddyfile
+include deploy/render/gateway/provider-pilot.Caddyfile
 include deploy/render/gateway/profile.example.json
+include deploy/render/gateway/provider-profile.example.json
 include deploy/render/gateway/README.md
 include tools/_portfolio_wire_contract.py
 include tools/oidc_reference_conformance.py
