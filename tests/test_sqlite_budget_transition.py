@@ -38,7 +38,7 @@ class SQLiteBudgetTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 10)
+        self.assertEqual(UsageStore.schema_version, 11)
         with (
             mock.patch.object(UsageStore, "schema_version", 8),
             mock.patch.object(portfolio_sql_module, "SQLITE_SCHEMA_VERSION", 8),
@@ -85,7 +85,7 @@ class SQLiteBudgetTransitionTests(unittest.TestCase):
         current = sqlite_snapshot(self.path)
         self.assertEqual(len(current["rows"]), 36)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
-        with mock.patch.object(UsageStore, "schema_version", 11):
+        with mock.patch.object(UsageStore, "schema_version", 12):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
@@ -111,7 +111,7 @@ class SQLiteBudgetTransitionTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
             self.assertEqual(sqlite_snapshot(self.path), partial)
         with managed_sqlite_connection(self.path) as connection:
-            connection.execute("UPDATE hormuz_schema_migrations SET version=11, state='applied' WHERE version=9")
+            connection.execute("UPDATE hormuz_schema_migrations SET version=12, state='applied' WHERE version=9")
         newer = sqlite_snapshot(self.path)
         with self.assertRaises(StorageSchemaError) as caught:
             UsageStore(self.path)

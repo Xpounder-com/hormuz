@@ -319,6 +319,10 @@ jobs:
             "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
               -s "$GITHUB_WORKSPACE/tests" -p "${module}.py" -v
           done
+          for module in test_finance_attempt_runtime test_postgres_finance_attempt_runtime; do
+            "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+              -s "$GITHUB_WORKSPACE/tests" -p "${module}.py" -v
+          done
           for module in test_sqlite_budget test_postgres_budget; do
             "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
               -s "$GITHUB_WORKSPACE/tests" -p "${module}.py" -v

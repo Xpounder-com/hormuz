@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from hormuz.config import ConfigError, GatewayConfig, ModelRoute, Policy
-from hormuz.budget_runtime import configured_model_id
+from hormuz.budget_runtime import configured_model_id, configured_route_rate_card
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
 from hormuz.custody import KEY_PURPOSE_PROVIDER_CREDENTIAL, EnvelopeCipher, GeneratedDataKey
 from hormuz.custody_runtime import write_envelope_file
@@ -26,6 +26,11 @@ from hormuz.postgres import PostgresStorageError
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
 from hormuz.usage import ResponseUsageParser
+
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 
 GATEWAY_TOKEN = "company-user-token-never-forward"
@@ -130,6 +135,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             }
             if body.get("force_missing_usage") is True:
                 payload.pop("usage")
+            cache_write_tokens = body.get("force_cache_write_tokens")
+            if type(cache_write_tokens) is int and cache_write_tokens >= 0:
+                payload["usage"]["input_tokens_details"]["cache_write_tokens"] = cache_write_tokens
+            if body.get("force_response_failed") is True:
+                payload["status"] = "failed"
             if body.get("stream") is True:
                 self._send_openai_stream(payload)
                 return
@@ -242,6 +252,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
         message_id = "msg_gateway_probe"
         text = "GATEWAY_OK"
         in_progress = {**completed_response, "status": "in_progress", "output": [], "usage": None}
+        terminal_status = completed_response.get("status", "completed")
         completed_message = {
             "id": message_id,
             "type": "message",
@@ -249,8 +260,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             "role": "assistant",
             "content": [{"type": "output_text", "text": text, "annotations": [], "logprobs": []}],
         }
-        completed = {**completed_response, "output": [completed_message]}
-        events = [
+        completed = {
+            **completed_response,
+            "output": [completed_message] if terminal_status == "completed" else [],
+        }
+        completed_events = [
             {"type": "response.created", "response": in_progress, "sequence_number": 0},
             {
                 "type": "response.output_item.added",
@@ -299,6 +313,14 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 "sequence_number": 6,
             },
             {"type": "response.completed", "response": completed, "sequence_number": 7},
+        ]
+        events = completed_events if terminal_status == "completed" else [
+            completed_events[0],
+            {
+                "type": f"response.{terminal_status}",
+                "response": completed,
+                "sequence_number": 1,
+            },
         ]
         body_bytes = "".join(
             f"event: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n" for event in events
@@ -583,6 +605,62 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.reasoning_tokens, 7)
         self.assertGreater(totals.cost_microusd, 0)
+
+    def test_openai_native_cache_write_cost_settles_usage_and_budget_consistently(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["model_routes"]["engineering-fast"]["cache_write_cost_per_million"] = 5
+        self._restart_gateway(config_value)
+
+        status, _, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "cache-write accounting",
+                "stream": False,
+                "force_cache_write_tokens": 10,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        with managed_sqlite_connection(self.gateway.store.path) as connection:
+            row = connection.execute(
+                "SELECT usage.cost_microusd, finance.configured_estimate_microusd, "
+                "finance.cache_write_input_tokens "
+                "FROM gateway_finance_attempt_evidence AS finance "
+                "JOIN gateway_usage_events AS usage "
+                "ON usage.organization_id=finance.organization_id "
+                "AND usage.id=finance.usage_event_id"
+            ).fetchone()
+        self.assertEqual(row, (202, 202, 10))
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").cost_microusd, 202)
+
+    def test_openai_failed_terminal_stream_is_not_recorded_as_succeeded(self) -> None:
+        status, headers, body = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "known provider failure",
+                "stream": True,
+                "force_response_failed": True,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/event-stream")
+        self.assertIn(b"response.failed", body)
+        with managed_sqlite_connection(self.gateway.store.path) as connection:
+            row = connection.execute(
+                "SELECT terminal.state, usage.status, finance.terminal_state "
+                "FROM gateway_finance_attempt_evidence AS finance "
+                "JOIN gateway_request_attempt_events AS terminal "
+                "ON terminal.organization_id=finance.organization_id "
+                "AND terminal.id=finance.terminal_attempt_event_id "
+                "JOIN gateway_usage_events AS usage "
+                "ON usage.organization_id=finance.organization_id "
+                "AND usage.id=finance.usage_event_id"
+            ).fetchone()
+        self.assertEqual(row, ("failed", "failed", "failed"))
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
 
     def test_gateway_uses_an_encrypted_provider_credential_at_startup(self) -> None:
         """The runtime must prefer the sealed source over any plaintext env value."""
@@ -1177,7 +1255,17 @@ class GatewayIntegrationTests(unittest.TestCase):
 
     def test_interrupted_provider_response_becomes_unknown_without_replay(self) -> None:
         self._restart_gateway(self._config_with_failover())
-        partial_body = b"{\"partial\": true"
+        partial_body = json.dumps({
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {
+                    "cached_tokens": 2,
+                    "cache_write_tokens": 1,
+                },
+                "output_tokens": 4,
+                "total_tokens": 14,
+            },
+        }).encode()
 
         class InterruptedResponse:
             status = 200
@@ -1215,6 +1303,12 @@ class GatewayIntegrationTests(unittest.TestCase):
             "provider_bytes_read, downstream_bytes_sent "
             "FROM gateway_provider_attempt_metrics"
         ).fetchone()
+        finance = connection.execute(
+            "SELECT observation_state, observation_reason_code, provider_input_tokens, "
+            "provider_output_tokens, cache_read_input_tokens, cache_write_input_tokens, "
+            "configured_estimate_availability, configured_estimate_reason_code "
+            "FROM gateway_finance_attempt_evidence"
+        ).fetchone()
         connection.close()
         self.assertIsNotNone(metrics)
         assert metrics is not None
@@ -1225,6 +1319,13 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(
             events,
             [(1, "pending", None, None), (2, "outcome_unknown", "provider_stream_interrupted", None)],
+        )
+        self.assertEqual(
+            finance,
+            (
+                "partial", "provider_stream_interrupted", 10, 4, 2, 1,
+                "unavailable", "attempt_outcome_unknown",
+            ),
         )
 
     def test_event_stream_releases_available_chunk_before_provider_completion(self) -> None:
@@ -1266,6 +1367,41 @@ class GatewayIntegrationTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.getheader("Content-Type"), "text/event-stream")
             self.assertTrue(FakeProviderHandler.delayed_stream_started.wait(timeout=1))
+            route = self.config.model_routes["engineering-fast"]
+            expected_binding = configured_route_rate_card(
+                alias=route.alias,
+                protocol=route.protocol,
+                upstream_model=route.upstream_model,
+                input_cost_per_million=route.input_cost_per_million,
+                cache_read_cost_per_million=route.cache_read_cost_per_million,
+                cache_write_cost_per_million=route.cache_write_cost_per_million,
+                output_cost_per_million=route.output_cost_per_million,
+            )
+            database = sqlite3.connect(self.gateway.store.path)
+            binding = database.execute(
+                "SELECT configured_rate_card_state, configured_rate_card_id, "
+                "configured_rate_card_version, configured_rate_card_digest, "
+                "configured_rate_card_currency FROM gateway_request_attempts"
+            ).fetchone()
+            pending = database.execute(
+                "SELECT state FROM gateway_request_attempt_events ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()[0]
+            sidecar_count = database.execute(
+                "SELECT COUNT(*) FROM gateway_finance_attempt_evidence"
+            ).fetchone()[0]
+            database.close()
+            self.assertEqual(
+                binding,
+                (
+                    "configured",
+                    expected_binding["id"],
+                    expected_binding["version"],
+                    expected_binding["content_digest"],
+                    expected_binding["currency"],
+                ),
+            )
+            self.assertEqual(pending, "pending")
+            self.assertEqual(sidecar_count, 0)
             self.assertTrue(
                 first_read_finished.wait(timeout=2),
                 "gateway held an available provider event until stream completion",
@@ -1280,6 +1416,17 @@ class GatewayIntegrationTests(unittest.TestCase):
         connection.close()
         self.assertIn(b"event: response.completed", remainder)
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 1)
+        database = sqlite3.connect(self.gateway.store.path)
+        finance = database.execute(
+            "SELECT observation_state, provider_input_tokens, provider_output_tokens, "
+            "configured_estimate_availability, configured_rate_card_digest "
+            "FROM gateway_finance_attempt_evidence"
+        ).fetchone()
+        database.close()
+        self.assertEqual(
+            finance,
+            ("partial", 1, 1, "unavailable", expected_binding["content_digest"]),
+        )
 
     def test_downstream_disconnect_closes_provider_stream_and_keeps_unknown_attempt(self) -> None:
         self._restart_gateway(self._config_with_failover())

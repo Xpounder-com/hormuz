@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from dataclasses import replace
 import hashlib
 import json
@@ -29,13 +28,13 @@ if __package__:
     from ._outcome_predecessor_fixture import attribution_predecessor_call
     from ._outcome_fixture import replay_outcome_metadata, seed_outcome_metadata
     from ._portfolio_fixture import ADMIN, registry_config
-    from ._postgres_fixture import PostgresTestCase
+    from ._postgres_fixture import PostgresTestCase, without_finance_attempt_successor
     from ._registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
 else:
     from _outcome_predecessor_fixture import attribution_predecessor_call
     from _outcome_fixture import replay_outcome_metadata, seed_outcome_metadata
     from _portfolio_fixture import ADMIN, registry_config
-    from _postgres_fixture import PostgresTestCase
+    from _postgres_fixture import PostgresTestCase, without_finance_attempt_successor
     from _registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
 
 
@@ -53,7 +52,7 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
                                   runtime_role=self.runtime_role, organization_ids=("acme", "beta"))
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 14)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
         # The inherited fixture creates and owns this unique test schema/roles.
         self._drop_schema(self.schema)
         self.predecessor_request = {
@@ -86,15 +85,15 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            self.assertIn(version, (11, 12, 13, 14))
+            self.assertIn(version, (11, 12, 13, 14, 15))
             ddl = original(version, schema, *roles)
             return ddl.split(";", 1)[0] + "; SELECT 1 / 0;" if fail and version == 11 else ddl
 
         with mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
-            self.assertEqual(self.migrate().version, 14)
+            self.assertEqual(self.migrate().version, 15)
 
     def assert_prior_state_preserved(self):
-        current = copy.deepcopy(self.snapshot())
+        current = without_finance_attempt_successor(self.snapshot())
         added = set(TABLE_DDL) | set(FINANCE_TABLES) | set(BUDGET_TABLES) | set(PROVIDER_TABLES)
         current["rows"] = {table: rows for table, rows in current["rows"].items() if table not in added}
         current["shape"] = [row for row in current["shape"] if not row[0].startswith(("portfolio_outcome_", "portfolio_finance_", "portfolio_work_budget_", "gateway_provider_"))]
@@ -135,9 +134,9 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
     def test_postgres_outcome_real_migration_and_missing_following_migration(self):
         self.upgrade()
         self.assert_prior_state_preserved()
-        self.assertEqual(len(self.snapshot()["rows"]), 60)
+        self.assertEqual(len(self.snapshot()["rows"]), 61)
         before = self.snapshot()
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 16):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

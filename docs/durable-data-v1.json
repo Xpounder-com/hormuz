@@ -217,6 +217,17 @@
       ]
     },
     {
+      "id": "provider_attempt_finance_evidence",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "gateway_finance_attempt_evidence"
+      ],
+      "postgresql_tables": [
+        "gateway_finance_attempt_evidence"
+      ]
+    },
+    {
       "id": "audit_chain_state",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

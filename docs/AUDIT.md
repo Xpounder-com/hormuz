@@ -83,12 +83,13 @@ the request path; the job itself is the only component that contacts the anchor
 store.
 
 Commit-time entry v1 remains untouched for historical usage and secret-egress
-evidence. Entry v2 is an explicit, finite custody-source union: custody control
-events, executor attempts/events, lifecycle events, envelope attestations, and
-deletion-block events. It has an exact metadata-only schema and binds its source
-schema ID/version/event ID into the canonical digest. Verifiers reject unknown
-entry/source versions and arbitrary source JSON rather than treating it as a
-forward-compatible extension.
+evidence. Entry v2 is an explicit, finite metadata-source union: custody control
+events, executor attempts/events, lifecycle events, envelope attestations,
+deletion-block events, and finance-attempt evidence version 1. It binds the
+source schema ID/version/event ID into the canonical digest. Verifiers reject
+unknown entry/source versions and arbitrary source JSON rather than treating it
+as a forward-compatible extension. A finance entry must exactly match the
+tenant-local append-only sidecar inserted in the same transaction.
 
 After an intentional restore or migration, an operator must start a new epoch
 from a trusted canonical checkpoint. Hormuz never silently resets sequence

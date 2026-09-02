@@ -219,6 +219,14 @@ def _validate_audit_chain_v2_source(
 
         validate_custody_deletion_event(event)
         expected_source_id = _value_string(event, "deletion_event_id")
+    elif source_schema_id == "hormuz.finance-attempt-evidence" and source_schema_version == 1:
+        from ..finance_attempts import validate_finance_attempt_event
+
+        try:
+            validate_finance_attempt_event(event)
+        except ValueError as error:
+            raise ContractValidationError("finance attempt audit source is invalid") from error
+        expected_source_id = _value_string(event, "evidence_event_id")
     else:
         raise ContractValidationError("audit chain v2 source schema is unsupported")
     if source_event_id != expected_source_id:

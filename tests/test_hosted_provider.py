@@ -943,6 +943,59 @@ class HostedProviderHTTPTests(unittest.TestCase):
             1,
         )
 
+    def test_disconnect_on_failed_terminal_chunk_records_known_failure(self):
+        directory_setup(self.gateway.session_broker.directory, self.config)
+        _, pair = activate_member(
+            self.gateway.session_broker.store,
+            self.gateway.session_broker.directory,
+        )
+        response = _ProviderResponse(200)
+        response.headers["Content-Type"] = "text/event-stream"
+        response._body = (
+            b'event: response.failed\n'
+            b'data: {"type":"response.failed","response":{"status":"failed",'
+            b'"model":"openai-primary-model","usage":{"input_tokens":2,'
+            b'"output_tokens":1}}}\n\n'
+        )
+        with (
+            patch("hormuz.server.urllib.request.urlopen", return_value=response),
+            patch(
+                "hormuz.server.GatewayRequestHandler._write_downstream_chunk",
+                side_effect=BrokenPipeError,
+            ),
+        ):
+            status, _, body = self.request(
+                "POST",
+                "/v1/responses",
+                body={"model": "openai-primary", "input": "failed terminal disconnect", "stream": True},
+                headers={"Authorization": "Bearer " + pair.access_token},
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"")
+        self.assertTrue(response.closed)
+
+        summary_status, _, summary_body = self.request(
+            "GET",
+            "/v1/gateway/reliability",
+            headers={"Authorization": "Bearer " + pair.access_token},
+        )
+        self.assertEqual(summary_status, 200)
+        summary = json.loads(summary_body)
+        self.assertEqual(summary["outcome_unknown_count"], 0)
+        self.assertEqual(summary["cancellation_outcome_unknown_count"], 0)
+        with closing(sqlite3.connect(self.config.database_path)) as connection:
+            row = connection.execute(
+                "SELECT terminal.state, usage.status, finance.terminal_state "
+                "FROM gateway_finance_attempt_evidence AS finance "
+                "JOIN gateway_request_attempt_events AS terminal "
+                "ON terminal.organization_id=finance.organization_id "
+                "AND terminal.id=finance.terminal_attempt_event_id "
+                "JOIN gateway_usage_events AS usage "
+                "ON usage.organization_id=finance.organization_id "
+                "AND usage.id=finance.usage_event_id"
+            ).fetchone()
+        self.assertEqual(row, ("failed", "failed", "failed"))
+
     def test_unknown_route_and_oversized_body_stop_at_private_boundary(self):
         self.assertEqual(self.request("POST", "/v1/models", body={})[0], 503)
         connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=2)

@@ -14,6 +14,7 @@ from .audit_chain import (
     AuditChainAnchorStatus,
     AuditChainError,
     AuditChainHead,
+    AuditChainSource,
     audit_chain_checkpoint_summary,
     build_audit_chain_entry,
     canonical_json_text,
@@ -30,6 +31,21 @@ from .contracts import (
     validate_request_status,
 )
 from .evidence import EvidenceStorageError, security_audit_event, usage_audit_event
+from .finance_attempts import (
+    FINANCE_ATTEMPT_SCHEMA_ID,
+    FINANCE_ATTEMPT_SCHEMA_VERSION,
+    ConfiguredRateCardBinding,
+    ConfiguredRouteEstimate,
+    NativeUsageObservation,
+    absent_native_observation,
+    binding_from_attempt_row,
+    build_finance_attempt_event,
+    finance_attempt_event_from_row,
+    finance_attempt_storage_row,
+    repository_contract_binding,
+    unavailable_estimate,
+    unknown_native_observation,
+)
 from .provider_reliability import (
     ProviderAttemptMetrics,
     ProviderFailoverContext,
@@ -245,11 +261,12 @@ class UsageStore:
         connection: sqlite3.Connection,
         *,
         event: Mapping[str, object],
+        source: AuditChainSource | None = None,
     ) -> AuditChainHead:
         """Atomically append a canonical event and advance its tenant head."""
 
         organization_id = event.get("organization_id")
-        event_id = event.get("id")
+        event_id = event.get("id") if source is None else source.event_id
         if not isinstance(organization_id, str) or not organization_id or not isinstance(event_id, str) or not event_id:
             raise StorageSchemaError("audit_chain_event_malformed")
         head = self._audit_chain_head_in_connection(connection, organization_id=organization_id)
@@ -262,33 +279,32 @@ class UsageStore:
                 chain_epoch=head.chain_epoch,
                 sequence=head.sequence + 1,
                 previous_digest=head.head_digest,
+                entry_schema_version=1 if source is None else 2,
+                source=source,
             )
         except AuditChainError as error:
             raise StorageSchemaError(error.code) from None
         event_value = entry["event"]
         if not isinstance(event_value, Mapping):  # Defensive after strict construction above.
             raise StorageSchemaError("audit_chain_entry_malformed")
+        columns = [
+            "organization_id", "chain_version", "chain_epoch", "sequence",
+            "entry_schema_id", "entry_schema_version", "event_id", "previous_digest",
+            "event_digest", "event_json", "appended_at",
+        ]
+        values: list[object] = [
+            organization_id, entry["chain_version"], entry["chain_epoch"],
+            entry["sequence"], entry["schema_id"], entry["schema_version"], event_id,
+            entry["previous_digest"], entry["event_digest"],
+            canonical_json_text(dict(event_value)), datetime.now(timezone.utc).isoformat(),
+        ]
+        if source is not None:
+            columns.extend(("source_schema_id", "source_schema_version", "source_event_id"))
+            values.extend((source.schema_id, source.schema_version, source.event_id))
         cursor = connection.execute(
-            """
-            INSERT INTO gateway_audit_chain_entries (
-                organization_id, chain_version, chain_epoch, sequence,
-                entry_schema_id, entry_schema_version, event_id, previous_digest,
-                event_digest, event_json, appended_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                organization_id,
-                entry["chain_version"],
-                entry["chain_epoch"],
-                entry["sequence"],
-                entry["schema_id"],
-                entry["schema_version"],
-                event_id,
-                entry["previous_digest"],
-                entry["event_digest"],
-                canonical_json_text(dict(event_value)),
-                datetime.now(timezone.utc).isoformat(),
-            ),
+            f"INSERT INTO gateway_audit_chain_entries ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)})",
+            tuple(values),
         )
         if cursor.rowcount != 1:
             raise StorageSchemaError("audit_chain_entry_unavailable")
@@ -394,12 +410,14 @@ class UsageStore:
         provider_request_id: str | None = None,
         redaction_count: int = 0,
         redaction_rules: tuple[str, ...] = (),
+        occurred_at: datetime | None = None,
     ) -> str:
         """Insert one usage event inside an existing SQLite transaction."""
 
         validate_policy_action(policy_action)
         validate_request_status(status)
         event_id = str(uuid.uuid4())
+        timestamp = datetime.now(timezone.utc) if occurred_at is None else occurred_at
         connection.execute(
             """
             INSERT INTO gateway_usage_events (
@@ -416,7 +434,7 @@ class UsageStore:
             """,
             (
                 event_id,
-                datetime.now(timezone.utc).isoformat(),
+                timestamp.isoformat(),
                 AUDIT_EVENT_SCHEMA_ID,
                 AUDIT_EVENT_SCHEMA_VERSION,
                 identity.organization_id,
@@ -632,6 +650,7 @@ class UsageStore:
         reserved_cost_microusd: int,
         ttl_seconds: int,
     ) -> RequestAttempt:
+        configured_rate_card = repository_contract_binding()
         return self._begin_request_attempt_with_work_budget(
             identity=identity,
             client=client,
@@ -648,6 +667,7 @@ class UsageStore:
             reserved_cost_microusd=reserved_cost_microusd,
             ttl_seconds=ttl_seconds,
             work_budget=None,
+            configured_rate_card=configured_rate_card,
         )
 
     @audit_work_budget_denials
@@ -670,6 +690,7 @@ class UsageStore:
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
         provider_failover: ProviderFailoverContext | None = None,
+        configured_rate_card: ConfiguredRateCardBinding | None = None,
     ) -> RequestAttempt:
         """Durably record a pending attempt and its budget hold before egress.
 
@@ -679,6 +700,7 @@ class UsageStore:
         """
 
         now = datetime.now(timezone.utc)
+        binding = configured_rate_card or repository_contract_binding()
         attempt_id = str(uuid.uuid4())
         root = build_request_attempt_root(
             attempt_id=attempt_id,
@@ -700,40 +722,41 @@ class UsageStore:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._sweep_stale_request_attempts_in_connection(connection, now=now, organization_id=identity.organization_id)
+            finance_schema_ready = connection.execute(
+                "SELECT 1 FROM hormuz_schema_migrations "
+                "WHERE version=11 AND state='applied'"
+            ).fetchone() is not None
+            columns = [
+                "attempt_id", "created_at", "evidence_schema_id", "evidence_schema_version",
+                "organization_id", "actor_id", "actor_name", "team_id", "team_name",
+                "identity_type", "authentication_source", "client", "protocol", "requested_model",
+                "resolved_alias", "upstream_model", "policy_version", "policy_action",
+                "redaction_count", "redaction_rules", "reserved_tokens", "reserved_cost_microusd",
+            ]
+            values: list[object] = [
+                root["attempt_id"], root["created_at"], root["evidence_schema_id"],
+                root["evidence_schema_version"], root["organization_id"], root["actor_id"],
+                root["actor_name"], root["team_id"], root["team_name"], root["identity_type"],
+                root["authentication_source"], root["client"], root["protocol"],
+                root["requested_model"], root["resolved_alias"], root["upstream_model"],
+                root["policy_version"], root["policy_action"], root["redaction_count"],
+                json.dumps(root["redaction_rules"], separators=(",", ":")),
+                root["reserved_tokens"], root["reserved_cost_microusd"],
+            ]
+            if finance_schema_ready:
+                columns.extend((
+                    "configured_rate_card_state", "configured_rate_card_id",
+                    "configured_rate_card_version", "configured_rate_card_digest",
+                    "configured_rate_card_currency",
+                ))
+                values.extend((
+                    "configured", binding.rate_card_id, binding.rate_card_version,
+                    binding.rate_card_digest, binding.currency,
+                ))
             connection.execute(
-                """
-                INSERT INTO gateway_request_attempts (
-                    attempt_id, created_at, evidence_schema_id, evidence_schema_version,
-                    organization_id, actor_id, actor_name, team_id, team_name,
-                    identity_type, authentication_source, client, protocol, requested_model,
-                    resolved_alias, upstream_model, policy_version, policy_action,
-                    redaction_count, redaction_rules, reserved_tokens, reserved_cost_microusd
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    root["attempt_id"],
-                    root["created_at"],
-                    root["evidence_schema_id"],
-                    root["evidence_schema_version"],
-                    root["organization_id"],
-                    root["actor_id"],
-                    root["actor_name"],
-                    root["team_id"],
-                    root["team_name"],
-                    root["identity_type"],
-                    root["authentication_source"],
-                    root["client"],
-                    root["protocol"],
-                    root["requested_model"],
-                    root["resolved_alias"],
-                    root["upstream_model"],
-                    root["policy_version"],
-                    root["policy_action"],
-                    root["redaction_count"],
-                    json.dumps(root["redaction_rules"], separators=(",", ":")),
-                    root["reserved_tokens"],
-                    root["reserved_cost_microusd"],
-                ),
+                f"INSERT INTO gateway_request_attempts ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' for _ in columns)})",
+                tuple(values),
             )
             self._append_request_attempt_event_in_connection(
                 connection,
@@ -855,6 +878,8 @@ class UsageStore:
         cost_microusd: int = 0,
         provider_request_id: str | None = None,
         provider_metrics: ProviderAttemptMetrics | None,
+        finance_observation: NativeUsageObservation | None = None,
+        configured_estimate: ConfiguredRouteEstimate | None = None,
     ) -> None:
         """Finalize an attempt and atomically append optional provider timing."""
 
@@ -865,6 +890,7 @@ class UsageStore:
             latest = self._latest_request_attempt_state_in_connection(connection, attempt.attempt_id)
             require_pending_request_attempt_state(latest.state)
             result = normalize_request_attempt_result(root, error_factory=StorageSchemaError)
+            terminal_at = datetime.now(timezone.utc)
             usage_event_id = self._record_in_connection(
                 connection,
                 identity=result.identity,
@@ -886,16 +912,27 @@ class UsageStore:
                 provider_request_id=provider_request_id,
                 redaction_count=result.redaction_count,
                 redaction_rules=result.redaction_rules,
+                occurred_at=terminal_at,
             )
-            self._append_request_attempt_event_in_connection(
+            terminal_event_id = self._append_request_attempt_event_in_connection(
                 connection,
                 attempt_id=attempt.attempt_id,
                 organization_id=organization_id,
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=terminal_at,
                 sequence=latest.sequence + 1,
                 state=status,
                 reason_code=None,
                 usage_event_id=usage_event_id,
+            )
+            self._append_finance_attempt_evidence_in_connection(
+                connection,
+                root=dict(root),
+                terminal_attempt_event_id=terminal_event_id,
+                usage_event_id=usage_event_id,
+                terminal_state=status,
+                occurred_at=terminal_at,
+                observation=finance_observation,
+                estimate=configured_estimate,
             )
             if provider_metrics is not None:
                 self._append_provider_metrics_in_connection(
@@ -937,24 +974,38 @@ class UsageStore:
         organization_id: str,
         reason_code: str,
         provider_metrics: ProviderAttemptMetrics | None,
+        finance_observation: NativeUsageObservation | None = None,
     ) -> bool:
         """Append an unknown outcome and optional timing in one transaction."""
 
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            self._request_attempt_root_in_connection(connection, attempt.attempt_id, organization_id)
+            root = self._request_attempt_root_in_connection(connection, attempt.attempt_id, organization_id)
             latest = self._latest_request_attempt_state_in_connection(connection, attempt.attempt_id)
             if not should_mark_request_attempt_unknown(latest.state):
                 return False
-            self._append_request_attempt_event_in_connection(
+            terminal_at = datetime.now(timezone.utc)
+            terminal_event_id = self._append_request_attempt_event_in_connection(
                 connection,
                 attempt_id=attempt.attempt_id,
                 organization_id=organization_id,
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=terminal_at,
                 sequence=latest.sequence + 1,
                 state="outcome_unknown",
                 reason_code=reason_code,
                 usage_event_id=None,
+            )
+            self._append_finance_attempt_evidence_in_connection(
+                connection,
+                root=dict(root),
+                terminal_attempt_event_id=terminal_event_id,
+                usage_event_id=None,
+                terminal_state="outcome_unknown",
+                occurred_at=terminal_at,
+                observation=unknown_native_observation(
+                    str(root["protocol"]), finance_observation, reason_code,
+                ),
+                estimate=None,
             )
             if provider_metrics is not None:
                 self._append_provider_metrics_in_connection(
@@ -1106,10 +1157,15 @@ class UsageStore:
             parameters,
         ).fetchall()
         for row in rows:
+            root = self._request_attempt_root_in_connection(
+                connection,
+                str(row["attempt_id"]),
+                str(row["organization_id"]),
+            )
             latest = self._latest_request_attempt_state_in_connection(connection, str(row["attempt_id"]))
             if latest.state != "pending":
                 continue
-            self._append_request_attempt_event_in_connection(
+            terminal_event_id = self._append_request_attempt_event_in_connection(
                 connection,
                 attempt_id=str(row["attempt_id"]),
                 organization_id=str(row["organization_id"]),
@@ -1118,6 +1174,18 @@ class UsageStore:
                 state="outcome_unknown",
                 reason_code="stale_pending",
                 usage_event_id=None,
+            )
+            self._append_finance_attempt_evidence_in_connection(
+                connection,
+                root=dict(root),
+                terminal_attempt_event_id=terminal_event_id,
+                usage_event_id=None,
+                terminal_state="outcome_unknown",
+                occurred_at=now,
+                observation=unknown_native_observation(
+                    str(root["protocol"]), None, "stale_pending",
+                ),
+                estimate=None,
             )
         return len(rows)
 
@@ -1213,6 +1281,64 @@ class UsageStore:
             ),
         )
         return str(event["id"])
+
+    def _append_finance_attempt_evidence_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        root: Mapping[str, object],
+        terminal_attempt_event_id: str,
+        usage_event_id: str | None,
+        terminal_state: str,
+        occurred_at: datetime,
+        observation: NativeUsageObservation | None,
+        estimate: ConfiguredRouteEstimate | None,
+    ) -> str | None:
+        """Append one sidecar and its chain entry in the active transaction."""
+
+        try:
+            binding = binding_from_attempt_row(root)
+            if binding is None:
+                # A root created before schema 11 remains an explicit coverage
+                # gap and is never backfilled or repriced.
+                return None
+            native = observation or absent_native_observation(str(root["protocol"]))
+            configured = estimate or unavailable_estimate(
+                binding,
+                "attempt_outcome_unknown"
+                if terminal_state == "outcome_unknown"
+                else "missing_native_usage",
+            )
+            event = build_finance_attempt_event(
+                protocol=str(root["protocol"]),
+                organization_id=str(root["organization_id"]),
+                request_attempt_id=str(root["attempt_id"]),
+                terminal_attempt_event_id=terminal_attempt_event_id,
+                usage_event_id=usage_event_id,
+                terminal_state=terminal_state,
+                occurred_at=occurred_at.isoformat(),
+                observation=native,
+                estimate=configured,
+                binding=binding,
+            )
+            row = finance_attempt_storage_row(event)
+        except ValueError:
+            raise StorageSchemaError("finance_attempt_evidence_invalid") from None
+        connection.execute(
+            f"INSERT INTO gateway_finance_attempt_evidence ({', '.join(row)}) "
+            f"VALUES ({', '.join('?' for _ in row)})",
+            tuple(row.values()),
+        )
+        self._append_audit_chain_entry_in_connection(
+            connection,
+            event=event,
+            source=AuditChainSource(
+                FINANCE_ATTEMPT_SCHEMA_ID,
+                FINANCE_ATTEMPT_SCHEMA_VERSION,
+                str(event["evidence_event_id"]),
+            ),
+        )
+        return str(event["evidence_event_id"])
 
     def _append_provider_failover_in_connection(
         self,
@@ -1979,6 +2105,17 @@ class UsageStore:
             """,
             (organization_id,),
         ).fetchall()
+        finance_ready = connection.execute(
+            "SELECT 1 FROM hormuz_schema_migrations WHERE version=11 AND state='applied'"
+        ).fetchone() is not None
+        finance_rows = (
+            connection.execute(
+                "SELECT * FROM gateway_finance_attempt_evidence WHERE organization_id = ?",
+                (organization_id,),
+            ).fetchall()
+            if finance_ready
+            else ()
+        )
         for row in usage_rows:
             try:
                 event = usage_audit_event(dict(row))
@@ -2001,6 +2138,25 @@ class UsageStore:
                 event,
                 error_factory=StorageSchemaError,
             )
+            if source.source in source_identities:
+                raise StorageSchemaError("audit_chain_source_event_malformed")
+            source_identities.add(source.source)
+            sources.append(source)
+        for row in finance_rows:
+            try:
+                event = finance_attempt_event_from_row(dict(row))
+                source_identity = AuditChainSource(
+                    FINANCE_ATTEMPT_SCHEMA_ID,
+                    FINANCE_ATTEMPT_SCHEMA_VERSION,
+                    str(event["evidence_event_id"]),
+                )
+                source = normalize_audit_chain_source_event_input(
+                    event,
+                    source=source_identity,
+                    error_factory=StorageSchemaError,
+                )
+            except ValueError:
+                raise StorageSchemaError("audit_chain_source_event_malformed") from None
             if source.source in source_identities:
                 raise StorageSchemaError("audit_chain_source_event_malformed")
             source_identities.add(source.source)
@@ -2047,10 +2203,19 @@ class UsageStore:
                 """,
                 (organization_id,),
             ).fetchall()
+            finance_ready = connection.execute(
+                "SELECT 1 FROM hormuz_schema_migrations WHERE version=11 AND state='applied'"
+            ).fetchone() is not None
+            source_columns = (
+                ", source_schema_id, source_schema_version, source_event_id"
+                if finance_ready
+                else ""
+            )
             entry_rows = connection.execute(
-                """
+                f"""
                 SELECT chain_version, chain_epoch, sequence, entry_schema_id,
                        entry_schema_version, event_id, previous_digest, event_digest, event_json
+                       {source_columns}
                 FROM gateway_audit_chain_entries
                 WHERE organization_id = ?
                 ORDER BY chain_epoch ASC, sequence ASC

@@ -16,6 +16,11 @@ from ._persistence import (
     WorkBudgetRequestRepository,
 )
 from .config import GatewayConfig, Identity
+from .finance_attempts import (
+    ConfiguredRateCardBinding,
+    ConfiguredRouteEstimate,
+    NativeUsageObservation,
+)
 from .postgres import PostgresConnectionPool, PostgresStorageError
 from .postgres_usage_store import PostgresUsageStore
 from .provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
@@ -80,7 +85,8 @@ class _ProviderReliabilityBegin(Protocol):
         reserved_cost_microusd: int,
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
-        provider_failover: ProviderFailoverContext,
+        provider_failover: ProviderFailoverContext | None,
+        configured_rate_card: ConfiguredRateCardBinding | None = None,
     ) -> RequestAttempt: ...
 
 
@@ -100,6 +106,8 @@ class _ProviderReliabilityFinalize(Protocol):
         cost_microusd: int = 0,
         provider_request_id: str | None = None,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
+        configured_estimate: ConfiguredRouteEstimate | None = None,
     ) -> None: ...
 
 
@@ -111,6 +119,7 @@ class _ProviderReliabilityMarkUnknown(Protocol):
         organization_id: str,
         reason_code: str,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
     ) -> bool: ...
 
 
@@ -194,7 +203,8 @@ class ProviderReliabilityAdapter:
         reserved_cost_microusd: int,
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
-        provider_failover: ProviderFailoverContext,
+        provider_failover: ProviderFailoverContext | None,
+        configured_rate_card: ConfiguredRateCardBinding | None = None,
     ) -> RequestAttempt:
         return self._begin(
             identity=identity,
@@ -213,6 +223,7 @@ class ProviderReliabilityAdapter:
             ttl_seconds=ttl_seconds,
             work_budget=work_budget,
             provider_failover=provider_failover,
+            configured_rate_card=configured_rate_card,
         )
 
     def finalize_request_attempt(
@@ -230,6 +241,8 @@ class ProviderReliabilityAdapter:
         cost_microusd: int = 0,
         provider_request_id: str | None = None,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
+        configured_estimate: ConfiguredRouteEstimate | None = None,
     ) -> None:
         self._finalize(
             attempt=attempt,
@@ -244,6 +257,8 @@ class ProviderReliabilityAdapter:
             cost_microusd=cost_microusd,
             provider_request_id=provider_request_id,
             provider_metrics=provider_metrics,
+            finance_observation=finance_observation,
+            configured_estimate=configured_estimate,
         )
 
     def mark_request_attempt_outcome_unknown(
@@ -253,12 +268,14 @@ class ProviderReliabilityAdapter:
         organization_id: str,
         reason_code: str,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
     ) -> bool:
         return self._mark_unknown(
             attempt=attempt,
             organization_id=organization_id,
             reason_code=reason_code,
             provider_metrics=provider_metrics,
+            finance_observation=finance_observation,
         )
 
     def totals(

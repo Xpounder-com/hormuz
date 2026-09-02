@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from dataclasses import replace
 import json
 import os
@@ -32,12 +31,26 @@ if __package__:
     from ._attribution_predecessor_fixture import registry_predecessor_call
     from ._attribution_fixture import seed_attribution_metadata
     from ._portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
-    from ._registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot
+    from ._registry_transition_fixture import (
+        ledger_observation,
+        released_v1_call,
+        seed_registry_ledger,
+        sqlite_backup,
+        sqlite_snapshot,
+        without_sqlite_finance_attempt_successor,
+    )
 else:
     from _attribution_predecessor_fixture import registry_predecessor_call
     from _attribution_fixture import seed_attribution_metadata
     from _portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
-    from _registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot
+    from _registry_transition_fixture import (
+        ledger_observation,
+        released_v1_call,
+        seed_registry_ledger,
+        sqlite_backup,
+        sqlite_snapshot,
+        without_sqlite_finance_attempt_successor,
+    )
 
 
 @unittest.skipUnless(os.environ.get("HORMUZ_TEST_REGISTRY_PYTHON"), "requires digest-pinned real registry predecessor")
@@ -48,7 +61,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.config = registry_config(self.root)
         self.path = self.config.database_path
-        self.assertEqual(UsageStore.schema_version, 10)
+        self.assertEqual(UsageStore.schema_version, 11)
         seeded = registry_predecessor_call({"backend": "sqlite", "path": str(self.path), "mode": "seed"})
         self.assertEqual(seeded["status"], "ready")
         self.writes, self.page = seeded["writes"], seeded["page"]
@@ -60,7 +73,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            self.assertIn(version, (6, 7, 8, 9, 10))
+            self.assertIn(version, (6, 7, 8, 9, 10, 11))
             original(connection, version)
             if fail and version == 6:
                 raise RuntimeError("synthetic_attribution_migration_failure")
@@ -69,7 +82,10 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
             UsageStore(self.path).verify_ready()
 
     def assert_prior_state_preserved(self):
-        current = copy.deepcopy(sqlite_snapshot(self.path))
+        current = without_sqlite_finance_attempt_successor(
+            sqlite_snapshot(self.path)
+        )
+        before = without_sqlite_finance_attempt_successor(self.before)
         added = (
             set(TABLE_DDL)
             | set(OUTCOME_TABLES)
@@ -87,12 +103,12 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
             for row in current["rows"]["hormuz_schema_migrations"]
             if row[0] not in {6, 7, 8, 9, 10}
         ]
-        self.assertEqual(current, self.before)
+        self.assertEqual(current, before)
 
     def test_sqlite_attribution_migration_is_additive_and_idempotent(self):
         for _ in range(2):
             self.probe()
-            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 38)
+            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 39)
             self.assert_prior_state_preserved()
 
     def test_sqlite_attribution_failure_and_retry_preserve_populated_registry(self):

@@ -9,7 +9,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from hormuz.store import StorageSchemaError, UsageStore
+from hormuz.config import Identity
+from hormuz.store import ReservationScope, StorageSchemaError, UsageStore
 
 if __package__:
     from ._finance_native_predecessor_fixture import finance_native_predecessor_call
@@ -29,35 +30,56 @@ else:
     )
 
 
-PROBE_TABLE = "finance_native_attempt_transition_test_probe"
-PROBE_COLUMNS = (
-    ("configured_rate_card_state", "TEXT"),
-    ("configured_rate_card_id", "TEXT"),
-    ("configured_rate_card_version", "INTEGER"),
-    ("configured_rate_card_digest", "TEXT"),
-    ("configured_rate_card_currency", "TEXT"),
-)
-
-
-def _apply_probe_migration(connection) -> None:
-    for name, kind in PROBE_COLUMNS:
-        connection.execute(
-            f"ALTER TABLE gateway_request_attempts ADD COLUMN {name} {kind}"
-        )
-    connection.execute(
-        f"CREATE TABLE {PROBE_TABLE} "
-        "(id INTEGER PRIMARY KEY, marker TEXT NOT NULL)"
+def _candidate_write(path: Path) -> str:
+    store = UsageStore(path)
+    identity = Identity(
+        token_env="UNUSED_TRANSITION_TOKEN",
+        token="synthetic-unused-secret",
+        actor_id="candidate",
+        actor_name="Candidate",
+        team_id="finance",
+        team_name="Finance",
+        # The predecessor fixture intentionally activates an attributed work
+        # budget for acme. Use its ungoverned tenant so this recovery probe
+        # exercises successor durability rather than bypassing that policy.
+        organization_id="beta",
     )
+    attempt = store.begin_request_attempt(
+        identity=identity,
+        client="codex",
+        protocol="openai",
+        requested_model="candidate-model",
+        resolved_alias="candidate-model",
+        upstream_model="candidate-provider-model",
+        policy_version="candidate-policy",
+        policy_action="allowed",
+        redaction_count=0,
+        redaction_rules=(),
+        scopes=(ReservationScope(name="organization"),),
+        reserved_tokens=2,
+        reserved_cost_microusd=3,
+        ttl_seconds=60,
+    )
+    store.finalize_request_attempt(
+        attempt=attempt,
+        organization_id="beta",
+        status="succeeded",
+        input_tokens=1,
+        output_tokens=1,
+        cost_microusd=2,
+    )
+    return attempt.attempt_id
 
 
-class SQLiteFinanceNativeAttemptRedFirstTests(unittest.TestCase):
+class SQLiteFinanceNativeAttemptTransitionTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 10)
-        store = UsageStore(self.path)
+        self.assertEqual(UsageStore.schema_version, 11)
+        with mock.patch.object(UsageStore, "schema_version", 10):
+            store = UsageStore(self.path)
         seed_registry_ledger(store)
         self.before = sqlite_snapshot(self.path)
 
@@ -66,27 +88,37 @@ class SQLiteFinanceNativeAttemptRedFirstTests(unittest.TestCase):
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            if version != 11:
-                return original(connection, version)
-            _apply_probe_migration(connection)
-            if fail:
+            original(connection, version)
+            if version == 11 and fail:
                 raise RuntimeError("synthetic_finance_native_migration_failure")
 
-        with (
-            mock.patch.object(UsageStore, "schema_version", 11),
-            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
-        ):
+        with mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
             UsageStore(target).verify_ready()
 
-    def test_missing_migration_is_red_and_leaves_no_partial_state(self):
-        with mock.patch.object(UsageStore, "schema_version", 11):
-            with self.assertRaises(StorageSchemaError) as caught:
-                UsageStore(self.path)
-        self.assertEqual(
-            caught.exception.code,
-            "storage_schema_migration_unsupported",
-        )
-        self.assertEqual(sqlite_snapshot(self.path), self.before)
+    def test_real_migration_materializes_binding_sidecar_and_audit_source_shape(self):
+        self.probe()
+        after = sqlite_snapshot(self.path)
+        self.assertIn("gateway_finance_attempt_evidence", after["rows"])
+        self.assertEqual(after["rows"]["gateway_finance_attempt_evidence"], [])
+        with managed_sqlite_connection(self.path) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(gateway_request_attempts)"
+                ).fetchall()
+            }
+            self.assertTrue({
+                "configured_rate_card_state", "configured_rate_card_id",
+                "configured_rate_card_version", "configured_rate_card_digest",
+                "configured_rate_card_currency",
+            }.issubset(columns))
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM gateway_request_attempts "
+                    "WHERE configured_rate_card_state='legacy_unavailable'"
+                ).fetchone()[0],
+                len(after["rows"]["gateway_request_attempts"]),
+            )
         UsageStore(self.path).verify_ready()
 
     def test_probe_failure_rolls_back_and_retry_is_idempotent(self):
@@ -98,8 +130,8 @@ class SQLiteFinanceNativeAttemptRedFirstTests(unittest.TestCase):
         self.assertEqual(sqlite_snapshot(self.path), self.before)
         self.probe()
         after = sqlite_snapshot(self.path)
-        self.assertIn(PROBE_TABLE, after["rows"])
-        self.assertEqual(after["rows"][PROBE_TABLE], [])
+        self.assertIn("gateway_finance_attempt_evidence", after["rows"])
+        self.assertEqual(after["rows"]["gateway_finance_attempt_evidence"], [])
         self.probe()
         self.assertEqual(sqlite_snapshot(self.path), after)
 
@@ -120,6 +152,10 @@ class SQLiteFinanceNativeAttemptRedFirstTests(unittest.TestCase):
                 "storage_schema_partial_upgrade",
             )
             self.assertEqual(sqlite_snapshot(self.path), partial)
+        with mock.patch.object(UsageStore, "schema_version", 10):
+            with self.assertRaises(StorageSchemaError) as caught:
+                UsageStore(self.path)
+        self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
         with managed_sqlite_connection(self.path) as connection:
             connection.execute(
                 "UPDATE hormuz_schema_migrations SET state='applied' "
@@ -127,7 +163,11 @@ class SQLiteFinanceNativeAttemptRedFirstTests(unittest.TestCase):
             )
         newer = sqlite_snapshot(self.path)
         with self.assertRaises(StorageSchemaError) as caught:
-            UsageStore(self.path)
+            UsageStore(self.path, read_only=True)
+        self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
+        with mock.patch.object(UsageStore, "schema_version", 10):
+            with self.assertRaises(StorageSchemaError) as caught:
+                UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
         self.assertEqual(sqlite_snapshot(self.path), newer)
 
@@ -173,19 +213,7 @@ class SQLiteFinanceNativeAttemptPredecessorTests(unittest.TestCase):
 
     def probe(self, *, path=None):
         target = path or self.path
-        original = UsageStore._apply_migration
-
-        def apply(connection, version):
-            if version == 11:
-                _apply_probe_migration(connection)
-                return
-            original(connection, version)
-
-        with (
-            mock.patch.object(UsageStore, "schema_version", 11),
-            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
-        ):
-            UsageStore(target).verify_ready()
+        UsageStore(target).verify_ready()
 
     def replay_request(self, path):
         return {
@@ -252,18 +280,21 @@ class SQLiteFinanceNativeAttemptPredecessorTests(unittest.TestCase):
 
     def test_post_checkpoint_write_requires_forward_recovery(self):
         self.probe()
-        with managed_sqlite_connection(self.path) as connection:
-            connection.execute(
-                f"INSERT INTO {PROBE_TABLE} (id, marker) "
-                "VALUES (1, 'candidate-write')"
-            )
+        attempt_id = _candidate_write(self.path)
         after_write = sqlite_snapshot(self.path)
+        self.assertEqual(
+            len(after_write["rows"]["gateway_finance_attempt_evidence"]),
+            1,
+        )
+        self.assertIn(
+            attempt_id,
+            str(after_write["rows"]["gateway_finance_attempt_evidence"][0]),
+        )
         retained = self.root / "retained-candidate.sqlite3"
         restored = self.root / "forward-recovered.sqlite3"
         sqlite_backup(self.path, retained)
         sqlite_backup(retained, restored)
-        with mock.patch.object(UsageStore, "schema_version", 11):
-            UsageStore(restored, read_only=True).verify_ready()
+        UsageStore(restored, read_only=True).verify_ready()
         self.assertEqual(sqlite_snapshot(restored), after_write)
         self.assertEqual(
             finance_native_predecessor_call(

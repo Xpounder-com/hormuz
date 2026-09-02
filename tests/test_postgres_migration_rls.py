@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 from uuid import uuid4
 
+import hormuz.postgres as postgres_module
 from hormuz.cli import main
 from hormuz.config import GatewayConfig, PostgresPoolConfig, UsageStorageConfig
 from hormuz.postgres import (
@@ -117,6 +118,22 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                         )
                     )
 
+            def acl_boundary() -> tuple[int, str]:
+                with self.psycopg.connect(self.owner_dsn) as connection:
+                    with connection.cursor() as cursor:
+                        entries = postgres_module._postgres_acl_entries(
+                            cursor,
+                            schema=schema,
+                            migration_login=migration_login,
+                            error_scope="test",
+                        )
+                return postgres_module._postgres_acl_boundary(
+                    entries,
+                    schema=schema,
+                    migration_login=migration_login,
+                    role_names=roles,
+                )
+
             first = bootstrap_postgres_deployment(
                 self.owner_dsn,
                 runtime_dsn,
@@ -126,6 +143,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 custody_control_role=custody_role,
                 custody_executor_role=executor_role,
             )
+            first_acl_boundary = acl_boundary()
             second = bootstrap_postgres_deployment(
                 self.owner_dsn,
                 runtime_dsn,
@@ -135,6 +153,13 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 custody_control_role=custody_role,
                 custody_executor_role=executor_role,
             )
+            second_acl_boundary = acl_boundary()
+            expected_acl_boundary = (
+                185,
+                "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a",
+            )
+            self.assertEqual(first_acl_boundary, expected_acl_boundary)
+            self.assertEqual(second_acl_boundary, expected_acl_boundary)
             self.assertEqual(first, second)
             self.assertEqual(first.schema_version, POSTGRES_SCHEMA_VERSION)
             self.assertEqual(first.restricted_roles, 4)
@@ -433,6 +458,14 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                             self.sql.Identifier(runtime_role),
                         )
                     )
+            unexpected_acl_boundary = acl_boundary()
+            self.assertEqual(
+                unexpected_acl_boundary,
+                (
+                    186,
+                    "d06ec615d82a176b107e1131c00e1dceb5f629d9504a7519f64e1eb77a0c7246",
+                ),
+            )
             with self.assertRaisesRegex(
                 PostgresStorageError,
                 "postgres_bootstrap_acl_boundary_invalid",

@@ -54,9 +54,9 @@ except ModuleNotFoundError:  # Direct execution resolves helpers beside this scr
 
 
 STATE_SCHEMA_ID = "hormuz.postgresql-recovery-drill-state"
-STATE_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
 SUMMARY_SCHEMA_ID = "hormuz.postgresql-recovery-drill-summary"
-SUMMARY_SCHEMA_VERSION = 1
+SUMMARY_SCHEMA_VERSION = 2
 SUMMARY_COVERAGE = "ephemeral_logical_backup_restore_only"
 _DEFAULT_OPERATOR_READINESS_ATTEMPTS = 30
 _DEFAULT_OPERATOR_READINESS_INTERVAL_SECONDS = 0.25
@@ -69,6 +69,7 @@ _REQUIRED_RECORD_COUNT_KEYS = (
     "active_budget_reservations",
     "request_attempts",
     "request_attempt_events",
+    "finance_attempt_evidence",
     "policy_administrators",
     "policy_versions",
     "active_policy_versions",
@@ -85,13 +86,14 @@ _EXPECTED_RECORD_COUNTS = {
     "active_budget_reservations": 4,
     "request_attempts": 2,
     "request_attempt_events": 4,
+    "finance_attempt_evidence": 2,
     "policy_administrators": 2,
     "policy_versions": 2,
     "active_policy_versions": 2,
     "policy_control_events": 6,
     "audit_chain_epochs": 2,
     "audit_chain_heads": 2,
-    "audit_chain_entries": 4,
+    "audit_chain_entries": 6,
     "audit_chain_checkpoints": 0,
 }
 _STATE_CHECK_KEYS = (
@@ -99,6 +101,7 @@ _STATE_CHECK_KEYS = (
     "tenant_scoped_repository",
     "active_policy_versions",
     "audit_chain_integrity",
+    "finance_attempt_evidence",
     "rls_without_organization_context",
 )
 _NEGATIVE_CHECK_KEYS = (
@@ -802,7 +805,7 @@ def _capture_state(
         if store.monthly_secret_totals(organization_id=organization_id).events != 1:
             raise RecoveryDrillError("recovery_tenant_repository_check_failed")
         audit_chain = store.verify_audit_chain(organization_id=organization_id)
-        if audit_chain.sequence != 2 or audit_chain.head_digest is None:
+        if audit_chain.sequence != 3 or audit_chain.head_digest is None:
             raise RecoveryDrillError("recovery_audit_chain_check_failed")
         if store.active_budget_reservations(organization_id=organization_id) != 2:
             raise RecoveryDrillError("recovery_budget_reservation_check_failed")
@@ -818,6 +821,16 @@ def _capture_state(
                     "FROM gateway_request_attempt_events ORDER BY attempt_id, sequence"
                 )
                 attempt_events = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(
+                    "SELECT event_schema_id, event_schema_version, terminal_state, usage_event_id, "
+                    "provider_schema_id, provider_schema_version, observation_state, "
+                    "observation_reason_code, native_payload_json, native_payload_digest, "
+                    "configured_estimate_availability, configured_estimate_amount, "
+                    "configured_estimate_microusd, configured_estimate_currency, "
+                    "configured_estimate_basis, configured_estimate_reason_code, provider_final "
+                    "FROM gateway_finance_attempt_evidence ORDER BY request_attempt_id"
+                )
+                finance_evidence = [dict(row) for row in cursor.fetchall()]
         if attempt_events != [
             {"state": "pending", "reason_code": None, "usage_event_id": None},
             {
@@ -827,6 +840,28 @@ def _capture_state(
             },
         ]:
             raise RecoveryDrillError("recovery_request_attempt_check_failed")
+        if finance_evidence != [
+            {
+                "event_schema_id": "hormuz.finance-attempt-evidence",
+                "event_schema_version": 1,
+                "terminal_state": "outcome_unknown",
+                "usage_event_id": None,
+                "provider_schema_id": "openai.responses.usage.v1",
+                "provider_schema_version": 1,
+                "observation_state": "absent",
+                "observation_reason_code": "provider_transport_ambiguous",
+                "native_payload_json": None,
+                "native_payload_digest": None,
+                "configured_estimate_availability": "unavailable",
+                "configured_estimate_amount": None,
+                "configured_estimate_microusd": None,
+                "configured_estimate_currency": "USD",
+                "configured_estimate_basis": "configured_rate_card_estimate",
+                "configured_estimate_reason_code": "attempt_outcome_unknown",
+                "provider_final": False,
+            }
+        ]:
+            raise RecoveryDrillError("recovery_finance_attempt_evidence_check_failed")
 
         status = service.status(organization_id=organization_id, credential_env=identity.token_env)
         snapshot = runtime.snapshot_for(identity)
@@ -861,6 +896,7 @@ def _capture_state(
         "active_budget_reservations": len(records["gateway_budget_reservations"]),
         "request_attempts": len(records["gateway_request_attempts"]),
         "request_attempt_events": len(records["gateway_request_attempt_events"]),
+        "finance_attempt_evidence": len(records["gateway_finance_attempt_evidence"]),
         "policy_administrators": len(records["policy_administrators"]),
         "policy_versions": len(records["policy_versions"]),
         "active_policy_versions": len(records["policy_active_versions"]),
@@ -888,6 +924,7 @@ def _capture_state(
             "tenant_scoped_repository": True,
             "active_policy_versions": True,
             "audit_chain_integrity": True,
+            "finance_attempt_evidence": True,
             "rls_without_organization_context": True,
         },
     }
@@ -920,6 +957,7 @@ def _collect_restricted_records(
         ("gateway_budget_reservations", "id"),
         ("gateway_request_attempts", "attempt_id"),
         ("gateway_request_attempt_events", "attempt_id, sequence"),
+        ("gateway_finance_attempt_evidence", "organization_id, request_attempt_id"),
         ("gateway_audit_chain_epochs", "organization_id, chain_epoch"),
         ("gateway_audit_chain_heads", "organization_id"),
         ("gateway_audit_chain_entries", "organization_id, chain_epoch, sequence"),
@@ -1019,6 +1057,7 @@ def _verify_rls_without_organization_context(
         (runtime_dsn, "gateway_budget_reservations"),
         (runtime_dsn, "gateway_request_attempts"),
         (runtime_dsn, "gateway_request_attempt_events"),
+        (runtime_dsn, "gateway_finance_attempt_evidence"),
         (runtime_dsn, "gateway_audit_chain_epochs"),
         (runtime_dsn, "gateway_audit_chain_heads"),
         (runtime_dsn, "gateway_audit_chain_entries"),
