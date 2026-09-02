@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+import zlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -160,6 +161,21 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
                     1,
                 ),
                 self.assertRaisesRegex(VerificationError, "distribution_archive_too_large"),
+            ):
+                self._verify(archive, bundle, "notarized")
+
+    def test_corrupt_deflate_is_a_bounded_verification_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive, bundle = self._write_archive(Path(temporary), include_ticket=True)
+            with (
+                patch.object(
+                    zipfile.ZipExtFile,
+                    "read",
+                    side_effect=zlib.error("corrupt deflate"),
+                ),
+                self.assertRaisesRegex(
+                    VerificationError, "invalid_distribution_archive"
+                ),
             ):
                 self._verify(archive, bundle, "notarized")
 

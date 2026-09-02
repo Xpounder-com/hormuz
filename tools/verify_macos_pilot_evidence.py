@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -74,10 +75,14 @@ _SUBMISSION_ID_RE = re.compile(_UUID + r"\Z", re.IGNORECASE)
 _ACTIONS_RUN_RE = re.compile(
     r"https://github\.com/Xpounder-com/hormuz/actions/runs/[1-9][0-9]{0,19}\Z"
 )
-_ISSUE_RE = re.compile(
-    r"https://github\.com/Xpounder-com/hormuz/issues/[1-9][0-9]*\Z"
+_ISSUE_COMMENT_RE = re.compile(
+    r"https://github\.com/Xpounder-com/hormuz/issues/([1-9][0-9]*)"
+    r"#issuecomment-([1-9][0-9]{0,19})\Z"
 )
 _PRIVATE_REFERENCE_RE = re.compile(rf"private-(?:security-)?review:{_UUID}\Z")
+_GITHUB_LOGIN_RE = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z"
+)
 
 _ROOT_FIELDS = {
     "schema_id",
@@ -232,6 +237,19 @@ _REVIEW_FIELDS = {
     "independent_reviewer",
     "reference_type",
     "reference",
+    "artifact_sha256",
+    "source_commit",
+    "completed_at",
+}
+_REVIEW_ATTESTATION_FIELDS = {
+    "schema_id",
+    "schema_version",
+    "claim_scope",
+    "review_kind",
+    "status",
+    "independent_reviewer",
+    "artifact_sha256",
+    "source_commit",
 }
 _OPERATOR_FIELDS = {
     "artifact_workflow_head_matches_source",
@@ -602,6 +620,7 @@ def _verify_distribution_artifact_zip(
         ValueError,
         zipfile.BadZipFile,
         zipfile.LargeZipFile,
+        zlib.error,
     ) as error:
         raise MacPilotEvidenceError(f"{label}_github_artifact_zip_invalid") from error
 
@@ -615,7 +634,7 @@ def _authenticate_distribution_artifact(
     archive_size: int,
     archive_sha256: str,
     label: str,
-) -> None:
+) -> dict[str, object]:
     run = _authenticate_github_run(
         url,
         source_commit,
@@ -635,6 +654,17 @@ def _authenticate_distribution_artifact(
         or proof["build"] != str(run_number * 1000 + run_attempt)
     ):
         raise MacPilotEvidenceError(f"{label}_github_run_build_invalid")
+    actor_logins: set[str] = set()
+    for actor_label in ("actor", "triggering_actor"):
+        actor = run.get(actor_label)
+        login = actor.get("login") if isinstance(actor, dict) else None
+        actor_logins.add(
+            _require_pattern(
+                login,
+                _GITHUB_LOGIN_RE,
+                f"{label}_github_run_{actor_label}",
+            ).casefold()
+        )
 
     response = _github_api_json(
         f"repos/Xpounder-com/hormuz/actions/runs/{run_id}/artifacts?per_page=100",
@@ -664,6 +694,9 @@ def _authenticate_distribution_artifact(
     artifact_id = artifact.get("id")
     artifact_size = artifact.get("size_in_bytes")
     workflow_run = artifact.get("workflow_run")
+    artifact_created_at = _require_timestamp(
+        artifact.get("created_at"), f"{label}_github_artifact_created_at"
+    )
     if (
         isinstance(artifact_id, bool)
         or not isinstance(artifact_id, int)
@@ -724,6 +757,35 @@ def _authenticate_distribution_artifact(
             archive_sha256,
             label,
         )
+    return {
+        "run_number": run_number,
+        "run_attempt": run_attempt,
+        "artifact_created_at": artifact_created_at,
+        "actor_logins": actor_logins,
+    }
+
+
+def _validate_authenticated_distribution_history(
+    artifact: dict[str, object], previous_artifact: dict[str, object]
+) -> None:
+    run_number = artifact.get("run_number")
+    previous_run_number = previous_artifact.get("run_number")
+    run_attempt = artifact.get("run_attempt")
+    created_at = artifact.get("artifact_created_at")
+    previous_created_at = previous_artifact.get("artifact_created_at")
+    if (
+        isinstance(run_number, bool)
+        or not isinstance(run_number, int)
+        or isinstance(previous_run_number, bool)
+        or not isinstance(previous_run_number, int)
+        or run_number != previous_run_number + 1
+        or isinstance(run_attempt, bool)
+        or run_attempt != 1
+        or not isinstance(created_at, datetime)
+        or not isinstance(previous_created_at, datetime)
+        or created_at <= previous_created_at
+    ):
+        raise MacPilotEvidenceError("previous_artifact_not_immediate")
 
 
 def _verify_production_archive(
@@ -868,7 +930,11 @@ def _validate_artifact(
 
 
 def _validate_clean_machines(
-    value: object, artifact_sha256: str, generated_at: datetime, reasons: list[str]
+    value: object,
+    artifact_sha256: str,
+    artifact_created_at: datetime | None,
+    generated_at: datetime,
+    reasons: list[str],
 ) -> list[str]:
     if not isinstance(value, list) or len(value) > 8:
         raise MacPilotEvidenceError("clean_machine_runs_invalid")
@@ -884,6 +950,8 @@ def _validate_clean_machines(
         if run["artifact_sha256"] != artifact_sha256:
             raise MacPilotEvidenceError(f"{label}_artifact_binding_invalid")
         started_at = _require_timestamp(run["started_at"], f"{label}_started_at")
+        if artifact_created_at is not None and started_at < artifact_created_at:
+            raise MacPilotEvidenceError(f"{label}_predates_artifact")
         if started_at > generated_at:
             raise MacPilotEvidenceError(f"{label}_after_generated_at")
         architecture = run["architecture"]
@@ -1053,7 +1121,15 @@ def _validate_hosted_gateway(
     return gateway
 
 
-def _validate_review(value: object, label: str, reasons: list[str]) -> None:
+def _validate_review(
+    value: object,
+    label: str,
+    artifact_sha256: str,
+    source_commit: str,
+    artifact_created_at: datetime | None,
+    generated_at: datetime,
+    reasons: list[str],
+) -> dict[str, Any]:
     review = _require_fields(value, _REVIEW_FIELDS, label)
     status = review["status"]
     reference_type = review["reference_type"]
@@ -1061,17 +1137,107 @@ def _validate_review(value: object, label: str, reasons: list[str]) -> None:
     independent = _require_bool(review["independent_reviewer"], f"{label}_independent_reviewer")
     if not isinstance(status, str) or status not in {"not_started", "failed", "passed"}:
         raise MacPilotEvidenceError(f"{label}_status_invalid")
+    if (
+        review["artifact_sha256"] != artifact_sha256
+        or review["source_commit"] != source_commit
+    ):
+        raise MacPilotEvidenceError(f"{label}_candidate_binding_invalid")
+    if status == "not_started":
+        if review["completed_at"] != "none":
+            raise MacPilotEvidenceError(f"{label}_completion_invalid")
+    else:
+        completed_at = _require_timestamp(
+            review["completed_at"], f"{label}_completed_at"
+        )
+        if artifact_created_at is not None and completed_at < artifact_created_at:
+            raise MacPilotEvidenceError(f"{label}_predates_artifact")
+        if completed_at > generated_at:
+            raise MacPilotEvidenceError(f"{label}_after_generated_at")
     if reference_type == "none":
-        if reference != "none" or status == "passed":
+        if reference != "none" or status != "not_started":
             raise MacPilotEvidenceError(f"{label}_reference_invalid")
-    elif reference_type == "public_issue":
-        _require_pattern(reference, _ISSUE_RE, f"{label}_reference")
+    elif reference_type == "public_issue_comment":
+        _require_pattern(reference, _ISSUE_COMMENT_RE, f"{label}_reference")
     elif reference_type == "private_review":
         _require_pattern(reference, _PRIVATE_REFERENCE_RE, f"{label}_reference")
     else:
         raise MacPilotEvidenceError(f"{label}_reference_type_invalid")
-    if status != "passed" or not independent:
+    if status != "passed" or not independent or reference_type == "private_review":
         reasons.append(f"{label}_incomplete")
+    return review
+
+
+def _authenticate_review_reference(
+    review: dict[str, Any],
+    review_kind: str,
+    workflow_actor_logins: set[str],
+    generated_at: datetime,
+    label: str,
+) -> None:
+    reference = review["reference"]
+    matched = _ISSUE_COMMENT_RE.fullmatch(reference)
+    if matched is None:
+        raise MacPilotEvidenceError(f"{label}_reference_not_authenticatable")
+    issue_number, comment_id_text = matched.groups()
+    comment_id = int(comment_id_text)
+    response = _github_api_json(
+        f"repos/Xpounder-com/hormuz/issues/comments/{comment_id}",
+        f"{label}_github_comment",
+    )
+    user = response.get("user") if isinstance(response, dict) else None
+    reviewer_login = user.get("login") if isinstance(user, dict) else None
+    created_at = _require_timestamp(
+        response.get("created_at") if isinstance(response, dict) else None,
+        f"{label}_github_comment_created_at",
+    )
+    updated_at = _require_timestamp(
+        response.get("updated_at") if isinstance(response, dict) else None,
+        f"{label}_github_comment_updated_at",
+    )
+    if (
+        not isinstance(response, dict)
+        or isinstance(response.get("id"), bool)
+        or response.get("id") != comment_id
+        or response.get("html_url") != reference
+        or response.get("issue_url")
+        != f"https://api.github.com/repos/Xpounder-com/hormuz/issues/{issue_number}"
+        or not isinstance(user, dict)
+        or user.get("type") != "User"
+        or not isinstance(reviewer_login, str)
+        or _GITHUB_LOGIN_RE.fullmatch(reviewer_login) is None
+        or reviewer_login.casefold() in workflow_actor_logins
+        or created_at > updated_at
+        or updated_at > generated_at
+        or review["completed_at"] != updated_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    ):
+        raise MacPilotEvidenceError(f"{label}_github_comment_not_trusted")
+    body = response.get("body")
+    if not isinstance(body, str):
+        raise MacPilotEvidenceError(f"{label}_github_comment_not_trusted")
+    body_payload = body.encode("utf-8")
+    if not 1 <= len(body_payload) <= _MAX_FILE_BYTES:
+        raise MacPilotEvidenceError(f"{label}_github_comment_not_trusted")
+    attestation = _require_fields(
+        _parse_json(body_payload, f"{label}_attestation"),
+        _REVIEW_ATTESTATION_FIELDS,
+        f"{label}_attestation",
+    )
+    _require_int(
+        attestation["schema_version"],
+        1,
+        1,
+        f"{label}_attestation_schema_version",
+    )
+    if (
+        attestation["schema_id"] != "hormuz.macos-pilot-review"
+        or attestation["claim_scope"] != CLAIM_SCOPE
+        or attestation["review_kind"] != review_kind
+        or attestation["status"] != "passed"
+        or attestation["independent_reviewer"] is not True
+        or attestation["artifact_sha256"] != review["artifact_sha256"]
+        or attestation["source_commit"] != review["source_commit"]
+    ):
+        raise MacPilotEvidenceError(f"{label}_attestation_invalid")
 
 
 def validate_evidence(
@@ -1141,12 +1307,14 @@ def validate_evidence(
         or artifact["submission_id"] == previous_artifact["submission_id"]
     ):
         raise MacPilotEvidenceError("artifact_history_binding_invalid")
+    artifact_authentication: dict[str, object] | None = None
+    artifact_created_at: datetime | None = None
     if evidence_kind == "pilot_qualification":
         _verify_production_archive(archive_path, proof, "artifact")
         _verify_production_archive(
             previous_archive_path, previous_proof, "previous_artifact"
         )
-        _authenticate_distribution_artifact(
+        artifact_authentication = _authenticate_distribution_artifact(
             artifact["workflow_run_url"],
             artifact["source_commit"],
             proof,
@@ -1156,7 +1324,7 @@ def validate_evidence(
             archive_sha256,
             "artifact",
         )
-        _authenticate_distribution_artifact(
+        previous_authentication = _authenticate_distribution_artifact(
             previous_artifact["workflow_run_url"],
             previous_artifact["source_commit"],
             previous_proof,
@@ -1166,10 +1334,23 @@ def validate_evidence(
             previous_archive_sha256,
             "previous_artifact",
         )
+        _validate_authenticated_distribution_history(
+            artifact_authentication, previous_authentication
+        )
+        authenticated_creation = artifact_authentication["artifact_created_at"]
+        if not isinstance(authenticated_creation, datetime):
+            raise MacPilotEvidenceError("artifact_github_artifact_created_at_invalid")
+        if authenticated_creation > generated_at:
+            raise MacPilotEvidenceError("artifact_created_after_evidence")
+        artifact_created_at = authenticated_creation
 
     reasons: list[str] = []
     architectures = _validate_clean_machines(
-        root["clean_machine_runs"], artifact["archive_sha256"], generated_at, reasons
+        root["clean_machine_runs"],
+        artifact["archive_sha256"],
+        artifact_created_at,
+        generated_at,
+        reasons,
     )
     _validate_lifecycle(
         root["lifecycle"], previous_artifact["build"], artifact["build"], reasons
@@ -1192,8 +1373,43 @@ def validate_evidence(
         )
 
     reviews = _require_fields(root["reviews"], _REVIEWS_FIELDS, "reviews")
-    _validate_review(reviews["security"], "security_review", reasons)
-    _validate_review(reviews["accessibility"], "accessibility_review", reasons)
+    validated_reviews = {
+        "security": _validate_review(
+            reviews["security"],
+            "security_review",
+            artifact["archive_sha256"],
+            artifact["source_commit"],
+            artifact_created_at,
+            generated_at,
+            reasons,
+        ),
+        "accessibility": _validate_review(
+            reviews["accessibility"],
+            "accessibility_review",
+            artifact["archive_sha256"],
+            artifact["source_commit"],
+            artifact_created_at,
+            generated_at,
+            reasons,
+        ),
+    }
+    if artifact_authentication is not None:
+        actor_logins = artifact_authentication["actor_logins"]
+        if not isinstance(actor_logins, set):
+            raise MacPilotEvidenceError("artifact_github_run_actor_invalid")
+        for review_kind, review in validated_reviews.items():
+            if (
+                review["status"] == "passed"
+                and review["independent_reviewer"] is True
+                and review["reference_type"] == "public_issue_comment"
+            ):
+                _authenticate_review_reference(
+                    review,
+                    review_kind,
+                    actor_logins,
+                    generated_at,
+                    f"{review_kind}_review",
+                )
 
     attestations = _require_fields(root["operator_attestations"], _OPERATOR_FIELDS, "operator_attestations")
     attestation_checks = {

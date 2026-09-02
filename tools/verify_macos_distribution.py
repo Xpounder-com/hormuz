@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import zlib
 from pathlib import Path
 from typing import BinaryIO
 
@@ -168,6 +169,7 @@ def verify_archive(
         ValueError,
         zipfile.BadZipFile,
         zipfile.LargeZipFile,
+        zlib.error,
     ) as error:
         raise VerificationError("invalid_distribution_archive") from error
 

@@ -25,6 +25,12 @@ affected gate on a new build when artifact bytes change.
    current build and its immediately preceding notarized build are both needed
    to test update and rollback. A local or feature-branch notarization is useful
    rehearsal evidence but cannot satisfy the default-branch provenance fields.
+   The candidate must be the first attempt of the distribution run, and its run
+   number must immediately follow the authenticated rollback artifact's run
+   number. This deliberately strict rule rejects an intervening failed,
+   cancelled, or rerun candidate; produce a fresh pair of consecutive successful
+   protected runs rather than guessing which older build users would roll back
+   to.
 2. **Verify exact artifact custody.** Recompute the SHA-256 and byte size after
    downloading the artifact. They must match `distribution-proof.json`; the
    proof and notarization-summary file digests must match the aggregate. The
@@ -39,13 +45,17 @@ affected gate on a new build when artifact bytes change.
    the proof's source commit. It downloads the uniquely named, unexpired Actions
    artifact for that run and byte-binds the retained notarized ZIP, distribution
    proof, and notarization summary to its members. The proof build must equal the
-   workflow run-number/run-attempt build identity. Apple acceptance must contain
-   zero issues and at least two ticket entries.
+   workflow run-number/run-attempt build identity. The authenticated Actions
+   artifact creation time becomes the lower bound for every clean-machine run
+   and completed review. Apple acceptance must contain zero issues and at least
+   two ticket entries.
 3. **Exercise clean machines.** Use one Apple Silicon Mac and one Intel Mac
    without developer tools. Download through the intended delivery channel so
    normal quarantine is present. Confirm Gatekeeper accepts the archive,
-   install `Hormuz.app` in `/Applications`, and launch it. A VM that changes
-   architecture or bypasses normal quarantine does not replace either run.
+   install `Hormuz.app` in `/Applications`, and launch it. Each recorded start
+   time must follow the authenticated candidate artifact's creation time. A VM
+   that changes architecture or bypasses normal quarantine does not replace
+   either run.
 4. **Exercise signed Keychain and session lifecycle.** With the real pilot IdP,
    sign in, restart the app, lock and unlock macOS, refresh the session, sign
    out, and revoke the server-side session. Confirm the revoked session is
@@ -78,8 +88,19 @@ affected gate on a new build when artifact bytes change.
    gateway commit. That operational workflow does not exist yet, so the current
    repository remains fail-closed for real pilot qualification.
 7. **Complete independent review.** An independent reviewer must close both the
-   security and accessibility reviews through a public issue or opaque private
-   review reference. A self-review or an unreferenced `passed` value is rejected.
+   security and accessibility reviews after the candidate artifact exists. Each
+   aggregate record binds the candidate archive digest, source commit, and
+   completion time. A qualifying public reference is an authenticated GitHub
+   issue comment whose author differs from both the distribution workflow actor
+   and triggering actor. Its entire body is a JSON object with exactly these
+   fields: `schema_id` (`hormuz.macos-pilot-review`), `schema_version` (`1`),
+   `claim_scope`, `review_kind` (`security` or `accessibility`), `status`
+   (`passed`), `independent_reviewer` (`true`), `artifact_sha256`, and
+   `source_commit`. The aggregate completion time must equal the comment's
+   authenticated GitHub update time. An opaque private-review reference remains
+   structurally valid but cannot qualify until a separate private-reference
+   authenticator is implemented. A self-review, bare issue URL, reused older
+   review, or unreferenced `passed` value is rejected.
 8. **Resolve every blocker.** The aggregate may retain only fixed blocker enums.
    `ready_for_controlled_external_pilot` is true only when the list is empty and
    every preceding gate qualifies.
@@ -87,12 +108,12 @@ affected gate on a new build when artifact bytes change.
 ## Content-free evidence boundary
 
 The aggregate contains only exact artifact identifiers, timestamps, bounded
-environment enums, fixed counts, booleans, public Actions/issue URLs, and opaque
-private-review IDs. Its schema has no field for a name, email address, employer,
-customer, prompt, response, provider request ID, token, credential, hostname,
-local path, log, screenshot, or free-form feedback. Unknown fields, duplicate
-JSON members, non-finite numbers, symlinks, changing files, and oversized input
-fail closed.
+environment enums, fixed counts, booleans, public Actions/issue-comment URLs,
+and opaque private-review IDs. Its schema has no field for a name, email
+address, employer, customer, prompt, response, provider request ID, token,
+credential, hostname, local path, log, screenshot, or free-form feedback.
+Unknown fields, duplicate JSON members, non-finite numbers, symlinks, changing
+files, and oversized input fail closed.
 
 Real qualification evidence must carry the permanent `com.xpounder.hormuz`
 bundle identity and Apple Developer team `R267LZMUTY`. The checked-in synthetic
@@ -108,7 +129,12 @@ Real qualification reruns the macOS platform checks against both archive byte
 streams, authenticates the recorded GitHub workflow runs, and verifies that the
 exact retained files occur in each run's final Actions artifact. Expired,
 duplicate, malformed, oversized, encrypted, path-bearing, or extra artifact
-members fail closed. The gateway record also carries an evidence-kind
+members fail closed. It also requires consecutive distribution run numbers,
+rejects a rerun candidate, and binds clean-machine and independent-review
+chronology to the authenticated candidate artifact creation time. Qualifying
+public review comments are fetched through GitHub's API; their exact candidate
+attestation, reviewer identity boundary, and update time are checked without
+retaining the reviewer login. The gateway record also carries an evidence-kind
 discriminator; the synthetic gateway domain is rejected when the aggregate
 claims real pilot qualification.
 

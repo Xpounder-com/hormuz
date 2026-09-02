@@ -9,6 +9,7 @@ import os
 import tempfile
 import unittest
 import zipfile
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -162,6 +163,8 @@ class MacPilotEvidenceTests(unittest.TestCase):
         gateway["recovery_evidence_url"] = (
             "https://github.com/Xpounder-com/hormuz/actions/runs/999996"
         )
+        for review in evidence["reviews"].values():  # type: ignore[union-attr]
+            review["source_commit"] = artifact["source_commit"]
         proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
         previous_proof_payload = (
             json.dumps(previous_proof, indent=2, sort_keys=True) + "\n"
@@ -186,9 +189,31 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 },
             ) as platform_verifier,
             patch.object(
-                pilot, "_authenticate_distribution_artifact"
+                pilot,
+                "_authenticate_distribution_artifact",
+                side_effect=(
+                    {
+                        "run_number": 12,
+                        "run_attempt": 1,
+                        "artifact_created_at": datetime(
+                            2026, 9, 1, 14, 0, tzinfo=timezone.utc
+                        ),
+                        "actor_logins": {"release-owner"},
+                    },
+                    {
+                        "run_number": 11,
+                        "run_attempt": 2,
+                        "artifact_created_at": datetime(
+                            2026, 9, 1, 13, 0, tzinfo=timezone.utc
+                        ),
+                        "actor_logins": {"release-owner"},
+                    },
+                ),
             ) as distribution_authenticator,
             patch.object(pilot, "_authenticate_github_run") as run_authenticator,
+            patch.object(
+                pilot, "_authenticate_review_reference"
+            ) as review_authenticator,
         ):
             result = self._validate(*inputs)
 
@@ -198,6 +223,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertIn("not_external_human_validation", result["nonclaims"])
         self.assertEqual(platform_verifier.call_count, 2)
         self.assertEqual(distribution_authenticator.call_count, 2)
+        self.assertEqual(review_authenticator.call_count, 2)
         self.assertEqual(
             run_authenticator.call_args_list,
             [
@@ -233,12 +259,15 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "id": 12345,
             "run_number": 12,
             "run_attempt": 1,
+            "actor": {"login": "release-owner"},
+            "triggering_actor": {"login": "release-owner"},
         }
         artifact = {
             "id": 67890,
             "name": f"hormuz-macos-{proof['version']}-12-1",
             "size_in_bytes": len(artifact_payload.getvalue()),
             "expired": False,
+            "created_at": "2026-09-01T14:00:00Z",
             "url": "https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/67890",
             "archive_download_url": (
                 "https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/67890/zip"
@@ -262,7 +291,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
             patch.object(pilot, "_github_api_json", return_value=response),
             patch.object(pilot.subprocess, "run", side_effect=download) as command,
         ):
-            pilot._authenticate_distribution_artifact(
+            authentication = pilot._authenticate_distribution_artifact(
                 proof["workflow_run_url"],
                 proof["source_commit"],
                 proof,
@@ -273,6 +302,13 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 "artifact",
             )
 
+        self.assertEqual(authentication["run_number"], 12)
+        self.assertEqual(authentication["run_attempt"], 1)
+        self.assertEqual(
+            authentication["artifact_created_at"],
+            datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(authentication["actor_logins"], {"release-owner"})
         command.assert_called_once()
         self.assertEqual(
             command.call_args.args[0],
@@ -327,6 +363,167 @@ class MacPilotEvidenceTests(unittest.TestCase):
                     hashlib.sha256(archive_payload).hexdigest(),
                     "artifact",
                 )
+
+    def test_authenticated_distribution_artifact_wraps_corrupt_deflate(self) -> None:
+        proof = self._json(PROOF_PATH)
+        proof_payload = PROOF_PATH.read_bytes()
+        notarization_payload = NOTARIZATION_PATH.read_bytes()
+        archive_payload = ARCHIVE_PATH.read_bytes()
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact_zip = Path(temporary) / "artifact.zip"
+            with zipfile.ZipFile(artifact_zip, "w", zipfile.ZIP_DEFLATED) as package:
+                package.writestr(
+                    f"Hormuz-{proof['version']}-notarized.zip", archive_payload
+                )
+                package.writestr("distribution-proof.json", proof_payload)
+                package.writestr("notarization.json", notarization_payload)
+            with (
+                patch.object(
+                    pilot.zipfile.ZipExtFile,
+                    "read",
+                    side_effect=zlib.error("corrupt deflate"),
+                ),
+                self.assertRaisesRegex(
+                    pilot.MacPilotEvidenceError,
+                    "artifact_github_artifact_zip_invalid",
+                ),
+            ):
+                pilot._verify_distribution_artifact_zip(
+                    artifact_zip,
+                    proof,
+                    proof_payload,
+                    notarization_payload,
+                    len(archive_payload),
+                    hashlib.sha256(archive_payload).hexdigest(),
+                    "artifact",
+                )
+
+    def test_authenticated_history_requires_consecutive_distribution_runs(self) -> None:
+        candidate = {
+            "run_number": 12,
+            "run_attempt": 1,
+            "artifact_created_at": datetime(
+                2026, 9, 1, 14, 0, tzinfo=timezone.utc
+            ),
+        }
+        previous = {
+            "run_number": 11,
+            "run_attempt": 3,
+            "artifact_created_at": datetime(
+                2026, 9, 1, 13, 0, tzinfo=timezone.utc
+            ),
+        }
+        pilot._validate_authenticated_distribution_history(candidate, previous)
+
+        stale_previous = dict(previous, run_number=10)
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "previous_artifact_not_immediate"
+        ):
+            pilot._validate_authenticated_distribution_history(
+                candidate, stale_previous
+            )
+
+        rerun_candidate = dict(candidate, run_attempt=2)
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "previous_artifact_not_immediate"
+        ):
+            pilot._validate_authenticated_distribution_history(
+                rerun_candidate, previous
+            )
+
+    def test_clean_machine_run_must_follow_authenticated_artifact_creation(self) -> None:
+        evidence = self._json(EVIDENCE_PATH)
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "clean_machine_run_0_predates_artifact",
+        ):
+            pilot._validate_clean_machines(
+                evidence["clean_machine_runs"],
+                evidence["artifact"]["archive_sha256"],  # type: ignore[index]
+                datetime(2026, 9, 1, 15, 30, tzinfo=timezone.utc),
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+                [],
+            )
+
+    def test_review_binds_candidate_and_authenticated_github_attestation(self) -> None:
+        evidence = self._json(EVIDENCE_PATH)
+        review = evidence["reviews"]["security"]  # type: ignore[index]
+        candidate = evidence["artifact"]  # type: ignore[assignment]
+        reasons: list[str] = []
+        validated = pilot._validate_review(
+            review,
+            "security_review",
+            candidate["archive_sha256"],
+            candidate["source_commit"],
+            datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+            datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+            reasons,
+        )
+        self.assertEqual(reasons, [])
+        attestation = {
+            "schema_id": "hormuz.macos-pilot-review",
+            "schema_version": 1,
+            "claim_scope": pilot.CLAIM_SCOPE,
+            "review_kind": "security",
+            "status": "passed",
+            "independent_reviewer": True,
+            "artifact_sha256": candidate["archive_sha256"],
+            "source_commit": candidate["source_commit"],
+        }
+        response = {
+            "id": 9000009,
+            "html_url": review["reference"],
+            "issue_url": "https://api.github.com/repos/Xpounder-com/hormuz/issues/9",
+            "created_at": "2026-09-01T16:20:00Z",
+            "updated_at": "2026-09-01T16:30:00Z",
+            "body": json.dumps(attestation),
+            "user": {"login": "independent-reviewer", "type": "User"},
+        }
+        with patch.object(
+            pilot, "_github_api_json", return_value=response
+        ) as github_api:
+            pilot._authenticate_review_reference(
+                validated,
+                "security",
+                {"release-owner"},
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+                "security_review",
+            )
+        github_api.assert_called_once_with(
+            "repos/Xpounder-com/hormuz/issues/comments/9000009",
+            "security_review_github_comment",
+        )
+
+        changed = copy.deepcopy(review)
+        changed["source_commit"] = "f" * 40
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "security_review_candidate_binding_invalid",
+        ):
+            pilot._validate_review(
+                changed,
+                "security_review",
+                candidate["archive_sha256"],
+                candidate["source_commit"],
+                None,
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+                [],
+            )
+
+        with (
+            patch.object(pilot, "_github_api_json", return_value=response),
+            self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError,
+                "security_review_github_comment_not_trusted",
+            ),
+        ):
+            pilot._authenticate_review_reference(
+                validated,
+                "security",
+                {"independent-reviewer"},
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+                "security_review",
+            )
 
     def test_exact_archive_bytes_and_proof_digests_are_bound(self) -> None:
         inputs = list(self._inputs())
@@ -680,6 +877,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 "independent_reviewer": False,
                 "reference_type": "none",
                 "reference": "none",
+                "completed_at": "none",
             }
         )
         inputs[0] = evidence

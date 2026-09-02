@@ -159,15 +159,21 @@
   },
   "reviews": {
     "accessibility": {
+      "artifact_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
+      "completed_at": "2026-09-01T16:45:00Z",
       "independent_reviewer": true,
-      "reference": "https://github.com/Xpounder-com/hormuz/issues/13",
-      "reference_type": "public_issue",
+      "reference": "https://github.com/Xpounder-com/hormuz/issues/13#issuecomment-13000013",
+      "reference_type": "public_issue_comment",
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "status": "passed"
     },
     "security": {
+      "artifact_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
+      "completed_at": "2026-09-01T16:30:00Z",
       "independent_reviewer": true,
-      "reference": "https://github.com/Xpounder-com/hormuz/issues/9",
-      "reference_type": "public_issue",
+      "reference": "https://github.com/Xpounder-com/hormuz/issues/9#issuecomment-9000009",
+      "reference_type": "public_issue_comment",
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "status": "passed"
     }
   },
