@@ -29,6 +29,13 @@ class ResponseUsageParser:
         self._json_buffer = bytearray()
         self._input_tokens_observed = False
         self._output_tokens_observed = False
+        self._provider_completed = False
+
+    @property
+    def provider_completed(self) -> bool:
+        """Whether a provider terminal event has been observed in the stream."""
+
+        return self._provider_completed
 
     def feed(self, data: bytes) -> None:
         if self.is_event_stream:
@@ -55,10 +62,22 @@ class ResponseUsageParser:
         return self.usage
 
     def _parse_sse_line(self, line: str) -> None:
+        if line.startswith("event:"):
+            event = line[6:].strip()
+            if (
+                self.protocol == "openai" and event == "response.completed"
+            ) or (
+                self.protocol == "anthropic" and event == "message_stop"
+            ):
+                self._provider_completed = True
+            return
         if not line.startswith("data:"):
             return
         payload = line[5:].strip()
-        if not payload or payload == "[DONE]":
+        if not payload:
+            return
+        if payload == "[DONE]":
+            self._provider_completed = True
             return
         try:
             value = json.loads(payload)
@@ -70,11 +89,15 @@ class ResponseUsageParser:
         if not isinstance(value, dict):
             return
         if self.protocol == "openai":
+            if self.is_event_stream and value.get("type") == "response.completed":
+                self._provider_completed = True
             response = value.get("response") if value.get("type") == "response.completed" else value
             if isinstance(response, dict):
                 self._apply_provider_model(response.get("model"))
                 self._apply_openai_usage(response.get("usage"))
         elif self.protocol == "anthropic":
+            if self.is_event_stream and value.get("type") == "message_stop":
+                self._provider_completed = True
             if value.get("type") == "message_start" and isinstance(value.get("message"), dict):
                 self._apply_provider_model(value["message"].get("model"))
                 self._apply_anthropic_usage(

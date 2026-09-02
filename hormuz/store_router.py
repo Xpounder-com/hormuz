@@ -8,6 +8,7 @@ from typing import Generic, Mapping, Protocol, TypeVar
 
 from ._persistence import (
     ProviderReliabilityRepository,
+    ProviderReliabilityTotals,
     RequestAttempt,
     ReservationScope,
     UsageRepository,
@@ -113,6 +114,15 @@ class _ProviderReliabilityMarkUnknown(Protocol):
     ) -> bool: ...
 
 
+class _ProviderReliabilityTotalsRead(Protocol):
+    def __call__(
+        self,
+        *,
+        actor_id: str,
+        organization_id: str,
+    ) -> ProviderReliabilityTotals: ...
+
+
 @dataclass(frozen=True, repr=False)
 class WorkBudgetRequestAdapter:
     """Typed bridge to the adapters' private atomic v1.1 transaction."""
@@ -164,6 +174,7 @@ class ProviderReliabilityAdapter:
     _begin: _ProviderReliabilityBegin
     _finalize: _ProviderReliabilityFinalize
     _mark_unknown: _ProviderReliabilityMarkUnknown
+    _read_totals: _ProviderReliabilityTotalsRead
 
     def begin_request_attempt(
         self,
@@ -250,6 +261,17 @@ class ProviderReliabilityAdapter:
             provider_metrics=provider_metrics,
         )
 
+    def totals(
+        self,
+        *,
+        actor_id: str,
+        organization_id: str,
+    ) -> ProviderReliabilityTotals:
+        return self._read_totals(
+            actor_id=actor_id,
+            organization_id=organization_id,
+        )
+
 
 @dataclass(frozen=True, repr=False)
 class RepositoryBundle(Generic[RepositoryT]):
@@ -281,12 +303,14 @@ def create_provider_reliability_repository(
             usage._begin_request_attempt_with_work_budget,
             usage._finalize_request_attempt_with_provider_metrics,
             usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
+            usage._provider_reliability_totals,
         )
     if type(usage) is PostgresUsageStore:
         return ProviderReliabilityAdapter(
             usage._begin_request_attempt_with_work_budget,
             usage._finalize_request_attempt_with_provider_metrics,
             usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
+            usage._provider_reliability_totals,
         )
     return None
 
@@ -297,8 +321,14 @@ def create_usage_store(
     environ: Mapping[str, str] | None = None,
     connection_pool: PostgresConnectionPool | None = None,
     read_only: bool = False,
+    organization_ids: tuple[str, ...] | None = None,
 ) -> UsageRepository:
-    """Return the configured store, never placing a PostgreSQL DSN in config."""
+    """Return the configured store, never placing a PostgreSQL DSN in config.
+
+    ``organization_ids`` lets an authenticated server-local directory provide
+    the PostgreSQL tenant allowlist when identities are enrolled dynamically.
+    Omitting it preserves the immutable configuration-owned allowlist.
+    """
 
     storage = config.usage_storage
     audit_chain_maximum_anchor_age_seconds = (
@@ -319,7 +349,9 @@ def create_usage_store(
         raise PostgresStorageError("postgres_dsn_unavailable")
     return PostgresUsageStore(
         dsn,
-        organization_ids=config.organization_ids,
+        organization_ids=(
+            config.organization_ids if organization_ids is None else organization_ids
+        ),
         schema=storage.postgres_schema,
         runtime_role=storage.postgres_runtime_role,
         connection_pool=connection_pool,
@@ -334,6 +366,7 @@ def create_repository_bundle(
     environ: Mapping[str, str] | None = None,
     connection_pool: PostgresConnectionPool | None = None,
     read_only: bool = False,
+    usage_organization_ids: tuple[str, ...] | None = None,
 ) -> RepositoryBundle[RepositoryT]:
     """Compose an explicitly supplied owner beside the unchanged v1 usage ledger.
 
@@ -346,9 +379,21 @@ def create_repository_bundle(
     The legacy create_usage_store path does not call this composition helper.
     """
 
-    usage = create_usage_store(
-        config, environ=environ, connection_pool=connection_pool, read_only=read_only,
-    )
+    if usage_organization_ids is None:
+        usage = create_usage_store(
+            config,
+            environ=environ,
+            connection_pool=connection_pool,
+            read_only=read_only,
+        )
+    else:
+        usage = create_usage_store(
+            config,
+            environ=environ,
+            connection_pool=connection_pool,
+            read_only=read_only,
+            organization_ids=usage_organization_ids,
+        )
     portfolio = portfolio_factory(
         config, environ=environ, connection_pool=connection_pool, read_only=read_only,
     )

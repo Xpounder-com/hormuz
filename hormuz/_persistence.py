@@ -81,6 +81,24 @@ class SecretTotals:
 
 
 @dataclass(frozen=True)
+class ProviderReliabilityTotals:
+    """Content-free reliability evidence scoped to one actor and tenant."""
+
+    attempt_count: int = 0
+    provider_attempt_record_count: int = 0
+    latency_header_sample_count: int = 0
+    latency_first_body_byte_sample_count: int = 0
+    latency_total_sample_count: int = 0
+    failover_link_record_count: int = 0
+    outcome_unknown_count: int = 0
+    cancellation_outcome_unknown_count: int = 0
+
+    @property
+    def live_provider_request_count(self) -> int:
+        return max(0, self.attempt_count - self.failover_link_record_count)
+
+
+@dataclass(frozen=True)
 class ReservationScope:
     name: str
     actor_id: str | None = None
@@ -203,6 +221,13 @@ class ProviderReliabilityRepository(Protocol):
         reason_code: str,
         provider_metrics: ProviderAttemptMetrics,
     ) -> bool: ...
+
+    def totals(
+        self,
+        *,
+        actor_id: str,
+        organization_id: str,
+    ) -> ProviderReliabilityTotals: ...
 
 
 @dataclass(frozen=True)

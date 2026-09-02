@@ -144,6 +144,38 @@ class PostgresPoolUnitTests(unittest.TestCase):
         self.assertTrue(pool.closed)
         self.assertEqual(fake.close_calls, [7])
 
+    def test_operational_stats_project_only_bounded_content_free_counters(self) -> None:
+        pool = self._pool(min_connections=1, max_connections=4, max_waiting=8)
+        fake = _FakePoolModule.ConnectionPool.instances[-1]
+        fake.stats = {
+            "pool_size": 3,
+            "pool_available": 2,
+            "requests_waiting": 1,
+            "requests_num": 12,
+            "requests_queued": 4,
+            "requests_errors": 2,
+            "requests_wait_ms": 37,
+            "unexpected_future_field": 999,
+        }
+        self.assertEqual(
+            pool.operational_stats(),
+            {
+                "configured": True,
+                "closed": False,
+                "min_connections": 1,
+                "max_connections": 4,
+                "pool_size": 3,
+                "available_connections": 2,
+                "requests_waiting": 1,
+                "requests_total": 12,
+                "requests_queued_total": 4,
+                "requests_error_total": 2,
+                "requests_wait_milliseconds_total": 37,
+            },
+        )
+        pool.close()
+        self.assertTrue(pool.operational_stats()["closed"])
+
     def test_checkout_and_startup_errors_are_stable_and_content_free(self) -> None:
         secret_dsn_fragment = "never-log"
         _FakePoolModule.ConnectionPool.open_error = _FakePoolModule.PoolTimeout(secret_dsn_fragment)
@@ -223,9 +255,14 @@ class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
             mock.patch("hormuz.server.ThreadingHTTPServer.__init__", return_value=None),
             mock.patch("hormuz.server.ThreadingHTTPServer.server_close") as base_close,
         ):
-            server = GatewayServer(config)
-            create_pool.assert_called_once_with(config)
-            create_store.assert_called_once_with(config, connection_pool=pool)
+            bounded_environment = {"HORMUZ_POSTGRES_DSN": "synthetic-runtime-dsn"}
+            server = GatewayServer(config, environ=bounded_environment)
+            create_pool.assert_called_once_with(config, environ=bounded_environment)
+            create_store.assert_called_once_with(
+                config,
+                environ=bounded_environment,
+                connection_pool=pool,
+            )
             create_reliability.assert_called_once_with(store)
             create_runtime.assert_called_once_with(config, connection_pool=pool)
             runtime.verify_active_policies.assert_called_once_with()

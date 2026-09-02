@@ -103,6 +103,11 @@ EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
         "${{ secrets.HORMUZ_LIVE_ANTHROPIC_PROVIDER_KEY }}",
         "${{ secrets.HORMUZ_LIVE_OPENAI_PROVIDER_KEY }}",
     ),
+    "external-pilot-qualification.yml": (
+        "${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}",
+        "${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}",
+        "${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}",
+    ),
     "macos-distribution.yml": (
         "${{ secrets.APPLE_NOTARY_ISSUER_ID }}",
         "${{ secrets.APPLE_NOTARY_KEY_ID }}",
@@ -118,6 +123,10 @@ EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
     ),
 }
 EXPECTED_WORKFLOW_JOB_ENVIRONMENTS = {
+    "external-pilot-qualification.yml": {
+        "deployment": "external-pilot-qualification",
+        "qualification": "external-pilot-qualification",
+    },
     "freeze-v1-candidate.yml": {
         "preflight": CUSTODY_ENVIRONMENT_NAME,
         "publish": CUSTODY_ENVIRONMENT_NAME,

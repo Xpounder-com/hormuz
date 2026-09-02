@@ -441,6 +441,23 @@ class ConfiguredModelIdentityTests(unittest.TestCase):
 
 
 class ResponseUsageEvidenceTests(unittest.TestCase):
+    def test_stream_completion_is_observed_only_from_terminal_provider_events(self) -> None:
+        openai = ResponseUsageParser("openai", is_event_stream=True)
+        openai.feed(b'data: {"type":"response.output_text.delta","delta":"x"}\n\n')
+        self.assertFalse(openai.provider_completed)
+        openai.feed(b'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}\n\n')
+        self.assertTrue(openai.provider_completed)
+
+        anthropic = ResponseUsageParser("anthropic", is_event_stream=True)
+        anthropic.feed(b'data: {"type":"message_delta","usage":{"output_tokens":1}}\n\n')
+        self.assertFalse(anthropic.provider_completed)
+        anthropic.feed(b'data: {"type":"message_stop"}\n\n')
+        self.assertTrue(anthropic.provider_completed)
+
+        event_only = ResponseUsageParser("openai", is_event_stream=True)
+        event_only.feed(b"event: response.completed\n")
+        self.assertTrue(event_only.provider_completed)
+
     def test_success_evidence_requires_valid_input_and_output_tokens(self) -> None:
         complete = ResponseUsageParser("openai", is_event_stream=False)
         complete.feed(json.dumps({

@@ -9,26 +9,708 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+from uuid import uuid4
 
 from hormuz.cli import main
-from hormuz.config import GatewayConfig, UsageStorageConfig
+from hormuz.config import GatewayConfig, PostgresPoolConfig, UsageStorageConfig
 from hormuz.postgres import (
     POSTGRES_SCHEMA_VERSION,
+    PostgresConnectionPool,
     PostgresStorageError,
+    bootstrap_postgres_deployment,
     migrate_postgres,
     postgres_transaction,
+    verify_postgres_deployment_runtime,
     verify_postgres_schema,
 )
 from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz.provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
 from hormuz.store import ReservationScope
-from hormuz.store_router import create_usage_store
+from hormuz.store_router import create_provider_reliability_repository, create_usage_store
 if __package__:
-    from ._postgres_fixture import ROOT, PostgresTestCase, _identity
+    from ._postgres_fixture import ROOT, PostgresTestCase, _identity, _runtime_dsn
 else:  # Isolated wheel compatibility discovery uses the tests directory as its import root.
-    from _postgres_fixture import ROOT, PostgresTestCase, _identity
+    from _postgres_fixture import ROOT, PostgresTestCase, _identity, _runtime_dsn
 
 
 class PostgresMigrationRLSTests(PostgresTestCase):
+    def test_deployment_bootstrap_rejects_startup_role_impersonation(self) -> None:
+        suffix = uuid4().hex[:12]
+        runtime_role = f"hormuz_runtime_i_{suffix}"
+        policy_role = f"hormuz_policy_i_{suffix}"
+        custody_role = f"hormuz_custody_i_{suffix}"
+        executor_role = f"hormuz_executor_i_{suffix}"
+        impersonated_runtime_dsn = self.psycopg.conninfo.make_conninfo(
+            self.owner_dsn,
+            options=f"-c role={self.runtime_role}",
+        )
+
+        with self.psycopg.connect(impersonated_runtime_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT session_user, current_user")
+                session_user, current_user = map(str, cursor.fetchone())
+        self.assertNotEqual(session_user, current_user)
+        self.assertEqual(current_user, self.runtime_role)
+
+        with self.assertRaisesRegex(
+            PostgresStorageError,
+            "postgres_bootstrap_runtime_identity_invalid",
+        ):
+            bootstrap_postgres_deployment(
+                self.owner_dsn,
+                impersonated_runtime_dsn,
+                schema=f"hormuz_impersonation_{suffix}",
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+            )
+        with self.assertRaisesRegex(
+            PostgresStorageError,
+            "postgres_runtime_identity_invalid",
+        ):
+            verify_postgres_deployment_runtime(
+                impersonated_runtime_dsn,
+                schema=self.schema,
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+            )
+        with self.assertRaisesRegex(
+            PostgresStorageError,
+            "postgres_migration_identity_invalid",
+        ):
+            migrate_postgres(
+                impersonated_runtime_dsn,
+                schema=f"hormuz_migration_impersonation_{suffix}",
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+            )
+
+    def test_deployment_bootstrap_separates_managed_login_from_schema_owner(self) -> None:
+        suffix = uuid4().hex[:12]
+        schema = f"hormuz_bootstrap_{suffix}"
+        runtime_login = f"hormuz_login_{suffix}"
+        unexpected_member = f"hormuz_old_login_{suffix}"
+        runtime_role = f"hormuz_runtime_b_{suffix}"
+        policy_role = f"hormuz_policy_b_{suffix}"
+        custody_role = f"hormuz_custody_b_{suffix}"
+        executor_role = f"hormuz_executor_b_{suffix}"
+        password = "hormuz-managed-runtime-login-password"
+        runtime_dsn = _runtime_dsn(self.owner_dsn, runtime_login, password)
+        roles = (runtime_role, policy_role, custody_role, executor_role)
+        try:
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT session_user")
+                    migration_login = str(cursor.fetchone()[0])
+                    cursor.execute(
+                        self.sql.SQL(
+                            "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB "
+                            "NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS"
+                        ).format(
+                            self.sql.Identifier(runtime_login),
+                            self.sql.Literal(password),
+                        )
+                    )
+
+            first = bootstrap_postgres_deployment(
+                self.owner_dsn,
+                runtime_dsn,
+                schema=schema,
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+            )
+            second = bootstrap_postgres_deployment(
+                self.owner_dsn,
+                runtime_dsn,
+                schema=schema,
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+            )
+            self.assertEqual(first, second)
+            self.assertEqual(first.schema_version, POSTGRES_SCHEMA_VERSION)
+            self.assertEqual(first.restricted_roles, 4)
+            self.assertTrue(first.runtime_login_restricted)
+            self.assertTrue(first.runtime_membership_verified)
+            verify_postgres_deployment_runtime(
+                runtime_dsn,
+                schema=schema,
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+            )
+            pool = PostgresConnectionPool(
+                runtime_dsn,
+                settings=PostgresPoolConfig(min_connections=1, max_connections=1),
+            )
+            try:
+                verify_postgres_deployment_runtime(
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                    connection_pool=pool,
+                )
+            finally:
+                pool.close()
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_role_unsafe",
+            ):
+                verify_postgres_deployment_runtime(
+                    self.owner_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT rolcanlogin, rolinherit, rolsuper, rolcreatedb,
+                               rolcreaterole, rolreplication, rolbypassrls
+                        FROM pg_roles WHERE rolname = %s
+                        """,
+                        (runtime_login,),
+                    )
+                    self.assertEqual(
+                        cursor.fetchone(),
+                        (True, False, False, False, False, False, False),
+                    )
+                    cursor.execute(
+                        """
+                        SELECT granted.rolname, membership.admin_option,
+                               membership.inherit_option, membership.set_option
+                        FROM pg_auth_members AS membership
+                        JOIN pg_roles AS granted ON granted.oid = membership.roleid
+                        JOIN pg_roles AS member ON member.oid = membership.member
+                        WHERE member.rolname = %s
+                        """,
+                        (runtime_login,),
+                    )
+                    self.assertEqual(
+                        cursor.fetchall(),
+                        [(runtime_role, False, False, True)],
+                    )
+
+            with self.assertRaises(self.psycopg.errors.InsufficientPrivilege):
+                with self.psycopg.connect(runtime_dsn) as connection:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            self.sql.SQL(
+                                "SELECT COUNT(*) FROM {}.gateway_usage_events"
+                            ).format(self.sql.Identifier(schema))
+                        )
+            status = verify_postgres_schema(
+                runtime_dsn,
+                schema=schema,
+                runtime_role=runtime_role,
+            )
+            self.assertTrue(status.complete)
+
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("GRANT {} TO {} WITH ADMIN OPTION").format(
+                            self.sql.Identifier(runtime_role),
+                            self.sql.Identifier(runtime_login),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_authorization_membership_unsafe",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("REVOKE ADMIN OPTION FOR {} FROM {}").format(
+                            self.sql.Identifier(runtime_role),
+                            self.sql.Identifier(runtime_login),
+                        )
+                    )
+
+            for membership_option in (
+                "INHERIT TRUE",
+                "INHERIT FALSE, SET FALSE",
+            ):
+                with self.subTest(membership_option=membership_option):
+                    with self.psycopg.connect(
+                        self.owner_dsn, autocommit=True
+                    ) as connection:
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                self.sql.SQL(
+                                    "GRANT {} TO {} WITH " + membership_option
+                                ).format(
+                                    self.sql.Identifier(runtime_role),
+                                    self.sql.Identifier(runtime_login),
+                                )
+                            )
+                    for operation, expected in (
+                        (
+                            lambda: bootstrap_postgres_deployment(
+                                self.owner_dsn,
+                                runtime_dsn,
+                                schema=schema,
+                                runtime_role=runtime_role,
+                                policy_control_role=policy_role,
+                                custody_control_role=custody_role,
+                                custody_executor_role=executor_role,
+                            ),
+                            "postgres_bootstrap_authorization_membership_unsafe",
+                        ),
+                        (
+                            lambda: verify_postgres_deployment_runtime(
+                                runtime_dsn,
+                                schema=schema,
+                                runtime_role=runtime_role,
+                                policy_control_role=policy_role,
+                                custody_control_role=custody_role,
+                                custody_executor_role=executor_role,
+                            ),
+                            "postgres_runtime_authorization_role_unsafe",
+                        ),
+                    ):
+                        with self.assertRaisesRegex(PostgresStorageError, expected):
+                            operation()
+                    with self.psycopg.connect(
+                        self.owner_dsn, autocommit=True
+                    ) as connection:
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                self.sql.SQL(
+                                    "GRANT {} TO {} WITH ADMIN FALSE, "
+                                    "INHERIT FALSE, SET TRUE"
+                                ).format(
+                                    self.sql.Identifier(runtime_role),
+                                    self.sql.Identifier(runtime_login),
+                                )
+                            )
+
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("CREATE ROLE {} NOLOGIN").format(
+                            self.sql.Identifier(unexpected_member)
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("GRANT {} TO {}").format(
+                            self.sql.Identifier(runtime_role),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_authorization_membership_unsafe",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("REVOKE {} FROM {}").format(
+                            self.sql.Identifier(runtime_role),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("GRANT {} TO {}").format(
+                            self.sql.Identifier(runtime_login),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_runtime_membership_unsafe",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("REVOKE {} FROM {}").format(
+                            self.sql.Identifier(runtime_login),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("GRANT {} TO {}").format(
+                            self.sql.Identifier(migration_login),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+            for operation, expected in (
+                (
+                    lambda: bootstrap_postgres_deployment(
+                        self.owner_dsn,
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                    ),
+                    "postgres_bootstrap_ownership_boundary_invalid",
+                ),
+                (
+                    lambda: verify_postgres_deployment_runtime(
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                    ),
+                    "postgres_runtime_ownership_boundary_invalid",
+                ),
+                (
+                    lambda: migrate_postgres(
+                        self.owner_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                    ),
+                    "postgres_migration_ownership_boundary_invalid",
+                ),
+            ):
+                with self.subTest(expected=expected), self.assertRaisesRegex(
+                    PostgresStorageError, expected
+                ):
+                    operation()
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("REVOKE {} FROM {}").format(
+                            self.sql.Identifier(migration_login),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL(
+                            "GRANT DELETE ON {}.gateway_provider_attempt_metrics TO {}"
+                        ).format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(runtime_role),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_acl_boundary_invalid",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_acl_boundary_invalid",
+            ):
+                verify_postgres_deployment_runtime(
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "REVOKE DELETE ON {}.gateway_provider_attempt_metrics FROM {}"
+                        ).format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(runtime_role),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL(
+                            "GRANT SELECT ON {}.gateway_provider_attempt_metrics "
+                            "TO {} WITH GRANT OPTION"
+                        ).format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(runtime_role),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_acl_boundary_invalid",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_acl_boundary_invalid",
+            ):
+                verify_postgres_deployment_runtime(
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "REVOKE GRANT OPTION FOR SELECT ON "
+                            "{}.gateway_provider_attempt_metrics FROM {}"
+                        ).format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(runtime_role),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("GRANT SELECT ON {}.gateway_usage_events TO {}").format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_acl_boundary_invalid",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_acl_boundary_invalid",
+            ):
+                verify_postgres_deployment_runtime(
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("REVOKE ALL ON {}.gateway_usage_events FROM {}").format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+                    cursor.execute("SELECT session_user")
+                    migration_login = str(cursor.fetchone()[0])
+                    cursor.execute(
+                        self.sql.SQL("ALTER SCHEMA {} OWNER TO {}").format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_ownership_boundary_invalid",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_migration_ownership_boundary_invalid",
+            ):
+                migrate_postgres(
+                    self.owner_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_ownership_boundary_invalid",
+            ):
+                verify_postgres_deployment_runtime(
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("ALTER SCHEMA {} OWNER TO {}").format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(migration_login),
+                        )
+                    )
+        finally:
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                            self.sql.Identifier(schema)
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("DROP ROLE IF EXISTS {}").format(
+                            self.sql.Identifier(unexpected_member)
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("DROP ROLE IF EXISTS {}").format(
+                            self.sql.Identifier(runtime_login)
+                        )
+                    )
+                    for role in roles:
+                        cursor.execute(
+                            self.sql.SQL("DROP ROLE IF EXISTS {}").format(
+                                self.sql.Identifier(role)
+                            )
+                        )
+
+    def test_provider_reliability_totals_are_actor_and_tenant_scoped(self) -> None:
+        reliability = create_provider_reliability_repository(self.store)
+        assert reliability is not None
+        original = self.store.begin_request_attempt(
+            identity=_identity("acme"),
+            client="codex",
+            protocol="openai",
+            requested_model="engineering-fast",
+            resolved_alias="engineering-fast",
+            upstream_model="gpt-fast",
+            policy_version="policy-v1",
+            policy_action="allowed",
+            redaction_count=0,
+            redaction_rules=(),
+            scopes=(),
+            reserved_tokens=10,
+            reserved_cost_microusd=20,
+            ttl_seconds=60,
+        )
+        reliability.finalize_request_attempt(
+            attempt=original,
+            organization_id="acme",
+            status="rate_limited",
+            provider_metrics=ProviderAttemptMetrics(429, 1_000, None, 1_500, 0, 0),
+        )
+        alternate = reliability.begin_request_attempt(
+            identity=_identity("acme"),
+            client="codex",
+            protocol="openai",
+            requested_model="engineering-fast",
+            resolved_alias="engineering-deep",
+            upstream_model="gpt-deep",
+            policy_version="policy-v1",
+            policy_action="allowed",
+            redaction_count=0,
+            redaction_rules=(),
+            scopes=(),
+            reserved_tokens=10,
+            reserved_cost_microusd=20,
+            ttl_seconds=60,
+            work_budget=None,
+            provider_failover=ProviderFailoverContext(
+                original_attempt_id=original.attempt_id,
+                trigger_status=429,
+                reason_code="provider_rate_limited",
+            ),
+        )
+        reliability.finalize_request_attempt(
+            attempt=alternate,
+            organization_id="acme",
+            status="succeeded",
+            provider_metrics=ProviderAttemptMetrics(200, 800, 1_100, 1_600, 12, 12),
+        )
+
+        totals = reliability.totals(
+            actor_id="alice",
+            organization_id="acme",
+        )
+        self.assertEqual(totals.attempt_count, 2)
+        self.assertEqual(totals.live_provider_request_count, 1)
+        self.assertEqual(totals.provider_attempt_record_count, 2)
+        self.assertEqual(totals.latency_header_sample_count, 2)
+        self.assertEqual(totals.latency_first_body_byte_sample_count, 1)
+        self.assertEqual(totals.latency_total_sample_count, 2)
+        self.assertEqual(totals.failover_link_record_count, 1)
+        self.assertEqual(totals.outcome_unknown_count, 0)
+        self.assertEqual(
+            reliability.totals(
+                actor_id="bob",
+                organization_id="acme",
+            ).attempt_count,
+            0,
+        )
+        self.assertEqual(
+            reliability.totals(
+                actor_id="alice",
+                organization_id="beta",
+            ).attempt_count,
+            0,
+        )
+
     def test_migration_is_visible_to_the_restricted_runtime_role(self) -> None:
         status = verify_postgres_schema(
             self.runtime_dsn,

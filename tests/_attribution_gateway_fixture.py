@@ -69,7 +69,11 @@ class AttributionGatewayAssertions:
         service = PortfolioService(config, create_portfolio_repository(config, environ=environment))
         self.scope = service.dispatch(ADMIN, "POST", SCOPES, body=canonical(create_request()).encode(), idempotency_key="native-scope")[1]
         self.config = attributed_config(config, self.scope)
-        self.server = GatewayServer(self.config, environ={"SYNTHETIC_PROVIDER_KEY": "synthetic-native-provider-key"})
+        bounded_environment = {
+            **(environment or {}),
+            "SYNTHETIC_PROVIDER_KEY": "synthetic-native-provider-key",
+        }
+        self.server = GatewayServer(self.config, environ=bounded_environment)
         self.thread = serve_in_thread(self.server)
         self.addCleanup(self.close_gateway)
         self.principal = self.server.portfolio_service.authenticate(ADMIN)
@@ -92,7 +96,10 @@ class AttributionGatewayAssertions:
         self.config = config
         self.server = GatewayServer(
             self.config,
-            environ={"SYNTHETIC_PROVIDER_KEY": "synthetic-native-provider-key"},
+            environ={
+                **(self.environment or {}),
+                "SYNTHETIC_PROVIDER_KEY": "synthetic-native-provider-key",
+            },
         )
         self.thread = serve_in_thread(self.server)
         self.principal = self.server.portfolio_service.authenticate(ADMIN)
