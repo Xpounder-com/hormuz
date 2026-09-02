@@ -141,9 +141,10 @@ runtime login from `INHERIT` to `NOINHERIT`; rejects elevated or unexpected
 memberships; grants only `hormuz_runtime`; applies all migrations as the
 authenticated owner; removes direct runtime-login and `PUBLIC` grants; and
 verifies that the owner owns every schema object and that every schema, table,
-sequence, and function ACL names only the owner or one of the four fixed roles.
-It then proves runtime access and RLS through the runtime DSN. Its output is
-content-free and inference remains disabled. Safe completed work can be rerun.
+column, sequence, function, and owner-default ACL matches the exact
+version-pinned privilege and grant-option boundary. It then proves runtime
+access and RLS through the runtime DSN. Its output is content-free and
+inference remains disabled. Safe completed work can be rerun.
 
 For a later schema upgrade, temporarily restore the owner DSN while still in
 maintenance and run `provider-migrate`. That command never creates roles or
@@ -165,12 +166,14 @@ managed organization. `provider-check` reads the exact organization IDs from
 that server-local directory, revalidates `session_user` before any `SET ROLE`,
 and proves the restricted PostgreSQL runtime path under each tenant's RLS
 context. It rejects an owner or superuser DSN, startup-role impersonation,
-unexpected memberships, ownership drift, or an unexpected ACL principal. An
-empty directory fails closed. The provider process repeats the credential and
-ownership checks and pins the same tenant allowlist at startup. Creating
+unexpected memberships, ownership drift, or any unexpected ACL principal,
+privilege, or grant option. An empty directory fails closed. The provider
+process repeats the credential, ownership, and exact ACL checks and pins the
+same tenant allowlist at startup. Creating
 another managed organization therefore requires a maintenance preflight and a
-fresh deployment before that organization's members can send inference requests. Member,
-invitation, and session revocation continue to take effect without widening
+fresh deployment before that organization's members can send inference
+requests. Member, invitation, and session revocation continue to take effect
+without widening
 this tenant allowlist.
 
 Require `provider_configuration_valid`, `postgresql_runtime_verified`, and a

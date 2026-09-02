@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import hashlib
 from importlib import resources
+import json
 import re
 from typing import Any, Iterator, Mapping
 
@@ -19,6 +21,17 @@ from .config import PostgresPoolConfig
 POSTGRES_SCHEMA_VERSION = 14
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
+# Each tuple is the count and SHA-256 digest of the canonical non-owner ACL
+# entries created by the reviewed migrations for that schema version.  The
+# canonical rows include object kind/name, column, logical grantor/grantee,
+# privilege type, and grant-option flag.  A migration that intentionally
+# changes a grant must update this boundary from a clean disposable database.
+_POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION = {
+    14: (
+        183,
+        "052ec56ed318d781be974529b256f8e6008454b91ca87aa08985fc57cab2cc92",
+    ),
+}
 
 
 class PostgresStorageError(RuntimeError):
@@ -749,8 +762,32 @@ def _verify_postgres_deployment_roles(
     )
     if len(boundary_values) != 4 or any(bool(value) for value in boundary_values):
         fail("ownership_boundary_invalid")
+    acl_entries = _postgres_acl_entries(
+        cursor,
+        schema=schema,
+        migration_login=migration_login,
+        error_scope=error_scope,
+    )
     allowed_principals = {migration_login, *role_names}
-    if _postgres_acl_principals(cursor, schema=schema) - allowed_principals:
+    principals = {
+        principal
+        for entry in acl_entries
+        for principal in (entry[3], entry[4])
+    }
+    expected_acl_boundary = _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(
+        POSTGRES_SCHEMA_VERSION
+    )
+    observed_acl_boundary = _postgres_acl_boundary(
+        acl_entries,
+        schema=schema,
+        migration_login=migration_login,
+        role_names=role_names,
+    )
+    if (
+        principals - allowed_principals
+        or expected_acl_boundary is None
+        or observed_acl_boundary != expected_acl_boundary
+    ):
         fail("acl_boundary_invalid")
 
 
@@ -829,20 +866,41 @@ def _verify_postgres_migration_ownership(
         )
 
 
-def _postgres_acl_principals(cursor: Any, *, schema: str) -> set[str]:
-    """Return grantors and grantees on schema, relation, and routine ACLs."""
+def _postgres_acl_entries(
+    cursor: Any,
+    *,
+    schema: str,
+    migration_login: str,
+    error_scope: str = "runtime",
+) -> set[tuple[str, str, str, str, str, str, bool]]:
+    """Return the complete ACL surface governed by the migration login."""
 
     cursor.execute(
         """
         WITH acl_entries AS (
-            SELECT acl.grantor, acl.grantee
+            SELECT
+                'schema'::TEXT AS object_kind,
+                namespace.nspname::TEXT AS object_name,
+                ''::TEXT AS column_name,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
             FROM pg_namespace AS namespace
             CROSS JOIN LATERAL aclexplode(
                 COALESCE(namespace.nspacl, acldefault('n', namespace.nspowner))
             ) AS acl
             WHERE namespace.nspname = %s
             UNION ALL
-            SELECT acl.grantor, acl.grantee
+            SELECT
+                CASE WHEN relation.relkind = 'S' THEN 'sequence'::TEXT
+                     ELSE 'relation'::TEXT END,
+                relation.relname::TEXT,
+                ''::TEXT,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
             FROM pg_class AS relation
             JOIN pg_namespace AS namespace
               ON namespace.oid = relation.relnamespace
@@ -859,7 +917,31 @@ def _postgres_acl_principals(cursor: Any, *, schema: str) -> set[str]:
             WHERE namespace.nspname = %s
               AND relation.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
             UNION ALL
-            SELECT acl.grantor, acl.grantee
+            SELECT
+                'column'::TEXT,
+                relation.relname::TEXT,
+                attribute.attname::TEXT,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
+            FROM pg_attribute AS attribute
+            JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+            JOIN pg_namespace AS namespace
+              ON namespace.oid = relation.relnamespace
+            CROSS JOIN LATERAL aclexplode(attribute.attacl) AS acl
+            WHERE namespace.nspname = %s
+              AND attribute.attnum > 0
+              AND NOT attribute.attisdropped
+            UNION ALL
+            SELECT
+                'routine'::TEXT,
+                routine.proname || '(' || oidvectortypes(routine.proargtypes) || ')',
+                ''::TEXT,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
             FROM pg_proc AS routine
             JOIN pg_namespace AS namespace
               ON namespace.oid = routine.pronamespace
@@ -867,25 +949,116 @@ def _postgres_acl_principals(cursor: Any, *, schema: str) -> set[str]:
                 COALESCE(routine.proacl, acldefault('f', routine.proowner))
             ) AS acl
             WHERE namespace.nspname = %s
+            UNION ALL
+            SELECT
+                'default'::TEXT,
+                CASE WHEN defaults.defaclnamespace = 0 THEN '*'
+                     ELSE namespace.nspname END || ':' || defaults.defaclobjtype::TEXT,
+                ''::TEXT,
+                acl.grantor,
+                acl.grantee,
+                acl.privilege_type::TEXT,
+                acl.is_grantable
+            FROM pg_default_acl AS defaults
+            JOIN pg_roles AS owner_role ON owner_role.oid = defaults.defaclrole
+            LEFT JOIN pg_namespace AS namespace
+              ON namespace.oid = defaults.defaclnamespace
+            CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
+            WHERE owner_role.rolname = %s
+              AND (defaults.defaclnamespace = 0 OR namespace.nspname = %s)
         )
         SELECT DISTINCT
+            object_kind,
+            object_name,
+            column_name,
             CASE WHEN grantor = 0 THEN 'PUBLIC'
                  ELSE pg_get_userbyid(grantor) END AS grantor_name,
             CASE WHEN grantee = 0 THEN 'PUBLIC'
-                 ELSE pg_get_userbyid(grantee) END AS grantee_name
+                 ELSE pg_get_userbyid(grantee) END AS grantee_name,
+            privilege_type,
+            is_grantable
         FROM acl_entries
         """,
-        (schema, schema, schema),
+        (schema, schema, schema, schema, migration_login, schema),
     )
-    principals: set[str] = set()
+    entries: set[tuple[str, str, str, str, str, str, bool]] = set()
     for row in cursor.fetchall():
         values = (
-            (row.get("grantor_name"), row.get("grantee_name"))
+            (
+                row.get("object_kind"),
+                row.get("object_name"),
+                row.get("column_name"),
+                row.get("grantor_name"),
+                row.get("grantee_name"),
+                row.get("privilege_type"),
+                row.get("is_grantable"),
+            )
             if isinstance(row, Mapping)
             else tuple(row)
         )
-        principals.update(str(value) for value in values if value is not None)
-    return principals
+        if len(values) != 7 or any(value is None for value in values):
+            raise PostgresStorageError(
+                f"postgres_{error_scope}_acl_boundary_invalid"
+            )
+        entries.add(
+            (
+                str(values[0]),
+                str(values[1]),
+                str(values[2]),
+                str(values[3]),
+                str(values[4]),
+                str(values[5]),
+                bool(values[6]),
+            )
+        )
+    return entries
+
+
+def _postgres_acl_boundary(
+    entries: set[tuple[str, str, str, str, str, str, bool]],
+    *,
+    schema: str,
+    migration_login: str,
+    role_names: tuple[str, ...],
+) -> tuple[int, str]:
+    """Return a role-name-independent fingerprint of all non-owner ACLs."""
+
+    labels = {
+        migration_login: "migration_owner",
+        role_names[0]: "runtime",
+        role_names[1]: "policy_control",
+        role_names[2]: "custody_control",
+        role_names[3]: "custody_executor",
+    }
+    canonical = []
+    for (
+        object_kind,
+        object_name,
+        column_name,
+        grantor,
+        grantee,
+        privilege_type,
+        is_grantable,
+    ) in entries:
+        if grantor == migration_login and grantee == migration_login:
+            continue
+        canonical.append(
+            (
+                object_kind,
+                (
+                    "<schema>"
+                    if object_kind == "schema" and object_name == schema
+                    else object_name
+                ),
+                column_name,
+                labels.get(grantor, "unexpected_principal"),
+                labels.get(grantee, "unexpected_principal"),
+                privilege_type,
+                is_grantable,
+            )
+        )
+    payload = json.dumps(sorted(canonical), separators=(",", ":"))
+    return len(canonical), hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def migrate_postgres(

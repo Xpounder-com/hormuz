@@ -296,6 +296,94 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                         )
                     )
                     cursor.execute(
+                        self.sql.SQL(
+                            "GRANT DELETE ON {}.gateway_provider_attempt_metrics TO {}"
+                        ).format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(runtime_role),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_acl_boundary_invalid",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_acl_boundary_invalid",
+            ):
+                verify_postgres_deployment_runtime(
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "REVOKE DELETE ON {}.gateway_provider_attempt_metrics FROM {}"
+                        ).format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(runtime_role),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL(
+                            "GRANT SELECT ON {}.gateway_provider_attempt_metrics "
+                            "TO {} WITH GRANT OPTION"
+                        ).format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(runtime_role),
+                        )
+                    )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_bootstrap_acl_boundary_invalid",
+            ):
+                bootstrap_postgres_deployment(
+                    self.owner_dsn,
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_acl_boundary_invalid",
+            ):
+                verify_postgres_deployment_runtime(
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "REVOKE GRANT OPTION FOR SELECT ON "
+                            "{}.gateway_provider_attempt_metrics FROM {}"
+                        ).format(
+                            self.sql.Identifier(schema),
+                            self.sql.Identifier(runtime_role),
+                        )
+                    )
+                    cursor.execute(
                         self.sql.SQL("GRANT SELECT ON {}.gateway_usage_events TO {}").format(
                             self.sql.Identifier(schema),
                             self.sql.Identifier(unexpected_member),
