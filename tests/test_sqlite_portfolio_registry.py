@@ -10,6 +10,7 @@ from hormuz.portfolio_repository import RegistryRepository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import PortfolioError
 from hormuz.store import UsageStore
+from tests._sqlite import managed_sqlite_connection
 if __package__:
     from ._portfolio_fixture import RegistryAssertions, registry_config
 else:
@@ -27,7 +28,7 @@ class SQLitePortfolioRegistryTests(RegistryAssertions, unittest.TestCase):
         self.service = PortfolioService(self.config, self.repository)
 
     def registry_rows(self):
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             connection.row_factory = sqlite3.Row
             return {table: [dict(row) for row in connection.execute(f"SELECT * FROM {table}")]
                     for table in TABLE_DDL}
@@ -58,7 +59,7 @@ class SQLitePortfolioRegistryTests(RegistryAssertions, unittest.TestCase):
 
     def test_sqlite_registry_append_only_and_missing_trigger(self):
         self.create()
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             for table in ("portfolio_work_scope_versions", "portfolio_audit_events", "portfolio_idempotency"):
                 for command in (f"DELETE FROM {table}", f"UPDATE {table} SET organization_id='beta'"):
                     with self.assertRaises(sqlite3.IntegrityError):

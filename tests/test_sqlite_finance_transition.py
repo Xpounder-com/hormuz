@@ -16,6 +16,7 @@ from hormuz._finance_schema import TABLE_DDL, sqlite_statements
 from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
 from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_TABLES
 from hormuz.finance_repository import create_finance_repository
+from tests._sqlite import managed_sqlite_connection
 
 if __package__:
     from ._finance_fixture import ADMIN, seed_finance
@@ -100,7 +101,7 @@ class SQLiteFinanceTransitionTests(unittest.TestCase):
         self.assertEqual(sqlite_snapshot(self.path), current)
 
     def test_sqlite_finance_partial_state_refuses_before_repair(self):
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute("INSERT INTO hormuz_schema_migrations (version, state) VALUES (8, 'applying')")
         before = sqlite_snapshot(self.path)
         for read_only in (False, True):
@@ -118,7 +119,7 @@ class SQLiteFinanceTransitionTests(unittest.TestCase):
         for driver in (outcome_predecessor_call, released_v1_call):
             self.assertEqual(driver(request), {"status": "refused", "code": "storage_schema_newer_than_binary"})
         self.assertEqual(sqlite_snapshot(self.path), before)
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute("UPDATE hormuz_schema_migrations SET state='applying' WHERE version=8")
         partial = sqlite_snapshot(self.path)
         for driver in (outcome_predecessor_call, released_v1_call):

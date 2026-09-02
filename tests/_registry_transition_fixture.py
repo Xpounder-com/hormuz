@@ -16,6 +16,7 @@ import sys
 
 from hormuz.config import Identity
 from hormuz.store import ReservationScope, StorageSchemaError, UsageStore
+from tests._sqlite import managed_sqlite_connection
 
 
 ARCHIVE_SHA256 = "2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a"
@@ -65,7 +66,7 @@ def ledger_observation(store) -> dict[str, object]:
 
 
 def sqlite_snapshot(path: Path) -> dict[str, object]:
-    with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True) as connection:
+    with managed_sqlite_connection(f"{path.as_uri()}?mode=ro", uri=True) as connection:
         objects = connection.execute(
             "SELECT type, name, tbl_name, sql FROM sqlite_master "
             "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
@@ -82,8 +83,8 @@ def sqlite_backup(source: Path, destination: Path) -> None:
     if destination.exists():
         raise ValueError("test_backup_destination_exists")
     with (
-        sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True) as reader,
-        sqlite3.connect(destination) as writer,
+        managed_sqlite_connection(f"{source.as_uri()}?mode=ro", uri=True) as reader,
+        managed_sqlite_connection(destination) as writer,
     ):
         reader.backup(writer)
 

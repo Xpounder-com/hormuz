@@ -20,6 +20,7 @@ from hormuz.portfolio_repository import RegistryRepository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import SCOPES
 from hormuz._portfolio_schema import TABLE_DDL as REGISTRY_TABLES
+from tests._sqlite import managed_sqlite_connection
 if __package__:
     from ._portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from ._registry_transition_fixture import (
@@ -95,7 +96,7 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         self.assert_v1_preserved()
 
     def test_sqlite_partial_upgrade_refuses_readers_and_writers_without_changes(self) -> None:
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute("INSERT INTO hormuz_schema_migrations (version, state) VALUES (5, 'applying')")
         before = sqlite_snapshot(self.path)
         for read_only in (False, True):
@@ -119,7 +120,7 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         self.assert_v1_preserved()
         self.probe()
         for state, expected in (("applied", "storage_schema_newer_than_binary"), ("applying", "storage_schema_partial_upgrade")):
-            with sqlite3.connect(self.path) as connection:
+            with managed_sqlite_connection(self.path) as connection:
                 connection.execute("UPDATE hormuz_schema_migrations SET state = ? WHERE version = 5", (state,))
             before = sqlite_snapshot(self.path)
             self.assertEqual(released_v1_call({**request, "mode": "verify"}), {"status": "refused", "code": expected})

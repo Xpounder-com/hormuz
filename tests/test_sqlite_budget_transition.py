@@ -15,6 +15,7 @@ from unittest import mock
 import hormuz._portfolio_sql as portfolio_sql_module
 from hormuz._budget_schema import TABLE_DDL, sqlite_statements
 from hormuz.store import StorageSchemaError, UsageStore
+from tests._sqlite import managed_sqlite_connection
 
 if __package__:
     from ._budget_predecessor_fixture import finance_predecessor_call
@@ -98,7 +99,7 @@ class SQLiteBudgetTransitionTests(unittest.TestCase):
         self.assertEqual(sqlite_snapshot(self.path), after)
 
     def test_partial_and_newer_states_fail_closed_without_repair(self):
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute("INSERT INTO hormuz_schema_migrations (version, state) VALUES (9, 'applying')")
         partial = sqlite_snapshot(self.path)
         for read_only in (False, True):
@@ -106,7 +107,7 @@ class SQLiteBudgetTransitionTests(unittest.TestCase):
                 UsageStore(self.path, read_only=read_only)
             self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
             self.assertEqual(sqlite_snapshot(self.path), partial)
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute("UPDATE hormuz_schema_migrations SET version=11, state='applied' WHERE version=9")
         newer = sqlite_snapshot(self.path)
         with self.assertRaises(StorageSchemaError) as caught:
@@ -149,7 +150,7 @@ class SQLiteBudgetPredecessorTests(unittest.TestCase):
             {"status": "refused", "code": "storage_schema_newer_than_binary"},
         )
         self.assertEqual(sqlite_snapshot(self.path), candidate)
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute("UPDATE hormuz_schema_migrations SET state='applying' WHERE version=9")
         partial = sqlite_snapshot(self.path)
         self.assertEqual(
@@ -177,7 +178,7 @@ class SQLiteBudgetPredecessorTests(unittest.TestCase):
 
     def test_post_checkpoint_budget_write_requires_forward_recovery(self):
         self.upgrade()
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute(
                 "INSERT INTO portfolio_work_budget_audit_events "
                 "(organization_id,event_id,sequence,actor_id,operation,entity_id,entity_version,reason_code,occurred_at) "
