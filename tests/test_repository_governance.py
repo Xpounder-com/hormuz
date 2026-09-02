@@ -549,6 +549,39 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_macos_distribution_must_bind_proof_to_workflow_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            marker = "          HORMUZ_SOURCE_COMMIT: ${{ github.sha }}\n"
+            self.assertEqual(value.count(marker), 1)
+            workflow.write_text(value.replace(marker, "", 1), encoding="utf-8")
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution proof provenance binding changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_macos_distribution_must_pin_the_production_signing_team(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            marker = "          HORMUZ_TEAM_ID: R267LZMUTY\n"
+            self.assertEqual(value.count(marker), 1)
+            workflow.write_text(
+                value.replace(marker, "          HORMUZ_TEAM_ID: WRONGTEAM1\n", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution signing team binding changed",
+            ):
+                validate_repository_governance(root)
+
     def test_macos_distribution_must_keep_build_off_signing_runner(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
