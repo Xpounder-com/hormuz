@@ -67,6 +67,8 @@ EXTERNAL_PILOT_WORKFLOW = ".github/workflows/external-pilot-qualification.yml"
 MAX_GITHUB_METADATA_BYTES = 1024 * 1024
 MAX_GITHUB_ARTIFACT_BYTES = 2 * 1024 * 1024
 MIN_STREAM_COMPLETION_SEPARATION_SECONDS = 0.25
+CANCELLATION_EVIDENCE_TIMEOUT_SECONDS = 10.0
+CANCELLATION_EVIDENCE_POLL_SECONDS = 0.1
 RELIABILITY_FIELDS = {
     "schema_id",
     "schema_version",
@@ -708,6 +710,40 @@ def _delta(after: dict[str, Any], before: dict[str, Any], name: str) -> int:
     return result
 
 
+def _wait_for_cancellation_evidence(
+    origin: str,
+    access_token: str,
+    *,
+    expected_commit: str,
+    service_id: str,
+    before: dict[str, Any],
+    timeout_seconds: float = CANCELLATION_EVIDENCE_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Wait for the aborted stream to be finalized into durable counters."""
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        snapshot = _reliability(
+            origin,
+            access_token,
+            expected_commit=expected_commit,
+            service_id=service_id,
+        )
+        if (
+            _delta(
+                snapshot,
+                before,
+                "cancellation_outcome_unknown_count",
+            )
+            >= 1
+        ):
+            return snapshot
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise QualificationError("cancellation_evidence_timed_out")
+        time.sleep(min(CANCELLATION_EVIDENCE_POLL_SECONDS, remaining))
+
+
 def qualify(
     *,
     origin: str,
@@ -799,11 +835,12 @@ def qualify(
             disconnect_after_first_chunk=True,
         )
         request_count += 1
-        after_cancellation = _reliability(
+        after_cancellation = _wait_for_cancellation_evidence(
             origin,
             access_token,
             expected_commit=expected_commit,
             service_id=service_id,
+            before=before_cancellation,
         )
         cancellation_replays = _delta(
             after_cancellation,

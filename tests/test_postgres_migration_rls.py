@@ -105,6 +105,8 @@ class PostgresMigrationRLSTests(PostgresTestCase):
         try:
             with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
                 with connection.cursor() as cursor:
+                    cursor.execute("SELECT session_user")
+                    migration_login = str(cursor.fetchone()[0])
                     cursor.execute(
                         self.sql.SQL(
                             "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB "
@@ -304,6 +306,60 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                     cursor.execute(
                         self.sql.SQL("REVOKE {} FROM {}").format(
                             self.sql.Identifier(runtime_login),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("GRANT {} TO {}").format(
+                            self.sql.Identifier(migration_login),
+                            self.sql.Identifier(unexpected_member),
+                        )
+                    )
+            for operation, expected in (
+                (
+                    lambda: bootstrap_postgres_deployment(
+                        self.owner_dsn,
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                    ),
+                    "postgres_bootstrap_ownership_boundary_invalid",
+                ),
+                (
+                    lambda: verify_postgres_deployment_runtime(
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                    ),
+                    "postgres_runtime_ownership_boundary_invalid",
+                ),
+                (
+                    lambda: migrate_postgres(
+                        self.owner_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                    ),
+                    "postgres_migration_ownership_boundary_invalid",
+                ),
+            ):
+                with self.subTest(expected=expected), self.assertRaisesRegex(
+                    PostgresStorageError, expected
+                ):
+                    operation()
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("REVOKE {} FROM {}").format(
+                            self.sql.Identifier(migration_login),
                             self.sql.Identifier(unexpected_member),
                         )
                     )

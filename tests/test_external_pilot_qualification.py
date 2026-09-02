@@ -17,6 +17,7 @@ from tools.qualify_external_pilot import (
     _deploy_hook_url,
     _provider_request,
     _reliability,
+    _wait_for_cancellation_evidence,
     qualify,
 )
 
@@ -374,6 +375,7 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         snapshots = [
             _counters(live=0, attempts=0, first=0, failovers=0),
             _counters(live=8, attempts=8, first=8, failovers=0),
+            _counters(live=8, attempts=8, first=8, failovers=0),
             _counters(live=9, attempts=9, first=9, failovers=0, unknown=1, cancellations=1),
             _counters(live=10, attempts=11, first=10, failovers=1, unknown=1, cancellations=1),
         ]
@@ -384,6 +386,7 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             patch("tools.qualify_external_pilot._reliability", side_effect=snapshots) as reliability,
             patch("tools.qualify_external_pilot._provider_request", side_effect=provider_results) as provider,
             patch("tools.qualify_external_pilot._logout") as logout,
+            patch("tools.qualify_external_pilot.time.sleep") as sleep,
         ):
             evidence = qualify(
                 origin=ORIGIN,
@@ -403,7 +406,8 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             origin=ORIGIN,
         )
         refresh.assert_called_once_with(ORIGIN, REFRESH)
-        self.assertEqual(reliability.call_count, 4)
+        self.assertEqual(reliability.call_count, 5)
+        sleep.assert_called_once()
         self.assertEqual(provider.call_count, 10)
         self.assertTrue(provider.call_args_list[-2].kwargs["disconnect_after_first_chunk"])
         logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH)
@@ -417,6 +421,28 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         rendered = repr(evidence)
         for secret in (REFRESH, ROTATED_REFRESH, ACCESS, REHEARSAL):
             self.assertNotIn(secret, rendered)
+
+    def test_cancellation_evidence_wait_is_bounded(self) -> None:
+        snapshot = _counters(live=8, attempts=8, first=8, failovers=0)
+        with (
+            patch(
+                "tools.qualify_external_pilot._reliability",
+                return_value=snapshot,
+            ) as reliability,
+            self.assertRaisesRegex(
+                QualificationError,
+                "^cancellation_evidence_timed_out$",
+            ),
+        ):
+            _wait_for_cancellation_evidence(
+                ORIGIN,
+                ACCESS,
+                expected_commit=COMMIT,
+                service_id=SERVICE_ID,
+                before=snapshot,
+                timeout_seconds=0,
+            )
+        reliability.assert_called_once()
 
     def test_unexpected_unknown_provider_outcome_rejects_qualification(self) -> None:
         provider_results = []

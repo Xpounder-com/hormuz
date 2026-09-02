@@ -815,6 +815,10 @@ def _verify_postgres_migration_ownership(
     allow_missing_schema: bool,
     error_scope: str = "bootstrap",
 ) -> None:
+    if _postgres_role_member_grants(cursor, migration_login):
+        raise PostgresStorageError(
+            f"postgres_{error_scope}_ownership_boundary_invalid"
+        )
     owner = _postgres_schema_owner(cursor, schema)
     if owner is None:
         if allow_missing_schema:
