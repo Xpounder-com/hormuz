@@ -57,6 +57,8 @@ loader requires:
   and ingress credential as the initialized hosted-login profile;
 - Render source metadata for the exact `main` commit, the
   `Xpounder-com/hormuz` repository, a web service, 0.5 CPU, and one web worker;
+  Render's `RENDER_CPU_COUNT` value may spell that fixed size as `0.50` or
+  `0.5`;
 - PostgreSQL schema `hormuz`, stable runtime role `hormuz_runtime`, and the
   fixed 1-to-4 connection pool;
 - only the OpenAI Responses and Anthropic Messages upstreams;
