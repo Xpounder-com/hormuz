@@ -201,7 +201,7 @@ class HostedProviderConfigTests(unittest.TestCase):
         render = {
             **self.settings,
             "RENDER": "true",
-            "RENDER_CPU_COUNT": "0.5",
+            "RENDER_CPU_COUNT": "0.50",
             "RENDER_EXTERNAL_HOSTNAME": "hormuz-test.onrender.com",
             "RENDER_EXTERNAL_URL": "https://hormuz-test.onrender.com",
             "RENDER_GIT_BRANCH": "main",
@@ -216,8 +216,16 @@ class HostedProviderConfigTests(unittest.TestCase):
             self.load(render_document, settings=render).usage_storage.postgres_pool.max_connections,
             4,
         )
+        self.assertEqual(
+            self.load(
+                render_document,
+                settings={**render, "RENDER_CPU_COUNT": "0.5"},
+            ).usage_storage.postgres_pool.max_connections,
+            4,
+        )
         for name, value in (
             ("RENDER_CPU_COUNT", "1"),
+            ("RENDER_CPU_COUNT", "0.500"),
             ("RENDER_EXTERNAL_HOSTNAME", "wrong.example.test"),
             ("RENDER_EXTERNAL_URL", "http://hormuz-test.onrender.com"),
             ("RENDER_GIT_BRANCH", "feature"),
