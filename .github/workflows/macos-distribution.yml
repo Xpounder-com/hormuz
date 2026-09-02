@@ -239,6 +239,7 @@ jobs:
           HORMUZ_VERSION: ${{ steps.release.outputs.version }}
           HORMUZ_BUILD_NUMBER: ${{ steps.release.outputs.build_number }}
           HORMUZ_BUNDLE_ID: ${{ steps.release.outputs.bundle_identifier }}
+          HORMUZ_TEAM_ID: R267LZMUTY
           HORMUZ_UNSIGNED_PAYLOAD: ${{ runner.temp }}/hormuz-unsigned-payload
           HORMUZ_SOURCE_COMMIT: ${{ github.sha }}
           HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -276,6 +277,7 @@ jobs:
           HORMUZ_IDENTITIES="$(security find-identity -v -p codesigning "$HORMUZ_KEYCHAIN" | sed -n 's/.*"\(Developer ID Application: [^"]*\)"/\1/p')"
           test "$(printf '%s\n' "$HORMUZ_IDENTITIES" | sed '/^$/d' | wc -l | tr -d ' ')" = 1
           HORMUZ_CODESIGN_IDENTITY="$HORMUZ_IDENTITIES"
+          [[ "$HORMUZ_CODESIGN_IDENTITY" == *"($HORMUZ_TEAM_ID)" ]]
           xcrun notarytool store-credentials "$HORMUZ_NOTARY_PROFILE" \
             --key "$HORMUZ_NOTARY_KEY" \
             --key-id "$HORMUZ_NOTARY_KEY_ID" \

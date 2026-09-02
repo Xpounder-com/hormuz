@@ -8,8 +8,11 @@ import json
 import os
 import tempfile
 import unittest
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import call, patch
 
 from tools import client_release_versions
 from tools import verify_macos_pilot_evidence as pilot
@@ -86,7 +89,14 @@ class MacPilotEvidenceTests(unittest.TestCase):
         )
 
     def test_complete_synthetic_fixture_exercises_every_gate_but_never_qualifies(self) -> None:
-        result = self._validate(*self._inputs())
+        with (
+            patch.object(pilot, "verify_archive") as platform_verifier,
+            patch.object(
+                pilot, "_authenticate_distribution_artifact"
+            ) as distribution_authenticator,
+            patch.object(pilot, "_authenticate_github_run") as run_authenticator,
+        ):
+            result = self._validate(*self._inputs())
 
         self.assertFalse(result["ready_for_controlled_external_pilot"])
         self.assertEqual(result["status"], "not_ready")
@@ -94,6 +104,9 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertEqual(result["clean_machine_architectures"], ["arm64", "x86_64"])
         self.assertEqual(result["external_initial_completion_count"], 0)
         self.assertEqual(result["external_returning_completion_count"], 0)
+        platform_verifier.assert_not_called()
+        distribution_authenticator.assert_not_called()
+        run_authenticator.assert_not_called()
 
     def test_synthetic_fixture_cannot_be_promoted_by_changing_its_kind(self) -> None:
         inputs = list(self._inputs())
@@ -119,10 +132,14 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "https://github.com/Xpounder-com/hormuz/actions/runs/999999"
         )
         artifact["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
-        artifact["team_identifier"] = "ZYXWVUTSRQ"
+        artifact["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
         proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
-        proof["team_identifier"] = "ZYXWVUTSRQ"
-        proof["signing_authority"] = "Developer ID Application: Xpounder (ZYXWVUTSRQ)"
+        proof["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
+        signing_authority = (
+            "Developer ID Application: Xpounder "
+            f"({pilot.PRODUCTION_TEAM_IDENTIFIER})"
+        )
+        proof["signing_authority"] = signing_authority
         proof["source_commit"] = artifact["source_commit"]
         proof["workflow_run_url"] = artifact["workflow_run_url"]
         previous_artifact["source_commit"] = "f" * 40
@@ -130,13 +147,20 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "https://github.com/Xpounder-com/hormuz/actions/runs/999998"
         )
         previous_artifact["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
-        previous_artifact["team_identifier"] = "ZYXWVUTSRQ"
+        previous_artifact["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
         previous_proof["source_commit"] = previous_artifact["source_commit"]
         previous_proof["workflow_run_url"] = previous_artifact["workflow_run_url"]
         previous_proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
-        previous_proof["team_identifier"] = "ZYXWVUTSRQ"
-        previous_proof["signing_authority"] = (
-            "Developer ID Application: Xpounder (ZYXWVUTSRQ)"
+        previous_proof["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
+        previous_proof["signing_authority"] = signing_authority
+        gateway = evidence["hosted_gateway"]  # type: ignore[assignment]
+        gateway["evidence_kind"] = "live_external_pilot"
+        gateway["source_commit"] = "1" * 40
+        gateway["deployment_evidence_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999997"
+        )
+        gateway["recovery_evidence_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999996"
         )
         proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
         previous_proof_payload = (
@@ -152,12 +176,157 @@ class MacPilotEvidenceTests(unittest.TestCase):
         inputs[7] = previous_proof
         inputs[9] = previous_proof_payload
 
-        result = self._validate(*inputs)
+        with (
+            patch.object(
+                pilot,
+                "verify_archive",
+                return_value={
+                    "team_identifier": pilot.PRODUCTION_TEAM_IDENTIFIER,
+                    "authority": signing_authority,
+                },
+            ) as platform_verifier,
+            patch.object(
+                pilot, "_authenticate_distribution_artifact"
+            ) as distribution_authenticator,
+            patch.object(pilot, "_authenticate_github_run") as run_authenticator,
+        ):
+            result = self._validate(*inputs)
 
         self.assertTrue(result["ready_for_controlled_external_pilot"])
         self.assertEqual(result["status"], "ready_for_controlled_external_pilot")
         self.assertEqual(result["reasons"], [])
         self.assertIn("not_external_human_validation", result["nonclaims"])
+        self.assertEqual(platform_verifier.call_count, 2)
+        self.assertEqual(distribution_authenticator.call_count, 2)
+        self.assertEqual(
+            run_authenticator.call_args_list,
+            [
+                call(
+                    gateway["deployment_evidence_url"],
+                    gateway["source_commit"],
+                    pilot.EXTERNAL_PILOT_WORKFLOW,
+                    "gateway_deployment",
+                ),
+                call(
+                    gateway["recovery_evidence_url"],
+                    gateway["source_commit"],
+                    pilot.EXTERNAL_PILOT_WORKFLOW,
+                    "gateway_recovery",
+                ),
+            ],
+        )
+
+    def test_authenticated_distribution_artifact_binds_exact_retained_files(self) -> None:
+        proof = self._json(PROOF_PATH)
+        proof["build"] = "12001"
+        proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
+        notarization_payload = NOTARIZATION_PATH.read_bytes()
+        archive_payload = ARCHIVE_PATH.read_bytes()
+        artifact_payload = io.BytesIO()
+        with zipfile.ZipFile(artifact_payload, "w", zipfile.ZIP_DEFLATED) as package:
+            package.writestr(f"Hormuz-{proof['version']}-notarized.zip", archive_payload)
+            package.writestr("distribution-proof.json", proof_payload)
+            package.writestr("notarization.json", notarization_payload)
+            package.writestr(f"Hormuz-{proof['version']}.dSYM.zip", b"content-free-dsym")
+
+        run = {
+            "id": 12345,
+            "run_number": 12,
+            "run_attempt": 1,
+        }
+        artifact = {
+            "id": 67890,
+            "name": f"hormuz-macos-{proof['version']}-12-1",
+            "size_in_bytes": len(artifact_payload.getvalue()),
+            "expired": False,
+            "url": "https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/67890",
+            "archive_download_url": (
+                "https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/67890/zip"
+            ),
+            "workflow_run": {
+                "id": 12345,
+                "head_branch": "main",
+                "head_sha": proof["source_commit"],
+            },
+        }
+        response = {"total_count": 1, "artifacts": [artifact]}
+
+        def download(_command: list[str], **kwargs: object) -> SimpleNamespace:
+            destination = kwargs["stdout"]
+            destination.write(artifact_payload.getvalue())  # type: ignore[union-attr]
+            destination.flush()  # type: ignore[union-attr]
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with (
+            patch.object(pilot, "_authenticate_github_run", return_value=run),
+            patch.object(pilot, "_github_api_json", return_value=response),
+            patch.object(pilot.subprocess, "run", side_effect=download) as command,
+        ):
+            pilot._authenticate_distribution_artifact(
+                proof["workflow_run_url"],
+                proof["source_commit"],
+                proof,
+                proof_payload,
+                notarization_payload,
+                len(archive_payload),
+                hashlib.sha256(archive_payload).hexdigest(),
+                "artifact",
+            )
+
+        command.assert_called_once()
+        self.assertEqual(
+            command.call_args.args[0],
+            [
+                "gh",
+                "api",
+                "--hostname",
+                "github.com",
+                "--method",
+                "GET",
+                "repos/Xpounder-com/hormuz/actions/artifacts/67890/zip",
+            ],
+        )
+
+    def test_authenticated_distribution_artifact_rejects_tampered_or_extra_files(self) -> None:
+        proof = self._json(PROOF_PATH)
+        proof_payload = PROOF_PATH.read_bytes()
+        notarization_payload = NOTARIZATION_PATH.read_bytes()
+        archive_payload = ARCHIVE_PATH.read_bytes()
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact_zip = Path(temporary) / "artifact.zip"
+            with zipfile.ZipFile(artifact_zip, "w", zipfile.ZIP_DEFLATED) as package:
+                package.writestr(f"Hormuz-{proof['version']}-notarized.zip", archive_payload)
+                package.writestr("distribution-proof.json", proof_payload + b"tampered")
+                package.writestr("notarization.json", notarization_payload)
+            with self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError,
+                "artifact_github_artifact_binding_invalid",
+            ):
+                pilot._verify_distribution_artifact_zip(
+                    artifact_zip,
+                    proof,
+                    proof_payload,
+                    notarization_payload,
+                    len(archive_payload),
+                    hashlib.sha256(archive_payload).hexdigest(),
+                    "artifact",
+                )
+
+            with zipfile.ZipFile(artifact_zip, "a", zipfile.ZIP_DEFLATED) as package:
+                package.writestr("unexpected.txt", b"unexpected")
+            with self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError,
+                "artifact_github_artifact_members_invalid",
+            ):
+                pilot._verify_distribution_artifact_zip(
+                    artifact_zip,
+                    proof,
+                    proof_payload,
+                    notarization_payload,
+                    len(archive_payload),
+                    hashlib.sha256(archive_payload).hexdigest(),
+                    "artifact",
+                )
 
     def test_exact_archive_bytes_and_proof_digests_are_bound(self) -> None:
         inputs = list(self._inputs())
@@ -224,6 +393,20 @@ class MacPilotEvidenceTests(unittest.TestCase):
         inputs[2] = notarization
         with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "notarization_not_cleanly_accepted"):
             self._validate(*inputs)
+
+    def test_real_distribution_proof_requires_the_pinned_apple_team(self) -> None:
+        proof = self._json(PROOF_PATH)
+        proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
+        proof["team_identifier"] = "ZYXWVUTSRQ"
+        proof["signing_authority"] = (
+            "Developer ID Application: Other Organization (ZYXWVUTSRQ)"
+        )
+
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "distribution_proof_product_identity_invalid",
+        ):
+            pilot._validate_distribution_proof(proof, "pilot_qualification")
 
     def test_both_clean_architectures_require_real_gatekeeper_conditions(self) -> None:
         inputs = list(self._inputs())
@@ -357,6 +540,71 @@ class MacPilotEvidenceTests(unittest.TestCase):
 
         self.assertIn("live_provider_failover_evidence_incomplete", result["reasons"])
 
+    def test_synthetic_gateway_record_cannot_enter_real_qualification(self) -> None:
+        evidence = self._json(EVIDENCE_PATH)
+        gateway = evidence["hosted_gateway"]
+
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "gateway_evidence_kind_invalid"
+        ):
+            pilot._validate_hosted_gateway(gateway, "pilot_qualification", [])
+
+    def test_github_run_authentication_binds_repository_workflow_and_commit(self) -> None:
+        url = "https://github.com/Xpounder-com/hormuz/actions/runs/12345"
+        source_commit = "a" * 40
+        response = {
+            "id": 12345,
+            "html_url": url,
+            "head_sha": source_commit,
+            "head_branch": "main",
+            "event": "workflow_dispatch",
+            "status": "completed",
+            "conclusion": "success",
+            "path": pilot.MACOS_DISTRIBUTION_WORKFLOW,
+            "repository": {"full_name": "Xpounder-com/hormuz"},
+        }
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(response).encode(),
+            stderr=b"",
+        )
+        with patch.object(pilot.subprocess, "run", return_value=completed) as command:
+            pilot._authenticate_github_run(
+                url,
+                source_commit,
+                pilot.MACOS_DISTRIBUTION_WORKFLOW,
+                "artifact",
+            )
+        command.assert_called_once_with(
+            [
+                "gh",
+                "api",
+                "--hostname",
+                "github.com",
+                "--method",
+                "GET",
+                "repos/Xpounder-com/hormuz/actions/runs/12345",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+        response["path"] = ".github/workflows/ci.yml"
+        completed.stdout = json.dumps(response).encode()
+        with (
+            patch.object(pilot.subprocess, "run", return_value=completed),
+            self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError, "artifact_github_run_not_trusted"
+            ),
+        ):
+            pilot._authenticate_github_run(
+                url,
+                source_commit,
+                pilot.MACOS_DISTRIBUTION_WORKFLOW,
+                "artifact",
+            )
+
     def test_huge_build_strings_fail_as_contract_errors(self) -> None:
         inputs = list(self._inputs())
         evidence = copy.deepcopy(inputs[0])
@@ -391,6 +639,36 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 )
         self.assertEqual(result, 2)
         self.assertIn("artifact_build_invalid", stderr.getvalue())
+
+    def test_oversized_json_integer_is_a_documented_malformed_input(self) -> None:
+        payload = b'{"schema_version":' + (b"9" * 5_000) + b"}"
+        with self.assertRaisesRegex(pilot.MacPilotEvidenceError, "evidence_json_invalid"):
+            pilot._parse_json(payload, "evidence")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence_path = Path(temporary) / "oversized-number.json"
+            evidence_path.write_bytes(payload)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = pilot.main(
+                    [
+                        str(evidence_path),
+                        "--archive",
+                        str(ARCHIVE_PATH),
+                        "--distribution-proof",
+                        str(PROOF_PATH),
+                        "--notarization-summary",
+                        str(NOTARIZATION_PATH),
+                        "--previous-archive",
+                        str(PREVIOUS_ARCHIVE_PATH),
+                        "--previous-distribution-proof",
+                        str(PREVIOUS_PROOF_PATH),
+                        "--previous-notarization-summary",
+                        str(PREVIOUS_NOTARIZATION_PATH),
+                    ]
+                )
+        self.assertEqual(result, 2)
+        self.assertIn("evidence_json_invalid", stderr.getvalue())
 
     def test_independent_security_and_accessibility_reviews_are_required(self) -> None:
         inputs = list(self._inputs())

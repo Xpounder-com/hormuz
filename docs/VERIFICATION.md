@@ -228,7 +228,12 @@ python tools/verify_macos_pilot_evidence.py \
 ```
 
 The fixture always returns `ready_for_controlled_external_pilot: false`. A real
-pass must use exact default-branch workflow artifacts and still supports only a
+pass must run on macOS with authenticated GitHub CLI access, independently
+recheck both archives with codesign, stapler, and Gatekeeper, require Apple team
+`R267LZMUTY`, authenticate the recorded default-branch workflow runs, download
+their final unexpired Actions artifacts, and byte-bind each supplied archive,
+proof, and notarization summary to the corresponding artifact members. It
+still supports only a
 controlled single-region pilot. It does not prove external-human usability,
 multi-region availability, zero downtime, an availability or latency SLA, or
 customer production readiness. See

@@ -151,6 +151,18 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
             with self.assertRaisesRegex(VerificationError, "Contents/CodeResources"):
                 self._verify(archive, bundle, "developer-id")
 
+    def test_distribution_archive_uncompressed_size_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive, bundle = self._write_archive(Path(temporary), include_ticket=True)
+            with (
+                patch(
+                    "tools.verify_macos_distribution.MAX_ARCHIVE_UNCOMPRESSED_BYTES",
+                    1,
+                ),
+                self.assertRaisesRegex(VerificationError, "distribution_archive_too_large"),
+            ):
+                self._verify(archive, bundle, "notarized")
+
     def test_notarized_signature_requires_stapled_ticket_marker(self) -> None:
         details = "\n".join(
             (

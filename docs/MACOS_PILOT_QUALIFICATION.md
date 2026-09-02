@@ -31,8 +31,16 @@ affected gate on a new build when artifact bytes change.
    distribution proof must show a universal `arm64`/`x86_64` Developer ID
    signature, hardened runtime, no entitlements, system-only dependencies, a
    stapled ticket, Gatekeeper acceptance, and the same permanent bundle and team
-   identity. Apple acceptance must contain zero issues and at least two ticket
-   entries.
+   identity. The verifier independently extracts both archives and reruns
+   `codesign`, stapler, and Gatekeeper assessment, requiring Apple team
+   `R267LZMUTY`; hand-authored JSON cannot replace those platform checks. It
+   also authenticates each distribution run through `gh api`, requiring a
+   successful default-branch `Mac signed distribution` workflow-dispatch run at
+   the proof's source commit. It downloads the uniquely named, unexpired Actions
+   artifact for that run and byte-binds the retained notarized ZIP, distribution
+   proof, and notarization summary to its members. The proof build must equal the
+   workflow run-number/run-attempt build identity. Apple acceptance must contain
+   zero issues and at least two ticket entries.
 3. **Exercise clean machines.** Use one Apple Silicon Mac and one Intel Mac
    without developer tools. Download through the intended delivery channel so
    normal quarantine is present. Confirm Gatekeeper accepts the archive,
@@ -64,7 +72,11 @@ affected gate on a new build when artifact bytes change.
    durable failover-link count must equal the extra attempt count. Monitor worker
    saturation and PostgreSQL pool wait. The current Render
    authentication staging profile has inference disabled and cannot satisfy
-   this gate.
+   this gate. A real pass also authenticates distinct deployment and recovery
+   runs through GitHub's API and requires both to be successful default-branch
+   runs of `.github/workflows/external-pilot-qualification.yml` at the recorded
+   gateway commit. That operational workflow does not exist yet, so the current
+   repository remains fail-closed for real pilot qualification.
 7. **Complete independent review.** An independent reviewer must close both the
    security and accessibility reviews through a public issue or opaque private
    review reference. A self-review or an unreferenced `passed` value is rejected.
@@ -83,7 +95,7 @@ JSON members, non-finite numbers, symlinks, changing files, and oversized input
 fail closed.
 
 Real qualification evidence must carry the permanent `com.xpounder.hormuz`
-bundle identity and a non-fixture Developer ID team. The checked-in synthetic
+bundle identity and Apple Developer team `R267LZMUTY`. The checked-in synthetic
 identity is accepted only while `evidence_kind` remains
 `synthetic_test_fixture`; changing that marker cannot promote the fixture into
 a qualifying artifact. The distribution-proof schema matches the exact
@@ -92,6 +104,13 @@ including its `executable_version_verified`, `source_commit`, and
 `workflow_run_url` fields. The aggregate binds those workflow-origin fields for
 both the candidate and the retained previous archive; operator-entered
 provenance cannot substitute for the protected workflow proof.
+Real qualification reruns the macOS platform checks against both archive byte
+streams, authenticates the recorded GitHub workflow runs, and verifies that the
+exact retained files occur in each run's final Actions artifact. Expired,
+duplicate, malformed, oversized, encrypted, path-bearing, or extra artifact
+members fail closed. The gateway record also carries an evidence-kind
+discriminator; the synthetic gateway domain is rejected when the aggregate
+claims real pilot qualification.
 
 `provider_attempt_record_count` is content-free operational evidence. It does
 not contain request or response content. Provider credentials remain only in
@@ -100,8 +119,10 @@ the aggregate receives them.
 
 ## Verification command
 
-Keep the real aggregate outside the repository. Download the exact notarized
-ZIP, distribution proof, and notarization summary into a private directory and
+Keep the real aggregate outside the repository. Run this on macOS 14 or later
+with `gh` authenticated to GitHub and able to read Actions artifacts, then
+download both exact notarized ZIPs,
+distribution proofs, and notarization summaries into a private directory and
 run:
 
 ```bash

@@ -15,7 +15,10 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
+import tempfile
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -31,16 +34,31 @@ except ModuleNotFoundError:  # Direct execution sets tools/ as sys.path[0].
         SUPPORTED_CODEX_VERSION,
     )
 
+try:
+    from tools.verify_macos_distribution import (
+        VerificationError as DistributionVerificationError,
+        verify_archive,
+    )
+except ModuleNotFoundError:  # Direct execution sets tools/ as sys.path[0].
+    from verify_macos_distribution import (  # type: ignore[no-redef]
+        VerificationError as DistributionVerificationError,
+        verify_archive,
+    )
+
 
 SCHEMA_ID = "hormuz.macos-pilot-qualification"
 SCHEMA_VERSION = 1
 CLAIM_SCOPE = "signed_macos_controlled_external_pilot_readiness"
 EVIDENCE_KINDS = {"pilot_qualification", "synthetic_test_fixture"}
 PRODUCTION_BUNDLE_IDENTIFIER = "com.xpounder.hormuz"
+PRODUCTION_TEAM_IDENTIFIER = "R267LZMUTY"
 SYNTHETIC_BUNDLE_IDENTIFIER = "com.example.hormuzpilot"
+MACOS_DISTRIBUTION_WORKFLOW = ".github/workflows/macos-distribution.yml"
+EXTERNAL_PILOT_WORKFLOW = ".github/workflows/external-pilot-qualification.yml"
 
 _MAX_FILE_BYTES = 1024 * 1024
 _MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
+_MAX_ACTIONS_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_FUTURE_CLOCK_SKEW = timedelta(minutes=5)
 
 _REVISION_RE = re.compile(r"[0-9a-f]{40}\Z")
@@ -54,7 +72,7 @@ _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12
 _RUN_ID_RE = re.compile(rf"mcr:{_UUID}\Z")
 _SUBMISSION_ID_RE = re.compile(_UUID + r"\Z", re.IGNORECASE)
 _ACTIONS_RUN_RE = re.compile(
-    r"https://github\.com/Xpounder-com/hormuz/actions/runs/[1-9][0-9]*\Z"
+    r"https://github\.com/Xpounder-com/hormuz/actions/runs/[1-9][0-9]{0,19}\Z"
 )
 _ISSUE_RE = re.compile(
     r"https://github\.com/Xpounder-com/hormuz/issues/[1-9][0-9]*\Z"
@@ -170,6 +188,7 @@ _CLIENT_FIELDS = {
     "native_keychain_helper",
 }
 _HOSTED_GATEWAY_FIELDS = {
+    "evidence_kind",
     "profile",
     "source_commit",
     "deployment_evidence_url",
@@ -401,7 +420,9 @@ def _parse_json(payload: bytes, label: str) -> object:
             object_pairs_hook=_strict_object,
             parse_constant=_reject_json_constant,
         )
-    except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
+    except MacPilotEvidenceError:
+        raise
+    except (UnicodeError, ValueError, RecursionError) as error:
         raise MacPilotEvidenceError(f"{label}_json_invalid") from error
 
 
@@ -445,6 +466,287 @@ def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _authenticate_github_run(
+    url: str,
+    source_commit: str,
+    workflow_path: str,
+    label: str,
+) -> dict[str, Any]:
+    if (
+        _ACTIONS_RUN_RE.fullmatch(url) is None
+        or _REVISION_RE.fullmatch(source_commit) is None
+    ):
+        raise MacPilotEvidenceError(f"{label}_github_run_not_trusted")
+    run_id = url.rsplit("/", 1)[-1]
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                "--hostname",
+                "github.com",
+                "--method",
+                "GET",
+                f"repos/Xpounder-com/hormuz/actions/runs/{run_id}",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise MacPilotEvidenceError(f"{label}_github_run_unavailable") from error
+    if result.returncode != 0 or len(result.stdout) > _MAX_FILE_BYTES:
+        raise MacPilotEvidenceError(f"{label}_github_run_unavailable")
+    value = _parse_json(result.stdout, f"{label}_github_run")
+    repository = value.get("repository") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or isinstance(value.get("id"), bool)
+        or value.get("id") != int(run_id)
+        or value.get("html_url") != url
+        or value.get("head_sha") != source_commit
+        or value.get("head_branch") != "main"
+        or value.get("event") != "workflow_dispatch"
+        or value.get("status") != "completed"
+        or value.get("conclusion") != "success"
+        or value.get("path") != workflow_path
+        or not isinstance(repository, dict)
+        or repository.get("full_name") != "Xpounder-com/hormuz"
+    ):
+        raise MacPilotEvidenceError(f"{label}_github_run_not_trusted")
+    return value
+
+
+def _github_api_json(endpoint: str, label: str) -> object:
+    try:
+        result = subprocess.run(
+            ["gh", "api", "--hostname", "github.com", "--method", "GET", endpoint],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise MacPilotEvidenceError(f"{label}_github_api_unavailable") from error
+    if result.returncode != 0 or len(result.stdout) > _MAX_FILE_BYTES:
+        raise MacPilotEvidenceError(f"{label}_github_api_unavailable")
+    return _parse_json(result.stdout, label)
+
+
+def _verify_distribution_artifact_zip(
+    artifact_zip: Path,
+    proof: dict[str, Any],
+    proof_payload: bytes,
+    notarization_payload: bytes,
+    archive_size: int,
+    archive_sha256: str,
+    label: str,
+) -> None:
+    archive_name = f"Hormuz-{proof['version']}-notarized.zip"
+    dsym_name = f"Hormuz-{proof['version']}.dSYM.zip"
+    expected = {
+        archive_name: (archive_size, archive_sha256),
+        "distribution-proof.json": (len(proof_payload), _sha256(proof_payload)),
+        "notarization.json": (
+            len(notarization_payload),
+            _sha256(notarization_payload),
+        ),
+    }
+    try:
+        with zipfile.ZipFile(artifact_zip) as package:
+            members = package.infolist()
+            names = [member.filename for member in members]
+            if (
+                len(names) != len(set(names))
+                or not set(expected) <= set(names)
+                or not set(names) <= {*expected, dsym_name}
+            ):
+                raise MacPilotEvidenceError(f"{label}_github_artifact_members_invalid")
+            total_size = 0
+            for member in members:
+                file_type = (member.external_attr >> 16) & 0o170000
+                if (
+                    member.is_dir()
+                    or member.filename in {"", ".", ".."}
+                    or "/" in member.filename
+                    or "\\" in member.filename
+                    or file_type == stat.S_IFLNK
+                    or member.flag_bits & 0x1
+                    or member.file_size < 1
+                ):
+                    raise MacPilotEvidenceError(f"{label}_github_artifact_members_invalid")
+                total_size += member.file_size
+                if total_size > _MAX_ACTIONS_ARTIFACT_BYTES:
+                    raise MacPilotEvidenceError(f"{label}_github_artifact_too_large")
+                digest = hashlib.sha256()
+                observed = 0
+                with package.open(member) as source:
+                    while chunk := source.read(1024 * 1024):
+                        observed += len(chunk)
+                        if observed > member.file_size:
+                            raise MacPilotEvidenceError(
+                                f"{label}_github_artifact_member_changed"
+                            )
+                        digest.update(chunk)
+                if observed != member.file_size:
+                    raise MacPilotEvidenceError(f"{label}_github_artifact_member_changed")
+                binding = expected.get(member.filename)
+                if binding is not None and (observed, digest.hexdigest()) != binding:
+                    raise MacPilotEvidenceError(f"{label}_github_artifact_binding_invalid")
+    except MacPilotEvidenceError:
+        raise
+    except (
+        OSError,
+        RuntimeError,
+        EOFError,
+        KeyError,
+        ValueError,
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+    ) as error:
+        raise MacPilotEvidenceError(f"{label}_github_artifact_zip_invalid") from error
+
+
+def _authenticate_distribution_artifact(
+    url: str,
+    source_commit: str,
+    proof: dict[str, Any],
+    proof_payload: bytes,
+    notarization_payload: bytes,
+    archive_size: int,
+    archive_sha256: str,
+    label: str,
+) -> None:
+    run = _authenticate_github_run(
+        url,
+        source_commit,
+        MACOS_DISTRIBUTION_WORKFLOW,
+        label,
+    )
+    run_id = run["id"]
+    run_number = run.get("run_number")
+    run_attempt = run.get("run_attempt")
+    if (
+        isinstance(run_number, bool)
+        or not isinstance(run_number, int)
+        or not 1 <= run_number <= 999_999_999_999_999
+        or isinstance(run_attempt, bool)
+        or not isinstance(run_attempt, int)
+        or not 1 <= run_attempt < 1000
+        or proof["build"] != str(run_number * 1000 + run_attempt)
+    ):
+        raise MacPilotEvidenceError(f"{label}_github_run_build_invalid")
+
+    response = _github_api_json(
+        f"repos/Xpounder-com/hormuz/actions/runs/{run_id}/artifacts?per_page=100",
+        f"{label}_github_artifacts",
+    )
+    if not isinstance(response, dict):
+        raise MacPilotEvidenceError(f"{label}_github_artifacts_invalid")
+    total_count = response.get("total_count")
+    artifacts = response.get("artifacts")
+    if (
+        isinstance(total_count, bool)
+        or not isinstance(total_count, int)
+        or not 0 <= total_count <= 100
+        or not isinstance(artifacts, list)
+        or len(artifacts) != total_count
+    ):
+        raise MacPilotEvidenceError(f"{label}_github_artifacts_invalid")
+    expected_name = f"hormuz-macos-{proof['version']}-{run_number}-{run_attempt}"
+    matches = [
+        artifact
+        for artifact in artifacts
+        if isinstance(artifact, dict) and artifact.get("name") == expected_name
+    ]
+    if len(matches) != 1:
+        raise MacPilotEvidenceError(f"{label}_github_artifact_not_unique")
+    artifact = matches[0]
+    artifact_id = artifact.get("id")
+    artifact_size = artifact.get("size_in_bytes")
+    workflow_run = artifact.get("workflow_run")
+    if (
+        isinstance(artifact_id, bool)
+        or not isinstance(artifact_id, int)
+        or artifact_id < 1
+        or isinstance(artifact_size, bool)
+        or not isinstance(artifact_size, int)
+        or not 1 <= artifact_size <= _MAX_ACTIONS_ARTIFACT_BYTES
+        or artifact.get("expired") is not False
+        or artifact.get("url")
+        != f"https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/{artifact_id}"
+        or artifact.get("archive_download_url")
+        != f"https://api.github.com/repos/Xpounder-com/hormuz/actions/artifacts/{artifact_id}/zip"
+        or not isinstance(workflow_run, dict)
+        or workflow_run.get("id") != run_id
+        or workflow_run.get("head_branch") != "main"
+        or workflow_run.get("head_sha") != source_commit
+    ):
+        raise MacPilotEvidenceError(f"{label}_github_artifact_not_trusted")
+
+    with tempfile.TemporaryDirectory(prefix="hormuz-pilot-artifact-") as temporary:
+        artifact_zip = Path(temporary) / "artifact.zip"
+        try:
+            with artifact_zip.open("xb") as destination:
+                result = subprocess.run(
+                    [
+                        "gh",
+                        "api",
+                        "--hostname",
+                        "github.com",
+                        "--method",
+                        "GET",
+                        f"repos/Xpounder-com/hormuz/actions/artifacts/{artifact_id}/zip",
+                    ],
+                    stdout=destination,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    timeout=120,
+                )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise MacPilotEvidenceError(f"{label}_github_artifact_unavailable") from error
+        try:
+            downloaded_size = artifact_zip.stat().st_size
+        except OSError as error:
+            raise MacPilotEvidenceError(f"{label}_github_artifact_unavailable") from error
+        if (
+            result.returncode != 0
+            or downloaded_size < 1
+            or downloaded_size != artifact_size
+            or downloaded_size > _MAX_ACTIONS_ARTIFACT_BYTES
+        ):
+            raise MacPilotEvidenceError(f"{label}_github_artifact_unavailable")
+        _verify_distribution_artifact_zip(
+            artifact_zip,
+            proof,
+            proof_payload,
+            notarization_payload,
+            archive_size,
+            archive_sha256,
+            label,
+        )
+
+
+def _verify_production_archive(
+    archive_path: Path,
+    proof: dict[str, Any],
+    label: str,
+) -> None:
+    try:
+        signature = verify_archive(
+            archive_path,
+            None,
+            "notarized",
+            PRODUCTION_BUNDLE_IDENTIFIER,
+        )
+    except (DistributionVerificationError, OSError) as error:
+        raise MacPilotEvidenceError(f"{label}_platform_verification_failed") from error
+    if signature != {
+        "team_identifier": PRODUCTION_TEAM_IDENTIFIER,
+        "authority": proof["signing_authority"],
+    }:
+        raise MacPilotEvidenceError(f"{label}_platform_identity_invalid")
+
+
 def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str, Any]:
     proof = _require_fields(value, _DISTRIBUTION_PROOF_FIELDS, "distribution_proof")
     _require_int(proof["schema_version"], 2, 2, "distribution_proof_schema_version")
@@ -480,7 +782,7 @@ def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str,
     if evidence_kind == "pilot_qualification":
         if (
             bundle_id != PRODUCTION_BUNDLE_IDENTIFIER
-            or team_id == "ABCDEFGHIJ"
+            or team_id != PRODUCTION_TEAM_IDENTIFIER
             or "Synthetic Fixture" in authority
         ):
             raise MacPilotEvidenceError("distribution_proof_product_identity_invalid")
@@ -669,11 +971,22 @@ def _validate_client_recovery(value: object, artifact_sha256: str, reasons: list
         reasons.append("signed_client_401_recovery_incomplete")
 
 
-def _validate_hosted_gateway(value: object, reasons: list[str]) -> None:
+def _validate_hosted_gateway(
+    value: object, evidence_kind: str, reasons: list[str]
+) -> dict[str, Any]:
     gateway = _require_fields(value, _HOSTED_GATEWAY_FIELDS, "hosted_gateway")
+    expected_evidence_kind = (
+        "live_external_pilot"
+        if evidence_kind == "pilot_qualification"
+        else "synthetic_test_fixture"
+    )
+    if gateway["evidence_kind"] != expected_evidence_kind:
+        raise MacPilotEvidenceError("gateway_evidence_kind_invalid")
     _require_pattern(gateway["source_commit"], _REVISION_RE, "gateway_source_commit")
     _require_pattern(gateway["deployment_evidence_url"], _ACTIONS_RUN_RE, "deployment_evidence_url")
     _require_pattern(gateway["recovery_evidence_url"], _ACTIONS_RUN_RE, "recovery_evidence_url")
+    if gateway["deployment_evidence_url"] == gateway["recovery_evidence_url"]:
+        raise MacPilotEvidenceError("gateway_evidence_urls_not_distinct")
     protocols = gateway["provider_protocols"]
     if (
         not isinstance(protocols, list)
@@ -737,6 +1050,7 @@ def _validate_hosted_gateway(value: object, reasons: list[str]) -> None:
         reasons.append("live_provider_failover_evidence_incomplete")
     if sla_claimed:
         reasons.append("unsupported_availability_sla_claimed")
+    return gateway
 
 
 def _validate_review(value: object, label: str, reasons: list[str]) -> None:
@@ -827,6 +1141,31 @@ def validate_evidence(
         or artifact["submission_id"] == previous_artifact["submission_id"]
     ):
         raise MacPilotEvidenceError("artifact_history_binding_invalid")
+    if evidence_kind == "pilot_qualification":
+        _verify_production_archive(archive_path, proof, "artifact")
+        _verify_production_archive(
+            previous_archive_path, previous_proof, "previous_artifact"
+        )
+        _authenticate_distribution_artifact(
+            artifact["workflow_run_url"],
+            artifact["source_commit"],
+            proof,
+            distribution_proof_payload,
+            notarization_summary_payload,
+            archive_size,
+            archive_sha256,
+            "artifact",
+        )
+        _authenticate_distribution_artifact(
+            previous_artifact["workflow_run_url"],
+            previous_artifact["source_commit"],
+            previous_proof,
+            previous_distribution_proof_payload,
+            previous_notarization_summary_payload,
+            previous_archive_size,
+            previous_archive_sha256,
+            "previous_artifact",
+        )
 
     reasons: list[str] = []
     architectures = _validate_clean_machines(
@@ -836,7 +1175,21 @@ def validate_evidence(
         root["lifecycle"], previous_artifact["build"], artifact["build"], reasons
     )
     _validate_client_recovery(root["client_auth_recovery"], artifact["archive_sha256"], reasons)
-    _validate_hosted_gateway(root["hosted_gateway"], reasons)
+    gateway_reason_count = len(reasons)
+    gateway = _validate_hosted_gateway(root["hosted_gateway"], evidence_kind, reasons)
+    if evidence_kind == "pilot_qualification" and len(reasons) == gateway_reason_count:
+        _authenticate_github_run(
+            gateway["deployment_evidence_url"],
+            gateway["source_commit"],
+            EXTERNAL_PILOT_WORKFLOW,
+            "gateway_deployment",
+        )
+        _authenticate_github_run(
+            gateway["recovery_evidence_url"],
+            gateway["source_commit"],
+            EXTERNAL_PILOT_WORKFLOW,
+            "gateway_recovery",
+        )
 
     reviews = _require_fields(root["reviews"], _REVIEWS_FIELDS, "reviews")
     _validate_review(reviews["security"], "security_review", reasons)

@@ -78,6 +78,7 @@
     "cancellation_verified": true,
     "deployment_evidence_url": "https://github.com/Xpounder-com/hormuz/actions/runs/2",
     "durable_sessions": true,
+    "evidence_kind": "synthetic_test_fixture",
     "failover_hop_limit": 1,
     "failover_link_record_count": 1,
     "failover_rehearsal_passed": true,

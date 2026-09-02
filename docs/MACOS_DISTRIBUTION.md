@@ -2,7 +2,7 @@
 
 Hormuz's first customer distribution path is a Developer ID signed and Apple-notarized download. It does not require Mac App Store review, App Sandbox adoption, or an App Store listing; Apple's [notarization overview](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) describes this automated trust check as separate from App Review. The existing local preview remains an ad hoc build with bundle identifier `com.hormuz.mac.local`; it is never a customer artifact.
 
-The permanent identifier is `com.xpounder.hormuz`, registered as an explicit App ID in the Hormuz Apple team. Treat this as an identity decision: changing the identifier or signing team later changes the app's designated requirement and can disrupt Keychain access, updates, and rollback behavior. The current app has no custom entitlements and uses no provisioning profile. Apple's [Developer ID guidance](https://developer.apple.com/support/developer-id/) requires a Developer ID provisioning profile only when an app adopts advanced capabilities such as CloudKit; registering the explicit App ID now reserves the customer identity without adding such a profile to this build.
+The permanent identifier is `com.xpounder.hormuz`, registered as an explicit App ID in Apple Developer team `R267LZMUTY`. Treat both values as identity decisions: changing the identifier or signing team later changes the app's designated requirement and can disrupt Keychain access, updates, and rollback behavior. The current app has no custom entitlements and uses no provisioning profile. Apple's [Developer ID guidance](https://developer.apple.com/support/developer-id/) requires a Developer ID provisioning profile only when an app adopts advanced capabilities such as CloudKit; registering the explicit App ID now reserves the customer identity without adding such a profile to this build.
 
 ## What the Developer membership supplies
 
@@ -61,7 +61,7 @@ The manual **Mac signed distribution** workflow performs the same steps on a Git
 
 The workflow separates compilation from credential use. An unprivileged job tests and builds the universal executable, packages a disposable ad hoc bundle, and executes `--version` there to prove the bundle reports the requested release version. It records that result with the source commit, permanent bundle identifier, CI-derived build number, architectures, and SHA-256 digest, then transfers only the unsigned payload for one day. A fresh runner in the protected environment independently derives the same release identity, repeats the manifest, commit, architecture, and digest checks, and only then enters the one step that receives the five secrets. Neither tests nor Swift compilation run on the credential-bearing runner, and that runner never executes the transferred payload; its bundle and archive checks are static plus Apple signature, notarization, stapler, and Gatekeeper verification.
 
-The dispatcher supplies only the three-component marketing version. The bundle identifier is pinned in the protected workflow to `com.xpounder.hormuz`. `CFBundleVersion` is derived as `GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT`, which increases for both new workflow runs and reruns and reserves up to 999 attempts per run. Operators cannot reuse, lower, or replace either release-identity value through workflow inputs.
+The dispatcher supplies only the three-component marketing version. The bundle identifier is pinned in the protected workflow to `com.xpounder.hormuz`, and the imported Developer ID identity must belong to team `R267LZMUTY`. `CFBundleVersion` is derived as `GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT`, which increases for both new workflow runs and reruns and reserves up to 999 attempts per run. Operators cannot reuse, lower, or replace these release-identity values through workflow inputs.
 
 Both jobs refuse a feature branch: the checked-out commit must be the repository's exact default-branch commit selected by the workflow run. The protected environment should independently restrict deployment to protected branches, require a reviewer, and disallow administrator bypass. The signing job creates an ephemeral Keychain, imports only the supplied identity, validates notarization credentials, then deletes the raw credential files and unsets their environment values before it handles the payload. It deletes the Keychain before the step exits. It has read-only repository permission. It uploads the notarized archive, dSYM, and content-free proofs for 30 days; it cannot create a GitHub release or publish the artifact. Publication remains a separate digest-reviewed decision.
 
@@ -81,7 +81,9 @@ Notarization proves Apple scanned and accepted the submitted bytes. It does not 
 
 The executable [signed Mac pilot qualification](MACOS_PILOT_QUALIFICATION.md)
 binds these gates to the exact notarized archive, distribution proof, and Apple
-notarization summary. Its synthetic fixture validates only the contract shape;
-it can never qualify a pilot or change the external-onboarding counts.
+notarization summary. For real evidence it also authenticates the protected
+workflow run and exact retained Actions-artifact members through GitHub's API.
+Its synthetic fixture validates only the contract shape; it can never qualify a
+pilot or change the external-onboarding counts.
 
 There is no authenticated automatic updater yet. Distribute versioned archives manually during the pilot and retain the previous notarized archive and digest for controlled rollback. Do not promise an availability or latency SLA from signing, notarization, or a single-node Render staging deployment.

@@ -37,6 +37,7 @@ EXPECTED_DIRECTORIES = {
     "Hormuz.app/Contents/Resources/",
     "Hormuz.app/Contents/_CodeSignature/",
 }
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024
 
 
 class VerificationError(RuntimeError):
@@ -109,13 +110,19 @@ def verify_reported_version(executable: Path, expected_version: str) -> None:
         raise VerificationError("reported_release_version_mismatch")
 
 
-def verify_archive(archive: Path, bundle: Path, mode: str, expected_identifier: str) -> None:
+def verify_archive(
+    archive: Path,
+    bundle: Path | None,
+    mode: str,
+    expected_identifier: str,
+) -> dict[str, object]:
     required_files = expected_files(mode)
     try:
         with zipfile.ZipFile(archive) as packaged:
             files: set[str] = set()
             directories: set[str] = set()
             seen: set[str] = set()
+            uncompressed_bytes = 0
             for entry in packaged.infolist():
                 if entry.filename in seen:
                     raise VerificationError("duplicate_archive_member")
@@ -124,21 +131,44 @@ def verify_archive(archive: Path, bundle: Path, mode: str, expected_identifier: 
                 if path.is_absolute() or ".." in path.parts:
                     raise VerificationError("unsafe_archive_member")
                 archived_mode = entry.external_attr >> 16
-                if stat.S_IFMT(archived_mode) == stat.S_IFLNK:
+                archived_type = stat.S_IFMT(archived_mode)
+                if archived_type == stat.S_IFLNK:
                     raise VerificationError("archive_symlink_not_allowed")
+                if entry.flag_bits & 0x1:
+                    raise VerificationError("encrypted_archive_member_not_allowed")
+                if entry.file_size < 0:
+                    raise VerificationError("invalid_archive_member_size")
+                uncompressed_bytes += entry.file_size
+                if uncompressed_bytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                    raise VerificationError("distribution_archive_too_large")
                 if entry.is_dir():
+                    if archived_type not in {0, stat.S_IFDIR} or entry.file_size != 0:
+                        raise VerificationError("invalid_archive_directory")
                     directories.add(entry.filename)
                     continue
+                if archived_type not in {0, stat.S_IFREG} or entry.file_size == 0:
+                    raise VerificationError("invalid_archive_regular_file")
                 files.add(entry.filename)
                 if entry.filename not in required_files:
                     continue
-                relative = path.relative_to("Hormuz.app")
-                with packaged.open(entry) as archived_file:
-                    if stream_digest(archived_file) != digest(bundle / relative):
-                        raise VerificationError("archive_bundle_content_mismatch")
+                if bundle is not None:
+                    relative = path.relative_to("Hormuz.app")
+                    with packaged.open(entry) as archived_file:
+                        if stream_digest(archived_file) != digest(bundle / relative):
+                            raise VerificationError("archive_bundle_content_mismatch")
                 if entry.filename == "Hormuz.app/Contents/MacOS/Hormuz" and not archived_mode & 0o111:
                     raise VerificationError("archive_executable_mode_missing")
-    except (FileNotFoundError, zipfile.BadZipFile) as error:
+    except VerificationError:
+        raise
+    except (
+        OSError,
+        RuntimeError,
+        EOFError,
+        KeyError,
+        ValueError,
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+    ) as error:
         raise VerificationError("invalid_distribution_archive") from error
 
     if files != required_files or directories != EXPECTED_DIRECTORIES:
@@ -150,10 +180,11 @@ def verify_archive(archive: Path, bundle: Path, mode: str, expected_identifier: 
     with tempfile.TemporaryDirectory(prefix="hormuz-macos-archive-") as temporary:
         run("ditto", "-x", "-k", str(archive), temporary)
         extracted_bundle = Path(temporary) / "Hormuz.app"
-        signing_details(extracted_bundle, mode, expected_identifier)
+        signature = signing_details(extracted_bundle, mode, expected_identifier)
         if mode == "notarized":
             run("xcrun", "stapler", "validate", str(extracted_bundle))
             run("spctl", "--assess", "--type", "execute", "--verbose=4", str(extracted_bundle))
+    return signature
 
 
 def main() -> int:
