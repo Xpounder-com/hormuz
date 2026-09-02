@@ -328,6 +328,29 @@ def _plan_refs(plans: list[dict[str, Any]]) -> tuple[tuple[str, int], ...]:
     return tuple((row["budget_plan_id"], row["version"]) for row in plans)
 
 
+def _plans_for_chain(
+    plans: list[dict[str, Any]],
+    chain: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    if not chain:
+        return []
+    scopes = {(item["work_scope_id"], item["version"]) for item in chain}
+    kind_by_scope = {
+        (item["work_scope_id"], item["version"]): item["kind"]
+        for item in chain
+    }
+    result = [
+        row for row in plans
+        if (row["work_scope_id"], row["work_scope_version"]) in scopes
+    ]
+    return sorted(result, key=lambda row: (
+        _KIND_ORDER[
+            kind_by_scope[(row["work_scope_id"], row["work_scope_version"])]
+        ],
+        row["budget_plan_id"],
+    ))
+
+
 def _scope_chain(sql: RuntimeBudgetSQL, organization_id: str, context: WorkBudgetContext) -> tuple[dict[str, Any], ...]:
     scope_id, version = context.work_scope_id, context.work_scope_version
     assert scope_id is not None and version is not None
@@ -448,9 +471,10 @@ def prepare_work_budget(
             context=context, scope_chain=chain, now=now_value,
         )
     except ReservationDenied as error:
-        if effective:
+        applicable = _plans_for_chain(effective, chain)
+        if applicable:
             raise WorkBudgetDenied(
-                str(error), "attribution_invalid", _plan_refs(effective),
+                str(error), "attribution_invalid", _plan_refs(applicable),
                 evaluated_at=now_value,
             ) from None
         raise
@@ -459,17 +483,9 @@ def prepare_work_budget(
 
 def _plans(sql: RuntimeBudgetSQL, organization_id: str,
            chain: tuple[dict[str, Any], ...], now: str) -> list[dict[str, Any]]:
-    if not chain:
-        return []
-    scopes = {(item["work_scope_id"], item["version"]) for item in chain}
-    kind_by_scope = {(item["work_scope_id"], item["version"]): item["kind"] for item in chain}
-    result = [
-        row for row in _effective_plan_rows(sql, organization_id, now)
-        if (row["work_scope_id"], row["work_scope_version"]) in scopes
-    ]
-    return sorted(result, key=lambda row: (
-        _KIND_ORDER[kind_by_scope[(row["work_scope_id"], row["work_scope_version"])]], row["budget_plan_id"],
-    ))
+    return _plans_for_chain(
+        _effective_plan_rows(sql, organization_id, now), chain,
+    )
 
 
 def _consumed(sql: RuntimeBudgetSQL, plan: dict[str, Any]) -> Decimal:

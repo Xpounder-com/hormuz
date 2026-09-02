@@ -958,6 +958,13 @@ class BudgetAssertions:
     def check_attribution_sequence_exhaustion_is_audited(self):
         plan = self.create(amount="10")
         self.activate(plan)
+        unrelated_scope = self.registry.dispatch(
+            ADMIN_TOKEN, "POST", SCOPES,
+            body=canonical(create_request(kind="portfolio")).encode(),
+            idempotency_key="budget-unrelated-portfolio",
+        )[1]
+        unrelated_plan = self.create_for(unrelated_scope, amount="10")
+        self.activate(unrelated_plan)
         original_one = RuntimeBudgetSQL.one
 
         def saturated_sequence(sql, statement, values=()):
@@ -984,13 +991,26 @@ class BudgetAssertions:
             for row in self.budget_rows()["portfolio_work_budget_audit_events"]
             if row["operation"] == "reserve_denied"
         ]
-        self.assertEqual(len(denials), 1)
-        self.assertEqual(denials[0]["entity_id"], plan["budget_plan_id"])
-        self.assertEqual(denials[0]["entity_version"], plan["version"])
-        self.assertEqual(denials[0]["reason_code"], "attribution_invalid")
+        self.assertEqual(
+            {
+                (row["entity_id"], row["entity_version"], row["reason_code"])
+                for row in denials
+            },
+            {
+                (
+                    plan["budget_plan_id"], plan["version"],
+                    "attribution_invalid",
+                )
+            },
+        )
         report = self.repository.current_report(ADMIN, plan["budget_plan_id"])
         self.assertEqual(report["coverage"]["population_attempts"], 1)
         self.assertEqual(report["coverage"]["unattributed_attempts"], 1)
+        unrelated_report = self.repository.current_report(
+            ADMIN, unrelated_plan["budget_plan_id"],
+        )
+        self.assertEqual(unrelated_report["coverage"]["population_attempts"], 0)
+        self.assertEqual(unrelated_report["coverage"]["unattributed_attempts"], 0)
 
     def check_malformed_rate_card_coordinates_fail_report_closed(self):
         plan = self.create(amount="10")
