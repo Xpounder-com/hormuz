@@ -10,7 +10,10 @@ from hormuz.portfolio_repository import RegistryRepository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import PortfolioError
 from hormuz.store import UsageStore
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 if __package__:
     from ._portfolio_fixture import RegistryAssertions, registry_config
 else:

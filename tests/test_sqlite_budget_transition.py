@@ -15,7 +15,10 @@ from unittest import mock
 import hormuz._portfolio_sql as portfolio_sql_module
 from hormuz._budget_schema import TABLE_DDL, sqlite_statements
 from hormuz.store import StorageSchemaError, UsageStore
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._budget_predecessor_fixture import finance_predecessor_call

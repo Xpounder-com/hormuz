@@ -6,7 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 
 class SQLiteResourceSafetyTests(unittest.TestCase):

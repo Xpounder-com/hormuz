@@ -16,7 +16,10 @@ import sys
 
 from hormuz.config import Identity
 from hormuz.store import ReservationScope, StorageSchemaError, UsageStore
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 
 ARCHIVE_SHA256 = "2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a"

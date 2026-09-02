@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 
 from hormuz.store import UsageStore
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._usage_repository_contract import exercise_usage_repository, ledger_clock, read_usage_repository

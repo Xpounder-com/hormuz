@@ -12,7 +12,10 @@ from hormuz.config import GatewayConfig, UsageStorageConfig
 from hormuz.postgres import PostgresConnectionPool, PostgresStorageError
 from hormuz.store import UsageStore
 import hormuz.store_router as router
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -8,7 +8,10 @@ import unittest
 
 from hormuz._attribution_schema import TABLE_DDL, postgres_statements
 from hormuz.store import StorageSchemaError, UsageStore
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 
 class AttributionSchemaTests(unittest.TestCase):

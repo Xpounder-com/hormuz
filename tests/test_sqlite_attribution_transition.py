@@ -23,7 +23,10 @@ from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
 from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_TABLES
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_wire import ATTRIBUTIONS, canonical
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._attribution_predecessor_fixture import registry_predecessor_call

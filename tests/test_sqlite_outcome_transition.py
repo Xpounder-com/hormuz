@@ -19,7 +19,10 @@ from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_TABLES
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import OUTCOMES
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._outcome_predecessor_fixture import attribution_predecessor_call

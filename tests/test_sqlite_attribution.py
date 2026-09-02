@@ -7,7 +7,10 @@ import unittest
 
 from hormuz._attribution_schema import TABLE_DDL
 from hormuz.store import UsageStore
-from tests._sqlite import managed_sqlite_connection
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._attribution_fixture import AttributionAssertions
