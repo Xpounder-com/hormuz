@@ -213,6 +213,14 @@ latency samples, a one-hop policy-bounded same-protocol failover, worker and
 pool-wait monitoring, recovery, and a support path. Independent security and
 accessibility reviews are separate required records.
 
+The protected `.github/workflows/macos-pilot-operations.yml` workflow collects
+the clean-install, Keychain lifecycle, update/rollback, and pinned-client
+records. Its protected preparation job authenticates the two consecutive signed
+distribution runs and the exact-source gateway deployment; clean Apple Silicon
+and Intel self-hosted runners receive no checkout or repository token. A real
+run still requires both dedicated machines and operator interaction, so the
+workflow's presence alone is not pilot evidence.
+
 Run the content-free synthetic contract check with:
 
 ```bash

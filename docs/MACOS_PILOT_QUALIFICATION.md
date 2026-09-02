@@ -29,8 +29,9 @@ affected gate on a new build when artifact bytes change.
    number must immediately follow the authenticated rollback artifact's run
    number. This deliberately strict rule rejects an intervening failed,
    cancelled, or rerun candidate; produce a fresh pair of consecutive successful
-   protected runs rather than guessing which older build users would roll back
-   to.
+   protected runs with distinct three-component marketing versions. Distinct
+   versions keep both exact Safari-downloaded archives available under their
+   proof-bound filenames for the update and rollback exercise.
 2. **Verify exact artifact custody.** Recompute the SHA-256 and byte size after
    downloading the artifact. They must match `distribution-proof.json`; the
    proof and notarization-summary file digests must match the aggregate. The
@@ -87,15 +88,20 @@ affected gate on a new build when artifact bytes change.
    source commit and deployment run URL, then reproduces the clean-machine,
    lifecycle, and official-client recovery records. The verifier downloads the
    artifact through the authenticated GitHub API and exact-compares all three
-   record groups and the gateway identity. The authenticated gateway deployment
+   record groups and the gateway identity. The machine collector also requires
+the signed app's configured HTTPS origin to equal the origin authenticated
+from that gateway deployment artifact. Every client-side reliability snapshot
+also requires the live Render service ID, source commit, branch, repository,
+compute contract, and external origin to match that authenticated deployment,
+so a later redeploy at the same hostname cannot qualify. The authenticated gateway deployment
    must finish before the operations run starts. Every clean-machine start must
    fall within the operations run and no later than this immutable artifact's
    creation time. While any of gates 3
    through 5 is incomplete, `macos_operational_evidence_url` may be `none` and
    the verifier reports not ready; once all three record groups qualify, a real
-   authenticated run URL is required. Until the operational workflow and its
-   machine-side collectors are implemented and complete a protected run,
-   caller-authored booleans cannot qualify a real pilot.
+   authenticated run URL is required. The operational workflow and system-tool
+   collectors are implemented, but no protected clean-machine run has qualified
+   yet. Caller-authored booleans cannot qualify a real pilot.
 6. **Qualify the hosted gateway.** Use a separately deployed
    `external_pilot` profile with HTTPS, real Okta login, server-only provider
    credentials, PostgreSQL durability and tenant RLS, durable sessions,
@@ -148,6 +154,64 @@ affected gate on a new build when artifact bytes change.
 8. **Resolve every blocker.** The aggregate may retain only fixed blocker enums.
    `ready_for_controlled_external_pilot` is true only when the list is empty and
    every preceding gate qualifies.
+
+## Protected operations run
+
+Configure a GitHub environment named `macos-pilot-operations`. Restrict it to
+protected branches, require a reviewer, and disallow administrator bypass. It
+has no secrets. Approval gates the Ubuntu preparation job, which authenticates
+the three supplied Actions run URLs and transfers only bounded metadata plus the
+two collectors from the exact reviewed default-branch commit.
+
+Register two dedicated self-hosted runners under these exact labels:
+
+| Runner | Required labels | Required state |
+| --- | --- | --- |
+| Apple Silicon | `self-hosted`, `macOS`, `hormuz-pilot-clean-arm64` | macOS 14 or later; no Xcode app or Command Line Tools; interactive signed-in desktop user |
+| Intel | `self-hosted`, `macOS`, `hormuz-pilot-clean-x86_64` | macOS 14 or later; no Xcode app or Command Line Tools; interactive signed-in desktop user |
+
+Do not add checkout, repository credentials, environment secrets, or operator
+attestation inputs to either clean runner. They receive the authenticated input
+artifact from the protected preparation job and return only strict content-free
+records. The transfer artifacts expire after one day; the assembled operations
+proof is retained for 30 days.
+
+Before dispatch, use Safari on both Macs to download the exact candidate
+`Hormuz-<version>-notarized.zip` named in its distribution proof and allow
+Archive Utility to create `~/Downloads/Hormuz.app`. On the Apple Silicon Mac,
+also retain the differently versioned previous notarized ZIP in `~/Downloads`.
+Leave `/Applications/Hormuz.app` absent on both machines. Install the official
+pinned Codex `0.147.0` and Claude Code `2.1.233` clients on the Apple Silicon Mac
+without installing Xcode or Command Line Tools.
+
+The clean-machine collector hashes the Safari-downloaded ZIP, extracts that
+same ZIP into a private runner directory with `ditto`, byte-compares the bundle
+tree with Archive Utility's `~/Downloads/Hormuz.app`, and requires Apple team
+`R267LZMUTY` from `codesign` before installation. The lifecycle collector pins
+the same team on the retained previous build, candidate build, and each installed
+replacement.
+
+Dispatch **Mac controlled-pilot operations** from the exact candidate commit on
+`main`, supplying only:
+
+- the candidate signed-distribution run URL;
+- the immediately preceding signed-distribution run URL; and
+- the successful external-pilot deployment-evidence run URL from that same
+  source commit.
+
+After the environment approval, the Intel job needs no interaction. On the
+Apple Silicon desktop, follow the fixed action messages in the runner log: sign
+in through the Hormuz app with a Codex profile, lock and unlock the Mac once,
+then sign in again with a Claude Code profile after the first session is
+revoked and removed. The collector never prints a session credential or client
+output. It rejects any session profile whose HTTPS gateway differs from the
+authenticated deployment origin.
+
+The workflow is successful only when the final artifact contains exactly
+`macos-pilot-operations-evidence.json`. Use that workflow run URL as
+`macos_operational_evidence_url` in the final aggregate. A queued run, a run on
+the wrong source, missing hardware, skipped interaction, or any failed collector
+remains incomplete evidence.
 
 ## Content-free evidence boundary
 
