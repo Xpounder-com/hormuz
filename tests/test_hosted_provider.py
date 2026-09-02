@@ -25,6 +25,7 @@ from hormuz._hosted_state import initialize
 from hormuz.config import UsageStorageConfig
 from hormuz.hosted import main
 from hormuz.onboarding import TeamDirectory
+from hormuz.postgres import PostgresStorageError
 from hormuz.session_store import SQLiteSessionStore
 from tests._console_fixtures import activate_member
 from tests._hosted_fixtures import console_credential, directory_setup, provider_profile
@@ -427,6 +428,31 @@ class HostedProviderConfigTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("hosted_provider_bootstrap_requires_maintenance", error.getvalue())
         bootstrap.assert_not_called()
+
+    def test_provider_postgres_bootstrap_reports_only_stable_storage_code(self):
+        output, error = io.StringIO(), io.StringIO()
+        settings = {**self.settings, "HORMUZ_HOSTED_MODE": "maintenance"}
+        with (
+            patch.dict(os.environ, settings, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            patch(
+                "hormuz.postgres.bootstrap_postgres_deployment",
+                side_effect=PostgresStorageError("storage_access_denied"),
+            ),
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.staging.source_path),
+                "--provider-config", str(self.path),
+                "provider-bootstrap-postgres",
+            ])
+        self.assertEqual(status, 1)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(
+            json.loads(error.getvalue()),
+            {"event": "hosted_operation_failed", "code": "storage_access_denied"},
+        )
 
 
 @unittest.skipUnless(os.name == "posix", "The hosted runtime uses POSIX file permissions")

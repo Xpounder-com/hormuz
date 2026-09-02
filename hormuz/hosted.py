@@ -41,6 +41,7 @@ from ._hosted_state import (
     snapshot,
     state_lock,
 )
+from .postgres import PostgresStorageError
 
 
 def runtime_settings() -> dict[str, str]:
@@ -366,7 +367,13 @@ def main(argv=None) -> int:
                           "inference_enabled": False, **result}, sort_keys=True))
         return 0
     except Exception as error:
-        code = str(error) if isinstance(error, HostedError) else "hosted_operation_failed"
+        code = (
+            str(error)
+            if isinstance(error, HostedError)
+            else error.code
+            if isinstance(error, PostgresStorageError)
+            else "hosted_operation_failed"
+        )
         print(json.dumps({"event": "hosted_operation_failed", "code": code}), file=sys.stderr)
         return 1
 
