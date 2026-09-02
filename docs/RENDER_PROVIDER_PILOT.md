@@ -19,12 +19,15 @@ The profile is deliberately sized for Render's 0.5 CPU / 512 MiB service:
   spoofable control headers, disables retries and keepalive to the backend, and
   flushes response fragments without buffering a complete model response.
 - The Python gateway listens on loopback and admits at most eight concurrent
-  connections. Every request closes its connection. A stalled client socket is
-  bounded to 45 seconds, and a connection cannot outlive the configured
-  provider timeout plus 30 seconds, capped at 630 seconds.
+  generation requests. One additional bounded connection is reserved so
+  `/health` remains responsive at generation saturation. Every request closes
+  its connection. A stalled client socket is bounded to 45 seconds, and a
+  connection cannot outlive the configured provider timeout plus 30 seconds,
+  capped at 630 seconds.
 - Caddy caps request bodies at `2MB`; Python independently caps them at 2 MiB.
   Response headers are capped at 16 KiB. Provider calls are capped at 600
-  seconds.
+  seconds, and Caddy allows 660 seconds for the bounded backend to return its
+  first response headers.
 - SQLite stores sessions, authorization, usage, reservations, provider timing,
   and failover evidence on one persistent disk. No background response storage
   or provider-side asynchronous work is permitted.
@@ -32,14 +35,14 @@ The profile is deliberately sized for Render's 0.5 CPU / 512 MiB service:
   protocol. Caddy receives neither. The backend receives no unrelated service
   environment or ambient HTTP proxy setting.
 
-The first saturation point is eight long-running streams. A ninth backend
-connection is closed instead of allocating another thread. Large JSON parsing,
-secret inspection, and usage parsing share the half CPU. SQLite serializes
-writes, and one capacity failover creates two reservations, attempt records,
-metric rows, and provider calls. The persistent disk prevents horizontal
-scaling and zero-downtime deploys. A process, instance, disk, region, or Render
-outage therefore interrupts this pilot. These are the main reasons it cannot be
-sold as the availability product yet.
+The first saturation point is eight long-running streams. A ninth generation
+request fails closed while the reserved liveness connection remains available.
+Large JSON parsing, secret inspection, and usage parsing share the half CPU.
+SQLite serializes writes, and one capacity failover creates two reservations,
+attempt records, metric rows, and provider calls. The persistent disk prevents
+horizontal scaling and zero-downtime deploys. A process, instance, disk, region,
+or Render outage therefore interrupts this pilot. These are the main reasons it
+cannot be sold as the availability product yet.
 
 Render CPU, memory, restart, disk, and request-latency observations should be
 reviewed after each controlled workload. The current code records content-free
@@ -63,8 +66,9 @@ conditions hold:
   `https://api.anthropic.com`, using the fixed environment names below;
 - each protocol has fixed primary and secondary aliases, and the primary has
   exactly one same-protocol failover hop to a different model;
-- all four aliases have positive configured input/output rates so cost figures
-  are explicit estimates rather than zeros;
+- all four aliases have positive configured uncached-input, cache-read,
+  cache-write, and output rates so cost figures are explicit estimates rather
+  than zeros;
 - the organization policy allows only Codex and Claude Code, permits exactly
   those aliases, sets both organization and per-actor monthly spend caps, and
   caps output at no more than 32,768 tokens;

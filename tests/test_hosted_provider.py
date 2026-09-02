@@ -15,7 +15,11 @@ from unittest.mock import patch
 
 from hormuz._hosted_config import HostedError
 from hormuz._hosted_provider import load_provider_profile
-from hormuz._hosted_server import PROVIDER_MAX_CONNECTIONS, ProviderPilotGatewayServer
+from hormuz._hosted_server import (
+    PROVIDER_MAX_CONNECTIONS,
+    PROVIDER_MAX_INFERENCE_CONNECTIONS,
+    ProviderPilotGatewayServer,
+)
 from hormuz._hosted_state import initialize
 from hormuz.hosted import main
 from tests._console_fixtures import activate_member
@@ -116,6 +120,16 @@ class HostedProviderConfigTests(unittest.TestCase):
             with self.subTest(keys=sorted(candidate)), self.assertRaises(HostedError):
                 self.load(candidate)
 
+    def test_every_provider_route_requires_explicit_cache_rates(self):
+        for alias in self.document["model_routes"]:
+            for field in ("cache_read_cost_per_million", "cache_write_cost_per_million"):
+                candidate = json.loads(json.dumps(self.document))
+                candidate["model_routes"][alias].pop(field)
+                with self.subTest(alias=alias, field=field), self.assertRaisesRegex(
+                    HostedError, "routes_invalid"
+                ):
+                    self.load(candidate)
+
     def test_provider_credentials_are_present_printable_and_distinct(self):
         changes = (
             {"HORMUZ_OPENAI_PROVIDER_KEY": ""},
@@ -205,9 +219,61 @@ class HostedProviderHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["status"], "provider_pilot")
         self.assertEqual(self.gateway._connection_slots._initial_value, PROVIDER_MAX_CONNECTIONS)
+        self.assertEqual(self.gateway._provider_slots._initial_value, PROVIDER_MAX_INFERENCE_CONNECTIONS)
         with patch("hormuz.server.urllib.request.urlopen") as provider:
             self.assertEqual(self.request("POST", "/v1/responses", body={"model": "openai-primary"})[0], 401)
         provider.assert_not_called()
+
+    def test_health_keeps_reserved_capacity_and_has_no_readiness_dependency(self):
+        held = []
+        try:
+            for _ in range(PROVIDER_MAX_INFERENCE_CONNECTIONS):
+                acquired = self.gateway._connection_slots.acquire(blocking=False)
+                self.assertTrue(acquired)
+                held.append(acquired)
+            self.assertEqual(self.request("GET", "/health")[0], 200)
+        finally:
+            for _ in held:
+                self.gateway._connection_slots.release()
+
+        self.config.database_path.unlink()
+        self.assertEqual(self.request("GET", "/ready")[0], 503)
+        status, _, body = self.request("GET", "/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["status"], "provider_pilot")
+
+    def test_generation_capacity_fails_closed_without_provider_egress(self):
+        directory_setup(self.gateway.session_broker.directory, self.config)
+        _, pair = activate_member(self.gateway.session_broker.store, self.gateway.session_broker.directory)
+        held = []
+        try:
+            for _ in range(PROVIDER_MAX_INFERENCE_CONNECTIONS):
+                acquired = self.gateway._provider_slots.acquire(blocking=False)
+                self.assertTrue(acquired)
+                held.append(acquired)
+            with patch("hormuz.server.urllib.request.urlopen") as provider:
+                status, _, body = self.request(
+                    "POST",
+                    "/v1/responses",
+                    body={"model": "openai-primary", "input": "synthetic capacity check"},
+                    headers={"Authorization": "Bearer " + pair.access_token},
+                )
+            self.assertEqual(status, 503)
+            self.assertEqual(json.loads(body)["error"]["code"], "hormuz_provider_capacity_exhausted")
+            provider.assert_not_called()
+            self.assertEqual(self.request("GET", "/health")[0], 200)
+        finally:
+            for _ in held:
+                self.gateway._provider_slots.release()
+
+    def test_proxy_limits_preserve_liveness_and_backend_timeout_margin(self):
+        caddy = (
+            Path(__file__).resolve().parents[1]
+            / "deploy/render/gateway/provider-pilot.Caddyfile"
+        ).read_text()
+        self.assertIn("unhealthy_request_count 9", caddy)
+        self.assertIn("max_conns_per_host 9", caddy)
+        self.assertIn("response_header_timeout 660s", caddy)
 
     def test_one_capacity_failover_records_two_attempts_and_two_egresses(self):
         directory_setup(self.gateway.session_broker.directory, self.config)

@@ -59,6 +59,8 @@
       "protocol": "openai",
       "upstream_model": "replace-with-approved-openai-primary",
       "input_cost_per_million": 1,
+      "cache_read_cost_per_million": 1,
+      "cache_write_cost_per_million": 1,
       "output_cost_per_million": 1,
       "failover_alias": "openai-secondary"
     },
@@ -66,12 +68,16 @@
       "protocol": "openai",
       "upstream_model": "replace-with-approved-openai-secondary",
       "input_cost_per_million": 1,
+      "cache_read_cost_per_million": 1,
+      "cache_write_cost_per_million": 1,
       "output_cost_per_million": 1
     },
     "anthropic-primary": {
       "protocol": "anthropic",
       "upstream_model": "replace-with-approved-anthropic-primary",
       "input_cost_per_million": 1,
+      "cache_read_cost_per_million": 1,
+      "cache_write_cost_per_million": 1,
       "output_cost_per_million": 1,
       "failover_alias": "anthropic-secondary"
     },
@@ -79,6 +85,8 @@
       "protocol": "anthropic",
       "upstream_model": "replace-with-approved-anthropic-secondary",
       "input_cost_per_million": 1,
+      "cache_read_cost_per_million": 1,
+      "cache_write_cost_per_million": 1,
       "output_cost_per_million": 1
     }
   },

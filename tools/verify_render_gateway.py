@@ -42,13 +42,19 @@ for filename, state in [('profile.json', 'state'), ('restored-profile.json', 're
     path.chmod(0o600)
 routes = {
     'openai-primary': {'protocol': 'openai', 'upstream_model': 'openai-primary-model',
-        'input_cost_per_million': 1, 'output_cost_per_million': 2, 'failover_alias': 'openai-secondary'},
+        'input_cost_per_million': 1, 'cache_read_cost_per_million': 1,
+        'cache_write_cost_per_million': 1, 'output_cost_per_million': 2,
+        'failover_alias': 'openai-secondary'},
     'openai-secondary': {'protocol': 'openai', 'upstream_model': 'openai-secondary-model',
-        'input_cost_per_million': 2, 'output_cost_per_million': 4},
+        'input_cost_per_million': 2, 'cache_read_cost_per_million': 2,
+        'cache_write_cost_per_million': 2, 'output_cost_per_million': 4},
     'anthropic-primary': {'protocol': 'anthropic', 'upstream_model': 'anthropic-primary-model',
-        'input_cost_per_million': 3, 'output_cost_per_million': 6, 'failover_alias': 'anthropic-secondary'},
+        'input_cost_per_million': 3, 'cache_read_cost_per_million': 3,
+        'cache_write_cost_per_million': 3, 'output_cost_per_million': 6,
+        'failover_alias': 'anthropic-secondary'},
     'anthropic-secondary': {'protocol': 'anthropic', 'upstream_model': 'anthropic-secondary-model',
-        'input_cost_per_million': 4, 'output_cost_per_million': 8},
+        'input_cost_per_million': 4, 'cache_read_cost_per_million': 4,
+        'cache_write_cost_per_million': 4, 'output_cost_per_million': 8},
 }
 provider = root / 'provider.json'
 provider.write_text(json.dumps({

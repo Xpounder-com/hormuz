@@ -19,7 +19,7 @@
 }
 
 # Render terminates public TLS. The backend remains loopback-only and accepts
-# eight concurrent, non-keepalive proxy connections on the 512 MiB pilot tier.
+# eight provider streams plus one liveness connection on the 512 MiB pilot tier.
 :{$PORT:10000} {
 	bind 0.0.0.0
 	header {
@@ -49,16 +49,16 @@
 			header_up -Idempotency-Key
 			header_up -X-Idempotency-Key
 			lb_retries 0
-			unhealthy_request_count 8
+			unhealthy_request_count 9
 			transport http {
 				versions 1.1
 				network_proxy none
 				keepalive off
 				compression off
-				max_conns_per_host 8
+				max_conns_per_host 9
 				max_response_header 16KB
 				dial_timeout 3s
-				response_header_timeout 600s
+				response_header_timeout 660s
 				read_timeout 0s
 				write_timeout 30s
 			}

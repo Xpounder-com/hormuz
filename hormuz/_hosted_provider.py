@@ -130,12 +130,16 @@ def _validate_provider_runtime(config: GatewayConfig) -> None:
             or primary.upstream_model == secondary.upstream_model
             or primary.upstream_model.startswith("replace-with-")
             or secondary.upstream_model.startswith("replace-with-")
-            or primary.input_cost_per_million <= 0
-            or primary.output_cost_per_million <= 0
-            or secondary.input_cost_per_million <= 0
-            or secondary.output_cost_per_million <= 0
         ):
             raise HostedError("hosted_provider_routes_invalid")
+        for route in (primary, secondary):
+            if (
+                route.input_cost_per_million <= 0
+                or route.cache_read_cost_per_million <= 0
+                or route.cache_write_cost_per_million <= 0
+                or route.output_cost_per_million <= 0
+            ):
+                raise HostedError("hosted_provider_routes_invalid")
 
     policy = config.organization_policy
     if (

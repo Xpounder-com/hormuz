@@ -17,7 +17,11 @@ from .server import GatewayRequestHandler, GatewayServer
 MAX_CONNECTIONS = 32
 SOCKET_TIMEOUT = 5
 CONNECTION_LIFETIME = 30
-PROVIDER_MAX_CONNECTIONS = 8
+PROVIDER_MAX_INFERENCE_CONNECTIONS = 8
+PROVIDER_RESERVED_LIVENESS_CONNECTIONS = 1
+PROVIDER_MAX_CONNECTIONS = (
+    PROVIDER_MAX_INFERENCE_CONNECTIONS + PROVIDER_RESERVED_LIVENESS_CONNECTIONS
+)
 PROVIDER_SOCKET_TIMEOUT = 45
 PROVIDER_CONNECTION_LIFETIME_MARGIN = 30
 
@@ -87,6 +91,7 @@ class ProviderPilotGatewayServer(GatewayServer):
     def __init__(self, config, *, environ):
         self._state_identity = check_initialized(config)
         self._connection_slots = threading.BoundedSemaphore(PROVIDER_MAX_CONNECTIONS)
+        self._provider_slots = threading.BoundedSemaphore(PROVIDER_MAX_INFERENCE_CONNECTIONS)
         self.connection_lifetime = min(
             config.upstream_timeout_seconds + PROVIDER_CONNECTION_LIFETIME_MARGIN,
             630,
@@ -293,21 +298,43 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
         if not allowed:
             self._stage_response(HTTPStatus.SERVICE_UNAVAILABLE, "route_disabled")
             return False
-        if not self.server.state_intact() or not self.server._accepting_requests.is_set():
+        if request.path != "/health" and (
+            not self.server.state_intact() or not self.server._accepting_requests.is_set()
+        ):
             self.server.begin_drain()
             self._stage_response(HTTPStatus.SERVICE_UNAVAILABLE, "not_ready")
             return False
         return True
 
     def do_GET(self):  # noqa: N802
-        if urlsplit(self.path).path in {"/health", "/ready"}:
+        path = urlsplit(self.path).path
+        if path in {"/health", "/ready"}:
             if self.path not in {"/health", "/ready"}:
                 self.send_error(HTTPStatus.BAD_REQUEST)
                 return
-            ready = self.server.readiness_reason() is None
+            ready = path == "/health" or self.server.readiness_reason() is None
             self._stage_response(
                 HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
                 "provider_pilot" if ready else "not_ready",
             )
             return
         GatewayRequestHandler.do_GET(self)
+
+    def _proxy_generation(self, *, identity, protocol, client, account_usage) -> None:
+        if not self.server._provider_slots.acquire(blocking=False):
+            self._send_protocol_error(
+                protocol,
+                "Provider pilot capacity is currently full",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                code="hormuz_provider_capacity_exhausted",
+            )
+            return
+        try:
+            super()._proxy_generation(
+                identity=identity,
+                protocol=protocol,
+                client=client,
+                account_usage=account_usage,
+            )
+        finally:
+            self.server._provider_slots.release()
