@@ -352,6 +352,60 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         for secret in (REFRESH, ROTATED_REFRESH, ACCESS, REHEARSAL):
             self.assertNotIn(secret, rendered)
 
+    def test_unexpected_unknown_provider_outcome_rejects_qualification(self) -> None:
+        provider_results = []
+        for _protocol in ("anthropic", "openai"):
+            for _suffix in ("primary", "secondary"):
+                provider_results.extend([
+                    ({"server-timing": "hormuz_upstream_headers;dur=1.000"}, False, False),
+                    ({"server-timing": "hormuz_upstream_headers;dur=1.000"}, True, True),
+                ])
+        provider_results.extend([
+            ({"x-hormuz-cancellation-rehearsal": "v1"}, True, False),
+            ({
+                "x-hormuz-failover": "v1;reason=provider_rate_limited",
+                "x-hormuz-failover-rehearsal": "v1",
+            }, False, False),
+        ])
+        snapshots = [
+            _counters(live=0, attempts=0, first=0, failovers=0),
+            _counters(live=8, attempts=8, first=8, failovers=0, unknown=1),
+            _counters(live=9, attempts=9, first=9, failovers=0, unknown=2, cancellations=1),
+            _counters(live=10, attempts=11, first=10, failovers=1, unknown=2, cancellations=1),
+        ]
+        with (
+            patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+            patch("tools.qualify_external_pilot._restart_and_wait"),
+            patch(
+                "tools.qualify_external_pilot._refresh",
+                return_value=(ACCESS, ROTATED_REFRESH),
+            ),
+            patch(
+                "tools.qualify_external_pilot._reliability",
+                side_effect=snapshots,
+            ),
+            patch(
+                "tools.qualify_external_pilot._provider_request",
+                side_effect=provider_results,
+            ),
+            patch("tools.qualify_external_pilot._logout") as logout,
+            self.assertRaisesRegex(
+                QualificationError,
+                "provider_reliability_evidence_incomplete",
+            ),
+        ):
+            qualify(
+                origin=ORIGIN,
+                expected_commit=COMMIT,
+                service_id=SERVICE_ID,
+                deployment_evidence_url=DEPLOYMENT_RUN,
+                workflow_run_url=QUALIFICATION_RUN,
+                refresh_token=REFRESH,
+                rehearsal_key=REHEARSAL,
+                deploy_hook=f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}",
+            )
+        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH)
+
     def test_rotated_qualification_session_is_revoked_after_failure(self) -> None:
         with (
             patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),

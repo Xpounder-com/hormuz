@@ -826,6 +826,8 @@ def qualify(
             or _delta(final, baseline, "latency_header_sample_count") != request_count + 1
             or _delta(final, baseline, "latency_first_body_byte_sample_count") < request_count
             or _delta(final, baseline, "latency_total_sample_count") != request_count + 1
+            or _delta(final, baseline, "outcome_unknown_count") != 1
+            or _delta(final, baseline, "cancellation_outcome_unknown_count") != 1
             or not first_chunk_before_completion
         ):
             raise QualificationError("provider_reliability_evidence_incomplete")

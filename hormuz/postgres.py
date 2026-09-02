@@ -1090,6 +1090,23 @@ def migrate_postgres(
     try:
         with connection.transaction():
             with connection.cursor() as cursor:
+                migration_login, current_role, _ = _postgres_connection_identity(
+                    cursor
+                )
+                if (
+                    migration_login != current_role
+                    or _IDENTIFIER_PATTERN.fullmatch(migration_login) is None
+                ):
+                    raise PostgresStorageError(
+                        "postgres_migration_identity_invalid"
+                    )
+                _verify_postgres_migration_ownership(
+                    cursor,
+                    schema=schema,
+                    migration_login=migration_login,
+                    allow_missing_schema=True,
+                    error_scope="migration",
+                )
                 cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
                 cursor.execute(
                     sql.SQL(
@@ -1185,6 +1202,13 @@ def migrate_postgres(
                 if POSTGRES_SCHEMA_VERSION >= 14:
                     from ._provider_reliability_schema import verify_postgres_provider_reliability
                     verify_postgres_provider_reliability(cursor, schema, PostgresStorageError)
+                _verify_postgres_migration_ownership(
+                    cursor,
+                    schema=schema,
+                    migration_login=migration_login,
+                    allow_missing_schema=False,
+                    error_scope="migration",
+                )
         return PostgresSchemaStatus(version=POSTGRES_SCHEMA_VERSION, complete=True)
     except PostgresStorageError:
         raise

@@ -77,6 +77,18 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 custody_control_role=custody_role,
                 custody_executor_role=executor_role,
             )
+        with self.assertRaisesRegex(
+            PostgresStorageError,
+            "postgres_migration_identity_invalid",
+        ):
+            migrate_postgres(
+                impersonated_runtime_dsn,
+                schema=f"hormuz_migration_impersonation_{suffix}",
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+            )
 
     def test_deployment_bootstrap_separates_managed_login_from_schema_owner(self) -> None:
         suffix = uuid4().hex[:12]
@@ -437,6 +449,18 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 bootstrap_postgres_deployment(
                     self.owner_dsn,
                     runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_migration_ownership_boundary_invalid",
+            ):
+                migrate_postgres(
+                    self.owner_dsn,
                     schema=schema,
                     runtime_role=runtime_role,
                     policy_control_role=policy_role,
