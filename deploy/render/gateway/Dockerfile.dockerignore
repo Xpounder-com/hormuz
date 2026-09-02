@@ -13,4 +13,5 @@
 !deploy/render/gateway/Dockerfile
 !deploy/render/gateway/active.Caddyfile
 !deploy/render/gateway/maintenance.Caddyfile
+!deploy/render/gateway/provider-pilot.Caddyfile
 # No profile, credentials, state, tests or local artifacts enter any layer.

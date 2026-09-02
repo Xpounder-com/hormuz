@@ -1,0 +1,77 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+	grace_period 3s
+	log {
+		output discard
+	}
+	servers {
+		protocols h1
+		max_header_size 16KB
+		timeouts {
+			read_header 5s
+			read_body 30s
+			write 0s
+			idle 30s
+		}
+	}
+}
+
+# Render terminates public TLS. The backend remains loopback-only and accepts
+# eight provider streams plus one liveness connection on the 512 MiB pilot tier.
+:{$PORT:10000} {
+	bind 0.0.0.0
+	header {
+		-Server
+		Cache-Control "no-store"
+		X-Content-Type-Options "nosniff"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+	}
+	@pilot {
+		path /health /ready /console /console/* /v1/auth/* /v1/admin/* /v1/gateway/whoami /v1/gateway/usage /v1/responses /v1/responses/compact /v1/messages /v1/messages/count_tokens
+	}
+	handle @pilot {
+		request_body {
+			max_size 2MB
+		}
+		reverse_proxy 127.0.0.1:8787 {
+			# Each available response fragment is flushed immediately. Hormuz owns
+			# the upstream response stream and records its own timing evidence.
+			flush_interval -1
+			header_up X-Hormuz-Ingress-Credential {env.HORMUZ_INGRESS_CREDENTIAL}
+			header_up -Forwarded
+			header_up -X-Forwarded-*
+			header_up -X-Api-Key
+			header_up -X-Hormuz-Organization
+			header_up -X-Hormuz-Team
+			header_up -X-Hormuz-User
+			header_up -Idempotency-Key
+			header_up -X-Idempotency-Key
+			lb_retries 0
+			unhealthy_request_count 9
+			transport http {
+				versions 1.1
+				network_proxy none
+				keepalive off
+				compression off
+				max_conns_per_host 9
+				max_response_header 16KB
+				dial_timeout 3s
+				response_header_timeout 660s
+				read_timeout 0s
+				write_timeout 30s
+			}
+		}
+	}
+	handle {
+		respond "{\"schema_id\":\"hormuz.hosted-provider-pilot\",\"schema_version\":1,\"status\":\"route_disabled\",\"inference_enabled\":true}" 503 {
+			close
+		}
+	}
+	handle_errors {
+		respond "{\"schema_id\":\"hormuz.hosted-provider-pilot\",\"schema_version\":1,\"status\":\"request_rejected\",\"inference_enabled\":true}" {err.status_code} {
+			close
+		}
+	}
+}
