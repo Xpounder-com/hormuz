@@ -144,7 +144,12 @@ def _archive_manifest(directory: Path) -> tuple[bytes, tuple[dict[str, object], 
     return encoded, tuple(entries)
 
 
-def _validate_output(path: Path, active: Path) -> None:
+def _validate_output(
+    path: Path,
+    active: Path,
+    *,
+    trusted_parent_path: Path | None = None,
+) -> None:
     if (
         path != path.resolve()
         or path == active
@@ -152,12 +157,19 @@ def _validate_output(path: Path, active: Path) -> None:
         or active.is_relative_to(path)
     ):
         raise HostedError("hosted_backup_output_invalid")
-    _parent(path)
+    _parent(path, trusted_parent_path=trusted_parent_path)
 
 
-def _encrypt_snapshot(directory: Path, output: Path, key: bytes, *, active: Path) -> dict[str, object]:
+def _encrypt_snapshot(
+    directory: Path,
+    output: Path,
+    key: bytes,
+    *,
+    active: Path,
+    trusted_parent_path: Path | None = None,
+) -> dict[str, object]:
     manifest, entries = _archive_manifest(directory)
-    _validate_output(output, active)
+    _validate_output(output, active, trusted_parent_path=trusted_parent_path)
     try:
         descriptor = os.open(
             output,
@@ -447,7 +459,13 @@ def export_backup(config: GatewayConfig, output: Path, key: bytes) -> dict[str, 
     with tempfile.TemporaryDirectory(prefix=".hormuz-offsite-export-", dir=active.parent) as temporary:
         directory = Path(temporary) / "snapshot"
         snapshot(config, directory)
-        return _encrypt_snapshot(directory, output, key, active=active)
+        return _encrypt_snapshot(
+            directory,
+            output,
+            key,
+            active=active,
+            trusted_parent_path=config.session_broker.trusted_parent_path,
+        )
 
 
 def restore_backup(config: GatewayConfig, source: Path, key: bytes) -> dict[str, object]:
@@ -457,7 +475,7 @@ def restore_backup(config: GatewayConfig, source: Path, key: bytes) -> dict[str,
     destination = config.database_path.parent
     if destination.exists() or destination.is_symlink():
         raise HostedError("hosted_backup_destination_exists")
-    _parent(destination)
+    _parent(destination, trusted_parent_path=config.session_broker.trusted_parent_path)
     summary = _decrypt_pass(source, key, None)
     with tempfile.TemporaryDirectory(prefix=".hormuz-offsite-restore-", dir=destination.parent) as temporary:
         directory = Path(temporary)

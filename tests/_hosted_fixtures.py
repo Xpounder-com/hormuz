@@ -19,7 +19,7 @@ def profile(root: Path):
     }
     document = {"schema": "hormuz.hosted-auth-staging/v1", "public_origin": "https://gateway.example.test",
                 "oidc_issuer": "https://idp.example.test", "oidc_client_id": "fixture-login",
-                "state_directory": str(root / "state")}
+                "state_directory": str(root / "state"), "trusted_parent_path": str(root)}
     path = root / "profile.json"
     path.write_text(json.dumps(document))
     path.chmod(0o600)
@@ -103,6 +103,7 @@ def provider_profile(root: Path):
             "session_broker": {
                 "enabled": True, "public_base_url": hosted_document["public_origin"],
                 "database": str(state / "sessions.sqlite3"),
+                "trusted_parent_path": hosted_document["trusted_parent_path"],
                 "master_key_env": "HORMUZ_SESSION_MASTER_KEY",
                 "access_ttl_seconds": 600, "absolute_ttl_seconds": 43200,
                 "enrollment_ttl_seconds": 300, "onboarding_enabled": True,

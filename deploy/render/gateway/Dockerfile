@@ -38,7 +38,7 @@ RUN rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14 \
         --no-create-home --no-log-init hormuz \
     && install --directory --owner=65532 --group=1000 --mode=0700 \
         /home/hormuz /home/hormuz/.ssh \
-    && install --directory --owner=65532 --group=65532 --mode=0750 /var/lib/hormuz \
+    && install --directory --owner=65532 --group=65532 --mode=0700 /var/lib/hormuz \
     && install --directory --owner=root --group=root --mode=0755 /etc/hormuz/caddy
 COPY --from=builder /opt/hormuz /opt/hormuz
 COPY --from=proxy /usr/bin/caddy /usr/bin/caddy

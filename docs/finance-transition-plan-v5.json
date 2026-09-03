@@ -14,14 +14,14 @@
   "final_candidate_accepted": false,
   "released": false,
   "predecessor": {
-    "source_commit": "04a086cc0f5e47db3728e9128bb89769d220dc05",
-    "merged_main_commit": "04a086cc0f5e47db3728e9128bb89769d220dc05",
-    "archive_sha256": "f3b6d63ed5fcdee314d3a4ca0dec247c36b73b90e472347a88566b638357a5ff",
+    "source_commit": "34da6746fbe5b0eb55e1c4fb3c8ee1db54fe956e",
+    "merged_main_commit": "34da6746fbe5b0eb55e1c4fb3c8ee1db54fe956e",
+    "archive_sha256": "b87acf9694940d41d6e1a9a6e02a87bc6c3eed0e96596957ecdaab14874f8c63",
     "archive_kind": "deterministic_git_snapshot_not_published_release",
     "archive_prefix": "hormuz-finance-native-runtime-baseline/",
     "archive_tar_umask": "0000",
     "verified_runtime_file_count": 145,
-    "runtime_tree_sha256": "d48c5d8b44814342bc443990dcbbf0a05b070f719c27ed38debcda4264590945",
+    "runtime_tree_sha256": "48eda914375ff0b56ef21b9e6153aca64ac1d053f8ce22048f89996e3b6451fe",
     "sqlite_schema_version": 11,
     "postgresql_schema_version": 15,
     "accepted_features": [

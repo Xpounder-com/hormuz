@@ -93,7 +93,7 @@ def run(config: GatewayConfig, args: argparse.Namespace) -> int:
     store = SQLiteSessionStore(
         settings.database_path, master_key=settings.master_key, audience=settings.public_base_url,
         access_ttl_seconds=settings.access_ttl_seconds, absolute_ttl_seconds=settings.absolute_ttl_seconds,
-        enrollment_ttl_seconds=settings.enrollment_ttl_seconds,
+        enrollment_ttl_seconds=settings.enrollment_ttl_seconds, trusted_parent_path=settings.trusted_parent_path,
     )
     directory = TeamDirectory(config, store)
     action = args.team_command

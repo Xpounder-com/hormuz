@@ -47,6 +47,12 @@ class SessionConfigTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ConfigError):
                 self.load(raw)
 
+    def test_trusted_parent_path_must_be_absolute(self):
+        raw = copy.deepcopy(self.value)
+        raw["authentication"]["session_broker"]["trusted_parent_path"] = "./state"
+        with self.assertRaises(ConfigError):
+            self.load(raw, environ={})
+
     def test_login_audience_is_distinct_and_secrets_are_required(self):
         raw = copy.deepcopy(self.value)
         raw["authentication"]["oidc"]["issuers"][0]["login"]["client_id"] = "hormuz-api"

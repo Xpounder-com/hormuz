@@ -107,6 +107,7 @@ class SQLiteSessionStore:
         access_ttl_seconds: int,
         absolute_ttl_seconds: int,
         enrollment_ttl_seconds: int,
+        trusted_parent_path: Path | None = None,
         clock: Callable[[], datetime] | None = None,
     ):
         if len(master_key) != 32:
@@ -129,6 +130,7 @@ class SQLiteSessionStore:
         self._enrollment_ttl = timedelta(seconds=enrollment_ttl_seconds)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
+        self._trusted_parent_path = trusted_parent_path.absolute() if trusted_parent_path is not None else None
         if self.path.exists() and self.path.is_symlink():
             raise SessionStoreError("session_store_symlink_refused")
         self._prepare_storage_parent()
@@ -717,37 +719,68 @@ class SQLiteSessionStore:
             configured_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         except OSError as error:
             raise SessionStoreError("session_store_open_failed") from error
-        self._validate_parent_chain(configured_parent, allow_trusted_symlinks=True)
+        self._validate_parent_chain(configured_parent, allow_trusted_symlinks=True, trusted_parent_path=self._trusted_parent_path)
         try:
             resolved_parent = configured_parent.resolve(strict=True)
         except OSError as error:
             raise SessionStoreError("session_store_open_failed") from error
-        self._validate_parent_chain(resolved_parent, allow_trusted_symlinks=False)
+        self._validate_parent_chain(resolved_parent, allow_trusted_symlinks=False, trusted_parent_path=self._trusted_parent_path)
         self.path = resolved_parent / self.path.name
 
     def _validate_storage_parent(self) -> None:
-        self._validate_parent_chain(self.path.parent, allow_trusted_symlinks=False)
+        self._validate_parent_chain(self.path.parent, allow_trusted_symlinks=False, trusted_parent_path=self._trusted_parent_path)
 
     @staticmethod
-    def _validate_parent_chain(current: Path, *, allow_trusted_symlinks: bool) -> None:
+    def _validate_parent_chain(
+        current: Path,
+        *,
+        allow_trusted_symlinks: bool,
+        trusted_parent_path: Path | None,
+    ) -> None:
         effective_uid = os.geteuid() if hasattr(os, "geteuid") else None
+        trusted_parent_candidates = ()
+        if trusted_parent_path is not None:
+            trusted_parent_candidates = (
+                trusted_parent_path,
+                trusted_parent_path.resolve(),
+            )
+        boundary_seen = False
         while True:
             try:
                 metadata = os.lstat(current)
             except OSError as error:
                 raise SessionStoreError("session_store_open_failed") from error
             trusted_owner = effective_uid is None or metadata.st_uid in {0, effective_uid}
+            in_trusted_zone = False
+            is_boundary = False
+            for candidate in trusted_parent_candidates:
+                if current == candidate:
+                    is_boundary = True
+                    in_trusted_zone = True
+                    boundary_seen = True
+                elif current.is_relative_to(candidate):
+                    in_trusted_zone = True
             if stat.S_ISLNK(metadata.st_mode):
-                insecure = not allow_trusted_symlinks or not trusted_owner
+                insecure = not allow_trusted_symlinks or not trusted_owner or is_boundary
             else:
-                insecure = (
-                    not stat.S_ISDIR(metadata.st_mode)
-                    or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
-                    or not trusted_owner
-                )
+                if is_boundary:
+                    insecure = (
+                        not stat.S_ISDIR(metadata.st_mode)
+                        or metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
+                        or not trusted_owner
+                    )
+                else:
+                    insecure = (
+                        not stat.S_ISDIR(metadata.st_mode)
+                        or metadata.st_mode & stat.S_IWOTH
+                        or (metadata.st_mode & stat.S_IWGRP and not in_trusted_zone)
+                        or not trusted_owner
+                    )
             if insecure:
                 raise SessionStoreError("session_store_insecure_parent")
             if current.parent == current:
+                if trusted_parent_path is not None and not boundary_seen:
+                    raise SessionStoreError("session_store_insecure_parent")
                 return
             current = current.parent
 

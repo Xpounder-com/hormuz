@@ -280,6 +280,7 @@ class SessionBrokerConfig:
     enabled: bool = False
     public_base_url: str | None = None
     database_path: Path | None = None
+    trusted_parent_path: Path | None = None
     master_key_env: str = "HORMUZ_SESSION_MASTER_KEY"
     master_key: bytes = field(default=b"", repr=False)
     access_ttl_seconds: int = 600

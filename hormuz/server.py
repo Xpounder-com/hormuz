@@ -220,6 +220,7 @@ class GatewayServer(ThreadingHTTPServer):
                     access_ttl_seconds=settings.access_ttl_seconds,
                     absolute_ttl_seconds=settings.absolute_ttl_seconds,
                     enrollment_ttl_seconds=settings.enrollment_ttl_seconds,
+                    trusted_parent_path=settings.trusted_parent_path,
                 ))
             storage_organizations: tuple[str, ...] | None = None
             if (

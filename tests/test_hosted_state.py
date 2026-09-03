@@ -87,6 +87,7 @@ class HostedStateTests(unittest.TestCase):
             {"oidc_issuer": "http://idp.example.test"},
             {"oidc_issuer": "https://user:secret@idp.example.test"},
             {"upstreams": {}}, {"identities": []}, {"state_directory": "./state"},
+            {"trusted_parent_path": "./runtime"}, {"trusted_parent_path": "/"},
         ]
         for change in mutations:
             with self.subTest(change=change):

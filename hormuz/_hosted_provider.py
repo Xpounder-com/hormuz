@@ -153,6 +153,8 @@ def _validate_render_runtime(
         config.database_path.resolve() != state / "usage.sqlite3"
         or config.session_broker.database_path is None
         or config.session_broker.database_path.resolve() != state / "sessions.sqlite3"
+        or config.session_broker.trusted_parent_path is None
+        or config.session_broker.trusted_parent_path.resolve() != Path("/var/lib/hormuz").resolve()
         or config.session_broker.public_base_url != metadata["external_origin"]
         or len(issuer_hostnames) != 1
         or not next(iter(issuer_hostnames)).endswith((".okta.com", ".oktapreview.com"))

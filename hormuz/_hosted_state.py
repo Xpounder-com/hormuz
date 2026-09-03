@@ -48,10 +48,15 @@ def _private(path: Path, *, directory: bool = False) -> os.stat_result:
     return info
 
 
-def _parent(path: Path) -> None:
+def _parent(path: Path, *, trusted_parent_path: Path | None = None) -> None:
     parent = path.parent
-    info = parent.lstat()
-    if parent != parent.resolve() or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+    try:
+        SQLiteSessionStore._validate_parent_chain(
+            parent,
+            allow_trusted_symlinks=False,
+            trusted_parent_path=trusted_parent_path,
+        )
+    except SessionStoreError:
         raise HostedError("hosted_state_parent_unsafe")
 
 
@@ -61,7 +66,7 @@ def state_lock(config: GatewayConfig, *, exclusive: bool = True):
     import fcntl
 
     directory = config.database_path.parent
-    _parent(directory)
+    _parent(directory, trusted_parent_path=config.session_broker.trusted_parent_path)
     path = directory.parent / ("." + directory.name + ".hosted.lock")
     descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
@@ -109,7 +114,8 @@ def sessions(config: GatewayConfig) -> SQLiteSessionStore:
     settings = config.session_broker
     return SQLiteSessionStore(settings.database_path, master_key=settings.master_key,
                               audience=settings.public_base_url, access_ttl_seconds=settings.access_ttl_seconds,
-                              absolute_ttl_seconds=settings.absolute_ttl_seconds, enrollment_ttl_seconds=settings.enrollment_ttl_seconds)
+                              absolute_ttl_seconds=settings.absolute_ttl_seconds, enrollment_ttl_seconds=settings.enrollment_ttl_seconds,
+                              trusted_parent_path=settings.trusted_parent_path)
 
 
 def _marker(config: GatewayConfig, *, recovered: bool) -> dict:
@@ -231,10 +237,10 @@ def check_recovered_closed(config: GatewayConfig) -> dict[str, int | bool]:
         return {"recovered_closed": True, **_assert_recovery_closed(config)}
 
 
-def _destination(path: Path, active: Path) -> None:
+def _destination(path: Path, active: Path, *, trusted_parent_path: Path | None = None) -> None:
     if path != path.resolve() or path == active or path.is_relative_to(active) or active.is_relative_to(path):
         raise HostedError("hosted_snapshot_path_invalid")
-    _parent(path)
+    _parent(path, trusted_parent_path=trusted_parent_path)
     path.mkdir(mode=0o700)
 
 
@@ -249,7 +255,7 @@ def _snapshot_locked(
         require_current_usage_schema=require_current_usage_schema,
     )
     directory = config.database_path.parent
-    _destination(destination, directory)
+    _destination(destination, directory, trusted_parent_path=config.session_broker.trusted_parent_path)
     with ExitStack() as stack:
         # Hold write reservations on BOTH databases before taking either copy.
         # Backup uses separate readers to avoid backing up a write transaction.
@@ -329,7 +335,7 @@ def restore(config: GatewayConfig, source: Path) -> dict[str, int | bool]:
                 raise HostedError("hosted_snapshot_digest_mismatch")
         check_initialized(at_directory(config, source))
         destination = config.database_path.parent
-        _destination(destination, source)
+        _destination(destination, source, trusted_parent_path=config.session_broker.trusted_parent_path)
         for name in DATABASES:
             descriptor = os.open(destination / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "wb") as output, (source / name).open("rb") as input_file:

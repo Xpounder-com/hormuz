@@ -45,6 +45,7 @@
       "enabled": true,
       "public_base_url": "https://gateway.example.com",
       "database": "/var/lib/hormuz/private/state/sessions.sqlite3",
+      "trusted_parent_path": "/var/lib/hormuz",
       "master_key_env": "HORMUZ_SESSION_MASTER_KEY",
       "access_ttl_seconds": 600,
       "absolute_ttl_seconds": 43200,

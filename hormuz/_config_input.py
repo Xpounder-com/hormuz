@@ -114,7 +114,8 @@ _OIDC_SUBJECT_FIELDS = _IDENTITY_FIELDS.difference({"token_env"}).union({"subjec
 _OIDC_LOGIN_FIELDS = frozenset({"client_id", "client_secret_env", "scopes", "token_endpoint_auth_method"})
 _SESSION_BROKER_FIELDS = frozenset({
     "enabled", "public_base_url", "database", "master_key_env", "access_ttl_seconds",
-    "absolute_ttl_seconds", "enrollment_ttl_seconds", "allow_insecure_http", "onboarding_enabled", "console_enabled",
+    "absolute_ttl_seconds", "enrollment_ttl_seconds", "allow_insecure_http", "trusted_parent_path",
+    "onboarding_enabled", "console_enabled",
 })
 _MODEL_ROUTE_FIELDS = frozenset(
     {

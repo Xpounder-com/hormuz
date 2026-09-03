@@ -56,7 +56,14 @@ def load_profile(path: Path, credentials: dict[str, str]) -> GatewayConfig:
     if not stat.S_ISREG(details.st_mode) or details.st_mode & 0o022 or details.st_size > 16384:
         raise HostedError("hosted_configuration_file_unsafe")
     raw = _load_configuration_json(path)
-    if set(raw) != {"schema", "public_origin", "oidc_issuer", "oidc_client_id", "state_directory"} or raw["schema"] != PROFILE_SCHEMA:
+    if set(raw) != {
+        "schema",
+        "public_origin",
+        "oidc_issuer",
+        "oidc_client_id",
+        "state_directory",
+        "trusted_parent_path",
+    } or raw["schema"] != PROFILE_SCHEMA:
         raise HostedError("hosted_configuration_invalid")
     public_origin = _https_url(raw["public_origin"], origin=True)
     issuer = _https_url(raw["oidc_issuer"])
@@ -69,6 +76,16 @@ def load_profile(path: Path, credentials: dict[str, str]) -> GatewayConfig:
     state = Path(directory)
     if state != state.resolve() or state == state.parent:
         raise HostedError("hosted_state_path_invalid")
+    boundary = raw["trusted_parent_path"]
+    if not isinstance(boundary, str) or not boundary.startswith("/") or any(ord(c) < 32 for c in boundary):
+        raise HostedError("hosted_trusted_parent_path_invalid")
+    trusted_parent = Path(boundary)
+    if (
+        trusted_parent == trusted_parent.parent
+        or trusted_parent != trusted_parent.resolve()
+        or not state.is_relative_to(trusted_parent)
+    ):
+        raise HostedError("hosted_trusted_parent_path_invalid")
     ingress = credentials.get("HORMUZ_INGRESS_CREDENTIAL", "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", ingress):
         raise HostedError("hosted_ingress_credential_invalid")
@@ -90,6 +107,7 @@ def load_profile(path: Path, credentials: dict[str, str]) -> GatewayConfig:
         )},
         session_broker=SessionBrokerConfig(
             enabled=True, public_base_url=public_origin, database_path=state / "sessions.sqlite3",
+            trusted_parent_path=trusted_parent,
             onboarding_enabled=True, console_enabled=True,
         ),
         max_request_bytes=16384, upstream_timeout_seconds=10,
