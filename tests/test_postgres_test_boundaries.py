@@ -86,7 +86,7 @@ EXPECTED_OWNERS = {
         {
             "test_deployment_bootstrap_rejects_startup_role_impersonation",
             "test_deployment_bootstrap_separates_managed_login_from_schema_owner",
-            "test_deployment_bootstrap_supports_postgres16_non_superuser_owner",
+            "test_deployment_bootstrap_supports_postgres16_non_superuser_migration_login",
             "test_provider_reliability_totals_are_actor_and_tenant_scoped",
             "test_migration_is_visible_to_the_restricted_runtime_role",
             "test_policy_control_role_verifies_only_the_shared_migration_ledger",
