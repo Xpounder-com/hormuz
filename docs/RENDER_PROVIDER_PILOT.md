@@ -111,7 +111,7 @@ environment secrets.
 Render secret files appear as symlinks, while Hormuz deliberately accepts only
 a regular, single-linked, non-writable provider profile. In maintenance, copy
 the approved profile into
-`/var/lib/hormuz/operator/hormuz-provider-runtime.json` with the guarded copy
+`/var/lib/hormuz/private/operator/hormuz-provider-runtime.json` with the guarded copy
 procedure in the [Render gateway runbook](../deploy/render/gateway/README.md),
 then set `HORMUZ_PROVIDER_CONFIG` to that path.
 
@@ -169,8 +169,8 @@ Then perform these steps:
 
 ```sh
 python -I -m hormuz.hosted \
-  --config /var/lib/hormuz/operator/hormuz-runtime.json \
-  --provider-config /var/lib/hormuz/operator/hormuz-provider-runtime.json \
+  --config /var/lib/hormuz/private/operator/hormuz-runtime.json \
+  --provider-config /var/lib/hormuz/private/operator/hormuz-provider-runtime.json \
   provider-bootstrap-postgres
 ```
 
@@ -199,8 +199,8 @@ Still in maintenance, run:
 
 ```sh
 python -I -m hormuz.hosted \
-  --config /var/lib/hormuz/operator/hormuz-runtime.json \
-  --provider-config /var/lib/hormuz/operator/hormuz-provider-runtime.json \
+  --config /var/lib/hormuz/private/operator/hormuz-runtime.json \
+  --provider-config /var/lib/hormuz/private/operator/hormuz-provider-runtime.json \
   provider-check
 ```
 
