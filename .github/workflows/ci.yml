@@ -267,7 +267,8 @@ jobs:
             --output="$RUNNER_TEMP/budget-runtime-baseline-4e3133f.tar" \
             4e3133f19db4c34d7a181848ebc36754bce164ea
           python tools/verify_finance_native_attempt_transition_plan.py \
-            --predecessor-archive "$RUNNER_TEMP/budget-runtime-baseline-4e3133f.tar"
+            --predecessor-archive "$RUNNER_TEMP/budget-runtime-baseline-4e3133f.tar" \
+            --allow-successor-schema
           python -m venv "$RUNNER_TEMP/hormuz-budget-runtime-baseline"
           "$RUNNER_TEMP/hormuz-budget-runtime-baseline/bin/python" -m pip install \
             "$RUNNER_TEMP/budget-runtime-baseline-4e3133f.tar[postgres]"
