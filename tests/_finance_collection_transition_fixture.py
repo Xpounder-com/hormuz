@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
+import hormuz.finance_repository as finance_repository_module
+import hormuz.postgres as postgres_module
 from hormuz.config import UsageStorageConfig
 from hormuz.portfolio_config import PortfolioPrincipal
 from hormuz.portfolio_repository import create_portfolio_repository
@@ -181,26 +184,32 @@ def seed_postgres_collection_predecessor(
     custody_control_role: str,
     custody_executor_role: str,
 ):
-    migrate_postgres(
-        owner_dsn,
-        schema=schema,
-        runtime_role=runtime_role,
-        policy_control_role=policy_control_role,
-        custody_control_role=custody_control_role,
-        custody_executor_role=custody_executor_role,
-    )
-    config = replace(
-        registry_config(Path("/unused/finance-collection-predecessor")),
-        usage_storage=UsageStorageConfig(
-            backend="postgresql",
-            postgres_schema=schema,
-            postgres_runtime_role=runtime_role,
-        ),
-    )
-    store = PostgresUsageStore(
-        runtime_dsn,
-        schema=schema,
-        runtime_role=runtime_role,
-        organization_ids=("acme", "beta"),
-    )
-    return _seed(config, store, {"HORMUZ_POSTGRES_DSN": runtime_dsn})
+    # Build the exact schema-15 predecessor with the still-supported migration
+    # code, then let the candidate binary perform the real 15-to-16 step.
+    with (
+        mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15),
+        mock.patch.object(finance_repository_module, "POSTGRES_SCHEMA_VERSION", 15),
+    ):
+        migrate_postgres(
+            owner_dsn,
+            schema=schema,
+            runtime_role=runtime_role,
+            policy_control_role=policy_control_role,
+            custody_control_role=custody_control_role,
+            custody_executor_role=custody_executor_role,
+        )
+        config = replace(
+            registry_config(Path("/unused/finance-collection-predecessor")),
+            usage_storage=UsageStorageConfig(
+                backend="postgresql",
+                postgres_schema=schema,
+                postgres_runtime_role=runtime_role,
+            ),
+        )
+        store = PostgresUsageStore(
+            runtime_dsn,
+            schema=schema,
+            runtime_role=runtime_role,
+            organization_ids=("acme", "beta"),
+        )
+        return _seed(config, store, {"HORMUZ_POSTGRES_DSN": runtime_dsn})

@@ -79,6 +79,7 @@ _RUNTIME_CONSUMERS = frozenset(
         "policy_runtime",
         "portfolio_runtime",
         "portfolio_control_cli",
+        "finance_collection_cli",
         "storage_runtime",
         "storage_migration_cli",
         "hosted_operator_cli",
@@ -123,6 +124,7 @@ _MATERIAL_CLASSES = frozenset(
         "identity_connector_secret",
         "session_material",
         "approval_fingerprint",
+        "tenant_fingerprint_key",
         "data_encryption_key",
         "hosted_state_backup",
     }

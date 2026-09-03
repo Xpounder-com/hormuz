@@ -228,6 +228,29 @@
       ]
     },
     {
+      "id": "provider_finance_collection_evidence",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "portfolio_finance_collection_attempts",
+        "portfolio_finance_collection_events",
+        "portfolio_finance_cost_observations",
+        "portfolio_finance_snapshot_bucket_coverage",
+        "portfolio_finance_snapshots",
+        "portfolio_finance_source_binding_versions",
+        "portfolio_finance_usage_observations"
+      ],
+      "postgresql_tables": [
+        "portfolio_finance_collection_attempts",
+        "portfolio_finance_collection_events",
+        "portfolio_finance_cost_observations",
+        "portfolio_finance_snapshot_bucket_coverage",
+        "portfolio_finance_snapshots",
+        "portfolio_finance_source_binding_versions",
+        "portfolio_finance_usage_observations"
+      ]
+    },
+    {
       "id": "audit_chain_state",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

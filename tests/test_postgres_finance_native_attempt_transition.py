@@ -49,6 +49,13 @@ class PostgresFinanceNativeAttemptTransitionTests(PostgresTestCase):
         )
 
     def setUp(self):
+        # This suite proves the historical v14-to-v15 native-attempt
+        # transition; the v15-to-v16 collection transition is separate.
+        self._schema_version_patch = mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 15
+        )
+        self._schema_version_patch.start()
+        self.addCleanup(self._schema_version_patch.stop)
         self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
         self._drop_schema(self.schema)
         self.request = {

@@ -135,6 +135,8 @@ def verify_predecessor_archive(path: Path) -> None:
 
 def verify_finance_native_attempt_transition_plan(
     root: Path = ROOT,
+    *,
+    allow_successor_schema: bool = False,
 ) -> dict[str, object]:
     for relative in REQUIRED_FILES:
         if not (root / relative).is_file():
@@ -153,15 +155,16 @@ def verify_finance_native_attempt_transition_plan(
         from hormuz._sqlite_schema import SQLITE_SCHEMA_VERSION
         from hormuz.postgres import POSTGRES_SCHEMA_VERSION
 
-        if SQLITE_SCHEMA_VERSION != 11 or POSTGRES_SCHEMA_VERSION != 15:
+        expected_current = (12, 16) if allow_successor_schema else (11, 15)
+        if (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != expected_current:
             _fail("finance_native_runtime_schema_version_invalid")
         if not isinstance(implementation, dict):
             _fail("finance_native_runtime_contract_changed")
         candidate = implementation["candidate"]
         storage = implementation["storage"]
         if (
-            candidate["sqlite_schema_version"] != SQLITE_SCHEMA_VERSION
-            or candidate["postgresql_schema_version"] != POSTGRES_SCHEMA_VERSION
+            candidate["sqlite_schema_version"] != 11
+            or candidate["postgresql_schema_version"] != 15
             or candidate["native_request_cost_capture_implemented"] is not True
             or candidate["native_attempt_runtime_accepted"] is not False
             or set(storage["altered_tables"]) != {
@@ -209,11 +212,18 @@ def verify_finance_native_attempt_transition_plan(
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--predecessor-archive", type=Path)
+    parser.add_argument(
+        "--allow-successor-schema",
+        action="store_true",
+        help="also accept the current additive schema successor while retaining the v4 contract checks",
+    )
     args = parser.parse_args(argv)
     try:
-        result = verify_finance_native_attempt_transition_plan()
         if args.predecessor_archive is not None:
             verify_predecessor_archive(args.predecessor_archive)
+        result = verify_finance_native_attempt_transition_plan(
+            allow_successor_schema=args.allow_successor_schema
+        )
         result["predecessor_archive_verified"] = args.predecessor_archive is not None
         print(json.dumps(result, sort_keys=True))
         return 0

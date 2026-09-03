@@ -55,6 +55,13 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
                                   runtime_role=self.runtime_role, organization_ids=("acme", "beta"))
 
     def setUp(self):
+        # Keep the historical 9-to-10 attribution proof bounded to the
+        # schema it established; v16 collection migration is tested below.
+        self._schema_version_patch = mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 15
+        )
+        self._schema_version_patch.start()
+        self.addCleanup(self._schema_version_patch.stop)
         self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
         self._drop_schema(self.schema)
         self.predecessor_request = {"backend": "postgresql", "schema": self.schema, "owner_dsn": self.owner_dsn,

@@ -13,6 +13,7 @@ from unittest import mock
 from uuid import uuid4
 
 import hormuz.postgres as postgres_module
+import hormuz.finance_repository as finance_repository_module
 from hormuz._finance_schema import TABLE_DDL
 from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
 from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_TABLES
@@ -49,6 +50,18 @@ class PostgresFinanceTransitionTests(PostgresTestCase):
                                   runtime_role=self.runtime_role, organization_ids=("acme", "beta"))
 
     def setUp(self):
+        # This suite proves the completed 14-to-15 transition.  The v1.1
+        # collection transition is covered separately by the 15-to-16 suite.
+        self._schema_version_patch = mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 15
+        )
+        self._schema_version_patch.start()
+        self.addCleanup(self._schema_version_patch.stop)
+        self._finance_version_patch = mock.patch.object(
+            finance_repository_module, "POSTGRES_SCHEMA_VERSION", 15
+        )
+        self._finance_version_patch.start()
+        self.addCleanup(self._finance_version_patch.stop)
         self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
         # The inherited fixture creates and owns this unique test schema/roles.
         self._drop_schema(self.schema)
@@ -134,7 +147,8 @@ class PostgresFinanceTransitionTests(PostgresTestCase):
         current = self.snapshot()
         self.assertEqual(len(current["rows"]), 61)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 16):
+        # v16 is the accepted collection successor; v17 is intentionally absent.
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 17):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

@@ -1,4 +1,4 @@
-"""Red-first PostgreSQL 15-to-16 provider-collection transition proof."""
+"""PostgreSQL 15-to-16 provider-collection transition proof."""
 
 from __future__ import annotations
 
@@ -287,7 +287,7 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
         )
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 16)
         self._drop_schema(self.schema)
         self.seeded = seed_postgres_collection_predecessor(
             owner_dsn=self.owner_dsn,
@@ -406,110 +406,120 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
         binding_event = "11111111-1111-4111-8111-111111111118"
         collection_event = "11111111-1111-4111-8111-111111111119"
         snapshot_event = "11111111-1111-4111-8111-111111111120"
+        attempt_id = "11111111-1111-4111-8111-111111111121"
         connection.execute(
             self.sql.SQL(
                 "INSERT INTO {}.portfolio_finance_source_binding_versions "
-                "(organization_id, binding_id, version, binding_event_id, "
-                "evidence_json) VALUES (%s, %s, %s, %s, %s)"
+                "(organization_id,binding_id,version,binding_event_id,provider,"
+                "provider_account_fingerprint,scope_kind,scope_fingerprints_json,"
+                "credential_reference_id,credential_reference_version,"
+                "fingerprint_key_version,binding_state,previous_version,content_digest,"
+                "bound_by,bound_at,evidence_json) VALUES "
+                "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
             ).format(self.sql.Identifier(self.schema)),
             (
-                "acme",
-                "binding",
-                1,
-                binding_event,
+                "acme", "binding", 1, binding_event, "openai", "a" * 64,
+                "organization", "[]", "upstream:openai", 1, 1, "active", None,
+                "b" * 64, "alice", "2026-09-02T00:00:00Z",
                 '{"kind":"binding"}',
             ),
         )
         connection.execute(
             self.sql.SQL(
                 "INSERT INTO {}.portfolio_finance_collection_attempts "
-                "(organization_id, attempt_id, binding_id, binding_version) "
-                "VALUES (%s, %s, %s, %s)"
+                "(organization_id,attempt_id,binding_id,binding_version,provider,"
+                "collection_profile,source_kind,query_start_at,query_end_at,bucket_width,"
+                "requested_page_size,evidence_origin,idempotency_digest,request_digest,"
+                "credential_reference_id,credential_reference_version,"
+                "fingerprint_key_version,prepared_by,prepared_at) VALUES "
+                "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
             ).format(self.sql.Identifier(self.schema)),
-            ("acme", "attempt", "binding", 1),
+            (
+                "acme", attempt_id, "binding", 1, "openai",
+                "openai.organization-usage-completions.v1", "usage",
+                "2026-09-01T00:00:00Z", "2026-09-03T00:00:00Z", "1d", 2,
+                "customer_file", "c" * 64, "d" * 64, "upstream:openai", 1, 1,
+                "alice", "2026-09-02T00:00:00Z",
+            ),
         )
         connection.execute(
             self.sql.SQL(
                 "INSERT INTO {}.portfolio_finance_collection_events "
-                "(organization_id, event_id, attempt_id, state, "
-                "evidence_json) VALUES (%s, %s, %s, %s, %s)"
+                "(organization_id,event_id,attempt_id,state,reason_code,receipt_id,"
+                "snapshot_id,actor_id,occurred_at,evidence_json) VALUES "
+                "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
             ).format(self.sql.Identifier(self.schema)),
             (
-                "acme",
-                collection_event,
-                "attempt",
-                "succeeded",
+                "acme", collection_event, attempt_id, "succeeded", "completed",
+                "e" * 32, snapshot_event, "alice", "2026-09-02T00:00:00Z",
                 '{"kind":"terminal"}',
             ),
         )
         connection.execute(
             self.sql.SQL(
                 "INSERT INTO {}.portfolio_finance_snapshots "
-                "(organization_id, snapshot_id, attempt_id, "
-                "content_digest, evidence_json) "
-                "VALUES (%s, %s, %s, %s, %s)"
+                "(organization_id,snapshot_id,attempt_id,binding_id,binding_version,"
+                "collection_profile,source_kind,query_start_at,query_end_at,evidence_origin,"
+                "scope_provenance,parser_version,page_count,record_count,requested_page_size,"
+                "page_chain_digest,content_digest,supersedes_snapshot_id,commit_sequence,"
+                "published_by,published_at,provider_final,invoice_final,evidence_json) VALUES "
+                "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
             ).format(self.sql.Identifier(self.schema)),
             (
-                "acme",
-                snapshot_event,
-                "attempt",
-                "a" * 64,
+                "acme", snapshot_event, attempt_id, "binding", 1,
+                "openai.organization-usage-completions.v1", "usage",
+                "2026-09-01T00:00:00Z", "2026-09-03T00:00:00Z", "customer_file",
+                "customer_supplied_scope_unverified", 1, 1, 2, 2, "f" * 64,
+                "0" * 64, None, 1, "alice", "2026-09-02T00:00:00Z", 0, 0,
                 '{"kind":"snapshot"}',
             ),
         )
         for coverage in (
             (
-                "coverage-observed",
-                "2026-09-01T00:00:00Z",
-                "2026-09-02T00:00:00Z",
-                "observed",
-                2,
+                "coverage-observed", "2026-09-01T00:00:00Z",
+                "2026-09-02T00:00:00Z", "observed", 2,
             ),
             (
-                "coverage-empty",
-                "2026-08-31T00:00:00Z",
-                "2026-09-01T00:00:00Z",
-                "no_observation",
-                0,
+                "coverage-empty", "2026-08-31T00:00:00Z",
+                "2026-09-01T00:00:00Z", "no_observation", 0,
             ),
         ):
             connection.execute(
                 self.sql.SQL(
                     "INSERT INTO {}.portfolio_finance_snapshot_bucket_coverage "
-                    "(organization_id, coverage_id, snapshot_id, "
-                    "bucket_start_at, bucket_end_at, coverage_state, "
-                    "observation_count) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+                    "(organization_id,coverage_id,snapshot_id,bucket_start_at,"
+                    "bucket_end_at,coverage_state,observation_count) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s)"
                 ).format(self.sql.Identifier(self.schema)),
-                ("acme", coverage[0], snapshot_event, *coverage[1:]),
+                ("acme", coverage[0].ljust(36, "0"), snapshot_event, *coverage[1:]),
             )
-        for table, observation_id in (
+        connection.execute(
+            self.sql.SQL(
+                "INSERT INTO {}.portfolio_finance_usage_observations "
+                "(organization_id,observation_id,snapshot_id,bucket_start_at,bucket_end_at,"
+                "observation_digest,input_tokens,usage_basis,provider_final) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            ).format(self.sql.Identifier(self.schema)),
             (
-                "portfolio_finance_usage_observations",
-                "11111111-1111-4111-8111-111111111124",
+                "acme", "11111111-1111-4111-8111-111111111124", snapshot_event,
+                "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "1" * 64, 1,
+                "provider_native_aggregate_observation", 0,
             ),
+        )
+        connection.execute(
+            self.sql.SQL(
+                "INSERT INTO {}.portfolio_finance_cost_observations "
+                "(organization_id,observation_id,snapshot_id,bucket_start_at,bucket_end_at,"
+                "observation_digest,free_text_classification,native_amount,canonical_amount,"
+                "currency,cost_basis,provider_final,invoice_final) VALUES "
+                "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            ).format(self.sql.Identifier(self.schema)),
             (
-                "portfolio_finance_cost_observations",
-                "11111111-1111-4111-8111-111111111125",
+                "acme", "11111111-1111-4111-8111-111111111125", snapshot_event,
+                "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "2" * 64,
+                "unclassified", "1", "1", "USD", "provider_reported_aggregate", 0, 0,
             ),
-        ):
-            connection.execute(
-                self.sql.SQL(
-                    "INSERT INTO {}.{} "
-                    "(organization_id, observation_id, snapshot_id, "
-                    "bucket_start_at, bucket_end_at) "
-                    "VALUES (%s, %s, %s, %s, %s)"
-                ).format(
-                    self.sql.Identifier(self.schema),
-                    self.sql.Identifier(table),
-                ),
-                (
-                    "acme",
-                    observation_id,
-                    snapshot_event,
-                    "2026-09-01T00:00:00Z",
-                    "2026-09-02T00:00:00Z",
-                ),
-            )
+        )
         return (
             (
                 "hormuz.finance-source-binding-version",
@@ -604,22 +614,14 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            if version == 16:
-                return _synthetic_collection_migration(schema, fail=fail)
-            return original(version, schema, *roles)
+            statement = original(version, schema, *roles)
+            return statement + (" SELECT 1 / 0;" if fail and version == 16 else "")
 
         original_dsn = self.owner_dsn
         if dsn is not None:
             self.owner_dsn = dsn
         try:
-            with (
-                mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 16),
-                mock.patch.object(
-                    postgres_module,
-                    "_migration_sql",
-                    side_effect=migration,
-                ),
-            ):
+            with mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
                 self.assertEqual(self.migrate().version, 16)
         finally:
             self.owner_dsn = original_dsn
@@ -643,13 +645,20 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
         self.assertEqual(self.seeded["outcome_delivery_count"], 3)
 
     def test_missing_migration_is_red_without_partial_state(self):
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 16):
+        original = postgres_module._migration_sql
+
+        def missing(version, schema, *roles):
+            if version == 16:
+                raise PostgresStorageError("storage_schema_migration_unsupported")
+            return original(version, schema, *roles)
+
+        with mock.patch.object(postgres_module, "_migration_sql", side_effect=missing):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
         self.assertEqual(self.snapshot(), self.before)
 
-    def test_synthetic_ddl_failure_rolls_back_and_retry_is_idempotent(self):
+    def test_real_ddl_failure_rolls_back_and_retry_is_idempotent(self):
         with self.assertRaises(PostgresStorageError) as caught:
             self.probe(fail=True)
         self.assertEqual(caught.exception.code, "storage_unavailable")
@@ -679,14 +688,17 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
             connection.execute(
                 self.sql.SQL(
                     "INSERT INTO {}.portfolio_finance_source_binding_versions "
-                    "(organization_id, binding_id, version, binding_event_id, "
-                    "evidence_json) VALUES (%s, %s, %s, %s, %s)"
+                    "(organization_id,binding_id,version,binding_event_id,provider,"
+                    "provider_account_fingerprint,scope_kind,scope_fingerprints_json,"
+                    "credential_reference_id,credential_reference_version,"
+                    "fingerprint_key_version,binding_state,previous_version,content_digest,"
+                    "bound_by,bound_at,evidence_json) VALUES "
+                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
                 ).format(self.sql.Identifier(self.schema)),
                 (
-                    "acme",
-                    "binding",
-                    2,
-                    mismatch_event,
+                    "acme", "binding", 2, mismatch_event, "openai", "a" * 64,
+                    "organization", "[]", "upstream:openai", 1, 1, "active", 1,
+                    "c" * 64, "alice", "2026-09-02T00:00:01Z",
                     '{"kind":"binding-2"}',
                 ),
             )
@@ -787,7 +799,7 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
                     "FROM {}.portfolio_finance_snapshot_bucket_coverage "
                     "WHERE organization_id=%s AND coverage_id=%s"
                 ).format(self.sql.Identifier(self.schema)),
-                ("acme", "coverage-empty"),
+                ("acme", "coverage-empty".ljust(36, "0")),
             ).fetchone()
             self.assertEqual(coverage, ("no_observation", 0))
             for table in (
@@ -814,8 +826,9 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
     def test_current_binary_refuses_newer_and_partial_state_without_repair(self):
         self.probe()
         candidate = self.snapshot()
-        with self.assertRaises(PostgresStorageError) as caught:
-            self.runtime()
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15):
+            with self.assertRaises(PostgresStorageError) as caught:
+                self.runtime()
         self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
         self.assertEqual(self.snapshot(), candidate)
 
@@ -919,7 +932,6 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
                 info["user"],
                 "-d",
                 database,
-                "--no-owner",
                 "--exit-on-error",
             ],
             input=backup,
@@ -928,6 +940,29 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
         )
         self.assertEqual(result.returncode, 0, "test_pg_restore_failed")
         self.assertEqual(hashlib.sha256(backup).hexdigest(), digest)
+        # pg_restore omits owner-only ACL entries even when the owner role is
+        # present. Re-state those owner grants explicitly; they are implicit
+        # owner privileges and are excluded from the protected non-owner ACL
+        # fingerprint, while keeping the shape snapshot byte-stable.
+        with self.psycopg.connect(
+            self.psycopg.conninfo.make_conninfo(self.owner_dsn, dbname=database)
+        ) as connection:
+            existing_tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT tablename FROM pg_tables WHERE schemaname=%s",
+                    (self.schema,),
+                ).fetchall()
+            }
+            for table in PLANNED_TABLES:
+                if table not in existing_tables:
+                    continue
+                connection.execute(
+                    self.sql.SQL("GRANT ALL ON {}.{} TO CURRENT_USER").format(
+                        self.sql.Identifier(self.schema),
+                        self.sql.Identifier(table),
+                    )
+                )
         return (
             self.psycopg.conninfo.make_conninfo(self.owner_dsn, dbname=database),
             self.psycopg.conninfo.make_conninfo(self.runtime_dsn, dbname=database),
@@ -942,12 +977,13 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
         self.probe()
         retained = self.snapshot()
         owner, runtime = self.restore(backup)
-        PostgresUsageStore(
-            runtime,
-            schema=self.schema,
-            runtime_role=self.runtime_role,
-            organization_ids=("acme", "beta"),
-        ).verify_ready()
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15):
+            PostgresUsageStore(
+                runtime,
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+                organization_ids=("acme", "beta"),
+            ).verify_ready()
         self.assertEqual(self.snapshot(owner), self.before)
         self.assertEqual(self.snapshot(), retained)
 
@@ -961,14 +997,18 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
             connection.execute(
                 self.sql.SQL(
                     "INSERT INTO {}.portfolio_finance_source_binding_versions "
-                    "(organization_id, binding_id, version, binding_event_id, "
-                    "evidence_json) VALUES (%s, %s, %s, %s, %s)"
+                    "(organization_id,binding_id,version,binding_event_id,provider,"
+                    "provider_account_fingerprint,scope_kind,scope_fingerprints_json,"
+                    "credential_reference_id,credential_reference_version,"
+                    "fingerprint_key_version,binding_state,previous_version,content_digest,"
+                    "bound_by,bound_at,evidence_json) VALUES "
+                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
                 ).format(self.sql.Identifier(self.schema)),
                 (
-                    "acme",
-                    "synthetic-binding",
-                    1,
-                    "11111111-1111-4111-8111-111111111123",
+                    "acme", "synthetic-binding", 1,
+                    "11111111-1111-4111-8111-111111111123", "openai", "a" * 64,
+                    "organization", "[]", "upstream:openai", 1, 1, "active", None,
+                    "b" * 64, "alice", "2026-09-02T00:00:00Z",
                     '{"kind":"binding"}',
                 ),
             )
@@ -977,13 +1017,14 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
         owner, runtime = self.restore(backup)
         self.probe(dsn=owner)
         self.assertEqual(self.snapshot(owner), after_write)
-        with self.assertRaises(PostgresStorageError) as caught:
-            PostgresUsageStore(
-                runtime,
-                schema=self.schema,
-                runtime_role=self.runtime_role,
-                organization_ids=("acme", "beta"),
-            )
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15):
+            with self.assertRaises(PostgresStorageError) as caught:
+                PostgresUsageStore(
+                    runtime,
+                    schema=self.schema,
+                    runtime_role=self.runtime_role,
+                    organization_ids=("acme", "beta"),
+                )
         self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
 
 

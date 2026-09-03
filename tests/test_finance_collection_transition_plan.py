@@ -29,37 +29,18 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         return json.loads((ROOT / verifier.CONTRACT_PATH).read_bytes())
 
     def test_checkpoint_is_preflight_only_and_reserves_next_versions(self):
-        result = verifier.verify_finance_collection_transition_plan(ROOT)
-        self.assertEqual(
-            result["status"],
-            "finance_collection_preflight_candidate_verified",
-        )
-        self.assertEqual(result["feature_issue"], 8)
-        self.assertEqual(result["gate_issue"], 214)
-        self.assertEqual(result["current_sqlite_schema_version"], 11)
-        self.assertEqual(result["current_postgresql_schema_version"], 15)
-        self.assertEqual(result["planned_sqlite_schema_version"], 12)
-        self.assertEqual(result["planned_postgresql_schema_version"], 16)
-        self.assertEqual(result["collection_profile_count"], 4)
-        self.assertEqual(result["planned_table_count"], 7)
-        self.assertEqual(result["planned_altered_table_count"], 1)
-        self.assertEqual(result["planned_audit_source_count"], 3)
-        self.assertEqual(
-            result["predecessor_runtime_tree_sha256"],
-            verifier.PREDECESSOR_RUNTIME_TREE_SHA256,
-        )
-        self.assertTrue(result["native_attempt_runtime_source_verified"])
-        for field in (
-            "collection_preflight_accepted",
-            "provider_collection_implemented",
-            "provider_import_implemented",
-            "reconciliation_implemented",
-            "finance_implemented",
-            "live_finance_verified",
-            "final_candidate_accepted",
-            "released",
+        with self.assertRaisesRegex(
+            FinanceCollectionTransitionError,
+            "finance_collection_runtime_present_in_preflight",
         ):
-            self.assertFalse(result[field])
+            verifier.verify_finance_collection_transition_plan(ROOT)
+        plan = self.plan()
+        self.assertEqual(plan["feature_issue"], 8)
+        self.assertEqual(plan["gate_issue"], 214)
+        self.assertEqual(plan["transitions"], {"sqlite": {"from": 11, "to": 12}, "postgresql": {"from": 15, "to": 16}})
+        self.assertEqual(len(plan["planned_storage"]["tables"]), 7)
+        self.assertFalse(plan["collection_preflight_accepted"])
+        self.assertFalse(plan["provider_collection_implemented"])
 
     def test_every_plan_and_contract_section_is_digest_frozen(self):
         for value, validate, code in (
@@ -126,6 +107,7 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
                 "verify_finance_native_attempt_transition_plan",
                 return_value={"native_request_cost_capture_implemented": True},
             ),
+            mock.patch.object(verifier, "FORBIDDEN_RUNTIME_FILES", ()),
             mock.patch("hormuz._sqlite_schema.SQLITE_SCHEMA_VERSION", 12),
         ):
             with self.assertRaisesRegex(
@@ -138,6 +120,16 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
             (145, "0" * 64),
         ):
             with self.subTest(inventory=inventory), mock.patch.object(
+                verifier,
+                "FORBIDDEN_RUNTIME_FILES",
+                (),
+            ), mock.patch.object(
+                verifier,
+                "verify_finance_native_attempt_transition_plan",
+                return_value={"native_request_cost_capture_implemented": True},
+            ), mock.patch("hormuz._sqlite_schema.SQLITE_SCHEMA_VERSION", 11), mock.patch(
+                "hormuz.postgres.POSTGRES_SCHEMA_VERSION", 15
+            ), mock.patch.object(
                 verifier,
                 "_runtime_inventory",
                 return_value=inventory,

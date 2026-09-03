@@ -137,7 +137,7 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
         self._replace_budget_audit_index(BUDGET_AUDIT_REPORT_COLUMNS)
 
     def test_real_schema_and_checked_in_migration(self):
-        self.assertEqual(POSTGRES_SCHEMA_VERSION, 15)
+        self.assertEqual(POSTGRES_SCHEMA_VERSION, 16)
         with self.psycopg.connect(self.owner_dsn) as connection:
             count = connection.execute(
                 "SELECT COUNT(*) FROM pg_tables WHERE schemaname=%s", (self.schema,),
@@ -154,7 +154,7 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
                     (self.schema, BUDGET_AUDIT_REPORT_INDEX),
                 ).fetchall()
             )
-        self.assertEqual(count, 61)
+        self.assertEqual(count, 68)
         self.assertEqual(index_columns, BUDGET_AUDIT_REPORT_COLUMNS)
         actual = resources.files("hormuz").joinpath(
             "migrations/postgresql/0013_work_budgets.sql"

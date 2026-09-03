@@ -31,7 +31,14 @@ class FinanceNativeAttemptTransitionPlanTests(unittest.TestCase):
         return json.loads((ROOT / verifier.IMPLEMENTATION_PLAN_PATH).read_bytes())
 
     def test_checkpoint_is_runtime_candidate_not_runtime_acceptance_or_release(self):
-        result = verifier.verify_finance_native_attempt_transition_plan(ROOT)
+        # The current tree has advanced to the collection successor schemas;
+        # this explicit flag keeps the retained v4 contract check strict while
+        # allowing the current runtime to prove that the predecessor remains
+        # present and unchanged.
+        result = verifier.verify_finance_native_attempt_transition_plan(
+            ROOT,
+            allow_successor_schema=True,
+        )
         self.assertEqual(result["status"], "finance_native_attempt_runtime_candidate_verified")
         self.assertEqual(result["feature_issue"], 8)
         self.assertEqual(result["gate_issue"], 214)

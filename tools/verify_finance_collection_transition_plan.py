@@ -397,9 +397,9 @@ def main(argv=None) -> int:
     parser.add_argument("--predecessor-archive", type=Path)
     args = parser.parse_args(argv)
     try:
-        result = verify_finance_collection_transition_plan()
         if args.predecessor_archive is not None:
             verify_predecessor_archive(args.predecessor_archive)
+        result = verify_finance_collection_transition_plan()
         result["predecessor_archive_verified"] = (
             args.predecessor_archive is not None
         )
