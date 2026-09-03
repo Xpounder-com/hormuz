@@ -49,6 +49,13 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
         )
 
     def setUp(self):
+        # Keep this historical 12-to-13 proof isolated from the newer
+        # 15-to-16 finance-collection transition.
+        self._schema_version_patch = mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 15
+        )
+        self._schema_version_patch.start()
+        self.addCleanup(self._schema_version_patch.stop)
         self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
         self._drop_schema(self.schema)
         self.request = {

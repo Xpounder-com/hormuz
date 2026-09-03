@@ -52,6 +52,13 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
                                   runtime_role=self.runtime_role, organization_ids=("acme", "beta"))
 
     def setUp(self):
+        # This suite proves the completed 10-to-11 outcome transition; the
+        # later collection transition owns the current v16 gate.
+        self._schema_version_patch = mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 15
+        )
+        self._schema_version_patch.start()
+        self.addCleanup(self._schema_version_patch.stop)
         self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
         # The inherited fixture creates and owns this unique test schema/roles.
         self._drop_schema(self.schema)
