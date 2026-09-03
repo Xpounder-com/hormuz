@@ -104,7 +104,8 @@ class SQLiteFinanceTransitionTests(unittest.TestCase):
         current = sqlite_snapshot(self.path)
         self.assertEqual(len(current["rows"]), 46)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
-        with mock.patch.object(UsageStore, "schema_version", 12):
+        # v12 is the accepted collection successor; v13 is intentionally absent.
+        with mock.patch.object(UsageStore, "schema_version", 13):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
