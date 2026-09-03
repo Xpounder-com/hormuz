@@ -102,7 +102,8 @@ provider.write_text(json.dumps({
             'allow_response_storage': False, 'allow_background': False}},
     'authentication': {
         'session_broker': {'enabled': True, 'public_base_url': 'https://gateway.example.test',
-            'database': str(root / 'state' / 'sessions.sqlite3'), 'master_key_env': 'HORMUZ_SESSION_MASTER_KEY',
+            'database': str(root / 'state' / 'sessions.sqlite3'), 'trusted_parent_path': str(root / 'state'),
+            'master_key_env': 'HORMUZ_SESSION_MASTER_KEY',
             'access_ttl_seconds': 600, 'absolute_ttl_seconds': 43200, 'enrollment_ttl_seconds': 300,
             'onboarding_enabled': True, 'console_enabled': True},
         'oidc': {'issuers': [{'issuer': 'https://idp.example.test', 'audiences': ['hormuz-staging-api'],
