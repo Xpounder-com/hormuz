@@ -60,11 +60,14 @@ SETUP = '''
 import base64, json
 from pathlib import Path
 root = Path('/var/lib/hormuz')
+config = root / 'private' / 'config'
+config.mkdir(mode=0o700, parents=True, exist_ok=True)
 for filename, state in [('profile.json', 'state'), ('restored-profile.json', 'restored')]:
-    path = root / filename
+    path = config / filename
     path.write_text(json.dumps({'schema': 'hormuz.hosted-auth-staging/v1',
         'public_origin': 'https://gateway.example.test', 'oidc_issuer': 'https://idp.example.test',
-        'oidc_client_id': 'fixture-login', 'state_directory': str(root / state)}))
+        'oidc_client_id': 'fixture-login', 'state_directory': str(root / 'private' / state),
+        'trusted_parent_path': str(root)}))
     path.chmod(0o600)
 routes = {
     'openai-primary': {'protocol': 'openai', 'upstream_model': 'openai-primary-model',
@@ -82,12 +85,12 @@ routes = {
         'input_cost_per_million': 4, 'cache_read_cost_per_million': 4,
         'cache_write_cost_per_million': 4, 'output_cost_per_million': 8},
 }
-provider = root / 'provider.json'
+provider = config / 'provider.json'
 provider.write_text(json.dumps({
     'listen': {'host': '127.0.0.1', 'port': 8787},
     'ingress': {'mode': 'external_tls_proxy', 'trusted_proxy_cidrs': ['127.0.0.1/32'],
         'credential_env': 'HORMUZ_INGRESS_CREDENTIAL'},
-    'database': str(root / 'state' / 'usage.sqlite3'),
+    'database': str(root / 'private' / 'state' / 'usage.sqlite3'),
     'usage_storage': {'backend': 'postgresql', 'postgres_dsn_env': 'HORMUZ_POSTGRES_DSN',
         'postgres_migration_dsn_env': 'HORMUZ_POSTGRES_MIGRATION_DSN',
         'postgres_schema': 'hormuz', 'postgres_runtime_role': 'hormuz_runtime',
@@ -102,7 +105,7 @@ provider.write_text(json.dumps({
             'allow_response_storage': False, 'allow_background': False}},
     'authentication': {
         'session_broker': {'enabled': True, 'public_base_url': 'https://gateway.example.test',
-            'database': str(root / 'state' / 'sessions.sqlite3'), 'trusted_parent_path': str(root / 'state'),
+            'database': str(root / 'private' / 'state' / 'sessions.sqlite3'), 'trusted_parent_path': str(root),
             'master_key_env': 'HORMUZ_SESSION_MASTER_KEY',
             'access_ttl_seconds': 600, 'absolute_ttl_seconds': 43200, 'enrollment_ttl_seconds': 300,
             'onboarding_enabled': True, 'console_enabled': True},
@@ -118,7 +121,7 @@ provider.write_text(json.dumps({
         'teams': {}, 'actors': {}}
 }))
 provider.chmod(0o600)
-key = root / 'backup.key'
+key = config / 'backup.key'
 key.write_bytes(base64.b64encode(b'b' * 32) + b'\\n')
 key.chmod(0o600)
 '''
@@ -217,8 +220,8 @@ def verify(image: str) -> dict:
     volume_created = False
     network_created = False
     checks = []
-    environment = ["--env", "HORMUZ_CONFIG=/var/lib/hormuz/profile.json",
-                   "--env", "HORMUZ_PROVIDER_CONFIG=/var/lib/hormuz/provider.json"]
+    environment = ["--env", "HORMUZ_CONFIG=/var/lib/hormuz/private/config/profile.json",
+                   "--env", "HORMUZ_PROVIDER_CONFIG=/var/lib/hormuz/private/config/provider.json"]
     for name, value in {**SECRETS, **PROVIDER_SECRETS}.items():
         environment.extend(["--env", name + "=" + value])
     environment.extend(["--env", "UNRELATED_SECRET=" + CANARY, "--env", "HTTP_PROXY=http://untrusted.example.test:8080"])
@@ -231,7 +234,7 @@ def verify(image: str) -> dict:
               "--add-host", "api.openai.com:127.0.0.1",
               "--add-host", "api.anthropic.com:127.0.0.1",
               "--tmpfs", "/tmp:rw,noexec,nosuid,size=32m",
-              "--mount", "type=volume,source=" + volume + ",target=/var/lib/hormuz", *environment]
+              "--mount", "type=volume,source=" + volume + ",target=/var/lib/hormuz/private", *environment]
 
     def passed(name, condition=True):
         if not condition:
@@ -427,12 +430,15 @@ def verify(image: str) -> dict:
                and ssh_account["home_metadata"] == expected_private_directory
                and ssh_account["ssh_metadata"] == expected_private_directory)
         passed("render_ssh_home_is_outside_persistent_disk", not ssh_account["home"].startswith("/var/lib/hormuz"))
+        docker("run", "--rm", *common, "--user", "0:0", "--cap-add", "CHOWN", "--cap-add", "DAC_OVERRIDE",
+               "--entrypoint", PYTHON, image, "-I", "-c",
+               "import os; from pathlib import Path; path=Path('/var/lib/hormuz/private'); os.chown(path,0,1000); path.chmod(0o775)")
         docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image, "-I", "-", input_text=SETUP)
         # Model Render's root-owned, group-1000 readable secret-file mount.
         # Elevated permissions apply ONLY to this disposable fixture setup.
         docker("run", "--rm", *common, "--user", "0:0", "--cap-add", "CHOWN", "--cap-add", "DAC_OVERRIDE",
                "--entrypoint", PYTHON, image, "-I", "-c",
-               "import os; from pathlib import Path; files=[Path('/var/lib/hormuz')/name for name in ('profile.json','restored-profile.json','provider.json')]; [(os.chown(path,0,1000),path.chmod(0o640)) for path in files]")
+               "import os; from pathlib import Path; files=[Path('/var/lib/hormuz/private/config')/name for name in ('profile.json','restored-profile.json','provider.json')]; [(os.chown(path,0,1000),path.chmod(0o640)) for path in files]")
         uninitialized = start("uninitialized", "active")
         passed("uninitialized_active_start_refused", docker("wait", uninitialized, timeout=25) == "1")
         maintenance = start("maintenance", "maintenance")
@@ -475,24 +481,24 @@ def verify(image: str) -> dict:
                 + str(oversized_status)
             )
         passed("large_body_rejected")
-        denied = execute(active, PYTHON, "-I", "-m", "hormuz.hosted", "snapshot", "--output-directory", "/var/lib/hormuz/blocked", expected=1)
+        denied = execute(active, PYTHON, "-I", "-m", "hormuz.hosted", "snapshot", "--output-directory", "/var/lib/hormuz/private/blocked", expected=1)
         passed("online_snapshot_refused", json.loads(denied)["code"] == "hosted_state_in_use")
         # No backend port is published, and every direct hop still needs its secret.
         direct = '''import http.client; c=http.client.HTTPConnection('127.0.0.1',8787,timeout=2); c.request('GET','/health',headers={'Host':'gateway.example.test'}); print(c.getresponse().status); c.close()'''
         passed("direct_backend_requires_ingress_secret", execute(active, PYTHON, "-I", "-c", direct) == "401")
         published = json.loads(docker("inspect", "--format", "{{json .HostConfig.PortBindings}}", active))
         passed("only_proxy_port_published", set(published) == {"10000/tcp"})
-        before = execute(active, PYTHON, "-I", "-c", "import hashlib; from pathlib import Path; print(hashlib.sha256(Path('/var/lib/hormuz/state/initialized.json').read_bytes()).hexdigest())")
+        before = execute(active, PYTHON, "-I", "-c", "import hashlib; from pathlib import Path; print(hashlib.sha256(Path('/var/lib/hormuz/private/state/initialized.json').read_bytes()).hexdigest())")
         stop(active)
         docker("start", active)
         await_health(active, "authentication_staging")
-        after = execute(active, PYTHON, "-I", "-c", "import hashlib; from pathlib import Path; print(hashlib.sha256(Path('/var/lib/hormuz/state/initialized.json').read_bytes()).hexdigest())")
+        after = execute(active, PYTHON, "-I", "-c", "import hashlib; from pathlib import Path; print(hashlib.sha256(Path('/var/lib/hormuz/private/state/initialized.json').read_bytes()).hexdigest())")
         passed("restart_preserves_state_binding", before == after)
         organizations = json.loads(execute(active, PYTHON, "-I", "-m", "hormuz.hosted", "team", "organization", "list"))
         passed("restart_preserves_operator_directory", "staging-fixture" in json.dumps(organizations))
         stop(active)
         bootstrap = json.loads(operator(
-            "--provider-config", "/var/lib/hormuz/provider.json",
+            "--provider-config", "/var/lib/hormuz/private/config/provider.json",
             "provider-bootstrap-postgres",
             migration=True,
         ))
@@ -504,7 +510,7 @@ def verify(image: str) -> dict:
             and bootstrap.get("postgresql_runtime_membership_verified") is True,
         )
         provider_check = json.loads(operator(
-            "--provider-config", "/var/lib/hormuz/provider.json", "provider-check",
+            "--provider-config", "/var/lib/hormuz/private/config/provider.json", "provider-check",
         ))
         passed("provider_profile_preflight_is_content_free_and_closed",
                provider_check.get("provider_configuration_valid") is True
@@ -535,23 +541,23 @@ def verify(image: str) -> dict:
         published = json.loads(docker("inspect", "--format", "{{json .HostConfig.PortBindings}}", provider_pilot))
         passed("provider_only_proxy_port_published", set(published) == {"10000/tcp"})
         stop(provider_pilot)
-        exported = json.loads(operator("backup-export", "--key-file", "/var/lib/hormuz/backup.key",
-                                       "--output-file", "/var/lib/hormuz/offsite.hzb"))
-        verified = json.loads(operator("backup-verify", "--key-file", "/var/lib/hormuz/backup.key",
-                                       "--archive-file", "/var/lib/hormuz/offsite.hzb"))
+        exported = json.loads(operator("backup-export", "--key-file", "/var/lib/hormuz/private/config/backup.key",
+                                       "--output-file", "/var/lib/hormuz/private/config/offsite.hzb"))
+        verified = json.loads(operator("backup-verify", "--key-file", "/var/lib/hormuz/private/config/backup.key",
+                                       "--archive-file", "/var/lib/hormuz/private/config/offsite.hzb"))
         passed("encrypted_archive_digest_matches", exported["archive_sha256"] == verified["archive_sha256"]
                and exported["archive_bytes"] == verified["archive_bytes"])
         ciphertext_only = docker(
             "run", "--rm", "-i", *common, "--entrypoint", PYTHON, image, "-I", "-",
-            input_text="from pathlib import Path\nv=Path('/var/lib/hormuz/offsite.hzb').read_bytes()\nprint(int(b'SQLite format 3' not in v and b'staging-fixture' not in v))\n",
+            input_text="from pathlib import Path\nv=Path('/var/lib/hormuz/private/config/offsite.hzb').read_bytes()\nprint(int(b'SQLite format 3' not in v and b'staging-fixture' not in v))\n",
         )
         passed("encrypted_archive_hides_database_and_fixture_identity", ciphertext_only == "1")
         recovery = json.loads(operator(
-            "--config", "/var/lib/hormuz/restored-profile.json", "backup-restore",
-            "--key-file", "/var/lib/hormuz/backup.key", "--archive-file", "/var/lib/hormuz/offsite.hzb",
+            "--config", "/var/lib/hormuz/private/config/restored-profile.json", "backup-restore",
+            "--key-file", "/var/lib/hormuz/private/config/backup.key", "--archive-file", "/var/lib/hormuz/private/config/offsite.hzb",
         ))
         recovery_check = json.loads(operator(
-            "--config", "/var/lib/hormuz/restored-profile.json", "recovery-check",
+            "--config", "/var/lib/hormuz/private/config/restored-profile.json", "recovery-check",
         ))
         export_metadata = {"event", "operation", "inference_enabled", "archive_bytes",
                            "archive_sha256", "backup_schema"}

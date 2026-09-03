@@ -41,7 +41,7 @@ configuration file as described in
 State directories are owner-only `0700`, and database/manifest files are `0600`.
 The account has `/bin/sh` and a private `0700` home and `~/.ssh` under
 `/home/hormuz` solely for Render's injected SSH/SFTP transport. The persistent
-disk at `/var/lib/hormuz` does not cover that home, and the image installs and
+disk at `/var/lib/hormuz/private` does not cover that home, and the image installs and
 runs no SSH server. Keep account-level operator SSH keys short-lived and remove
 them immediately after a transfer drill.
 Local verification additionally enforces a read-only root filesystem, no Linux
@@ -70,14 +70,15 @@ dump live Caddy configuration, or place credentials in command arguments.
 ## Private configuration and bootstrap
 
 Copy [profile.example.json](profile.example.json) into a private operator file.
-Only its five documented fields are accepted. Use an exact HTTPS public origin,
-the registered issuer and confidential client ID, and an absolute state directory
-under the persistent disk, normally `/var/lib/hormuz/private/state`. No credential belongs
+Only its six documented fields are accepted. Use an exact HTTPS public origin,
+the registered issuer and confidential client ID, an absolute state directory
+under the persistent disk, normally `/var/lib/hormuz/private/state`, and the
+owner-only trusted boundary above that mount, `/var/lib/hormuz`. No credential belongs
 in this JSON. Do not commit real tenant URLs, client IDs, subjects or email addresses.
 
 Set the profile as the Render secret file `hormuz-hosted.json`, available at
 `/etc/secrets/hormuz-hosted.json`. Set `HORMUZ_CONFIG` to
-`/var/lib/hormuz/operator/hormuz-runtime.json`; prepare that private regular file
+`/var/lib/hormuz/private/operator/hormuz-runtime.json`; prepare that private regular file
 below before activation. Set the following as service-scoped secret
 environment values through the protected Render configuration UI:
 
@@ -114,9 +115,11 @@ its health response as gateway readiness.
 
 Actual Render qualification found a root-owned, group-1000 disk mount with mode
 `0775`, and a secret-file symlink whose regular target is root-owned `0640`.
-The strict loader refuses symlinks, and the state lock refuses a foreign-owned
-or group-writable immediate parent. Keep those checks. In the service Shell,
-prepare new owner-only directories and a regular copy of the approved profile:
+The disk is mounted at `/var/lib/hormuz/private`, below the image-owned
+owner-only boundary `/var/lib/hormuz`; group-writable descendants are then
+confined to that boundary. The strict loader refuses symlinks, non-owner
+boundaries and unsafe ancestors. In the service Shell, prepare new owner-only
+directories and a regular copy of the approved profile:
 
 ```sh
 python -I - <<'PY'
@@ -132,9 +135,9 @@ with open("/etc/secrets/hormuz-hosted.json", "rb") as source:
     data = source.read(16385)
     if len(data) > 16384:
         raise RuntimeError("profile_source_too_large")
-for name in ("operator", "private"):
-    Path("/var/lib/hormuz", name).mkdir(mode=0o700)
-target = Path("/var/lib/hormuz/operator/hormuz-runtime.json")
+for name in ("operator", "state"):
+    Path("/var/lib/hormuz/private", name).mkdir(mode=0o700)
+target = Path("/var/lib/hormuz/private/operator/hormuz-runtime.json")
 fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
 with os.fdopen(fd, "wb") as output:
     output.write(data)
@@ -148,7 +151,7 @@ PY
 ```
 
 This one-time preparation refuses existing directories/files. Inspect any partial
-attempt instead of overwriting it. It copies only the five-field configuration,
+attempt instead of overwriting it. It copies only the six-field configuration,
 not environment credentials. Profile changes are explicit operator work: update
 both the saved Render profile and the private runtime copy, review state bindings,
 and check before deploying. A Render secret-file update alone does not replace
@@ -158,12 +161,12 @@ After preparation, initialize explicitly. The path is supplied here even if the
 new `HORMUZ_CONFIG` environment setting has not yet reached the running shell:
 
 ```sh
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json initialize
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json check
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json team organization create \
+python -I -m hormuz.hosted --config /var/lib/hormuz/private/operator/hormuz-runtime.json initialize
+python -I -m hormuz.hosted --config /var/lib/hormuz/private/operator/hormuz-runtime.json check
+python -I -m hormuz.hosted --config /var/lib/hormuz/private/operator/hormuz-runtime.json team organization create \
   --organization evaluation --name Evaluation \
   --issuer https://identity.example.com/oauth2/default
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json team create \
+python -I -m hormuz.hosted --config /var/lib/hormuz/private/operator/hormuz-runtime.json team create \
   --organization evaluation --team evaluation-eng --name Engineering
 ```
 
@@ -186,7 +189,7 @@ local state; they do not prove IdP availability or successful end-user login.
 ## Persistent disk and Render settings
 
 The proposed single-service setup uses a paid compute instance and a persistent
-disk mounted at `/var/lib/hormuz`. Free services cannot attach a persistent disk.
+disk mounted at `/var/lib/hormuz/private`. Free services cannot attach a persistent disk.
 Review the live monthly compute/disk quote before enabling paid resources; the
 local code and tests do not purchase or deploy anything.
 
@@ -217,9 +220,9 @@ routes remain unavailable. Then run the target image's explicit migration from
 the service Shell with a new absolute snapshot directory on the persistent disk:
 
 ```sh
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json migrate \
+python -I -m hormuz.hosted --config /var/lib/hormuz/private/operator/hormuz-runtime.json migrate \
   --snapshot-directory /var/lib/hormuz/private/pre-usage-migration-001
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json check
+python -I -m hormuz.hosted --config /var/lib/hormuz/private/operator/hormuz-runtime.json check
 ```
 
 `migrate` refuses active mode, an unavailable lifecycle lock, an existing
@@ -276,7 +279,7 @@ approved SSH/SFTP path, then run in the service Shell while maintenance remains
 closed:
 
 ```sh
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json backup-export \
+python -I -m hormuz.hosted --config /var/lib/hormuz/private/operator/hormuz-runtime.json backup-export \
   --key-file /tmp/hormuz-backup.key \
   --output-file /var/lib/hormuz/private/hormuz-offsite-001.hzb
 ```
@@ -316,10 +319,10 @@ rotate the master key to restore a managed directory: recipient hashes also
 depend on it. Run against the transferred encrypted archive:
 
 ```sh
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-restored.json backup-restore \
+python -I -m hormuz.hosted --config /var/lib/hormuz/private/operator/hormuz-restored.json backup-restore \
   --key-file /tmp/hormuz-backup.key \
   --archive-file /tmp/hormuz-offsite-001.hzb
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-restored.json recovery-check
+python -I -m hormuz.hosted --config /var/lib/hormuz/private/operator/hormuz-restored.json recovery-check
 ```
 
 Archive restore authenticates before writing plaintext, verifies the original

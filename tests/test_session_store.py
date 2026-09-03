@@ -172,6 +172,86 @@ class SessionStoreTests(unittest.TestCase):
                 trusted_parent_path=base / "revoked-parent",
             )
 
+    @unittest.skipIf(os.name == "nt", "POSIX directory ownership and mode check")
+    def test_trusted_parent_path_requires_an_owner_only_boundary(self) -> None:
+        base = Path(self.temporary.name)
+        trusted_parent = base / "trusted-state-parent"
+        trusted_parent.mkdir(mode=0o700)
+        database_parent = trusted_parent / "sessions"
+        database_parent.mkdir(mode=0o770)
+        candidate = database_parent / "sessions.sqlite3"
+        trusted_parent.chmod(0o750)
+        try:
+            with self.assertRaisesRegex(SessionStoreError, "session_store_insecure_parent"):
+                SQLiteSessionStore(
+                    candidate,
+                    master_key=b"m" * 32,
+                    audience="https://gateway.example",
+                    access_ttl_seconds=600,
+                    absolute_ttl_seconds=43_200,
+                    enrollment_ttl_seconds=300,
+                    trusted_parent_path=trusted_parent,
+                )
+        finally:
+            trusted_parent.chmod(0o700)
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory ownership and mode check")
+    def test_trusted_parent_path_must_cover_group_writable_runtime_ancestors(self) -> None:
+        base = Path(self.temporary.name)
+        runtime_root = base / "runtime-root"
+        runtime_root.mkdir(mode=0o700)
+        mounted_disk = runtime_root / "mounted-disk"
+        mounted_disk.mkdir(mode=0o770)
+        database_parent = mounted_disk / "state"
+        database_parent.mkdir(mode=0o770)
+        candidate = database_parent / "sessions.sqlite3"
+        store = SQLiteSessionStore(
+            candidate,
+            master_key=b"m" * 32,
+            audience="https://gateway.example",
+            access_ttl_seconds=600,
+            absolute_ttl_seconds=43_200,
+            enrollment_ttl_seconds=300,
+            trusted_parent_path=runtime_root,
+        )
+        self.assertEqual(store.check_available(), None)
+
+        outside_boundary = base / "outside-boundary"
+        outside_boundary.mkdir(mode=0o700)
+        with self.assertRaisesRegex(SessionStoreError, "session_store_insecure_parent"):
+            SQLiteSessionStore(
+                candidate,
+                master_key=b"m" * 32,
+                audience="https://gateway.example",
+                access_ttl_seconds=600,
+                absolute_ttl_seconds=43_200,
+                enrollment_ttl_seconds=300,
+                trusted_parent_path=outside_boundary,
+            )
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory ownership and mode check")
+    def test_group_writable_ancestor_outside_trusted_boundary_is_refused(self) -> None:
+        base = Path(self.temporary.name)
+        mount_root = base / "group-writable-mount"
+        mount_root.mkdir(mode=0o770)
+        trusted_parent = mount_root / "private"
+        trusted_parent.mkdir(mode=0o700)
+        database_parent = trusted_parent / "state"
+        database_parent.mkdir(mode=0o770)
+        mount_root.chmod(0o770)
+        database_parent.chmod(0o770)
+        candidate = database_parent / "sessions.sqlite3"
+        with self.assertRaisesRegex(SessionStoreError, "session_store_insecure_parent"):
+            SQLiteSessionStore(
+                candidate,
+                master_key=b"m" * 32,
+                audience="https://gateway.example",
+                access_ttl_seconds=600,
+                absolute_ttl_seconds=43_200,
+                enrollment_ttl_seconds=300,
+                trusted_parent_path=trusted_parent,
+            )
+
     def test_refresh_rotates_both_credentials_and_replay_revokes_family(self) -> None:
         first = self.store.redeem_enrollment(
             enrollment_id=self._authorized_enrollment(),

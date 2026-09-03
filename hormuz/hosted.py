@@ -261,6 +261,7 @@ def main(argv=None) -> int:
                 access_ttl_seconds=session_settings.access_ttl_seconds,
                 absolute_ttl_seconds=session_settings.absolute_ttl_seconds,
                 enrollment_ttl_seconds=session_settings.enrollment_ttl_seconds,
+                trusted_parent_path=session_settings.trusted_parent_path,
             )
             organization_ids = tuple(sorted(
                 set(config.organization_ids).union(

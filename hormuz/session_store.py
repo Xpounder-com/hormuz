@@ -744,6 +744,7 @@ class SQLiteSessionStore:
                 trusted_parent_path,
                 trusted_parent_path.resolve(),
             )
+        boundary_seen = False
         while True:
             try:
                 metadata = os.lstat(current)
@@ -756,6 +757,7 @@ class SQLiteSessionStore:
                 if current == candidate:
                     is_boundary = True
                     in_trusted_zone = True
+                    boundary_seen = True
                 elif current.is_relative_to(candidate):
                     in_trusted_zone = True
             if stat.S_ISLNK(metadata.st_mode):
@@ -764,12 +766,8 @@ class SQLiteSessionStore:
                 if is_boundary:
                     insecure = (
                         not stat.S_ISDIR(metadata.st_mode)
-                        or metadata.st_mode & stat.S_IWOTH
+                        or metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
                         or not trusted_owner
-                        or (
-                            metadata.st_mode & stat.S_IWGRP
-                            and not metadata.st_mode & stat.S_ISGID
-                        )
                     )
                 else:
                     insecure = (
@@ -781,6 +779,8 @@ class SQLiteSessionStore:
             if insecure:
                 raise SessionStoreError("session_store_insecure_parent")
             if current.parent == current:
+                if trusted_parent_path is not None and not boundary_seen:
+                    raise SessionStoreError("session_store_insecure_parent")
                 return
             current = current.parent
 

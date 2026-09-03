@@ -186,6 +186,7 @@ class HostedProviderConfigTests(unittest.TestCase):
             "public_origin": "https://hormuz-test.onrender.com",
             "oidc_issuer": "https://hormuz-test.okta.com/oauth2/default",
             "state_directory": str(render_state),
+            "trusted_parent_path": str(Path("/var/lib/hormuz").resolve()),
         })
         self.staging.source_path.write_text(json.dumps(hosted_document))
         self.staging.source_path.chmod(0o600)
@@ -194,7 +195,7 @@ class HostedProviderConfigTests(unittest.TestCase):
         render_document["authentication"]["session_broker"].update({
             "public_base_url": hosted_document["public_origin"],
             "database": str(render_state / "sessions.sqlite3"),
-            "trusted_parent_path": str(render_state),
+            "trusted_parent_path": str(Path("/var/lib/hormuz").resolve()),
         })
         render_document["authentication"]["oidc"]["issuers"][0]["issuer"] = hosted_document[
             "oidc_issuer"
