@@ -134,8 +134,8 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
             ):
                 verifier.verify_finance_collection_transition_plan(ROOT)
         for inventory in (
-            (145, verifier.PREDECESSOR_RUNTIME_TREE_SHA256),
-            (144, "0" * 64),
+            (146, verifier.PREDECESSOR_RUNTIME_TREE_SHA256),
+            (145, "0" * 64),
         ):
             with self.subTest(inventory=inventory), mock.patch.object(
                 verifier,
@@ -147,6 +147,33 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
                     "finance_collection_runtime_inventory_invalid",
                 ):
                     verifier.verify_finance_collection_transition_plan(ROOT)
+
+    def test_runtime_inventory_hashes_non_code_and_unknown_suffix_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            package = Path(temporary) / "hormuz"
+            package.mkdir()
+            (package / "runtime.py").write_bytes(b"SYNTHETIC_CODE\n")
+            stylesheet = package / "console.css"
+            stylesheet.write_bytes(b"SYNTHETIC_STYLE_A\n")
+            opaque = package / "runtime.asset"
+            opaque.write_bytes(b"SYNTHETIC_ASSET\n")
+
+            count, first_digest = verifier._runtime_inventory(Path(temporary))
+            self.assertEqual(count, 3)
+
+            stylesheet.write_bytes(b"SYNTHETIC_STYLE_B\n")
+            changed_count, changed_digest = verifier._runtime_inventory(
+                Path(temporary)
+            )
+            self.assertEqual(changed_count, 3)
+            self.assertNotEqual(first_digest, changed_digest)
+
+            (package / "another.unknown").write_bytes(b"SYNTHETIC_EXTRA\n")
+            extra_count, extra_digest = verifier._runtime_inventory(
+                Path(temporary)
+            )
+            self.assertEqual(extra_count, 4)
+            self.assertNotEqual(changed_digest, extra_digest)
 
     def test_profiles_freeze_provider_paths_units_and_private_dimensions(self):
         profiles = self.contract()["collection_profiles"]
@@ -166,6 +193,10 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         self.assertEqual(
             profiles["openai.organization-costs.v1"]["group_by"],
             ["project_id", "line_item", "api_key_id"],
+        )
+        self.assertIn(
+            "exact_provider_native_decimal",
+            profiles["openai.organization-costs.v1"]["quantity"],
         )
         self.assertEqual(
             profiles["anthropic.organization-costs.v1"]["path"],
@@ -229,6 +260,7 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         self.assertFalse(observation["request_final"])
         self.assertFalse(observation["team_or_employee_final"])
         self.assertIn("no_binary_float", observation["money"])
+        self.assertIn("unknown_not_zero", observation["native_quantity"])
         self.assertIn("preserve_sign", observation["signed_amounts"])
         self.assertIn("never_zero", observation["null"])
         self.assertIn("never_dropped_or_allocated", observation["unclassified_cost"])
@@ -251,6 +283,22 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
                 "normalized_nonzero_exponent_minimum": -18,
                 "normalized_nonzero_exponent_maximum": 17,
                 "provider_native_and_canonical_major_value_must_each_fit": True,
+                "rounding": "forbidden",
+            },
+        )
+        self.assertEqual(
+            numeric["provider_quantity"],
+            {
+                "type": "finite_exact_decimal",
+                "minimum_exclusive": "-1000000000000000000",
+                "maximum_exclusive": "1000000000000000000",
+                "maximum_integer_digits": 18,
+                "maximum_fractional_digits": 18,
+                "maximum_significant_digits": 36,
+                "normalized_nonzero_exponent_minimum": -18,
+                "normalized_nonzero_exponent_maximum": 17,
+                "provider_native_value_must_fit": True,
+                "unit_handling": "retain_allowlisted_quantity_unit_or_null_no_conversion",
                 "rounding": "forbidden",
             },
         )
@@ -425,21 +473,21 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
             verify_installed_runtime,
         )
 
-        source = b"SYNTHETIC_SOURCE_ONLY\n"
+        source = b"SYNTHETIC_NON_CODE_RUNTIME_ASSET\n"
         for mutation in ("none", "changed", "missing", "extra"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 if mutation != "missing":
-                    (root / "example.py").write_bytes(
+                    (root / "console.css").write_bytes(
                         source if mutation != "changed" else b"SYNTHETIC_CHANGED\n"
                     )
                 if mutation == "extra":
-                    (root / "unexpected.py").write_bytes(source)
+                    (root / "unexpected.runtime-asset").write_bytes(source)
                 stream = io.BytesIO()
                 with tarfile.open(fileobj=stream, mode="w") as archive:
                     member = tarfile.TarInfo(
                         verifier.PREDECESSOR_ARCHIVE_PREFIX
-                        + "hormuz/example.py"
+                        + "hormuz/console.css"
                     )
                     member.size = len(source)
                     archive.addfile(member, io.BytesIO(source))

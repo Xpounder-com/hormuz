@@ -55,6 +55,7 @@
       "identity_handling": "project_id_and_api_key_id_become_tenant_keyed_fingerprints",
       "free_text_handling": "discard_line_item_after_bounded_known_classification_and_tenant_keyed_fingerprint_never_store_or_display_raw_text",
       "amount": "exact_major_currency_decimal_preserve_source_text_and_sign",
+      "quantity": "exact_provider_native_decimal_preserve_source_text_and_sign_with_allowlisted_quantity_unit_or_null_and_no_unit_conversion",
       "time": "inclusive_start_exclusive_end_UTC_unix_seconds",
       "pagination": "has_more_and_next_page"
     },
@@ -183,6 +184,7 @@
     "request_final": false,
     "team_or_employee_final": false,
     "money": "exact_numeric_domain_below_no_binary_float_rounding_or_implicit_currency_conversion",
+    "native_quantity": "retain_bounded_exact_provider_quantity_and_allowlisted_unit_or_null_without_conversion_absence_is_unknown_not_zero",
     "signed_amounts": "preserve_sign_unknown_negative_or_positive_rows_remain_unclassified_not_guessed_credit_or_discount",
     "null": "unknown_or_not_returned_never_zero",
     "zero": "provider_explicitly_reported_zero",
@@ -204,6 +206,19 @@
       "normalized_nonzero_exponent_minimum": -18,
       "normalized_nonzero_exponent_maximum": 17,
       "provider_native_and_canonical_major_value_must_each_fit": true,
+      "rounding": "forbidden"
+    },
+    "provider_quantity": {
+      "type": "finite_exact_decimal",
+      "minimum_exclusive": "-1000000000000000000",
+      "maximum_exclusive": "1000000000000000000",
+      "maximum_integer_digits": 18,
+      "maximum_fractional_digits": 18,
+      "maximum_significant_digits": 36,
+      "normalized_nonzero_exponent_minimum": -18,
+      "normalized_nonzero_exponent_maximum": 17,
+      "provider_native_value_must_fit": true,
+      "unit_handling": "retain_allowlisted_quantity_unit_or_null_no_conversion",
       "rounding": "forbidden"
     },
     "usage_count": {
@@ -279,7 +294,7 @@
     "maximum_retry_delay_seconds": 5,
     "concurrent_collections_per_process": 4,
     "http": "401_and_403_never_retry_429_5xx_and_transient_network_retry_only_within_deadline_retry_after_bound",
-    "parser": "reject_duplicate_members_nonfinite_out_of_numeric_domain_or_overprecision_amounts_and_counts_before_digest_repeated_cursors_inconsistent_buckets_out_of_window_records_unsafe_dimensions_invalid_unicode_and_conflicting_duplicates",
+    "parser": "reject_duplicate_members_nonfinite_out_of_numeric_domain_or_overprecision_amounts_quantities_and_counts_before_digest_repeated_cursors_inconsistent_buckets_out_of_window_records_unsafe_dimensions_invalid_unicode_and_conflicting_duplicates",
     "diagnostics": "fixed_content_free_codes_only_no_response_body_exception_text_provider_text_identifier_or_secret",
     "coverage_on_failure": "explicit_failed_or_stale_gap_never_success_or_zero"
   },

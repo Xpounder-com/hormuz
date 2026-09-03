@@ -757,7 +757,7 @@ class SQLiteFinanceCollectionExactPredecessorTests(unittest.TestCase):
         request = {"backend": "sqlite", "path": str(self.path)}
         self.assertEqual(
             finance_collection_predecessor_call(request),
-            {"status": "ready", "runtime_files_verified": 144},
+            {"status": "ready", "runtime_files_verified": 145},
         )
         SQLiteFinanceCollectionTransitionTests.probe(self)
         self.assertEqual(

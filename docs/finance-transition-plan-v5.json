@@ -20,8 +20,8 @@
     "archive_kind": "deterministic_git_snapshot_not_published_release",
     "archive_prefix": "hormuz-finance-native-runtime-baseline/",
     "archive_tar_umask": "0000",
-    "verified_runtime_file_count": 144,
-    "runtime_tree_sha256": "00b01cf3347f9fcaa482778513b0415eb81c30a21e8fee1d0232390bb94fda32",
+    "verified_runtime_file_count": 145,
+    "runtime_tree_sha256": "163b8ebec0a519f2d07b7c2b2b53a169f69eb0abef6122ee91b6194a2df21b2a",
     "sqlite_schema_version": 11,
     "postgresql_schema_version": 15,
     "accepted_features": [
@@ -48,7 +48,7 @@
     "collection_contract": {
       "path": "docs/finance-collection-contract-v1.json",
       "schema_version": 1,
-      "canonical_sha256": "1eeb1931fa00f50657f524ac088e1fc886fe6535e9d37f67a6fcfafa1926a61f"
+      "canonical_sha256": "c32eeab34af806bd18cbedf77bbf91b0e30b4b369300b7ba01159701ced0760e"
     }
   },
   "transitions": {

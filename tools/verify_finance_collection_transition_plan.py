@@ -27,8 +27,8 @@ from tools.verify_finance_transition_plan import (
 PLAN_PATH = "docs/finance-transition-plan-v5.json"
 CONTRACT_PATH = "docs/finance-collection-contract-v1.json"
 SOURCE_CONTRACT_PATH = "docs/finance-source-contract-v1.json"
-PLAN_CANONICAL_SHA256 = "dacc88a9b1b822018730c59020cbfee82153920edb05bad5fda954d4760748fa"
-CONTRACT_CANONICAL_SHA256 = "1eeb1931fa00f50657f524ac088e1fc886fe6535e9d37f67a6fcfafa1926a61f"
+PLAN_CANONICAL_SHA256 = "ab8b05ac20b26259aa892a98ef2414469d777e52485ae0a75d4e6021251becb6"
+CONTRACT_CANONICAL_SHA256 = "c32eeab34af806bd18cbedf77bbf91b0e30b4b369300b7ba01159701ced0760e"
 SOURCE_CONTRACT_CANONICAL_SHA256 = "290def8f2cd7026d4e0f0512db9254906f8592a026ee4beb9cac3623d7a1d9f4"
 AUDIT_SOURCE_SCHEMAS = {
     "hormuz.finance-source-binding-version": {
@@ -62,12 +62,11 @@ PLANNED_TABLES = (
 PREDECESSOR_SOURCE_COMMIT = "cf30256760b68b133208b4013bdd31b22639b172"
 PREDECESSOR_ARCHIVE_SHA256 = "35cecfb4dbb1b4a972a4f43a30941e91e38c049636bd98cc4869cb145c65d1da"
 PREDECESSOR_ARCHIVE_PREFIX = "hormuz-finance-native-runtime-baseline/"
-PREDECESSOR_RUNTIME_FILE_COUNT = 144
-PREDECESSOR_RUNTIME_TREE_SHA256 = "00b01cf3347f9fcaa482778513b0415eb81c30a21e8fee1d0232390bb94fda32"
+PREDECESSOR_RUNTIME_FILE_COUNT = 145
+PREDECESSOR_RUNTIME_TREE_SHA256 = "163b8ebec0a519f2d07b7c2b2b53a169f69eb0abef6122ee91b6194a2df21b2a"
 MAX_JSON_BYTES = 256 * 1024
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_RUNTIME_FILE_BYTES = 2 * 1024 * 1024
-RUNTIME_SUFFIXES = frozenset({".py", ".json", ".sql", ".so", ".pyd"})
 REQUIRED_FILES = (
     PLAN_PATH,
     CONTRACT_PATH,
@@ -170,12 +169,13 @@ def verify_predecessor_archive(path: Path) -> None:
 def _runtime_inventory(root: Path) -> tuple[int, str]:
     package = root / "hormuz"
     try:
+        # Every package file is evidence. Suffix filtering would omit runtime
+        # assets such as console.css and make the predecessor pin incomplete.
         files = [
             path
             for path in package.rglob("*")
             if path.is_file()
             and "__pycache__" not in path.parts
-            and path.suffix in RUNTIME_SUFFIXES
         ]
         entries = []
         package_root = package.resolve()
@@ -247,6 +247,7 @@ def verify_finance_collection_transition_plan(
         observation = contract["observation"]
         numeric_domains = contract["numeric_domains"]
         money_domain = numeric_domains["money"]
+        quantity_domain = numeric_domains["provider_quantity"]
         usage_count_domain = numeric_domains["usage_count"]
         coverage_count_domain = numeric_domains[
             "coverage_observation_count"
@@ -313,6 +314,19 @@ def verify_finance_collection_transition_plan(
                 "normalized_nonzero_exponent_minimum": -18,
                 "normalized_nonzero_exponent_maximum": 17,
                 "provider_native_and_canonical_major_value_must_each_fit": True,
+                "rounding": "forbidden",
+            }
+            or quantity_domain != {
+                "type": "finite_exact_decimal",
+                "minimum_exclusive": "-1000000000000000000",
+                "maximum_exclusive": "1000000000000000000",
+                "maximum_integer_digits": 18,
+                "maximum_fractional_digits": 18,
+                "maximum_significant_digits": 36,
+                "normalized_nonzero_exponent_minimum": -18,
+                "normalized_nonzero_exponent_maximum": 17,
+                "provider_native_value_must_fit": True,
+                "unit_handling": "retain_allowlisted_quantity_unit_or_null_no_conversion",
                 "rounding": "forbidden",
             }
             or usage_count_domain != {

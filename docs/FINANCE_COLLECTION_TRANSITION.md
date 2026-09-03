@@ -66,7 +66,10 @@ from zero through `2^63 - 1`; and provider-native and canonical money values
 must each be finite, exact, strictly between `-10^18` and `10^18`, with at most
 18 integer digits, 18 fractional digits, and 36 significant digits. Booleans,
 out-of-range derived sums, exponent values outside the normalized `-18..17`
-range, and any required rounding fail closed.
+range, and any required rounding fail closed. OpenAI cost `quantity` is also an
+exact provider-native decimal under those same magnitude, precision, scale, and
+exponent limits. Its allowlisted unit or null is retained separately without
+unit conversion; an absent quantity remains unknown rather than zero.
 
 Only a complete page chain can publish. The snapshot, exact bucket-coverage
 rows, typed observations, receipt, append-only terminal attempt event, and
@@ -167,9 +170,9 @@ The exact predecessor is protected merged main
 `cf30256760b68b133208b4013bdd31b22639b172`, archived deterministically with
 prefix `hormuz-finance-native-runtime-baseline/`, umask `0000`, and SHA-256
 `35cecfb4dbb1b4a972a4f43a30941e91e38c049636bd98cc4869cb145c65d1da`.
-It runs SQLite 11 and PostgreSQL 15 and contains 144 verified runtime files
-whose canonical path-and-byte digest is
-`00b01cf3347f9fcaa482778513b0415eb81c30a21e8fee1d0232390bb94fda32`.
+It runs SQLite 11 and PostgreSQL 15 and contains 145 verified runtime files,
+including every packaged non-code asset, whose canonical path-and-byte digest
+is `163b8ebec0a519f2d07b7c2b2b53a169f69eb0abef6122ee91b6194a2df21b2a`.
 
 The preflight must prove that the current runtime tree matches those exact
 predecessor bytes, the absent 12/16 migrations fail without partial state,

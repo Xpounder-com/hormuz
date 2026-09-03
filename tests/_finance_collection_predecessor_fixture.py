@@ -17,8 +17,8 @@ from urllib.parse import unquote, urlsplit
 SOURCE_COMMIT = "cf30256760b68b133208b4013bdd31b22639b172"
 ARCHIVE_SHA256 = "35cecfb4dbb1b4a972a4f43a30941e91e38c049636bd98cc4869cb145c65d1da"
 ARCHIVE_PREFIX = "hormuz-finance-native-runtime-baseline/"
-RUNTIME_FILE_COUNT = 144
-RUNTIME_TREE_SHA256 = "00b01cf3347f9fcaa482778513b0415eb81c30a21e8fee1d0232390bb94fda32"
+RUNTIME_FILE_COUNT = 145
+RUNTIME_TREE_SHA256 = "163b8ebec0a519f2d07b7c2b2b53a169f69eb0abef6122ee91b6194a2df21b2a"
 
 
 def verify_installed_runtime(source_tar, package_root):
@@ -26,12 +26,13 @@ def verify_installed_runtime(source_tar, package_root):
 
     prefix = ARCHIVE_PREFIX + "hormuz/"
     try:
+        # Compare every package file, including non-code runtime assets.
         expected = {}
         for member in source_tar.getmembers():
             if not member.name.startswith(prefix):
                 continue
             relative = Path(member.name[len(prefix):])
-            if relative.suffix not in {".py", ".json", ".sql"}:
+            if member.isdir():
                 continue
             if (
                 not member.isfile()
@@ -48,7 +49,7 @@ def verify_installed_runtime(source_tar, package_root):
             path.relative_to(package_root)
             for path in package_root.rglob("*")
             if path.is_file()
-            and path.suffix in {".py", ".json", ".sql", ".so", ".pyd"}
+            and "__pycache__" not in path.parts
         }
         if len(expected) != RUNTIME_FILE_COUNT or actual != set(expected):
             raise RuntimeError("finance_collection_predecessor_runtime_mismatch")

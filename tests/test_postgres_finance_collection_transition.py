@@ -839,7 +839,7 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
     def test_exact_predecessor_accepts_current_and_refuses_newer_and_partial(self):
         self.assertEqual(
             finance_collection_predecessor_call(self.request()),
-            {"status": "ready", "runtime_files_verified": 144},
+            {"status": "ready", "runtime_files_verified": 145},
         )
         self.probe()
         self.assertEqual(
