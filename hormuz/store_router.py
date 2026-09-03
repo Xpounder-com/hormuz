@@ -8,6 +8,7 @@ from typing import Generic, Mapping, Protocol, TypeVar
 
 from ._persistence import (
     ProviderReliabilityRepository,
+    ProviderReliabilityTotals,
     RequestAttempt,
     ReservationScope,
     UsageRepository,
@@ -15,6 +16,11 @@ from ._persistence import (
     WorkBudgetRequestRepository,
 )
 from .config import GatewayConfig, Identity
+from .finance_attempts import (
+    ConfiguredRateCardBinding,
+    ConfiguredRouteEstimate,
+    NativeUsageObservation,
+)
 from .postgres import PostgresConnectionPool, PostgresStorageError
 from .postgres_usage_store import PostgresUsageStore
 from .provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
@@ -79,7 +85,8 @@ class _ProviderReliabilityBegin(Protocol):
         reserved_cost_microusd: int,
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
-        provider_failover: ProviderFailoverContext,
+        provider_failover: ProviderFailoverContext | None,
+        configured_rate_card: ConfiguredRateCardBinding | None = None,
     ) -> RequestAttempt: ...
 
 
@@ -99,6 +106,8 @@ class _ProviderReliabilityFinalize(Protocol):
         cost_microusd: int = 0,
         provider_request_id: str | None = None,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
+        configured_estimate: ConfiguredRouteEstimate | None = None,
     ) -> None: ...
 
 
@@ -110,7 +119,17 @@ class _ProviderReliabilityMarkUnknown(Protocol):
         organization_id: str,
         reason_code: str,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
     ) -> bool: ...
+
+
+class _ProviderReliabilityTotalsRead(Protocol):
+    def __call__(
+        self,
+        *,
+        actor_id: str,
+        organization_id: str,
+    ) -> ProviderReliabilityTotals: ...
 
 
 @dataclass(frozen=True, repr=False)
@@ -164,6 +183,7 @@ class ProviderReliabilityAdapter:
     _begin: _ProviderReliabilityBegin
     _finalize: _ProviderReliabilityFinalize
     _mark_unknown: _ProviderReliabilityMarkUnknown
+    _read_totals: _ProviderReliabilityTotalsRead
 
     def begin_request_attempt(
         self,
@@ -183,7 +203,8 @@ class ProviderReliabilityAdapter:
         reserved_cost_microusd: int,
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
-        provider_failover: ProviderFailoverContext,
+        provider_failover: ProviderFailoverContext | None,
+        configured_rate_card: ConfiguredRateCardBinding | None = None,
     ) -> RequestAttempt:
         return self._begin(
             identity=identity,
@@ -202,6 +223,7 @@ class ProviderReliabilityAdapter:
             ttl_seconds=ttl_seconds,
             work_budget=work_budget,
             provider_failover=provider_failover,
+            configured_rate_card=configured_rate_card,
         )
 
     def finalize_request_attempt(
@@ -219,6 +241,8 @@ class ProviderReliabilityAdapter:
         cost_microusd: int = 0,
         provider_request_id: str | None = None,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
+        configured_estimate: ConfiguredRouteEstimate | None = None,
     ) -> None:
         self._finalize(
             attempt=attempt,
@@ -233,6 +257,8 @@ class ProviderReliabilityAdapter:
             cost_microusd=cost_microusd,
             provider_request_id=provider_request_id,
             provider_metrics=provider_metrics,
+            finance_observation=finance_observation,
+            configured_estimate=configured_estimate,
         )
 
     def mark_request_attempt_outcome_unknown(
@@ -242,12 +268,25 @@ class ProviderReliabilityAdapter:
         organization_id: str,
         reason_code: str,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
     ) -> bool:
         return self._mark_unknown(
             attempt=attempt,
             organization_id=organization_id,
             reason_code=reason_code,
             provider_metrics=provider_metrics,
+            finance_observation=finance_observation,
+        )
+
+    def totals(
+        self,
+        *,
+        actor_id: str,
+        organization_id: str,
+    ) -> ProviderReliabilityTotals:
+        return self._read_totals(
+            actor_id=actor_id,
+            organization_id=organization_id,
         )
 
 
@@ -281,12 +320,14 @@ def create_provider_reliability_repository(
             usage._begin_request_attempt_with_work_budget,
             usage._finalize_request_attempt_with_provider_metrics,
             usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
+            usage._provider_reliability_totals,
         )
     if type(usage) is PostgresUsageStore:
         return ProviderReliabilityAdapter(
             usage._begin_request_attempt_with_work_budget,
             usage._finalize_request_attempt_with_provider_metrics,
             usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
+            usage._provider_reliability_totals,
         )
     return None
 
@@ -297,8 +338,14 @@ def create_usage_store(
     environ: Mapping[str, str] | None = None,
     connection_pool: PostgresConnectionPool | None = None,
     read_only: bool = False,
+    organization_ids: tuple[str, ...] | None = None,
 ) -> UsageRepository:
-    """Return the configured store, never placing a PostgreSQL DSN in config."""
+    """Return the configured store, never placing a PostgreSQL DSN in config.
+
+    ``organization_ids`` lets an authenticated server-local directory provide
+    the PostgreSQL tenant allowlist when identities are enrolled dynamically.
+    Omitting it preserves the immutable configuration-owned allowlist.
+    """
 
     storage = config.usage_storage
     audit_chain_maximum_anchor_age_seconds = (
@@ -319,7 +366,9 @@ def create_usage_store(
         raise PostgresStorageError("postgres_dsn_unavailable")
     return PostgresUsageStore(
         dsn,
-        organization_ids=config.organization_ids,
+        organization_ids=(
+            config.organization_ids if organization_ids is None else organization_ids
+        ),
         schema=storage.postgres_schema,
         runtime_role=storage.postgres_runtime_role,
         connection_pool=connection_pool,
@@ -334,6 +383,7 @@ def create_repository_bundle(
     environ: Mapping[str, str] | None = None,
     connection_pool: PostgresConnectionPool | None = None,
     read_only: bool = False,
+    usage_organization_ids: tuple[str, ...] | None = None,
 ) -> RepositoryBundle[RepositoryT]:
     """Compose an explicitly supplied owner beside the unchanged v1 usage ledger.
 
@@ -346,9 +396,21 @@ def create_repository_bundle(
     The legacy create_usage_store path does not call this composition helper.
     """
 
-    usage = create_usage_store(
-        config, environ=environ, connection_pool=connection_pool, read_only=read_only,
-    )
+    if usage_organization_ids is None:
+        usage = create_usage_store(
+            config,
+            environ=environ,
+            connection_pool=connection_pool,
+            read_only=read_only,
+        )
+    else:
+        usage = create_usage_store(
+            config,
+            environ=environ,
+            connection_pool=connection_pool,
+            read_only=read_only,
+            organization_ids=usage_organization_ids,
+        )
     portfolio = portfolio_factory(
         config, environ=environ, connection_pool=connection_pool, read_only=read_only,
     )

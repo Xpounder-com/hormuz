@@ -22,6 +22,11 @@ from .audit_chain import (
     audit_chain_checkpoint_position,
 )
 from .config import Identity
+from .finance_attempts import (
+    ConfiguredRateCardBinding,
+    ConfiguredRouteEstimate,
+    NativeUsageObservation,
+)
 from .provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -78,6 +83,24 @@ class SecretTotals:
     detections: int = 0
     redacted_requests: int = 0
     denied_requests: int = 0
+
+
+@dataclass(frozen=True)
+class ProviderReliabilityTotals:
+    """Content-free reliability evidence scoped to one actor and tenant."""
+
+    attempt_count: int = 0
+    provider_attempt_record_count: int = 0
+    latency_header_sample_count: int = 0
+    latency_first_body_byte_sample_count: int = 0
+    latency_total_sample_count: int = 0
+    failover_link_record_count: int = 0
+    outcome_unknown_count: int = 0
+    cancellation_outcome_unknown_count: int = 0
+
+    @property
+    def live_provider_request_count(self) -> int:
+        return max(0, self.attempt_count - self.failover_link_record_count)
 
 
 @dataclass(frozen=True)
@@ -175,7 +198,8 @@ class ProviderReliabilityRepository(Protocol):
         reserved_cost_microusd: int,
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
-        provider_failover: ProviderFailoverContext,
+        provider_failover: ProviderFailoverContext | None,
+        configured_rate_card: ConfiguredRateCardBinding | None = None,
     ) -> RequestAttempt: ...
 
     def finalize_request_attempt(
@@ -193,6 +217,8 @@ class ProviderReliabilityRepository(Protocol):
         cost_microusd: int = 0,
         provider_request_id: str | None = None,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
+        configured_estimate: ConfiguredRouteEstimate | None = None,
     ) -> None: ...
 
     def mark_request_attempt_outcome_unknown(
@@ -202,7 +228,15 @@ class ProviderReliabilityRepository(Protocol):
         organization_id: str,
         reason_code: str,
         provider_metrics: ProviderAttemptMetrics,
+        finance_observation: NativeUsageObservation | None = None,
     ) -> bool: ...
+
+    def totals(
+        self,
+        *,
+        actor_id: str,
+        organization_id: str,
+    ) -> ProviderReliabilityTotals: ...
 
 
 @dataclass(frozen=True)

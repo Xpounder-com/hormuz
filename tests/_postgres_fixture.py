@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from hormuz._finance_schema import TABLE_DDL as FINANCE_TABLES
 from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
 from hormuz._portfolio_schema import TABLE_DDL as REGISTRY_TABLES
 from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_RELIABILITY_TABLES
+from hormuz._finance_attempt_schema import FINANCE_ATTEMPT_TABLE
 from hormuz.config import GatewayConfig, Identity, PostgresPoolConfig
 from hormuz.policy_control import PolicyControlService
 from hormuz.postgres import (
@@ -30,6 +32,43 @@ from hormuz.postgres_usage_store import PostgresUsageStore
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "contracts"
+
+
+def without_finance_attempt_successor(snapshot: dict[str, object]) -> dict[str, object]:
+    """Normalize schema-15 additions for older cumulative transition proofs."""
+
+    normalized = copy.deepcopy(snapshot)
+    rows = normalized["rows"]
+    assert isinstance(rows, dict)
+    rows.pop(FINANCE_ATTEMPT_TABLE, None)
+    attempts = rows.get("gateway_request_attempts")
+    if isinstance(attempts, list):
+        stripped = []
+        for item in attempts:
+            value = json.loads(item[0])
+            for column in (
+                "configured_rate_card_state",
+                "configured_rate_card_id",
+                "configured_rate_card_version",
+                "configured_rate_card_digest",
+                "configured_rate_card_currency",
+            ):
+                value.pop(column, None)
+            stripped.append((json.dumps(value, ensure_ascii=False, separators=(",", ":")),))
+        rows["gateway_request_attempts"] = stripped
+    migrations = rows.get("hormuz_schema_migrations")
+    if isinstance(migrations, list):
+        rows["hormuz_schema_migrations"] = [
+            item for item in migrations if json.loads(item[0])["version"] != 15
+        ]
+    shape = normalized["shape"]
+    assert isinstance(shape, list)
+    normalized["shape"] = [
+        item for item in shape
+        if not str(item[0]).startswith("gateway_finance_attempt_")
+        and item[0] != "gateway_request_attempt_event_organization_id"
+    ]
+    return normalized
 
 
 class _BlockingReplicaBudgetProviderHandler(BaseHTTPRequestHandler):
@@ -274,10 +313,12 @@ class PostgresTestCase(unittest.TestCase):
                 additive_tables = tuple(table for table in (
                     *REGISTRY_TABLES, *ATTRIBUTION_TABLES, *OUTCOME_TABLES,
                     *FINANCE_TABLES, *BUDGET_TABLES, *PROVIDER_RELIABILITY_TABLES,
+                    FINANCE_ATTEMPT_TABLE,
                 ) if table in present)
                 immutable_tables = tuple(table for table in (
                     *ATTRIBUTION_TABLES, *OUTCOME_TABLES, *FINANCE_TABLES,
                     *BUDGET_TABLES, *PROVIDER_RELIABILITY_TABLES,
+                    FINANCE_ATTEMPT_TABLE,
                 ) if table in present)
                 # This class owns its unique disposable schema. Reset the exact
                 # FK-connected fixture tables together; never truncate a shared

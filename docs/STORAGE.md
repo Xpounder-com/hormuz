@@ -449,7 +449,8 @@ non-owner roles (runtime, policy-control, custody-control, and custody-executor)
 applies Hormuz's normal PostgreSQL migrations to the source, and seeds only
 fixed two-tenant metadata: one usage record, one secret-egress record, one
 active budget reservation, one `outcome_unknown` request attempt with its
-retained reservation, and one managed-policy lifecycle per tenant. No
+retained reservation and finance-attempt sidecar, and one managed-policy
+lifecycle per tenant. No
 provider call, customer database, customer role, prompt, response, secret
 value, or provider credential is used.
 
@@ -460,12 +461,13 @@ is then restored into a clean recovery database. The verifier uses the
 restricted runtime and policy-control roles to require the migration ledger,
 tenant-scoped repository behavior, active policy versions, active budget
 reservations (including uncertain attempt holds), request-attempt event state,
-and RLS denial without an organization context. It computes a
+finance-attempt evidence plus its audit-chain entry, and RLS denial without an
+organization context. It computes a
 SHA-256 state fingerprint over the restored metadata in memory and requires it
 to exactly match the source before writing evidence.
 
 Only `summary.json` is retained. It is schema-versioned as
-`hormuz.postgresql-recovery-drill-summary` v1 and contains the pinned database
+`hormuz.postgresql-recovery-drill-summary` v2 and contains the pinned database
 image/version, custom-dump checksum and byte count, content-free state
 fingerprints/counts, passed checks, and measured durations. It contains no
 connection string, role, database name, policy document, event row, or dump.
@@ -560,6 +562,23 @@ This is a **single disposable database interruption/restart proof**. It does
 not establish production database failover, HA, automatic promotion,
 multi-instance coordination, production RPO/RTO, customer topology, automatic
 provider replay, or an incident-response program.
+
+### SQLite schema v11 / PostgreSQL schema v15 attempt finance evidence
+
+The native-attempt finance migration adds one append-only,
+tenant-qualified `gateway_finance_attempt_evidence` row for every new terminal
+provider attempt and five immutable configured-rate binding columns on the
+attempt root. PostgreSQL forces RLS and grants its runtime role only select and
+insert. SQLite enforces the same tenant/link/cardinality invariants with
+foreign keys, unique keys, and mutation guards.
+
+The sidecar is a reviewed commit-audit-chain version-2 source. SQLite 11
+transactionally rebuilds the historical entry table to add source identity
+columns while copying every old entry unchanged. PostgreSQL 15 extends the
+existing finite source constraint and security-definer guard by exactly
+`hormuz.finance-attempt-evidence` version 1; arbitrary source JSON remains
+rejected. Pre-migration attempts keep explicit legacy coverage and are not
+backfilled or repriced.
 
 ## Failure behavior
 

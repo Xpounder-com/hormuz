@@ -1,14 +1,15 @@
 # Provider reliability: streaming, latency, and bounded failover
 
-This source-development slice gives Hormuz a narrow availability mechanism for
+Hormuz has a narrow availability mechanism for
 accounted OpenAI and Anthropic generation requests. It preserves streaming,
 records content-free timing evidence for each provider egress, and can make one
 alternate provider call after an explicit capacity rejection. It is disabled
 unless an operator configures an alternate route.
 
-This is implementation and test evidence. It is not a released feature,
-customer SLA, provider uptime claim, multi-region design, or proof from a live
-provider account.
+Local and PostgreSQL integration tests cover the mechanism. A separate
+protected workflow must still prove it against the exact live Render commit and
+real provider accounts. Neither form of evidence creates a customer SLA,
+provider uptime claim, or multi-region design.
 
 ## Configuration
 
@@ -102,6 +103,28 @@ uses the same constraints plus forced tenant row-level security and a
 restricted SELECT/INSERT runtime grant. Neither table stores request or
 response bodies.
 
+## Protected live rehearsals
+
+The Render pilot has two deterministic probes so live qualification does not
+depend on waiting for a real provider incident:
+
+- `X-Hormuz-Failover-Rehearsal` records a synthetic 429 for an eligible primary
+  route without sending that first attempt upstream, then makes exactly one
+  real request to its configured secondary. The response identifies both the
+  normal failover reason and rehearsal version.
+- `X-Hormuz-Cancellation-Rehearsal` makes one real streaming request, relays its
+  first available chunk, closes the upstream response, records the attempt as
+  outcome-unknown, and makes no alternate call. If that first read already
+  contains the provider's terminal event, the response is treated as completed
+  and cannot count as cancellation evidence.
+
+Each header must contain the exact high-entropy
+`HORMUZ_FAILOVER_REHEARSAL_KEY`. Supplying both headers, repeating one, or using
+an invalid value returns 403 before provider egress. The credential belongs
+only in the Render service and the protected qualification environment. It is
+never a customer feature, client setting, URL value, artifact field, or log
+value.
+
 ## Compute structure and bottlenecks
 
 The normal path adds a monotonic clock read and one small metrics row. It adds
@@ -125,7 +148,9 @@ The main pressure points are deliberate and visible:
 
 There is no hidden retry storm: the hop count is fixed at one, the accept queue
 is bounded, reservations remain conservative, and ambiguous provider work is
-never replayed. Capacity planning still needs live traffic, a paid runtime,
+never replayed. Provider-slot and connection-slot rejections have separate
+content-free counters, so slow headers or non-inference connections cannot hide
+worker pressure. Capacity planning still needs live traffic, a paid runtime,
 provider quotas, and customer-specific latency targets. The stored observations
 are the inputs for that later qualification; they do not establish it by
 themselves.
@@ -136,9 +161,16 @@ The provider-free integration suite proves prompt streaming before provider
 completion, upstream closure on downstream cancellation, one-hop `429` and
 `529` behavior, policy and request exclusions, separate attempts and metrics,
 and refusal to replay ambiguous transport or partial-stream outcomes. Migration
-tests prove exact generated PostgreSQL DDL, SQLite 9-to-10 rollback/retry,
-append-only evidence, and tenant-bound links.
+tests prove exact PostgreSQL schema v14, SQLite schema v10 rollback/retry,
+append-only evidence, and tenant-bound links. The Render qualification tool
+also checks actor-scoped counters, the eight-stream admission limit, the
+four-connection PostgreSQL pool, the exact service and source commit, restart
+survival, and qualification-session revocation. It accepts deployment evidence
+only after authenticating the successful exact-main GitHub run and downloading
+the uniquely named artifact that binds the same Render origin and service. A
+normal streaming observation counts only when its first socket read excludes a
+provider terminal event and a later read contains that terminal event.
 
-Live PostgreSQL recovery, real-provider behavior, Render resource measurements,
-dashboard aggregation, alerts, availability targets, and customer pilot
-results remain separate gates.
+Successful protected live runs, Render resource measurements under sustained
+load, alerts, availability targets, and customer pilot results remain separate
+gates.

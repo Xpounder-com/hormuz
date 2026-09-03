@@ -357,6 +357,11 @@ def _exchange_code(
             _validate_remote_url(response.geturl(), allow_insecure_http=allow_insecure_http)
             body = response.read(_MAX_TOKEN_RESPONSE_BYTES + 1)
     except (urllib.error.URLError, TimeoutError, ValueError) as error:
+        if isinstance(error, urllib.error.HTTPError):
+            try:
+                error.close()
+            except Exception:
+                pass
         LOGGER.warning(
             "oidc_token_exchange_failed endpoint_host=%s",
             urllib.parse.urlparse(token_endpoint).hostname,
@@ -429,6 +434,11 @@ def _fetch_userinfo(
             _validate_remote_url(response.geturl(), allow_insecure_http=allow_insecure_http)
             body = response.read(_MAX_USERINFO_RESPONSE_BYTES + 1)
     except (urllib.error.URLError, TimeoutError, ValueError) as error:
+        if isinstance(error, urllib.error.HTTPError):
+            try:
+                error.close()
+            except Exception:
+                pass
         LOGGER.warning(
             "oidc_userinfo_failed endpoint_host=%s",
             urllib.parse.urlparse(endpoint).hostname,

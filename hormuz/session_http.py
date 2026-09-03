@@ -139,7 +139,7 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
             provider_error=values.get("error"),
             response_issuer=values.get("iss"),
         )
-        _browser_page(handler, "Connected", "Return to your terminal to finish. You can close this page.", cookie="")
+        _browser_page(handler, "Connected", "Return to Hormuz to finish. You can close this page.", cookie="")
         return
     if handler.command != "POST":
         handler._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)

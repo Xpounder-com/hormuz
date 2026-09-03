@@ -14,7 +14,7 @@ from unittest import mock
 from uuid import uuid4
 
 from hormuz._persistence import WorkBudgetContext
-from hormuz.budget_runtime import WorkBudgetDenied
+from hormuz.budget_runtime import RuntimeBudgetSQL, WorkBudgetDenied
 from hormuz.budget_repository import BudgetRepositoryError
 from hormuz.config import ModelRoute, Policy
 from hormuz.policy_scenarios import create_policy_scenario_suite
@@ -34,6 +34,13 @@ except ModuleNotFoundError:
     validate_wire_payload = runpy.run_path(
         str(Path(__file__).resolve().parents[1] / "tools" / "_portfolio_wire_contract.py")
     )["validate_wire_payload"]
+
+try:
+    from tools.verify_portfolio_extensions import validate_extension_payload
+except ModuleNotFoundError:
+    validate_extension_payload = runpy.run_path(
+        str(Path(__file__).resolve().parents[1] / "tools" / "verify_portfolio_extensions.py")
+    )["validate_extension_payload"]
 
 if __package__:
     from ._portfolio_fixture import (
@@ -947,3 +954,150 @@ class BudgetAssertions:
             if row["operation"] == "reserve_denied"
         )
         self.assertEqual(denial["occurred_at"], evaluated_at)
+
+    def check_attribution_sequence_exhaustion_is_audited(self):
+        plan = self.create(amount="10")
+        self.activate(plan)
+        unrelated_scope = self.registry.dispatch(
+            ADMIN_TOKEN, "POST", SCOPES,
+            body=canonical(create_request(kind="portfolio")).encode(),
+            idempotency_key="budget-unrelated-portfolio",
+        )[1]
+        unrelated_plan = self.create_for(unrelated_scope, amount="10")
+        self.activate(unrelated_plan)
+        original_one = RuntimeBudgetSQL.one
+
+        def saturated_sequence(sql, statement, values=()):
+            if (
+                "MAX(sequence)" in statement
+                and "portfolio_attribution_audit_events" in statement
+            ):
+                return {"sequence": 9223372036854775807}
+            return original_one(sql, statement, values)
+
+        with mock.patch.object(
+            RuntimeBudgetSQL, "one", autospec=True, side_effect=saturated_sequence,
+        ):
+            with self.assertRaises(ReservationDenied):
+                self.attempt(cost_microusd=1)
+
+        self.assertEqual(self.attribution_rows(), [])
+        self.assertEqual(
+            self.budget_rows()["portfolio_work_budget_reservation_bindings"],
+            [],
+        )
+        denials = [
+            row
+            for row in self.budget_rows()["portfolio_work_budget_audit_events"]
+            if row["operation"] == "reserve_denied"
+        ]
+        self.assertEqual(
+            {
+                (row["entity_id"], row["entity_version"], row["reason_code"])
+                for row in denials
+            },
+            {
+                (
+                    plan["budget_plan_id"], plan["version"],
+                    "attribution_invalid",
+                )
+            },
+        )
+        report = self.repository.current_report(ADMIN, plan["budget_plan_id"])
+        self.assertEqual(report["coverage"]["population_attempts"], 1)
+        self.assertEqual(report["coverage"]["unattributed_attempts"], 1)
+        unrelated_report = self.repository.current_report(
+            ADMIN, unrelated_plan["budget_plan_id"],
+        )
+        self.assertEqual(unrelated_report["coverage"]["population_attempts"], 0)
+        self.assertEqual(unrelated_report["coverage"]["unattributed_attempts"], 0)
+
+    def check_malformed_rate_card_coordinates_fail_report_closed(self):
+        plan = self.create(amount="10")
+        self.activate(plan)
+        base = {
+            "attempt_state": "pending",
+            "committed_cost_microusd": None,
+            "reserved_amount": "0.000001",
+            "rate_card_id": "synthetic-route-rate",
+            "rate_card_version": 1,
+            "rate_card_digest": TEST_DIGEST,
+        }
+        malformed = (
+            {**base, "rate_card_id": "not/wire/safe"},
+            {
+                **base,
+                "rate_card_id": "hormuz-rate-card-overflow:" + TEST_DIGEST,
+            },
+            {**base, "rate_card_version": 0},
+            {**base, "rate_card_digest": "z" * 64},
+        )
+        for row in malformed:
+            with self.subTest(row=row):
+                with mock.patch.object(
+                    self.repository, "_attempt_rows", return_value=[row],
+                ):
+                    self.error(
+                        "unavailable",
+                        lambda: self.repository.current_report(
+                            ADMIN, plan["budget_plan_id"],
+                        ),
+                    )
+        unsupported = self.create(amount="10", currency="EUR")
+        self.activate(unsupported)
+        with mock.patch.object(
+            self.repository, "_attempt_rows",
+            return_value=[{**base, "rate_card_digest": "z" * 64}],
+        ):
+            self.error(
+                "unavailable",
+                lambda: self.repository.current_report(
+                    ADMIN, unsupported["budget_plan_id"],
+                ),
+            )
+
+    def check_rate_card_diversity_is_bounded_without_losing_accounting(self):
+        plan = self.create(amount="10")
+        self.activate(plan)
+        rows = [
+            {
+                "attempt_state": "succeeded",
+                "committed_cost_microusd": 1,
+                "reserved_amount": "0.000001",
+                "rate_card_id": f"card-{index:03d}",
+                "rate_card_version": 1,
+                "rate_card_digest": f"{index:064x}",
+            }
+            for index in range(101)
+        ]
+        with mock.patch.object(
+            self.repository, "_attempt_rows", return_value=rows,
+        ):
+            report = self.repository.current_report(ADMIN, plan["budget_plan_id"])
+        with mock.patch.object(
+            self.repository, "_attempt_rows", return_value=list(reversed(rows)),
+        ):
+            reversed_report = self.repository.current_report(
+                ADMIN, plan["budget_plan_id"],
+            )
+
+        observations = report["financial_observations"]
+        self.assertEqual(len(observations), 100)
+        self.assertTrue(all(item["rate_card"] is not None for item in observations[:99]))
+        overflow_card = observations[-1]["rate_card"]
+        self.assertIsNotNone(overflow_card)
+        self.assertEqual(overflow_card["version"], 1)
+        self.assertEqual(
+            overflow_card["id"],
+            "hormuz-rate-card-overflow:" + overflow_card["content_digest"],
+        )
+        self.assertEqual(observations[-1]["amount"], "0.000002")
+        self.assertEqual(observations[-1]["currency"], "USD")
+        self.assertEqual(observations[-1]["reason_code"], "known")
+        self.assertEqual(report["enforcement"]["committed_amount"], "0.000101")
+        self.assertEqual(report["coverage"]["population_attempts"], 101)
+        self.assertEqual(
+            reversed_report["financial_observations"], observations,
+        )
+        validate_wire_payload(BUDGET_WIRE, "hormuz.work-budget-report", report)
+        validate_extension_payload(BUDGET_WIRE, "hormuz.work-budget-report", report)

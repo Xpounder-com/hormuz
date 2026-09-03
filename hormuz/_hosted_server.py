@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import re
 import socket
@@ -10,7 +11,9 @@ from http import HTTPStatus
 from urllib.parse import urlsplit
 
 from ._hosted_config import HostedError
+from ._hosted_provider import PROVIDER_FAILOVER_REHEARSAL_ENV, deployment_metadata
 from ._hosted_state import DATABASES, MARKER, _private, check_initialized
+from .postgres import verify_postgres_deployment_runtime
 from .server import GatewayRequestHandler, GatewayServer
 
 
@@ -90,14 +93,121 @@ class ProviderPilotGatewayServer(GatewayServer):
 
     def __init__(self, config, *, environ):
         self._state_identity = check_initialized(config)
+        self._deployment_metadata = deployment_metadata(environ)
+        self._failover_rehearsal_key = environ[PROVIDER_FAILOVER_REHEARSAL_ENV]
         self._connection_slots = threading.BoundedSemaphore(PROVIDER_MAX_CONNECTIONS)
         self._provider_slots = threading.BoundedSemaphore(PROVIDER_MAX_INFERENCE_CONNECTIONS)
+        self._provider_metrics_lock = threading.Lock()
+        self._provider_inflight = 0
+        self._provider_peak_inflight = 0
+        self._provider_admitted_total = 0
+        self._provider_saturated_total = 0
+        self._connection_saturated_total = 0
         self.connection_lifetime = min(
             config.upstream_timeout_seconds + PROVIDER_CONNECTION_LIFETIME_MARGIN,
             630,
         )
+        if config.usage_storage.backend == "postgresql":
+            verify_postgres_deployment_runtime(
+                environ.get(config.usage_storage.postgres_dsn_env, ""),
+                schema=config.usage_storage.postgres_schema,
+                runtime_role=config.usage_storage.postgres_runtime_role,
+                policy_control_role=config.policy_control.postgres_control_role,
+                custody_control_role=config.custody_control.postgres_control_role,
+                custody_executor_role=config.custody_executor.postgres_executor_role,
+                require_restricted_migration_login=True,
+            )
         super().__init__(config, environ=environ)
         self.RequestHandlerClass = ProviderPilotRequestHandler
+
+    def try_admit_provider(self) -> bool:
+        if not self._provider_slots.acquire(blocking=False):
+            with self._provider_metrics_lock:
+                self._provider_saturated_total += 1
+            return False
+        with self._provider_metrics_lock:
+            self._provider_inflight += 1
+            self._provider_admitted_total += 1
+            self._provider_peak_inflight = max(
+                self._provider_peak_inflight,
+                self._provider_inflight,
+            )
+        return True
+
+    def release_provider(self) -> None:
+        with self._provider_metrics_lock:
+            if self._provider_inflight < 1:
+                raise RuntimeError("hosted_provider_capacity_accounting_invalid")
+            self._provider_inflight -= 1
+        self._provider_slots.release()
+
+    def operational_stats(self) -> dict[str, object]:
+        """Return bounded, content-free saturation and pool-wait evidence."""
+
+        with self._provider_metrics_lock:
+            provider = {
+                "capacity": PROVIDER_MAX_INFERENCE_CONNECTIONS,
+                "inflight": self._provider_inflight,
+                "peak_inflight": self._provider_peak_inflight,
+                "admitted_total": self._provider_admitted_total,
+                "saturated_total": self._provider_saturated_total,
+                "connection_capacity": PROVIDER_MAX_CONNECTIONS,
+                "connection_saturated_total": self._connection_saturated_total,
+            }
+        if self.postgres_pool is None:
+            postgres: dict[str, object] = {
+                "configured": False,
+                "closed": False,
+                "min_connections": 0,
+                "max_connections": 0,
+                "pool_size": 0,
+                "available_connections": 0,
+                "requests_waiting": 0,
+                "requests_total": 0,
+                "requests_queued_total": 0,
+                "requests_error_total": 0,
+                "requests_wait_milliseconds_total": 0,
+            }
+        else:
+            postgres = self.postgres_pool.operational_stats()
+        return {
+            "schema_id": "hormuz.provider-operations",
+            "schema_version": 1,
+            "content_boundary": "aggregate_content_free_counters",
+            "provider": provider,
+            "postgresql_pool": postgres,
+            "deployment": dict(self._deployment_metadata),
+        }
+
+    def deployment_contract(self) -> dict[str, object]:
+        issuer_hostnames = {
+            urlsplit(issuer.issuer).hostname or ""
+            for issuer in self.config.oidc_issuers.values()
+        }
+        identity_provider = (
+            "okta"
+            if len(issuer_hostnames) == 1
+            and next(iter(issuer_hostnames)).endswith((".okta.com", ".oktapreview.com"))
+            else "configured_oidc"
+        )
+        on_render = self._deployment_metadata["platform"] == "render"
+        return {
+            "profile": "external_pilot" if on_render else "local_provider_fixture",
+            "identity_provider": identity_provider,
+            "provider_protocols": ["anthropic", "openai"],
+            "https": on_render and self.config.session_broker.public_base_url.startswith("https://"),
+            "inference_enabled": True,
+            "provider_credentials_server_only": True,
+            "postgresql_durable": self.config.usage_storage.backend == "postgresql",
+            "tenant_rls": self.config.usage_storage.backend == "postgresql",
+            "durable_sessions": on_render,
+            "monitoring_configured": True,
+            "worker_saturation_monitoring": True,
+            "postgresql_pool_wait_monitoring": self.config.usage_storage.backend == "postgresql",
+            "single_region_acknowledged": True,
+            "availability_sla_claimed": False,
+            "max_inflight_streams": PROVIDER_MAX_INFERENCE_CONNECTIONS,
+        }
 
     state_intact = StagingGatewayServer.state_intact
 
@@ -114,6 +224,8 @@ class ProviderPilotGatewayServer(GatewayServer):
 
     def process_request(self, request, client_address):
         if not self._connection_slots.acquire(blocking=False):
+            with self._provider_metrics_lock:
+                self._connection_saturated_total += 1
             self.shutdown_request(request)
             return
         try:
@@ -241,6 +353,8 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
             "schema_version": 1,
             "status": state,
             "inference_enabled": True,
+            "deployment": dict(self.server._deployment_metadata),
+            "contract": self.server.deployment_contract(),
         }, separators=(",", ":")).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -263,6 +377,8 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
             or self.headers.get_all("Transfer-Encoding", [])
             or any(len(self.headers.get_all(name, [])) > 1 for name in (
                 "Content-Type", "Authorization", "Origin", "Cookie",
+                "X-Hormuz-Failover-Rehearsal",
+                "X-Hormuz-Cancellation-Rehearsal",
             ))
             or len(lengths) > 1
             or (self.command == "POST" and len(lengths) != 1)
@@ -289,6 +405,7 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
             "/ready",
             "/console",
             "/v1/gateway/whoami",
+            "/v1/gateway/reliability",
             "/v1/gateway/usage",
             "/v1/responses",
             "/v1/responses/compact",
@@ -321,7 +438,24 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
         GatewayRequestHandler.do_GET(self)
 
     def _proxy_generation(self, *, identity, protocol, client, account_usage) -> None:
-        if not self.server._provider_slots.acquire(blocking=False):
+        rehearsal_values = self.headers.get_all("X-Hormuz-Failover-Rehearsal", [])
+        cancellation_values = self.headers.get_all("X-Hormuz-Cancellation-Rehearsal", [])
+        supplied = [values for values in (rehearsal_values, cancellation_values) if values]
+        if len(supplied) > 1 or any(
+            len(values) != 1
+            or not hmac.compare_digest(values[0], self.server._failover_rehearsal_key)
+            for values in supplied
+        ):
+            self._send_protocol_error(
+                protocol,
+                "Failover rehearsal authorization was rejected",
+                HTTPStatus.FORBIDDEN,
+                code="hormuz_failover_rehearsal_rejected",
+            )
+            return
+        self._failover_rehearsal_requested = bool(rehearsal_values)
+        self._cancellation_rehearsal_requested = bool(cancellation_values)
+        if not self.server.try_admit_provider():
             self._send_protocol_error(
                 protocol,
                 "Provider pilot capacity is currently full",
@@ -337,4 +471,6 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
                 account_usage=account_usage,
             )
         finally:
-            self.server._provider_slots.release()
+            self._failover_rehearsal_requested = False
+            self._cancellation_rehearsal_requested = False
+            self.server.release_provider()

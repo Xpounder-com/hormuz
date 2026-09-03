@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from dataclasses import replace
 import os
 from pathlib import Path
@@ -19,17 +18,35 @@ from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_TABLES
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import OUTCOMES
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._outcome_predecessor_fixture import attribution_predecessor_call
     from ._outcome_fixture import replay_outcome_metadata, seed_outcome_metadata
     from ._portfolio_fixture import ADMIN, registry_config
-    from ._registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot
+    from ._registry_transition_fixture import (
+        ledger_observation,
+        released_v1_call,
+        seed_registry_ledger,
+        sqlite_backup,
+        sqlite_snapshot,
+        without_sqlite_finance_attempt_successor,
+    )
 else:
     from _outcome_predecessor_fixture import attribution_predecessor_call
     from _outcome_fixture import replay_outcome_metadata, seed_outcome_metadata
     from _portfolio_fixture import ADMIN, registry_config
-    from _registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot
+    from _registry_transition_fixture import (
+        ledger_observation,
+        released_v1_call,
+        seed_registry_ledger,
+        sqlite_backup,
+        sqlite_snapshot,
+        without_sqlite_finance_attempt_successor,
+    )
 
 
 @unittest.skipUnless(os.environ.get("HORMUZ_TEST_ATTRIBUTION_PYTHON"), "requires digest-pinned actual attribution predecessor")
@@ -39,7 +56,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 10)
+        self.assertEqual(UsageStore.schema_version, 11)
         self.predecessor_request = {"backend": "sqlite", "path": str(self.path)}
         self.seeded = attribution_predecessor_call({**self.predecessor_request, "mode": "seed"})
         self.assertEqual(self.seeded["status"], "ready")
@@ -52,7 +69,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            self.assertIn(version, (7, 8, 9, 10))
+            self.assertIn(version, (7, 8, 9, 10, 11))
             if fail and version == 7:
                 connection.execute(sqlite_statements()[0])
                 raise RuntimeError("synthetic_outcome_migration_failure")
@@ -62,7 +79,10 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
             UsageStore(self.path).verify_ready()
 
     def assert_prior_state_preserved(self):
-        current = copy.deepcopy(sqlite_snapshot(self.path))
+        current = without_sqlite_finance_attempt_successor(
+            sqlite_snapshot(self.path)
+        )
+        before = without_sqlite_finance_attempt_successor(self.before)
         added = set(TABLE_DDL) | set(FINANCE_TABLES) | set(BUDGET_TABLES) | set(PROVIDER_TABLES)
         current["objects"] = [
             row for row in current["objects"]
@@ -74,14 +94,14 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
             for row in current["rows"]["hormuz_schema_migrations"]
             if row[0] not in {7, 8, 9, 10}
         ]
-        self.assertEqual(current, self.before)
+        self.assertEqual(current, before)
 
     def test_sqlite_outcome_real_migration_and_missing_following_migration(self):
         self.upgrade()
         self.assert_prior_state_preserved()
-        self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 38)
+        self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 39)
         before = sqlite_snapshot(self.path)
-        with mock.patch.object(UsageStore, "schema_version", 11):
+        with mock.patch.object(UsageStore, "schema_version", 12):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
@@ -98,7 +118,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.assertEqual(sqlite_snapshot(self.path), current)
 
     def test_sqlite_outcome_partial_state_refuses_before_repair(self):
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute("INSERT INTO hormuz_schema_migrations (version, state) VALUES (7, 'applying')")
         before = sqlite_snapshot(self.path)
         for read_only in (False, True):
@@ -116,7 +136,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         for driver in (attribution_predecessor_call, released_v1_call):
             self.assertEqual(driver(request), {"status": "refused", "code": "storage_schema_newer_than_binary"})
         self.assertEqual(sqlite_snapshot(self.path), before)
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute("UPDATE hormuz_schema_migrations SET state='applying' WHERE version=7")
         partial = sqlite_snapshot(self.path)
         for driver in (attribution_predecessor_call, released_v1_call):

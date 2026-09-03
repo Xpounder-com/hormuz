@@ -41,6 +41,11 @@ from .contracts import (
 from .custody_runtime import resolve_upstream_credentials
 from .custody_runtime_projection import CustodyRuntimeProjection, CustodyRuntimeProjectionError
 from .evidence import EvidenceStorageError
+from .finance_attempts import (
+    ConfiguredRateCardBinding,
+    configured_rate_card_binding,
+    estimate_configured_route,
+)
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
@@ -82,6 +87,21 @@ _ANTHROPIC_PROVIDER_STATE_FIELDS = frozenset({"container", "mcp_servers"})
 _OPENAI_INLINE_TOOL_TYPES = frozenset({"custom", "function"})
 _ANTHROPIC_INLINE_TOOL_TYPES = frozenset({"custom"})
 _INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
+
+
+class _ProviderRehearsalResponse:
+    """A zero-egress 429 used only after hosted rehearsal authorization."""
+
+    status = int(HTTPStatus.TOO_MANY_REQUESTS)
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+
+    @classmethod
+    def getcode(cls) -> int:
+        return int(cls.status)
+
+    @staticmethod
+    def close() -> None:
+        return None
 
 
 def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) -> bool:
@@ -147,6 +167,22 @@ def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) ->
     return True
 
 
+def _configured_route_binding(decision: PolicyDecision) -> ConfiguredRateCardBinding:
+    """Freeze the exact configured prices selected for one provider attempt."""
+
+    route = decision.route
+    assert route is not None
+    return configured_rate_card_binding(configured_route_rate_card(
+        alias=decision.resolved_alias or route.alias,
+        protocol=route.protocol,
+        upstream_model=route.upstream_model,
+        input_cost_per_million=route.input_cost_per_million,
+        cache_read_cost_per_million=route.cache_read_cost_per_million,
+        cache_write_cost_per_million=route.cache_write_cost_per_million,
+        output_cost_per_million=route.output_cost_per_million,
+    ))
+
+
 class GatewayServer(ThreadingHTTPServer):
     # ThreadingMixIn joins non-daemon handler threads from ``server_close``.
     # Keep that default so a graceful listener shutdown cannot close the
@@ -169,7 +205,11 @@ class GatewayServer(ThreadingHTTPServer):
         self.session_request_limit = SessionRequestLimit()
         self.console_request_limit = SessionRequestLimit()
         self.console: ConsoleService | None = None
-        self.postgres_pool = create_postgres_runtime_pool(config)
+        # Keep injected-process tests and the hosted child's reviewed secret
+        # inventory authoritative. Falling back to ``os.environ`` here would
+        # let storage silently use a credential that the caller deliberately
+        # omitted from its bounded environment.
+        self.postgres_pool = create_postgres_runtime_pool(config, environ=environ)
         try:
             if config.session_broker.enabled:
                 settings = config.session_broker
@@ -182,13 +222,39 @@ class GatewayServer(ThreadingHTTPServer):
                     enrollment_ttl_seconds=settings.enrollment_ttl_seconds,
                     trusted_parent_path=settings.trusted_parent_path,
                 ))
+            storage_organizations: tuple[str, ...] | None = None
+            if (
+                self.session_broker is not None
+                and config.session_broker.onboarding_enabled
+            ):
+                usage_organization_ids = set(config.organization_ids)
+                usage_organization_ids.update(
+                    self.session_broker.directory.managed_organization_ids()
+                )
+                storage_organizations = tuple(sorted(usage_organization_ids))
             self.store: UsageRepository
             if config.portfolio_control is None:
-                self.store = create_usage_store(config, connection_pool=self.postgres_pool)
+                if storage_organizations is None:
+                    self.store = create_usage_store(
+                        config,
+                        environ=environ,
+                        connection_pool=self.postgres_pool,
+                    )
+                else:
+                    self.store = create_usage_store(
+                        config,
+                        environ=environ,
+                        connection_pool=self.postgres_pool,
+                        organization_ids=storage_organizations,
+                    )
                 portfolio = create_portfolio_repository(config, connection_pool=self.postgres_pool, environ=environ)
             else:
                 repositories = create_repository_bundle(
-                    config, portfolio_factory=create_portfolio_repository, connection_pool=self.postgres_pool,
+                    config,
+                    portfolio_factory=create_portfolio_repository,
+                    environ=environ,
+                    connection_pool=self.postgres_pool,
+                    usage_organization_ids=storage_organizations,
                 )
                 self.store, portfolio = repositories.usage, repositories.portfolio
             if self.session_broker is not None and config.session_broker.console_enabled:
@@ -434,6 +500,61 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "identity_type": identity.identity_type,
                     "allowed_clients": list(identity.allowed_clients),
                     "authentication_source": identity.authentication_source,
+                },
+            )
+            return
+        if path == "/v1/gateway/reliability":
+            operational_stats = getattr(self.server, "operational_stats", None)
+            if not callable(operational_stats):
+                self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
+                return
+            try:
+                totals = self.server.provider_reliability_store.totals(
+                    actor_id=identity.actor_id,
+                    organization_id=identity.organization_id,
+                )
+                operations = operational_stats()
+            except _STORAGE_FAILURES as error:
+                self._send_storage_failure(None, error)
+                return
+            provider = operations["provider"]
+            pool = operations["postgresql_pool"]
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "schema_id": "hormuz.provider-reliability-summary",
+                    "schema_version": 1,
+                    "scope": "current_actor",
+                    "live_provider_request_count": totals.live_provider_request_count,
+                    "provider_attempt_record_count": totals.provider_attempt_record_count,
+                    "latency_header_sample_count": totals.latency_header_sample_count,
+                    "latency_first_body_byte_sample_count": (
+                        totals.latency_first_body_byte_sample_count
+                    ),
+                    "latency_total_sample_count": totals.latency_total_sample_count,
+                    "failover_link_record_count": totals.failover_link_record_count,
+                    "outcome_unknown_count": totals.outcome_unknown_count,
+                    "cancellation_outcome_unknown_count": (
+                        totals.cancellation_outcome_unknown_count
+                    ),
+                    "provider_capacity": provider["capacity"],
+                    "provider_inflight": provider["inflight"],
+                    "provider_peak_inflight": provider["peak_inflight"],
+                    "provider_saturated_total": provider["saturated_total"],
+                    "connection_capacity": provider["connection_capacity"],
+                    "connection_saturated_total": provider[
+                        "connection_saturated_total"
+                    ],
+                    "postgresql_pool_max_connections": pool["max_connections"],
+                    "postgresql_pool_requests_waiting": pool["requests_waiting"],
+                    "postgresql_pool_requests_queued_total": pool[
+                        "requests_queued_total"
+                    ],
+                    "postgresql_pool_wait_milliseconds_total": pool[
+                        "requests_wait_milliseconds_total"
+                    ],
+                    "postgresql_pool_error_total": pool["requests_error_total"],
+                    "deployment": operations["deployment"],
                 },
             )
             return
@@ -794,7 +915,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         started_ns = time.monotonic_ns()
         try:
-            response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
+            if (
+                getattr(self, "_failover_rehearsal_requested", False)
+                and failover_decision is not None
+                and failover_applied_reason is None
+            ):
+                response = _ProviderRehearsalResponse()
+            else:
+                response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
@@ -932,6 +1060,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
         if failover_applied_reason is not None:
             self.send_header("X-Hormuz-Failover", f"v1;reason={failover_applied_reason}")
+            if getattr(self, "_failover_rehearsal_requested", False):
+                self.send_header("X-Hormuz-Failover-Rehearsal", "v1")
+        if getattr(self, "_cancellation_rehearsal_requested", False):
+            self.send_header("X-Hormuz-Cancellation-Rehearsal", "v1")
         self._send_attribution_header()
         if redaction_count:
             self.send_header("X-Hormuz-Redactions", str(redaction_count))
@@ -983,6 +1115,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 if first_body_byte_us is None:
                     first_body_byte_us = self._elapsed_us(started_ns)
                 provider_bytes_read += len(partial)
+                parser.feed(partial)
             downstream_ok = False
             LOGGER.warning(
                 "upstream_stream_failed actor=%s team=%s client=%s protocol=%s requested_model=%s error=%s",
@@ -1015,11 +1148,24 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             provider_bytes_read=provider_bytes_read,
             downstream_bytes_sent=downstream_bytes_sent,
         )
-        usage = parser.finish()
+        parsed_usage = parser.finish_with_finance()
+        usage = parsed_usage.usage
         if account_usage and attempt is not None:
-            successful = 200 <= status < 300 and downstream_ok
-            if successful:
-                request_status = "succeeded"
+            provider_terminal_failed = parsed_usage.provider_terminal_state in {
+                "failed",
+                "incomplete",
+            }
+            # A terminal provider event is authoritative even if writing that
+            # same final chunk discovers a downstream disconnect. Account for
+            # the known provider result rather than converting it to an
+            # ambiguous cancellation. OpenAI failed/incomplete terminals remain
+            # known non-successes even though the provider used HTTP 2xx.
+            provider_result_known = parser.provider_completed or provider_terminal_failed
+            accountable_response = 200 <= status < 300 and (
+                downstream_ok or provider_result_known
+            )
+            if accountable_response:
+                request_status = "failed" if provider_terminal_failed else "succeeded"
             elif status == HTTPStatus.TOO_MANY_REQUESTS:
                 request_status = "rate_limited"
             elif 200 <= status < 300:
@@ -1028,6 +1174,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     organization_id=identity.organization_id,
                     reason_code="provider_stream_interrupted",
                     provider_metrics=provider_metrics,
+                    finance_observation=parsed_usage.finance,
                 )
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s requested_model=%s reason=provider_stream_interrupted",
@@ -1040,12 +1187,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 return
             else:
                 request_status = "failed"
-            if successful and not usage.evidence_complete:
+            if request_status == "succeeded" and not usage.evidence_complete:
                 self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
                     attempt=attempt,
                     organization_id=identity.organization_id,
                     reason_code="provider_transport_ambiguous",
                     provider_metrics=provider_metrics,
+                    finance_observation=parsed_usage.finance,
                 )
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s "
@@ -1063,6 +1211,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cache_read_tokens=usage.cache_read_tokens,
                 cache_write_tokens=usage.cache_write_tokens,
             )
+            rate_card_binding = _configured_route_binding(decision)
+            configured_estimate = estimate_configured_route(
+                rate_card_binding,
+                parsed_usage.finance,
+                input_cost_per_million=route.input_cost_per_million,
+                cache_read_cost_per_million=route.cache_read_cost_per_million,
+                cache_write_cost_per_million=route.cache_write_cost_per_million,
+                output_cost_per_million=route.output_cost_per_million,
+            )
+            if configured_estimate.availability == "available":
+                assert configured_estimate.amount_microusd is not None
+                cost = configured_estimate.amount_microusd
             self.server.provider_reliability_store.finalize_request_attempt(
                 attempt=attempt,
                 organization_id=identity.organization_id,
@@ -1076,6 +1236,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cost_microusd=cost,
                 provider_request_id=provider_request_id,
                 provider_metrics=provider_metrics,
+                finance_observation=parsed_usage.finance,
+                configured_estimate=configured_estimate,
             )
             LOGGER.info(
                 "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d redactions=%d",
@@ -1125,15 +1287,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             input_tokens=reserved_input_tokens,
             output_tokens=max(0, reserved_output_tokens),
         )
-        route_rate_card = configured_route_rate_card(
-            alias=decision.resolved_alias or route.alias,
-            protocol=route.protocol,
-            upstream_model=route.upstream_model,
-            input_cost_per_million=route.input_cost_per_million,
-            cache_read_cost_per_million=route.cache_read_cost_per_million,
-            cache_write_cost_per_million=route.cache_write_cost_per_million,
-            output_cost_per_million=route.output_cost_per_million,
-        )
+        rate_card_binding = _configured_route_binding(decision)
         policy_digest = (
             decision.snapshot.content_sha256
             or local_policy_content_sha256(self.server.config)
@@ -1171,13 +1325,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         input_tokens_bounded=input_tokens_bounded,
                         policy_version=decision.policy_version,
                         policy_digest=policy_digest,
-                        rate_card_id=str(route_rate_card["id"]),
-                        rate_card_version=int(route_rate_card["version"]),
-                        rate_card_digest=str(route_rate_card["content_digest"]),
-                        rate_card_currency=str(route_rate_card["currency"]),
+                        rate_card_id=rate_card_binding.rate_card_id,
+                        rate_card_version=rate_card_binding.rate_card_version,
+                        rate_card_digest=rate_card_binding.rate_card_digest,
+                        rate_card_currency=rate_card_binding.currency,
                     )
                 ),
                 provider_failover=provider_failover,
+                configured_rate_card=rate_card_binding,
             )
         except _STORAGE_FAILURES:
             if admission is not None:

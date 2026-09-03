@@ -1,0 +1,56 @@
+{
+  "backup": {
+    "bytes": 321,
+    "format": "pg_dump_custom",
+    "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "checks": {
+    "active_policy_versions": true,
+    "audit_chain_integrity": true,
+    "corrupt_dump_rejected": true,
+    "finance_attempt_evidence": true,
+    "migration_ledger": true,
+    "missing_dump_rejected": true,
+    "partial_recovery_not_promoted": true,
+    "rls_without_organization_context": true,
+    "state_fingerprint_matches": true,
+    "tenant_scoped_repository": true
+  },
+  "coverage": "ephemeral_logical_backup_restore_only",
+  "database": {
+    "image": "postgres@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": "16.14"
+  },
+  "durations_ms": {
+    "backup": 20,
+    "migrate_and_seed": 10,
+    "restore": 30,
+    "total": 100,
+    "verify": 40
+  },
+  "schema_id": "hormuz.postgresql-recovery-drill-summary",
+  "schema_version": 2,
+  "state": {
+    "migration_version": 15,
+    "record_counts": {
+      "active_budget_reservations": 4,
+      "active_policy_versions": 2,
+      "audit_chain_checkpoints": 0,
+      "audit_chain_entries": 6,
+      "audit_chain_epochs": 2,
+      "audit_chain_heads": 2,
+      "finance_attempt_evidence": 2,
+      "organizations": 2,
+      "policy_administrators": 2,
+      "policy_control_events": 6,
+      "policy_versions": 2,
+      "request_attempt_events": 4,
+      "request_attempts": 2,
+      "secret_events": 2,
+      "usage_events": 2
+    },
+    "recovery_fingerprint": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "source_fingerprint": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "verdict": "pass"
+}

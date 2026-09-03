@@ -31,6 +31,7 @@ REQUIRED_CHECK_CONTEXTS = (
     "Python 3.12",
     "Python 3.13",
     "Python 3.14",
+    "Native Mac client and loopback contract",
 )
 DISCUSSION_CATEGORIES = (
     "Announcements",
@@ -102,6 +103,18 @@ EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
         "${{ secrets.HORMUZ_LIVE_ANTHROPIC_PROVIDER_KEY }}",
         "${{ secrets.HORMUZ_LIVE_OPENAI_PROVIDER_KEY }}",
     ),
+    "external-pilot-qualification.yml": (
+        "${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}",
+        "${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}",
+        "${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}",
+    ),
+    "macos-distribution.yml": (
+        "${{ secrets.APPLE_NOTARY_ISSUER_ID }}",
+        "${{ secrets.APPLE_NOTARY_KEY_ID }}",
+        "${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}",
+        "${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}",
+        "${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}",
+    ),
     "release-oci.yml": (
         "${{ secrets.GITHUB_TOKEN }}",
         "${{ secrets.GITHUB_TOKEN }}",
@@ -110,6 +123,10 @@ EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
     ),
 }
 EXPECTED_WORKFLOW_JOB_ENVIRONMENTS = {
+    "external-pilot-qualification.yml": {
+        "deployment": "external-pilot-qualification",
+        "qualification": "external-pilot-qualification",
+    },
     "freeze-v1-candidate.yml": {
         "preflight": CUSTODY_ENVIRONMENT_NAME,
         "publish": CUSTODY_ENVIRONMENT_NAME,
@@ -117,8 +134,39 @@ EXPECTED_WORKFLOW_JOB_ENVIRONMENTS = {
     "live-client-conformance.yml": {
         "live-clients": "live-provider-conformance"
     },
+    "macos-distribution.yml": {
+        "sign-and-notarize": "macos-distribution"
+    },
+    "macos-pilot-operations.yml": {
+        "prepare": "macos-pilot-operations"
+    },
     "website.yml": {"deploy": "github-pages"},
 }
+MACOS_DISTRIBUTION_SOURCE_GUARD = (
+    "HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}",
+    'test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"',
+    'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+    'test -z "$(git status --porcelain)"',
+)
+MACOS_DISTRIBUTION_SOURCE_GUARD_OCCURRENCES = 2
+MACOS_PILOT_OPERATIONS_TRIGGER = """on:
+  workflow_dispatch:
+    inputs:
+      candidate_distribution_run_url:
+        description: Successful candidate Mac signed-distribution workflow URL
+        required: true
+        type: string
+      previous_distribution_run_url:
+        description: Immediately preceding successful Mac signed-distribution workflow URL
+        required: true
+        type: string
+      gateway_deployment_evidence_url:
+        description: Successful external-pilot deployment-evidence workflow URL
+        required: true
+        type: string
+
+permissions: {}
+"""
 PAGES_PUBLISH_CONDITION = (
     "github.repository == 'Xpounder-com/hormuz' && "
     "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
@@ -1113,6 +1161,143 @@ def _validate_pages_workflow(
         raise RepositoryGovernanceError("Pages publication boundary changed")
 
 
+def _validate_macos_pilot_operations_workflow(
+    text: str,
+    workflow_permissions: PermissionSpec,
+    jobs: dict[str, PermissionSpec | None],
+    job_blocks: dict[str, str],
+    job_fields: dict[str, dict[str, str]],
+) -> None:
+    """Protect the clean runners and bind their records to reviewed inputs."""
+    expected_fields = {
+        "prepare": {
+            "name": "Authorize and bind exact pilot inputs",
+            "runs-on": "ubuntu-24.04",
+            "timeout-minutes": "15",
+            "environment": "macos-pilot-operations",
+            "permissions": "",
+            "steps": "",
+        },
+        "arm64-operations": {
+            "name": "Clean Apple Silicon install, lifecycle and client recovery",
+            "needs": "prepare",
+            "runs-on": "[self-hosted, macOS, hormuz-pilot-clean-arm64]",
+            "timeout-minutes": "90",
+            "permissions": "",
+            "steps": "",
+        },
+        "x86-64-install": {
+            "name": "Clean Intel install and launch",
+            "needs": "prepare",
+            "runs-on": "[self-hosted, macOS, hormuz-pilot-clean-x86_64]",
+            "timeout-minutes": "20",
+            "permissions": "",
+            "steps": "",
+        },
+        "assemble": {
+            "name": "Assemble exact content-free operations evidence",
+            "needs": "[prepare, arm64-operations, x86-64-install]",
+            "runs-on": "ubuntu-24.04",
+            "timeout-minutes": "10",
+            "permissions": "",
+            "steps": "",
+        },
+    }
+    prepare = job_blocks.get("prepare", "")
+    arm64 = job_blocks.get("arm64-operations", "")
+    x86_64 = job_blocks.get("x86-64-install", "")
+    assemble = job_blocks.get("assemble", "")
+    source_guard = (
+        "HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}",
+        'test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"',
+        'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+        'test -z "$(git status --porcelain)"',
+    )
+    if (
+        text.count(MACOS_PILOT_OPERATIONS_TRIGGER) != 1
+        or workflow_permissions != "{}"
+        or set(jobs) != set(expected_fields)
+        or job_fields != expected_fields
+        or jobs.get("prepare") != {"actions": "read", "contents": "read"}
+        or jobs.get("arm64-operations")
+        != {"actions": "read", "contents": "none"}
+        or jobs.get("x86-64-install")
+        != {"actions": "read", "contents": "none"}
+        or jobs.get("assemble") != {"actions": "read", "contents": "read"}
+    ):
+        raise RepositoryGovernanceError(
+            "macOS pilot operations job contract changed"
+        )
+    if (
+        any(text.count(marker) != 2 for marker in source_guard)
+        or text.count("actions/checkout@") != 2
+        or prepare.count("actions/checkout@") != 1
+        or assemble.count("actions/checkout@") != 1
+        or "persist-credentials: false" not in prepare
+        or "persist-credentials: false" not in assemble
+        or "ref: ${{ github.sha }}" not in prepare
+        or "ref: ${{ github.sha }}" not in assemble
+        or "python3 -I tools/macos_pilot_operations.py prepare" not in prepare
+        or "python3 -I tools/macos_pilot_operations.py assemble" not in assemble
+        or "HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/"
+        "${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        not in assemble
+    ):
+        raise RepositoryGovernanceError(
+            "macOS pilot operations provenance boundary changed"
+        )
+    for label, job, run_steps in (
+        ("arm64", arm64, 2),
+        ("x86_64", x86_64, 1),
+    ):
+        if (
+            "actions/checkout@" in job
+            or "${{ secrets." in job
+            or "${{ github.token }}" in job
+            or "\n        env:" in job
+            or job.count("\n        run:") != run_steps
+            or job.count("\n        uses:") != 2
+            or "actions/download-artifact@" not in job
+            or "actions/upload-artifact@" not in job
+        ):
+            raise RepositoryGovernanceError(
+                f"macOS pilot {label} clean-runner boundary changed"
+            )
+    if (
+        arm64.count(
+            '/bin/bash "$RUNNER_TEMP/hormuz-macos-pilot-inputs/'
+            'collect_macos_clean_machine.sh"'
+        )
+        != 1
+        or arm64.count(
+            '/bin/bash "$RUNNER_TEMP/hormuz-macos-pilot-inputs/'
+            'collect_macos_session_and_clients.sh"'
+        )
+        != 1
+        or x86_64.count(
+            '/bin/bash "$RUNNER_TEMP/hormuz-macos-pilot-inputs/'
+            'collect_macos_clean_machine.sh"'
+        )
+        != 1
+    ):
+        raise RepositoryGovernanceError(
+            "macOS pilot downloaded collector invocation changed"
+        )
+    if (
+        text.count("retention-days: 1") != 3
+        or text.count("retention-days: 30") != 1
+        or text.count("overwrite: false") != 4
+        or "hormuz-macos-pilot-operations-${{ github.run_number }}-"
+        "${{ github.run_attempt }}" not in assemble
+        or "path: ${{ runner.temp }}/hormuz-macos-pilot-operations" not in assemble
+        or 'test "$(find "$HORMUZ_OUTPUT" -type f | wc -l | tr -d \' \')" = 1'
+        not in assemble
+    ):
+        raise RepositoryGovernanceError(
+            "macOS pilot operations artifact boundary changed"
+        )
+
+
 def _validate_workflows(
     root: Path, allowed_owners: set[str]
 ) -> tuple[int, int]:
@@ -1172,6 +1357,148 @@ def _validate_workflows(
             raise RepositoryGovernanceError(
                 f"workflow environment contract changed: {path.name}"
             )
+        if path.name == "macos-pilot-operations.yml":
+            _validate_macos_pilot_operations_workflow(
+                text,
+                workflow_permissions,
+                jobs,
+                job_blocks,
+                job_fields,
+            )
+        if path.name == "macos-distribution.yml":
+            if any(
+                text.count(marker)
+                != MACOS_DISTRIBUTION_SOURCE_GUARD_OCCURRENCES
+                for marker in MACOS_DISTRIBUTION_SOURCE_GUARD
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution source guard changed"
+                )
+            if (
+                text.count("HORMUZ_SOURCE_COMMIT: ${{ github.sha }}") != 1
+                or text.count(
+                    "HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/"
+                    "${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                )
+                != 1
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution proof provenance binding changed"
+                )
+            if (
+                text.count("HORMUZ_TEAM_ID: R267LZMUTY") != 1
+                or text.count(
+                    '[[ "$HORMUZ_CODESIGN_IDENTITY" == *"($HORMUZ_TEAM_ID)" ]]'
+                )
+                != 1
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution signing team binding changed"
+                )
+            build_job = job_blocks.get("build-and-test")
+            signing_job = job_blocks.get("sign-and-notarize")
+            signing_fields = job_fields.get("sign-and-notarize", {})
+            if (
+                build_job is None
+                or signing_job is None
+                or signing_fields.get("needs") != "build-and-test"
+                or "${{ secrets." in build_job
+                or "swift test --package-path clients/macos" not in build_job
+                or "swift build --package-path clients/macos" not in build_job
+                or "actions/upload-artifact@" not in build_job
+                or "actions/download-artifact@" not in signing_job
+                or "swift test" in signing_job
+                or "swift build" in signing_job
+                or '--prebuilt-binary "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz"'
+                not in signing_job
+                or any(
+                    expression not in signing_job
+                    for expression in EXPECTED_WORKFLOW_SECRET_EXPRESSIONS[
+                        "macos-distribution.yml"
+                    ]
+                )
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution build/sign isolation changed"
+                )
+            if (
+                "\n      build_number:\n" in text
+                or "\n      bundle_identifier:\n" in text
+                or text.count("HORMUZ_BUNDLE_ID: com.xpounder.hormuz") != 2
+                or text.count(
+                    "HORMUZ_BUILD_NUMBER=$((GITHUB_RUN_NUMBER * 1000 + "
+                    "GITHUB_RUN_ATTEMPT))"
+                )
+                != 2
+                or text.count('test "$GITHUB_RUN_ATTEMPT" -lt 1000') != 2
+                or text.count(
+                    "HORMUZ_BUILD_NUMBER: ${{ steps.release.outputs.build_number }}"
+                )
+                != 3
+                or text.count(
+                    "HORMUZ_BUNDLE_ID: ${{ steps.release.outputs.bundle_identifier }}"
+                )
+                != 3
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution release identity changed"
+                )
+            if (
+                "--ad-hoc" not in build_job
+                or '"executable_version_verified": True' not in build_job
+                or build_job.count(
+                    '"credential_free_runtime_version_verified": True'
+                )
+                != 1
+                or signing_job.count(
+                    '"credential_free_runtime_version_verified": True'
+                )
+                != 1
+                or "--verify-executable-version" in signing_job
+                or '"$HORMUZ_UNSIGNED_PAYLOAD/Hormuz" --version' in signing_job
+                or 'rm -f "$HORMUZ_CERTIFICATE" "$HORMUZ_NOTARY_KEY"'
+                not in signing_job
+                or "unset HORMUZ_CERTIFICATE_BASE64 HORMUZ_CERTIFICATE_PASSWORD"
+                not in signing_job
+                or (
+                    "unset HORMUZ_NOTARY_KEY_BASE64 HORMUZ_NOTARY_KEY_ID "
+                    "HORMUZ_NOTARY_ISSUER_ID"
+                )
+                not in signing_job
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution credential execution boundary changed"
+                )
+        if path.name == "macos-client.yml":
+            change_job = job_blocks.get("changes")
+            native_job = job_blocks.get("native-client")
+            gate_job = job_blocks.get("native-client-gate")
+            if (
+                change_job is None
+                or native_job is None
+                or gate_job is None
+                or "pull_request:\n    paths:" in text
+                or 'git diff --quiet "$BASE_SHA" "$HEAD_SHA" --' not in change_job
+                or change_job.count('echo "macos=true" >> "$GITHUB_OUTPUT"') != 2
+                or change_job.count('echo "macos=false" >> "$GITHUB_OUTPUT"') != 1
+                or job_fields.get("native-client", {}).get("needs") != "changes"
+                or job_fields.get("native-client", {}).get("if")
+                != "needs.changes.outputs.macos == 'true'"
+                or job_fields.get("native-client", {}).get("name")
+                != "Native Mac client verification"
+                or job_fields.get("native-client-gate", {}).get("name")
+                != "Native Mac client and loopback contract"
+                or job_fields.get("native-client-gate", {}).get("if") != "always()"
+                or job_fields.get("native-client-gate", {}).get("needs")
+                != "[changes, native-client]"
+                or 'test "$CHANGES_RESULT" = "success"' not in gate_job
+                or 'test "$NATIVE_RESULT" = "success"' not in gate_job
+                or 'test "$NATIVE_RESULT" = "skipped"' not in gate_job
+                or "swift test --package-path clients/macos" not in native_job
+            ):
+                raise RepositoryGovernanceError(
+                    "native Mac required-check gate changed"
+                )
         if path.name == "website.yml":
             pages_workflow_seen = True
             _validate_pages_workflow(

@@ -6,13 +6,16 @@ also executed by the interpreter installed from the digest-pinned release.
 
 from __future__ import annotations
 
+import copy
 import importlib.metadata
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+from typing import Any, Iterator
 
 from hormuz.config import Identity
 from hormuz.store import ReservationScope, StorageSchemaError, UsageStore
@@ -20,6 +23,17 @@ from hormuz.store import ReservationScope, StorageSchemaError, UsageStore
 
 ARCHIVE_SHA256 = "2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a"
 PROBE_TABLE = "registry_transition_test_probe"
+
+
+@contextmanager
+def managed_sqlite_connection(*args: Any, **kwargs: Any) -> Iterator[sqlite3.Connection]:
+    """Keep the released-v1 standalone driver independent of sibling test modules."""
+    connection = sqlite3.connect(*args, **kwargs)
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def seed_registry_ledger(store) -> None:
@@ -65,7 +79,7 @@ def ledger_observation(store) -> dict[str, object]:
 
 
 def sqlite_snapshot(path: Path) -> dict[str, object]:
-    with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True) as connection:
+    with managed_sqlite_connection(f"{path.as_uri()}?mode=ro", uri=True) as connection:
         objects = connection.execute(
             "SELECT type, name, tbl_name, sql FROM sqlite_master "
             "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
@@ -78,12 +92,57 @@ def sqlite_snapshot(path: Path) -> dict[str, object]:
         return {"objects": objects, "rows": rows}
 
 
+def without_sqlite_finance_attempt_successor(
+    snapshot: dict[str, object],
+) -> dict[str, object]:
+    """Normalize schema-11 additions for older cumulative transition proofs."""
+
+    normalized = copy.deepcopy(snapshot)
+    objects = normalized["objects"]
+    rows = normalized["rows"]
+    assert isinstance(objects, list)
+    assert isinstance(rows, dict)
+    migrations = rows.get("hormuz_schema_migrations")
+    successor_applied = isinstance(migrations, list) and any(
+        isinstance(item, tuple) and item and item[0] == 11
+        for item in migrations
+    )
+    changed_tables = {
+        "gateway_request_attempts",
+        "gateway_audit_chain_entries",
+    }
+    added_base_indexes = {
+        "idx_gateway_usage_organization_id",
+        "idx_gateway_attempt_event_organization_id",
+    }
+    normalized["objects"] = [
+        item
+        for item in objects
+        if item[2] not in changed_tables
+        and item[2] != "gateway_finance_attempt_evidence"
+        and item[1] not in added_base_indexes
+    ]
+    rows.pop("gateway_finance_attempt_evidence", None)
+    if successor_applied:
+        attempts = rows.get("gateway_request_attempts")
+        chain_entries = rows.get("gateway_audit_chain_entries")
+        if isinstance(attempts, list):
+            rows["gateway_request_attempts"] = [item[:-5] for item in attempts]
+        if isinstance(chain_entries, list):
+            rows["gateway_audit_chain_entries"] = [item[:-3] for item in chain_entries]
+    if isinstance(migrations, list):
+        rows["hormuz_schema_migrations"] = [
+            item for item in migrations if item[0] != 11
+        ]
+    return normalized
+
+
 def sqlite_backup(source: Path, destination: Path) -> None:
     if destination.exists():
         raise ValueError("test_backup_destination_exists")
     with (
-        sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True) as reader,
-        sqlite3.connect(destination) as writer,
+        managed_sqlite_connection(f"{source.as_uri()}?mode=ro", uri=True) as reader,
+        managed_sqlite_connection(destination) as writer,
     ):
         reader.backup(writer)
 

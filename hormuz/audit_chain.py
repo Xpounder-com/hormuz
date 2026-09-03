@@ -77,8 +77,9 @@ class AuditChainSource:
     """One finite, metadata-only v2 source identity.
 
     Version 1 entries have no source wrapper and remain limited to current
-    gateway audit events.  Version 2 adds this identity to bind custody event
-    families without opening the chain to arbitrary JSON records.
+    gateway audit events. Version 2 adds this identity for the reviewed finite
+    custody and finance-attempt source union without opening the chain to
+    arbitrary JSON records.
     """
 
     schema_id: str
@@ -118,8 +119,8 @@ def build_audit_chain_entry(
     """Return one strict entry whose digest binds its complete source event.
 
     The default deliberately remains the established v1 encoding so existing
-    usage/security writers retain their durable format.  New custody writers
-    must opt into the strict v2 source union through ``source``.
+    usage/security writers retain their durable format. Reviewed finite-source
+    writers opt into the strict v2 union through ``source``.
     """
 
     _validate_chain_position(chain_version=chain_version, chain_epoch=chain_epoch, sequence=sequence)
@@ -495,6 +496,11 @@ def _normalized_v2_source_event(event: Mapping[str, Any], *, source: AuditChainS
         elif source.schema_id == "hormuz.custody-deletion-event" and source.schema_version == 1:
             validate_custody_deletion_event(parsed)
             expected_id = parsed.get("deletion_event_id")
+        elif source.schema_id == "hormuz.finance-attempt-evidence" and source.schema_version == 1:
+            from .finance_attempts import validate_finance_attempt_event
+
+            validate_finance_attempt_event(parsed)
+            expected_id = parsed.get("evidence_event_id")
         else:
             raise AuditChainError("audit_chain_event_schema_unsupported")
     except (AuditChainError, ContractValidationError, TypeError, ValueError, json.JSONDecodeError):

@@ -1,0 +1,337 @@
+{
+  "schema_id": "hormuz.finance-collection-contract",
+  "schema_version": 1,
+  "reviewed_on": "2026-09-02",
+  "stage": "pre_implementation",
+  "purpose": "Collect bounded provider-native usage and cost aggregates as durable accounting evidence without manufacturing invoice, request, team, or employee truth",
+  "source_contract": {
+    "path": "docs/finance-source-contract-v1.json",
+    "schema_id": "hormuz.finance-source-contract",
+    "schema_version": 1,
+    "canonical_sha256": "290def8f2cd7026d4e0f0512db9254906f8592a026ee4beb9cac3623d7a1d9f4"
+  },
+  "collection_profiles": {
+    "openai.organization-usage-completions.v1": {
+      "provider": "openai",
+      "source_kind": "usage",
+      "method": "GET",
+      "host": "api.openai.com",
+      "path": "/v1/organization/usage/completions",
+      "bucket_widths": [
+        "1m",
+        "1h",
+        "1d"
+      ],
+      "initial_bucket_width": "1d",
+      "group_by": [
+        "project_id",
+        "api_key_id",
+        "model",
+        "batch",
+        "service_tier"
+      ],
+      "excluded_group_by": [
+        "user_id"
+      ],
+      "identity_handling": "project_id_and_api_key_id_become_tenant_keyed_fingerprints_and_never_actor_authority",
+      "time": "inclusive_start_exclusive_end_UTC_unix_seconds",
+      "pagination": "has_more_and_next_page"
+    },
+    "openai.organization-costs.v1": {
+      "provider": "openai",
+      "source_kind": "cost",
+      "method": "GET",
+      "host": "api.openai.com",
+      "path": "/v1/organization/costs",
+      "bucket_widths": [
+        "1d"
+      ],
+      "initial_bucket_width": "1d",
+      "group_by": [
+        "project_id",
+        "line_item",
+        "api_key_id"
+      ],
+      "identity_handling": "project_id_and_api_key_id_become_tenant_keyed_fingerprints",
+      "free_text_handling": "discard_line_item_after_bounded_known_classification_and_tenant_keyed_fingerprint_never_store_or_display_raw_text",
+      "amount": "exact_major_currency_decimal_preserve_source_text_and_sign",
+      "quantity": "exact_provider_native_decimal_preserve_source_text_and_sign_with_allowlisted_quantity_unit_or_null_and_no_unit_conversion",
+      "time": "inclusive_start_exclusive_end_UTC_unix_seconds",
+      "pagination": "has_more_and_next_page"
+    },
+    "anthropic.organization-usage-messages.v1": {
+      "provider": "anthropic",
+      "source_kind": "usage",
+      "method": "GET",
+      "host": "api.anthropic.com",
+      "path": "/v1/organizations/usage_report/messages",
+      "api_version": "2023-06-01",
+      "bucket_widths": [
+        "1m",
+        "1h",
+        "1d"
+      ],
+      "initial_bucket_width": "1d",
+      "group_by": [
+        "workspace_id",
+        "api_key_id",
+        "model",
+        "service_tier",
+        "context_window",
+        "inference_geo"
+      ],
+      "excluded_group_by": [
+        "account_id",
+        "service_account_id",
+        "speed"
+      ],
+      "identity_handling": "workspace_id_and_api_key_id_become_tenant_keyed_fingerprints_and_never_actor_authority",
+      "beta_features_enabled": false,
+      "time": "inclusive_start_exclusive_end_UTC_RFC3339",
+      "pagination": "has_more_and_next_page"
+    },
+    "anthropic.organization-costs.v1": {
+      "provider": "anthropic",
+      "source_kind": "cost",
+      "method": "GET",
+      "host": "api.anthropic.com",
+      "path": "/v1/organizations/cost_report",
+      "api_version": "2023-06-01",
+      "bucket_widths": [
+        "1d"
+      ],
+      "initial_bucket_width": "1d",
+      "group_by": [
+        "workspace_id",
+        "description"
+      ],
+      "identity_handling": "workspace_id_becomes_a_tenant_keyed_fingerprint",
+      "free_text_handling": "discard_description_after_bounded_known_classification_and_tenant_keyed_fingerprint_never_store_or_display_raw_text",
+      "structured_metadata": [
+        "model",
+        "cost_type",
+        "token_type",
+        "service_tier",
+        "context_window",
+        "inference_geo"
+      ],
+      "amount": "exact_USD_fractional_cents_divide_by_100_preserve_source_text_and_sign",
+      "time": "inclusive_start_exclusive_end_UTC_RFC3339",
+      "pagination": "has_more_and_next_page"
+    }
+  },
+  "authorization": {
+    "mutation_role": "portfolio_admin",
+    "order": "authenticate_server_resolved_principal_require_exact_current_tenant_and_role_resolve_active_binding_commit_attempt_root_then_allow_file_or_network_io",
+    "commit_revalidation": "same_principal_tenant_role_binding_version_and_credential_reference_version_must_remain_authorized_before_snapshot_publish",
+    "body_claims_grant_authority": false,
+    "finance_viewer_collection_access": false,
+    "raw_record_role_expansion": false,
+    "role_scoped_reporting_gate": 223
+  },
+  "source_binding": {
+    "model": "immutable_versioned_provider_account_and_scope_attestation_with_one_active_successor",
+    "identity": "organization_id_binding_id_version_provider_provider_account_reference_id_and_canonical_digest",
+    "provider_account_evidence": "operator_attestation_is_separate_from_authenticated_transport_and_neither_alone_proves_customer_ownership",
+    "credential": "bounded_credential_reference_id_and_positive_version_only_never_secret_value_header_or_environment_variable_contents",
+    "scope": "explicit_provider_account_project_or_workspace_selection_with_tenant_keyed_fingerprints_and_no_user_mapping",
+    "revocation": "append_successor_state_and_prevent_new_io_pending_attempt_cannot_publish_after_revalidation_failure",
+    "network_from_unbound_or_body_supplied_account": false
+  },
+  "collection_lifecycle": {
+    "attempt_root": "immutable_query_identity_committed_before_external_io_pending_is_derived_from_no_terminal_event_and_no_secret",
+    "terminal_transition": "pending_is_derived_from_no_terminal_event_then_exactly_one_append_only_succeeded_failed_or_abandoned_event",
+    "provider_io": "outside_database_transaction_fixed_profile_endpoint_only_TLS_verified_no_redirects_no_model_request",
+    "success": "complete_validated_page_chain_snapshot_exact_bucket_coverage_observations_receipt_terminal_event_and_audit_commit_together",
+    "failure": "content_free_terminal_event_and_audit_commit_prior_complete_snapshot_retained_no_partial_observation_or_zero_substitution",
+    "interruption": "pending_remains_explicit_until_bounded_abandonment_no_automatic_network_replay",
+    "retry": "persistence_retry_may_reuse_the_same_in_memory_normalized_evidence_but_never_recontacts_provider_automatically"
+  },
+  "snapshot": {
+    "grain": "one_organization_binding_id_and_version_collection_profile_query_window_and_complete_page_chain",
+    "immutable": true,
+    "published_only_when_complete": true,
+    "page_chain_digest": "sha256_of_canonical_validated_pagination_provenance_including_requested_page_size_and_returned_page_boundaries_or_counts_not_raw_bytes_or_stored_opaque_cursors",
+    "content_digest": "sha256_of_canonical_typed_bucket_coverage_observations_and_stable_source_identity_including_organization_binding_id_and_version_collection_profile_and_query_window_excluding_attempt_identity_page_size_page_boundaries_cursors_and_page_chain_mechanics",
+    "authenticated_evidence": "authenticated_query_pagination_complete_not_invoice_finality_account_ownership_or_point_in_time_consistency",
+    "file_evidence": "customer_supplied_profile_bundle_contract_validated_scope_unverified_never_live_verified_from_file_fields",
+    "mutable_source": true,
+    "whole_snapshot_supersession": "only_exact_same_organization_binding_id_and_version_collection_profile_and_query_window_may_append_an_explicit_successor_relationship_partial_overlap_never_supersedes_a_whole_snapshot",
+    "overlap": "within_one_organization_binding_id_and_version_and_collection_profile_reporting_partitions_bucket_coverage_by_exact_provider_native_bucket_start_and_end_then_selects_the_newest_complete_snapshot_by_database_commit_sequence_for_each_exact_bucket_and_only_its_observations_never_sums_duplicate_intervals",
+    "nonidentical_overlap": "overlapping_nonidentical_bucket_intervals_remain_separate_evidence_and_must_not_be_summed_or_silently_selected_as_one_partition",
+    "selection": "deterministic_from_append_only_bucket_coverage_per_exact_provider_native_bucket_interval_as_of_database_commit_sequence_not_observation_presence_or_wall_clock_last_write_wins",
+    "empty_bucket_selection": "selected_no_observation_coverage_suppresses_any_older_numeric_observation_for_the_exact_interval_and_returns_no_current_numeric_value_never_zero",
+    "no_historical_repricing": true
+  },
+  "bucket_coverage": {
+    "table": "portfolio_finance_snapshot_bucket_coverage",
+    "grain": "one_organization_snapshot_and_exact_provider_native_bucket_start_and_end",
+    "publication": "derived_from_the_fixed_profile_query_grid_and_complete_validated_page_chain_then_committed_atomically_with_snapshot_and_observations",
+    "states": [
+      "observed",
+      "no_observation"
+    ],
+    "observation_count": "integer_zero_through_4096_equal_to_the_snapshot_owned_observation_rows_for_that_exact_interval",
+    "selection_authority": "select_newest_complete_snapshot_from_coverage_first_then_read_only_that_snapshot_observations_for_the_exact_interval",
+    "empty": "no_observation_requires_count_zero_suppresses_older_exact_interval_value_and_exposes_missing_current_value_not_numeric_zero",
+    "numeric_zero_claim": false
+  },
+  "observation": {
+    "usage_basis": "provider_native_aggregate_observation",
+    "cost_basis": "provider_reported_aggregate",
+    "provider_final": false,
+    "invoice_final": false,
+    "request_final": false,
+    "team_or_employee_final": false,
+    "money": "exact_numeric_domain_below_no_binary_float_rounding_or_implicit_currency_conversion",
+    "native_quantity": "retain_bounded_exact_provider_quantity_and_allowlisted_unit_or_null_without_conversion_absence_is_unknown_not_zero",
+    "signed_amounts": "preserve_sign_unknown_negative_or_positive_rows_remain_unclassified_not_guessed_credit_or_discount",
+    "null": "unknown_or_not_returned_never_zero",
+    "zero": "provider_explicitly_reported_zero",
+    "native_usage": "retain_allowlisted_provider_counts_and_cache_TTL_categories_without_double_counting",
+    "unclassified_cost": "included_in_provider_aggregate_and_unclassified_coverage_never_dropped_or_allocated",
+    "granularity": "every_observation_carries_exact_provider_native_bucket_start_and_end_plus_provider_scope_and_model_dimensions_only_when_returned_and_allowed_no_inferred_team_actor_application_or_work_scope",
+    "later_reconciliation": "must_pin_exact_snapshots_gateway_attempt_evidence_rate_cards_source_bindings_and_policy_versions"
+  },
+  "numeric_domains": {
+    "validation_order": "reject_before_canonical_digest_idempotency_comparison_or_persistence",
+    "source_numeric_lexeme_maximum_bytes": 128,
+    "money": {
+      "type": "finite_exact_decimal",
+      "minimum_exclusive": "-1000000000000000000",
+      "maximum_exclusive": "1000000000000000000",
+      "maximum_integer_digits": 18,
+      "maximum_fractional_digits": 18,
+      "maximum_significant_digits": 36,
+      "normalized_nonzero_exponent_minimum": -18,
+      "normalized_nonzero_exponent_maximum": 17,
+      "provider_native_and_canonical_major_value_must_each_fit": true,
+      "rounding": "forbidden"
+    },
+    "provider_quantity": {
+      "type": "finite_exact_decimal",
+      "minimum_exclusive": "-1000000000000000000",
+      "maximum_exclusive": "1000000000000000000",
+      "maximum_integer_digits": 18,
+      "maximum_fractional_digits": 18,
+      "maximum_significant_digits": 36,
+      "normalized_nonzero_exponent_minimum": -18,
+      "normalized_nonzero_exponent_maximum": 17,
+      "provider_native_value_must_fit": true,
+      "unit_handling": "retain_allowlisted_quantity_unit_or_null_no_conversion",
+      "rounding": "forbidden"
+    },
+    "usage_count": {
+      "type": "integer_not_boolean",
+      "minimum": 0,
+      "maximum": 9223372036854775807,
+      "derived_sum_overflow": "reject"
+    },
+    "coverage_observation_count": {
+      "type": "integer_not_boolean",
+      "minimum": 0,
+      "maximum": 4096
+    }
+  },
+  "audit_source_schemas": {
+    "hormuz.finance-source-binding-version": {
+      "schema_version": 1,
+      "table": "portfolio_finance_source_binding_versions",
+      "source_event_id_column": "binding_event_id",
+      "evidence_json_column": "evidence_json"
+    },
+    "hormuz.finance-collection-event": {
+      "schema_version": 1,
+      "table": "portfolio_finance_collection_events",
+      "source_event_id_column": "event_id",
+      "evidence_json_column": "evidence_json"
+    },
+    "hormuz.finance-snapshot": {
+      "schema_version": 1,
+      "table": "portfolio_finance_snapshots",
+      "source_event_id_column": "snapshot_id",
+      "evidence_json_column": "evidence_json"
+    }
+  },
+  "privacy": {
+    "stored": "typed_allowlisted_dimensions_exact_numbers_bounded_internal_identifiers_tenant_keyed_provider_scope_and_text_fingerprints_and_canonical_digests",
+    "discarded": [
+      "raw_JSON",
+      "raw_file_bytes",
+      "HTTP_headers",
+      "opaque_cursors_after_page_chain_validation",
+      "credential_values",
+      "authorization_headers",
+      "provider_free_text",
+      "free_form_errors",
+      "OpenAI_user_id",
+      "Anthropic_account_id",
+      "Anthropic_service_account_id"
+    ],
+    "keyed_fingerprint": "tenant_specific_nonexported_key_version_prevents_cross_tenant_correlation_and_supports_rotation_without_rewriting_source_facts",
+    "employee_surveillance": false,
+    "actor_attribution_from_provider_identifiers": false
+  },
+  "idempotency": {
+    "identity": "organization_binding_id_and_version_profile_query_window_and_operator_idempotency_digest",
+    "same_identity_same_canonical_content": "return_original_receipt_without_new_snapshot_or_provider_io",
+    "same_identity_different_content": "fail_conflict_without_mutation",
+    "same_content_different_page_size": "same_content_digest_but_distinct_attempt_and_page_chain_provenance_with_a_distinct_page_chain_digest_may_resolve_to_original_snapshot",
+    "concurrency": "database_unique_constraints_make_two_replica_identical_publish_converge_and_conflicting_publish_fail_closed"
+  },
+  "failure_and_limits": {
+    "maximum_page_bytes": 1048576,
+    "maximum_total_bytes": 16777216,
+    "maximum_pages": 32,
+    "maximum_records": 4096,
+    "maximum_window_days": 31,
+    "maximum_json_depth": 16,
+    "maximum_json_members_per_page": 65536,
+    "maximum_opaque_cursor_bytes": 2048,
+    "request_timeout_seconds": 10,
+    "collection_deadline_seconds": 60,
+    "maximum_retries_per_page": 2,
+    "maximum_retry_delay_seconds": 5,
+    "concurrent_collections_per_process": 4,
+    "http": "401_and_403_never_retry_429_5xx_and_transient_network_retry_only_within_deadline_retry_after_bound",
+    "parser": "reject_duplicate_members_nonfinite_out_of_numeric_domain_or_overprecision_amounts_quantities_and_counts_before_digest_repeated_cursors_inconsistent_buckets_out_of_window_records_unsafe_dimensions_invalid_unicode_and_conflicting_duplicates",
+    "diagnostics": "fixed_content_free_codes_only_no_response_body_exception_text_provider_text_identifier_or_secret",
+    "coverage_on_failure": "explicit_failed_or_stale_gap_never_success_or_zero"
+  },
+  "unsupported_coverage": [
+    "OpenAI_ChatGPT_seat_or_Work_analytics",
+    "OpenAI_unmapped_Scale_Tier_commitments",
+    "OpenAI_third_party_gateway_or_reseller_invoices",
+    "Anthropic_Priority_Tier_costs",
+    "Anthropic_Claude_Platform_on_AWS_programmatic_reporting",
+    "Anthropic_Claude_Enterprise_Analytics",
+    "Anthropic_Bedrock_Vertex_Foundry_reseller_billing",
+    "Anthropic_speed_beta_without_a_separate_reviewed_profile",
+    "provider_invoice_credit_tax_discount_contract_or_foreign_exchange_finalization"
+  ],
+  "planned_surfaces": {
+    "new_http_routes": [],
+    "preflight_new_cli_commands": [],
+    "runtime_operator_commands": [
+      "finance source bind",
+      "finance collect",
+      "finance import"
+    ],
+    "schedulers_activated": [],
+    "live_provider_accounts_configured": []
+  },
+  "nonclaims": [
+    "provider_invoice_truth",
+    "complete_provider_account_coverage",
+    "request_team_actor_application_or_work_scope_final_cost",
+    "known_gateway_bypass_from_variance",
+    "shared_charge_allocation",
+    "accounts_payable_or_general_ledger_posting",
+    "employee_productivity_or_performance_measurement",
+    "automatic_budget_policy_or_model_change",
+    "live_customer_finance_validation",
+    "runtime_acceptance",
+    "final_candidate_acceptance",
+    "release_or_deployment_readiness"
+  ]
+}

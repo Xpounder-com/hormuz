@@ -110,6 +110,7 @@ _MATERIAL_CLASSES = frozenset(
         "ingress_proxy_credential",
         "protected_redaction_value",
         "provider_credential",
+        "rehearsal_control_credential",
         "database_credential",
         "policy_recovery_credential",
         "policy_administrator_credential",

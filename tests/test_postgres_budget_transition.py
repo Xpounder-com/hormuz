@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import os
@@ -19,10 +18,10 @@ from hormuz.postgres_usage_store import PostgresUsageStore
 
 if __package__:
     from ._budget_predecessor_fixture import finance_predecessor_call
-    from ._postgres_fixture import PostgresTestCase
+    from ._postgres_fixture import PostgresTestCase, without_finance_attempt_successor
 else:
     from _budget_predecessor_fixture import finance_predecessor_call
-    from _postgres_fixture import PostgresTestCase
+    from _postgres_fixture import PostgresTestCase, without_finance_attempt_successor
 
 
 @unittest.skipUnless(
@@ -50,7 +49,7 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
         )
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 14)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 15)
         self._drop_schema(self.schema)
         self.request = {
             "backend": "postgresql",
@@ -101,17 +100,17 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            self.assertIn(version, (13, 14))
+            self.assertIn(version, (13, 14, 15))
             ddl = original(version, schema, *roles)
             return ddl.split(";", 1)[0] + "; SELECT 1 / 0;" if fail and version == 13 else ddl
 
         with mock.patch.object(
             postgres_module, "_migration_sql", side_effect=migration
         ):
-            self.assertEqual(self.migrate().version, 14)
+            self.assertEqual(self.migrate().version, 15)
 
     def assert_prior_state_preserved(self):
-        current = copy.deepcopy(self.snapshot())
+        current = without_finance_attempt_successor(self.snapshot())
         current["rows"] = {
             table: rows
             for table, rows in current["rows"].items()
@@ -133,10 +132,10 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
         self.upgrade()
         self.assert_prior_state_preserved()
         current = self.snapshot()
-        self.assertEqual(len(current["rows"]), 60)
+        self.assertEqual(len(current["rows"]), 61)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
         self.runtime().verify_ready()
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 16):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(
@@ -169,7 +168,7 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
             connection.execute(
                 self.sql.SQL(
                     "UPDATE {}.hormuz_schema_migrations "
-                    "SET version=15 WHERE version=14"
+                    "SET version=16 WHERE version=15"
                 ).format(self.sql.Identifier(self.schema))
             )
         newer = self.snapshot()
@@ -188,7 +187,7 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
             connection.execute(
                 self.sql.SQL(
                     "UPDATE {}.hormuz_schema_migrations "
-                    "SET version=14,state='applying' WHERE version=15"
+                    "SET version=15,state='applying' WHERE version=16"
                 ).format(self.sql.Identifier(self.schema))
             )
         partial = self.snapshot()

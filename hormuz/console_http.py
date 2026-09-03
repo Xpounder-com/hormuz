@@ -112,7 +112,13 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
                 return
             _dashboard(handler, principal, credential, query)
             return
-        if path not in {"/v1/admin/me", "/v1/admin/usage", "/v1/admin/teams", "/v1/admin/members"}:
+        if path not in {
+            "/v1/admin/me",
+            "/v1/admin/usage",
+            "/v1/admin/teams",
+            "/v1/admin/members",
+            "/v1/admin/operations",
+        }:
             raise ConsoleError("admin_not_found")
         credential = _cookie(handler, "session")
         principal = service.sessions.authenticate(credential)
@@ -124,6 +130,15 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
         elif path == "/v1/admin/usage":
             query = _form(request.query, allowed={"from_date", "through_date", "team_id"})
             _json_response(handler, service.report(principal, **query))
+        elif path == "/v1/admin/operations":
+            if request.query:
+                raise ConsoleError("admin_invalid_request")
+            if principal.role != "member_admin":
+                raise ConsoleError("admin_access_denied")
+            snapshot = getattr(handler.server, "operational_stats", None)
+            if snapshot is None:
+                raise ConsoleError("admin_not_found")
+            _json_response(handler, snapshot())
         else:
             query = _form(request.query, allowed={"after", "limit"})
             limit = query.get("limit", "20")

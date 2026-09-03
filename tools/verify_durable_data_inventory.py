@@ -188,6 +188,31 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         if sqlite.intersection(registry_tables):
             raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
         sqlite.update(registry_tables)
+    finance_attempt_registry = ast.parse(
+        _read_text(root / "hormuz/_finance_attempt_schema.py")
+    )
+    finance_attempt_declaration = next(
+        (
+            node.value
+            for node in finance_attempt_registry.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "SQLITE_FINANCE_TABLE"
+                for target in node.targets
+            )
+        ),
+        None,
+    )
+    try:
+        finance_attempt_sql = ast.literal_eval(finance_attempt_declaration)
+    except (ValueError, TypeError):
+        raise DurableDataInventoryError("registry_schema_tables_invalid") from None
+    finance_attempt_tables = set(SQLITE_TABLE.findall(finance_attempt_sql))
+    if finance_attempt_tables != {"gateway_finance_attempt_evidence"}:
+        raise DurableDataInventoryError("registry_schema_tables_invalid")
+    if sqlite.intersection(finance_attempt_tables):
+        raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
+    sqlite.update(finance_attempt_tables)
     session_tables = set(SQLITE_TABLE.findall(_read_text(root / SESSION_SCHEMA_PATH)))
     for path in ("hormuz/_onboarding_schema.py", "hormuz/_console_schema.py"):
         additions = set(SQLITE_TABLE.findall(_read_text(root / path)))

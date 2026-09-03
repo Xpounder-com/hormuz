@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import socket
@@ -16,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from hormuz.config import ConfigError, GatewayConfig, ModelRoute, Policy
-from hormuz.budget_runtime import configured_model_id
+from hormuz.budget_runtime import configured_model_id, configured_route_rate_card
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
 from hormuz.custody import KEY_PURPOSE_PROVIDER_CREDENTIAL, EnvelopeCipher, GeneratedDataKey
 from hormuz.custody_runtime import write_envelope_file
@@ -26,11 +27,33 @@ from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
 from hormuz.usage import ResponseUsageParser
 
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
+
 
 GATEWAY_TOKEN = "company-user-token-never-forward"
 CLAUDE_ONLY_TOKEN = "company-claude-only-token-never-forward"
 OPENAI_KEY = "provider-openai-secret"
 ANTHROPIC_KEY = "provider-anthropic-secret"
+
+
+def _write_rotating_client_auth_helper(root: Path) -> tuple[Path, Path]:
+    """Return stale material once, then the current synthetic session token."""
+    count = root / "client-auth-helper-count"
+    helper = root / "client-auth-helper.py"
+    helper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, sys\n"
+        "path = pathlib.Path(sys.argv[1])\n"
+        "calls = int(path.read_text()) + 1 if path.exists() else 1\n"
+        "path.write_text(str(calls))\n"
+        "print('expired-session-token' if calls == 1 else sys.argv[2])\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    return helper, count
 
 
 class FakeProviderHandler(BaseHTTPRequestHandler):
@@ -112,6 +135,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             }
             if body.get("force_missing_usage") is True:
                 payload.pop("usage")
+            cache_write_tokens = body.get("force_cache_write_tokens")
+            if type(cache_write_tokens) is int and cache_write_tokens >= 0:
+                payload["usage"]["input_tokens_details"]["cache_write_tokens"] = cache_write_tokens
+            if body.get("force_response_failed") is True:
+                payload["status"] = "failed"
             if body.get("stream") is True:
                 self._send_openai_stream(payload)
                 return
@@ -224,6 +252,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
         message_id = "msg_gateway_probe"
         text = "GATEWAY_OK"
         in_progress = {**completed_response, "status": "in_progress", "output": [], "usage": None}
+        terminal_status = completed_response.get("status", "completed")
         completed_message = {
             "id": message_id,
             "type": "message",
@@ -231,8 +260,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             "role": "assistant",
             "content": [{"type": "output_text", "text": text, "annotations": [], "logprobs": []}],
         }
-        completed = {**completed_response, "output": [completed_message]}
-        events = [
+        completed = {
+            **completed_response,
+            "output": [completed_message] if terminal_status == "completed" else [],
+        }
+        completed_events = [
             {"type": "response.created", "response": in_progress, "sequence_number": 0},
             {
                 "type": "response.output_item.added",
@@ -281,6 +313,14 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 "sequence_number": 6,
             },
             {"type": "response.completed", "response": completed, "sequence_number": 7},
+        ]
+        events = completed_events if terminal_status == "completed" else [
+            completed_events[0],
+            {
+                "type": f"response.{terminal_status}",
+                "response": completed,
+                "sequence_number": 1,
+            },
         ]
         body_bytes = "".join(
             f"event: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n" for event in events
@@ -423,6 +463,23 @@ class ConfiguredModelIdentityTests(unittest.TestCase):
 
 
 class ResponseUsageEvidenceTests(unittest.TestCase):
+    def test_stream_completion_is_observed_only_from_terminal_provider_events(self) -> None:
+        openai = ResponseUsageParser("openai", is_event_stream=True)
+        openai.feed(b'data: {"type":"response.output_text.delta","delta":"x"}\n\n')
+        self.assertFalse(openai.provider_completed)
+        openai.feed(b'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}\n\n')
+        self.assertTrue(openai.provider_completed)
+
+        anthropic = ResponseUsageParser("anthropic", is_event_stream=True)
+        anthropic.feed(b'data: {"type":"message_delta","usage":{"output_tokens":1}}\n\n')
+        self.assertFalse(anthropic.provider_completed)
+        anthropic.feed(b'data: {"type":"message_stop"}\n\n')
+        self.assertTrue(anthropic.provider_completed)
+
+        event_only = ResponseUsageParser("openai", is_event_stream=True)
+        event_only.feed(b"event: response.completed\n")
+        self.assertTrue(event_only.provider_completed)
+
     def test_success_evidence_requires_valid_input_and_output_tokens(self) -> None:
         complete = ResponseUsageParser("openai", is_event_stream=False)
         complete.feed(json.dumps({
@@ -548,6 +605,62 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.reasoning_tokens, 7)
         self.assertGreater(totals.cost_microusd, 0)
+
+    def test_openai_native_cache_write_cost_settles_usage_and_budget_consistently(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["model_routes"]["engineering-fast"]["cache_write_cost_per_million"] = 5
+        self._restart_gateway(config_value)
+
+        status, _, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "cache-write accounting",
+                "stream": False,
+                "force_cache_write_tokens": 10,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        with managed_sqlite_connection(self.gateway.store.path) as connection:
+            row = connection.execute(
+                "SELECT usage.cost_microusd, finance.configured_estimate_microusd, "
+                "finance.cache_write_input_tokens "
+                "FROM gateway_finance_attempt_evidence AS finance "
+                "JOIN gateway_usage_events AS usage "
+                "ON usage.organization_id=finance.organization_id "
+                "AND usage.id=finance.usage_event_id"
+            ).fetchone()
+        self.assertEqual(row, (202, 202, 10))
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").cost_microusd, 202)
+
+    def test_openai_failed_terminal_stream_is_not_recorded_as_succeeded(self) -> None:
+        status, headers, body = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "known provider failure",
+                "stream": True,
+                "force_response_failed": True,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/event-stream")
+        self.assertIn(b"response.failed", body)
+        with managed_sqlite_connection(self.gateway.store.path) as connection:
+            row = connection.execute(
+                "SELECT terminal.state, usage.status, finance.terminal_state "
+                "FROM gateway_finance_attempt_evidence AS finance "
+                "JOIN gateway_request_attempt_events AS terminal "
+                "ON terminal.organization_id=finance.organization_id "
+                "AND terminal.id=finance.terminal_attempt_event_id "
+                "JOIN gateway_usage_events AS usage "
+                "ON usage.organization_id=finance.organization_id "
+                "AND usage.id=finance.usage_event_id"
+            ).fetchone()
+        self.assertEqual(row, ("failed", "failed", "failed"))
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
 
     def test_gateway_uses_an_encrypted_provider_credential_at_startup(self) -> None:
         """The runtime must prefer the sealed source over any plaintext env value."""
@@ -1142,7 +1255,17 @@ class GatewayIntegrationTests(unittest.TestCase):
 
     def test_interrupted_provider_response_becomes_unknown_without_replay(self) -> None:
         self._restart_gateway(self._config_with_failover())
-        partial_body = b"{\"partial\": true"
+        partial_body = json.dumps({
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {
+                    "cached_tokens": 2,
+                    "cache_write_tokens": 1,
+                },
+                "output_tokens": 4,
+                "total_tokens": 14,
+            },
+        }).encode()
 
         class InterruptedResponse:
             status = 200
@@ -1180,6 +1303,12 @@ class GatewayIntegrationTests(unittest.TestCase):
             "provider_bytes_read, downstream_bytes_sent "
             "FROM gateway_provider_attempt_metrics"
         ).fetchone()
+        finance = connection.execute(
+            "SELECT observation_state, observation_reason_code, provider_input_tokens, "
+            "provider_output_tokens, cache_read_input_tokens, cache_write_input_tokens, "
+            "configured_estimate_availability, configured_estimate_reason_code "
+            "FROM gateway_finance_attempt_evidence"
+        ).fetchone()
         connection.close()
         self.assertIsNotNone(metrics)
         assert metrics is not None
@@ -1190,6 +1319,13 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(
             events,
             [(1, "pending", None, None), (2, "outcome_unknown", "provider_stream_interrupted", None)],
+        )
+        self.assertEqual(
+            finance,
+            (
+                "partial", "provider_stream_interrupted", 10, 4, 2, 1,
+                "unavailable", "attempt_outcome_unknown",
+            ),
         )
 
     def test_event_stream_releases_available_chunk_before_provider_completion(self) -> None:
@@ -1231,6 +1367,41 @@ class GatewayIntegrationTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.getheader("Content-Type"), "text/event-stream")
             self.assertTrue(FakeProviderHandler.delayed_stream_started.wait(timeout=1))
+            route = self.config.model_routes["engineering-fast"]
+            expected_binding = configured_route_rate_card(
+                alias=route.alias,
+                protocol=route.protocol,
+                upstream_model=route.upstream_model,
+                input_cost_per_million=route.input_cost_per_million,
+                cache_read_cost_per_million=route.cache_read_cost_per_million,
+                cache_write_cost_per_million=route.cache_write_cost_per_million,
+                output_cost_per_million=route.output_cost_per_million,
+            )
+            database = sqlite3.connect(self.gateway.store.path)
+            binding = database.execute(
+                "SELECT configured_rate_card_state, configured_rate_card_id, "
+                "configured_rate_card_version, configured_rate_card_digest, "
+                "configured_rate_card_currency FROM gateway_request_attempts"
+            ).fetchone()
+            pending = database.execute(
+                "SELECT state FROM gateway_request_attempt_events ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()[0]
+            sidecar_count = database.execute(
+                "SELECT COUNT(*) FROM gateway_finance_attempt_evidence"
+            ).fetchone()[0]
+            database.close()
+            self.assertEqual(
+                binding,
+                (
+                    "configured",
+                    expected_binding["id"],
+                    expected_binding["version"],
+                    expected_binding["content_digest"],
+                    expected_binding["currency"],
+                ),
+            )
+            self.assertEqual(pending, "pending")
+            self.assertEqual(sidecar_count, 0)
             self.assertTrue(
                 first_read_finished.wait(timeout=2),
                 "gateway held an available provider event until stream completion",
@@ -1245,6 +1416,17 @@ class GatewayIntegrationTests(unittest.TestCase):
         connection.close()
         self.assertIn(b"event: response.completed", remainder)
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 1)
+        database = sqlite3.connect(self.gateway.store.path)
+        finance = database.execute(
+            "SELECT observation_state, provider_input_tokens, provider_output_tokens, "
+            "configured_estimate_availability, configured_rate_card_digest "
+            "FROM gateway_finance_attempt_evidence"
+        ).fetchone()
+        database.close()
+        self.assertEqual(
+            finance,
+            ("partial", 1, 1, "unavailable", expected_binding["content_digest"]),
+        )
 
     def test_downstream_disconnect_closes_provider_stream_and_keeps_unknown_attempt(self) -> None:
         self._restart_gateway(self._config_with_failover())
@@ -1636,6 +1818,56 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertIs(upstream["body"]["stream"], True)
         self.assertEqual(upstream["headers"]["authorization"], f"Bearer {OPENAI_KEY}")
 
+    @unittest.skipUnless(shutil.which("codex"), "Codex CLI is not installed")
+    def test_installed_codex_command_auth_recovers_after_401_without_duplicate_provider_egress(self) -> None:
+        helper, count = _write_rotating_client_auth_helper(self.root)
+        before = len(FakeProviderHandler.requests)
+        provider = (
+            "{name=\"Hormuz\",base_url=\"http://127.0.0.1:"
+            + str(self.gateway.server_port)
+            + "/v1\",wire_api=\"responses\",requires_openai_auth=false,auth={command="
+            + json.dumps(str(helper))
+            + ",args=["
+            + json.dumps(str(count))
+            + ","
+            + json.dumps(GATEWAY_TOKEN)
+            + "],refresh_interval_ms=0}}"
+        )
+        environment = os.environ.copy()
+        for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORGANIZATION", "OPENAI_PROJECT", "CODEX_API_KEY"):
+            environment.pop(name, None)
+        result = subprocess.run(
+            [
+                "codex",
+                "exec",
+                "--ignore-user-config",
+                "--skip-git-repo-check",
+                "--ephemeral",
+                "--sandbox",
+                "read-only",
+                "-C",
+                str(self.root),
+                "-m",
+                "engineering-fast",
+                "-c",
+                'model_provider="hormuz_connector"',
+                "-c",
+                "model_providers.hormuz_connector=" + provider,
+                "Reply with exactly GATEWAY_OK and do not call tools.",
+            ],
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        calls = int(count.read_text()) if count.exists() else 0
+        self.assertEqual(result.returncode, 0, msg=f"codex_401_recovery_failed:helper_calls={calls}")
+        self.assertEqual(calls, 2)
+        self.assertIn("GATEWAY_OK", result.stdout + result.stderr)
+        self.assertEqual(len(FakeProviderHandler.requests), before + 1)
+        self.assertTrue(str(FakeProviderHandler.requests[-1]["path"]).partition("?")[0].endswith("/responses"))
+
     @unittest.skipUnless(
         os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1"
         and (shutil.which("claude") or shutil.which("npx")),
@@ -1695,6 +1927,100 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertIs(upstream["body"]["stream"], True)
         self.assertEqual(upstream["headers"]["x-api-key"], ANTHROPIC_KEY)
         self.assertNotIn("authorization", upstream["headers"])
+
+    @unittest.skipUnless(
+        os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1"
+        and (shutil.which("claude") or shutil.which("npx")),
+        "Set HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 and install Claude Code or npx",
+    )
+    def test_official_claude_code_refreshes_after_401_and_requires_explicit_request_retry(self) -> None:
+        helper, count = _write_rotating_client_auth_helper(self.root)
+        settings_path = self.root / "claude-401-settings.json"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "apiKeyHelper": shlex.join([str(helper), str(count), GATEWAY_TOKEN]),
+                    "env": {
+                        "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{self.gateway.server_port}",
+                        "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "60000",
+                        "ANTHROPIC_API_KEY": "",
+                        "ANTHROPIC_AUTH_TOKEN": "",
+                        "CLAUDE_CODE_OAUTH_TOKEN": "",
+                        "DISABLE_AUTOUPDATER": "1",
+                        "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT": "1",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        environment = os.environ.copy()
+        for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"):
+            environment.pop(name, None)
+        claude = shutil.which("claude")
+        command = ([claude] if claude else ["npx", "-y", "@anthropic-ai/claude-code"]) + [
+            "-p",
+            "--bare",
+            "--no-session-persistence",
+            "--tools",
+            "",
+            "--settings",
+            str(settings_path),
+            "--model",
+            "claude-sonnet-5",
+            "Reply with exactly ok and do not call tools.",
+        ]
+        before = len(FakeProviderHandler.requests)
+        rejected = subprocess.run(
+            command,
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=45,
+            check=False,
+        )
+        calls_after_rejection = int(count.read_text()) if count.exists() else 0
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertEqual(calls_after_rejection, 2)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+        retried = subprocess.run(
+            command,
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=45,
+            check=False,
+        )
+        calls_after_retry = int(count.read_text()) if count.exists() else 0
+        self.assertEqual(retried.returncode, 0, msg=f"claude_401_recovery_failed:helper_calls={calls_after_retry}")
+        self.assertEqual(calls_after_retry, 3)
+        self.assertIn("ok", retried.stdout.lower())
+        retry_generation_requests = [
+            request
+            for request in FakeProviderHandler.requests[before:]
+            if str(request["path"]).partition("?")[0].endswith("/messages")
+        ]
+        self.assertTrue(retry_generation_requests)
+
+        control_before = len(FakeProviderHandler.requests)
+        control = subprocess.run(
+            command,
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=45,
+            check=False,
+        )
+        self.assertEqual(control.returncode, 0, msg="claude_clean_credential_control_failed")
+        control_generation_requests = [
+            request
+            for request in FakeProviderHandler.requests[control_before:]
+            if str(request["path"]).partition("?")[0].endswith("/messages")
+        ]
+        self.assertEqual(len(retry_generation_requests), len(control_generation_requests))
 
     def _post(self, path: str, body: dict, *, extra_headers: dict[str, str] | None = None, token: str = GATEWAY_TOKEN):
         connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)

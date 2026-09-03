@@ -121,7 +121,7 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_budget_schema.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_budget.py -v
-      - name: Verify additive portfolio contracts and budget preflight from the source distribution
+      - name: Verify additive portfolio, budget, and finance preflights from the source distribution
         run: |
           hormuz_extension_source="$(mktemp -d "$RUNNER_TEMP/hormuz-extensions.XXXXXX")"
           hormuz_extension_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
@@ -129,9 +129,13 @@ jobs:
           cd "$hormuz_extension_source/hormuz-$hormuz_extension_version"
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_portfolio_extensions.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_budget_transition_plan.py
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_native_attempt_transition_plan.py
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_collection_transition_plan.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest -v \
             tests.test_portfolio_extensions tests.test_portfolio_extension_packaging \
             tests.test_budget_transition_plan tests.test_budget_preflight_packaging \
+            tests.test_finance_native_attempt_transition_plan tests.test_finance_native_attempt_packaging \
+            tests.test_finance_collection_transition_plan tests.test_finance_collection_packaging \
             tests.test_portfolio_wire_contract
       - name: Verify the resolved license boundary for every declared extra
         run: |
@@ -164,7 +168,7 @@ jobs:
   postgres-compatibility:
     name: PostgreSQL compatibility
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
@@ -254,6 +258,29 @@ jobs:
           python -m venv "$RUNNER_TEMP/hormuz-finance-baseline"
           "$RUNNER_TEMP/hormuz-finance-baseline/bin/python" -m pip install \
             "$RUNNER_TEMP/finance-baseline-1dd6c9f.tar[postgres]"
+      - name: Verify and install the accepted budget-runtime predecessor
+        run: |
+          git fetch --no-tags origin 4e3133f19db4c34d7a181848ebc36754bce164ea
+          git -c tar.umask=0000 archive --format=tar --prefix=hormuz-budget-runtime-baseline/ \
+            --output="$RUNNER_TEMP/budget-runtime-baseline-4e3133f.tar" \
+            4e3133f19db4c34d7a181848ebc36754bce164ea
+          python tools/verify_finance_native_attempt_transition_plan.py \
+            --predecessor-archive "$RUNNER_TEMP/budget-runtime-baseline-4e3133f.tar"
+          python -m venv "$RUNNER_TEMP/hormuz-budget-runtime-baseline"
+          "$RUNNER_TEMP/hormuz-budget-runtime-baseline/bin/python" -m pip install \
+            "$RUNNER_TEMP/budget-runtime-baseline-4e3133f.tar[postgres]"
+      - name: Verify and install the accepted native-finance predecessor
+        run: |
+          git fetch --no-tags origin 04a086cc0f5e47db3728e9128bb89769d220dc05
+          git -c tar.umask=0000 archive --format=tar \
+            --prefix=hormuz-finance-native-runtime-baseline/ \
+            --output="$RUNNER_TEMP/finance-native-runtime-baseline-04a086c.tar" \
+            04a086cc0f5e47db3728e9128bb89769d220dc05
+          python tools/verify_finance_collection_transition_plan.py \
+            --predecessor-archive "$RUNNER_TEMP/finance-native-runtime-baseline-04a086c.tar"
+          python -m venv "$RUNNER_TEMP/hormuz-finance-native-runtime-baseline"
+          "$RUNNER_TEMP/hormuz-finance-native-runtime-baseline/bin/python" -m pip install \
+            "$RUNNER_TEMP/finance-native-runtime-baseline-04a086c.tar[postgres]"
       - name: Build the candidate wheel
         run: |
           python -m pip install build==1.3.0
@@ -275,10 +302,14 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_outcome_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_budget_transition_plan.py
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_native_attempt_transition_plan.py
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_collection_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest -v \
             tests.test_registry_transition_plan tests.test_attribution_transition_plan tests.test_outcome_transition_plan \
             tests.test_finance_transition_plan tests.test_finance_packaging \
             tests.test_budget_transition_plan tests.test_budget_preflight_packaging \
+            tests.test_finance_native_attempt_transition_plan tests.test_finance_native_attempt_packaging \
+            tests.test_finance_collection_transition_plan tests.test_finance_collection_packaging \
             tests.test_portfolio_wire_contract
       - name: Prove PostgreSQL migration and repository compatibility
         env:
@@ -289,16 +320,24 @@ jobs:
           HORMUZ_TEST_ATTRIBUTION_PYTHON: ${{ runner.temp }}/hormuz-attribution-baseline/bin/python
           HORMUZ_TEST_OUTCOME_PYTHON: ${{ runner.temp }}/hormuz-outcome-baseline/bin/python
           HORMUZ_TEST_FINANCE_PYTHON: ${{ runner.temp }}/hormuz-finance-baseline/bin/python
+          HORMUZ_TEST_FINANCE_NATIVE_PYTHON: ${{ runner.temp }}/hormuz-budget-runtime-baseline/bin/python
+          HORMUZ_TEST_FINANCE_COLLECTION_PYTHON: ${{ runner.temp }}/hormuz-finance-native-runtime-baseline/bin/python
         run: |
           test -x "$HORMUZ_TEST_V1_PYTHON"
           test -x "$HORMUZ_TEST_REGISTRY_PYTHON"
           test -x "$HORMUZ_TEST_ATTRIBUTION_PYTHON"
           test -x "$HORMUZ_TEST_OUTCOME_PYTHON"
           test -x "$HORMUZ_TEST_FINANCE_PYTHON"
+          test -x "$HORMUZ_TEST_FINANCE_NATIVE_PYTHON"
+          test -x "$HORMUZ_TEST_FINANCE_COLLECTION_PYTHON"
           test -n "$HORMUZ_TEST_PG_CONTAINER"
           test -n "$HORMUZ_TEST_POSTGRES_DSN"
           cd "$RUNNER_TEMP"
           for module in test_sqlite_finance test_postgres_finance; do
+            "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+              -s "$GITHUB_WORKSPACE/tests" -p "${module}.py" -v
+          done
+          for module in test_finance_attempt_runtime test_postgres_finance_attempt_runtime; do
             "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
               -s "$GITHUB_WORKSPACE/tests" -p "${module}.py" -v
           done
@@ -314,6 +353,14 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_budget_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_postgres_budget_transition.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_finance_native_attempt_transition.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_postgres_finance_native_attempt_transition.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_finance_collection_transition.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_postgres_finance_collection_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_outcome_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
@@ -787,4 +834,6 @@ jobs:
         run: |
           python -m unittest -v \
             tests.test_gateway.GatewayIntegrationTests.test_installed_codex_routes_through_gateway \
-            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway
+            tests.test_gateway.GatewayIntegrationTests.test_installed_codex_command_auth_recovers_after_401_without_duplicate_provider_egress \
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway \
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_refreshes_after_401_and_requires_explicit_request_retry

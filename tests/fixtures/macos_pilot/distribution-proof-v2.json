@@ -1,0 +1,28 @@
+{
+  "architectures": [
+    "arm64",
+    "x86_64"
+  ],
+  "archive_bytes": 59,
+  "archive_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
+  "build": "2",
+  "bundle_identifier": "com.example.hormuzpilot",
+  "distribution_ready": true,
+  "entitlements": [],
+  "executable_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "executable_version_verified": false,
+  "hardened_runtime": true,
+  "icon_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "minimum_macos": "14.0",
+  "mode": "notarized",
+  "notarization_ticket_stapled": true,
+  "passed": true,
+  "schema_id": "hormuz.macos-distribution-proof",
+  "schema_version": 2,
+  "signing_authority": "Developer ID Application: Synthetic Fixture (ABCDEFGHIJ)",
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "system_runtime_dependencies_only": true,
+  "team_identifier": "ABCDEFGHIJ",
+  "version": "0.1.0",
+  "workflow_run_url": "https://github.com/Xpounder-com/hormuz/actions/runs/1"
+}

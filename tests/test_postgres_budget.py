@@ -137,7 +137,7 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
         self._replace_budget_audit_index(BUDGET_AUDIT_REPORT_COLUMNS)
 
     def test_real_schema_and_checked_in_migration(self):
-        self.assertEqual(POSTGRES_SCHEMA_VERSION, 14)
+        self.assertEqual(POSTGRES_SCHEMA_VERSION, 15)
         with self.psycopg.connect(self.owner_dsn) as connection:
             count = connection.execute(
                 "SELECT COUNT(*) FROM pg_tables WHERE schemaname=%s", (self.schema,),
@@ -154,7 +154,7 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
                     (self.schema, BUDGET_AUDIT_REPORT_INDEX),
                 ).fetchall()
             )
-        self.assertEqual(count, 60)
+        self.assertEqual(count, 61)
         self.assertEqual(index_columns, BUDGET_AUDIT_REPORT_COLUMNS)
         actual = resources.files("hormuz").joinpath(
             "migrations/postgresql/0013_work_budgets.sql"
@@ -229,6 +229,15 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
 
     def test_denial_audit_retains_evaluation_time(self):
         self.check_denial_audit_retains_evaluation_time()
+
+    def test_attribution_sequence_exhaustion_is_audited(self):
+        self.check_attribution_sequence_exhaustion_is_audited()
+
+    def test_malformed_rate_card_coordinates_fail_report_closed(self):
+        self.check_malformed_rate_card_coordinates_fail_report_closed()
+
+    def test_rate_card_diversity_is_bounded_without_losing_accounting(self):
+        self.check_rate_card_diversity_is_bounded_without_losing_accounting()
 
     def test_denial_audit_failure_is_a_storage_failure(self):
         plan = self.create(amount="0")

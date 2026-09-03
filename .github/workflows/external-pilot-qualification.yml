@@ -1,0 +1,138 @@
+name: External pilot deployment qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Evidence operation to run
+        required: true
+        default: deployment
+        type: choice
+        options:
+          - deployment
+          - qualification
+      gateway_origin:
+        description: Exact HTTPS origin of the Render gateway
+        required: true
+        type: string
+      render_service_id:
+        description: Exact Render web service identifier
+        required: true
+        type: string
+      deployment_evidence_url:
+        description: Successful earlier deployment-evidence workflow URL, or none for deployment
+        required: true
+        default: none
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: external-pilot-deployment-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deployment:
+    name: Verify exact live external-pilot deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: external-pilot-qualification
+    if: ${{ inputs.operation == 'deployment' }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require reviewed default-branch source
+        env:
+          HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Verify live deployment and write content-free evidence
+        env:
+          HORMUZ_GATEWAY_ORIGIN: ${{ inputs.gateway_origin }}
+          HORMUZ_RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+          HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir "$RUNNER_TEMP/hormuz-external-pilot-deployment"
+          python -I tools/verify_external_pilot_deployment.py \
+            --gateway-origin "$HORMUZ_GATEWAY_ORIGIN" \
+            --expected-commit "$GITHUB_SHA" \
+            --expected-service-id "$HORMUZ_RENDER_SERVICE_ID" \
+            --workflow-run-url "$HORMUZ_WORKFLOW_RUN_URL" \
+            --output "$RUNNER_TEMP/hormuz-external-pilot-deployment/external-pilot-deployment-evidence.json"
+      - name: Upload exact deployment evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-external-pilot-deployment-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hormuz-external-pilot-deployment
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: false
+
+  qualification:
+    name: Restart and qualify live provider behavior
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: external-pilot-qualification
+    if: ${{ inputs.operation == 'qualification' }}
+    env:
+      HORMUZ_GATEWAY_ORIGIN: ${{ vars.HORMUZ_GATEWAY_ORIGIN }}
+      HORMUZ_RENDER_SERVICE_ID: ${{ vars.HORMUZ_RENDER_SERVICE_ID }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require reviewed default-branch source
+        env:
+          HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Require the protected gateway identity
+        env:
+          HORMUZ_REQUESTED_GATEWAY_ORIGIN: ${{ inputs.gateway_origin }}
+          HORMUZ_REQUESTED_RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+        run: |
+          set -euo pipefail
+          test -n "$HORMUZ_GATEWAY_ORIGIN"
+          test -n "$HORMUZ_RENDER_SERVICE_ID"
+          test "$HORMUZ_REQUESTED_GATEWAY_ORIGIN" = "$HORMUZ_GATEWAY_ORIGIN"
+          test "$HORMUZ_REQUESTED_RENDER_SERVICE_ID" = "$HORMUZ_RENDER_SERVICE_ID"
+      - name: Restart exact deployment and run content-free qualification
+        env:
+          HORMUZ_DEPLOYMENT_EVIDENCE_URL: ${{ inputs.deployment_evidence_url }}
+          HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN: ${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}
+          HORMUZ_FAILOVER_REHEARSAL_KEY: ${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}
+          HORMUZ_RENDER_DEPLOY_HOOK_URL: ${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir "$RUNNER_TEMP/hormuz-external-pilot-qualification"
+          python -I tools/qualify_external_pilot.py \
+            --gateway-origin "$HORMUZ_GATEWAY_ORIGIN" \
+            --expected-commit "$GITHUB_SHA" \
+            --expected-service-id "$HORMUZ_RENDER_SERVICE_ID" \
+            --deployment-evidence-url "$HORMUZ_DEPLOYMENT_EVIDENCE_URL" \
+            --workflow-run-url "$HORMUZ_WORKFLOW_RUN_URL" \
+            --output "$RUNNER_TEMP/hormuz-external-pilot-qualification/external-pilot-qualification-evidence.json"
+      - name: Upload exact qualification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-external-pilot-qualification-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hormuz-external-pilot-qualification
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: false
