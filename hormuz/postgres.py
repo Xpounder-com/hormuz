@@ -260,11 +260,18 @@ def bootstrap_postgres_deployment(
     """Prepare and verify a separate owner/login boundary for one deployment.
 
     The migration credential must own schema objects.  The runtime DSN must
-    identify a different, pre-existing managed login.  Hormuz never creates or
+    identify a different, pre-existing direct login.  Hormuz never creates or
     receives that login's password: it creates stable NOLOGIN authorization
-    roles, removes inheritance from the managed login, grants only the runtime
-    role, applies the schema as the owner, and finally proves that the runtime
-    credential can use the schema only by explicitly assuming that role.
+    roles, removes inheritance from the runtime login when needed, grants only
+    the runtime role, applies the schema as the owner, and finally proves that
+    the runtime credential can use the schema only by explicitly assuming that
+    role. A pre-hardened NOINHERIT login avoids an unnecessary PostgreSQL 16
+    ADMIN OPTION requirement.
+
+    PostgreSQL 16 automatically records a non-superuser CREATEROLE principal as
+    an administrative member of each role it creates.  The exact
+    ADMIN=TRUE/INHERIT=FALSE/SET=FALSE edge from the migration owner is accepted;
+    every other creator, member, or option still fails closed.
 
     Safe, already-complete work is accepted so an interrupted maintenance run
     can be repeated.  Unexpected roles, memberships, ownership, or elevated
@@ -368,12 +375,19 @@ def bootstrap_postgres_deployment(
                     raise PostgresStorageError(
                         "postgres_bootstrap_runtime_membership_unsafe"
                     )
-                cursor.execute(
-                    sql.SQL(
-                        "ALTER ROLE {} NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                        "NOINHERIT NOREPLICATION NOBYPASSRLS"
-                    ).format(sql.Identifier(runtime_login))
-                )
+                # PostgreSQL 16 requires ADMIN OPTION to repeat ALTER ROLE on
+                # another login, even when every requested attribute is
+                # already set.  Skip that no-op so a non-superuser migration
+                # owner can bootstrap a pre-hardened login.  Older
+                # deployments that still use INHERIT retain the existing
+                # one-time hardening path.
+                if runtime_attributes[4]:
+                    cursor.execute(
+                        sql.SQL(
+                            "ALTER ROLE {} NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                            "NOINHERIT NOREPLICATION NOBYPASSRLS"
+                        ).format(sql.Identifier(runtime_login))
+                    )
 
                 for role in role_names:
                     attributes = _postgres_role_attributes(cursor, role)
@@ -392,12 +406,20 @@ def bootstrap_postgres_deployment(
                         raise PostgresStorageError(
                             "postgres_bootstrap_authorization_membership_unsafe"
                         )
-                    expected_members = (
+                    allowed_members = {
+                        # PostgreSQL 16 records the non-superuser CREATEROLE
+                        # principal as an administrative member of each role
+                        # it creates.  This exact edge cannot inherit or SET
+                        # ROLE and gives the migration owner no authority it
+                        # does not already need to grant schema privileges.
+                        (migration_login, True, False, False)
+                    }
+                    allowed_members |= (
                         {(runtime_login, False, False, True)}
                         if role == runtime_role
                         else set()
                     )
-                    if _postgres_role_member_grants(cursor, role) - expected_members:
+                    if _postgres_role_member_grants(cursor, role) - allowed_members:
                         raise PostgresStorageError(
                             "postgres_bootstrap_authorization_membership_unsafe"
                         )
@@ -718,11 +740,15 @@ def _verify_postgres_deployment_roles(
             else "membership_unsafe"
         )
     for role in role_names:
-        expected_members = (
+        required_members = (
             {(runtime_login, False, False, True)}
             if role == runtime_role
             else set()
         )
+        allowed_members = required_members | {
+            (migration_login, True, False, False)
+        }
+        member_grants = _postgres_role_member_grants(cursor, role)
         if _postgres_role_attributes(cursor, role) != (
             False,
             False,
@@ -731,9 +757,11 @@ def _verify_postgres_deployment_roles(
             False,
             False,
             False,
-        ) or _postgres_role_memberships(cursor, role) or _postgres_role_member_grants(
-            cursor, role
-        ) != expected_members:
+        ) or (
+            _postgres_role_memberships(cursor, role)
+            or not required_members.issubset(member_grants)
+            or member_grants - allowed_members
+        ):
             fail("authorization_role_unsafe")
     _verify_postgres_migration_ownership(
         cursor,
