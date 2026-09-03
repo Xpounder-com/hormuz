@@ -147,7 +147,8 @@ class PostgresFinanceTransitionTests(PostgresTestCase):
         current = self.snapshot()
         self.assertEqual(len(current["rows"]), 61)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 16):
+        # v16 is the accepted collection successor; v17 is intentionally absent.
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 17):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
