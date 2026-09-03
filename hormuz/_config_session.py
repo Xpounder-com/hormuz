@@ -59,11 +59,21 @@ def build_session_broker(raw: dict[str, Any], *, source_path: Path) -> SessionBr
     database = Path(_string(item.get("database", "./sessions.sqlite3"), f"{prefix}.database")).expanduser()
     if not database.is_absolute():
         database = source_path.parent / database
+    trusted_parent = item.get("trusted_parent_path")
+    if trusted_parent is None:
+        trusted_parent_path = None
+    else:
+        trusted_parent_path = _string(trusted_parent, f"{prefix}.trusted_parent_path")
+        trusted_path = Path(trusted_parent_path).expanduser()
+        if any(ord(character) < 33 for character in trusted_parent_path) or not trusted_path.is_absolute():
+            raise ConfigError("session broker trusted_parent_path must be an absolute path")
+        trusted_parent_path = trusted_path
     access_ttl = _integer(item.get("access_ttl_seconds", 600), f"{prefix}.access_ttl_seconds", minimum=300, maximum=900)
     return SessionBrokerConfig(
         enabled=True,
         public_base_url=public_url,
         database_path=database.absolute(),
+        trusted_parent_path=trusted_parent_path,
         master_key_env=_environment_name(item.get("master_key_env", "HORMUZ_SESSION_MASTER_KEY"), f"{prefix}.master_key_env"),
         access_ttl_seconds=access_ttl,
         absolute_ttl_seconds=_integer(item.get("absolute_ttl_seconds", 43200), f"{prefix}.absolute_ttl_seconds", minimum=access_ttl, maximum=43200),

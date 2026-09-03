@@ -180,6 +180,7 @@ class GatewayServer(ThreadingHTTPServer):
                     access_ttl_seconds=settings.access_ttl_seconds,
                     absolute_ttl_seconds=settings.absolute_ttl_seconds,
                     enrollment_ttl_seconds=settings.enrollment_ttl_seconds,
+                    trusted_parent_path=settings.trusted_parent_path,
                 ))
             self.store: UsageRepository
             if config.portfolio_control is None:

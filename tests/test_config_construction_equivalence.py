@@ -102,8 +102,8 @@ def _snapshot_sha256(config: GatewayConfig) -> str:
 
 
 class ConfigurationConstructionEquivalenceTests(unittest.TestCase):
-    LOCAL_SNAPSHOT_SHA256 = "cf53bcb3b090eb158ce2717b511bceee0639174154aabcf9a3411d1812ddca9b"
-    MANAGED_SNAPSHOT_SHA256 = "6f5ac7b96e7ab26409d63df7915c1e2691fb7a02dfa5fb9658623040fdb86a51"
+    LOCAL_SNAPSHOT_SHA256 = "299d5663eab862908a1f7a2357881b24c0bddef14b472bb97e7841246efec7b2"
+    MANAGED_SNAPSHOT_SHA256 = "0f66170d8e9bbe76e0a2f1f6340f2991a390d424f715a0d4be0baa7c3b2c0823"
 
     def _local_value(self) -> dict[str, object]:
         value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))

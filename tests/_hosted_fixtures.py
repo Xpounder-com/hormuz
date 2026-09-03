@@ -86,6 +86,7 @@ def provider_profile(root: Path):
             "session_broker": {
                 "enabled": True, "public_base_url": hosted_document["public_origin"],
                 "database": str(state / "sessions.sqlite3"),
+                "trusted_parent_path": str(state),
                 "master_key_env": "HORMUZ_SESSION_MASTER_KEY",
                 "access_ttl_seconds": 600, "absolute_ttl_seconds": 43200,
                 "enrollment_ttl_seconds": 300, "onboarding_enabled": True,

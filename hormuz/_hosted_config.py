@@ -90,6 +90,7 @@ def load_profile(path: Path, credentials: dict[str, str]) -> GatewayConfig:
         )},
         session_broker=SessionBrokerConfig(
             enabled=True, public_base_url=public_origin, database_path=state / "sessions.sqlite3",
+            trusted_parent_path=state,
             onboarding_enabled=True, console_enabled=True,
         ),
         max_request_bytes=16384, upstream_timeout_seconds=10,

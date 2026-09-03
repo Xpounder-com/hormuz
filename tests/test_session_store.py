@@ -133,6 +133,45 @@ class SessionStoreTests(unittest.TestCase):
         finally:
             parent.chmod(0o700)
 
+    @unittest.skipIf(os.name == "nt", "POSIX directory ownership and mode check")
+    def test_trusted_parent_path_allows_group_writable_subtrees(self) -> None:
+        base = Path(self.temporary.name)
+        trusted_parent = base / "trusted-state-parent"
+        trusted_parent.mkdir(mode=0o700)
+        database_parent = trusted_parent / "sessions"
+        database_parent.mkdir(mode=0o770)
+        trusted_parent.chmod(0o700)
+        database_parent.chmod(0o770)
+        candidate = database_parent / "sessions.sqlite3"
+        store = SQLiteSessionStore(
+            candidate,
+            master_key=b"m" * 32,
+            audience="https://gateway.example",
+            access_ttl_seconds=600,
+            absolute_ttl_seconds=43_200,
+            enrollment_ttl_seconds=300,
+            trusted_parent_path=trusted_parent,
+        )
+        self.assertEqual(store.path, candidate.resolve())
+        self.assertEqual(store.check_available(), None)
+        try:
+            database_parent.chmod(0o777)
+            with self.assertRaisesRegex(SessionStoreError, "session_store_insecure_parent"):
+                store.check_available()
+        finally:
+            database_parent.chmod(0o770)
+            trusted_parent.chmod(0o700)
+        with self.assertRaisesRegex(SessionStoreError, "session_store_insecure_parent"):
+            SQLiteSessionStore(
+                candidate,
+                master_key=b"m" * 32,
+                audience="https://gateway.example",
+                access_ttl_seconds=600,
+                absolute_ttl_seconds=43_200,
+                enrollment_ttl_seconds=300,
+                trusted_parent_path=base / "revoked-parent",
+            )
+
     def test_refresh_rotates_both_credentials_and_replay_revokes_family(self) -> None:
         first = self.store.redeem_enrollment(
             enrollment_id=self._authorized_enrollment(),
