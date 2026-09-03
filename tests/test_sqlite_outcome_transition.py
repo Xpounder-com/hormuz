@@ -15,6 +15,7 @@ from hormuz._outcome_schema import TABLE_DDL, sqlite_statements
 from hormuz._finance_schema import TABLE_DDL as FINANCE_TABLES
 from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
 from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_TABLES
+from hormuz._finance_collection_schema import TABLE_DDL as COLLECTION_TABLES
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import OUTCOMES
@@ -56,7 +57,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 11)
+        self.assertEqual(UsageStore.schema_version, 12)
         self.predecessor_request = {"backend": "sqlite", "path": str(self.path)}
         self.seeded = attribution_predecessor_call({**self.predecessor_request, "mode": "seed"})
         self.assertEqual(self.seeded["status"], "ready")
@@ -69,7 +70,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            self.assertIn(version, (7, 8, 9, 10, 11))
+            self.assertIn(version, (7, 8, 9, 10, 11, 12))
             if fail and version == 7:
                 connection.execute(sqlite_statements()[0])
                 raise RuntimeError("synthetic_outcome_migration_failure")
@@ -83,7 +84,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
             sqlite_snapshot(self.path)
         )
         before = without_sqlite_finance_attempt_successor(self.before)
-        added = set(TABLE_DDL) | set(FINANCE_TABLES) | set(BUDGET_TABLES) | set(PROVIDER_TABLES)
+        added = set(TABLE_DDL) | set(FINANCE_TABLES) | set(BUDGET_TABLES) | set(PROVIDER_TABLES) | set(COLLECTION_TABLES)
         current["objects"] = [
             row for row in current["objects"]
             if row[2] not in added and not row[1].startswith("gateway_provider_")
@@ -92,16 +93,19 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         current["rows"]["hormuz_schema_migrations"] = [
             row
             for row in current["rows"]["hormuz_schema_migrations"]
-            if row[0] not in {7, 8, 9, 10}
+            if row[0] not in {7, 8, 9, 10, 11, 12}
         ]
         self.assertEqual(current, before)
 
     def test_sqlite_outcome_real_migration_and_missing_following_migration(self):
         self.upgrade()
         self.assert_prior_state_preserved()
-        self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 39)
+        self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 46)
         before = sqlite_snapshot(self.path)
-        with mock.patch.object(UsageStore, "schema_version", 12):
+        # The candidate binary ends at schema 12.  Pretend the next schema
+        # exists so the already-upgraded v12 database exercises the
+        # unsupported-following-migration guard.
+        with mock.patch.object(UsageStore, "schema_version", 13):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

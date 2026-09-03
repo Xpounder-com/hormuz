@@ -2116,6 +2116,37 @@ class UsageStore:
             if finance_ready
             else ()
         )
+        collection_ready = connection.execute(
+            "SELECT 1 FROM hormuz_schema_migrations WHERE version=12 AND state='applied'"
+        ).fetchone() is not None
+        collection_rows: list[tuple[str, str, str]] = []
+        if collection_ready:
+            for source_schema_id, table, identity_column in (
+                (
+                    "hormuz.finance-source-binding-version",
+                    "portfolio_finance_source_binding_versions",
+                    "binding_event_id",
+                ),
+                (
+                    "hormuz.finance-collection-event",
+                    "portfolio_finance_collection_events",
+                    "event_id",
+                ),
+                (
+                    "hormuz.finance-snapshot",
+                    "portfolio_finance_snapshots",
+                    "snapshot_id",
+                ),
+            ):
+                rows = connection.execute(
+                    f"SELECT {identity_column}, evidence_json FROM {table} "
+                    "WHERE organization_id = ?",
+                    (organization_id,),
+                ).fetchall()
+                collection_rows.extend(
+                    (source_schema_id, str(row[identity_column]), str(row["evidence_json"]))
+                    for row in rows
+                )
         for row in usage_rows:
             try:
                 event = usage_audit_event(dict(row))
@@ -2156,6 +2187,38 @@ class UsageStore:
                     error_factory=StorageSchemaError,
                 )
             except ValueError:
+                raise StorageSchemaError("audit_chain_source_event_malformed") from None
+            if source.source in source_identities:
+                raise StorageSchemaError("audit_chain_source_event_malformed")
+            source_identities.add(source.source)
+            sources.append(source)
+        for source_schema_id, source_event_id, event_json in collection_rows:
+            try:
+                from .finance_collection import (
+                    FinanceCollectionError,
+                    finance_collection_source_identity,
+                )
+
+                event = json.loads(event_json)
+                if (
+                    not isinstance(event, dict)
+                    or canonical_json_text(event) != event_json
+                    or finance_collection_source_identity(source_schema_id, event)
+                    != source_event_id
+                ):
+                    raise ValueError
+                source = normalize_audit_chain_source_event_input(
+                    event,
+                    source=AuditChainSource(source_schema_id, 1, source_event_id),
+                    error_factory=StorageSchemaError,
+                )
+            except (
+                AuditChainError,
+                FinanceCollectionError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ):
                 raise StorageSchemaError("audit_chain_source_event_malformed") from None
             if source.source in source_identities:
                 raise StorageSchemaError("audit_chain_source_event_malformed")

@@ -46,6 +46,14 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
         )
 
     def setUp(self) -> None:
+        # The registry transition remains a historical v8-to-v9 proof.  Pin
+        # the candidate verifier to the v15 boundary so the v16 collection
+        # migration is exercised only by its dedicated transition suite.
+        self._schema_version_patch = mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 15
+        )
+        self._schema_version_patch.start()
+        self.addCleanup(self._schema_version_patch.stop)
         # The shared fixture owns this uniquely named schema and its four roles.
         # Each case starts at real v8, then exercises actual migration 9.
         self._drop_schema(self.schema)

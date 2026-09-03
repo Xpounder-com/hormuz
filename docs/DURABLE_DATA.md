@@ -45,6 +45,7 @@ unregistered table.
 | `request_attempt_ledger` | `gateway_request_attempt_events`, `gateway_request_attempts` | `gateway_request_attempt_events`, `gateway_request_attempts` | Content-free pre-egress attempt identity, routing/policy/redaction metadata, reservations, terminal/unknown state, and usage linkage. |
 | `provider_reliability_evidence` | `gateway_provider_attempt_metrics`, `gateway_provider_failover_events` | `gateway_provider_attempt_metrics`, `gateway_provider_failover_events` | Append-only per-egress monotonic header/first-byte/total timing, provider/downstream byte counts, provider status, and one-hop attempt linkage with fixed trigger reason. No prompt or response body. |
 | `provider_attempt_finance_evidence` | `gateway_finance_attempt_evidence` | `gateway_finance_attempt_evidence` | One append-only fact per post-migration terminal provider attempt: bounded allowlisted native counters/dimensions, nullable normalized values, configured estimate and immutable rate-card provenance. No prompt, response body, or provider-final invoice claim. |
+| `provider_finance_collection_evidence` | `portfolio_finance_source_binding_versions`, `portfolio_finance_collection_attempts`, `portfolio_finance_collection_events`, `portfolio_finance_snapshots`, `portfolio_finance_snapshot_bucket_coverage`, `portfolio_finance_usage_observations`, `portfolio_finance_cost_observations` | `portfolio_finance_source_binding_versions`, `portfolio_finance_collection_attempts`, `portfolio_finance_collection_events`, `portfolio_finance_snapshots`, `portfolio_finance_snapshot_bucket_coverage`, `portfolio_finance_usage_observations`, `portfolio_finance_cost_observations` | Append-only source-binding versions, content-free collection attempts and terminal events, complete typed snapshots, explicit empty-bucket coverage, tenant-keyed provider dimensions, and exact native/canonical cost text. No raw provider payload, cursor, credential, prompt, response, or invoice-final claim. |
 | `audit_chain_state` | `gateway_audit_chain_checkpoints`, `gateway_audit_chain_entries`, `gateway_audit_chain_epochs`, `gateway_audit_chain_heads` | `gateway_audit_chain_checkpoints`, `gateway_audit_chain_entries`, `gateway_audit_chain_epochs`, `gateway_audit_chain_heads` | Tenant-qualified event references, sequence, timestamps, hashes, checkpoint receipts, and external object versions. |
 | `policy_control` | — | `policy_active_versions`, `policy_administrators`, `policy_control_events`, `policy_tenants`, `policy_versions` | Administrator identity keys, immutable policy JSON/documents, activation pointers, hashes, summaries, and control events. Policy documents are organization configuration, not request content. |
 | `custody_control` | — | `custody_administrators`, `custody_control_events`, `custody_operation_approvals`, `custody_operation_intents`, `custody_tenants` | Tenant/admin identities, fixed operation types, approvals, target/parameter fingerprints, retention configuration, and content-free control events. No plaintext protected input. |
@@ -74,6 +75,13 @@ binding columns on request roots. It stores only a bounded provider metadata
 allowlist and configured estimates; missing values stay null and no field is
 claimed as provider-final invoice truth. See
 [FINANCE_NATIVE_ATTEMPT_RUNTIME.md](FINANCE_NATIVE_ATTEMPT_RUNTIME.md).
+The provider collection candidate adds seven append-only collection tables in
+SQLite migration 12 / PostgreSQL migration 16. SQLite collection runtime and
+customer-file import are implemented behind the candidate gates; PostgreSQL
+collection runtime grants remain withheld until a separately reviewed literal
+ACL boundary is accepted. Collection snapshots are complete and typed, while
+coverage records authoritative empty buckets without claiming numeric zero.
+See [FINANCE_COLLECTION_RUNTIME.md](FINANCE_COLLECTION_RUNTIME.md).
 #214 stays open for final-candidate
 transition proof. See [REGISTRY.md](REGISTRY.md) for the opt-in authority and
 [REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) for the application/database

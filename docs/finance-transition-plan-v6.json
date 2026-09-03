@@ -1,0 +1,72 @@
+{
+  "schema_id": "hormuz.finance-transition-plan",
+  "schema_version": 6,
+  "stage": "provider_collection_runtime_candidate",
+  "target_release": "1.1.0",
+  "feature_issue": 8,
+  "gate_issue": 214,
+  "preflight_plan": {
+    "path": "docs/finance-transition-plan-v5.json",
+    "canonical_sha256": "9a5df6cdf6a9c32c92e30b5e8226ee232213dae05635186bded7d7482b243555"
+  },
+  "collection_contract": {
+    "path": "docs/finance-collection-contract-v1.json",
+    "canonical_sha256": "c32eeab34af806bd18cbedf77bbf91b0e30b4b369300b7ba01159701ced0760e"
+  },
+  "transitions": {
+    "sqlite": {"from": 11, "to": 12},
+    "postgresql": {"from": 15, "to": 16}
+  },
+  "runtime_scope": {
+    "profiles": [
+      "openai.organization-usage-completions.v1",
+      "openai.organization-costs.v1",
+      "anthropic.organization-usage-messages.v1",
+      "anthropic.organization-costs.v1"
+    ],
+    "tables": [
+      "portfolio_finance_source_binding_versions",
+      "portfolio_finance_collection_attempts",
+      "portfolio_finance_collection_events",
+      "portfolio_finance_snapshots",
+      "portfolio_finance_snapshot_bucket_coverage",
+      "portfolio_finance_usage_observations",
+      "portfolio_finance_cost_observations"
+    ],
+    "sqlite_runtime_candidate": true,
+    "postgresql_schema_candidate": true,
+    "complete_snapshot_only": true,
+    "provider_import_implemented": true,
+    "reconciliation_implemented": false,
+    "automatic_allocation": false,
+    "live_finance_verified": false
+  },
+  "postgresql_acl_gate": {
+    "fingerprint_mode": "fixed_literal",
+    "expected_current_count": 185,
+    "expected_current_sha256": "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a",
+    "injected_permission_count": 186,
+    "injected_permission_sha256": "d06ec615d82a176b107e1131c00e1dceb5f629d9504a7519f64e1eb77a0c7246",
+    "reject_code": "postgres_bootstrap_acl_boundary_invalid",
+    "accepts_multiple_fingerprints": false,
+    "computes_expected_from_database": false,
+    "runtime_grants_withheld": true,
+    "runtime_access_accepted": false
+  },
+  "gates": {
+    "collection_preflight_accepted": true,
+    "provider_collection_runtime_accepted": false,
+    "postgresql_collection_runtime_accepted": false,
+    "reconciliation_accepted": false,
+    "finance_implemented": false,
+    "final_candidate_accepted": false,
+    "released": false
+  },
+  "nonclaims": [
+    "provider_invoice_truth",
+    "granular_request_team_actor_application_or_work_scope_final_cost",
+    "automatic_model_policy_budget_or_allocation_change",
+    "live_customer_finance_validation",
+    "release_or_deployment_readiness"
+  ]
+}

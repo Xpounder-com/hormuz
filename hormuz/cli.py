@@ -14,6 +14,7 @@ from .auth import Authenticator
 from .commands import audit as audit_commands
 from .commands import client as client_commands
 from .commands import custody as custody_commands
+from .commands import finance as finance_commands
 from .commands import policy as policy_commands
 from .commands import portfolio as portfolio_commands
 from .commands import runtime as runtime_commands
@@ -80,6 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
     audit_commands.add_audit_commands(subparsers)
 
     custody_commands.add_custody_commands(subparsers)
+
+    finance_commands.add_finance_commands(subparsers)
 
     runtime_commands.add_storage_commands(subparsers)
 
@@ -152,6 +155,12 @@ def main(argv: list[str] | None = None) -> int:
             return audit_commands._audit(config, args, _audit_command_dependencies())
         if args.command == "custody":
             return custody_commands._custody(config, args, _custody_command_dependencies())
+        if args.command == "finance":
+            return finance_commands.run(
+                config,
+                args,
+                _finance_command_dependencies(),
+            )
     except ConfigError as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 2
@@ -233,6 +242,19 @@ def _custody_command_dependencies() -> custody_commands.CustodyCommandDependenci
         read_envelope_file=read_envelope_file,
         write_envelope_file=write_envelope_file,
         required_organization=_required_organization,
+    )
+
+
+def _finance_command_dependencies() -> finance_commands.FinanceCommandDependencies:
+    """Resolve finance collection CLI patch points at dispatch time."""
+
+    return finance_commands.FinanceCommandDependencies(
+        authenticator=Authenticator,
+        create_repository=finance_commands.create_finance_collection_repository,
+        resolve_credentials=resolve_upstream_credentials,
+        fetch_pages=finance_commands.fetch_collection_pages,
+        normalize_pages=finance_commands.normalize_collection_pages,
+        normalize_file=finance_commands.normalize_collection_file,
     )
 
 

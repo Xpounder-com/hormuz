@@ -16,14 +16,14 @@ else:
 
 class OutcomeSchemaTests(unittest.TestCase):
     def test_outcome_seven_remains_exact_in_current_cumulative_schema(self):
-        self.assertEqual(UsageStore.schema_version, 11)
+        self.assertEqual(UsageStore.schema_version, 12)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
             UsageStore(path).verify_ready()
             with managed_sqlite_connection(path) as connection:
                 names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 self.assertTrue(set(TABLE_DDL).issubset(names))
-                self.assertEqual(len(names), 39)
+                self.assertEqual(len(names), 46)
                 self.assertNotIn("outcome_transition_test_probe", names)
                 before = list(connection.iterdump())
             UsageStore(path).verify_ready()

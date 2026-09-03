@@ -39,8 +39,8 @@ class PostgresFinanceTests(FinanceAssertions, PostgresTestCase):
         return self._rows([name for name in names if name not in TABLE_DDL])
 
     def test_postgres_finance_real_schema_and_checked_in_migration(self):
-        self.assertEqual(POSTGRES_SCHEMA_VERSION, 15)
-        self.assertEqual(len(self.legacy_rows()) + len(TABLE_DDL), 61)
+        self.assertEqual(POSTGRES_SCHEMA_VERSION, 16)
+        self.assertEqual(len(self.legacy_rows()) + len(TABLE_DDL), 68)
         self.assertEqual(resources.files("hormuz").joinpath("migrations/postgresql/0012_finance_rate_cards.sql").read_text(),
                          postgres_statements("{schema}", "{runtime_role}"))
 
@@ -144,11 +144,12 @@ class PostgresFinanceTests(FinanceAssertions, PostgresTestCase):
     def test_postgres_finance_direct_repository_refuses_partial_missing_and_newer_ledger(self):
         self.register()
         before = self.finance_rows()
+        current_version = POSTGRES_SCHEMA_VERSION
         changes = (
-            ("UPDATE {}.hormuz_schema_migrations SET state='applying' WHERE version=15",
-             "UPDATE {}.hormuz_schema_migrations SET state='applied' WHERE version=15"),
-            ("UPDATE {}.hormuz_schema_migrations SET version=16 WHERE version=15",
-             "UPDATE {}.hormuz_schema_migrations SET version=15 WHERE version=16"),
+            (f"UPDATE {{}}.hormuz_schema_migrations SET state='applying' WHERE version={current_version}",
+             f"UPDATE {{}}.hormuz_schema_migrations SET state='applied' WHERE version={current_version}"),
+            (f"UPDATE {{}}.hormuz_schema_migrations SET version={current_version + 1} WHERE version={current_version}",
+             f"UPDATE {{}}.hormuz_schema_migrations SET version={current_version} WHERE version={current_version + 1}"),
         )
         for change, restore in changes:
             with self.psycopg.connect(self.owner_dsn) as connection:
@@ -161,7 +162,10 @@ class PostgresFinanceTests(FinanceAssertions, PostgresTestCase):
                 with self.psycopg.connect(self.owner_dsn) as connection:
                     connection.execute(self.sql.SQL(restore).format(self.sql.Identifier(self.schema)))
         with self.psycopg.connect(self.owner_dsn) as connection:
-            saved = connection.execute(self.sql.SQL("DELETE FROM {}.hormuz_schema_migrations WHERE version=15 RETURNING version,state,applied_at").format(self.sql.Identifier(self.schema))).fetchone()
+            saved = connection.execute(self.sql.SQL(
+                f"DELETE FROM {{}}.hormuz_schema_migrations WHERE version={current_version} "
+                "RETURNING version,state,applied_at"
+            ).format(self.sql.Identifier(self.schema))).fetchone()
         try:
             self.error("unavailable", lambda: self.register(version=2))
             self.error("unavailable", self.get)
