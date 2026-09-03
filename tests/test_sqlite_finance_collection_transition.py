@@ -779,7 +779,15 @@ class SQLiteFinanceCollectionExactPredecessorTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        seed_sqlite_collection_predecessor(self.path)
+        # Build the exact v11 predecessor database before the installed
+        # predecessor driver verifies it.  Without this patch the candidate
+        # schema version (12) is used while seeding, so the supposedly exact
+        # v11 archive correctly refuses the database as newer-than-binary.
+        with (
+            mock.patch.object(UsageStore, "schema_version", 11),
+            mock.patch("hormuz._portfolio_sql.SQLITE_SCHEMA_VERSION", 11),
+        ):
+            seed_sqlite_collection_predecessor(self.path)
 
     def test_exact_predecessor_accepts_current_and_refuses_newer_and_partial(self):
         request = {"backend": "sqlite", "path": str(self.path)}
