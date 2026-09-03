@@ -48,6 +48,11 @@ AUDIT_SOURCE_SCHEMAS = (
     "hormuz.finance-snapshot",
 )
 
+BINDING_EVENT_ID = "11111111-1111-4111-8111-111111111111"
+ATTEMPT_ID = "11111111-1111-4111-8111-111111111112"
+COLLECTION_EVENT_ID = "11111111-1111-4111-8111-111111111113"
+SNAPSHOT_ID = "11111111-1111-4111-8111-111111111114"
+
 SQLITE_APPEND_ONLY_IDENTITIES = {
     "portfolio_finance_source_binding_versions": (
         "(existing.binding_id=NEW.binding_id AND existing.version=NEW.version)",
@@ -128,37 +133,56 @@ def _append_synthetic_audit_entry(
 def _seed_synthetic_collection_rows(connection):
     connection.execute(
         "INSERT INTO portfolio_finance_source_binding_versions "
-        "(organization_id, binding_id, version, binding_event_id, "
-        "evidence_json) VALUES (?, ?, ?, ?, ?)",
-        ("acme", "binding", 1, "binding-event", '{"kind":"binding"}'),
+        "(organization_id,binding_id,version,binding_event_id,provider,"
+        "provider_account_fingerprint,scope_kind,scope_fingerprints_json,"
+        "credential_reference_id,credential_reference_version,"
+        "fingerprint_key_version,binding_state,previous_version,content_digest,"
+        "bound_by,bound_at,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "acme", "binding", 1, BINDING_EVENT_ID, "openai", "a" * 64,
+            "organization", "[]", "upstream:openai", 1, 1, "active", None,
+            "b" * 64, "alice", "2026-09-02T00:00:00Z", '{"kind":"binding"}',
+        ),
     )
     connection.execute(
         "INSERT INTO portfolio_finance_collection_attempts "
-        "(organization_id, attempt_id, binding_id, binding_version) "
-        "VALUES (?, ?, ?, ?)",
-        ("acme", "attempt", "binding", 1),
+        "(organization_id,attempt_id,binding_id,binding_version,provider,"
+        "collection_profile,source_kind,query_start_at,query_end_at,bucket_width,"
+        "requested_page_size,evidence_origin,idempotency_digest,request_digest,"
+        "credential_reference_id,credential_reference_version,fingerprint_key_version,"
+        "prepared_by,prepared_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "acme", ATTEMPT_ID, "binding", 1, "openai",
+            "openai.organization-usage-completions.v1", "usage",
+            "2026-09-01T00:00:00Z", "2026-09-03T00:00:00Z", "1d", 2,
+            "customer_file", "c" * 64, "d" * 64, "upstream:openai", 1, 1,
+            "alice", "2026-09-02T00:00:00Z",
+        ),
     )
     connection.execute(
         "INSERT INTO portfolio_finance_collection_events "
-        "(organization_id, event_id, attempt_id, state, evidence_json) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "(organization_id,event_id,attempt_id,state,reason_code,receipt_id,"
+        "snapshot_id,actor_id,occurred_at,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (
-            "acme",
-            "collection-event",
-            "attempt",
-            "succeeded",
+            "acme", COLLECTION_EVENT_ID, ATTEMPT_ID, "succeeded", "completed",
+            "e" * 32, SNAPSHOT_ID, "alice", "2026-09-02T00:00:00Z",
             '{"kind":"terminal"}',
         ),
     )
     connection.execute(
         "INSERT INTO portfolio_finance_snapshots "
-        "(organization_id, snapshot_id, attempt_id, content_digest, "
-        "evidence_json) VALUES (?, ?, ?, ?, ?)",
+        "(organization_id,snapshot_id,attempt_id,binding_id,binding_version,"
+        "collection_profile,source_kind,query_start_at,query_end_at,evidence_origin,"
+        "scope_provenance,parser_version,page_count,record_count,requested_page_size,"
+        "page_chain_digest,content_digest,supersedes_snapshot_id,commit_sequence,"
+        "published_by,published_at,provider_final,invoice_final,evidence_json) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
-            "acme",
-            "snapshot-event",
-            "attempt",
-            "a" * 64,
+            "acme", SNAPSHOT_ID, ATTEMPT_ID, "binding", 1,
+            "openai.organization-usage-completions.v1", "usage",
+            "2026-09-01T00:00:00Z", "2026-09-03T00:00:00Z", "customer_file",
+            "customer_supplied_scope_unverified", 1, 1, 2, 2, "f" * 64,
+            "0" * 64, None, 1, "alice", "2026-09-02T00:00:00Z", 0, 0,
             '{"kind":"snapshot"}',
         ),
     )
@@ -183,38 +207,44 @@ def _seed_synthetic_collection_rows(connection):
             "(organization_id, coverage_id, snapshot_id, bucket_start_at, "
             "bucket_end_at, coverage_state, observation_count) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("acme", coverage[0], "snapshot-event", *coverage[1:]),
+            ("acme", coverage[0].ljust(36, "0"), SNAPSHOT_ID, *coverage[1:]),
         )
-    for table, observation_id in (
-        ("portfolio_finance_usage_observations", "usage-observation"),
-        ("portfolio_finance_cost_observations", "cost-observation"),
-    ):
-        connection.execute(
-            f"INSERT INTO {table} "
-            "(organization_id, observation_id, snapshot_id, "
-            "bucket_start_at, bucket_end_at) VALUES (?, ?, ?, ?, ?)",
-            (
-                "acme",
-                observation_id,
-                "snapshot-event",
-                "2026-09-01T00:00:00Z",
-                "2026-09-02T00:00:00Z",
-            ),
-        )
+    connection.execute(
+        "INSERT INTO portfolio_finance_usage_observations "
+        "(organization_id,observation_id,snapshot_id,bucket_start_at,bucket_end_at,"
+        "observation_digest,input_tokens,usage_basis,provider_final) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        (
+            "acme", "usage-observation".ljust(36, "0"), SNAPSHOT_ID,
+            "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "1" * 64, 1,
+            "provider_native_aggregate_observation", 0,
+        ),
+    )
+    connection.execute(
+        "INSERT INTO portfolio_finance_cost_observations "
+        "(organization_id,observation_id,snapshot_id,bucket_start_at,bucket_end_at,"
+        "observation_digest,free_text_classification,native_amount,canonical_amount,"
+        "currency,cost_basis,provider_final,invoice_final) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "acme", "cost-observation".ljust(36, "0"), SNAPSHOT_ID,
+            "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "2" * 64,
+            "unclassified", "1", "1", "USD", "provider_reported_aggregate", 0, 0,
+        ),
+    )
     return (
         (
             "hormuz.finance-source-binding-version",
-            "binding-event",
+            BINDING_EVENT_ID,
             '{"kind":"binding"}',
         ),
         (
             "hormuz.finance-collection-event",
-            "collection-event",
+            COLLECTION_EVENT_ID,
             '{"kind":"terminal"}',
         ),
         (
             "hormuz.finance-snapshot",
-            "snapshot-event",
+            SNAPSHOT_ID,
             '{"kind":"snapshot"}',
         ),
     )
@@ -479,8 +509,14 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 11)
-        self.seeded = seed_sqlite_collection_predecessor(self.path)
+        self.assertEqual(UsageStore.schema_version, 12)
+        # Build the exact v11 predecessor with the still-supported migration
+        # code, then let the current binary perform the real 11-to-12 step.
+        with (
+            mock.patch.object(UsageStore, "schema_version", 11),
+            mock.patch("hormuz._portfolio_sql.SQLITE_SCHEMA_VERSION", 11),
+        ):
+            self.seeded = seed_sqlite_collection_predecessor(self.path)
         self.before = sqlite_snapshot(self.path)
 
     def assert_audit_transition(self, snapshot):
@@ -520,15 +556,11 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            if version == 12:
-                _synthetic_collection_migration(connection, fail=fail)
-            else:
-                original(connection, version)
+            original(connection, version)
+            if version == 12 and fail:
+                raise RuntimeError("synthetic_finance_collection_migration_failure")
 
-        with (
-            mock.patch.object(UsageStore, "schema_version", 12),
-            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
-        ):
+        with mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
             UsageStore(target).verify_ready()
 
     def test_predecessor_has_every_accepted_populated_domain(self):
@@ -550,13 +582,20 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         self.assertEqual(self.seeded["outcome_delivery_count"], 3)
 
     def test_missing_migration_is_red_without_partial_state(self):
-        with mock.patch.object(UsageStore, "schema_version", 12):
+        original = UsageStore._apply_migration
+
+        def missing(connection, version):
+            if version == 12:
+                raise StorageSchemaError("storage_schema_migration_unsupported")
+            original(connection, version)
+
+        with mock.patch.object(UsageStore, "_apply_migration", side_effect=missing):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
         self.assertEqual(sqlite_snapshot(self.path), self.before)
 
-    def test_synthetic_ddl_failure_rolls_back_and_retry_is_idempotent(self):
+    def test_real_ddl_failure_rolls_back_and_retry_is_idempotent(self):
         with self.assertRaisesRegex(
             RuntimeError,
             "synthetic_finance_collection_migration_failure",
@@ -590,7 +629,7 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
                 _append_synthetic_audit_entry(
                     connection,
                     source_schema_id="hormuz.finance-snapshot",
-                    source_event_id="snapshot-event",
+                    source_event_id=SNAPSHOT_ID,
                     evidence_json='{"kind":"wrong"}',
                 )
             with self.assertRaises(sqlite3.IntegrityError):
@@ -655,7 +694,7 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
                 "SELECT coverage_state, observation_count "
                 "FROM portfolio_finance_snapshot_bucket_coverage "
                 "WHERE organization_id=? AND coverage_id=?",
-                ("acme", "coverage-empty"),
+                ("acme", "coverage-empty".ljust(36, "0")),
             ).fetchone()
             self.assertEqual(coverage, ("no_observation", 0))
             for table in (
@@ -677,13 +716,14 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
     def test_current_binary_refuses_newer_and_partial_state_without_repair(self):
         self.probe()
         candidate = sqlite_snapshot(self.path)
-        for read_only in (False, True):
-            with self.subTest(read_only=read_only), self.assertRaises(
-                StorageSchemaError
-            ) as caught:
-                UsageStore(self.path, read_only=read_only)
-            self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
-            self.assertEqual(sqlite_snapshot(self.path), candidate)
+        with mock.patch.object(UsageStore, "schema_version", 11):
+            for read_only in (False, True):
+                with self.subTest(read_only=read_only), self.assertRaises(
+                    StorageSchemaError
+                ) as caught:
+                    UsageStore(self.path, read_only=read_only)
+                self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
+                self.assertEqual(sqlite_snapshot(self.path), candidate)
 
         with managed_sqlite_connection(self.path) as connection:
             connection.execute(
@@ -706,37 +746,25 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         retained = sqlite_snapshot(self.path)
         restored = self.root / "restored-accepted-main.sqlite3"
         shutil.copyfile(backup, restored)
-        UsageStore(restored, read_only=True).verify_ready()
+        with mock.patch.object(UsageStore, "schema_version", 11):
+            UsageStore(restored, read_only=True).verify_ready()
         self.assertEqual(sqlite_snapshot(restored), self.before)
         self.assertEqual(sqlite_snapshot(self.path), retained)
 
     def test_post_checkpoint_write_requires_retained_forward_recovery(self):
         self.probe()
         with managed_sqlite_connection(self.path) as connection:
-            connection.execute(
-                "INSERT INTO portfolio_finance_source_binding_versions "
-                "(organization_id, binding_id, version, binding_event_id, "
-                "evidence_json) VALUES (?, ?, ?, ?, ?)",
-                (
-                    "acme",
-                    "synthetic-binding",
-                    1,
-                    "synthetic-binding-event",
-                    '{"kind":"binding"}',
-                ),
-            )
+            _seed_synthetic_collection_rows(connection)
         after_write = sqlite_snapshot(self.path)
         retained = self.root / "retained-candidate.sqlite3"
         recovered = self.root / "forward-recovered.sqlite3"
         sqlite_backup(self.path, retained)
         sqlite_backup(retained, recovered)
-        with (
-            mock.patch.object(UsageStore, "schema_version", 12),
-            mock.patch.object(UsageStore, "_apply_migration"),
-        ):
-            UsageStore(recovered, read_only=True).verify_ready()
+        UsageStore(recovered, read_only=True).verify_ready()
         self.assertEqual(sqlite_snapshot(recovered), after_write)
-        with self.assertRaises(StorageSchemaError) as caught:
+        with mock.patch.object(UsageStore, "schema_version", 11), self.assertRaises(
+            StorageSchemaError
+        ) as caught:
             UsageStore(recovered, read_only=True)
         self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
 

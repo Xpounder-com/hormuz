@@ -17,6 +17,10 @@ from ._portfolio_schema import TABLE_DDL, verify_postgres_registry
 from ._attribution_schema import TABLE_DDL as ATTRIBUTION_TABLES, verify_postgres_attribution
 from ._outcome_schema import TABLE_DDL as OUTCOME_TABLES, verify_postgres_outcomes
 from ._finance_schema import TABLE_DDL as FINANCE_TABLES, verify_postgres_finance
+from ._finance_collection_schema import (
+    TABLE_DDL as FINANCE_COLLECTION_TABLES,
+    verify_postgres_finance_collection,
+)
 from ._budget_schema import (
     ACTIVE_TABLE as BUDGET_ACTIVE_TABLE,
     TABLE_DDL as BUDGET_TABLES,
@@ -113,6 +117,12 @@ def portfolio_transaction(
                         verify_postgres_outcomes(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is FINANCE_TABLES:
                         verify_postgres_finance(cursor, storage.postgres_schema, PostgresStorageError)
+                    if tables is FINANCE_COLLECTION_TABLES:
+                        verify_postgres_finance_collection(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
                     if tables is BUDGET_TABLES:
                         verify_postgres_budget(cursor, storage.postgres_schema, PostgresStorageError)
                 for table in tables:

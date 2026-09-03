@@ -18,7 +18,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 15
+POSTGRES_SCHEMA_VERSION = 16
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 # Each tuple is the count and SHA-256 digest of the canonical non-owner ACL
@@ -32,6 +32,10 @@ _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION = {
         "052ec56ed318d781be974529b256f8e6008454b91ca87aa08985fc57cab2cc92",
     ),
     15: (
+        185,
+        "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a",
+    ),
+    16: (
         185,
         "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a",
     ),
@@ -1279,6 +1283,9 @@ def migrate_postgres(
                     if max(states) >= 15:
                         from ._finance_attempt_schema import verify_postgres_finance_attempt
                         verify_postgres_finance_attempt(cursor, schema, PostgresStorageError)
+                    if max(states) >= 16:
+                        from ._finance_collection_schema import verify_postgres_finance_collection
+                        verify_postgres_finance_collection(cursor, schema, PostgresStorageError)
                 for version in range(1, POSTGRES_SCHEMA_VERSION + 1):
                     if version in states:
                         continue
@@ -1331,6 +1338,9 @@ def migrate_postgres(
                 if POSTGRES_SCHEMA_VERSION >= 15:
                     from ._finance_attempt_schema import verify_postgres_finance_attempt
                     verify_postgres_finance_attempt(cursor, schema, PostgresStorageError)
+                if POSTGRES_SCHEMA_VERSION >= 16:
+                    from ._finance_collection_schema import verify_postgres_finance_collection
+                    verify_postgres_finance_collection(cursor, schema, PostgresStorageError)
                 _verify_postgres_migration_ownership(
                     cursor,
                     schema=schema,
@@ -2378,6 +2388,7 @@ def _migration_sql(
         13: "0013_work_budgets.sql",
         14: "0014_provider_reliability.sql",
         15: "0015_finance_attempt_evidence.sql",
+        16: "0016_finance_collection.sql",
     }
     filename = filenames.get(version)
     if filename is None:

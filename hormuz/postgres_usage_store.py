@@ -2327,6 +2327,48 @@ class PostgresUsageStore:
             finance_rows = cursor.fetchall()
         else:
             finance_rows = ()
+        cursor.execute(
+            f"SELECT EXISTS (SELECT 1 FROM {self._table('hormuz_schema_migrations')} "
+            "WHERE version=16 AND state='applied') AS collection_ready"
+        )
+        collection_ready_row = cursor.fetchone()
+        collection_ready = bool(
+            next(iter(collection_ready_row.values()))
+            if isinstance(collection_ready_row, dict)
+            else collection_ready_row[0]
+        )
+        collection_rows: list[tuple[str, str, str]] = []
+        if collection_ready:
+            collection_source_ids = (
+                "hormuz.finance-source-binding-version",
+                "hormuz.finance-collection-event",
+                "hormuz.finance-snapshot",
+            )
+            cursor.execute(
+                f"SELECT source_schema_id, source_event_id "
+                f"FROM {self._table('gateway_audit_chain_entries')} "
+                "WHERE organization_id = %s AND entry_schema_version = 2 "
+                "AND source_schema_id = ANY(%s)",
+                (organization_id, list(collection_source_ids)),
+            )
+            for source_schema_id, source_event_id in cursor.fetchall():
+                cursor.execute(
+                    "SELECT custody_audit_chain_source_event_json(%s, %s, %s, %s) AS event_json",
+                    (organization_id, source_schema_id, 1, source_event_id),
+                )
+                source_row = cursor.fetchone()
+                event_json = (
+                    source_row.get("event_json")
+                    if isinstance(source_row, Mapping)
+                    else source_row[0]
+                    if source_row is not None
+                    else None
+                )
+                if not isinstance(event_json, str):
+                    raise PostgresStorageError("audit_chain_source_event_missing")
+                collection_rows.append(
+                    (str(source_schema_id), str(source_event_id), event_json)
+                )
         for row in usage_rows:
             try:
                 event = usage_audit_event(dict(row))
@@ -2372,6 +2414,38 @@ class PostgresUsageStore:
                 raise PostgresStorageError("audit_chain_source_event_malformed")
             source_identities.add(source.source)
             sources.append(source)
+        for source_schema_id, source_event_id, event_json in collection_rows:
+            try:
+                from .finance_collection import (
+                    FinanceCollectionError,
+                    finance_collection_source_identity,
+                )
+
+                event = json.loads(event_json)
+                if (
+                    not isinstance(event, dict)
+                    or canonical_json_text(event) != event_json
+                    or finance_collection_source_identity(source_schema_id, event)
+                    != source_event_id
+                ):
+                    raise ValueError
+                source = normalize_audit_chain_source_event_input(
+                    event,
+                    source=AuditChainSource(source_schema_id, 1, source_event_id),
+                    error_factory=PostgresStorageError,
+                )
+            except (
+                AuditChainError,
+                FinanceCollectionError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ):
+                raise PostgresStorageError("audit_chain_source_event_malformed") from None
+            if source.source in source_identities:
+                raise PostgresStorageError("audit_chain_source_event_malformed")
+            source_identities.add(source.source)
+            sources.append(source)
         return tuple(sources)
 
     @staticmethod
@@ -2395,7 +2469,11 @@ class PostgresUsageStore:
             if entry.get("entry_schema_version") != 2:
                 continue
             source_schema_id = entry.get("source_schema_id")
-            if source_schema_id == FINANCE_ATTEMPT_SCHEMA_ID:
+            from .finance_collection import FINANCE_COLLECTION_SOURCE_SCHEMA_IDS
+
+            if source_schema_id == FINANCE_ATTEMPT_SCHEMA_ID or (
+                source_schema_id in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS
+            ):
                 # Finance evidence is directly readable by the runtime role
                 # and was loaded by _audit_chain_source_events_in_cursor.
                 continue

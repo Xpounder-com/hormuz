@@ -218,6 +218,19 @@ REQUIRED_FINANCE_COLLECTION_PREFLIGHT_SDIST_PATHS = (
     "tests/test_postgres_finance_collection_transition.py",
     "tests/test_finance_collection_packaging.py",
 )
+REQUIRED_FINANCE_COLLECTION_RUNTIME_SDIST_PATHS = (
+    "docs/FINANCE_COLLECTION_RUNTIME.md",
+    "docs/finance-transition-plan-v6.json",
+    "hormuz/_finance_collection_schema.py",
+    "hormuz/finance_collection.py",
+    "hormuz/finance_collection_repository.py",
+    "hormuz/commands/finance.py",
+    "hormuz/migrations/postgresql/0016_finance_collection.sql",
+    "tools/verify_finance_collection_runtime.py",
+    "tests/test_finance_collection_runtime.py",
+    "tests/test_finance_collection_cli.py",
+    "tests/test_finance_collection_runtime_plan.py",
+)
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
     "docs/work-budget-reports-wire-v1.json",
@@ -338,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     _assert_finance_history_sdist_boundary(sdist)
     _assert_finance_native_attempt_preflight_sdist_boundary(sdist)
     _assert_finance_collection_preflight_sdist_boundary(sdist)
+    _assert_finance_collection_runtime_sdist_boundary(sdist)
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)
     _assert_budget_runtime_sdist_boundary(sdist)
@@ -515,6 +529,20 @@ def _assert_finance_collection_preflight_sdist_boundary(path: Path) -> None:
     if missing:
         raise RuntimeError(
             "Finance collection source kit incomplete in "
+            f"{path.name}: {', '.join(sorted(missing))}"
+        )
+
+
+def _assert_finance_collection_runtime_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required
+        for required in REQUIRED_FINANCE_COLLECTION_RUNTIME_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(
+            "Finance collection runtime incomplete in "
             f"{path.name}: {', '.join(sorted(missing))}"
         )
 

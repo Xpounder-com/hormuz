@@ -77,7 +77,10 @@ class SQLiteFinanceNativeAttemptTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 11)
+        # This is a retained v10-to-v11 predecessor proof.  The current
+        # checkout is v12; pin the fixture's starting point explicitly while
+        # keeping the predecessor transition itself isolated below.
+        self.assertEqual(UsageStore.schema_version, 12)
         with mock.patch.object(UsageStore, "schema_version", 10):
             store = UsageStore(self.path)
         seed_registry_ledger(store)
@@ -92,7 +95,10 @@ class SQLiteFinanceNativeAttemptTransitionTests(unittest.TestCase):
             if version == 11 and fail:
                 raise RuntimeError("synthetic_finance_native_migration_failure")
 
-        with mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
+        with (
+            mock.patch.object(UsageStore, "schema_version", 11),
+            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
+        ):
             UsageStore(target).verify_ready()
 
     def test_real_migration_materializes_binding_sidecar_and_audit_source_shape(self):
@@ -119,7 +125,8 @@ class SQLiteFinanceNativeAttemptTransitionTests(unittest.TestCase):
                 ).fetchone()[0],
                 len(after["rows"]["gateway_request_attempts"]),
             )
-        UsageStore(self.path).verify_ready()
+        with mock.patch.object(UsageStore, "schema_version", 11):
+            UsageStore(self.path).verify_ready()
 
     def test_probe_failure_rolls_back_and_retry_is_idempotent(self):
         with self.assertRaisesRegex(
@@ -280,7 +287,8 @@ class SQLiteFinanceNativeAttemptPredecessorTests(unittest.TestCase):
 
     def test_post_checkpoint_write_requires_forward_recovery(self):
         self.probe()
-        attempt_id = _candidate_write(self.path)
+        with mock.patch.object(UsageStore, "schema_version", 11):
+            attempt_id = _candidate_write(self.path)
         after_write = sqlite_snapshot(self.path)
         self.assertEqual(
             len(after_write["rows"]["gateway_finance_attempt_evidence"]),
@@ -294,7 +302,8 @@ class SQLiteFinanceNativeAttemptPredecessorTests(unittest.TestCase):
         restored = self.root / "forward-recovered.sqlite3"
         sqlite_backup(self.path, retained)
         sqlite_backup(retained, restored)
-        UsageStore(restored, read_only=True).verify_ready()
+        with mock.patch.object(UsageStore, "schema_version", 11):
+            UsageStore(restored, read_only=True).verify_ready()
         self.assertEqual(sqlite_snapshot(restored), after_write)
         self.assertEqual(
             finance_native_predecessor_call(

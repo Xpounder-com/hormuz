@@ -2,10 +2,10 @@
 
 Hormuz 1.1.0 needs provider-reported usage and cost evidence before it can
 reconcile gateway estimates for accounting, analytics, and management. This
-checkpoint freezes that collection boundary before runtime or schema changes.
-It extends the accepted native-attempt finance runtime; it does not claim that
-provider collection, reconciliation, invoice finalization, or live customer
-finance validation exists.
+document records the frozen preflight boundary and its successor runtime
+decision. It extends the accepted native-attempt finance runtime; it does not
+claim reconciliation, invoice finalization, or live customer finance
+validation.
 
 The machine-readable decision is split between
 [`finance-transition-plan-v5.json`](finance-transition-plan-v5.json),
@@ -126,8 +126,8 @@ exchange finalization. These remain visible coverage gaps.
 
 ## Planned storage and migration
 
-The runtime successor reserves additive SQLite schema 12 and PostgreSQL schema
-16 for seven objects:
+The runtime successor materializes additive SQLite schema 12 and PostgreSQL
+schema 16 for seven objects:
 
 1. immutable source-binding versions;
 2. immutable collection attempt roots;
@@ -146,12 +146,14 @@ tenant, event identity, and canonical `evidence_json`. SQLite must rebuild its
 fixed source-union check transactionally while preserving every audit column,
 row, index, immutability trigger, and existing source guard. PostgreSQL must
 replace the corresponding fixed constraint and source-validation function and
-retain forced RLS, least-privilege
-runtime roles, and a new literal count/digest ACL boundary established from a
-clean reviewed migration. It may not accept multiple fingerprints or derive
-the expected production fingerprint from the database under test. This
-preflight does not consume either migration number or alter the current 185-row
-schema-15 ACL boundary.
+retain forced RLS. The collection tables are owner-controlled in this
+candidate: runtime-role grants are intentionally withheld. The existing
+literal 185-entry ACL boundary and its exact digest remain authoritative, and
+the injected 186th-permission witness remains a rejection. The candidate never
+accepts multiple fingerprints or derives the expected fingerprint from the
+database under test. A separate successor decision is required before
+PostgreSQL collection runtime access can be enabled. The migration consumes
+schema version 16 but does not alter the protected 185-entry ACL boundary.
 
 All seven collection tables are append-only. Their reviewed migrations must
 reject every update and delete, and PostgreSQL must reject `TRUNCATE`. SQLite
@@ -160,9 +162,10 @@ identity would conflict, so replacement cannot delete a source row behind an
 existing audit entry.
 
 No current usage repository protocol, request-attempt schema, native finance
-record, route, command, public wire contract, role, or error changes. The
-runtime successor may add local operator commands for `finance source bind`,
-`finance collect`, and `finance import`; this checkpoint registers none.
+record, public wire contract, or role changes. The runtime candidate adds local
+operator commands for `finance source bind`, `finance collect`, and
+`finance import`. PostgreSQL collection calls remain fail-closed until the ACL
+successor gate is accepted.
 
 ## Recovery and acceptance gates
 
@@ -185,10 +188,13 @@ post-checkpoint writes require retained-candidate forward recovery without
 provider replay. PostgreSQL evidence must run with the complete existing
 migration and runtime suites, including the unchanged literal ACL boundary.
 
-Local contract checks run from the repository root:
+The immutable preflight verifier remains a historical checkpoint and must be
+run against its predecessor source tree. The runtime candidate verifier and
+focused checks run from the current repository root:
 
 ```console
-python3 tools/verify_finance_collection_transition_plan.py
+python3 tools/verify_finance_collection_runtime.py
+python3 -m unittest -v tests.test_finance_collection_runtime_plan
 python3 -m unittest -v tests.test_finance_collection_transition_plan
 python3 -m unittest -v tests.test_sqlite_finance_collection_transition
 python3 -m unittest -v tests.test_finance_collection_packaging
@@ -200,8 +206,9 @@ transition evidence.
 
 Exact-head technical review, every protected check, normal merge, and exact
 merged-main transition evidence are required before a #214 preflight
-acceptance can be recorded. Runtime implementation then requires a separately
-reviewed successor. #8 remains open for collection runtime, reconciliation,
-coverage and exception reporting, live customer-authorized proof, and the rest
-of its acceptance criteria. #214 remains open for the final candidate. No tag,
-release, deployment, credential use, or provider call is authorized here.
+acceptance can be recorded. This runtime candidate still needs its own exact
+head review and protected evidence before any runtime-acceptance decision. #8
+remains open for PostgreSQL access, reconciliation, coverage and exception
+reporting, live customer-authorized proof, and the rest of its acceptance
+criteria. #214 remains open for the final candidate. No tag, release,
+deployment, credential use, or provider call is authorized here.

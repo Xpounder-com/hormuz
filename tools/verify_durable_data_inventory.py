@@ -133,6 +133,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         "hormuz/_attribution_schema.py",
         "hormuz/_outcome_schema.py",
         "hormuz/_finance_schema.py",
+        "hormuz/_finance_collection_schema.py",
         "hormuz/_budget_schema.py",
         "hormuz/_provider_reliability_schema.py",
     ):
@@ -149,7 +150,44 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         try:
             registry_tables = ast.literal_eval(declarations)
         except (ValueError, TypeError):
-            raise DurableDataInventoryError("registry_schema_tables_invalid") from None
+            # The collection schema keeps its table names in named constants
+            # so the runtime SQL and audit-source map cannot drift apart.  The
+            # inventory verifier resolves those literal names without importing
+            # or executing the checkout under review.
+            if path != "hormuz/_finance_collection_schema.py" or not isinstance(
+                declarations, ast.Dict
+            ):
+                raise DurableDataInventoryError(
+                    "registry_schema_tables_invalid"
+                ) from None
+            constants: dict[str, str] = {}
+            for node in registry.body:
+                if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                    continue
+                target = node.targets[0]
+                if not isinstance(target, ast.Name):
+                    continue
+                try:
+                    literal = ast.literal_eval(node.value)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(literal, str):
+                    constants[target.id] = literal
+            resolved: dict[str, object] = {}
+            for key in declarations.keys:
+                if isinstance(key, ast.Name):
+                    literal_key = constants.get(key.id)
+                else:
+                    try:
+                        literal_key = ast.literal_eval(key)
+                    except (ValueError, TypeError):
+                        literal_key = None
+                if not isinstance(literal_key, str):
+                    raise DurableDataInventoryError(
+                        "registry_schema_tables_invalid"
+                    )
+                resolved[literal_key] = None
+            registry_tables = resolved
         if not isinstance(registry_tables, dict):
             raise DurableDataInventoryError("registry_schema_tables_invalid")
         if path == "hormuz/_budget_schema.py":

@@ -129,13 +129,15 @@ jobs:
           cd "$hormuz_extension_source/hormuz-$hormuz_extension_version"
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_portfolio_extensions.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_budget_transition_plan.py
-          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_native_attempt_transition_plan.py
-          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_collection_transition_plan.py
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_native_attempt_transition_plan.py \
+            --allow-successor-schema
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_collection_runtime.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest -v \
             tests.test_portfolio_extensions tests.test_portfolio_extension_packaging \
             tests.test_budget_transition_plan tests.test_budget_preflight_packaging \
             tests.test_finance_native_attempt_transition_plan tests.test_finance_native_attempt_packaging \
-            tests.test_finance_collection_transition_plan tests.test_finance_collection_packaging \
+            tests.test_finance_collection_transition_plan tests.test_finance_collection_runtime_plan \
+            tests.test_finance_collection_packaging \
             tests.test_portfolio_wire_contract
       - name: Verify the resolved license boundary for every declared extra
         run: |
@@ -276,6 +278,10 @@ jobs:
             --prefix=hormuz-finance-native-runtime-baseline/ \
             --output="$RUNNER_TEMP/finance-native-runtime-baseline-34da674.tar" \
             34da6746fbe5b0eb55e1c4fb3c8ee1db54fe956e
+          mkdir "$RUNNER_TEMP/finance-native-preflight-source"
+          tar -xf "$RUNNER_TEMP/finance-native-runtime-baseline-34da674.tar" \
+            -C "$RUNNER_TEMP/finance-native-preflight-source"
+          cd "$RUNNER_TEMP/finance-native-preflight-source/hormuz-finance-native-runtime-baseline"
           python tools/verify_finance_collection_transition_plan.py \
             --predecessor-archive "$RUNNER_TEMP/finance-native-runtime-baseline-34da674.tar"
           python -m venv "$RUNNER_TEMP/hormuz-finance-native-runtime-baseline"
@@ -302,14 +308,16 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_outcome_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_budget_transition_plan.py
-          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_native_attempt_transition_plan.py
-          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_collection_transition_plan.py
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_native_attempt_transition_plan.py \
+            --allow-successor-schema
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_collection_runtime.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest -v \
             tests.test_registry_transition_plan tests.test_attribution_transition_plan tests.test_outcome_transition_plan \
             tests.test_finance_transition_plan tests.test_finance_packaging \
             tests.test_budget_transition_plan tests.test_budget_preflight_packaging \
             tests.test_finance_native_attempt_transition_plan tests.test_finance_native_attempt_packaging \
-            tests.test_finance_collection_transition_plan tests.test_finance_collection_packaging \
+            tests.test_finance_collection_transition_plan tests.test_finance_collection_runtime_plan \
+            tests.test_finance_collection_packaging \
             tests.test_portfolio_wire_contract
       - name: Prove PostgreSQL migration and repository compatibility
         env:

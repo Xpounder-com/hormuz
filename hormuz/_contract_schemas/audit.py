@@ -227,6 +227,24 @@ def _validate_audit_chain_v2_source(
         except ValueError as error:
             raise ContractValidationError("finance attempt audit source is invalid") from error
         expected_source_id = _value_string(event, "evidence_event_id")
+    elif source_schema_version == 1:
+        from ..finance_collection import (
+            FINANCE_COLLECTION_SOURCE_SCHEMA_IDS,
+            FinanceCollectionError,
+            finance_collection_source_identity,
+        )
+
+        if source_schema_id not in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS:
+            raise ContractValidationError("audit chain v2 source schema is unsupported")
+        try:
+            expected_source_id = finance_collection_source_identity(
+                source_schema_id,
+                event,
+            )
+        except FinanceCollectionError as error:
+            raise ContractValidationError(
+                "finance collection audit source is invalid"
+            ) from error
     else:
         raise ContractValidationError("audit chain v2 source schema is unsupported")
     if source_event_id != expected_source_id:
