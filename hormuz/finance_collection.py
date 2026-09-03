@@ -195,7 +195,9 @@ class CollectionQuery:
         if self.query_start_at != canonical_start or self.query_end_at != canonical_end:
             raise FinanceCollectionError("invalid_request")
         provider_limit = _provider_page_limit(spec, self.bucket_width)
-        if self.requested_page_size > provider_limit:
+        bucket_count = int((end - start) / width)
+        minimum_pages = (bucket_count + self.requested_page_size - 1) // self.requested_page_size
+        if self.requested_page_size > provider_limit or minimum_pages > MAX_PAGES:
             raise FinanceCollectionError("invalid_request")
 
     @property
@@ -327,8 +329,8 @@ def tenant_fingerprint(
         or not _safe_id(organization_id)
         or not _safe_id(kind)
         or not isinstance(value, str)
-        or not 1 <= len(value.encode("utf-8")) <= 2048
         or not _unicode_safe(value)
+        or not 1 <= len(value.encode("utf-8")) <= 2048
     ):
         raise FinanceCollectionError("invalid_request")
     fields = ("hormuz.finance-fingerprint.v1", organization_id, kind, value)
@@ -371,6 +373,7 @@ def validate_finance_source_binding_event(value: Mapping[str, Any]) -> None:
     scopes = value.get("scope_fingerprints")
     if (
         value.get("schema_id") != FINANCE_SOURCE_BINDING_SCHEMA_ID
+        or type(value.get("schema_version")) is not int
         or value.get("schema_version") != 1
         or not _uuid_string(value.get("binding_event_id"))
         or not _safe_id(value.get("organization_id"))
@@ -428,6 +431,7 @@ def validate_finance_collection_event(value: Mapping[str, Any]) -> None:
     succeeded = value.get("state") == "succeeded"
     if (
         value.get("schema_id") != FINANCE_COLLECTION_EVENT_SCHEMA_ID
+        or type(value.get("schema_version")) is not int
         or value.get("schema_version") != 1
         or not _uuid_string(value.get("event_id"))
         or not _safe_id(value.get("organization_id"))
@@ -481,6 +485,7 @@ def validate_finance_snapshot_event(value: Mapping[str, Any]) -> None:
     profile = value.get("collection_profile")
     if (
         value.get("schema_id") != FINANCE_SNAPSHOT_SCHEMA_ID
+        or type(value.get("schema_version")) is not int
         or value.get("schema_version") != 1
         or not _uuid_string(value.get("snapshot_id"))
         or not _uuid_string(value.get("attempt_id"))
@@ -1227,8 +1232,8 @@ def _free_text(
         return "unclassified", None
     if (
         not isinstance(value, str)
-        or not 1 <= len(value.encode("utf-8")) <= 2048
         or not _unicode_safe(value)
+        or not 1 <= len(value.encode("utf-8")) <= 2048
     ):
         raise FinanceCollectionError("provider_response_invalid")
     known = {
@@ -1255,8 +1260,9 @@ def _decimal_value(value: object, *, require_number: bool) -> tuple[str, Decimal
         raise FinanceCollectionError("numeric_domain_invalid")
     source = str(value)
     if (
-        not 1 <= len(source.encode("utf-8")) <= MAX_NUMERIC_LEXEME_BYTES
-        or _JSON_NUMBER.fullmatch(source) is None
+        _JSON_NUMBER.fullmatch(source) is None
+        or not _unicode_safe(source)
+        or not 1 <= len(source.encode("utf-8")) <= MAX_NUMERIC_LEXEME_BYTES
     ):
         raise FinanceCollectionError("numeric_domain_invalid")
     try:
@@ -1318,6 +1324,7 @@ def fetch_collection_pages(
     if (
         type(query) is not CollectionQuery
         or not isinstance(credential, str)
+        or not _unicode_safe(credential)
         or not 1 <= len(credential.encode("utf-8")) <= 4096
         or any(character in credential for character in ("\x00", "\r", "\n"))
         or base_url != f"https://{query.profile.host}"
@@ -1382,12 +1389,17 @@ def _request_page(
             raise FinanceCollectionError("collection_deadline")
         request = Request(url, headers=headers, method="GET")
         try:
-            response = opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS)
+            remaining = COLLECTION_DEADLINE_SECONDS - (clock() - started)
+            if remaining <= 0:
+                raise FinanceCollectionError("collection_deadline")
+            response = opener.open(request, timeout=min(REQUEST_TIMEOUT_SECONDS, remaining))
             with response:
                 status = getattr(response, "status", response.getcode())
                 if status != 200 or response.geturl() != url:
                     raise FinanceCollectionError("provider_response_invalid")
                 payload = response.read(MAX_PAGE_BYTES + 1)
+            if clock() - started >= COLLECTION_DEADLINE_SECONDS:
+                raise FinanceCollectionError("collection_deadline")
             if len(payload) > MAX_PAGE_BYTES:
                 raise FinanceCollectionError("provider_response_too_large")
             if not payload:
@@ -1474,8 +1486,8 @@ def _page_parts(
     cursor = value.get("next_page")
     if cursor is not None and (
         not isinstance(cursor, str)
-        or not 1 <= len(cursor.encode("utf-8")) <= MAX_CURSOR_BYTES
         or not _unicode_safe(cursor)
+        or not 1 <= len(cursor.encode("utf-8")) <= MAX_CURSOR_BYTES
     ):
         raise FinanceCollectionError("pagination_invalid")
     return tuple(_mapping(bucket) for bucket in data), has_more, cursor
@@ -1674,8 +1686,8 @@ def _optional_fingerprint(
 def _discarded_identifier(value: object) -> None:
     if value is not None and (
         not isinstance(value, str)
-        or not 1 <= len(value.encode("utf-8")) <= 2048
         or not _unicode_safe(value)
+        or not 1 <= len(value.encode("utf-8")) <= 2048
     ):
         raise FinanceCollectionError("provider_response_invalid")
 

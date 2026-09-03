@@ -187,6 +187,15 @@ def normalized_usage(
 
 
 class FinanceCollectionNormalizationTests(unittest.TestCase):
+    def test_content_free_fingerprints_reject_invalid_unicode(self):
+        with self.assertRaisesRegex(FinanceCollectionError, "invalid_request"):
+            tenant_fingerprint(
+                KEY,
+                organization_id="acme",
+                kind="workspace",
+                value="\ud800",
+            )
+
     def test_all_four_profiles_normalize_typed_private_exact_evidence(self):
         cases = (
             (
@@ -396,6 +405,34 @@ class _Opener:
 
 
 class FinanceCollectionTransportTests(unittest.TestCase):
+    def test_query_rejects_page_chain_that_cannot_fit_deadline_bound(self):
+        with self.assertRaisesRegex(FinanceCollectionError, "invalid_request"):
+            CollectionQuery(
+                "acme",
+                "provider-account",
+                1,
+                "openai.organization-usage-completions.v1",
+                START,
+                MIDDLE,
+                "1m",
+                7,
+            )
+
+    def test_response_reading_cannot_extend_past_collection_deadline(self):
+        value = query("openai.organization-usage-completions.v1")
+        payload = openai_page([openai_bucket(START, MIDDLE, [openai_usage()])])
+        opener = _Opener([lambda request: _Response(payload, request.full_url)])
+        clock_values = iter((0.0, 0.0, 59.0, 60.0))
+        with self.assertRaisesRegex(FinanceCollectionError, "collection_deadline"):
+            fetch_collection_pages(
+                value,
+                credential="secret",
+                base_url="https://api.openai.com",
+                opener=opener,
+                clock=lambda: next(clock_values),
+            )
+        self.assertEqual(opener.requests[0][1], 1.0)
+
     def test_fixed_tls_endpoint_headers_and_complete_pagination(self):
         value = query("openai.organization-usage-completions.v1", end=END)
         first = openai_page(
@@ -546,6 +583,10 @@ class FinanceCollectionSQLiteRepositoryTests(unittest.TestCase):
             fingerprint_key=KEY,
         )
 
+    def test_binding_request_rejects_boolean_schema_version(self):
+        with self.assertRaisesRegex(FinanceCollectionError, "invalid_request"):
+            self.bind(schema_version=True)
+
     def test_postgres_collection_runtime_is_gated_before_connection(self):
         config = replace(
             self.config,
@@ -589,6 +630,8 @@ class FinanceCollectionSQLiteRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(len(view.coverage), 1)
         self.assertEqual(len(view.observations), 1)
+        self.assertIs(view.observations[0]["batch"], False)
+        self.assertIs(view.observations[0]["provider_final"], False)
         self.assertEqual(
             UsageStore(self.config.database_path).verify_audit_chain(
                 organization_id="acme"
@@ -724,6 +767,33 @@ class FinanceCollectionSQLiteRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(exact_retry.supersedes_snapshot_id, refresh.snapshot_id)
         self.assertNotEqual(initial.snapshot_id, refresh.snapshot_id)
+
+    def test_current_cost_observations_expose_boolean_finality(self):
+        self.bind()
+        value = query("openai.organization-costs.v1")
+        collection = normalize_collection_pages(
+            value,
+            (openai_page([openai_bucket(START, MIDDLE, [openai_cost()])]),),
+            fingerprint_key=KEY,
+            fingerprint_key_version=1,
+        )
+        self.repository.publish_collection(
+            ADMIN,
+            self.repository.prepare_collection(
+                ADMIN, value, idempotency_key="cost-bools", evidence_origin="customer_file"
+            ),
+            collection,
+        )
+        observation = self.repository.current_observations(
+            ADMIN,
+            binding_id="provider-account",
+            binding_version=1,
+            collection_profile=value.collection_profile,
+            start_at=START,
+            end_at=MIDDLE,
+        ).observations[0]
+        self.assertIs(observation["provider_final"], False)
+        self.assertIs(observation["invoice_final"], False)
 
     def test_binding_and_role_revocation_races_prevent_publication(self):
         first = self.bind()

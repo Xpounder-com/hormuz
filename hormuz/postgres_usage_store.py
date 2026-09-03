@@ -2351,7 +2351,12 @@ class PostgresUsageStore:
                 "AND source_schema_id = ANY(%s)",
                 (organization_id, list(collection_source_ids)),
             )
-            for source_schema_id, source_event_id in cursor.fetchall():
+            for row in cursor.fetchall():
+                if isinstance(row, Mapping):
+                    source_schema_id = row["source_schema_id"]
+                    source_event_id = row["source_event_id"]
+                else:
+                    source_schema_id, source_event_id = row
                 cursor.execute(
                     "SELECT custody_audit_chain_source_event_json(%s, %s, %s, %s) AS event_json",
                     (organization_id, source_schema_id, 1, source_event_id),

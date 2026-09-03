@@ -35,6 +35,7 @@ from .finance_collection import (
     FinanceCollectionError,
     NormalizedCollection,
     tenant_fingerprint,
+    _unicode_safe,
     validate_normalized_collection,
     validate_finance_collection_event,
     validate_finance_snapshot_event,
@@ -361,8 +362,9 @@ class FinanceCollectionRepository:
             or query.organization_id != principal.organization_id
             or evidence_origin not in {"authenticated_api", "customer_file"}
             or not isinstance(idempotency_key, str)
-            or not 1 <= len(idempotency_key.encode("utf-8")) <= 256
             or "\x00" in idempotency_key
+            or not _unicode_safe(idempotency_key)
+            or not 1 <= len(idempotency_key.encode("utf-8")) <= 256
         ):
             raise FinanceCollectionError("invalid_request")
         idempotency_digest = _digest(
@@ -842,18 +844,23 @@ class FinanceCollectionRepository:
                 ).fetchall()
                 if len(rows) != selected["observation_count"]:
                     raise FinanceCollectionError("unavailable")
-                observations.extend(
-                    {
+                for row in rows:
+                    observation = {
                         key: value
                         for key, value in dict(row).items()
-                        if key
-                        not in {
-                            "organization_id",
-                            "observation_id",
-                        }
+                        if key not in {"organization_id", "observation_id"}
                     }
-                    for row in rows
-                )
+                    for field in ("batch", "provider_final", "invoice_final"):
+                        if field not in observation:
+                            continue
+                        value = observation[field]
+                        if value is None or type(value) is bool:
+                            continue
+                        if type(value) is int and value in {0, 1}:
+                            observation[field] = bool(value)
+                            continue
+                        raise FinanceCollectionError("unavailable")
+                    observations.append(observation)
             return CurrentCollectionView(
                 principal.organization_id,
                 binding_id,
@@ -900,6 +907,7 @@ def _normalize_binding_request(
         raise FinanceCollectionError("invalid_request")
     if (
         request.get("schema_id") != "hormuz.finance-source-binding-request"
+        or type(request.get("schema_version")) is not int
         or request.get("schema_version") != 1
         or not _safe_id(request.get("binding_id"))
         or request.get("provider") not in {"openai", "anthropic"}
