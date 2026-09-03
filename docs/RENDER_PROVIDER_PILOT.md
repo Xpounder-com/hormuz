@@ -93,7 +93,7 @@ The service uses these secret environment values:
 | `HORMUZ_ANTHROPIC_PROVIDER_KEY` | Provider backend | Anthropic authorization |
 | `HORMUZ_POSTGRES_DSN` | Provider backend | Restricted runtime login, internal URL |
 | `HORMUZ_FAILOVER_REHEARSAL_KEY` | Provider backend | Protected deterministic qualification |
-| `HORMUZ_POSTGRES_MIGRATION_DSN` | Maintenance command only | Direct migration owner, internal URL |
+| `HORMUZ_POSTGRES_MIGRATION_DSN` | Maintenance command only | Direct migration login, internal URL |
 
 All values must be distinct. The provider backend receives only the first seven
 values plus validated Render metadata. Remove the migration DSN from the whole
@@ -128,25 +128,27 @@ logins with independently generated passwords and these exact attributes:
 
 - runtime: `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`
   `NOREPLICATION NOBYPASSRLS`;
-- migration owner: `LOGIN NOSUPERUSER NOCREATEDB CREATEROLE NOINHERIT`
+- migration: `LOGIN NOSUPERUSER NOCREATEDB CREATEROLE NOINHERIT`
   `NOREPLICATION NOBYPASSRLS`.
 
-The direct migration login must own the database and have no role members.
-PostgreSQL 16 automatically gives a non-superuser role creator an
-`ADMIN=TRUE, INHERIT=FALSE, SET=FALSE` membership in every role it creates. To
-leave the migration owner itself with no members, create it through a disposable
-`CREATEROLE` builder, transfer database ownership through temporary `SET=TRUE`
-grants, revoke those grants, and drop the builder in the same transaction. Bind
+Keep the Render-managed operator role as database owner and grant the direct
+migration login only `CREATE` on that database. Create both direct logins through
+one disposable `CREATEROLE` builder and drop that builder before bootstrap.
+PostgreSQL 16 automatically makes a non-superuser creator an
+`ADMIN=TRUE, INHERIT=FALSE, SET=FALSE` member of each role it creates; dropping
+the builder removes those otherwise-unexpected edges from both application
+logins. Do not create either login through a long-lived operator role. Bind
 passwords as parameters; never put them in SQL text, command arguments, or shell
 history. Before continuing, prove both DSNs report `session_user=current_user`,
-the runtime attributes are exact, the migration owner has no memberships in
-either direction, and the database owner is the migration login.
+the runtime attributes are exact, both direct logins have no memberships in
+either direction, and the database owner is distinct from both application
+logins.
 
 Then perform these steps:
 
 1. Keep the web service in `maintenance` and save the direct runtime internal
    URL as `HORMUZ_POSTGRES_DSN`.
-2. Save the direct migration-owner internal URL as
+2. Save the direct migration internal URL as
    `HORMUZ_POSTGRES_MIGRATION_DSN` only for the maintenance operation.
 3. Inject the other provider secrets and prepare the private provider profile.
 4. Run the idempotent bootstrap from the Render service Shell:
@@ -158,14 +160,14 @@ python -I -m hormuz.hosted \
   provider-bootstrap-postgres
 ```
 
-The command requires distinct direct owner and runtime credentials. It creates
+The command requires distinct direct migration and runtime credentials. It creates
 four fixed `NOLOGIN`, `NOINHERIT`, non-superuser authorization roles. On
 PostgreSQL 16 it accepts only the migration owner's automatic
-`ADMIN=TRUE, INHERIT=FALSE, SET=FALSE` creator edge; no other principal or option
+`ADMIN=TRUE, INHERIT=FALSE, SET=FALSE` creator edge; no other principal, role, or option
 is permitted. It skips an unnecessary `ALTER ROLE` when the runtime login is
 already `NOINHERIT`, grants only `hormuz_runtime`, applies all migrations as the
-authenticated owner, removes direct runtime-login and `PUBLIC` grants, and
-verifies that the owner owns every schema object and that every schema, table,
+authenticated migration login, removes direct runtime-login and `PUBLIC` grants,
+and verifies that the migration login owns every schema object and that every schema, table,
 column, sequence, function, and owner-default ACL matches the exact
 version-pinned privilege and grant-option boundary. It then proves runtime
 access and RLS through the runtime DSN. Its output is content-free and

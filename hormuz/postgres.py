@@ -257,7 +257,7 @@ def bootstrap_postgres_deployment(
     custody_control_role: str = "hormuz_custody_control",
     custody_executor_role: str = "hormuz_custody_executor",
 ) -> PostgresDeploymentBootstrapStatus:
-    """Prepare and verify a separate owner/login boundary for one deployment.
+    """Prepare and verify a separate migration/runtime boundary for one deployment.
 
     The migration credential must own schema objects.  The runtime DSN must
     identify a different, pre-existing direct login.  Hormuz never creates or
@@ -270,7 +270,7 @@ def bootstrap_postgres_deployment(
 
     PostgreSQL 16 automatically records a non-superuser CREATEROLE principal as
     an administrative member of each role it creates.  The exact
-    ADMIN=TRUE/INHERIT=FALSE/SET=FALSE edge from the migration owner is accepted;
+    ADMIN=TRUE/INHERIT=FALSE/SET=FALSE edge from the migration login is accepted;
     every other creator, member, or option still fails closed.
 
     Safe, already-complete work is accepted so an interrupted maintenance run
@@ -356,6 +356,7 @@ def bootstrap_postgres_deployment(
                     cursor,
                     schema=schema,
                     migration_login=migration_login,
+                    role_names=role_names,
                     allow_missing_schema=True,
                 )
 
@@ -767,6 +768,7 @@ def _verify_postgres_deployment_roles(
         cursor,
         schema=schema,
         migration_login=migration_login,
+        role_names=role_names,
         allow_missing_schema=False,
         error_scope=error_scope,
     )
@@ -855,10 +857,21 @@ def _verify_postgres_migration_ownership(
     *,
     schema: str,
     migration_login: str,
+    role_names: tuple[str, ...],
     allow_missing_schema: bool,
     error_scope: str = "bootstrap",
 ) -> None:
-    if _postgres_role_member_grants(cursor, migration_login):
+    memberships = _postgres_role_memberships(cursor, migration_login)
+    expected_creator_memberships = {
+        role
+        for role in role_names
+        if (migration_login, True, False, False)
+        in _postgres_role_member_grants(cursor, role)
+    }
+    if (
+        _postgres_role_member_grants(cursor, migration_login)
+        or memberships != expected_creator_memberships
+    ):
         raise PostgresStorageError(
             f"postgres_{error_scope}_ownership_boundary_invalid"
         )
@@ -1151,6 +1164,12 @@ def migrate_postgres(
                     cursor,
                     schema=schema,
                     migration_login=migration_login,
+                    role_names=(
+                        runtime_role,
+                        policy_control_role,
+                        custody_control_role,
+                        custody_executor_role,
+                    ),
                     allow_missing_schema=True,
                     error_scope="migration",
                 )
@@ -1259,6 +1278,12 @@ def migrate_postgres(
                     cursor,
                     schema=schema,
                     migration_login=migration_login,
+                    role_names=(
+                        runtime_role,
+                        policy_control_role,
+                        custody_control_role,
+                        custody_executor_role,
+                    ),
                     allow_missing_schema=False,
                     error_scope="migration",
                 )
