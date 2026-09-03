@@ -93,13 +93,15 @@ The service uses these secret environment values:
 | `HORMUZ_ANTHROPIC_PROVIDER_KEY` | Provider backend | Anthropic authorization |
 | `HORMUZ_POSTGRES_DSN` | Provider backend | Restricted runtime login, internal URL |
 | `HORMUZ_FAILOVER_REHEARSAL_KEY` | Provider backend | Protected deterministic qualification |
-| `HORMUZ_POSTGRES_MIGRATION_DSN` | Maintenance command only | Original database owner, internal URL |
+| `HORMUZ_POSTGRES_MIGRATION_DSN` | Maintenance command only | Direct migration login, internal URL |
 
 All values must be distinct. The provider backend receives only the first seven
 values plus validated Render metadata. Remove the migration DSN from the whole
 service after maintenance; `provider-pilot` refuses to start while it is
 nonempty because the supervisor and backend share a container UID. Keep the
-owner DSN in an approved secret manager for future reviewed migrations.
+direct migration DSN in an approved secret manager for future reviewed
+migrations. Retain the Render-managed operator DSN separately for database-role
+repair; never substitute it for the restricted migration login.
 
 Never put a credential in JSON, a command argument, logs, artifacts, Caddy, or
 GitHub workflow inputs. The protected qualification workflow receives a
@@ -115,20 +117,55 @@ then set `HORMUZ_PROVIDER_CONFIG` to that path.
 
 ## First PostgreSQL deployment
 
-Create a dedicated Render Postgres database in the same region as the gateway.
-Use its internal URL to avoid public-network latency. Perform these steps in
-order because creating a new Render-managed credential makes it the default and
-the previous credential stops being visible in the dashboard:
+Create a dedicated Render Postgres database in the same region as the gateway
+and use only its internal host from the gateway. The Render-managed credentials
+observed during qualification authenticated as rotating logins and started with
+a shared owner role as `current_user`. Treat Render-managed credentials as
+operator credentials for this profile: they fail the required direct-identity
+and least-privilege checks and must not be used as either application DSN.
 
-1. While the original credential is still the default, save its internal URL
-   as the operator-held `HORMUZ_POSTGRES_MIGRATION_DSN`.
-2. In the database Credentials panel, create a new managed credential with a
-   deployment-specific login name such as `hormuz_runtime_login_20260902`.
-3. Save the new default internal URL as `HORMUZ_POSTGRES_DSN`. Do not use the
-   external URL and do not delete the original owner.
-4. Keep the web service in `maintenance`, inject both DSNs and the other
-   provider secrets, and prepare the private provider profile.
-5. Run the idempotent bootstrap from the Render service Shell:
+Keep one Render-managed internal URL in the operator secret manager and out of
+the web-service environment. Through that connection, create two direct SQL
+logins with independently generated passwords. Both login names must match
+`[A-Za-z_][A-Za-z0-9_]*`; safe deployment-specific examples are
+`hormuz_migration_direct_20260902` and `hormuz_runtime_direct_20260902`.
+Use these exact attributes:
+
+- runtime: `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`
+  `NOREPLICATION NOBYPASSRLS`;
+- migration: `LOGIN NOSUPERUSER NOCREATEDB CREATEROLE NOINHERIT`
+  `NOREPLICATION NOBYPASSRLS`.
+
+Keep the Render-managed operator role as database owner and grant the direct
+migration login only `CREATE` on that database. Create both direct logins through
+one disposable `CREATEROLE` builder and drop that builder before bootstrap.
+PostgreSQL 16 automatically makes a non-superuser creator an
+`ADMIN=TRUE, INHERIT=FALSE, SET=FALSE` member of each role it creates; dropping
+the builder removes those otherwise-unexpected edges from both application
+logins. That automatic creator grant cannot assume the builder because
+`SET=FALSE`. Require the observed Render-managed boundary in which the rotating
+`session_user` is distinct from the effective operator `current_user`; stop if
+they are equal. Before `SET ROLE` to the builder, use its creator's admin option
+to grant the builder temporarily to that authenticated `session_user` with
+`ADMIN=FALSE, INHERIT=FALSE, SET=TRUE`. Create both logins while the builder is
+the effective role, then `RESET ROLE` and assume the recorded operator
+`current_user` again. Drop the builder, which removes the temporary session
+membership, before granting the migration login database `CREATE`. Do not
+create either application login through a long-lived operator role. Bind
+passwords as parameters; never put them in SQL text, command arguments, or
+shell history. Before continuing, prove both application DSNs report
+`session_user=current_user`, both attribute sets are exact, both direct logins
+have no memberships in either direction, the builder no longer exists, and the
+database owner is distinct from both application logins.
+
+Then perform these steps:
+
+1. Keep the web service in `maintenance` and save the direct runtime internal
+   URL as `HORMUZ_POSTGRES_DSN`.
+2. Save the direct migration internal URL as
+   `HORMUZ_POSTGRES_MIGRATION_DSN` only for the maintenance operation.
+3. Inject the other provider secrets and prepare the private provider profile.
+4. Run the idempotent bootstrap from the Render service Shell:
 
 ```sh
 python -I -m hormuz.hosted \
@@ -137,20 +174,24 @@ python -I -m hormuz.hosted \
   provider-bootstrap-postgres
 ```
 
-The command requires distinct owner and runtime credentials. It creates four
-fixed `NOLOGIN`, `NOINHERIT`, non-superuser roles; changes only the managed
-runtime login from `INHERIT` to `NOINHERIT`; rejects elevated or unexpected
-memberships; grants only `hormuz_runtime`; applies all migrations as the
-authenticated owner; removes direct runtime-login and `PUBLIC` grants; and
-verifies that the owner owns every schema object and that every schema, table,
+The command requires distinct direct migration and runtime credentials. It creates
+four fixed `NOLOGIN`, `NOINHERIT`, non-superuser authorization roles. On
+PostgreSQL 16 it accepts only the migration owner's automatic
+`ADMIN=TRUE, INHERIT=FALSE, SET=FALSE` creator edge; no other principal, role, or option
+is permitted. It skips an unnecessary `ALTER ROLE` when the runtime login is
+already `NOINHERIT`, grants only `hormuz_runtime`, applies all migrations as the
+authenticated migration login, removes direct runtime-login and `PUBLIC` grants,
+and verifies that the migration login owns every schema object and that every schema, table,
 column, sequence, function, and owner-default ACL matches the exact
 version-pinned privilege and grant-option boundary. It then proves runtime
 access and RLS through the runtime DSN. Its output is content-free and
 inference remains disabled. Safe completed work can be rerun.
 
-For a later schema upgrade, temporarily restore the owner DSN while still in
-maintenance and run `provider-migrate`. That command never creates roles or
-relaxes the bootstrap boundary.
+For a later schema upgrade, temporarily restore the retained direct migration
+DSN as `HORMUZ_POSTGRES_MIGRATION_DSN` while still in maintenance and run
+`provider-migrate`. The command revalidates the login's exact restricted
+attributes, memberships, and schema ownership before changing schema objects;
+it never creates roles or relaxes the bootstrap boundary.
 
 ## Preflight and activation
 

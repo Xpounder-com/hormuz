@@ -115,6 +115,7 @@ class ProviderPilotGatewayServer(GatewayServer):
                 policy_control_role=config.policy_control.postgres_control_role,
                 custody_control_role=config.custody_control.postgres_control_role,
                 custody_executor_role=config.custody_executor.postgres_executor_role,
+                require_restricted_migration_login=True,
             )
         super().__init__(config, environ=environ)
         self.RequestHandlerClass = ProviderPilotRequestHandler

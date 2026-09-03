@@ -91,6 +91,352 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 custody_executor_role=executor_role,
             )
 
+    def test_deployment_bootstrap_supports_postgres16_non_superuser_migration_login(
+        self,
+    ) -> None:
+        suffix = uuid4().hex[:12]
+        schema = f"hormuz_pg16_{suffix}"
+        builder = f"hormuz_builder_pg16_{suffix}"
+        migration_login = f"hormuz_migration_pg16_{suffix}"
+        runtime_login = f"hormuz_login_pg16_{suffix}"
+        runtime_role = f"hormuz_runtime_pg16_{suffix}"
+        policy_role = f"hormuz_policy_pg16_{suffix}"
+        custody_role = f"hormuz_custody_pg16_{suffix}"
+        executor_role = f"hormuz_executor_pg16_{suffix}"
+        roles = (runtime_role, policy_role, custody_role, executor_role)
+        migration_password = "hormuz-postgres16-migration-password"
+        runtime_password = "hormuz-postgres16-runtime-password"
+        migration_dsn = _runtime_dsn(
+            self.owner_dsn, migration_login, migration_password
+        )
+        runtime_dsn = _runtime_dsn(self.owner_dsn, runtime_login, runtime_password)
+        try:
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT current_database()")
+                    database = str(cursor.fetchone()[0])
+                    cursor.execute(
+                        self.sql.SQL(
+                            "CREATE ROLE {} NOLOGIN NOSUPERUSER NOCREATEDB "
+                            "CREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS"
+                        ).format(self.sql.Identifier(builder))
+                    )
+                    cursor.execute(
+                        self.sql.SQL("SET ROLE {}").format(
+                            self.sql.Identifier(builder)
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL(
+                            "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB "
+                            "CREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS"
+                        ).format(
+                            self.sql.Identifier(migration_login),
+                            self.sql.Literal(migration_password),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL(
+                            "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB "
+                            "NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS"
+                        ).format(
+                            self.sql.Identifier(runtime_login),
+                            self.sql.Literal(runtime_password),
+                        )
+                    )
+                    cursor.execute("RESET ROLE")
+                    cursor.execute(
+                        self.sql.SQL("DROP ROLE {}").format(
+                            self.sql.Identifier(builder)
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(
+                            self.sql.Identifier(database),
+                            self.sql.Identifier(migration_login),
+                        )
+                    )
+                    cursor.execute(
+                        "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = %s",
+                        (database,),
+                    )
+                    database_owner = str(cursor.fetchone()[0])
+                    self.assertNotIn(
+                        database_owner, {migration_login, runtime_login}
+                    )
+                    for login in (migration_login, runtime_login):
+                        self.assertEqual(
+                            postgres_module._postgres_role_memberships(cursor, login),
+                            set(),
+                        )
+                        self.assertEqual(
+                            postgres_module._postgres_role_member_grants(cursor, login),
+                            set(),
+                        )
+
+            status = bootstrap_postgres_deployment(
+                migration_dsn,
+                runtime_dsn,
+                schema=schema,
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+                require_restricted_migration_login=True,
+            )
+            self.assertTrue(status.schema_complete)
+            self.assertTrue(status.runtime_login_restricted)
+            self.assertTrue(status.runtime_membership_verified)
+            verify_postgres_deployment_runtime(
+                runtime_dsn,
+                schema=schema,
+                runtime_role=runtime_role,
+                policy_control_role=policy_role,
+                custody_control_role=custody_role,
+                custody_executor_role=executor_role,
+                require_restricted_migration_login=True,
+            )
+
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
+                            self.sql.Identifier(database),
+                            self.sql.Identifier(migration_login),
+                        )
+                    )
+            for operation, expected in (
+                (
+                    lambda: bootstrap_postgres_deployment(
+                        migration_dsn,
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_bootstrap_ownership_boundary_invalid",
+                ),
+                (
+                    lambda: migrate_postgres(
+                        migration_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_migration_ownership_boundary_invalid",
+                ),
+                (
+                    lambda: verify_postgres_deployment_runtime(
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_runtime_ownership_boundary_invalid",
+                ),
+            ):
+                with self.subTest(expected=expected), self.assertRaisesRegex(
+                    PostgresStorageError, expected
+                ):
+                    operation()
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
+                            self.sql.Identifier(database),
+                            self.sql.Identifier(database_owner),
+                        )
+                    )
+
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("ALTER ROLE {} CREATEDB").format(
+                            self.sql.Identifier(migration_login)
+                        )
+                    )
+            for operation, expected in (
+                (
+                    lambda: bootstrap_postgres_deployment(
+                        migration_dsn,
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_bootstrap_migration_role_unsafe",
+                ),
+                (
+                    lambda: migrate_postgres(
+                        migration_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_migration_role_unsafe",
+                ),
+                (
+                    lambda: verify_postgres_deployment_runtime(
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_runtime_migration_role_unsafe",
+                ),
+            ):
+                with self.subTest(expected=expected), self.assertRaisesRegex(
+                    PostgresStorageError, expected
+                ):
+                    operation()
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("ALTER ROLE {} NOCREATEDB").format(
+                            self.sql.Identifier(migration_login)
+                        )
+                    )
+
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                with connection.cursor() as cursor:
+                    for role in roles:
+                        self.assertIn(
+                            (migration_login, True, False, False),
+                            postgres_module._postgres_role_member_grants(cursor, role),
+                        )
+                    cursor.execute(
+                        self.sql.SQL(
+                            "GRANT {} TO {} WITH ADMIN TRUE, INHERIT FALSE, SET TRUE"
+                        ).format(
+                            self.sql.Identifier(policy_role),
+                            self.sql.Identifier(migration_login),
+                        )
+                    )
+
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_authorization_role_unsafe",
+            ):
+                verify_postgres_deployment_runtime(
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                    require_restricted_migration_login=True,
+                )
+
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("REVOKE {} FROM {}").format(
+                            self.sql.Identifier(policy_role),
+                            self.sql.Identifier(migration_login),
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("CREATE ROLE {} NOLOGIN").format(
+                            self.sql.Identifier(f"hormuz_unrelated_pg16_{suffix}")
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("GRANT {} TO {}").format(
+                            self.sql.Identifier(f"hormuz_unrelated_pg16_{suffix}"),
+                            self.sql.Identifier(migration_login),
+                        )
+                    )
+
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "postgres_runtime_ownership_boundary_invalid",
+            ):
+                verify_postgres_deployment_runtime(
+                    runtime_dsn,
+                    schema=schema,
+                    runtime_role=runtime_role,
+                    policy_control_role=policy_role,
+                    custody_control_role=custody_role,
+                    custody_executor_role=executor_role,
+                    require_restricted_migration_login=True,
+                )
+        finally:
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    if "database" in locals() and "database_owner" in locals():
+                        cursor.execute(
+                            "SELECT pg_get_userbyid(datdba) FROM pg_database "
+                            "WHERE datname = %s",
+                            (database,),
+                        )
+                        if str(cursor.fetchone()[0]) != database_owner:
+                            cursor.execute(
+                                self.sql.SQL(
+                                    "ALTER DATABASE {} OWNER TO {}"
+                                ).format(
+                                    self.sql.Identifier(database),
+                                    self.sql.Identifier(database_owner),
+                                )
+                            )
+                    cursor.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)",
+                        (migration_login,),
+                    )
+                    if cursor.fetchone()[0]:
+                        cursor.execute(
+                            self.sql.SQL("DROP OWNED BY {} CASCADE").format(
+                                self.sql.Identifier(migration_login)
+                            )
+                        )
+                    cursor.execute(
+                        self.sql.SQL("DROP ROLE IF EXISTS {}").format(
+                            self.sql.Identifier(f"hormuz_unrelated_pg16_{suffix}")
+                        )
+                    )
+                    cursor.execute(
+                        self.sql.SQL("DROP ROLE IF EXISTS {}").format(
+                            self.sql.Identifier(builder)
+                        )
+                    )
+                    for role in (runtime_login, migration_login, *roles):
+                        cursor.execute(
+                            self.sql.SQL("DROP ROLE IF EXISTS {}").format(
+                                self.sql.Identifier(role)
+                            )
+                        )
+
     def test_deployment_bootstrap_separates_managed_login_from_schema_owner(self) -> None:
         suffix = uuid4().hex[:12]
         schema = f"hormuz_bootstrap_{suffix}"

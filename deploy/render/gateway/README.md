@@ -26,8 +26,9 @@ credentials below. The provider backend receives those three plus two provider
 keys, the restricted PostgreSQL runtime DSN, and the rehearsal credential
 documented in the provider-pilot guide. It also receives an allowlisted set of
 non-secret Render deployment metadata. The PostgreSQL migration-owner DSN is
-never passed to either backend. Neither inherits unrelated deployment secrets
-or HTTP proxy settings. Caddy's admin
+available only to the explicit maintenance command and is removed before
+provider mode; it is never passed to either backend. Neither inherits unrelated
+deployment secrets or HTTP proxy settings. Caddy's admin
 endpoint, configuration persistence, retries and upstream keepalive are disabled.
 No secret is written into a configuration file. The processes share one UID;
 this limits accidental environment inheritance, not a compromised process's OS
