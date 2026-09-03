@@ -194,6 +194,7 @@ class HostedProviderConfigTests(unittest.TestCase):
         render_document["authentication"]["session_broker"].update({
             "public_base_url": hosted_document["public_origin"],
             "database": str(render_state / "sessions.sqlite3"),
+            "trusted_parent_path": str(render_state),
         })
         render_document["authentication"]["oidc"]["issuers"][0]["issuer"] = hosted_document[
             "oidc_issuer"
