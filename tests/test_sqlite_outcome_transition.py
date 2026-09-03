@@ -102,7 +102,10 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.assert_prior_state_preserved()
         self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 46)
         before = sqlite_snapshot(self.path)
-        with mock.patch.object(UsageStore, "schema_version", 12):
+        # The candidate binary ends at schema 12.  Pretend the next schema
+        # exists so the already-upgraded v12 database exercises the
+        # unsupported-following-migration guard.
+        with mock.patch.object(UsageStore, "schema_version", 13):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
