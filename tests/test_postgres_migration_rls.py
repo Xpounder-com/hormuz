@@ -162,7 +162,10 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                         "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = %s",
                         (database,),
                     )
-                    self.assertNotEqual(str(cursor.fetchone()[0]), migration_login)
+                    database_owner = str(cursor.fetchone()[0])
+                    self.assertNotIn(
+                        database_owner, {migration_login, runtime_login}
+                    )
                     for login in (migration_login, runtime_login):
                         self.assertEqual(
                             postgres_module._postgres_role_memberships(cursor, login),
@@ -195,6 +198,70 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 custody_executor_role=executor_role,
                 require_restricted_migration_login=True,
             )
+
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
+                            self.sql.Identifier(database),
+                            self.sql.Identifier(migration_login),
+                        )
+                    )
+            for operation, expected in (
+                (
+                    lambda: bootstrap_postgres_deployment(
+                        migration_dsn,
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_bootstrap_ownership_boundary_invalid",
+                ),
+                (
+                    lambda: migrate_postgres(
+                        migration_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_migration_ownership_boundary_invalid",
+                ),
+                (
+                    lambda: verify_postgres_deployment_runtime(
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_runtime_ownership_boundary_invalid",
+                ),
+            ):
+                with self.subTest(expected=expected), self.assertRaisesRegex(
+                    PostgresStorageError, expected
+                ):
+                    operation()
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
+                            self.sql.Identifier(database),
+                            self.sql.Identifier(database_owner),
+                        )
+                    )
 
             with self.psycopg.connect(
                 self.owner_dsn, autocommit=True
@@ -328,6 +395,21 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 self.owner_dsn, autocommit=True
             ) as connection:
                 with connection.cursor() as cursor:
+                    if "database" in locals() and "database_owner" in locals():
+                        cursor.execute(
+                            "SELECT pg_get_userbyid(datdba) FROM pg_database "
+                            "WHERE datname = %s",
+                            (database,),
+                        )
+                        if str(cursor.fetchone()[0]) != database_owner:
+                            cursor.execute(
+                                self.sql.SQL(
+                                    "ALTER DATABASE {} OWNER TO {}"
+                                ).format(
+                                    self.sql.Identifier(database),
+                                    self.sql.Identifier(database_owner),
+                                )
+                            )
                     cursor.execute(
                         "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)",
                         (migration_login,),

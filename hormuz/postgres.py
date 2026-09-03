@@ -345,18 +345,24 @@ def bootstrap_postgres_deployment(
                     "SELECT session_user, current_user, current_database()"
                 )
                 migration_identity = cursor.fetchone()
+                if not migration_identity or len(migration_identity) != 3:
+                    raise PostgresStorageError(
+                        "postgres_bootstrap_credential_boundary_invalid"
+                    )
+                (
+                    migration_login,
+                    migration_effective_role,
+                    migration_database,
+                ) = map(str, migration_identity)
                 if (
-                    not migration_identity
-                    or len(migration_identity) != 3
-                    or str(migration_identity[0])
-                    != str(migration_identity[1])
-                    or str(migration_identity[0]) == runtime_login
-                    or str(migration_identity[2]) != runtime_database
+                    migration_login != migration_effective_role
+                    or _IDENTIFIER_PATTERN.fullmatch(migration_login) is None
+                    or migration_login == runtime_login
+                    or migration_database != runtime_database
                 ):
                     raise PostgresStorageError(
                         "postgres_bootstrap_credential_boundary_invalid"
                     )
-                migration_login = str(migration_identity[0])
                 _verify_postgres_migration_ownership(
                     cursor,
                     schema=schema,
@@ -866,6 +872,21 @@ def _postgres_schema_owner(cursor: Any, schema: str) -> str | None:
     return None if value is None else str(value)
 
 
+def _postgres_database_owner(cursor: Any) -> str | None:
+    cursor.execute(
+        """
+        SELECT pg_get_userbyid(datdba) AS database_owner
+        FROM pg_database
+        WHERE datname = current_database()
+        """
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    value = row.get("database_owner") if isinstance(row, Mapping) else row[0]
+    return None if value is None else str(value)
+
+
 def _verify_postgres_migration_ownership(
     cursor: Any,
     *,
@@ -885,6 +906,12 @@ def _verify_postgres_migration_ownership(
             else "migration_role_unsafe"
         )
         raise PostgresStorageError(f"postgres_{error_scope}_{suffix}")
+    if require_restricted_login:
+        database_owner = _postgres_database_owner(cursor)
+        if database_owner is None or database_owner == migration_login:
+            raise PostgresStorageError(
+                f"postgres_{error_scope}_ownership_boundary_invalid"
+            )
     memberships = _postgres_role_memberships(cursor, migration_login)
     expected_creator_memberships = {
         role

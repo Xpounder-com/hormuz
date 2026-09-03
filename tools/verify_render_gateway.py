@@ -336,12 +336,25 @@ def verify(image: str) -> dict:
             raise RuntimeError("staging_postgres_startup_timeout")
         # The official image briefly accepts connections on its temporary
         # initialization postmaster before restarting the final postmaster.
-        # A health transition can therefore race this first command. Keep the
-        # synthetic setup in one transaction and retry only inside the bounded
+        # A health transition can therefore race this first command. Keep each
+        # synthetic setup phase transactional and retry only inside the bounded
         # startup window.
+        operator_sql = (
+            "DO $hormuz$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles "
+            "WHERE rolname = 'hormuz_render_owner') THEN CREATE ROLE "
+            "hormuz_render_owner NOLOGIN NOSUPERUSER CREATEDB CREATEROLE "
+            "NOINHERIT NOREPLICATION NOBYPASSRLS; CREATE ROLE "
+            "hormuz_render_session LOGIN PASSWORD 'synthetic-operator-password' "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION "
+            "NOBYPASSRLS; GRANT hormuz_render_owner TO hormuz_render_session "
+            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE; END IF; END $hormuz$; "
+            "ALTER DATABASE hormuz OWNER TO hormuz_render_owner"
+        )
         role_sql = (
             "CREATE ROLE hormuz_bootstrap_builder NOLOGIN NOSUPERUSER NOCREATEDB "
             "CREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; "
+            "GRANT hormuz_bootstrap_builder TO hormuz_render_session "
+            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE; "
             "SET ROLE hormuz_bootstrap_builder; "
             "CREATE ROLE hormuz_migration_direct LOGIN "
             "PASSWORD 'synthetic-migration-password' NOSUPERUSER NOCREATEDB "
@@ -349,7 +362,8 @@ def verify(image: str) -> dict:
             "CREATE ROLE hormuz_runtime_direct LOGIN "
             "PASSWORD 'synthetic-runtime-password' NOSUPERUSER NOCREATEDB "
             "NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; "
-            "RESET ROLE; DROP ROLE hormuz_bootstrap_builder; "
+            "RESET ROLE; SET ROLE hormuz_render_owner; "
+            "DROP ROLE hormuz_bootstrap_builder; "
             "GRANT CREATE ON DATABASE hormuz TO hormuz_migration_direct"
         )
         role_deadline = time.monotonic() + 35
@@ -358,8 +372,17 @@ def verify(image: str) -> dict:
                 docker(
                     "exec", database, "psql", "-v", "ON_ERROR_STOP=1",
                     "--single-transaction", "-U", "postgres", "-d", "hormuz",
+                    "-c", operator_sql,
+                    failure_context="postgres_operator_fixture",
+                )
+                docker(
+                    "exec", "--env", "PGPASSWORD=synthetic-operator-password",
+                    "--env", "PGOPTIONS=-c role=hormuz_render_owner",
+                    database, "psql", "-v", "ON_ERROR_STOP=1",
+                    "--single-transaction", "-h", "127.0.0.1",
+                    "-U", "hormuz_render_session", "-d", "hormuz",
                     "-c", role_sql,
-                    failure_context="postgres_runtime_fixture",
+                    failure_context="postgres_application_role_fixture",
                 )
                 break
             except RuntimeError:
@@ -377,10 +400,17 @@ def verify(image: str) -> dict:
             "WHERE granted.rolname IN ('hormuz_migration_direct','hormuz_runtime_direct') "
             "OR member.rolname IN ('hormuz_migration_direct','hormuz_runtime_direct')) "
             "AND (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'hormuz') "
-            "NOT IN ('hormuz_migration_direct','hormuz_runtime_direct'))::int",
+            "= 'hormuz_render_owner' "
+            "AND (SELECT NOT rolsuper AND rolcreaterole FROM pg_roles "
+            "WHERE rolname = 'hormuz_render_owner') "
+            "AND (SELECT NOT rolsuper AND NOT rolcreaterole FROM pg_roles "
+            "WHERE rolname = 'hormuz_render_session'))::int",
             failure_context="postgres_application_role_boundary",
         )
-        passed("provider_application_logins_have_separate_owner", role_boundary == "1")
+        passed(
+            "provider_application_logins_have_non_superuser_separate_owner",
+            role_boundary == "1",
+        )
         installed_sources = json.loads(docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image,
                                               "-I", "-", input_text=IMAGE_SOURCES))
         passed("installed_sources_match_checkout", all(hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest
@@ -540,6 +570,7 @@ def verify(image: str) -> dict:
                     *PROVIDER_SECRETS.values(),
                     POSTGRES_MIGRATION_DSN,
                     "synthetic-owner-password",
+                    "synthetic-operator-password",
                 )
             ))
         return {"schema_id": "hormuz.hosted-staging-verification", "schema_version": 1,

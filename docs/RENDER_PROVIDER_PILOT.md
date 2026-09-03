@@ -126,7 +126,10 @@ and least-privilege checks and must not be used as either application DSN.
 
 Keep one Render-managed internal URL in the operator secret manager and out of
 the web-service environment. Through that connection, create two direct SQL
-logins with independently generated passwords and these exact attributes:
+logins with independently generated passwords. Both login names must match
+`[A-Za-z_][A-Za-z0-9_]*`; safe deployment-specific examples are
+`hormuz_migration_direct_20260902` and `hormuz_runtime_direct_20260902`.
+Use these exact attributes:
 
 - runtime: `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`
   `NOREPLICATION NOBYPASSRLS`;
@@ -139,12 +142,21 @@ one disposable `CREATEROLE` builder and drop that builder before bootstrap.
 PostgreSQL 16 automatically makes a non-superuser creator an
 `ADMIN=TRUE, INHERIT=FALSE, SET=FALSE` member of each role it creates; dropping
 the builder removes those otherwise-unexpected edges from both application
-logins. Do not create either login through a long-lived operator role. Bind
-passwords as parameters; never put them in SQL text, command arguments, or shell
-history. Before continuing, prove both DSNs report `session_user=current_user`,
-the runtime attributes are exact, both direct logins have no memberships in
-either direction, and the database owner is distinct from both application
-logins.
+logins. That automatic creator grant cannot assume the builder because
+`SET=FALSE`. Require the observed Render-managed boundary in which the rotating
+`session_user` is distinct from the effective operator `current_user`; stop if
+they are equal. Before `SET ROLE` to the builder, use its creator's admin option
+to grant the builder temporarily to that authenticated `session_user` with
+`ADMIN=FALSE, INHERIT=FALSE, SET=TRUE`. Create both logins while the builder is
+the effective role, then `RESET ROLE` and assume the recorded operator
+`current_user` again. Drop the builder, which removes the temporary session
+membership, before granting the migration login database `CREATE`. Do not
+create either application login through a long-lived operator role. Bind
+passwords as parameters; never put them in SQL text, command arguments, or
+shell history. Before continuing, prove both application DSNs report
+`session_user=current_user`, both attribute sets are exact, both direct logins
+have no memberships in either direction, the builder no longer exists, and the
+database owner is distinct from both application logins.
 
 Then perform these steps:
 
