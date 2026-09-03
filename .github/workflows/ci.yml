@@ -271,16 +271,16 @@ jobs:
             "$RUNNER_TEMP/budget-runtime-baseline-4e3133f.tar[postgres]"
       - name: Verify and install the accepted native-finance predecessor
         run: |
-          git fetch --no-tags origin 0f2a21af4fb085fd9c655210cd661a8b0df9048c
+          git fetch --no-tags origin 04a086cc0f5e47db3728e9128bb89769d220dc05
           git -c tar.umask=0000 archive --format=tar \
             --prefix=hormuz-finance-native-runtime-baseline/ \
-            --output="$RUNNER_TEMP/finance-native-runtime-baseline-0f2a21a.tar" \
-            0f2a21af4fb085fd9c655210cd661a8b0df9048c
+            --output="$RUNNER_TEMP/finance-native-runtime-baseline-04a086c.tar" \
+            04a086cc0f5e47db3728e9128bb89769d220dc05
           python tools/verify_finance_collection_transition_plan.py \
-            --predecessor-archive "$RUNNER_TEMP/finance-native-runtime-baseline-0f2a21a.tar"
+            --predecessor-archive "$RUNNER_TEMP/finance-native-runtime-baseline-04a086c.tar"
           python -m venv "$RUNNER_TEMP/hormuz-finance-native-runtime-baseline"
           "$RUNNER_TEMP/hormuz-finance-native-runtime-baseline/bin/python" -m pip install \
-            "$RUNNER_TEMP/finance-native-runtime-baseline-0f2a21a.tar[postgres]"
+            "$RUNNER_TEMP/finance-native-runtime-baseline-04a086c.tar[postgres]"
       - name: Build the candidate wheel
         run: |
           python -m pip install build==1.3.0
