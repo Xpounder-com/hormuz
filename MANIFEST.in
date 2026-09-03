@@ -25,8 +25,10 @@ include docs/finance-transition-plan-v1.json
 include docs/finance-transition-plan-v2.json
 include docs/finance-transition-plan-v3.json
 include docs/finance-transition-plan-v4.json
+include docs/finance-transition-plan-v5.json
 include docs/finance-source-contract-v1.json
 include docs/finance-attempt-evidence-contract-v1.json
+include docs/finance-collection-contract-v1.json
 include docs/budget-transition-plan-v1.json
 include docs/budget-transition-plan-v2.json
 include docs/WORK_BUDGETS.md
@@ -56,6 +58,7 @@ include tools/verify_attribution_transition_plan.py
 include tools/verify_outcome_transition_plan.py
 include tools/verify_finance_transition_plan.py
 include tools/verify_finance_native_attempt_transition_plan.py
+include tools/verify_finance_collection_transition_plan.py
 include tools/verify_budget_transition_plan.py
 include tools/verify_core_wheel.py
 include tools/verify_render_gateway.py
