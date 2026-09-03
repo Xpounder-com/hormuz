@@ -14,11 +14,11 @@ import tarfile
 from urllib.parse import unquote, urlsplit
 
 
-SOURCE_COMMIT = "9311ec69554c6c709e8d16883040a21637dbc259"
-ARCHIVE_SHA256 = "99febbcadffbce1e5758dd468fd08506c0b556c9f52ae0348017de8eba9267c1"
+SOURCE_COMMIT = "545598c052013bb406741e2a003971f8047082f5"
+ARCHIVE_SHA256 = "7f4657439f91fa68bcd43860dfe6bb6f3c8b923dcd3c5ed9f1cd6acdcbe284c7"
 ARCHIVE_PREFIX = "hormuz-finance-native-runtime-baseline/"
 RUNTIME_FILE_COUNT = 145
-RUNTIME_TREE_SHA256 = "6e115b53d5af7324e8ea659a0a6354585eebdfc259b193640ce822a09f555357"
+RUNTIME_TREE_SHA256 = "6208bd386f6bd91aa395fe5d795e3112406b696d8675f169fb8f7dc288920123"
 
 
 def verify_installed_runtime(source_tar, package_root):
