@@ -279,10 +279,18 @@ jobs:
             --prefix=hormuz-finance-native-runtime-baseline/ \
             --output="$RUNNER_TEMP/finance-native-runtime-baseline-34da674.tar" \
             34da6746fbe5b0eb55e1c4fb3c8ee1db54fe956e
-          mkdir "$RUNNER_TEMP/finance-native-preflight-source"
-          tar -xf "$RUNNER_TEMP/finance-native-runtime-baseline-34da674.tar" \
-            -C "$RUNNER_TEMP/finance-native-preflight-source"
-          cd "$RUNNER_TEMP/finance-native-preflight-source/hormuz-finance-native-runtime-baseline"
+          # Run the v5 preflight verifier from the immutable main tree that
+          # established that plan; the successor checkout intentionally has
+          # the v1.1 runtime files and schema 12/16.
+          git fetch --no-tags origin 5074b0fc22cb67c55446e5458fa7aca20b457fdb
+          git -c tar.umask=0000 archive --format=tar \
+            --prefix=hormuz-finance-preflight-source/ \
+            --output="$RUNNER_TEMP/finance-preflight-source-5074b0f.tar" \
+            5074b0fc22cb67c55446e5458fa7aca20b457fdb
+          mkdir "$RUNNER_TEMP/finance-preflight-source"
+          tar -xf "$RUNNER_TEMP/finance-preflight-source-5074b0f.tar" \
+            -C "$RUNNER_TEMP/finance-preflight-source"
+          cd "$RUNNER_TEMP/finance-preflight-source/hormuz-finance-preflight-source"
           python tools/verify_finance_collection_transition_plan.py \
             --predecessor-archive "$RUNNER_TEMP/finance-native-runtime-baseline-34da674.tar"
           python -m venv "$RUNNER_TEMP/hormuz-finance-native-runtime-baseline"
