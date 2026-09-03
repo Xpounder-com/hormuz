@@ -279,6 +279,7 @@ def main(argv=None) -> int:
                     custody_control_role=config.custody_control.postgres_control_role,
                     custody_executor_role=config.custody_executor.postgres_executor_role,
                     connection_pool=pool,
+                    require_restricted_migration_login=True,
                 )
                 store = create_usage_store(
                     config,
@@ -317,6 +318,7 @@ def main(argv=None) -> int:
                 policy_control_role=config.policy_control.postgres_control_role,
                 custody_control_role=config.custody_control.postgres_control_role,
                 custody_executor_role=config.custody_executor.postgres_executor_role,
+                require_restricted_migration_login=True,
             )
             result = {
                 "postgresql_schema_version": status.schema_version,
@@ -345,6 +347,7 @@ def main(argv=None) -> int:
                 policy_control_role=config.policy_control.postgres_control_role,
                 custody_control_role=config.custody_control.postgres_control_role,
                 custody_executor_role=config.custody_executor.postgres_executor_role,
+                require_restricted_migration_login=True,
             )
             result = {
                 "postgresql_schema_version": status.version,

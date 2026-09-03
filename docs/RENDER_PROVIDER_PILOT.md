@@ -99,7 +99,9 @@ All values must be distinct. The provider backend receives only the first seven
 values plus validated Render metadata. Remove the migration DSN from the whole
 service after maintenance; `provider-pilot` refuses to start while it is
 nonempty because the supervisor and backend share a container UID. Keep the
-owner DSN in an approved secret manager for future reviewed migrations.
+direct migration DSN in an approved secret manager for future reviewed
+migrations. Retain the Render-managed operator DSN separately for database-role
+repair; never substitute it for the restricted migration login.
 
 Never put a credential in JSON, a command argument, logs, artifacts, Caddy, or
 GitHub workflow inputs. The protected qualification workflow receives a
@@ -173,9 +175,11 @@ version-pinned privilege and grant-option boundary. It then proves runtime
 access and RLS through the runtime DSN. Its output is content-free and
 inference remains disabled. Safe completed work can be rerun.
 
-For a later schema upgrade, temporarily restore the owner DSN while still in
-maintenance and run `provider-migrate`. That command never creates roles or
-relaxes the bootstrap boundary.
+For a later schema upgrade, temporarily restore the retained direct migration
+DSN as `HORMUZ_POSTGRES_MIGRATION_DSN` while still in maintenance and run
+`provider-migrate`. The command revalidates the login's exact restricted
+attributes, memberships, and schema ownership before changing schema objects;
+it never creates roles or relaxes the bootstrap boundary.
 
 ## Preflight and activation
 

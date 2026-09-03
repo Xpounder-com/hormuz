@@ -256,6 +256,7 @@ def bootstrap_postgres_deployment(
     policy_control_role: str = "hormuz_policy_control",
     custody_control_role: str = "hormuz_custody_control",
     custody_executor_role: str = "hormuz_custody_executor",
+    require_restricted_migration_login: bool = False,
 ) -> PostgresDeploymentBootstrapStatus:
     """Prepare and verify a separate migration/runtime boundary for one deployment.
 
@@ -272,6 +273,10 @@ def bootstrap_postgres_deployment(
     an administrative member of each role it creates.  The exact
     ADMIN=TRUE/INHERIT=FALSE/SET=FALSE edge from the migration login is accepted;
     every other creator, member, or option still fails closed.
+
+    Hosted provider deployments set ``require_restricted_migration_login`` so
+    the migration credential must also have exactly LOGIN, CREATEROLE, and
+    NOINHERIT with every other elevated role attribute disabled.
 
     Safe, already-complete work is accepted so an interrupted maintenance run
     can be repeated.  Unexpected roles, memberships, ownership, or elevated
@@ -358,6 +363,7 @@ def bootstrap_postgres_deployment(
                     migration_login=migration_login,
                     role_names=role_names,
                     allow_missing_schema=True,
+                    require_restricted_login=require_restricted_migration_login,
                 )
 
                 runtime_attributes = _postgres_role_attributes(cursor, runtime_login)
@@ -509,6 +515,7 @@ def bootstrap_postgres_deployment(
                     runtime_login=runtime_login,
                     role_names=role_names,
                     error_scope="bootstrap",
+                    require_restricted_migration_login=require_restricted_migration_login,
                 )
     except PostgresStorageError:
         raise
@@ -543,6 +550,7 @@ def verify_postgres_deployment_runtime(
     custody_control_role: str = "hormuz_custody_control",
     custody_executor_role: str = "hormuz_custody_executor",
     connection_pool: PostgresConnectionPool | None = None,
+    require_restricted_migration_login: bool = False,
 ) -> None:
     """Revalidate a hosted deployment's authenticated runtime boundary.
 
@@ -550,6 +558,9 @@ def verify_postgres_deployment_runtime(
     authenticated as the restricted managed login, that the login can assume
     only the fixed runtime authorization role, and that no unexpected
     principal owns or has an ACL on the Hormuz schema.
+
+    ``require_restricted_migration_login`` additionally checks the schema
+    owner's exact LOGIN/CREATEROLE attribute boundary used by the Render pilot.
     """
 
     schema = validate_postgres_identifier(schema, "postgres_schema")
@@ -600,6 +611,7 @@ def verify_postgres_deployment_runtime(
                     runtime_login=runtime_login,
                     role_names=role_names,
                     error_scope="runtime",
+                    require_restricted_migration_login=require_restricted_migration_login,
                 )
 
     if connection_pool is not None:
@@ -720,6 +732,7 @@ def _verify_postgres_deployment_roles(
     runtime_login: str,
     role_names: tuple[str, ...],
     error_scope: str,
+    require_restricted_migration_login: bool = False,
 ) -> None:
     def fail(suffix: str) -> None:
         raise PostgresStorageError(f"postgres_{error_scope}_{suffix}")
@@ -771,6 +784,7 @@ def _verify_postgres_deployment_roles(
         role_names=role_names,
         allow_missing_schema=False,
         error_scope=error_scope,
+        require_restricted_login=require_restricted_migration_login,
     )
     cursor.execute(
         """
@@ -860,7 +874,17 @@ def _verify_postgres_migration_ownership(
     role_names: tuple[str, ...],
     allow_missing_schema: bool,
     error_scope: str = "bootstrap",
+    require_restricted_login: bool = False,
 ) -> None:
+    if require_restricted_login and _postgres_role_attributes(
+        cursor, migration_login
+    ) != (True, False, False, True, False, False, False):
+        suffix = (
+            "role_unsafe"
+            if error_scope == "migration"
+            else "migration_role_unsafe"
+        )
+        raise PostgresStorageError(f"postgres_{error_scope}_{suffix}")
     memberships = _postgres_role_memberships(cursor, migration_login)
     expected_creator_memberships = {
         role
@@ -1129,8 +1153,13 @@ def migrate_postgres(
     policy_control_role: str = "hormuz_policy_control",
     custody_control_role: str = "hormuz_custody_control",
     custody_executor_role: str = "hormuz_custody_executor",
+    require_restricted_migration_login: bool = False,
 ) -> PostgresSchemaStatus:
-    """Apply all bundled PostgreSQL migrations atomically and idempotently."""
+    """Apply all bundled PostgreSQL migrations atomically and idempotently.
+
+    Hosted provider maintenance sets ``require_restricted_migration_login`` to
+    revalidate the direct migration credential before changing schema objects.
+    """
 
     schema = validate_postgres_identifier(schema, "postgres_schema")
     runtime_role = validate_postgres_identifier(runtime_role, "postgres_runtime_role")
@@ -1172,6 +1201,7 @@ def migrate_postgres(
                     ),
                     allow_missing_schema=True,
                     error_scope="migration",
+                    require_restricted_login=require_restricted_migration_login,
                 )
                 cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
                 cursor.execute(
@@ -1286,6 +1316,7 @@ def migrate_postgres(
                     ),
                     allow_missing_schema=False,
                     error_scope="migration",
+                    require_restricted_login=require_restricted_migration_login,
                 )
         return PostgresSchemaStatus(version=POSTGRES_SCHEMA_VERSION, complete=True)
     except PostgresStorageError:

@@ -181,6 +181,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 policy_control_role=policy_role,
                 custody_control_role=custody_role,
                 custody_executor_role=executor_role,
+                require_restricted_migration_login=True,
             )
             self.assertTrue(status.schema_complete)
             self.assertTrue(status.runtime_login_restricted)
@@ -192,7 +193,70 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 policy_control_role=policy_role,
                 custody_control_role=custody_role,
                 custody_executor_role=executor_role,
+                require_restricted_migration_login=True,
             )
+
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("ALTER ROLE {} CREATEDB").format(
+                            self.sql.Identifier(migration_login)
+                        )
+                    )
+            for operation, expected in (
+                (
+                    lambda: bootstrap_postgres_deployment(
+                        migration_dsn,
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_bootstrap_migration_role_unsafe",
+                ),
+                (
+                    lambda: migrate_postgres(
+                        migration_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_migration_role_unsafe",
+                ),
+                (
+                    lambda: verify_postgres_deployment_runtime(
+                        runtime_dsn,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        policy_control_role=policy_role,
+                        custody_control_role=custody_role,
+                        custody_executor_role=executor_role,
+                        require_restricted_migration_login=True,
+                    ),
+                    "postgres_runtime_migration_role_unsafe",
+                ),
+            ):
+                with self.subTest(expected=expected), self.assertRaisesRegex(
+                    PostgresStorageError, expected
+                ):
+                    operation()
+            with self.psycopg.connect(
+                self.owner_dsn, autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("ALTER ROLE {} NOCREATEDB").format(
+                            self.sql.Identifier(migration_login)
+                        )
+                    )
 
             with self.psycopg.connect(self.owner_dsn) as connection:
                 with connection.cursor() as cursor:
@@ -221,6 +285,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                     policy_control_role=policy_role,
                     custody_control_role=custody_role,
                     custody_executor_role=executor_role,
+                    require_restricted_migration_login=True,
                 )
 
             with self.psycopg.connect(
@@ -256,6 +321,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                     policy_control_role=policy_role,
                     custody_control_role=custody_role,
                     custody_executor_role=executor_role,
+                    require_restricted_migration_login=True,
                 )
         finally:
             with self.psycopg.connect(

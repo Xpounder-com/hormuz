@@ -333,6 +333,7 @@ class HostedProviderConfigTests(unittest.TestCase):
             custody_control_role="hormuz_custody_control",
             custody_executor_role="hormuz_custody_executor",
             connection_pool=pool,
+            require_restricted_migration_login=True,
         )
         store.verify_ready.assert_called_once_with()
         pool.close.assert_called_once_with()
@@ -382,6 +383,7 @@ class HostedProviderConfigTests(unittest.TestCase):
             policy_control_role="hormuz_policy_control",
             custody_control_role="hormuz_custody_control",
             custody_executor_role="hormuz_custody_executor",
+            require_restricted_migration_login=True,
         )
         initialize_server.assert_not_called()
 
@@ -442,6 +444,7 @@ class HostedProviderConfigTests(unittest.TestCase):
             policy_control_role="hormuz_policy_control",
             custody_control_role="hormuz_custody_control",
             custody_executor_role="hormuz_custody_executor",
+            require_restricted_migration_login=True,
         )
 
         output, error = io.StringIO(), io.StringIO()
@@ -507,6 +510,7 @@ class HostedProviderConfigTests(unittest.TestCase):
             policy_control_role="hormuz_policy_control",
             custody_control_role="hormuz_custody_control",
             custody_executor_role="hormuz_custody_executor",
+            require_restricted_migration_login=True,
         )
 
         output, error = io.StringIO(), io.StringIO()
