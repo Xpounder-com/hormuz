@@ -105,6 +105,18 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ("  build:\n", "  build:\n    permissions:\n      pages: write\n"),
             ("      id-token: write\n", "      id-token: write\n      packages: write\n"),
             ("          path: website/out\n", "          path: .\n"),
+            (
+                "          path: website/out\n",
+                "          path: website/out\n          include-hidden-files: true\n",
+            ),
+            (
+                "fc324d3547104276b827a68afc52ff2a11cc49c9",
+                "7b1f4a764d45c48632c6b24a0339c27f5614fb0b",
+            ),
+            (
+                "368f82528645a54fb793d4d04e342629a3f51346",
+                "d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e",
+            ),
             ("        id: deployment\n", "        id: deployment\n        continue-on-error: true\n"),
         )
         for original, replacement in mutations:

@@ -1136,13 +1136,13 @@ def _validate_pages_workflow(
         "      - name: Deploy verified static artifact\n"
         "        id: deployment\n"
         "        uses: actions/deploy-pages@"
-        "d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4\n"
+        "368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1\n"
     )
     expected_upload_step = (
         "      - name: Upload the Pages artifact\n"
         f"        if: {PAGES_PUBLISH_CONDITION}\n"
         "        uses: actions/upload-pages-artifact@"
-        "7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4\n"
+        "fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0\n"
         "        with:\n"
         "          path: website/out\n"
     )
