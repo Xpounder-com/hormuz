@@ -1,6 +1,8 @@
 # Finance reconciliation — decision preflight for v1.1.0
 
-Status: **draft; owner decision and #214 preflight acceptance pending**.
+Status: **owner-approved scope; exact #214 preflight acceptance pending**.
+The owner approved prospective metadata-only account capture on 2026-09-06;
+[durable approval record](https://github.com/Xpounder-com/hormuz/issues/8#issuecomment-5562564894).
 This is a continuation of #8, not a replacement for its remaining criteria.
 Baseline: protected main `c877f49da8baf6a837924f33f06494964cd7118b`
 ([collection acceptance](https://github.com/Xpounder-com/hormuz/issues/8#issuecomment-5560266260)).
@@ -58,14 +60,14 @@ configuration, an actor, or a numerically plausible provider total. Existing
 records must remain explicitly unbound unless a separately approved historical
 attestation mechanism exists. This draft does not authorize that mechanism.
 
-## Owner decision requested: prospective scope capture
+## Owner-approved decision: prospective scope capture
 
-Recommended: add a **separate, versioned, metadata-only account-binding
+Approved scope: add a **separate, versioned, metadata-only account-binding
 sidecar captured with the attempt root before egress**, using an explicitly
 operator-approved binding between the configured upstream and the collection
 account/scope. This is additional gateway evidence, not collection-only work.
 
-The proposed boundary is:
+The approved scope boundary is:
 
 - The operator attests the exact tenant, upstream identity/version, provider
   account/scope and source-binding version. API authentication and account
@@ -91,12 +93,34 @@ The proposed boundary is:
 - No new read role, credential creation/rotation, provider access, account
   allocation, raw content, automatic policy change or production migration.
 
-Approval would authorize developing this bounded successor preflight, not
+Approval authorizes developing this bounded successor preflight, not
 accepting its runtime. Its precise configuration contract, table shapes,
 audit-source additions, migration versions and any fixed ACL delta must be
 measured and reviewed before implementation. Versions 12/17 and the accepted
 199-entry ACL boundary are not rewritten or weakened. No successor version
-or fingerprint is reserved or claimed by this draft.
+or fingerprint is reserved or claimed by this draft. The internal evidence
+contract is recorded in `finance-account-binding-contract-v1.json`; its
+verifier/tests freeze the scope and failure semantics, not an implemented
+gateway, configuration surface, migration, or final transition checkpoint.
+
+### Credential and attestation limits
+
+Inference credential identity and collection/admin credential identity are
+different coordinates. An existing collection credential reference cannot
+prove which inference credential sent a request. Operator-controlled opaque
+reference versions identify those configurations; neither is the credential
+value, a hash of that value, or independent verification of account ownership.
+Replacing a secret under an unchanged reference cannot be detected by this
+metadata-only evidence. Operators must version the binding when changing the
+account/credential association; reports must preserve this attestation limit.
+
+Binding-registration-version and source-binding-version checks must share the tenant-bound
+transaction that captures attempt evidence. Do not use a second repository
+transaction and claim atomicity. Missing, revoked, stale, ambiguous or
+unsupported binding semantics produce explicit unbound evidence. If a real
+database write fails, the whole attempt transaction fails under the existing
+pre-egress durability rule; swallowing that failure and forwarding would not
+be preserved v1 behavior.
 
 ## Reconciliation contract to freeze after the scope decision
 
