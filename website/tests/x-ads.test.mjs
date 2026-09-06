@@ -16,13 +16,26 @@ function browser({ origin = 'https://usehormuz.github.io', signal = false, stora
   };
 }
 
+test('only acknowledged sales interests qualify for the lead event; general inquiries and QA never do', () => {
+  for (const interest of ['integration', 'security', 'community', '', undefined, '__proto__']) {
+    const win = browser(); saveAdConsent('allowed', win);
+    assert.equal(trackConfirmedApplication(win, { interest }), false);
+    assert.equal(win.twq, undefined);
+  }
+  for (const interest of ['review', 'pilot', 'support']) {
+    const win = browser(); saveAdConsent('allowed', win);
+    assert.equal(trackConfirmedApplication(win, { interest, testSubmission: true }), false);
+    assert.equal(trackConfirmedApplication(win, { interest }), true);
+  }
+});
+
 test('no scripts or conversion queues before consent, after decline, or with a privacy signal', () => {
   for (const state of ['unset', 'declined', 'privacy-signal', 'do-not-track']) {
     const win = browser({ signal: state === 'privacy-signal' });
     if (state === 'do-not-track') win.navigator.doNotTrack = '1';
     if (state !== 'unset') saveAdConsent(state === 'declined' ? 'declined' : 'allowed', win);
     assert.equal(startXPixel(win), false);
-    assert.equal(trackConfirmedApplication(win), false);
+    assert.equal(trackConfirmedApplication(win, { interest: 'review' }), false);
     assert.equal(win.scripts.length, 0);
     assert.equal(win.twq, undefined);
   }
@@ -42,7 +55,7 @@ test('opted-in previews never report to the production ad account', () => {
   for (const origin of ['http://127.0.0.1:3188', 'https://preview.example.com']) {
     const win = browser({ origin });
     saveAdConsent('allowed', win);
-    assert.equal(trackConfirmedApplication(win), false);
+    assert.equal(trackConfirmedApplication(win, { interest: 'review' }), false);
     assert.equal(win.scripts.length, 0);
   }
 });
@@ -56,8 +69,8 @@ test('one SDK initialization suppresses page URLs and one conversion contains no
   assert.equal(win.scripts[0].src, 'https://static.ads-twitter.com/uwt.js');
   assert.equal(win.scripts[0].referrerPolicy, 'origin');
   assert.deepEqual(win.twq.queue[0], ['set', { hide_page_location: true }]);
-  assert.equal(trackConfirmedApplication(win), true);
-  assert.equal(trackConfirmedApplication(win), false);
+  assert.equal(trackConfirmedApplication(win, { interest: 'review' }), true);
+  assert.equal(trackConfirmedApplication(win, { interest: 'review' }), false);
   assert.deepEqual(win.twq.queue.filter(args => args[0] === 'event'), [['event', X_LEAD_EVENT_ID, {}]]);
 });
 
@@ -66,7 +79,7 @@ test('withdrawal blocks subsequent application events and blocked storage suppor
   saveAdConsent('allowed', win);
   assert.equal(startXPixel(win), true);
   saveAdConsent('declined', win);
-  assert.equal(trackConfirmedApplication(win), false);
+  assert.equal(trackConfirmedApplication(win, { interest: 'review' }), false);
   assert.equal(win.twq.queue.some(args => args[0] === 'event'), false);
   assert.equal(readAdConsent(browser({ storageBlocked: true })), 'unset');
 });
@@ -77,11 +90,11 @@ test('a rejected form sends no conversion; a saved form can succeed even if X fa
   const endpoint = 'https://formspree.io/f/testfixture';
   await assert.rejects(async () => {
     await submitLead(endpoint, {}, async () => new Response('{"ok":false}', { status: 429 }));
-    trackConfirmedApplication(win);
+    trackConfirmedApplication(win, { interest: 'review' });
   });
   assert.equal(win.scripts.length, 0);
   await submitLead(endpoint, {}, async () => new Response('{"ok":true}'));
   startXPixel(win);
   win.twq = () => { throw Error('ad blocker'); };
-  assert.equal(trackConfirmedApplication(win), false);
+  assert.equal(trackConfirmedApplication(win, { interest: 'review' }), false);
 });

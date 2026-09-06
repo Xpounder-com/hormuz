@@ -15,6 +15,6 @@ export function PilotPriceCard() {
     <ul className="price-deliverables"><li>Policy map & agreed acceptance criteria</li><li>Non-production integration guidance</li><li>Evidence pack & operational handoff</li></ul>
     <CampaignLink className="button button-primary" href={sitePath('/contact/?interest=pilot')}>Discuss my pilot <span aria-hidden="true">↗</span></CampaignLink>
     <p className="price-card-note">Agree scope before paying. No automatic renewal.<br />Provider usage, infrastructure, and taxes additional.</p>
-    <a className="price-card-details" href={sitePath('/enterprise/#pilot')}>What happens over the 90 days? <span aria-hidden="true">→</span></a>
+    <CampaignLink className="price-card-details" href={sitePath('/enterprise/#pilot')}>What happens over the 90 days? <span aria-hidden="true">→</span></CampaignLink>
   </aside>;
 }

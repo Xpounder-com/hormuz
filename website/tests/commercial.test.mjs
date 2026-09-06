@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateCommercialConfig } from '../lib/commercial.mjs';
-import { buildLead, campaignLink, submitLead } from '../lib/lead.mjs';
+import { buildLead, campaignLink, createRequestReference, submitLead } from '../lib/lead.mjs';
 
 const blank = { formEndpoint: '', bookingUrl: '', pilotPaymentUrl: '', supportPaymentUrl: '' };
 const endpoint = 'https://formspree.io/f/testfixture';
@@ -37,6 +37,33 @@ test('lead payload excludes unknown fields and unconsented campaign data', () =>
   const tagged = buildLead(fields, '?utm_source=linkedin&email=private');
   assert.equal(tagged.campaign, 'utm_source=linkedin');
   assert.equal(buildLead({ ...fields, interest: 'support' }).interest, 'Enterprise support subscription');
+});
+
+test('creative attribution survives multiple page hops while downloads and external paths stay clean', () => {
+  const tags = '?utm_source=x&utm_medium=paid_social&utm_campaign=hormuz_signal_202609&utm_content=h03_evidence&email=private';
+  const pricing = campaignLink('/enterprise/#plans', tags);
+  const inquiry = campaignLink('/contact/?interest=review', new URL(pricing, 'https://example.com').search);
+  const payload = buildLead(fields, new URL(inquiry, 'https://example.com').search);
+  assert.match(payload.campaign, /utm_content=h03_evidence/);
+  assert.doesNotMatch(inquiry, /email|private/);
+  for (const href of ['/demo/gateway.txt', '/downloads/brief.pdf', '#recording', '/\\evil.example/']) assert.equal(campaignLink(href, tags), href);
+});
+
+test('request reference identifies the submission and QA status cannot come from an unknown form field', () => {
+  const reference = createRequestReference({ randomUUID: () => '11111111-2222-4333-8444-555555555555' });
+  const payload = buildLead({ ...fields, test_submission: true }, '', { reference });
+  assert.equal(payload.request_reference, reference);
+  assert.match(payload._subject, new RegExp(reference));
+  assert.equal(payload.test_submission, undefined);
+  const qa = buildLead(fields, '', { reference, testSubmission: true });
+  assert.equal(qa.test_submission, true);
+  assert.match(qa._subject, /^\[QA TEST\]/);
+  assert.throws(() => buildLead(fields, '', { reference: 'arbitrary contact data' }));
+});
+
+test('Google booking configuration allows public schedules but rejects private calendar pages', () => {
+  assert.equal(validateCommercialConfig({ ...blank, bookingUrl: 'https://calendar.google.com/calendar/u/0/appointments/schedules/AcZss_test' }).bookingUrl, 'https://calendar.google.com/calendar/u/0/appointments/schedules/AcZss_test');
+  for (const url of ['https://calendar.google.com/calendar/u/0/r', 'https://calendar.google.com/calendar/u/0/appointments/schedules/abc?email=private', 'https://calendar.google.com.evil.example/calendar/u/0/appointments/schedules/abc']) assert.throws(() => validateCommercialConfig({ ...blank, bookingUrl: url }));
 });
 
 test('lead validation requires reply contact and rejects invalid fields before submission', () => {

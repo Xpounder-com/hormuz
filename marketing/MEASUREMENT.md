@@ -23,19 +23,20 @@ productivity from usage data. Keep study evidence separate from sales notes.
 
 ## Consent-aware source handling
 
-Campaign URLs may use bounded `utm_source`, `utm_medium`, and `utm_campaign`
+Campaign URLs may use bounded `utm_source`, `utm_medium`, `utm_campaign`, and `utm_content`
 values, for example `?interest=pilot&utm_source=x&utm_medium=paid_social&utm_campaign=enterprise_pilot`.
 The browser sends the requested URL, including its query string, to GitHub Pages
 when it loads the page; those values can be processed in hosting/security logs.
 The contact page then reads them locally and offers an **unchecked** checkbox to
 include them in the Formspree application. This choice is independent of X Ads
-consent. Application CTAs retain only those three bounded campaign tags in the
+consent. Internal page links retain only those four bounded campaign tags in the
 URL, without storing them. The site does not forward `twclid` in its CTA links;
 after consent, X's SDK handles its own click identifier and cookies.
 
 ## Private lead ledger
 
-Copy `templates/leads.example.csv` to an access-controlled, private location.
+Use `marketing/private/leads.csv` with `scripts/sales_pipeline.py`; see
+[sales workflow](SALES_WORKFLOW.md) for stages, required evidence, and follow-up drafts.
 `marketing/private/` is gitignored as an accidental-publication guard, not a
 security boundary. Never commit real contacts, customer notes, or credentials.
 Store only consented/necessary contact information, source, workflow,
@@ -55,7 +56,9 @@ before use. No real lead records were created by this task.
 - Page-location suppression is set before pixel configuration. No application
   fields, hashed identities, prices, or campaign tags are passed as event data.
 - A single Lead event follows `submitLead` resolving with HTTP success and
-  `ok: true`. Validation failures, rejected/ambiguous responses, honeypot input,
+  `ok: true` for a review, pilot, or support inquiry. General integration,
+  security, and community inquiries and explicit QA mode do not trigger it.
+  Validation failures, rejected/ambiguous responses, honeypot input,
   button clicks, and repeated renders do not create conversion events.
 - A blocked pixel cannot prevent saving an inquiry. The event is not retroactively
   queued for a visitor who grants consent after submitting.
@@ -77,7 +80,9 @@ See [activation and verification](COMMERCIAL_SETUP.md) for public destination co
 - Pilot paid: a successful live Stripe payment for the agreed pilot, not a return URL.
 - Support subscribed: an active subscription and successful initial payment in Stripe.
 
-The X Lead event measures acknowledged applications, including any service-accepted
-spam or synthetic QA submissions. Exclude QA and spam from the sales ledger.
+The X Lead event measures consented, acknowledged sales inquiries. Explicit
+`?qa=1` submissions are visibly marked, excluded from the event, and must be
+classified `qa` in the private ledger. Unflagged service-accepted spam can still
+trigger an event; exclude it from the sales ledger after review.
 Inspect Events Manager activity after publication; a browser request alone does
 not prove ad attribution. No purchase, booking, or subscription pixel is installed.

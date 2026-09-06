@@ -1,12 +1,13 @@
-import { INTERESTS, campaignSource } from './contact.mjs';
+import { INTERESTS, CAMPAIGN_TAGS, campaignSource } from './contact.mjs';
 import { validateCommercialConfig } from './commercial.mjs';
+import { SITE_ROUTES, sitePath } from './site.mjs';
 
-const TAGS = ['utm_source', 'utm_medium', 'utm_campaign'];
 export function campaignLink(href, search) {
   if (!href.startsWith('/') || href.startsWith('//')) return href;
   const url = new URL(href, 'https://local.invalid');
+  if (url.origin !== 'https://local.invalid' || !SITE_ROUTES.map(sitePath).includes(url.pathname)) return href;
   const source = new URLSearchParams(search);
-  for (const key of TAGS) {
+  for (const key of CAMPAIGN_TAGS) {
     const value = source.get(key);
     if (value && /^[a-zA-Z0-9_.-]{1,64}$/.test(value)) url.searchParams.set(key, value);
   }
@@ -17,7 +18,12 @@ function clean(value, max) {
   return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
 }
 
-export function buildLead(fields, source = '') {
+export function createRequestReference(cryptoSource = globalThis.crypto) {
+  return `HZ-${cryptoSource.randomUUID()}`;
+}
+
+export function buildLead(fields, source = '', { reference = '', testSubmission = false } = {}) {
+  if (reference && !/^HZ-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(reference)) throw new Error('Invalid request reference');
   const name = clean(fields.name, 100);
   const email = clean(fields.email, 254);
   const organization = clean(fields.organization, 150);
@@ -26,7 +32,9 @@ export function buildLead(fields, source = '') {
   const interest = Object.hasOwn(INTERESTS, fields.interest) ? INTERESTS[fields.interest] : INTERESTS.pilot;
   return { name, email, organization, workflow, interest, timeframe: clean(fields.timeframe, 100),
     ...(source ? { campaign: campaignSource(source) } : {}),
-    _subject: `Hormuz — ${interest}`, _gotcha: clean(fields._gotcha, 100) };
+    ...(reference ? { request_reference: reference } : {}),
+    ...(testSubmission ? { test_submission: true } : {}),
+    _subject: `${testSubmission ? '[QA TEST] ' : ''}Hormuz — ${interest}${reference ? ` — ${reference}` : ''}`, _gotcha: clean(fields._gotcha, 100) };
 }
 
 /** A transport failure is ambiguous. Never retry automatically or claim delivery. */

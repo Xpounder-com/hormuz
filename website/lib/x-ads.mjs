@@ -1,4 +1,5 @@
 import { SITE_ORIGIN } from './site.mjs';
+import { isSalesInquiry } from './contact.mjs';
 
 // Public identifiers from the owner's X Ads Events Manager. No credentials.
 export const X_PIXEL_ID = 'rf0s7';
@@ -59,8 +60,9 @@ export function startXPixel(win = window) {
   } catch { return false; }
 }
 
-/** Called only after submitLead resolves. No form payload enters this function. */
-export function trackConfirmedApplication(win = window) {
+/** An acknowledged sales inquiry, not a qualified buyer. No form payload enters this function. */
+export function trackConfirmedApplication(win = window, { interest = '', testSubmission = false } = {}) {
+  if (!isSalesInquiry(interest) || testSubmission) return false;
   const state = session(win);
   if (state.converted || !startXPixel(win)) return false;
   try {

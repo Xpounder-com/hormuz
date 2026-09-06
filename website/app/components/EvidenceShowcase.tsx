@@ -1,5 +1,6 @@
 'use client';
 
+import { CampaignLink } from './CampaignLink';
 import { useState } from 'react';
 import { sitePath } from '../../lib/site.mjs';
 
@@ -17,7 +18,7 @@ export function EvidenceShowcase() {
     <div className="proof-selectors" role="group" aria-label="Choose an evidence example">{examples.map((item, i) => <button key={item.label} type="button" aria-pressed={selected === i} aria-controls="proof-panel" onClick={() => setSelected(i)}><span aria-hidden="true">0{i + 1}</span>{item.label}</button>)}</div>
     <div className="proof-panel" id="proof-panel">
       <div className="proof-art"><div className="proof-orbit" aria-hidden="true" /><div className="proof-terminal"><div className="proof-window"><span aria-hidden="true">● ● ●</span><span>hormuz / {example.file}</span><span>↗</span></div><p className="proof-source-label">RECORDED DEMO · SELECTED {selected === 1 ? 'RESULTS' : 'EXCERPT'}</p><pre>{example.lines.join('\n')}</pre><div className="proof-tags">{example.tags.map(tag => <span key={tag}>{tag}</span>)}</div></div><div className="proof-receipt"><span>DEMO EVIDENCE</span><strong>{example.metric}</strong><p>{example.metricLabel}</p><small>Recorded locally · Synthetic inputs</small></div></div>
-      <div className="proof-copy" aria-live="polite" aria-atomic="true"><p className="landing-eyebrow">{example.eyebrow}</p><h3>{example.title}</h3><p>{example.copy}</p><a className="proof-source" href={sitePath(`/demo/${example.file}`)}>Inspect the source <span aria-hidden="true">↗</span></a><a className="button landing-primary" href={sitePath('/demo/')}>Watch the recorded demos <span aria-hidden="true">→</span></a></div>
+      <div className="proof-copy" aria-live="polite" aria-atomic="true"><p className="landing-eyebrow">{example.eyebrow}</p><h3>{example.title}</h3><p>{example.copy}</p><CampaignLink className="proof-source" href={sitePath(`/demo/${example.file}`)}>Inspect the source <span aria-hidden="true">↗</span></CampaignLink><CampaignLink className="button landing-primary" href={sitePath('/demo/')}>Watch the recorded demos <span aria-hidden="true">→</span></CampaignLink></div>
     </div><p className="proof-footnote">These are synthetic demonstrations, not customer results or production qualification.</p>
   </section>;
 }

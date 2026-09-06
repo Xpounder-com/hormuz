@@ -44,12 +44,12 @@ export default function Home() {
         </div>
         <PilotPriceCard /></div>
         <GatewayPreview />
-        <div className="landing-integrations"><p>Built for your existing AI workflow</p><div><span>⌘ <strong>Codex</strong></span><span>✳ <strong>Claude Code</strong></span><i /><span>OpenAI</span><span>Anthropic</span></div><a href={sitePath('/integrations/')}>Explore supported integrations ↗</a></div>
+        <div className="landing-integrations"><p>Built for your existing AI workflow</p><div><span>⌘ <strong>Codex</strong></span><span>✳ <strong>Claude Code</strong></span><i /><span>OpenAI</span><span>Anthropic</span></div><CampaignLink href={sitePath('/integrations/')}>Explore supported integrations ↗</CampaignLink></div>
       </section>
 
       <section className="passage-story" aria-labelledby="passage-title">
         <figure className="passage-art"><img src={sitePath('/brand/controlled-passage.webp')} width="1536" height="1024" loading="lazy" alt="Layered sage and cream contours around a clear, open channel" /><figcaption><BrandMark /><span>ROOM TO MOVE. CLEAR BOUNDARIES.</span><span aria-hidden="true">↗</span></figcaption></figure>
-        <div className="passage-story-copy"><p className="landing-eyebrow">THE HORMUZ APPROACH</p><h2 id="passage-title">Let good work<br /><em>move forward.</em></h2><p>Give supported AI requests a clear path through your organization’s controls. Keep the workflow familiar and make the decisions inspectable.</p><dl className="passage-principles"><div><dt><span>01</span> Your tools</dt><dd>Start with Codex and Claude Code.</dd></div><div><dt><span>02</span> Your boundaries</dt><dd>Apply policy, budgets, and secret controls before egress.</dd></div><div><dt><span>03</span> Your evidence</dt><dd>Review the outcome without routine prompt logging.</dd></div></dl><a href={sitePath('/demo/')}>See how the request path works <span aria-hidden="true">↗</span></a></div>
+        <div className="passage-story-copy"><p className="landing-eyebrow">THE HORMUZ APPROACH</p><h2 id="passage-title">Let good work<br /><em>move forward.</em></h2><p>Give supported AI requests a clear path through your organization’s controls. Keep the workflow familiar and make the decisions inspectable.</p><dl className="passage-principles"><div><dt><span>01</span> Your tools</dt><dd>Start with Codex and Claude Code.</dd></div><div><dt><span>02</span> Your boundaries</dt><dd>Apply policy, budgets, and secret controls before egress.</dd></div><div><dt><span>03</span> Your evidence</dt><dd>Review the outcome without routine prompt logging.</dd></div></dl><CampaignLink href={sitePath('/demo/')}>See how the request path works <span aria-hidden="true">↗</span></CampaignLink></div>
       </section>
 
       <section className="landing-section" id="control-plane">
@@ -67,7 +67,7 @@ export default function Home() {
       <section className="landing-section benefits-section" id="capabilities">
         <div className="landing-heading"><p className="landing-eyebrow">LESS GUESSWORK. MORE CONTROL.</p><h2>The tools stay familiar.<br /><em>The boundaries get clearer.</em></h2></div>
         <div className="landing-benefits">{benefits.map(([number, title, copy, tag], index) => <article key={number}><ControlIllustration index={index} /><div className="benefit-caption"><span>{number}</span><small>{tag}</small></div><h3>{title}</h3><p>{copy}</p></article>)}</div>
-        <div className="evidence-banner" id="boundary"><div className="evidence-banner-icon" aria-hidden="true">⌘</div><div><h3>See the control path for yourself.</h3><p>A recorded CLI run with synthetic inputs and inspectable evidence.</p></div><a className="button landing-secondary" href={sitePath('/demo/')}>Watch the real demo <span aria-hidden="true">↗</span></a></div>
+        <div className="evidence-banner" id="boundary"><div className="evidence-banner-icon" aria-hidden="true">⌘</div><div><h3>See the control path for yourself.</h3><p>A recorded CLI run with synthetic inputs and inspectable evidence.</p></div><CampaignLink className="button landing-secondary" href={sitePath('/demo/')}>Watch the real demo <span aria-hidden="true">↗</span></CampaignLink></div>
       </section>
 
       <EnterprisePlans />

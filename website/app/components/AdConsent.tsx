@@ -1,5 +1,8 @@
 "use client";
 
+import { CampaignLink } from './CampaignLink';
+
+
 import { useEffect, useRef, useState } from 'react';
 import { pixelStarted, privacySignal, readAdConsent, saveAdConsent, startXPixel } from '../../lib/x-ads.mjs';
 import { sitePath } from '../../lib/site.mjs';
@@ -40,7 +43,7 @@ export function AdConsent() {
   if (!open) return null;
   return <section className="ad-consent" aria-labelledby="ad-consent-title">
     <div><span className="section-label">Your privacy choices</span><h2 id="ad-consent-title" ref={heading} tabIndex={-1}>Help us understand what works.</h2>
-      <p>Allow X to use cookies and visit signals to measure our ads and completed applications. Your form entries are never included. You can apply either way. <a href={sitePath('/privacy/#advertising')}>Details & choices</a>.</p>
+      <p>Allow X to use cookies and visit signals to measure our ads and submitted sales inquiries. Your form entries are never included. You can apply either way. <CampaignLink href={sitePath('/privacy/#advertising')}>Details & choices</CampaignLink>.</p>
       {signal && <p>We respect your browser’s privacy signal. Ad measurement is off.</p>}
       {choice === 'allowed' && <p>Turning measurement off reloads this page. Copy any unfinished application first.</p>}
     </div>

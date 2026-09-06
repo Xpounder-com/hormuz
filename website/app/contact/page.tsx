@@ -1,3 +1,4 @@
+import { CampaignLink } from '../components/CampaignLink';
 import { commercial, PILOT_PRICE, SUPPORT_PRICE } from '../../lib/commercial.mjs';
 import { pageMetadata } from '../../lib/metadata';
 import { CONTACT_EMAIL, OWNER_NAME, OWNER_URL, sourcePath, sitePath } from '../../lib/site.mjs';
@@ -19,14 +20,14 @@ export default function ContactPage() {
     <section className="section contact-layout">
       <div className="contact-form-panel">
         <div className="inquiry-heading"><span className="section-label">Let’s start with your team</span><h2>Your workflow, in a few words.</h2><p>{commercial.formEndpoint ? 'Choose your next step. No payment is taken here.' : 'Prepare → Review → Send from your inbox'}</p></div>
-        {commercial.bookingUrl && <div className="booking-card">
-          <h2>Start with a free governance review.</h2>
-          <p>Discuss your workflow, controls, and fit before committing to a pilot.</p>
-          <a className="button button-primary" href={commercial.bookingUrl} rel="noreferrer">Book a free review ↗</a>
-        </div>}
         {commercial.formEndpoint
           ? <LeadForm endpoint={commercial.formEndpoint} bookingUrl={commercial.bookingUrl} />
           : <ContactForm />}
+        {commercial.bookingUrl && <div className="booking-card">
+          <h2>Prefer to choose a time first?</h2>
+          <p>30 minutes on Google Meet. Wednesdays and Thursdays, 10 am–3 pm Central, subject to calendar availability.</p>
+          <a className="button button-outline" href={commercial.bookingUrl} rel="noreferrer">Book a free review ↗</a>
+        </div>}
       </div>
       <div className="contact-guide">
         <div className="contact-person"><span className="contact-avatar" aria-hidden="true">MZ</span><div><strong>Mehrdad Zaker</strong><span>Hormuz founder · Director, <a href={OWNER_URL}>{OWNER_NAME} ↗</a></span></div></div>
@@ -38,7 +39,7 @@ export default function ContactPage() {
         <ol className="contact-steps"><li><span>01</span><div><strong>Share the workflow</strong><small>Your team, AI client, and control requirements.</small></div></li><li><span>02</span><div><strong>Discuss fit together</strong><small>Scope, prerequisites, and capacity.</small></div></li><li><span>03</span><div><strong>Agree before you pay</strong><small>A written proposal and a clear next step.</small></div></li></ol>
         <p>Prefer direct email?<br /><a className="text-link" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a></p>
         <p>For vulnerabilities, use the <a href={sourcePath('SECURITY.md')}>private disclosure instructions</a>. For public troubleshooting, use <a href={sourcePath('SUPPORT.md')}>Support</a>.</p>
-        <p><a href={sitePath('/privacy/')}>How this website handles data →</a></p>
+        <p><CampaignLink href={sitePath('/privacy/')}>How this website handles data →</CampaignLink></p>
       </div>
     </section>
   </PageFrame>;

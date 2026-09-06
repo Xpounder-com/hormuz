@@ -1,3 +1,4 @@
+import { CampaignLink } from '../components/CampaignLink';
 import { pageMetadata } from '../../lib/metadata';
 import { sitePath } from '../../lib/site.mjs';
 import { PageFrame } from '../components/PageFrame';
@@ -94,12 +95,12 @@ export default function SecurityPage() {
         <p>Clients send request content to Hormuz; the gateway inspects it transiently and forwards allowed content to the configured provider. Providers still process that content under your provider agreement. Metadata-only Hormuz ledgers do not make provider processing disappear.</p>
         <p>Operators own reverse-proxy logging, backups, access to metadata, retention, credentials, and deployment configuration. Do not enable infrastructure body logging. Treat identity and usage metadata as sensitive organizational data.</p>
         <p>Secret controls are not comprehensive semantic DLP. Custody-lifecycle approvals are separate from inference requests; no per-inference human-approval workflow is claimed. Estimated spend is not reconciled provider billing.</p>
-        <div className="resource-actions"><a className="button button-primary" href={sitePath('/downloads/hormuz-trust-brief.pdf')}>Download trust brief ↓</a><a className="text-link" href={sitePath('/demo/#evidence')}>Inspect synthetic evidence →</a></div>
+        <div className="resource-actions"><CampaignLink className="button button-primary" href={sitePath('/downloads/hormuz-trust-brief.pdf')}>Download trust brief ↓</CampaignLink><CampaignLink className="text-link" href={sitePath('/demo/#evidence')}>Inspect synthetic evidence →</CampaignLink></div>
       </section>
 
       <section className="page-cta">
         <div><p className="section-label light">Security review</p><h2>Bring your actual control requirements.</h2><p>We will separate existing Hormuz evidence, customer-owned controls, and genuinely open engineering work.</p></div>
-        <a className="button button-light" href={sitePath('/contact/?interest=security')}>Discuss your requirements <span aria-hidden="true">→</span></a>
+        <CampaignLink className="button button-light" href={sitePath('/contact/?interest=security')}>Discuss your requirements <span aria-hidden="true">→</span></CampaignLink>
       </section>
 
       </PageFrame>

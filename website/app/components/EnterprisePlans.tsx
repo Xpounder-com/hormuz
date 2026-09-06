@@ -28,7 +28,7 @@ export function EnterprisePlans() {
         <ul><li>Policy map and agreed acceptance criteria</li><li>Non-production integration guidance</li><li>Allowed and blocked request checks</li><li>Evidence pack, go / no-go review, and handoff</li></ul>
         <CampaignLink className="button button-primary" href={sitePath('/contact/?interest=pilot')}>Discuss my pilot <span aria-hidden="true">↗</span></CampaignLink>
         <p className="field-hint">One team, one workflow. Scope, availability, and terms agreed before payment. No automatic renewal.</p>
-        <a className="text-link" href={sitePath('/enterprise/#pilot')}>See the 90-day plan →</a>
+        <CampaignLink className="text-link" href={sitePath('/enterprise/#pilot')}>See the 90-day plan →</CampaignLink>
       </article>
       <article className="offer-card">
         <p className="section-label">03 / KEEP MOVING</p>

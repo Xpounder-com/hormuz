@@ -21,20 +21,20 @@ export function SiteHeader({
   return (
     <header className={`nav-shell${overlay ? ' nav-shell-overlay' : ''}`}>
       <nav className="site-nav" aria-label="Primary navigation">
-        <a className="brand" href={sitePath('/')} aria-label="Hormuz home">
+        <CampaignLink className="brand" href={sitePath('/')} aria-label="Hormuz home">
           <BrandLockup />
-        </a>
+        </CampaignLink>
 
         <div className="nav-links">
           {navigation.map((item) => (
-            <a
+            <CampaignLink
               key={item.key}
               href={sitePath(item.href)}
               className={active === item.key ? 'nav-active' : undefined}
               aria-current={active === item.key ? 'page' : undefined}
             >
               {item.label}
-            </a>
+            </CampaignLink>
           ))}
         </div>
 
@@ -42,15 +42,15 @@ export function SiteHeader({
           <summary aria-label="Open navigation">Menu</summary>
           <div>
             {navigation.map((item) => (
-              <a
+              <CampaignLink
                 key={item.key}
                 href={sitePath(item.href)}
                 aria-current={active === item.key ? 'page' : undefined}
               >
                 {item.label}
-              </a>
+              </CampaignLink>
             ))}
-            <a href={sitePath('/integrations/')} aria-current={active === 'integrations' ? 'page' : undefined}>Integrations</a>
+            <CampaignLink href={sitePath('/integrations/')} aria-current={active === 'integrations' ? 'page' : undefined}>Integrations</CampaignLink>
             <CampaignLink className="mobile-pilot-cta" href={sitePath('/contact/?interest=review')}>Get a free review ↗</CampaignLink>
           </div>
         </details>

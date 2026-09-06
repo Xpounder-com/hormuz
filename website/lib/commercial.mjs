@@ -13,7 +13,8 @@ export function validateCommercialConfig(config) {
     if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash || url.search) throw new Error(`Expected a clean public HTTPS URL: ${key}`);
     if (key === 'formEndpoint' && (url.hostname !== 'formspree.io' || !/^\/f\/[a-zA-Z0-9]+$/.test(url.pathname))) throw new Error('Expected a Formspree form endpoint');
     if (key.endsWith('PaymentUrl') && (url.hostname !== 'buy.stripe.com' || !/^\/[a-zA-Z0-9]+$/.test(url.pathname) || url.pathname.startsWith('/test_'))) throw new Error('Expected a live public Stripe payment link');
-    if (key === 'bookingUrl' && !['calendly.com', 'cal.com'].includes(url.hostname)) throw new Error('Expected a public Calendly or Cal.com booking URL');
+    if (key === 'bookingUrl' && !(['calendly.com', 'cal.com'].includes(url.hostname) ||
+      (url.hostname === 'calendar.google.com' && /^\/calendar\/u\/0\/appointments\/schedules\/[a-zA-Z0-9_-]+$/.test(url.pathname)))) throw new Error('Expected a public scheduling URL');
     result[key] = url.href;
   }
   return Object.freeze(result);

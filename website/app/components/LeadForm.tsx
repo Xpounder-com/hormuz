@@ -1,8 +1,11 @@
 "use client";
 
+import { CampaignLink } from './CampaignLink';
+
+
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { INTERESTS, campaignSource } from '../../lib/contact.mjs';
-import { buildLead, submitLead } from '../../lib/lead.mjs';
+import { INTERESTS, campaignSource, isSalesInquiry } from '../../lib/contact.mjs';
+import { buildLead, createRequestReference, submitLead } from '../../lib/lead.mjs';
 import { trackConfirmedApplication } from '../../lib/x-ads.mjs';
 import { PILOT_PRICE, SUPPORT_PRICE } from '../../lib/commercial.mjs';
 import { CONTACT_EMAIL, sitePath } from '../../lib/site.mjs';
@@ -13,6 +16,9 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
   const [includeSource, setIncludeSource] = useState(false);
   const [state, setState] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
   const [error, setError] = useState('');
+  const [reference, setReference] = useState('');
+  const requestReference = useRef('');
+  const testSubmission = new URLSearchParams(search).get('qa') === '1';
   const selectedOffer = interest === 'review' ? { price: '$0', detail: 'Free AI governance review · no obligation', action: 'Request my free review →' } : interest === 'pilot' ? { price: PILOT_PRICE, detail: 'USD · one-time fee for a scoped 90-day pilot', action: 'Discuss my pilot →' } : interest === 'support' ? { price: `From ${SUPPORT_PRICE}/mo`, detail: 'USD · separately agreed enterprise support', action: 'Request support details →' } : null;
   const pending = useRef(false);
   const confirmation = useRef<HTMLHeadingElement>(null);
@@ -26,24 +32,32 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
     event.preventDefault();
     if (pending.current || state === 'success') return;
     let payload;
-    try { payload = buildLead({ ...Object.fromEntries(new FormData(event.currentTarget)), interest }, includeSource ? search : ''); }
+    try {
+      // Reuse this reference if the visitor retries an ambiguous transport result.
+      requestReference.current ||= createRequestReference();
+      setReference(requestReference.current);
+      payload = buildLead({ ...Object.fromEntries(new FormData(event.currentTarget)), interest }, includeSource ? search : '', { reference: requestReference.current, testSubmission });
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Check your entries.'); setState('error'); return; }
     pending.current = true;
     setState('sending'); setError('');
     try {
       await submitLead(endpoint, payload);
       setState('success');
-      if (!payload._gotcha) trackConfirmedApplication();
+      if (!payload._gotcha) trackConfirmedApplication(window, { interest, testSubmission });
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Receipt could not be confirmed. Please contact us by email.'); setState('error'); }
     finally { pending.current = false; }
   }
   if (state === 'success') return <section className="draft-panel" aria-label="Application received">
-    <h2 ref={confirmation} tabIndex={-1}>Application received.</h2>
-    <p>Thank you. Mehrdad will review your workflow and follow up about fit and scope. No payment has been taken and no service or meeting is booked.</p>
-    {bookingUrl && <a className="button button-primary" href={bookingUrl} rel="noreferrer">Book your free governance review ↗</a>}
+    <h2 ref={confirmation} tabIndex={-1}>{testSubmission ? 'Test inquiry received.' : 'Your inquiry is received.'}</h2>
+    <p>Request reference: <strong>{reference}</strong>. Save this reference to help us find your inquiry.</p>
+    <p>Mehrdad will review your workflow and reply personally. Response target: one business day. This page is your receipt; an automatic application email is not sent.</p>
+    {bookingUrl && isSalesInquiry(interest) && <><p>Choose a 30-minute Google Meet review on Wednesday or Thursday, 10 am–3 pm Central. Include your request reference when booking.</p><a className="button button-primary" href={bookingUrl} rel="noreferrer">Choose my review time ↗</a><p>Google Calendar emails both of us an invitation after you complete the booking.</p></>}
+    <p>No payment has been taken. A meeting is confirmed only after booking; any paid scope is agreed separately. Questions? <a href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(`Hormuz inquiry ${reference}`)}`}>Email Mehrdad</a>.</p>
   </section>;
   return <div className="contact-flow">
+    {testSubmission && <p role="status" className="form-status">QA test mode: this sends a clearly marked test inquiry to the owner. It does not count as an X Ads lead.</p>}
     <form className="contact-form" onSubmit={submit} aria-busy={state === 'sending'}>
       <fieldset disabled={state === 'sending'} className="lead-fields">
         <legend className="sr-only">Enterprise application</legend>
@@ -57,12 +71,13 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
         <label>Timing <span>(optional)</span><input name="timeframe" maxLength={100} placeholder="For example: this quarter" /></label>
         <div className="lead-trap" aria-hidden="true"><label>Leave this empty<input name="_gotcha" tabIndex={-1} autoComplete="off" /></label></div>
         {campaignSource(search) && <label className="checkbox-label"><input type="checkbox" checked={includeSource} onChange={e => setIncludeSource(e.target.checked)} />Include campaign source with my application: {campaignSource(search)}</label>}
-        <p className="field-hint">Submitting sends these details to Hormuz through Formspree so we can respond to this inquiry. It does not subscribe you to marketing emails. <a href={sitePath('/privacy/')}>Privacy details</a>.</p>
+        <p className="field-hint">Submitting sends these details to Hormuz through Formspree so we can respond to this inquiry. It does not subscribe you to marketing emails. <CampaignLink href={sitePath('/privacy/')}>Privacy details</CampaignLink>.</p>
+        <p className="field-hint">Personal reply from Mehrdad. Response target: one business day. {bookingUrl && isSalesInquiry(interest) ? 'After submitting, choose a free 30-minute review time.' : ''}</p>
         <button className="button button-primary" type="submit">{state === 'sending' ? 'Sending…' : selectedOffer?.action || 'Send my inquiry →'}</button>
       </fieldset>
     </form>
     {state === 'sending' && <p role="status">Sending your application…</p>}
-    {state === 'error' && <p role="alert" className="form-status">{error} <a href={`mailto:${CONTACT_EMAIL}`}>Email Mehrdad</a>.</p>}
+    {state === 'error' && <p role="alert" className="form-status">{error} {reference && <>Reference: <strong>{reference}</strong>. </>}<a href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(`Check Hormuz inquiry ${reference}`)}`}>Email Mehrdad</a>.</p>}
     <noscript><p>Application submission needs JavaScript. Please email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.</p></noscript>
   </div>;
 }
