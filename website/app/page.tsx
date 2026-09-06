@@ -1,4 +1,3 @@
-import './landing.css';
 import { EnterprisePlans } from './components/EnterprisePlans';
 import { CampaignLink } from './components/CampaignLink';
 import { EvidenceShowcase } from './components/EvidenceShowcase';
@@ -30,7 +29,7 @@ const faqs = [
 ];
 
 export default function Home() {
-  return <div className="landing-redesign">
+  return <div className="landing-home">
     <SiteHeader active="platform" />
     <main id="content" tabIndex={-1}>
       <section className="landing-hero" id="top">

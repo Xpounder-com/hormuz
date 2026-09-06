@@ -1,7 +1,6 @@
 import { pageMetadata } from '../../lib/metadata';
 import { sitePath } from '../../lib/site.mjs';
-import { SiteFooter } from '../components/SiteFooter';
-import { SiteHeader } from '../components/SiteHeader';
+import { PageFrame } from '../components/PageFrame';
 
 export const metadata = pageMetadata('Security & data handling — Hormuz', 'Review the implemented controls, metadata-only evidence, deployment responsibilities, and open security-review boundaries.', '/security/');
 
@@ -23,9 +22,7 @@ const openGates = [
 
 export default function SecurityPage() {
   return (
-    <>
-      <SiteHeader active="security" />
-      <main id="content" tabIndex={-1}>
+    <PageFrame active="security">
 
       <section className="subpage-hero security-hero">
         <div className="subpage-grid" aria-hidden="true" />
@@ -40,7 +37,7 @@ export default function SecurityPage() {
         </div>
       </section>
 
-      <section className="security-status section">
+      <section className="security-status section" id="status">
         <div><span>Source contracts</span><strong>v1.0.0</strong><i className="status-amber">Deployment qualification required</i></div>
         <div><span>Routine telemetry</span><strong>Content-free</strong><i>Schema-bound</i></div>
         <div><span>Provider keys</span><strong>Server-side</strong><i>Not sent to employees</i></div>
@@ -62,7 +59,7 @@ export default function SecurityPage() {
         </div>
       </section>
 
-      <section className="security-controls">
+      <section className="security-controls" id="controls">
         <div className="security-controls-inner">
           <div>
             <p className="section-label light">Current controls</p>
@@ -77,7 +74,7 @@ export default function SecurityPage() {
         </div>
       </section>
 
-      <section className="gates-section section">
+      <section className="gates-section section" id="gates">
         <div className="gates-copy">
           <p className="section-label">Open enterprise gates</p>
           <h2>No trust badge can close these.</h2>
@@ -105,8 +102,6 @@ export default function SecurityPage() {
         <a className="button button-light" href={sitePath('/contact/?interest=security')}>Discuss your requirements <span aria-hidden="true">→</span></a>
       </section>
 
-      </main>
-      <SiteFooter />
-    </>
+      </PageFrame>
   );
 }
