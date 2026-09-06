@@ -438,6 +438,26 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                         )
 
     def test_deployment_bootstrap_separates_managed_login_from_schema_owner(self) -> None:
+        self._assert_managed_bootstrap(
+            17,
+            (199, "1fa41892fb1206e7e70b922768ac27a39fce6ed98441a9fb78ce1511e1582906"),
+            (200, "36722069d266896d947c5d0d96f4e3033f7992244d26a5920d2c5cf7f5470296"),
+        )
+
+    def test_schema15_and_16_bootstraps_preserve_185_and_reject_injected_186(self) -> None:
+        for version in (15, 16):
+            with self.subTest(version=version):
+                self._assert_managed_bootstrap(
+                    version,
+                    (185, "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a"),
+                    (186, "d06ec615d82a176b107e1131c00e1dceb5f629d9504a7519f64e1eb77a0c7246"),
+                )
+
+    def _assert_managed_bootstrap(self, version, expected_acl_boundary, injected_acl_boundary):
+        with unittest.mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", version):
+            self._assert_managed_bootstrap_at_version(version, expected_acl_boundary, injected_acl_boundary)
+
+    def _assert_managed_bootstrap_at_version(self, version, expected_acl_boundary, injected_acl_boundary):
         suffix = uuid4().hex[:12]
         schema = f"hormuz_bootstrap_{suffix}"
         runtime_login = f"hormuz_login_{suffix}"
@@ -500,14 +520,10 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 custody_executor_role=executor_role,
             )
             second_acl_boundary = acl_boundary()
-            expected_acl_boundary = (
-                185,
-                "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a",
-            )
             self.assertEqual(first_acl_boundary, expected_acl_boundary)
             self.assertEqual(second_acl_boundary, expected_acl_boundary)
             self.assertEqual(first, second)
-            self.assertEqual(first.schema_version, POSTGRES_SCHEMA_VERSION)
+            self.assertEqual(first.schema_version, version)
             self.assertEqual(first.restricted_roles, 4)
             self.assertTrue(first.runtime_login_restricted)
             self.assertTrue(first.runtime_membership_verified)
@@ -807,10 +823,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
             unexpected_acl_boundary = acl_boundary()
             self.assertEqual(
                 unexpected_acl_boundary,
-                (
-                    186,
-                    "d06ec615d82a176b107e1131c00e1dceb5f629d9504a7519f64e1eb77a0c7246",
-                ),
+                injected_acl_boundary,
             )
             with self.assertRaisesRegex(
                 PostgresStorageError,

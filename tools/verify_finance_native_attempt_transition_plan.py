@@ -137,6 +137,7 @@ def verify_finance_native_attempt_transition_plan(
     root: Path = ROOT,
     *,
     allow_successor_schema: bool = False,
+    successor_postgres_schema: int = 17,
 ) -> dict[str, object]:
     for relative in REQUIRED_FILES:
         if not (root / relative).is_file():
@@ -155,7 +156,9 @@ def verify_finance_native_attempt_transition_plan(
         from hormuz._sqlite_schema import SQLITE_SCHEMA_VERSION
         from hormuz.postgres import POSTGRES_SCHEMA_VERSION
 
-        expected_current = (12, 16) if allow_successor_schema else (11, 15)
+        if successor_postgres_schema not in (16, 17):
+            _fail("finance_native_runtime_schema_version_invalid")
+        expected_current = (12, successor_postgres_schema) if allow_successor_schema else (11, 15)
         if (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != expected_current:
             _fail("finance_native_runtime_schema_version_invalid")
         if not isinstance(implementation, dict):

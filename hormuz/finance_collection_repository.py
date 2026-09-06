@@ -46,11 +46,10 @@ from .portfolio_wire import PortfolioError
 from .postgres import POSTGRES_SCHEMA_VERSION, PostgresConnectionPool
 
 
-# The SQLite collection runtime is the only accepted adapter in this
-# candidate.  PostgreSQL 16 provisions the owner-controlled collection shape,
-# but its runtime-role grants remain withheld until a separate ACL review
-# accepts a new literal boundary.  Keep this as a fixed code gate rather than
-# inferring readiness from whichever privileges happen to exist in a database.
+# Schema 17 implements the separately approved fixed 199-permission boundary.
+# Implementation is not release acceptance: that requires exact-head/main
+# evidence recorded on #8 and #214. Neither flag is inferred from database ACLs.
+POSTGRES_FINANCE_COLLECTION_RUNTIME_ENABLED = True
 POSTGRES_FINANCE_COLLECTION_RUNTIME_ACCEPTED = False
 
 
@@ -201,7 +200,7 @@ class FinanceCollectionRepository:
         self._authorize(principal)
         if (
             self.config.usage_storage.backend == "postgresql"
-            and not POSTGRES_FINANCE_COLLECTION_RUNTIME_ACCEPTED
+            and not POSTGRES_FINANCE_COLLECTION_RUNTIME_ENABLED
         ):
             raise FinanceCollectionError("unavailable")
         try:

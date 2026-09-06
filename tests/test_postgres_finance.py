@@ -39,7 +39,7 @@ class PostgresFinanceTests(FinanceAssertions, PostgresTestCase):
         return self._rows([name for name in names if name not in TABLE_DDL])
 
     def test_postgres_finance_real_schema_and_checked_in_migration(self):
-        self.assertEqual(POSTGRES_SCHEMA_VERSION, 16)
+        self.assertEqual(POSTGRES_SCHEMA_VERSION, 17)
         self.assertEqual(len(self.legacy_rows()) + len(TABLE_DDL), 68)
         self.assertEqual(resources.files("hormuz").joinpath("migrations/postgresql/0012_finance_rate_cards.sql").read_text(),
                          postgres_statements("{schema}", "{runtime_role}"))

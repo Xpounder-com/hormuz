@@ -219,6 +219,14 @@ REQUIRED_FINANCE_COLLECTION_PREFLIGHT_SDIST_PATHS = (
     "tests/test_finance_collection_packaging.py",
 )
 REQUIRED_FINANCE_COLLECTION_RUNTIME_SDIST_PATHS = (
+    "docs/FINANCE_COLLECTION_POSTGRES_RUNTIME.md",
+    "docs/finance-transition-plan-v7.json",
+    "hormuz/migrations/postgresql/0017_finance_collection_runtime.sql",
+    "tools/verify_finance_collection_postgres_runtime.py",
+    "tests/_finance_collection_runtime_predecessor_fixture.py",
+    "tests/test_finance_collection_postgres_runtime_plan.py",
+    "tests/test_postgres_finance_collection_runtime.py",
+    "tests/test_postgres_finance_collection_runtime_transition.py",
     "docs/FINANCE_COLLECTION_RUNTIME.md",
     "docs/finance-transition-plan-v6.json",
     "hormuz/_finance_collection_schema.py",

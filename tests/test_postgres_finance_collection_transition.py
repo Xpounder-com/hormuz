@@ -287,6 +287,10 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
         )
 
     def setUp(self):
+        # Preserve the original schema-15 -> schema-16 transition proof.
+        version_patch = unittest.mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 16)
+        version_patch.start()
+        self.addCleanup(version_patch.stop)
         self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 16)
         self._drop_schema(self.schema)
         self.seeded = seed_postgres_collection_predecessor(
