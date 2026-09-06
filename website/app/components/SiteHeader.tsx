@@ -5,7 +5,7 @@ const navigation = [
   { key: 'platform', label: 'Platform', href: '/' },
   { key: 'demo', label: 'Demo', href: '/demo/' },
   { key: 'docs', label: 'Docs', href: '/docs/' },
-  { key: 'enterprise', label: 'Plans & pilot', href: '/#plans' },
+  { key: 'enterprise', label: 'Plans & pilot', href: '/enterprise/' },
   { key: 'security', label: 'Security', href: '/security/' },
 ];
 
@@ -30,14 +30,14 @@ export function SiteHeader({
 
         <div className="nav-links">
           {navigation.map((item) => (
-            <CampaignLink
+            <a
               key={item.key}
               href={sitePath(item.href)}
               className={active === item.key ? 'nav-active' : undefined}
               aria-current={active === item.key ? 'page' : undefined}
             >
               {item.label}
-            </CampaignLink>
+            </a>
           ))}
         </div>
 
@@ -45,13 +45,13 @@ export function SiteHeader({
           <summary aria-label="Open navigation">Menu</summary>
           <div>
             {navigation.map((item) => (
-              <CampaignLink
+              <a
                 key={item.key}
                 href={sitePath(item.href)}
                 aria-current={active === item.key ? 'page' : undefined}
               >
                 {item.label}
-              </CampaignLink>
+              </a>
             ))}
           </div>
         </details>
