@@ -39,7 +39,7 @@ def footer(canvas, doc):
     canvas.line(44, 46, 568, 46)
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(TEAL)
-    canvas.drawString(44, 32, "HORMUZ  /  Mehrdad Zaker  /  August 31, 2026")
+    canvas.drawString(44, 32, "HORMUZ  /  Mehrdad Zaker  /  September 6, 2026")
     canvas.drawRightString(568, 32, f"{doc.page}")
     canvas.linkURL(URL, (44, 24, 440, 43), relative=0)
     canvas.restoreState()
@@ -117,8 +117,9 @@ pilot = [
     ], [262, 262]),
     p("Not included or established", "h2"),
     p("Managed hosting; fleet-wide coverage; client-side shell/MCP governance; 24/7 on-call; certification; legal/compliance determinations; comprehensive semantic DLP; per-inference human approval; native Hormuz login/refresh sessions; invoice reconciliation; guaranteed savings; or future portfolio features."),
-    p("Decide before work starts", "h2"),
-    p("Price/payment; dates; time budget; meeting cadence; support hours/time zone and response targets; named contact; customer prerequisites; acceptance; change control; confidentiality; approved access/data handling; liability; termination; and post-pilot support. Obtain appropriate contract review. No default price or SLA is implied."),
+    p("Price and terms", "h2"),
+    p("The 90-day pilot is $15,000 USD for one team and one workflow. Provider usage, infrastructure, and applicable taxes are additional. No automatic renewal. Enterprise support starts at $2,000 USD/month under a separate agreement."),
+    p("Agree scope, availability, and payment schedule before paying; dates; time budget; meeting cadence; support hours/time zone and response targets; named contact; customer prerequisites; acceptance; change control; confidentiality; approved access/data handling; liability; termination; and post-pilot support. Obtain appropriate contract review. No default SLA is implied."),
     p("Protect sensitive information", "h2"),
     p("Do not send tokens, raw prompts, customer content, production databases, or full configurations through the marketing form or public issues. Private access requires an approved method, minimal privilege, and a written handling scope."),
     p("The next decision", "h2"),
