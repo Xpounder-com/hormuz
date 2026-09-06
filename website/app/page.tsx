@@ -1,9 +1,11 @@
+import { EnterprisePlans } from './components/EnterprisePlans';
+import { CampaignLink } from './components/CampaignLink';
 import { pageMetadata } from '../lib/metadata';
 import { sitePath } from '../lib/site.mjs';
 import { SiteFooter } from './components/SiteFooter';
 import { SiteHeader } from './components/SiteHeader';
 
-export const metadata = pageMetadata('Hormuz — Open-source AI policy gateway', 'Keep Codex and Claude Code. Add self-hosted policy, budgets, secret controls, and metadata-only evidence. Apache-2.0, with a provider-free demo.', '/');
+export const metadata = pageMetadata('Hormuz — Control AI access, budgets, and provider keys', 'Keep Codex and Claude Code. Control model access, enforce budgets, and protect provider keys. Explore a founder-led 90-day paid pilot for your team.', '/');
 
 const decisionSteps = [
   { label: 'Identity', value: 'Verified', tone: 'cyan' },
@@ -72,30 +74,31 @@ export default function Home() {
           <div className="hero-copy">
             <p className="eyebrow reveal reveal-one">
               <span className="pulse-dot" aria-hidden="true" />
-              Open-source AI policy gateway
+              AI governance for engineering teams
             </p>
             <h1 className="reveal reveal-two">
-              Every AI request.
-              <span>One governed route.</span>
+              Your team uses AI.
+              <span>You set the limits.</span>
             </h1>
             <p className="hero-deck reveal reveal-three">
-              Hormuz sits between the AI tools your teams already use and the
-              model providers you already buy—enforcing policy, protecting
-              credentials, and producing evidence for every governed request.
+              Keep Codex and Claude Code. Control which models your team can use,
+              enforce budgets before requests leave, and keep company provider
+              keys on your server—with evidence for every governed request.
             </p>
             <div className="hero-actions reveal reveal-four">
-              <a className="button button-primary" href={sitePath('/docs/#quickstart')}>
-                Try open source
+              <CampaignLink className="button button-primary" href={sitePath('/contact/?interest=pilot')}>
+                Apply for a paid pilot
                 <span aria-hidden="true">→</span>
-              </a>
+              </CampaignLink>
               <a
                 className="button button-ghost"
                 href={sitePath('/demo/')}
               >
-                Watch the real demo
+                See Hormuz in action
                 <span aria-hidden="true">↗</span>
               </a>
             </div>
+            <p className="hero-offer-note reveal reveal-four">One team · 90-day evaluation · $15,000 pilot · Scope agreed before payment</p>
             <div className="hero-proof reveal reveal-four">
               <span>Apache-2.0 · Self-hosted</span>
               <strong>Codex</strong>
@@ -188,6 +191,8 @@ export default function Home() {
           <span>FAIL-CLOSED CONTROLS</span>
         </div>
       </section>
+
+      <EnterprisePlans />
 
       <section className="intro section" id="control-plane">
         <div className="section-heading">
@@ -348,20 +353,20 @@ export default function Home() {
         <div className="review-grid" aria-hidden="true" />
         <div className="review-inner">
           <p className="section-label light">Open core. Supported evaluation.</p>
-          <h2>Try it yourself. Evaluate it together.</h2>
+          <h2>Make your next AI rollout a governed one.</h2>
           <p>
-            The gateway and its controls are Apache-2.0. Need help fitting
-            them to a company workflow? Explore a bounded, founder-led pilot
-            around the same open-source product.
+            Bring one team and one workflow. Together, define the controls,
+            test the request path, and establish what it takes to operate
+            Hormuz in your environment.
           </p>
           <div className="review-actions">
-            <a
+            <CampaignLink
               className="button button-light"
-              href={sitePath('/enterprise/')}
+              href={sitePath('/contact/?interest=pilot')}
             >
-              Compare OSS & enterprise support
+              Apply for a paid pilot
               <span aria-hidden="true">→</span>
-            </a>
+            </CampaignLink>
             <span>Same open core · Scope agreed before work</span>
           </div>
         </div>

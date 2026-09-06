@@ -1,7 +1,8 @@
 # Measurement without hidden telemetry
 
 Current implementation: **marketing tracking is off**. The static site has no
-analytics SDK, ad pixel, visitor ID, form backend, or product-telemetry collector.
+analytics SDK, ad pixel, visitor ID, or product-telemetry collector. A Formspree
+application integration is available but inactive until a verified endpoint is configured.
 GitHub Pages may retain hosting/security logs; see the website privacy notice.
 No conversion rate is available from this implementation.
 
@@ -27,9 +28,9 @@ The browser sends the requested URL, including its query string, to GitHub Pages
 when it loads the page; those values can be processed in hosting/security logs.
 The contact page then reads them locally and offers an **unchecked** checkbox to
 include them in the user-reviewed email draft. The application sends no analytics event;
-UTM support is not an installed analytics system. Native internal links do not
-persist campaign tags; link directly to the intended campaign landing/contact
-page when using this manual method.
+UTM support is not an installed analytics system. Application CTAs retain only those three bounded campaign tags in the URL,
+without browser storage. When Formspree is connected, the same unchecked
+choice includes tags in the application payload instead of an email draft.
 
 ## Private lead ledger
 
@@ -48,3 +49,19 @@ Suggested minimal events: anonymous page category and explicit CTA action,
 without form text, identity, prompts, credentials, persistent cross-site IDs, or
 product usage. Verify opt-out/consent and the privacy notice before deployment.
 Do not label `email_draft_prepared` as `lead_submitted` or `meeting_booked`.
+
+## Commercial funnel activation
+
+The approved offer is a $15,000 USD 90-day pilot for one team/workflow and
+ongoing enterprise support from $2,000 USD/month under a separate agreement.
+See [activation and verification](COMMERCIAL_SETUP.md) for public destination configuration.
+
+- Application received: the form service acknowledges the submission; verify a
+  non-spam record in the private dashboard before counting it as an actual lead.
+- Review booked: a booking appears in the calendar service, not a booking-link click.
+- Pilot paid: a successful live Stripe payment for the agreed pilot, not a return URL.
+- Support subscribed: an active subscription and successful initial payment in Stripe.
+
+There is no ad-platform conversion integration yet. Do not optimize ads against
+email drafts or payment-link clicks. Connect the actual advertising account and
+approve its consent/data flow before importing verified lead or purchase events.

@@ -1,10 +1,11 @@
+import { CampaignLink } from './CampaignLink';
 import { sitePath } from '../../lib/site.mjs';
 
 const navigation = [
-  { key: 'platform', label: 'Open source', href: '/' },
+  { key: 'platform', label: 'Platform', href: '/' },
   { key: 'demo', label: 'Demo', href: '/demo/' },
   { key: 'docs', label: 'Docs', href: '/docs/' },
-  { key: 'enterprise', label: 'Enterprise', href: '/enterprise/' },
+  { key: 'enterprise', label: 'Plans & pilot', href: '/#plans' },
   { key: 'security', label: 'Security', href: '/security/' },
 ];
 
@@ -29,14 +30,14 @@ export function SiteHeader({
 
         <div className="nav-links">
           {navigation.map((item) => (
-            <a
+            <CampaignLink
               key={item.key}
               href={sitePath(item.href)}
               className={active === item.key ? 'nav-active' : undefined}
               aria-current={active === item.key ? 'page' : undefined}
             >
               {item.label}
-            </a>
+            </CampaignLink>
           ))}
         </div>
 
@@ -44,24 +45,24 @@ export function SiteHeader({
           <summary aria-label="Open navigation">Menu</summary>
           <div>
             {navigation.map((item) => (
-              <a
+              <CampaignLink
                 key={item.key}
                 href={sitePath(item.href)}
                 aria-current={active === item.key ? 'page' : undefined}
               >
                 {item.label}
-              </a>
+              </CampaignLink>
             ))}
           </div>
         </details>
 
-        <a
+        <CampaignLink
           className="nav-cta"
-          href={sitePath('/contact/')}
+          href={sitePath('/contact/?interest=pilot')}
         >
-          Talk to the maintainer
+          Apply for a pilot
           <span aria-hidden="true">↗</span>
-        </a>
+        </CampaignLink>
       </nav>
     </header>
   );
