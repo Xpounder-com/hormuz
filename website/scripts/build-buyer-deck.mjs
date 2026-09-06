@@ -13,6 +13,10 @@ const C = { night: '#24392d', ink: '#202723', paper: '#f4f3ee', white: '#fafbf6'
 const site = 'https://usehormuz.github.io/';
 const repo = 'https://github.com/Xpounder-com/hormuz/blob/main/';
 const sourceNotes = [];
+const brandMarks = {
+  light: await fs.readFile('public/brand/hormuz-mark.svg', 'utf8'),
+  dark: await fs.readFile('public/brand/hormuz-mark-reverse.svg', 'utf8'),
+};
 
 function text(slide, name, value, left, top, width, height, size = 28, color = C.ink, bold = false) {
   const shape = slide.shapes.add({ geometry: 'textbox', name, position: { left, top, width, height }, fill: 'none', line: { fill: 'none', width: 0, style: 'solid' } });
@@ -23,9 +27,7 @@ function text(slide, name, value, left, top, width, height, size = 28, color = C
 function slide(kicker, title, number, sources, dark = false) {
   const s = presentation.slides.add();
   s.background.fill = dark ? C.night : C.paper;
-  const markColor = dark ? C.cyan : C.teal;
-  s.shapes.add({ geometry: 'ellipse', name: 'Hormuz mark boundary', position: { left: 1176, top: 35, width: 40, height: 40 }, fill: 'none', line: { fill: markColor, width: 1, style: 'solid' } });
-  for (const [i, height] of [10, 20, 14].entries()) s.shapes.add({ geometry: 'roundRect', name: `Hormuz mark bar ${i + 1}`, position: { left: 1185 + i * 8, top: 55 - height / 2, width: 5, height }, fill: markColor, line: { fill: 'none', width: 0 } });
+  s.images.add({ svg: dark ? brandMarks.dark : brandMarks.light, alt: 'Hormuz passage H', fit: 'contain', position: { left: 1176, top: 35, width: 40, height: 40 } });
   text(s, 'section', kicker.toUpperCase(), 64, 44, 1130, 30, 19, dark ? C.cyan : C.teal, true);
   if (title) text(s, 'takeaway', title, 64, 106, 1152, 124, 48, dark ? C.white : C.ink, true);
   text(s, 'footer', 'HORMUZ  /  A product of Neuralint  /  Mehrdad Zaker  /  September 2026', 64, 672, 1000, 24, 17, dark ? '#dce6d5' : C.muted);

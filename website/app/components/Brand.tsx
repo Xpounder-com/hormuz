@@ -1,8 +1,9 @@
-/** The existing Hormuz mark, shared by navigation and product illustrations. */
+import mark from '../../lib/brand-mark.json';
+
+/** The approved passage H, shared by navigation and product illustrations. */
 export function BrandMark({ className = '' }: { className?: string }) {
   return <svg className={`hormuz-mark ${className}`} viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
-    <circle cx="32" cy="32" r="29" stroke="currentColor" strokeWidth="1.5" />
-    <g fill="currentColor"><rect x="15" y="25" width="8" height="14" rx="4" /><rect x="28" y="18" width="8" height="28" rx="4" /><rect x="41" y="22.5" width="8" height="19" rx="4" /></g>
+    <g fill="currentColor">{mark.paths.map(d => <path key={d} d={d} />)}</g>
   </svg>;
 }
 

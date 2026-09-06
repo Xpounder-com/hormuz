@@ -1,6 +1,6 @@
 # Hormuz: controlled passage
 
-Version 1 · September 2026
+Version 2 · September 2026
 
 ## Positioning
 
@@ -20,17 +20,21 @@ Use Neuralint as the organizational attribution and Mehrdad as the founder and l
 
 ## Identity
 
-The established three-bar circular mark remains the core identity. The wordmark uses outlined Geist Mono lettering. Supplied SVGs require no fonts to display.
+The passage H is the core identity: two solid gate forms, unequal upright heights, and an open central channel. Forest is the primary icon treatment; signal is the alternate. The wordmark uses outlined Geist Mono lettering. Supplied SVGs require no fonts to display.
 
 - `hormuz-lockup.svg`: forest, for light backgrounds.
 - `hormuz-lockup-reverse.svg`: chalk, for dark backgrounds.
 - `hormuz-mark.svg`: standalone mark.
-- `icon.svg`: dedicated small browser icon.
+- `icon.svg`: adaptive browser icon, with dedicated geometry at 16 px.
+- `favicon.ico`: 16, 32, and 48 px browser icons.
+- `apple-touch-icon.png`: 180 px touch icon.
+- `icons/`: forest, signal, and transparent treatments at 16, 24, 32, 48, 64, 128, 180, 192, 256, 512, and 1024 px, plus SVG masters and ICOs.
+- `hormuz-icons.zip`: the complete icon set.
 - `social-preview.png`: 1200 × 630 link/organic-post artwork.
 - `controlled-passage.webp`: original abstract editorial artwork, 1536 × 1024.
 - `tokens.css`: reusable palette and font roles.
 
-Keep clear space of at least half the mark's diameter around the lockup. Minimum standalone mark size: 24 px. Use the dedicated favicon below that. Recommended minimum lockup width: 150 px. Keep proportions, contrast, and supplied colors. Use a solid quiet background. Avoid stretching, shadows, busy image overlays, or converting the mark into a status indicator.
+Keep clear space of at least half the mark's width around the lockup. Minimum standalone mark size: 24 px. Use the dedicated 16 px version below that; its uprights align to the pixel grid and its central gap is wider. Do not substitute a scaled-down wordmark. Recommended minimum lockup width: 150 px. Keep proportions, contrast, and supplied colors. Use a solid quiet background. Avoid stretching, shadows, busy image overlays, or converting the mark into a status indicator.
 
 ## Color
 

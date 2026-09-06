@@ -14,7 +14,8 @@ const assets = [
   ['Complete brand kit', 'SVG marks and lockups, artwork, social card, tokens, and usage guide · ZIP', '/brand/hormuz-brand-kit.zip'],
   ['Primary lockup', 'Forest identity for light backgrounds · SVG', '/brand/hormuz-lockup.svg'],
   ['Reverse lockup', 'Chalk identity for dark backgrounds · SVG', '/brand/hormuz-lockup-reverse.svg'],
-  ['Standalone mark', 'The existing three-bar symbol, refined for the current palette · SVG', '/brand/hormuz-mark.svg'],
+  ['Standalone mark', 'Two gate forms, one open passage · SVG', '/brand/hormuz-mark.svg'],
+  ['Icons in every size', 'Forest, signal, and transparent · 16–1024 px PNGs, SVGs, and ICOs · ZIP', '/brand/hormuz-icons.zip'],
   ['Social preview', '1200 × 630, ready for links and organic posts · PNG', '/og.png'],
   ['Brand guide', 'Positioning, voice, color, typography, and asset usage · Markdown', '/brand/README.md'],
 ];
@@ -30,9 +31,13 @@ export default function BrandPage() {
       <figure><img src={sitePath('/brand/controlled-passage.webp')} width="1536" height="1024" alt="Layered cream and sage contours framing an open curved passage" /><figcaption>Original abstract brand artwork. The passage is a visual metaphor, separate from product architecture.</figcaption></figure>
     </section>
     <section className="brand-section" id="identity">
-      <p className="section-label">02 / The identity</p><h2>One mark.<br /><em>A consistent family.</em></h2><p>The familiar three-bar mark stays at the center. A compact symbol for small surfaces, a wordmark for recognition, and quiet linework for larger compositions.</p>
+      <p className="section-label">02 / The identity</p><h2>One mark.<br /><em>A consistent family.</em></h2><p>Two solid gate forms create an open H. Unequal heights give the mark its character; the clear passage connects it to the product. The same geometry carries from browser tabs to the full wordmark.</p>
       <div className="brand-lockups"><div className="brand-lockup-card"><img src={sitePath('/brand/hormuz-lockup.svg')} alt="Hormuz primary forest lockup" width="360" height="80" /><span>PRIMARY / LIGHT SURFACES</span></div><div className="brand-lockup-card brand-lockup-dark"><img src={sitePath('/brand/hormuz-lockup-reverse.svg')} alt="Hormuz reverse chalk lockup" width="360" height="80" /><span>REVERSE / DARK SURFACES</span></div></div>
-      <div className="brand-small-system"><BrandMark /><p>Keep clear space of at least half the mark’s diameter around the lockup. Use the standalone mark at 24 px or larger; the dedicated favicon serves browser tabs. Keep the proportions and use the supplied colors.</p></div>
+      <div className="brand-small-system"><BrandMark /><p>Keep clear space of at least half the mark’s width around the lockup. Use the standalone mark at 24 px or larger. The dedicated 16 px icon has a wider central gap to stay clear in a browser tab.</p></div>
+      <div className="brand-icon-system" id="icons">
+        {(['forest', 'signal'] as const).map(theme => <div className={`brand-icon-row brand-icon-${theme}`} key={theme}><h3>{theme === 'forest' ? 'Forest / primary icon' : 'Signal / alternate icon'}</h3><div>{[16, 24, 32, 48, 64, 128].map(size => <figure key={size}><img src={sitePath(`/brand/icons/${theme}/hormuz-${theme}-${size}.png`)} width={size} height={size} alt={`${theme === 'forest' ? 'Forest' : 'Signal'} Hormuz icon at ${size} pixels`} /><figcaption>{size} px</figcaption></figure>)}</div></div>)}
+        <p>Download the full set from 16 to 1024 px, including scalable SVGs and multi-resolution ICO files.</p><a href={sitePath('/brand/hormuz-icons.zip')} download>Download all icon sizes ↓</a>
+      </div>
     </section>
     <section className="brand-section" id="system">
       <p className="section-label">03 / Color & typography</p><h2>A calm canvas.<br /><em>A clear signal.</em></h2><p>Chalk gives the content room. Forest anchors actions. Sage supports the interface, and a little signal green draws attention. Status always includes a label or symbol.</p>

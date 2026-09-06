@@ -49,7 +49,7 @@ for (const source of sourceLinks) {
 }
 const sitemap = await readFile(path.join(out, 'sitemap.xml'), 'utf8');
 for (const route of routes) if (!sitemap.includes(`<loc>${siteUrl(route)}</loc>`)) failures.push(`Sitemap missing ${route}`);
-for (const asset of ['icon.svg', 'og.png', 'robots.txt', '.nojekyll', '404.html']) await stat(path.join(out, asset));
+for (const asset of ['icon.svg', 'favicon.ico', 'apple-touch-icon.png', 'brand/hormuz-icons.zip', 'og.png', 'robots.txt', '.nojekyll', '404.html']) await stat(path.join(out, asset));
 const robots = await readFile(path.join(out, 'robots.txt'), 'utf8');
 assert.match(robots, /^Allow: \/$/m);
 assert.ok(robots.includes(`Sitemap: ${siteUrl('/sitemap.xml')}`));

@@ -8,9 +8,9 @@
   --brand-muted: #5c6758;
 }
 .hormuz-mark { display: block; width: 34px; height: 34px; flex: 0 0 auto; color: currentColor; }
-.brand .hormuz-mark { color: #31684b; }
+.brand .hormuz-mark { color: var(--brand-forest); }
 .landing-redesign .brand { gap: 10px; }
-.landing-redesign .footer-brand .hormuz-mark { color: #31684b; }
+.landing-redesign .footer-brand .hormuz-mark { color: var(--brand-forest); }
 .gateway-h .hormuz-mark, .art-hormuz .hormuz-mark { width: 34px; height: 34px; }
 .passage-lines { display: block; pointer-events: none; }
 .subpage-hero > .passage-lines { position: absolute; right: -70px; bottom: -65px; width: min(48vw,650px); color: #64885b; opacity: .15; }
@@ -65,6 +65,15 @@
 .brand-small-system { display: flex; gap: 26px; align-items: center; padding: 20px 0; }
 .brand-small-system > .hormuz-mark { width: 64px; height: 64px; color: #31684b; }
 .brand-small-system p { margin: 0; font-size: 13px; max-width: 740px; }
+.brand-icon-system { margin-top: 28px; }
+.brand-icon-row { padding: 24px; border: 1px solid #d2daca; border-radius: 15px; margin-bottom: 18px; }
+.brand-icon-row h3 { margin: 0 0 26px; font-size: 13px; font-weight: 550; }
+.brand-icon-row > div { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 28px; }
+.brand-icon-row figure { margin: 0; min-width: 40px; display: grid; justify-items: center; gap: 16px; }
+.brand-icon-row img { display: block; max-width: none; }
+.brand-icon-row figcaption { font: 11px var(--font-geist-mono),monospace; }
+.brand-icon-signal { background: var(--brand-forest); color: var(--brand-chalk); border-color: var(--brand-forest); }
+.brand-icon-system > a { font-size: 13px; text-underline-offset: 4px; }
 .brand-swatches { display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; margin: 32px 0 50px; }
 .brand-swatch { border: 1px solid #d2daca; border-radius: 12px; overflow: hidden; }
 .brand-swatch > div { height: 115px; }

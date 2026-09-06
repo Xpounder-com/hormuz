@@ -37,13 +37,9 @@ def footer(canvas, doc):
     canvas.saveState()
     canvas.setFillColor(PAPER)
     canvas.rect(0, 0, 612, 792, fill=1, stroke=0)
-    # Existing three-bar identity, with room for the document title below it.
-    canvas.setStrokeColor(TEAL)
+    # Use the approved export, preserving the same geometry as the website.
     canvas.setFillColor(TEAL)
-    canvas.setLineWidth(.65)
-    canvas.circle(56, 758, 12, fill=0, stroke=1)
-    for x, y, w, h in [(49, 755, 3.2, 5.6), (54.2, 752.2, 3.2, 11.2), (59.4, 754, 3.2, 7.6)]:
-        canvas.roundRect(x, y, w, h, 1.6, fill=1, stroke=0)
+    canvas.drawImage(str(OUTPUT.parent / 'brand/icons/transparent/hormuz-transparent-512.png'), 40, 742, width=32, height=32, mask='auto')
     canvas.setFont("Helvetica-Bold", 10)
     canvas.drawString(77, 754, "H O R M U Z")
     canvas.setFont("Helvetica", 7)
