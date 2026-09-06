@@ -132,4 +132,4 @@ GitHub Pages still receives requested URLs and query strings as the hosting
 provider; optional email attribution does not prevent that initial request.
 
 Figma handoff: https://www.figma.com/design/Ax2HWqdWzVnMANEOmB5Z4z
-Public author: Mehrdad Zaker · zaker.mehrdad@gmail.com.
+Public author: Mehrdad Zaker · mehrdadz@neuralint.io.

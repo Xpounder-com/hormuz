@@ -4,10 +4,11 @@ import { EvidenceShowcase } from './components/EvidenceShowcase';
 import { ControlIllustration } from './components/ControlIllustration';
 import { GatewayPreview } from './components/GatewayPreview';
 import { pageMetadata } from '../lib/metadata';
-import { sitePath, REPOSITORY } from '../lib/site.mjs';
+import { sitePath, REPOSITORY, OWNER_NAME, OWNER_URL } from '../lib/site.mjs';
 import { PILOT_PRICE } from '../lib/commercial.mjs';
 import { SiteFooter } from './components/SiteFooter';
 import { SiteHeader } from './components/SiteHeader';
+import { PilotPriceCard } from './components/PriceCard';
 import { BrandMark } from './components/Brand';
 
 export const metadata = pageMetadata('Hormuz — Control AI access, budgets, and provider keys', 'Keep Codex and Claude Code. Control model access, enforce budgets, and protect provider keys. Explore a founder-led 90-day paid pilot for your team.', '/');
@@ -34,13 +35,14 @@ export default function Home() {
     <SiteHeader active="platform" />
     <main id="content" tabIndex={-1}>
       <section className="landing-hero" id="top">
-        <div className="landing-hero-copy">
+        <div className="hero-conversion-grid"><div className="landing-hero-copy">
           <p className="landing-eyebrow"><span className="mini-dot" /> AI GOVERNANCE, WITH A HUMAN ON YOUR SIDE</p>
           <h1>Give your team AI.<br /><em>Keep control.</em></h1>
           <p className="landing-deck">Keep Codex and Claude Code. Set the policies, protect your provider keys, and put budgets around the AI your team already uses.</p>
-          <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=review')}>Get a free governance review <span aria-hidden="true">↗</span></CampaignLink><CampaignLink className="button landing-secondary" href="/#plans">Explore the plans <span aria-hidden="true">↓</span></CampaignLink></div>
-          <p className="landing-reassurance">Founder-led · Open-source core · Your infrastructure</p><a className="hero-evidence-link" href="#evidence">Explore the evidence <span aria-hidden="true">↓</span></a>
+          <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=review')}>Get a free AI review <span aria-hidden="true">↗</span></CampaignLink><CampaignLink className="button landing-secondary" href="/#plans">See pricing & scope <span aria-hidden="true">↓</span></CampaignLink></div>
+          <p className="landing-reassurance">$0 review · No card required · Talk directly with the founder</p><p className="hero-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a> · Led by Mehrdad Zaker</p><a className="hero-evidence-link" href="#evidence">Explore the evidence <span aria-hidden="true">↓</span></a>
         </div>
+        <PilotPriceCard /></div>
         <GatewayPreview />
         <div className="landing-integrations"><p>Built for your existing AI workflow</p><div><span>⌘ <strong>Codex</strong></span><span>✳ <strong>Claude Code</strong></span><i /><span>OpenAI</span><span>Anthropic</span></div><a href={sitePath('/integrations/')}>Explore supported integrations ↗</a></div>
       </section>
@@ -71,14 +73,14 @@ export default function Home() {
       <EnterprisePlans />
 
       <section className="landing-section founder-section" id="review">
-        <div className="founder-intro"><div className="founder-monogram" aria-hidden="true">MZ<span>↗</span></div><p className="landing-eyebrow">DIRECT ACCESS TO THE BUILDER</p><h2>Work with the person<br /><em>building Hormuz.</em></h2><p>Bring your engineering questions straight to Mehrdad Zaker. We’ll work through your workflow, agree a useful scope, and make the evaluation concrete.</p><CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=review')}>Let’s talk about your team <span aria-hidden="true">↗</span></CampaignLink></div>
-        <div className="founder-note"><span className="note-label">A NOTE ON HOW WE WORK</span><p>Start with one real workflow. Define what good looks like. Then let the evidence guide the next step.</p><div><strong>Mehrdad Zaker</strong><span>Founder & maintainer, Hormuz</span></div><a href={REPOSITORY}>Explore the open-source project ↗</a></div>
+        <div className="founder-intro"><div className="founder-monogram" aria-hidden="true">MZ<span>↗</span></div><p className="landing-eyebrow">DIRECT ACCESS TO THE BUILDER</p><h2>Work with the person<br /><em>building Hormuz.</em></h2><p>Bring your engineering questions straight to Mehrdad Zaker. We’ll work through your workflow, agree a useful scope, and make the evaluation concrete.</p><CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=review')}>Get a free AI review <span aria-hidden="true">↗</span></CampaignLink></div>
+        <div className="founder-note"><span className="note-label">A NOTE ON HOW WE WORK</span><p>Start with one real workflow. Define what good looks like. Then let the evidence guide the next step.</p><div><strong>Mehrdad Zaker</strong><span>Hormuz founder · Director, Neuralint</span></div><a href={REPOSITORY}>Explore the open-source project ↗</a></div>
       </section>
 
       <section className="landing-section faq-section" id="faq"><div className="landing-heading"><p className="landing-eyebrow">BEFORE WE GET STARTED</p><h2>Good questions.<br /><em>Straight answers.</em></h2><p>Have a different question? <CampaignLink href={sitePath('/contact/?interest=review')}>Ask Mehrdad ↗</CampaignLink></p></div><div className="landing-faq">{faqs.map(([question, answer]) => <details key={question}><summary>{question}<span aria-hidden="true">+</span></summary><p>{answer}</p></details>)}</div></section>
-      <section className="landing-final"><p className="landing-eyebrow">YOUR NEXT AI WORKFLOW, GOVERNED.</p><h2>Move forward.<br /><em>With clear boundaries.</em></h2><p>Start with a free review. Build toward a {PILOT_PRICE} pilot scoped to your team.</p><div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=review')}>Get a free governance review <span aria-hidden="true">↗</span></CampaignLink><CampaignLink className="button landing-secondary" href="/#plans">See pricing <span aria-hidden="true">↑</span></CampaignLink></div></section>
+      <section className="landing-final"><p className="landing-eyebrow">YOUR NEXT AI WORKFLOW, GOVERNED.</p><h2>Move forward.<br /><em>With clear boundaries.</em></h2><p>Start with a free review. Build toward a {PILOT_PRICE} pilot scoped to your team.</p><div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=review')}>Get a free AI review <span aria-hidden="true">↗</span></CampaignLink><CampaignLink className="button landing-secondary" href="/#plans">See pricing <span aria-hidden="true">↑</span></CampaignLink></div></section>
     </main>
     <SiteFooter />
-    <CampaignLink className="founder-float" href={sitePath('/contact/?interest=review')} aria-label="Talk to Mehrdad about a free AI governance review"><span className="float-avatar" aria-hidden="true">MZ</span><span>Talk to the founder<small>Free governance review</small></span><span aria-hidden="true">↗</span></CampaignLink>
+    <CampaignLink className="founder-float" href={sitePath('/contact/?interest=review')} aria-label="Request a free AI governance review"><span className="float-avatar" aria-hidden="true">MZ</span><span>Get a free AI review<small>$0 · No obligation</small></span><span aria-hidden="true">↗</span></CampaignLink>
   </div>;
 }

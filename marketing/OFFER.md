@@ -40,7 +40,7 @@ arbitrary paywall around the useful core.
 
 ## Next step
 
-Discuss one workflow with **Mehrdad Zaker**, **zaker.mehrdad@gmail.com**.
+Discuss one workflow with **Mehrdad Zaker**, **mehrdadz@neuralint.io**.
 Begin with fit and scope; a shorter evaluation may precede the proposed
 [90-day pilot](PILOT.md). Agree price, timing, responsibilities, terms, and
 support expectations before work begins.

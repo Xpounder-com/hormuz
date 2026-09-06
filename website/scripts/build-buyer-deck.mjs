@@ -28,7 +28,8 @@ function slide(kicker, title, number, sources, dark = false) {
   for (const [i, height] of [10, 20, 14].entries()) s.shapes.add({ geometry: 'roundRect', name: `Hormuz mark bar ${i + 1}`, position: { left: 1185 + i * 8, top: 55 - height / 2, width: 5, height }, fill: markColor, line: { fill: 'none', width: 0 } });
   text(s, 'section', kicker.toUpperCase(), 64, 44, 1130, 30, 19, dark ? C.cyan : C.teal, true);
   if (title) text(s, 'takeaway', title, 64, 106, 1152, 124, 48, dark ? C.white : C.ink, true);
-  text(s, 'footer', `HORMUZ  /  Mehrdad Zaker  /  September 2026                                      ${String(number).padStart(2, '0')} / 07`, 64, 672, 1152, 24, 17, dark ? '#dce6d5' : C.muted);
+  text(s, 'footer', 'HORMUZ  /  A product of Neuralint  /  Mehrdad Zaker  /  September 2026', 64, 672, 1000, 24, 17, dark ? '#dce6d5' : C.muted);
+  text(s, 'page-number', `${String(number).padStart(2, '0')} / 07`, 1152, 672, 64, 24, 17, dark ? '#dce6d5' : C.muted);
   const urls = sources.map(source => source.startsWith('https:') ? source : repo + source);
   s.speakerNotes.textFrame.setText(`[Sources]\n${urls.join('\n')}\n[/Sources]\nScope: public v1 source contracts and synthetic evidence. No customer outcome, certification, SLA, validated demand, or future software availability is implied.`);
   sourceNotes.push({ slide: number, sources: urls });
@@ -65,9 +66,9 @@ text(s, 'proof-boundary', 'Four usage events + one secret-control event. Downloa
 s = slide('What is free. What is paid.', 'Keep a useful core open source.', 4, ['LICENSE', 'marketing/OFFER.md', 'marketing/PILOT.md']);
 text(s, 'oss-title', 'Apache-2.0 product', 64, 268, 514, 50, 34, C.teal, true);
 text(s, 'oss-body', 'Gateway and client paths\nOIDC JWT verification\nPolicy overlays and budgets\nDeterministic secret controls\nUsage reports and evidence', 64, 337, 516, 224, 28);
-text(s, 'paid-title', 'Scoped engagement', 684, 268, 532, 50, 34, C.teal, true);
+text(s, 'paid-title', '90-day pilot · $15,000', 684, 268, 532, 50, 34, C.teal, true);
 text(s, 'paid-body', 'Workflow and control mapping\nConfiguration and integration help\nAgreed non-production checks\nEvidence pack and gap review\nOperator handoff', 684, 337, 532, 224, 28);
-text(s, 'same-core', 'Same open core. Customer-operated infrastructure. Price, capacity, support hours, response targets, and terms agreed before work.', 64, 588, 1152, 68, 24, C.muted);
+text(s, 'same-core', 'USD · one team, one workflow. Optional support from $2,000/month. Provider usage, infrastructure, and applicable taxes are additional.', 64, 588, 1152, 68, 24, C.muted);
 
 s = slide('Maturity and responsibility', 'Stable contracts are not certification.', 5, ['SUPPORT.md', 'docs/OIDC.md', 'docs/SECRET_CONTROLS.md', 'docs/USAGE.md', 'marketing/TRUST.md']);
 text(s, 'release', 'v1.0.0 source contracts', 64, 268, 1152, 64, 42, C.teal, true);
@@ -91,7 +92,7 @@ text(s, 'pilot-boundary', 'Start with fit and scope. A shorter evaluation may co
 
 s = slide('A bounded next step', 'Name one workflow worth governing.', 7, [site, 'marketing/PILOT.md', 'marketing/TRUST.md'], true);
 text(s, 'next-step', 'Which client? Which team?\nWhich control is missing?\nWho operates the route?', 64, 280, 1140, 198, 44, C.white);
-text(s, 'contact', 'Mehrdad Zaker\nzaker.mehrdad@gmail.com', 64, 510, 1140, 86, 31, C.cyan, true);
+text(s, 'contact', 'Mehrdad Zaker\nmehrdadz@neuralint.io', 64, 510, 1140, 86, 31, C.cyan, true);
 text(s, 'website', 'usehormuz.github.io', 64, 613, 1140, 40, 25, '#d9e1df');
 
 await fs.writeFile(path.join(scratch, 'source-notes.txt'), JSON.stringify(sourceNotes, null, 2));

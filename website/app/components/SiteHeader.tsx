@@ -6,7 +6,7 @@ const navigation = [
   { key: 'platform', label: 'Platform', href: '/' },
   { key: 'demo', label: 'Demo', href: '/demo/' },
   { key: 'docs', label: 'Docs', href: '/docs/' },
-  { key: 'enterprise', label: 'Plans & pilot', href: '/enterprise/' },
+  { key: 'enterprise', label: 'Pricing', href: '/enterprise/' },
   { key: 'security', label: 'Security', href: '/security/' },
   { key: 'resources', label: 'Resources', href: '/resources/' },
 ];
@@ -51,15 +51,15 @@ export function SiteHeader({
               </a>
             ))}
             <a href={sitePath('/integrations/')} aria-current={active === 'integrations' ? 'page' : undefined}>Integrations</a>
-            <CampaignLink className="mobile-pilot-cta" href={sitePath('/contact/?interest=pilot')}>Apply for a pilot ↗</CampaignLink>
+            <CampaignLink className="mobile-pilot-cta" href={sitePath('/contact/?interest=review')}>Get a free review ↗</CampaignLink>
           </div>
         </details>
 
         <CampaignLink
           className="nav-cta"
-          href={sitePath('/contact/?interest=pilot')}
+          href={sitePath('/contact/?interest=review')}
         >
-          Apply for a pilot
+          Get a free review
           <span aria-hidden="true">↗</span>
         </CampaignLink>
       </nav>

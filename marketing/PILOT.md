@@ -1,7 +1,7 @@
 # Proposed Hormuz evaluation pilot
 
 Status: discussion brief, not a quote, service agreement, SLA, or certification.
-Owner: Mehrdad Zaker · zaker.mehrdad@gmail.com.
+Owner: Mehrdad Zaker · mehrdadz@neuralint.io.
 
 ## Fit and entry criteria
 

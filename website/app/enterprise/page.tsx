@@ -20,7 +20,7 @@ export default function EnterprisePage() {
   return <PageFrame active="enterprise">
     <PageHero eyebrow="Enterprise evaluation & support" title={<>An open core.<br /><span>A supported path to evaluation.</span></>}>
       <p>Hormuz’s gateway controls stay open source. The initial enterprise offer is a scoped engagement to evaluate and integrate that same product—not a separate proprietary edition or a promise of production certification.</p>
-      <div className="hero-actions"><CampaignLink className="button button-primary" href={sitePath('/contact/?interest=pilot')}>Apply for a paid pilot →</CampaignLink><a className="button button-ghost" href="#comparison">Compare the paths ↓</a></div>
+      <div className="hero-actions"><CampaignLink className="button button-primary" href={sitePath('/contact/?interest=pilot')}>Discuss my pilot →</CampaignLink><a className="button button-ghost" href="#comparison">Compare the paths ↓</a></div>
     </PageHero>
     <EnterprisePlans />
     <section className="section" id="comparison">
@@ -45,6 +45,6 @@ export default function EnterprisePage() {
       {commercial.supportPaymentUrl && <a className="button button-outline" href={commercial.supportPaymentUrl} rel="noreferrer"><span>Start agreed support · {SUPPORT_PRICE} USD/month</span><span aria-hidden="true">↗</span></a>}
     </div><p>Checkout is operated by AI and Robotics Solutions. Your card statement may show LINKEDFULL.COM. Support renews monthly until canceled under your agreed cancellation terms. Provider charges and infrastructure are separate.</p></section>}
     <section className="enterprise-truth section"><div><span className="status-ring" aria-hidden="true"><i /></span><strong>v1.0.0 source contracts</strong></div><h2>Engineering evidence is not enterprise certification.</h2><p>Reference checks do not establish your TLS, credential custody, retention, recovery, high availability, compliance, or independent security review. No customer endorsements, certifications, invoice reconciliation, or production SLA are claimed.</p><a href={sitePath('/security/')}>Review the security boundary →</a></section>
-    <section className="page-cta"><div><p className="section-label light">Founder-led · Mehrdad Zaker</p><h2>Bring one workflow and its constraints.</h2><p>The next step is a fit discussion, not a checkout or a deployment commitment.</p></div><a className="button button-light" href={sitePath('/contact/?interest=pilot')}>Apply for a paid pilot →</a></section>
+    <section className="page-cta"><div><p className="section-label light">Founder-led · Mehrdad Zaker</p><h2>Bring one workflow and its constraints.</h2><p>The next step is a fit discussion, not a checkout or a deployment commitment.</p></div><a className="button button-light" href={sitePath('/contact/?interest=pilot')}>Discuss my pilot →</a></section>
   </PageFrame>;
 }

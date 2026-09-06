@@ -12,6 +12,12 @@ Lead message: **Give your team AI. Keep control.**
 
 Brand concept: **Controlled passage.** Teams need room to work with AI and organizations need a clear place to apply their rules. An open channel through deliberate boundaries expresses those needs together. This is a design metaphor, not a claim about the origin of the name or a literal architecture diagram.
 
+## Attribution
+
+**Hormuz — a product of [Neuralint](https://neuralint.io), led by Mehrdad Zaker.**
+
+Use Neuralint as the organizational attribution and Mehrdad as the founder and lab director. Contact: [mehrdadz@neuralint.io](mailto:mehrdadz@neuralint.io). Keep Hormuz as the primary product brand.
+
 ## Identity
 
 The established three-bar circular mark remains the core identity. The wordmark uses outlined Geist Mono lettering. Supplied SVGs require no fonts to display.

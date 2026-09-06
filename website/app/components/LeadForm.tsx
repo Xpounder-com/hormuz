@@ -4,14 +4,16 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { INTERESTS, campaignSource } from '../../lib/contact.mjs';
 import { buildLead, submitLead } from '../../lib/lead.mjs';
 import { trackConfirmedApplication } from '../../lib/x-ads.mjs';
+import { PILOT_PRICE, SUPPORT_PRICE } from '../../lib/commercial.mjs';
 import { CONTACT_EMAIL, sitePath } from '../../lib/site.mjs';
 
 export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUrl: string }) {
-  const [interest, setInterest] = useState('pilot');
+  const [interest, setInterest] = useState('review');
   const [search, setSearch] = useState('');
   const [includeSource, setIncludeSource] = useState(false);
   const [state, setState] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
   const [error, setError] = useState('');
+  const selectedOffer = interest === 'review' ? { price: '$0', detail: 'Free AI governance review · no obligation', action: 'Request my free review →' } : interest === 'pilot' ? { price: PILOT_PRICE, detail: 'USD · one-time fee for a scoped 90-day pilot', action: 'Discuss my pilot →' } : interest === 'support' ? { price: `From ${SUPPORT_PRICE}/mo`, detail: 'USD · separately agreed enterprise support', action: 'Request support details →' } : null;
   const pending = useRef(false);
   const confirmation = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -46,6 +48,7 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
       <fieldset disabled={state === 'sending'} className="lead-fields">
         <legend className="sr-only">Enterprise application</legend>
         <label>I am interested in<select name="interest" value={interest} onChange={e => setInterest(e.target.value)}>{Object.entries(INTERESTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        {selectedOffer && <div className="selected-offer" aria-live="polite"><strong>{selectedOffer.price}</strong><span>{selectedOffer.detail}</span></div>}
         <label>Your name<input name="name" autoComplete="name" required maxLength={100} /></label>
         <label>Work email<input name="email" type="email" autoComplete="email" required maxLength={254} /></label>
         <label>Organization<input name="organization" autoComplete="organization" required maxLength={150} /></label>
@@ -55,7 +58,7 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
         <div className="lead-trap" aria-hidden="true"><label>Leave this empty<input name="_gotcha" tabIndex={-1} autoComplete="off" /></label></div>
         {campaignSource(search) && <label className="checkbox-label"><input type="checkbox" checked={includeSource} onChange={e => setIncludeSource(e.target.checked)} />Include campaign source with my application: {campaignSource(search)}</label>}
         <p className="field-hint">Submitting sends these details to Hormuz through Formspree so we can respond to this inquiry. It does not subscribe you to marketing emails. <a href={sitePath('/privacy/')}>Privacy details</a>.</p>
-        <button className="button button-primary" type="submit">{state === 'sending' ? 'Sending application…' : 'Submit application →'}</button>
+        <button className="button button-primary" type="submit">{state === 'sending' ? 'Sending…' : selectedOffer?.action || 'Send my inquiry →'}</button>
       </fieldset>
     </form>
     {state === 'sending' && <p role="status">Sending your application…</p>}

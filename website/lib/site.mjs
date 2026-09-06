@@ -4,7 +4,9 @@ export const LEGACY_BASE_PATH = '/hormuz';
 export const SITE_ROUTES = Object.freeze(['/', '/docs/', '/demo/', '/integrations/', '/enterprise/', '/security/', '/resources/', '/contact/', '/privacy/', '/brand/']);
 export const REPOSITORY = 'https://github.com/Xpounder-com/hormuz';
 export const AUTHOR = 'Mehrdad Zaker';
-export const CONTACT_EMAIL = 'zaker.mehrdad@gmail.com';
+export const CONTACT_EMAIL = 'mehrdadz@neuralint.io';
+export const OWNER_NAME = 'Neuralint';
+export const OWNER_URL = 'https://neuralint.io';
 export const SOURCE_VERSION = 'v1.0.0';
 export const OCI_VERSION = 'v0.1.3';
 

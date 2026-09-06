@@ -1,5 +1,5 @@
 import { pageMetadata } from '../../lib/metadata';
-import { sitePath } from '../../lib/site.mjs';
+import { sitePath, OWNER_NAME, OWNER_URL } from '../../lib/site.mjs';
 import { PageFrame, PageHero } from '../components/PageFrame';
 import { BrandMark } from '../components/Brand';
 
@@ -22,7 +22,7 @@ const assets = [
 export default function BrandPage() {
   return <PageFrame active="brand">
     <PageHero eyebrow="The Hormuz identity" title={<>Room to move.<br /><span>Clarity at the boundary.</span></>}>
-      <p>A practical identity for an open-source AI gateway. Built around one idea: controlled passage.</p>
+      <p>A practical identity for an open-source AI gateway. Built around one idea: controlled passage. A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a>, led by Mehrdad Zaker.</p>
       <div className="hero-actions"><a className="button landing-primary" href="#assets">Get the brand assets <span aria-hidden="true">↓</span></a></div>
     </PageHero>
     <section className="brand-section brand-concept" id="concept">

@@ -1,6 +1,6 @@
 # Hormuz: current project and evaluation materials
 
-Maintainer and public author: **Mehrdad Zaker** · **zaker.mehrdad@gmail.com**.
+Maintainer and public author: **Mehrdad Zaker** · **mehrdadz@neuralint.io**.
 Prepared August 30, 2026; recordings use public source
 `38e7ba883b4f37d9f4d75664ccf0bc3f74d88230`. The publication branch also preserves
 the subsequent `932024e5bb5d9250a20ef7c815bac2487746d086` v1.1 contract-only

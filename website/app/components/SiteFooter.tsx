@@ -1,4 +1,4 @@
-import { AUTHOR, CONTACT_EMAIL, REPOSITORY, sitePath, sourcePath } from '../../lib/site.mjs';
+import { AUTHOR, CONTACT_EMAIL, OWNER_NAME, OWNER_URL, REPOSITORY, sitePath, sourcePath } from '../../lib/site.mjs';
 import { AdPreferencesButton } from './AdConsent';
 import { BrandLockup } from './Brand';
 
@@ -9,6 +9,7 @@ export function SiteFooter() {
         <a className="brand footer-brand" href={sitePath('/')} aria-label="Hormuz home">
           <BrandLockup />
         </a>
+        <p className="footer-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a></p>
         <p>Open-source AI policy and evidence, at the request boundary.</p>
         <span>Apache-2.0 · v1.0.0 source contracts<br />Production qualification remains deployment-specific.</span>
       </div>
@@ -24,7 +25,7 @@ export function SiteFooter() {
 
       <div className="footer-column">
         <strong>Evaluate</strong>
-        <a href={sitePath('/enterprise/')}>OSS & enterprise support</a>
+        <a href={sitePath('/enterprise/')}>Pricing & pilot</a>
         <a href={sitePath('/security/')}>Security & boundaries</a>
         <a href={sitePath('/resources/')}>Buyer & project resources</a>
         <a href={sitePath('/brand/')}>Brand & assets</a>
@@ -35,7 +36,8 @@ export function SiteFooter() {
 
       <div className="footer-column">
         <strong>{AUTHOR}</strong>
-        <a href={sitePath('/contact/')}>Discuss a pilot</a>
+        <span>Hormuz founder · Director, Neuralint</span>
+        <a href={sitePath('/contact/?interest=review')}>Get a free AI review</a>
         <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
         <a href={sourcePath('SECURITY.md')}>Report a vulnerability ↗</a>
       </div>

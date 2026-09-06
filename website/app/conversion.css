@@ -1,0 +1,100 @@
+/* The offer stays legible from the first visit through the inquiry. */
+.landing-home .landing-hero { padding-top: 46px; }
+.hero-conversion-grid { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0,1.3fr) minmax(360px,1fr); gap: clamp(32px,5vw,76px); align-items: center; width: min(100% - 64px,1200px); margin: 0 auto 64px; }
+.hero-conversion-grid .landing-hero-copy { width: auto; margin: 0; text-align: left; }
+.hero-conversion-grid h1 { font-size: clamp(52px,5.7vw,80px); letter-spacing: -.06em; line-height: 1.06; }
+.hero-conversion-grid .landing-deck { margin-inline: 0; max-width: 560px; font-size: 17px; }
+.hero-conversion-grid .landing-actions { justify-content: flex-start; gap: 12px; flex-wrap: wrap; }
+.hero-conversion-grid .landing-actions .button { padding-inline: 22px; }
+.hero-conversion-grid .landing-reassurance { margin-top: 18px; font-size: 12px; }
+.hero-owner { color: #5c6758; font-size: 12px; line-height: 1.8; margin: 24px 0 0; }
+.hero-owner a { color: #24392d; text-decoration: underline; text-underline-offset: 3px; }
+.hero-conversion-grid .hero-evidence-link { margin-top: 22px; }
+.hero-price-card { padding: 30px; border-radius: 24px; color: #f4f3ee; background: #24392d; box-shadow: 0 18px 50px #24392d12; text-align: left; }
+.price-card-topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 25px; }
+.hero-price-card .section-label { margin: 0; color: #dceda6; font-size: 10px; }
+.price-duration { border: 1px solid #65745a; border-radius: 30px; padding: 5px 10px; font-size: 11px; white-space: nowrap; }
+.hero-price-card h2 { font-size: 29px; font-weight: 500; letter-spacing: -.045em; line-height: 1.15; margin: 0 0 22px; }
+.price-amount { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; margin: 0 0 24px; color: inherit; }
+.price-amount strong { font-size: clamp(48px,4.8vw,66px); line-height: 1; font-weight: 550; letter-spacing: -.065em; font-variant-numeric: tabular-nums; }
+.price-amount .price-prefix { font-size: 12px; line-height: 1; }
+.price-amount .price-period { font-size: 12px; line-height: 1.5; letter-spacing: 0; }
+.hero-price-card > p { font-size: 13px; line-height: 1.65; color: #dce6d5; margin: 0; }
+.price-deliverables { list-style: none; padding: 18px 0; margin: 20px 0; border-block: 1px solid #56664c; }
+.price-deliverables li { display: flex; align-items: baseline; gap: 10px; font-size: 12px; line-height: 1.65; margin: 6px 0; }
+.price-deliverables li::before { content: '✓'; color: #dceda6; }
+.landing-redesign .hero-price-card .button { background: #dceda6; color: #24392d; border: 1px solid #dceda6; width: 100%; display: flex; justify-content: space-between; font-size: 14px; min-height: 48px; }
+.landing-redesign .hero-price-card .button:hover { background: #e9f4c8; }
+.hero-price-card > .price-card-note { font-size: 11px; line-height: 1.65; margin: 12px 0 18px; }
+.price-card-details { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: #dceda6; text-underline-offset: 4px; }
+.landing-redesign .conversion-offers { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 20px; }
+.landing-redesign .conversion-offers .offer-card { padding: 30px; }
+.landing-redesign .conversion-offers h3 { margin-bottom: 26px; }
+.landing-redesign .conversion-offers .price-amount { min-height: 108px; justify-content: flex-end; }
+.landing-redesign .conversion-offers .offer-card > p:not(.section-label):not(.field-hint), .landing-redesign .conversion-offers li { font-size: 13px; line-height: 1.7; }
+.landing-redesign .conversion-offers .button { font-size: 13px; min-height: 48px; }
+.landing-redesign .conversion-offers .field-hint, .landing-redesign .conversion-offers .text-link { font-size: 11px; }
+.landing-redesign .conversion-offers .offer-featured { background: #24392d; color: #f4f3ee; border-color: #24392d; box-shadow: none; }
+.landing-redesign .conversion-offers .offer-featured > p:not(.section-label), .landing-redesign .conversion-offers .offer-featured li { color: #dce6d5; }
+.landing-redesign .conversion-offers .offer-featured .section-label { color: #dceda6; }
+.landing-redesign .conversion-offers .offer-featured .button { background: #dceda6; color: #24392d; border-color: #dceda6; }
+.open-source-option { display: flex; align-items: center; justify-content: space-between; gap: 30px; margin-top: 24px; padding: 28px 30px; border: 1px solid #d8dfcd; border-radius: 18px; }
+.open-source-option h3 { font-size: 22px; font-weight: 550; letter-spacing: -.035em; margin: 8px 0; }
+.open-source-option p { font-size: 12px; color: #5c6758; line-height: 1.7; max-width: 650px; margin: 0; }
+.open-source-option .button { flex-shrink: 0; font-size: 13px; }
+.pricing-cost-note { text-align: center; font-size: 12px; color: #5c6758; margin: 20px 0 0; }
+.footer-intro .footer-owner { font-size: 13px; margin: 20px 0 8px; color: #24392d; }
+.footer-owner a { text-decoration: underline; text-underline-offset: 3px; }
+.footer-column > span { font-size: 11px; line-height: 1.7; color: #5c6758; }
+.contact-offer-summary { margin: 24px 0 14px; padding: 10px 20px; background: #e8ede2; border: 1px solid #d4ddcb; border-radius: 16px; }
+.contact-offer-summary > div { display: flex; justify-content: space-between; gap: 18px; padding: 14px 0; align-items: baseline; }
+.contact-offer-summary > div + div { border-top: 1px solid #cdd7c3; }
+.contact-offer-summary dt { font-size: 12px; }
+.contact-offer-summary dd { margin: 0; font-size: 19px; font-weight: 550; text-align: right; white-space: nowrap; }
+.contact-offer-summary small { display: block; font-size: 10px; font-weight: 400; color: #5c6758; }
+.selected-offer { display: flex; flex-direction: column; gap: 6px; padding: 17px 20px; background: #e8ede2; border: 1px solid #cdd7c3; border-radius: 12px; }
+.selected-offer strong { font-size: 30px; font-weight: 550; letter-spacing: -.045em; line-height: 1.1; }
+.selected-offer span { font-size: 12px; color: #526046; }
+@media (max-width: 1080px) {
+  .hero-conversion-grid { gap: 30px; width: min(100% - 48px,1200px); grid-template-columns: minmax(0,1.15fr) minmax(320px,1fr); }
+  .hero-conversion-grid h1 { font-size: 60px; }
+  .hero-price-card { padding: 25px; }
+  .landing-redesign .conversion-offers .offer-card { padding: 24px; }
+  .landing-redesign .conversion-offers .price-amount strong { font-size: 50px; }
+}
+@media (max-width: 800px) {
+  .hero-conversion-grid { grid-template-columns: 1fr; max-width: 590px; gap: 34px; }
+  .hero-conversion-grid .landing-hero-copy { text-align: center; }
+  .hero-conversion-grid h1 { font-size: clamp(45px,9vw,66px); }
+  .hero-conversion-grid .landing-deck { margin-inline: auto; }
+  .hero-conversion-grid .landing-actions { justify-content: center; }
+  .hero-price-card { padding: 30px; }
+  .landing-redesign .conversion-offers { grid-template-columns: 1fr; max-width: 540px; }
+  .landing-redesign .conversion-offers .offer-card { padding: 30px; }
+  .landing-redesign .conversion-offers .price-amount { min-height: 0; }
+  .open-source-option { flex-direction: column; align-items: flex-start; max-width: 540px; margin-inline: auto; }
+  .open-source-option .button { width: 100%; justify-content: space-between; }
+}
+@media (max-width: 480px) {
+  .landing-home .landing-hero { padding-top: 32px; }
+  .hero-conversion-grid { width: calc(100% - 36px); margin-bottom: 44px; }
+  .hero-conversion-grid .landing-deck { font-size: 15px; }
+  .hero-conversion-grid .landing-actions { flex-direction: column; align-items: stretch; }
+  .hero-conversion-grid .landing-actions .button { width: 100%; min-height: 48px; }
+  .hero-conversion-grid .landing-reassurance { font-size: 11px; }
+  .hero-owner { margin-top: 18px; font-size: 11px; }
+  .hero-price-card { padding: 25px; }
+  .hero-price-card h2 { font-size: 29px; }
+  .hero-price-card .price-amount strong { font-size: 64px; }
+  .contact-offer-summary { padding-inline: 16px; }
+}
+
+.inner-page .contact-layout { grid-template-areas: "guide form"; }
+.contact-guide { grid-area: guide; }
+.contact-form-panel { grid-area: form; }
+@media (max-width: 800px) {
+  .inner-page .contact-layout { grid-template-columns: 1fr; grid-template-areas: "form" "guide"; }
+}
+@media (max-width: 800px) {
+  .landing-home .founder-float { display: none; }
+}

@@ -54,7 +54,8 @@ def footer(canvas, doc):
     canvas.line(44, 46, 568, 46)
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(TEAL)
-    canvas.drawString(44, 32, "HORMUZ  /  Mehrdad Zaker  /  September 6, 2026")
+    canvas.linkURL("https://neuralint.io", (44, 29, 245, 41), relative=0)
+    canvas.drawString(44, 32, "HORMUZ  /  A product of Neuralint  /  September 6, 2026")
     canvas.drawRightString(568, 32, f"{doc.page}")
     canvas.linkURL(URL, (44, 24, 440, 43), relative=0)
     canvas.restoreState()
@@ -99,7 +100,7 @@ overview = [
     p(f'The <link href="{URL}demo/" color="#31684b">real provider-free recording</link> demonstrates allow, fallback/cap, redact, deny with no upstream call, and synthetic metadata evidence. The complete quickstart needs no provider account.'),
     p("Know the boundary", "h2"),
     p("v1.0.0 stabilizes source CLI/policy/evidence contracts; the signed OCI reference is separately v0.1.3 linux/amd64. No blanket production certification, managed service, 24/7 SLA, invoice reconciliation, independent security review, or customer endorsement is claimed.", "small"),
-    p('<b>Discuss one workflow:</b> Mehrdad Zaker · <link href="mailto:zaker.mehrdad@gmail.com" color="#31684b">zaker.mehrdad@gmail.com</link><br/>' + f'<link href="{URL}" color="#31684b">usehormuz.github.io</link>'),
+    p('<b>Discuss one workflow:</b> Mehrdad Zaker · <link href="mailto:mehrdadz@neuralint.io" color="#31684b">mehrdadz@neuralint.io</link><br/>' + f'<link href="{URL}" color="#31684b">usehormuz.github.io</link>'),
     p("Sources: " + link("Architecture", "docs/ARCHITECTURE.md") + " · " + link("Clients", "docs/CLIENTS.md") + " · " + link("Support", "SUPPORT.md") + " · " + link("Offer", "marketing/OFFER.md"), "small"),
 ]
 
@@ -139,7 +140,7 @@ pilot = [
     p("Do not send tokens, raw prompts, customer content, production databases, or full configurations through the marketing form or public issues. Private access requires an approved method, minimal privilege, and a written handling scope."),
     p("The next decision", "h2"),
     p("Stop and retain the lessons; continue self-service; resolve specific gaps in another bounded engagement; or propose a wider deployment after its gates are satisfied. Expansion is not automatic."),
-    p('<b>Mehrdad Zaker</b> · <link href="mailto:zaker.mehrdad@gmail.com" color="#31684b">zaker.mehrdad@gmail.com</link>'),
+    p('<b>Mehrdad Zaker</b> · <link href="mailto:mehrdadz@neuralint.io" color="#31684b">mehrdadz@neuralint.io</link>'),
     p("Sources: " + link("Full pilot scope", "marketing/PILOT.md") + " · " + link("Support", "SUPPORT.md") + " · " + link("Operations", "docs/OPERATIONS.md"), "small"),
 ]
 
@@ -172,7 +173,7 @@ trust = [
     p("Inspect synthetic evidence", "h2"),
     p(f'The <link href="{URL}demo/#evidence" color="#31684b">demo evidence pack</link> contains four usage events and one secret-control event from a separate provider-free run. Product schema and forbidden-content checks passed before export. These are synthetic records, not a customer case study or human onboarding result.'),
     p("Report a vulnerability privately", "h2"),
-    p("Follow " + link("SECURITY.md", "SECURITY.md") + ". Do not submit sensitive material through public issues or the marketing form. General evaluation contact: <b>Mehrdad Zaker</b>, zaker.mehrdad@gmail.com."),
+    p("Follow " + link("SECURITY.md", "SECURITY.md") + ". Do not submit sensitive material through public issues or the marketing form. General evaluation contact: <b>Mehrdad Zaker</b>, mehrdadz@neuralint.io."),
     p("Sources: " + link("Full trust brief", "marketing/TRUST.md") + " · " + link("OIDC", "docs/OIDC.md") + " · " + link("Secret controls", "docs/SECRET_CONTROLS.md") + " · " + link("Usage", "docs/USAGE.md") + " · " + link("Operations", "docs/OPERATIONS.md"), "small"),
 ]
 
