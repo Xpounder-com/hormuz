@@ -587,7 +587,7 @@ class FinanceCollectionSQLiteRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(FinanceCollectionError, "invalid_request"):
             self.bind(schema_version=True)
 
-    def test_postgres_collection_runtime_is_gated_before_connection(self):
+    def test_disabled_postgres_collection_runtime_is_gated_before_connection(self):
         config = replace(
             self.config,
             usage_storage=UsageStorageConfig(backend="postgresql"),
@@ -596,6 +596,9 @@ class FinanceCollectionSQLiteRepositoryTests(unittest.TestCase):
             config, environ={"HORMUZ_POSTGRES_DSN": "postgresql://redacted"}
         )
         with unittest.mock.patch(
+            "hormuz.finance_collection_repository.POSTGRES_FINANCE_COLLECTION_RUNTIME_ENABLED",
+            False,
+        ), unittest.mock.patch(
             "hormuz.finance_collection_repository.portfolio_transaction",
             side_effect=AssertionError("postgres collection must remain gated"),
         ):

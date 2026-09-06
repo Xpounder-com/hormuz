@@ -18,7 +18,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 16
+POSTGRES_SCHEMA_VERSION = 17
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 # Each tuple is the count and SHA-256 digest of the canonical non-owner ACL
@@ -38,6 +38,10 @@ _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION = {
     16: (
         185,
         "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a",
+    ),
+    17: (
+        199,
+        "1fa41892fb1206e7e70b922768ac27a39fce6ed98441a9fb78ce1511e1582906",
     ),
 }
 
@@ -2389,6 +2393,7 @@ def _migration_sql(
         14: "0014_provider_reliability.sql",
         15: "0015_finance_attempt_evidence.sql",
         16: "0016_finance_collection.sql",
+        17: "0017_finance_collection_runtime.sql",
     }
     filename = filenames.get(version)
     if filename is None:

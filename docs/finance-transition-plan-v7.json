@@ -1,0 +1,74 @@
+{
+  "schema_id": "hormuz.finance-transition-plan",
+  "schema_version": 7,
+  "stage": "postgresql_collection_runtime_candidate",
+  "target_release": "1.1.0",
+  "feature_issue": 8,
+  "gate_issue": 214,
+  "owner_approval": "https://github.com/Xpounder-com/hormuz/issues/8#issuecomment-5559866894",
+  "predecessor": {
+    "source_commit": "0973662e57636b1dd6bbb6351c6cdde6676d3384",
+    "archive_prefix": "hormuz-finance-collection-runtime-baseline/",
+    "archive_sha256": "d7e6a0287ed8e527d365a121213eaa28e96a92f5b0e9f0e4caf67034dc3c0ae2",
+    "runtime_file_count": 150,
+    "plan_path": "docs/finance-transition-plan-v6.json",
+    "plan_canonical_sha256": "cf618e78058b0842efca2768f3638a0a4ce3954d855996a0224bc8dd955b2c7d"
+  },
+  "transitions": {"sqlite": {"from": 12, "to": 12}, "postgresql": {"from": 16, "to": 17}},
+  "migration": {
+    "path": "hormuz/migrations/postgresql/0017_finance_collection_runtime.sql",
+    "sha256": "033ae3e7e715b309cb7a1028976a77f85aee43040510418077889cbce0ef59c4",
+    "predecessor_migration_sha256": "8a60cf22ffc92105ab4b1028822ab6db32066e71129e2c43450be43096f8a3f9",
+    "privileges": ["SELECT", "INSERT"],
+    "new_permission_count": 14,
+    "tables": [
+      "portfolio_finance_source_binding_versions",
+      "portfolio_finance_collection_attempts",
+      "portfolio_finance_collection_events",
+      "portfolio_finance_snapshots",
+      "portfolio_finance_snapshot_bucket_coverage",
+      "portfolio_finance_usage_observations",
+      "portfolio_finance_cost_observations"
+    ],
+    "row_shape_changed": false,
+    "rls_or_source_guards_changed": false,
+    "grant_options": false
+  },
+  "postgresql_acl_gate": {
+    "fingerprint_mode": "fixed_literal_per_schema_version",
+    "schema15_and_16": [185, "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a"],
+    "schema15_and_16_injected_rejected": [186, "d06ec615d82a176b107e1131c00e1dceb5f629d9504a7519f64e1eb77a0c7246"],
+    "schema17": [199, "1fa41892fb1206e7e70b922768ac27a39fce6ed98441a9fb78ce1511e1582906"],
+    "schema17_injected_rejected": [200, "36722069d266896d947c5d0d96f4e3033f7992244d26a5920d2c5cf7f5470296"],
+    "accepts_multiple_fingerprints": false,
+    "computes_expected_from_database": false
+  },
+  "required_evidence": [
+    "first_and_repeated_bootstraps_185_and_injected186_rejection_for_schemas15_and16",
+    "first_and_repeated_bootstraps_199_and_injected200_rejection_for_schema17",
+    "restricted_runtime_tenant_rbac_revocation_append_only_and_replay",
+    "complete_postgresql_migration_and_runtime_suites",
+    "exact_installed_predecessor_newer_and_partial_refusal",
+    "transactional_ddl_failure_rollback_and_idempotent_retry",
+    "stopped_writer_old_pair_restore_and_retained_forward_recovery",
+    "wheel_and_source_archive_validation",
+    "exact_pr_head_review_all_protected_checks_normal_merge",
+    "exact_merged_main_ci_before_issue_acceptance"
+  ],
+  "gates": {
+    "owner_approved_acl_implementation": true,
+    "postgresql_collection_runtime_implemented": true,
+    "postgresql_collection_runtime_accepted": false,
+    "provider_collection_runtime_accepted": false,
+    "reconciliation_accepted": false,
+    "finance_implemented": false,
+    "final_candidate_accepted": false,
+    "released": false
+  },
+  "nonclaims": [
+    "live_provider_or_customer_finance_validation",
+    "invoice_truth_or_granular_final_cost",
+    "automatic_model_policy_budget_or_allocation_change",
+    "release_deployment_or_final_candidate_acceptance"
+  ]
+}
