@@ -147,6 +147,9 @@
 .inner-page .pilot-steps p { font-size: 14px; line-height: 1.75; margin-bottom: 28px; }
 .inner-page .pilot-steps strong { position: static; font-size: 10px; line-height: 1.6; margin-top: auto; padding-top: 18px; border-top: 1px solid #ccd8bf; }
 .inner-page #payment { border-radius: 24px; background: #e8eedc; padding: 40px; margin-bottom: 60px; border: 1px solid #cedabd; }
+.inner-page #payment h2 { margin-bottom: 20px; }
+.inner-page #payment .button { text-align: center; }
+.inner-page #payment .button > span:last-child { flex-shrink: 0; }
 .inner-page #payment > p:not(.section-label) { color: var(--muted); line-height: 1.8; font-size: 14px; max-width: 860px; }
 .inner-page #payment .resource-actions { margin: 24px 0; }
 .inner-page .enterprise-truth { padding: 32px; border-radius: 20px; border-color: #d4ddc9; margin-bottom: 65px; grid-template-columns: .7fr 1fr 1.2fr; gap: 28px; }
