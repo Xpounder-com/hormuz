@@ -36,7 +36,9 @@ export async function submitLead(endpoint, payload, fetcher = fetch) {
   try {
     const response = await fetcher(endpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(payload), credentials: 'omit', referrerPolicy: 'no-referrer',
+      // Formspree's domain restriction needs Referer. Cross-origin requests
+      // disclose only the website origin, never its path or query parameters.
+      body: JSON.stringify(payload), credentials: 'omit', referrerPolicy: 'strict-origin-when-cross-origin',
       signal: AbortSignal.timeout(15000), redirect: 'error',
     });
     const data = await response.json();

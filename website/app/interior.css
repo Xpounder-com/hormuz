@@ -290,3 +290,28 @@
 @media (prefers-reduced-motion: reduce) {
   .landing-redesign *, .landing-redesign *::before, .landing-redesign *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+.landing-redesign .ad-consent {
+  position: fixed; z-index: 100; right: 24px; bottom: 24px;
+  width: min(470px, calc(100vw - 48px)); padding: 24px;
+  border: 1px solid #b7c0b2; border-radius: 18px;
+  color: #29342b; background: #fafbf6; box-shadow: 0 12px 50px #1c302421;
+}
+.landing-redesign .ad-consent h2 { font-size: 21px; line-height: 1.2; letter-spacing: -.6px; margin: 9px 0 12px; }
+.landing-redesign .ad-consent p { font-size: 13px; line-height: 1.6; margin: 0 0 12px; color: #48554a; }
+.landing-redesign .ad-consent a { text-decoration: underline; text-underline-offset: 3px; }
+.landing-redesign .ad-consent-actions { display: flex; gap: 10px; }
+.landing-redesign .ad-consent-actions button {
+  flex: 1; min-height: 44px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid #71816c; background: transparent; color: #29342b;
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.landing-redesign .ad-consent-actions button:hover { background: #e5ebdf; }
+.landing-redesign .ad-preferences-link {
+  display: block; width: fit-content; padding: 0; border: 0; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.landing-redesign .ad-preferences-link:hover { text-decoration: underline; }
+@media (max-width: 600px) {
+  .landing-redesign .ad-consent { right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); width: calc(100vw - 24px); padding: 18px; max-height: 80dvh; overflow-y: auto; }
+  .landing-redesign .ad-consent h2 { font-size: 19px; }
+}

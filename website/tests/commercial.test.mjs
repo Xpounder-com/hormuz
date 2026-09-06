@@ -54,7 +54,7 @@ test('a lead is acknowledged only after a positive service response', async () =
     assert.equal(url, endpoint);
     assert.equal(options.method, 'POST');
     assert.equal(options.credentials, 'omit');
-    assert.equal(options.referrerPolicy, 'no-referrer');
+    assert.equal(options.referrerPolicy, 'strict-origin-when-cross-origin');
     assert.equal(options.redirect, 'error');
     assert.deepEqual(JSON.parse(options.body), payload);
     assert.ok(options.signal instanceof AbortSignal);

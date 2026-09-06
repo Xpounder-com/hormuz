@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { INTERESTS, campaignSource } from '../../lib/contact.mjs';
 import { buildLead, submitLead } from '../../lib/lead.mjs';
+import { trackConfirmedApplication } from '../../lib/x-ads.mjs';
 import { CONTACT_EMAIL, sitePath } from '../../lib/site.mjs';
 
 export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUrl: string }) {
@@ -27,7 +28,11 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Check your entries.'); setState('error'); return; }
     pending.current = true;
     setState('sending'); setError('');
-    try { await submitLead(endpoint, payload); setState('success'); }
+    try {
+      await submitLead(endpoint, payload);
+      setState('success');
+      if (!payload._gotcha) trackConfirmedApplication();
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Receipt could not be confirmed. Please contact us by email.'); setState('error'); }
     finally { pending.current = false; }
   }

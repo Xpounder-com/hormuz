@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { pageMetadata } from '../lib/metadata';
+import { AdConsent } from './components/AdConsent';
 import './globals.css';
 import './landing.css';
 import './interior.css';
@@ -30,7 +31,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <a className="skip-link" href="#content">Skip to content</a>
-        <div className="landing-redesign">{children}</div>
+        <div className="landing-redesign">{children}<AdConsent /></div>
       </body>
     </html>
   );

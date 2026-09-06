@@ -43,6 +43,11 @@ with agreed scope and start date; they do not provision a hosted service.
    protection, appropriate account access, and retention policy. Submit a clearly
    marked synthetic inquiry; confirm the record and notification. Do not count it
    as a customer lead. Frontend tests alone do not verify delivery.
+   The website request must retain `strict-origin-when-cross-origin`: Formspree's
+   domain restriction uses the Referer header and marks submissions without it as
+   spam. This sends only the HTTPS website origin on the cross-origin request,
+   excluding paths and campaign query parameters. See [Formspree's domain
+   restriction documentation](https://help.formspree.io/articles/form-and-project-settings/restrict-to-domain).
 5. Connect an existing booking event or agree availability and timezone before
    creating one. Follow any authentication or terms prompts with the owner.
 6. Run `npm test`, `npm run build`, `npm run typecheck`, and `npm run verify`.
@@ -57,11 +62,11 @@ with agreed scope and start date; they do not provision a hosted service.
 
 Application tags (`utm_source`, `utm_medium`, `utm_campaign`) are bounded and
 forwarded along commercial CTAs. Form submission includes them only when the
-visitor selects the unchecked attribution checkbox. No cookies, analytics SDK,
-ad pixels, click IDs, or persistent visitor IDs are added. Application contents
+visitor selects the unchecked attribution checkbox. Separately, visitor consent
+enables X Ads measurement of visits and acknowledged applications. Application contents
 are never sent in an analytics event. Use verified non-spam submissions, actual
 bookings, successful payments, and active subscriptions as distinct funnel stages.
-Ad-platform conversion import remains an account-dependent follow-up.
+See [measurement setup](MEASUREMENT.md) for consent and event details.
 
 ## Current activation status
 
@@ -81,8 +86,20 @@ signed-in Safari session on September 6, 2026:
 - The merchant is AI and Robotics Solutions; the existing statement descriptor is
   LINKEDFULL.COM. The draft website discloses this without rebranding other products.
 
-Public links are configured in the website draft. No live charge, test-mode
-transaction, subscription lifecycle, or refund has been exercised. These remain
-acceptance checks before publication. Formspree and booking destinations remain
-blank: applications still use the local email-draft fallback, and automatic
-application notification delivery is not configured. Publication remains pending.
+The live Stripe links were published with the full-site design at source
+`af578c4a9519614856f4c6bb4bb7919995476e82`. No live charge, test-mode transaction,
+subscription lifecycle, or refund has been exercised.
+
+Formspree configuration, September 6, 2026:
+
+- Separate project `Hormuz`, form `Hormuz Enterprise Applications`, endpoint
+  `https://formspree.io/f/xoeqnbyq`.
+- Verified owner inbox `zaker.mehrdad@gmail.com`; email notifications, submission
+  archive, and Formshield enabled. Domain restricted to `usehormuz.github.io`.
+- Current free account quota: 50 submissions/month shared across forms; dashboard
+  archive: 30 days. Existing unrelated forms were not changed.
+- Applicant autoresponses require Professional: USD 30 monthly, or USD 240/year.
+  No upgrade has been purchased; on-page receipt works without an upgrade.
+- Booking remains blank until the owner's event/availability is supplied.
+- Live form record, owner email delivery, and X event activity must be verified
+  after this source revision is published. Configuration is not delivery proof.

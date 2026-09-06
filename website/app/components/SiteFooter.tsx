@@ -1,4 +1,5 @@
 import { AUTHOR, CONTACT_EMAIL, REPOSITORY, sitePath, sourcePath } from '../../lib/site.mjs';
+import { AdPreferencesButton } from './AdConsent';
 
 export function SiteFooter() {
   return (
@@ -32,6 +33,7 @@ export function SiteFooter() {
         <a href={sitePath('/resources/')}>Buyer & project resources</a>
         <a href={REPOSITORY}>GitHub ↗</a>
         <a href={sitePath('/privacy/')}>Website privacy</a>
+        <AdPreferencesButton />
       </div>
 
       <div className="footer-column">
