@@ -5,6 +5,7 @@ import { AdConsent } from './components/AdConsent';
 import './globals.css';
 import './landing.css';
 import './interior.css';
+import './brand.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',

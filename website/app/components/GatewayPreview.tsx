@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { BrandMark } from './Brand';
 
 /** An interactive illustration, not a connected console or live customer data. */
 export function GatewayPreview() {
@@ -21,7 +22,7 @@ export function GatewayPreview() {
           <button type="button" aria-pressed={!blocked} onClick={() => setBlocked(false)}>Allowed request</button>
           <button type="button" aria-pressed={blocked} onClick={() => setBlocked(true)}>Blocked request</button>
         </div>
-        <div className="gateway-path" aria-hidden="true"><div><span>⌘</span><small>AI client</small></div><i /><div className="gateway-h"><span>H</span><small>Hormuz</small></div><i className={blocked ? 'path-stopped' : ''} /><div><span>{blocked ? '⊘' : '↗'}</span><small>Provider</small></div></div>
+        <div className="gateway-path" aria-hidden="true"><div><span>⌘</span><small>AI client</small></div><i /><div className="gateway-h"><span><BrandMark /></span><small>Hormuz</small></div><i className={blocked ? 'path-stopped' : ''} /><div><span>{blocked ? '⊘' : '↗'}</span><small>Provider</small></div></div>
         <div className="gateway-outcome" aria-live="polite" aria-atomic="true">
           <p><span className="outcome-check">{blocked ? '×' : '✓'}</span>{blocked ? 'Stopped before the provider.' : 'Checks passed. Request forwarded.'}</p>
           <div className="gateway-checks"><span>✓ Identity</span><span>{blocked ? '× Model policy' : '✓ Model policy'}</span><span>{blocked ? '— Budget not reserved' : '✓ Budget reserved'}</span></div>

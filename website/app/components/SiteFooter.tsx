@@ -1,17 +1,13 @@
 import { AUTHOR, CONTACT_EMAIL, REPOSITORY, sitePath, sourcePath } from '../../lib/site.mjs';
 import { AdPreferencesButton } from './AdConsent';
+import { BrandLockup } from './Brand';
 
 export function SiteFooter() {
   return (
     <footer className="site-footer">
       <div className="footer-intro">
         <a className="brand footer-brand" href={sitePath('/')} aria-label="Hormuz home">
-          <span className="brand-mark" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
-          <span className="brand-name">HORMUZ</span>
+          <BrandLockup />
         </a>
         <p>Open-source AI policy and evidence, at the request boundary.</p>
         <span>Apache-2.0 · v1.0.0 source contracts<br />Production qualification remains deployment-specific.</span>
@@ -31,6 +27,7 @@ export function SiteFooter() {
         <a href={sitePath('/enterprise/')}>OSS & enterprise support</a>
         <a href={sitePath('/security/')}>Security & boundaries</a>
         <a href={sitePath('/resources/')}>Buyer & project resources</a>
+        <a href={sitePath('/brand/')}>Brand & assets</a>
         <a href={REPOSITORY}>GitHub ↗</a>
         <a href={sitePath('/privacy/')}>Website privacy</a>
         <AdPreferencesButton />

@@ -8,6 +8,7 @@ import { sitePath, REPOSITORY } from '../lib/site.mjs';
 import { PILOT_PRICE } from '../lib/commercial.mjs';
 import { SiteFooter } from './components/SiteFooter';
 import { SiteHeader } from './components/SiteHeader';
+import { BrandMark } from './components/Brand';
 
 export const metadata = pageMetadata('Hormuz — Control AI access, budgets, and provider keys', 'Keep Codex and Claude Code. Control model access, enforce budgets, and protect provider keys. Explore a founder-led 90-day paid pilot for your team.', '/');
 
@@ -42,6 +43,11 @@ export default function Home() {
         </div>
         <GatewayPreview />
         <div className="landing-integrations"><p>Built for your existing AI workflow</p><div><span>⌘ <strong>Codex</strong></span><span>✳ <strong>Claude Code</strong></span><i /><span>OpenAI</span><span>Anthropic</span></div><a href={sitePath('/integrations/')}>Explore supported integrations ↗</a></div>
+      </section>
+
+      <section className="passage-story" aria-labelledby="passage-title">
+        <figure className="passage-art"><img src={sitePath('/brand/controlled-passage.webp')} width="1536" height="1024" loading="lazy" alt="Layered sage and cream contours around a clear, open channel" /><figcaption><BrandMark /><span>ROOM TO MOVE. CLEAR BOUNDARIES.</span><span aria-hidden="true">↗</span></figcaption></figure>
+        <div className="passage-story-copy"><p className="landing-eyebrow">THE HORMUZ APPROACH</p><h2 id="passage-title">Let good work<br /><em>move forward.</em></h2><p>Give supported AI requests a clear path through your organization’s controls. Keep the workflow familiar and make the decisions inspectable.</p><dl className="passage-principles"><div><dt><span>01</span> Your tools</dt><dd>Start with Codex and Claude Code.</dd></div><div><dt><span>02</span> Your boundaries</dt><dd>Apply policy, budgets, and secret controls before egress.</dd></div><div><dt><span>03</span> Your evidence</dt><dd>Review the outcome without routine prompt logging.</dd></div></dl><a href={sitePath('/demo/')}>See how the request path works <span aria-hidden="true">↗</span></a></div>
       </section>
 
       <section className="landing-section" id="control-plane">

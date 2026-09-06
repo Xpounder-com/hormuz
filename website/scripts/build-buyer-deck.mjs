@@ -9,7 +9,7 @@ const scratch = path.resolve('.artifacts/deck');
 await fs.mkdir(scratch, { recursive: true });
 await fs.mkdir(path.dirname(output), { recursive: true });
 const presentation = Presentation.create({ slideSize: { width: 1280, height: 720 } });
-const C = { night: '#07171a', ink: '#101b20', paper: '#f4f4ef', white: '#fbfcf8', teal: '#087f78', cyan: '#68e6dd', muted: '#607077', line: '#d9e1df' };
+const C = { night: '#24392d', ink: '#202723', paper: '#f4f3ee', white: '#fafbf6', teal: '#31684b', cyan: '#dceda6', muted: '#5c6758', line: '#d4dbcc' };
 const site = 'https://usehormuz.github.io/';
 const repo = 'https://github.com/Xpounder-com/hormuz/blob/main/';
 const sourceNotes = [];
@@ -23,9 +23,12 @@ function text(slide, name, value, left, top, width, height, size = 28, color = C
 function slide(kicker, title, number, sources, dark = false) {
   const s = presentation.slides.add();
   s.background.fill = dark ? C.night : C.paper;
+  const markColor = dark ? C.cyan : C.teal;
+  s.shapes.add({ geometry: 'ellipse', name: 'Hormuz mark boundary', position: { left: 1176, top: 35, width: 40, height: 40 }, fill: 'none', line: { fill: markColor, width: 1, style: 'solid' } });
+  for (const [i, height] of [10, 20, 14].entries()) s.shapes.add({ geometry: 'roundRect', name: `Hormuz mark bar ${i + 1}`, position: { left: 1185 + i * 8, top: 55 - height / 2, width: 5, height }, fill: markColor, line: { fill: 'none', width: 0 } });
   text(s, 'section', kicker.toUpperCase(), 64, 44, 1130, 30, 19, dark ? C.cyan : C.teal, true);
   if (title) text(s, 'takeaway', title, 64, 106, 1152, 124, 48, dark ? C.white : C.ink, true);
-  text(s, 'footer', `HORMUZ  /  Mehrdad Zaker  /  31 Aug 2026                                      ${String(number).padStart(2, '0')} / 07`, 64, 672, 1152, 24, 17, dark ? '#b9ccc7' : C.muted);
+  text(s, 'footer', `HORMUZ  /  Mehrdad Zaker  /  September 2026                                      ${String(number).padStart(2, '0')} / 07`, 64, 672, 1152, 24, 17, dark ? '#dce6d5' : C.muted);
   const urls = sources.map(source => source.startsWith('https:') ? source : repo + source);
   s.speakerNotes.textFrame.setText(`[Sources]\n${urls.join('\n')}\n[/Sources]\nScope: public v1 source contracts and synthetic evidence. No customer outcome, certification, SLA, validated demand, or future software availability is implied.`);
   sourceNotes.push({ slide: number, sources: urls });
@@ -33,7 +36,7 @@ function slide(kicker, title, number, sources, dark = false) {
 }
 
 let s = slide('Open source + supported evaluation', '', 1, ['marketing/OFFER.md', 'LICENSE', 'docs/CLIENTS.md'], true);
-text(s, 'cover-title', 'Keep the coding clients.\nGovern their model requests.', 64, 156, 1140, 222, 68, C.white, true);
+text(s, 'cover-title', 'Give your team AI.\nKeep control.', 64, 156, 1140, 222, 76, C.white, true);
 text(s, 'cover-summary', 'Self-hosted policy, budgets, secret controls,\nand metadata-only evidence for Codex and Claude Code.', 68, 438, 1110, 106, 31, '#d9e1df');
 text(s, 'cover-boundary', 'Apache-2.0 core  •  v1.0.0 source contracts', 68, 582, 1110, 42, 25, C.cyan, true);
 

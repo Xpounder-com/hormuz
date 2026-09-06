@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { validateSourcePin } from './verify-source-pin.mjs';
 
 export const LIVE_ORIGIN = 'https://usehormuz.github.io';
-export const LIVE_ROUTES = Object.freeze(['/', '/docs/', '/demo/', '/integrations/', '/enterprise/', '/security/', '/resources/', '/contact/', '/privacy/']);
+export const LIVE_ROUTES = Object.freeze(['/', '/docs/', '/demo/', '/integrations/', '/enterprise/', '/security/', '/resources/', '/contact/', '/privacy/', '/brand/']);
 export const LIVE_DOWNLOADS = Object.freeze(['hormuz-overview.pdf', 'hormuz-pilot-brief.pdf', 'hormuz-trust-brief.pdf', 'hormuz-buyer-briefing.pptx']);
 
 export async function verifyLiveSite(sourcePin, fetcher = fetch) {

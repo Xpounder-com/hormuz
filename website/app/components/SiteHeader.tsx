@@ -1,4 +1,5 @@
 import { CampaignLink } from './CampaignLink';
+import { BrandLockup } from './Brand';
 import { sitePath } from '../../lib/site.mjs';
 
 const navigation = [
@@ -21,12 +22,7 @@ export function SiteHeader({
     <header className={`nav-shell${overlay ? ' nav-shell-overlay' : ''}`}>
       <nav className="site-nav" aria-label="Primary navigation">
         <a className="brand" href={sitePath('/')} aria-label="Hormuz home">
-          <span className="brand-mark" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
-          <span className="brand-name">HORMUZ</span>
+          <BrandLockup />
         </a>
 
         <div className="nav-links">
