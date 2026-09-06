@@ -1,5 +1,10 @@
 # Provider finance collection runtime candidate
 
+This document records the schema-16 / plan-v6 checkpoint. The owner-approved
+schema-17 successor is specified in [PostgreSQL collection runtime](FINANCE_COLLECTION_POSTGRES_RUNTIME.md)
+and plan v7. The historical 185/186 boundary below remains unchanged for schemas
+15/16; the successor adds its own fixed 199/200 boundary and open acceptance gates.
+
 This is the implementation candidate for the analytics-first provider
 collection slice in Hormuz 1.1.0. It stores bounded, typed provider usage and
 cost aggregates as complete append-only snapshots, with source-binding
@@ -36,7 +41,7 @@ security gate, not a claim that PostgreSQL collection runtime is enabled.
 Run the candidate verifier and focused suites from the repository root:
 
 ```console
-python3 tools/verify_finance_collection_runtime.py
+python3 tools/verify_finance_collection_postgres_runtime.py
 python3 -m unittest -v tests.test_finance_collection_runtime_plan
 python3 -m unittest -v tests.test_finance_collection_runtime tests.test_finance_collection_cli
 ```

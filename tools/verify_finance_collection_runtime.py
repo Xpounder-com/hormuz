@@ -129,7 +129,9 @@ def _validate_postgres_runtime_grants(migration: str, tables: object) -> None:
             _fail("finance_collection_postgres_grants_not_gated")
 
 
-def verify_finance_collection_runtime(root: Path = ROOT) -> dict[str, object]:
+def verify_finance_collection_runtime(
+    root: Path = ROOT, *, allow_successor_schema: bool = False,
+) -> dict[str, object]:
     root = Path(root)
     for relative in REQUIRED_FILES:
         if not (root / relative).is_file():
@@ -147,7 +149,8 @@ def verify_finance_collection_runtime(root: Path = ROOT) -> dict[str, object]:
             _fail("finance_collection_source_contract_changed")
         validate_finance_sources(source_contract)
         native = verify_finance_native_attempt_transition_plan(
-            root, allow_successor_schema=True
+            root, allow_successor_schema=True,
+            successor_postgres_schema=17 if allow_successor_schema else 16,
         )
     except FinanceCollectionRuntimeError:
         raise
@@ -164,7 +167,8 @@ def verify_finance_collection_runtime(root: Path = ROOT) -> dict[str, object]:
             _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
         )
 
-        if (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != (12, 16):
+        expected_current = (12, 17) if allow_successor_schema else (12, 16)
+        if (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != expected_current:
             _fail("finance_collection_runtime_schema_version_invalid")
         if POSTGRES_FINANCE_COLLECTION_RUNTIME_ACCEPTED is not False:
             _fail("finance_collection_postgres_runtime_gate_changed")
@@ -264,9 +268,12 @@ def verify_finance_collection_runtime(root: Path = ROOT) -> dict[str, object]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=ROOT)
+    parser.add_argument("--allow-successor-schema", action="store_true")
     args = parser.parse_args(argv)
     try:
-        print(json.dumps(verify_finance_collection_runtime(args.repo_root), sort_keys=True))
+        print(json.dumps(verify_finance_collection_runtime(
+            args.repo_root, allow_successor_schema=args.allow_successor_schema,
+        ), sort_keys=True))
         return 0
     except FinanceCollectionRuntimeError as error:
         print(str(error))
