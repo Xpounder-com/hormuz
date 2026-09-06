@@ -3,6 +3,6 @@
 export const commercialConfig = Object.freeze({
   formEndpoint: '',
   bookingUrl: '',
-  pilotPaymentUrl: '',
-  supportPaymentUrl: '',
+  pilotPaymentUrl: 'https://buy.stripe.com/3cI9AUddYaIRej44l78og01',
+  supportPaymentUrl: 'https://buy.stripe.com/3cIeVeddY9ENej47xj8og00',
 });

@@ -65,6 +65,24 @@ Ad-platform conversion import remains an account-dependent follow-up.
 
 ## Current activation status
 
-Code prepared; external destinations blank. Stripe requires account authentication.
-Formspree and booking account/destination are not yet identified. Live submission,
-notification delivery, checkout, recurring billing, and publication remain unverified.
+Stripe products and live Payment Links were created and inspected in the owner's
+signed-in Safari session on September 6, 2026:
+
+- Pilot: USD 15,000 one-time, fixed quantity, no upsells or renewal.
+- Support: USD 2,000 monthly, fixed quantity, no trial or upsells.
+- Both require customer name, business name, and an agreed proposal reference.
+- Both public checkout pages loaded with the expected product, amount, and interval.
+- The existing automatic tax setting and preset product tax category were retained;
+  this does not validate tax classification or registrations.
+- Mercury was visibly listed as the default USD payments-balance payout account.
+  No banking details were changed and no payout was initiated.
+- Successful-payment email notifications were enabled for the signed-in Stripe user.
+  Actual delivery has not been tested.
+- The merchant is AI and Robotics Solutions; the existing statement descriptor is
+  LINKEDFULL.COM. The draft website discloses this without rebranding other products.
+
+Public links are configured in the website draft. No live charge, test-mode
+transaction, subscription lifecycle, or refund has been exercised. These remain
+acceptance checks before publication. Formspree and booking destinations remain
+blank: applications still use the local email-draft fallback, and automatic
+application notification delivery is not configured. Publication remains pending.
