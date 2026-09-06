@@ -102,6 +102,7 @@ recursive-include docs *.md
 include examples/policy-admin-usability-baseline.json
 include examples/policy-admin-usability-scenarios.json
 recursive-include docs/evidence *.json
+include docs/evidence/reconciliation_scope_probe.py
 recursive-include tests *.py *.json
 recursive-include hormuz/migrations/postgresql *.sql
 prune experiments
