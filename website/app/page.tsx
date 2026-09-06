@@ -1,6 +1,8 @@
 import './landing.css';
 import { EnterprisePlans } from './components/EnterprisePlans';
 import { CampaignLink } from './components/CampaignLink';
+import { EvidenceShowcase } from './components/EvidenceShowcase';
+import { ControlIllustration } from './components/ControlIllustration';
 import { GatewayPreview } from './components/GatewayPreview';
 import { pageMetadata } from '../lib/metadata';
 import { sitePath, REPOSITORY } from '../lib/site.mjs';
@@ -37,7 +39,7 @@ export default function Home() {
           <h1>Give your team AI.<br /><em>Keep control.</em></h1>
           <p className="landing-deck">Keep Codex and Claude Code. Set the policies, protect your provider keys, and put budgets around the AI your team already uses.</p>
           <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=review')}>Get a free governance review <span aria-hidden="true">↗</span></CampaignLink><CampaignLink className="button landing-secondary" href="/#plans">Explore the plans <span aria-hidden="true">↓</span></CampaignLink></div>
-          <p className="landing-reassurance">Founder-led · Open-source core · Your infrastructure</p>
+          <p className="landing-reassurance">Founder-led · Open-source core · Your infrastructure</p><a className="hero-evidence-link" href="#evidence">Explore the evidence <span aria-hidden="true">↓</span></a>
         </div>
         <GatewayPreview />
         <div className="landing-integrations"><p>Built for your existing AI workflow</p><div><span>⌘ <strong>Codex</strong></span><span>✳ <strong>Claude Code</strong></span><i /><span>OpenAI</span><span>Anthropic</span></div><a href={sitePath('/integrations/')}>Explore supported integrations ↗</a></div>
@@ -53,9 +55,11 @@ export default function Home() {
         <div className="process-link"><CampaignLink href={sitePath('/enterprise/#pilot')}>See the full 90-day pilot plan <span aria-hidden="true">↗</span></CampaignLink></div>
       </section>
 
+      <EvidenceShowcase />
+
       <section className="landing-section benefits-section" id="capabilities">
         <div className="landing-heading"><p className="landing-eyebrow">LESS GUESSWORK. MORE CONTROL.</p><h2>The tools stay familiar.<br /><em>The boundaries get clearer.</em></h2></div>
-        <div className="landing-benefits">{benefits.map(([number, title, copy, tag]) => <article key={number}><div><span>{number}</span><small>{tag}</small></div><h3>{title}</h3><p>{copy}</p></article>)}</div>
+        <div className="landing-benefits">{benefits.map(([number, title, copy, tag], index) => <article key={number}><ControlIllustration index={index} /><div className="benefit-caption"><span>{number}</span><small>{tag}</small></div><h3>{title}</h3><p>{copy}</p></article>)}</div>
         <div className="evidence-banner" id="boundary"><div className="evidence-banner-icon" aria-hidden="true">⌘</div><div><h3>See the control path for yourself.</h3><p>A recorded CLI run with synthetic inputs and inspectable evidence.</p></div><a className="button landing-secondary" href={sitePath('/demo/')}>Watch the real demo <span aria-hidden="true">↗</span></a></div>
       </section>
 
