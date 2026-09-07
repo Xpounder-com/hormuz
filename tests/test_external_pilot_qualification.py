@@ -15,8 +15,10 @@ from tools.qualify_external_pilot import (
     _abort_gateway_response,
     _authenticate_deployment_evidence,
     _deploy_hook_url,
+    _logout_sessions,
     _provider_request,
     _reliability,
+    _session_binding,
     _wait_for_cancellation_evidence,
     qualify,
 )
@@ -33,7 +35,37 @@ ROTATED_REFRESH = "hox_r_" + "s" * 43
 ROTATED_REFRESH_AFTER_RESTART = "hox_r_" + "t" * 43
 ACCESS = "hox_a_" + "a" * 43
 ACCESS_AFTER_RESTART = "hox_a_" + "b" * 43
+CLAUDE_REFRESH = "hox_r_" + "u" * 43
+CLAUDE_ROTATED_REFRESH = "hox_r_" + "v" * 43
+CLAUDE_ROTATED_AFTER_RESTART = "hox_r_" + "w" * 43
+CLAUDE_ACCESS = "hox_a_" + "c" * 43
+CLAUDE_ACCESS_AFTER_RESTART = "hox_a_" + "d" * 43
+BINDING = ("evaluation", "evaluation-member", "evaluation-eng")
 REHEARSAL = "k" * 43
+
+
+def _qualification_arguments():
+    return {
+        "origin": ORIGIN,
+        "expected_commit": COMMIT,
+        "service_id": SERVICE_ID,
+        "deployment_evidence_url": DEPLOYMENT_RUN,
+        "workflow_run_url": QUALIFICATION_RUN,
+        "refresh_token": REFRESH,
+        "claude_code_refresh_token": CLAUDE_REFRESH,
+        "rehearsal_key": REHEARSAL,
+        "deploy_hook": f"https://api.render.com/deploy/{SERVICE_ID}?key=exampleKey1",
+    }
+
+
+def _session_identity(client, **changes):
+    value = {
+        "schema_id": "hormuz.gateway-identity", "schema_version": 1,
+        "organization_id": BINDING[0], "actor_id": BINDING[1], "team_id": BINDING[2],
+        "identity_type": "human", "allowed_clients": [client],
+        "authentication_source": "session:test-issuer",
+    }
+    return value | changes
 
 
 def _deployment_artifact(*, service_id: str = SERVICE_ID) -> bytes:
@@ -105,6 +137,131 @@ def _counters(*, live: int, attempts: int, first: int, failovers: int, unknown: 
 
 
 class ExternalPilotQualificationTests(unittest.TestCase):
+    def test_session_binding_requires_the_expected_single_client(self) -> None:
+        for client, access in (("codex", ACCESS), ("claude-code", CLAUDE_ACCESS)):
+            with self.subTest(client=client), patch(
+                "tools.qualify_external_pilot._json_gateway",
+                return_value=(_session_identity(client), {}),
+            ) as gateway:
+                self.assertEqual(_session_binding(ORIGIN, access, client), BINDING)
+            gateway.assert_called_once_with(ORIGIN, "/v1/gateway/whoami", access_token=access)
+
+    def test_session_binding_rejects_broad_wrong_or_non_session_identity(self) -> None:
+        for changes in (
+            {"allowed_clients": ["codex", "claude-code"]},
+            {"allowed_clients": ["codex"]},
+            {"allowed_clients": []},
+            {"identity_type": "machine"},
+            {"authentication_source": "static"},
+            {"actor_id": ""},
+            {"organization_id": None},
+            {"schema_version": 2},
+        ):
+            with self.subTest(changes=changes), patch(
+                "tools.qualify_external_pilot._json_gateway",
+                return_value=(_session_identity("claude-code", **changes), {}),
+            ), self.assertRaisesRegex(QualificationError, "^qualification_client_session_invalid$"):
+                _session_binding(ORIGIN, CLAUDE_ACCESS, "claude-code")
+
+    def test_different_members_are_rejected_before_provider_traffic(self) -> None:
+        with (
+            patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+            patch("tools.qualify_external_pilot._refresh", side_effect=[
+                (ACCESS, ROTATED_REFRESH), (CLAUDE_ACCESS, CLAUDE_ROTATED_REFRESH),
+            ]),
+            patch("tools.qualify_external_pilot._session_binding", side_effect=[
+                BINDING, (BINDING[0], "another-member", BINDING[2]),
+            ]),
+            patch("tools.qualify_external_pilot._provider_request") as provider,
+            patch("tools.qualify_external_pilot._restart_and_wait") as restart,
+            patch("tools.qualify_external_pilot._logout") as logout,
+            self.assertRaisesRegex(QualificationError, "^qualification_session_actor_mismatch$"),
+        ):
+            qualify(**_qualification_arguments())
+        provider.assert_not_called()
+        restart.assert_not_called()
+        self.assertEqual(logout.call_args_list, [
+            unittest.mock.call(ORIGIN, ROTATED_REFRESH),
+            unittest.mock.call(ORIGIN, CLAUDE_ROTATED_REFRESH),
+        ])
+
+    def test_second_refresh_failure_revokes_rotated_and_original_families(self) -> None:
+        with (
+            patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+            patch("tools.qualify_external_pilot._refresh", side_effect=[
+                (ACCESS, ROTATED_REFRESH), QualificationError("session_refresh_invalid"),
+            ]),
+            patch("tools.qualify_external_pilot._provider_request") as provider,
+            patch("tools.qualify_external_pilot._logout") as logout,
+            self.assertRaisesRegex(QualificationError, "^session_refresh_invalid$"),
+        ):
+            qualify(**_qualification_arguments())
+        provider.assert_not_called()
+        self.assertEqual(logout.call_args_list, [
+            unittest.mock.call(ORIGIN, ROTATED_REFRESH),
+            unittest.mock.call(ORIGIN, CLAUDE_REFRESH),
+        ])
+
+    def test_changed_member_after_restart_blocks_remaining_provider_traffic(self) -> None:
+        for changed_client in ("codex", "claude-code"):
+            changed = (BINDING[0], "another-member", BINDING[2])
+            bindings = [BINDING, BINDING, changed if changed_client == "codex" else BINDING, changed]
+            with (
+                self.subTest(client=changed_client),
+                patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+                patch("tools.qualify_external_pilot._refresh", side_effect=[
+                    (ACCESS, ROTATED_REFRESH), (CLAUDE_ACCESS, CLAUDE_ROTATED_REFRESH),
+                    (ACCESS_AFTER_RESTART, ROTATED_REFRESH_AFTER_RESTART),
+                    (CLAUDE_ACCESS_AFTER_RESTART, CLAUDE_ROTATED_AFTER_RESTART),
+                ]),
+                patch("tools.qualify_external_pilot._session_binding", side_effect=bindings),
+                patch("tools.qualify_external_pilot._reliability", side_effect=[
+                    _counters(live=0, attempts=0, first=0, failovers=0),
+                    _counters(live=1, attempts=1, first=1, failovers=0),
+                ]),
+                patch("tools.qualify_external_pilot._provider_request") as provider,
+                patch("tools.qualify_external_pilot._restart_and_wait") as restart,
+                patch("tools.qualify_external_pilot._logout") as logout,
+                self.assertRaisesRegex(QualificationError, "^qualification_session_actor_mismatch$"),
+            ):
+                qualify(**_qualification_arguments())
+            provider.assert_called_once_with(
+                ORIGIN, ACCESS, protocol="openai", alias="openai-secondary", stream=False,
+            )
+            restart.assert_called_once()
+            self.assertEqual(logout.call_args_list, [
+                unittest.mock.call(ORIGIN, ROTATED_REFRESH_AFTER_RESTART),
+                unittest.mock.call(ORIGIN, CLAUDE_ROTATED_AFTER_RESTART),
+            ])
+
+    def test_revocation_failure_still_attempts_the_other_session(self) -> None:
+        for errors in ((OSError("transport failed"), None), (None, OSError("transport failed"))):
+            with self.subTest(first_fails=errors[0] is not None), patch(
+                "tools.qualify_external_pilot._logout", side_effect=errors,
+            ) as logout, self.assertRaisesRegex(QualificationError, "^qualification_session_cleanup_failed$"):
+                _logout_sessions(ORIGIN, (ROTATED_REFRESH, CLAUDE_ROTATED_REFRESH))
+            self.assertEqual(logout.call_args_list, [
+                unittest.mock.call(ORIGIN, ROTATED_REFRESH),
+                unittest.mock.call(ORIGIN, CLAUDE_ROTATED_REFRESH),
+            ])
+
+    def test_cleanup_failure_preserves_the_primary_error(self) -> None:
+        with (
+            patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+            patch("tools.qualify_external_pilot._refresh", side_effect=[
+                (ACCESS, ROTATED_REFRESH), (CLAUDE_ACCESS, CLAUDE_ROTATED_REFRESH),
+            ]),
+            patch("tools.qualify_external_pilot._session_binding", return_value=BINDING),
+            patch("tools.qualify_external_pilot._reliability", side_effect=QualificationError("probe_failed")),
+            patch("tools.qualify_external_pilot._logout", side_effect=[OSError("transport failed"), None]) as logout,
+            self.assertRaisesRegex(QualificationError, "^probe_failed$"),
+        ):
+            qualify(**_qualification_arguments())
+        self.assertEqual(logout.call_args_list, [
+            unittest.mock.call(ORIGIN, ROTATED_REFRESH),
+            unittest.mock.call(ORIGIN, CLAUDE_ROTATED_REFRESH),
+        ])
+
     def test_abort_gateway_response_forces_the_underlying_socket_closed(self) -> None:
         class Response:
             def __init__(self) -> None:
@@ -387,12 +544,15 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         ]
         with (
             patch("tools.qualify_external_pilot._authenticate_deployment_evidence") as deployment,
+            patch("tools.qualify_external_pilot._session_binding", return_value=BINDING),
             patch("tools.qualify_external_pilot._restart_and_wait", return_value="c" * 16) as restart,
             patch(
                 "tools.qualify_external_pilot._refresh",
                 side_effect=[
                     (ACCESS, ROTATED_REFRESH),
+                    (CLAUDE_ACCESS, CLAUDE_ROTATED_REFRESH),
                     (ACCESS_AFTER_RESTART, ROTATED_REFRESH_AFTER_RESTART),
+                    (CLAUDE_ACCESS_AFTER_RESTART, CLAUDE_ROTATED_AFTER_RESTART),
                 ],
             ) as refresh,
             patch("tools.qualify_external_pilot._reliability", side_effect=snapshots) as reliability,
@@ -407,6 +567,7 @@ class ExternalPilotQualificationTests(unittest.TestCase):
                 deployment_evidence_url=DEPLOYMENT_RUN,
                 workflow_run_url=QUALIFICATION_RUN,
                 refresh_token=REFRESH,
+                claude_code_refresh_token=CLAUDE_REFRESH,
                 rehearsal_key=REHEARSAL,
                 deploy_hook=f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}",
             )
@@ -421,14 +582,23 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             refresh.call_args_list,
             [
                 unittest.mock.call(ORIGIN, REFRESH),
+                unittest.mock.call(ORIGIN, CLAUDE_REFRESH),
                 unittest.mock.call(ORIGIN, ROTATED_REFRESH),
+                unittest.mock.call(ORIGIN, CLAUDE_ROTATED_REFRESH),
             ],
         )
         self.assertEqual(reliability.call_count, 7)
         sleep.assert_called_once()
         self.assertEqual(provider.call_count, 11)
+        self.assertEqual(provider.call_args_list[0].args[1], ACCESS)
+        for call in provider.call_args_list[1:]:
+            expected_access = CLAUDE_ACCESS_AFTER_RESTART if call.kwargs["protocol"] == "anthropic" else ACCESS_AFTER_RESTART
+            self.assertEqual(call.args[1], expected_access)
         self.assertTrue(provider.call_args_list[-2].kwargs["disconnect_after_first_chunk"])
-        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH_AFTER_RESTART)
+        self.assertEqual(logout.call_args_list, [
+            unittest.mock.call(ORIGIN, ROTATED_REFRESH_AFTER_RESTART),
+            unittest.mock.call(ORIGIN, CLAUDE_ROTATED_AFTER_RESTART),
+        ])
         self.assertEqual(evidence["schema_id"], "hormuz.external-pilot-qualification-evidence")
         self.assertEqual(evidence["deployment_evidence_url"], DEPLOYMENT_RUN)
         self.assertEqual(evidence["recovery_evidence_url"], QUALIFICATION_RUN)
@@ -444,6 +614,8 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             ACCESS,
             ACCESS_AFTER_RESTART,
             REHEARSAL,
+            CLAUDE_REFRESH, CLAUDE_ROTATED_REFRESH, CLAUDE_ROTATED_AFTER_RESTART,
+            CLAUDE_ACCESS, CLAUDE_ACCESS_AFTER_RESTART,
         ):
             self.assertNotIn(secret, rendered)
 
@@ -455,12 +627,15 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         ]
         with (
             patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+            patch("tools.qualify_external_pilot._session_binding", return_value=BINDING),
             patch("tools.qualify_external_pilot._restart_and_wait"),
             patch(
                 "tools.qualify_external_pilot._refresh",
                 side_effect=[
                     (ACCESS, ROTATED_REFRESH),
+                    (CLAUDE_ACCESS, CLAUDE_ROTATED_REFRESH),
                     (ACCESS_AFTER_RESTART, ROTATED_REFRESH_AFTER_RESTART),
+                    (CLAUDE_ACCESS_AFTER_RESTART, CLAUDE_ROTATED_AFTER_RESTART),
                 ],
             ),
             patch("tools.qualify_external_pilot._reliability", side_effect=snapshots),
@@ -485,10 +660,14 @@ class ExternalPilotQualificationTests(unittest.TestCase):
                 deployment_evidence_url=DEPLOYMENT_RUN,
                 workflow_run_url=QUALIFICATION_RUN,
                 refresh_token=REFRESH,
+                claude_code_refresh_token=CLAUDE_REFRESH,
                 rehearsal_key=REHEARSAL,
                 deploy_hook=f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}",
             )
-        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH_AFTER_RESTART)
+        self.assertEqual(logout.call_args_list, [
+            unittest.mock.call(ORIGIN, ROTATED_REFRESH_AFTER_RESTART),
+            unittest.mock.call(ORIGIN, CLAUDE_ROTATED_AFTER_RESTART),
+        ])
 
     def test_cancellation_evidence_wait_is_bounded(self) -> None:
         snapshot = _counters(live=8, attempts=8, first=8, failovers=0)
@@ -539,12 +718,15 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         ]
         with (
             patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+            patch("tools.qualify_external_pilot._session_binding", return_value=BINDING),
             patch("tools.qualify_external_pilot._restart_and_wait"),
             patch(
                 "tools.qualify_external_pilot._refresh",
                 side_effect=[
                     (ACCESS, ROTATED_REFRESH),
+                    (CLAUDE_ACCESS, CLAUDE_ROTATED_REFRESH),
                     (ACCESS_AFTER_RESTART, ROTATED_REFRESH_AFTER_RESTART),
+                    (CLAUDE_ACCESS_AFTER_RESTART, CLAUDE_ROTATED_AFTER_RESTART),
                 ],
             ),
             patch(
@@ -568,16 +750,23 @@ class ExternalPilotQualificationTests(unittest.TestCase):
                 deployment_evidence_url=DEPLOYMENT_RUN,
                 workflow_run_url=QUALIFICATION_RUN,
                 refresh_token=REFRESH,
+                claude_code_refresh_token=CLAUDE_REFRESH,
                 rehearsal_key=REHEARSAL,
                 deploy_hook=f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}",
             )
-        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH_AFTER_RESTART)
+        self.assertEqual(logout.call_args_list, [
+            unittest.mock.call(ORIGIN, ROTATED_REFRESH_AFTER_RESTART),
+            unittest.mock.call(ORIGIN, CLAUDE_ROTATED_AFTER_RESTART),
+        ])
 
     def test_rotated_qualification_session_is_revoked_after_failure(self) -> None:
         with (
             patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+            patch("tools.qualify_external_pilot._session_binding", return_value=BINDING),
             patch("tools.qualify_external_pilot._restart_and_wait"),
-            patch("tools.qualify_external_pilot._refresh", return_value=(ACCESS, ROTATED_REFRESH)),
+            patch("tools.qualify_external_pilot._refresh", side_effect=[
+                (ACCESS, ROTATED_REFRESH), (CLAUDE_ACCESS, CLAUDE_ROTATED_REFRESH),
+            ]),
             patch("tools.qualify_external_pilot._reliability", side_effect=QualificationError("probe_failed")),
             patch("tools.qualify_external_pilot._logout") as logout,
             self.assertRaisesRegex(QualificationError, "probe_failed"),
@@ -589,14 +778,19 @@ class ExternalPilotQualificationTests(unittest.TestCase):
                 deployment_evidence_url=DEPLOYMENT_RUN,
                 workflow_run_url=QUALIFICATION_RUN,
                 refresh_token=REFRESH,
+                claude_code_refresh_token=CLAUDE_REFRESH,
                 rehearsal_key=REHEARSAL,
                 deploy_hook=f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}",
             )
-        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH)
+        self.assertEqual(logout.call_args_list, [
+            unittest.mock.call(ORIGIN, ROTATED_REFRESH),
+            unittest.mock.call(ORIGIN, CLAUDE_ROTATED_REFRESH),
+        ])
 
     def test_original_refresh_credential_revokes_family_when_rotation_response_is_lost(self) -> None:
         with (
             patch("tools.qualify_external_pilot._authenticate_deployment_evidence"),
+            patch("tools.qualify_external_pilot._session_binding", return_value=BINDING),
             patch("tools.qualify_external_pilot._restart_and_wait"),
             patch(
                 "tools.qualify_external_pilot._refresh",
@@ -612,10 +806,14 @@ class ExternalPilotQualificationTests(unittest.TestCase):
                 deployment_evidence_url=DEPLOYMENT_RUN,
                 workflow_run_url=QUALIFICATION_RUN,
                 refresh_token=REFRESH,
+                claude_code_refresh_token=CLAUDE_REFRESH,
                 rehearsal_key=REHEARSAL,
                 deploy_hook=f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}",
             )
-        logout.assert_called_once_with(ORIGIN, REFRESH)
+        self.assertEqual(logout.call_args_list, [
+            unittest.mock.call(ORIGIN, REFRESH),
+            unittest.mock.call(ORIGIN, CLAUDE_REFRESH),
+        ])
 
     def test_deploy_hook_is_bound_to_the_expected_service_and_commit(self) -> None:
         hook = f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}"
@@ -655,6 +853,7 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/external-pilot-qualification.yml").read_text()
         self.assertEqual(workflow.count("environment: external-pilot-qualification"), 2)
         self.assertEqual(workflow.count("${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}"), 1)
+        self.assertEqual(workflow.count("${{ secrets.HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN }}"), 1)
         self.assertEqual(workflow.count("${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}"), 1)
         self.assertEqual(workflow.count("${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}"), 1)
         self.assertEqual(workflow.count("${{ vars.HORMUZ_GATEWAY_ORIGIN }}"), 1)
