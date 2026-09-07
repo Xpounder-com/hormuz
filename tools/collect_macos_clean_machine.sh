@@ -15,7 +15,8 @@ OUTPUT="$3"
   || fail architecture_invalid
 [[ "$OUTPUT" == /* && ! -e "$OUTPUT" && ! -L "$OUTPUT" ]] || fail output_path_unsafe
 [[ -f "$INPUTS" && ! -L "$INPUTS" ]] || fail inputs_unsafe
-[[ "$(/usr/bin/stat -f '%z' "$INPUTS")" -le 1048576 ]] || fail inputs_too_large
+INPUT_BYTES="$(/usr/bin/wc -c < "$INPUTS")" || fail inputs_unsafe
+[[ "$INPUT_BYTES" -le 1048576 ]] || fail inputs_too_large
 
 input_value() {
   /usr/bin/plutil -extract "$1" raw -o - "$INPUTS" 2>/dev/null \

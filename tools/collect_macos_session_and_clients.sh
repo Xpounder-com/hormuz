@@ -11,7 +11,8 @@ fail() {
 INPUTS="$1"
 OUTPUT_DIRECTORY="$2"
 [[ -f "$INPUTS" && ! -L "$INPUTS" ]] || fail inputs_unsafe
-[[ "$(/usr/bin/stat -f '%z' "$INPUTS")" -le 1048576 ]] || fail inputs_too_large
+INPUT_BYTES="$(/usr/bin/wc -c < "$INPUTS")" || fail inputs_unsafe
+[[ "$INPUT_BYTES" -le 1048576 ]] || fail inputs_too_large
 [[ -d "$OUTPUT_DIRECTORY" && ! -L "$OUTPUT_DIRECTORY" ]] || fail output_directory_unsafe
 
 input_value() {
