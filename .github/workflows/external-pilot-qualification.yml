@@ -114,6 +114,7 @@ jobs:
           HORMUZ_DEPLOYMENT_EVIDENCE_URL: ${{ inputs.deployment_evidence_url }}
           HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN: ${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}
+          HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN: ${{ secrets.HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN }}
           HORMUZ_FAILOVER_REHEARSAL_KEY: ${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}
           HORMUZ_RENDER_DEPLOY_HOOK_URL: ${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}
           GH_TOKEN: ${{ github.token }}

@@ -529,6 +529,34 @@ def _logout(origin: str, credential: str) -> None:
         raise QualificationError("qualification_session_cleanup_failed")
 
 
+def _logout_sessions(origin: str, credentials: tuple[str, ...]) -> None:
+    failed = False
+    for credential in credentials:
+        try:
+            _logout(origin, credential)
+        except Exception:
+            failed = True
+    if failed:
+        raise QualificationError("qualification_session_cleanup_failed")
+
+
+def _session_binding(origin: str, access_token: str, client: str) -> tuple[str, str, str]:
+    value, _ = _json_gateway(origin, "/v1/gateway/whoami", access_token=access_token)
+    binding = tuple(value.get(name) for name in ("organization_id", "actor_id", "team_id"))
+    source = value.get("authentication_source")
+    if (
+        value.get("schema_id") != "hormuz.gateway-identity"
+        or value.get("schema_version") != 1
+        or value.get("identity_type") != "human"
+        or value.get("allowed_clients") != [client]
+        or not isinstance(source, str)
+        or not source.startswith("session:")
+        or any(not isinstance(item, str) or not item for item in binding)
+    ):
+        raise QualificationError("qualification_client_session_invalid")
+    return binding
+
+
 def _reliability(
     origin: str,
     access_token: str,
@@ -765,6 +793,7 @@ def qualify(
     deployment_evidence_url: str,
     workflow_run_url: str,
     refresh_token: str,
+    claude_code_refresh_token: str,
     rehearsal_key: str,
     deploy_hook: str,
 ) -> dict[str, Any]:
@@ -776,6 +805,8 @@ def qualify(
         or RUN_URL_RE.fullmatch(workflow_run_url) is None
         or deployment_evidence_url == workflow_run_url
         or TOKEN_RE.fullmatch(refresh_token) is None
+        or TOKEN_RE.fullmatch(claude_code_refresh_token) is None
+        or refresh_token == claude_code_refresh_token
         or re.fullmatch(r"[A-Za-z0-9_-]{43,128}", rehearsal_key) is None
     ):
         raise QualificationError("qualification_input_invalid")
@@ -789,9 +820,15 @@ def qualify(
 
     access_token = ""
     rotated_refresh = ""
+    claude_code_access = ""
+    claude_code_rotated_refresh = ""
     primary_error: BaseException | None = None
     try:
         access_token, rotated_refresh = _refresh(origin, refresh_token)
+        claude_code_access, claude_code_rotated_refresh = _refresh(origin, claude_code_refresh_token)
+        binding = _session_binding(origin, access_token, "codex")
+        if _session_binding(origin, claude_code_access, "claude-code") != binding:
+            raise QualificationError("qualification_session_actor_mismatch")
         before_restart_write = _reliability(
             origin,
             access_token,
@@ -834,6 +871,12 @@ def qualify(
             deploy_hook=deploy_hook,
         )
         access_token, rotated_refresh = _refresh(origin, rotated_refresh)
+        claude_code_access, claude_code_rotated_refresh = _refresh(origin, claude_code_rotated_refresh)
+        if (
+            _session_binding(origin, access_token, "codex") != binding
+            or _session_binding(origin, claude_code_access, "claude-code") != binding
+        ):
+            raise QualificationError("qualification_session_actor_mismatch")
         baseline = _reliability(
             origin,
             access_token,
@@ -848,11 +891,12 @@ def qualify(
         first_chunk_before_completion = True
         request_count = 0
         for protocol in ("anthropic", "openai"):
+            protocol_access = claude_code_access if protocol == "anthropic" else access_token
             for suffix in ("primary", "secondary"):
                 alias = f"{protocol}-{suffix}"
                 _provider_request(
                     origin,
-                    access_token,
+                    protocol_access,
                     protocol=protocol,
                     alias=alias,
                     stream=False,
@@ -860,7 +904,7 @@ def qualify(
                 request_count += 1
                 _, first_before_completion, terminal_observed = _provider_request(
                     origin,
-                    access_token,
+                    protocol_access,
                     protocol=protocol,
                     alias=alias,
                     stream=True,
@@ -1002,13 +1046,15 @@ def qualify(
         primary_error = error
         raise
     finally:
-        cleanup_refresh = rotated_refresh or refresh_token
-        if cleanup_refresh:
-            try:
-                _logout(origin, cleanup_refresh)
-            except Exception:
-                if primary_error is None:
-                    raise
+        # Attempt both families even when refreshing or revoking the first fails.
+        try:
+            _logout_sessions(origin, (
+                rotated_refresh or refresh_token,
+                claude_code_rotated_refresh or claude_code_refresh_token,
+            ))
+        except QualificationError:
+            if primary_error is None:
+                raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1021,6 +1067,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args(argv)
     refresh_token = os.environ.get("HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN", "")
+    claude_code_refresh_token = os.environ.get("HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN", "")
     rehearsal_key = os.environ.get("HORMUZ_FAILOVER_REHEARSAL_KEY", "")
     deploy_hook = os.environ.get("HORMUZ_RENDER_DEPLOY_HOOK_URL", "")
     try:
@@ -1031,6 +1078,7 @@ def main(argv: list[str] | None = None) -> int:
             deployment_evidence_url=arguments.deployment_evidence_url,
             workflow_run_url=arguments.workflow_run_url,
             refresh_token=refresh_token,
+            claude_code_refresh_token=claude_code_refresh_token,
             rehearsal_key=rehearsal_key,
             deploy_hook=deploy_hook,
         )
