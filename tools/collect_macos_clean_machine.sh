@@ -15,24 +15,53 @@ OUTPUT="$3"
   || fail architecture_invalid
 [[ "$OUTPUT" == /* && ! -e "$OUTPUT" && ! -L "$OUTPUT" ]] || fail output_path_unsafe
 [[ -f "$INPUTS" && ! -L "$INPUTS" ]] || fail inputs_unsafe
-[[ "$(/usr/bin/stat -f '%z' "$INPUTS")" -le 1048576 ]] || fail inputs_too_large
+INPUT_BYTES="$(/usr/bin/wc -c < "$INPUTS")" || fail inputs_unsafe
+[[ "$INPUT_BYTES" -le 1048576 ]] || fail inputs_too_large
 
 input_value() {
   /usr/bin/plutil -extract "$1" raw -o - "$INPUTS" 2>/dev/null \
     || fail inputs_invalid
 }
 
-SOURCE_COMMIT="$(input_value source_commit)"
 SCHEMA_ID="$(input_value schema_id)"
 SCHEMA_VERSION="$(input_value schema_version)"
+[[ "$(/usr/bin/plutil -type schema_id "$INPUTS" 2>/dev/null || true)" == "string" \
+      && "$(/usr/bin/plutil -type schema_version "$INPUTS" 2>/dev/null || true)" == "integer" \
+      && "$SCHEMA_ID" == "hormuz.macos-pilot-operations-inputs" ]] \
+  || fail inputs_schema_invalid
+case "$SCHEMA_VERSION" in
+  1)
+    QUALIFICATION_SCOPE=full_dual_provider
+    if /usr/bin/plutil -type qualification_scope "$INPUTS" >/dev/null 2>&1 \
+        || /usr/bin/plutil -type gateway.profile "$INPUTS" >/dev/null 2>&1 \
+        || /usr/bin/plutil -type gateway.provider_protocols "$INPUTS" >/dev/null 2>&1; then
+      fail inputs_scope_invalid
+    fi
+    ;;
+  2)
+    [[ "$(/usr/bin/plutil -type qualification_scope "$INPUTS" 2>/dev/null || true)" == "string" \
+          && "$(input_value qualification_scope)" == "codex_openai" \
+          && "$(/usr/bin/plutil -type gateway.profile "$INPUTS" 2>/dev/null || true)" == "string" \
+          && "$(input_value gateway.profile)" == "external_pilot_openai" \
+          && "$(/usr/bin/plutil -type gateway.provider_protocols "$INPUTS" 2>/dev/null || true)" == "array" \
+          && "$(input_value gateway.provider_protocols)" == "1" \
+          && "$(/usr/bin/plutil -type gateway.provider_protocols.0 "$INPUTS" 2>/dev/null || true)" == "string" \
+          && "$(input_value gateway.provider_protocols.0)" == "openai" ]] \
+      || fail inputs_scope_invalid
+    QUALIFICATION_SCOPE=codex_openai
+    ;;
+  *)
+    fail inputs_schema_invalid
+    ;;
+esac
+
+SOURCE_COMMIT="$(input_value source_commit)"
 CANDIDATE_SOURCE="$(input_value candidate.source_commit)"
 ARCHIVE_NAME="$(input_value candidate.archive_name)"
 ARCHIVE_BYTES="$(input_value candidate.archive_bytes)"
 ARCHIVE_SHA256="$(input_value candidate.archive_sha256)"
 VERSION="$(input_value candidate.version)"
 BUILD="$(input_value candidate.build)"
-[[ "$SCHEMA_ID" == "hormuz.macos-pilot-operations-inputs" && "$SCHEMA_VERSION" == "1" ]] \
-  || fail inputs_schema_invalid
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ && "$CANDIDATE_SOURCE" == "$SOURCE_COMMIT" ]] \
   || fail source_binding_invalid
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail version_invalid

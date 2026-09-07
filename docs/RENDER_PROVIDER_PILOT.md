@@ -63,12 +63,14 @@ revokes the session. Then disable the member and delete the temporary secret,
 including after a failed or abandoned run. Never give the member administrator
 access to simplify testing.
 
-OpenAI-only evidence is a bounded gateway result. It does **not** satisfy the
-existing signed-Mac aggregate, which still requires both protocols and official
-clients. That full gate stays unchanged and rejects OpenAI-only evidence. A
-separately scoped Codex-only Mac acceptance path and its actual clean-machine,
-session, update/rollback, security, accessibility and onboarding evidence remain
-necessary before claiming a customer-ready OpenAI-only desktop release.
+OpenAI-only evidence is a bounded gateway result. It can be composed only with
+the explicitly selected `codex_openai` schema-v2 signed-Mac contract described
+in [signed Mac pilot qualification](MACOS_PILOT_QUALIFICATION.md). The default
+`full_dual_provider` contract stays unchanged and rejects OpenAI-only evidence.
+The narrow path still requires its own real clean-machine, session,
+update/rollback, Codex recovery, security, and accessibility evidence before a
+controlled external pilot can qualify. It does not change the separate external
+human onboarding study or establish customer production readiness.
 
 ## Compute and data topology
 
@@ -293,28 +295,35 @@ reviewed `main` commit, and keep auto-deploy disabled. Then run the protected
    unauthenticated inference. Retain its exact artifact and run URL.
 2. `qualification` binds a deploy hook to that service and commit, restarts the
    instance, authenticates the successful deployment run and its exact artifact,
-   proves both encrypted client sessions survived, runs non-streaming and streaming
-   requests through all four aliases, exercises cancellation and one-hop
-   failover, verifies latency and pressure counters, revokes the qualification
-   sessions, and emits content-free evidence.
+   proves every selected encrypted client session survived, runs non-streaming
+   and streaming requests through the selected profile's exact aliases,
+   exercises cancellation and one-hop failover, verifies latency and pressure
+   counters, revokes the selected qualification sessions, and emits content-free
+   evidence.
 
-For the default dual-provider scope, the qualification environment must require review. Pin its non-secret
+The qualification environment must require review. Pin its non-secret
 `HORMUZ_GATEWAY_ORIGIN` and `HORMUZ_RENDER_SERVICE_ID` environment variables to
-the approved service, and keep only `HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN`,
-`HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN`,
-`HORMUZ_FAILOVER_REHEARSAL_KEY`, and `HORMUZ_RENDER_DEPLOY_HOOK_URL` as secrets.
-Both refresh tokens must belong to the same dedicated qualification member:
-the first comes from a `codex` login, the second from a `claude-code` login.
+the approved service. Both profiles use
+`HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN`, `HORMUZ_FAILOVER_REHEARSAL_KEY`, and
+`HORMUZ_RENDER_DEPLOY_HOOK_URL` as secrets. The default dual-provider profile
+also requires `HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN`; the OpenAI-only
+profile rejects that secret if supplied to its verifier. For the default
+profile, both refresh tokens must belong to the same dedicated qualification
+member: the first comes from a `codex` login, the second from a `claude-code`
+login.
 The gateway intentionally restricts each session to its enrolled client; a Codex
 session cannot authorize the Claude Code endpoint. Do not broaden that access
-boundary for qualification. The workflow verifies the two client scopes and
-matching organization, actor and team before and after restart, rotates both
-tokens, writes one governed attempt before the restart, and then
-requires the same actor-scoped PostgreSQL counters to survive before it sends
-the remaining qualification traffic.
-Its cleanup attempts revocation of both session families even if one cleanup
-fails. After the run or an abandoned setup, disable the temporary member, verify
-that neither session remains live, and delete both protected refresh-token secrets.
+boundary for qualification. In full scope, the workflow verifies both client
+scopes and matching organization, actor, and team before and after restart and
+rotates both tokens. In OpenAI-only scope, it verifies and rotates only the
+Codex session. Both paths write one governed attempt before the restart and
+require the same actor-scoped PostgreSQL counters to survive before sending the
+remaining qualification traffic.
+Its full-scope cleanup attempts revocation of both session families even if one
+cleanup fails. The OpenAI-only path cleans up the Codex session without creating
+or referencing a Claude session. After either run or an abandoned setup,
+disable the temporary member, verify that every selected session is no longer
+live, and delete the temporary protected refresh-token secrets.
 
 The protected workflow is evidence, not activation authority. Do not invite a
 customer until both runs pass and the signed-Mac gates in

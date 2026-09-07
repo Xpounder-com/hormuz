@@ -3,6 +3,16 @@ import XCTest
 @testable import HormuzClientCore
 
 final class StorageAndConnectorTests: PrivateStorageTestCase {
+    private struct LegacyProfile: Codable, Equatable {
+        let id: UUID
+        let gateway: String
+        let organization: String
+        let issuer: String?
+        let client: AIClient
+        let model: String
+        let allowLoopbackHTTP: Bool
+    }
+
     func testSymlinksHardlinksAndPublicFilesAreRejectedWithoutChanges() throws {
         let external = temporary.appendingPathComponent("external")
         try Data("leave me alone".utf8).write(to: external)
@@ -52,6 +62,77 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         XCTAssertNotNil(json["apiKeyHelper"])
         XCTAssertFalse(plan.previewText.contains("hox_"))
         XCTAssertFalse(plan.previewText.contains("settings.json' >"))
+    }
+
+    func testHostedCodexAliasesProduceOnlyBoundCodexLaunchers() throws {
+        for alias in ["openai-primary", "openai-secondary"] {
+            let profile = try ConnectionProfile(
+                gateway: "https://gateway.example.test",
+                organization: "org-a",
+                client: .codex,
+                model: alias,
+                setup: .openAIPilot
+            )
+            let plan = try ConnectorPlan.preview(
+                profile: profile,
+                directory: directory,
+                helper: URL(
+                    fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"
+                )
+            )
+            XCTAssertEqual(plan.profile.setup, .openAIPilot)
+            XCTAssertEqual(plan.files.count, 1)
+            XCTAssertTrue(plan.launcher.lastPathComponent.hasPrefix("codex-"))
+            XCTAssertTrue(plan.previewText.contains("https://gateway.example.test/v1"))
+            XCTAssertTrue(plan.previewText.contains("model=\"\(alias)\""))
+            XCTAssertFalse(plan.previewText.contains("ANTHROPIC_BASE_URL"))
+        }
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: directory.root.path), []
+        )
+    }
+
+    func testMalformedHostedProfileCannotWriteConnectorFiles() throws {
+        let value: [String: Any] = [
+            "id": UUID().uuidString,
+            "gateway": "https://gateway.example.test",
+            "organization": "org-a",
+            "client": "claude-code",
+            "model": "openai-primary",
+            "allowLoopbackHTTP": false,
+            "setup": "openai-pilot",
+        ]
+        let data = try JSONSerialization.data(withJSONObject: value)
+        XCTAssertThrowsError(try JSONDecoder().decode(ConnectionProfile.self, from: data))
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: directory.root.path), []
+        )
+    }
+
+    func testSaveLoadAndLegacyDecoderPreserveProfileIdentity() throws {
+        let profile = try ConnectionProfile(
+            gateway: "https://gateway.example.test",
+            organization: "org-a",
+            issuer: "https://issuer.example.test",
+            client: .codex,
+            model: "openai-primary",
+            setup: .openAIPilot
+        )
+        try directory.saveProfile(profile)
+        let loaded = try XCTUnwrap(directory.loadProfile())
+        XCTAssertEqual(loaded, profile)
+        XCTAssertEqual(loaded.key, profile.key)
+        XCTAssertEqual(loaded.setup, .openAIPilot)
+
+        let encoded = try JSONEncoder().encode(profile)
+        let legacy = try JSONDecoder().decode(LegacyProfile.self, from: encoded)
+        XCTAssertEqual(legacy.id, profile.id)
+        XCTAssertEqual(legacy.gateway, profile.gateway)
+        XCTAssertEqual(legacy.organization, profile.organization)
+        XCTAssertEqual(legacy.issuer, profile.issuer)
+        XCTAssertEqual(legacy.client, profile.client)
+        XCTAssertEqual(legacy.model, profile.model)
+        XCTAssertEqual(legacy.allowLoopbackHTTP, profile.allowLoopbackHTTP)
     }
 
     func testAnEditAfterPreviewIsNotOverwritten() async throws {

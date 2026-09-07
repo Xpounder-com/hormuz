@@ -15,6 +15,14 @@ on:
         description: Successful external-pilot deployment-evidence workflow URL
         required: true
         type: string
+      qualification_scope:
+        description: Explicit desktop scope; Codex/OpenAI does not qualify Claude Code or cross-provider availability
+        required: true
+        type: choice
+        default: full_dual_provider
+        options:
+          - full_dual_provider
+          - codex_openai
 
 permissions: {}
 
@@ -51,6 +59,7 @@ jobs:
           HORMUZ_CANDIDATE_RUN_URL: ${{ inputs.candidate_distribution_run_url }}
           HORMUZ_PREVIOUS_RUN_URL: ${{ inputs.previous_distribution_run_url }}
           HORMUZ_GATEWAY_DEPLOYMENT_URL: ${{ inputs.gateway_deployment_evidence_url }}
+          HORMUZ_QUALIFICATION_SCOPE: ${{ inputs.qualification_scope }}
         run: |
           set -euo pipefail
           umask 077
@@ -61,6 +70,7 @@ jobs:
             --previous-distribution-run-url "$HORMUZ_PREVIOUS_RUN_URL" \
             --gateway-deployment-evidence-url "$HORMUZ_GATEWAY_DEPLOYMENT_URL" \
             --expected-source-commit "$GITHUB_SHA" \
+            --qualification-scope "$HORMUZ_QUALIFICATION_SCOPE" \
             --output "$HORMUZ_STAGE/macos-pilot-inputs.json"
           install -m 0700 tools/collect_macos_clean_machine.sh \
             "$HORMUZ_STAGE/collect_macos_clean_machine.sh"
@@ -184,22 +194,38 @@ jobs:
           path: ${{ runner.temp }}/hormuz-macos-x86-64-records
       - name: Validate and assemble the sole retained proof
         env:
+          HORMUZ_QUALIFICATION_SCOPE: ${{ inputs.qualification_scope }}
           HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           umask 077
           HORMUZ_OUTPUT="$RUNNER_TEMP/hormuz-macos-pilot-operations"
           mkdir "$HORMUZ_OUTPUT"
-          python3 -I tools/macos_pilot_operations.py assemble \
-            --inputs "$RUNNER_TEMP/hormuz-macos-pilot-inputs/macos-pilot-inputs.json" \
-            --arm64-record "$RUNNER_TEMP/hormuz-macos-arm64-records/clean-machine.json" \
-            --x86-64-record "$RUNNER_TEMP/hormuz-macos-x86-64-records/clean-machine.json" \
-            --lifecycle "$RUNNER_TEMP/hormuz-macos-arm64-records/lifecycle.json" \
-            --codex-record "$RUNNER_TEMP/hormuz-macos-arm64-records/codex-recovery.json" \
-            --claude-record "$RUNNER_TEMP/hormuz-macos-arm64-records/claude-recovery.json" \
-            --source-commit "$GITHUB_SHA" \
-            --workflow-run-url "$HORMUZ_WORKFLOW_RUN_URL" \
+          HORMUZ_ASSEMBLE_ARGUMENTS=(
+            --inputs "$RUNNER_TEMP/hormuz-macos-pilot-inputs/macos-pilot-inputs.json"
+            --arm64-record "$RUNNER_TEMP/hormuz-macos-arm64-records/clean-machine.json"
+            --x86-64-record "$RUNNER_TEMP/hormuz-macos-x86-64-records/clean-machine.json"
+            --lifecycle "$RUNNER_TEMP/hormuz-macos-arm64-records/lifecycle.json"
+            --codex-record "$RUNNER_TEMP/hormuz-macos-arm64-records/codex-recovery.json"
+            --qualification-scope "$HORMUZ_QUALIFICATION_SCOPE"
+            --source-commit "$GITHUB_SHA"
+            --workflow-run-url "$HORMUZ_WORKFLOW_RUN_URL"
             --output "$HORMUZ_OUTPUT/macos-pilot-operations-evidence.json"
+          )
+          case "$HORMUZ_QUALIFICATION_SCOPE" in
+            full_dual_provider)
+              HORMUZ_ASSEMBLE_ARGUMENTS+=(
+                --claude-record "$RUNNER_TEMP/hormuz-macos-arm64-records/claude-recovery.json"
+              )
+              ;;
+            codex_openai)
+              ;;
+            *)
+              exit 1
+              ;;
+          esac
+          python3 -I tools/macos_pilot_operations.py assemble \
+            "${HORMUZ_ASSEMBLE_ARGUMENTS[@]}"
           test "$(find "$HORMUZ_OUTPUT" -type f | wc -l | tr -d ' ')" = 1
       - name: Upload exact operations evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -201,17 +201,25 @@ Hormuz, or enterprise production readiness.
 
 ## Signed Mac controlled-pilot gate
 
-The separate `hormuz.macos-pilot-qualification` v1 contract composes the exact
-notarized archive with its distribution proof and Apple summary, clean
-Gatekeeper installation on Apple Silicon and Intel Macs without developer
-tools, signed Keychain/session update and rollback behavior, the pinned Codex
-and Claude Code `401` semantics, and a real hosted `external_pilot` gateway.
-That gateway evidence requires HTTPS, Okta, server-only provider credentials,
-PostgreSQL durability and tenant RLS, durable sessions, early streaming,
-upstream closure and zero replay on cancellation, header/first-byte/total
-latency samples, a one-hop policy-bounded same-protocol failover, worker and
-pool-wait monitoring, recovery, and a support path. Independent security and
-accessibility reviews are separate required records.
+The separate `hormuz.macos-pilot-qualification` contract has two exact scopes.
+The default `full_dual_provider` scope retains the schema-v1 representation and
+requires the pinned Codex and Claude Code clients, both protocols, and a real
+hosted `external_pilot` gateway. The explicit `codex_openai` scope uses schema
+v2 and requires only pinned Codex, the OpenAI Responses protocol, and a real
+hosted `external_pilot_openai` gateway. Missing Claude evidence never selects
+the narrow scope, and a scope mismatch at any layer fails closed.
+
+Both scopes compose the exact notarized archive with its distribution proof and
+Apple summary, clean Gatekeeper installation on Apple Silicon and Intel Macs
+without developer tools, and signed Keychain/session update and rollback
+behavior. The selected gateway evidence requires HTTPS, Okta, server-only
+provider credentials, PostgreSQL durability and tenant RLS, durable sessions,
+early streaming, upstream closure and zero replay on cancellation,
+header/first-byte/total latency samples, a one-hop policy-bounded same-protocol
+failover, worker and pool-wait monitoring, recovery, and a support path.
+OpenAI-only fallback stays within OpenAI; that scope does not establish
+cross-provider failover or protection from an OpenAI-wide outage.
+Independent security and accessibility reviews are separate required records.
 
 The protected `.github/workflows/macos-pilot-operations.yml` workflow collects
 the clean-install, Keychain lifecycle, update/rollback, and pinned-client
@@ -220,10 +228,13 @@ distribution runs and the exact-source gateway deployment; clean Apple Silicon
 and Intel self-hosted runners receive no checkout or repository token. A real
 run still requires both dedicated machines and operator interaction. The Apple
 Silicon collector pins the npm release integrities and exact executed-file
-hashes for both official clients; it also requires a newly launched app process,
+hashes for every selected official client; it also requires a newly launched
+app process,
 an empty Keychain session before each login, and one unchanged Render instance
 fingerprint across reliability snapshots. The workflow's presence alone is not
-pilot evidence.
+pilot evidence. Workflow dispatch requires the exact `qualification_scope`
+choice. The full scope installs and exercises both clients; the narrow scope
+neither installs, invokes, nor records Claude Code.
 
 Run the content-free synthetic contract check with:
 
@@ -264,6 +275,26 @@ multi-region availability, zero downtime, an availability or latency SLA, or
 customer production readiness. See
 [MACOS_PILOT_QUALIFICATION.md](MACOS_PILOT_QUALIFICATION.md) for the sequence,
 evidence boundary, and remaining operational gates.
+
+The separate schema-v2 fixture proves the Codex/OpenAI branch mechanics:
+
+```bash
+python tools/verify_macos_pilot_evidence.py \
+  tests/fixtures/macos_pilot/complete-synthetic-codex-openai-v2.json \
+  --archive tests/fixtures/macos_pilot/Hormuz-0.1.0-notarized.zip \
+  --distribution-proof tests/fixtures/macos_pilot/distribution-proof-v2.json \
+  --notarization-summary tests/fixtures/macos_pilot/notarization-v1.json \
+  --previous-archive tests/fixtures/macos_pilot/Hormuz-0.0.9-notarized.zip \
+  --previous-distribution-proof tests/fixtures/macos_pilot/previous-distribution-proof-v2.json \
+  --previous-notarization-summary tests/fixtures/macos_pilot/previous-notarization-v1.json \
+  --qualification-scope codex_openai \
+  --allow-synthetic-fixture
+```
+
+It also always reports false with `synthetic_fixture`. A real narrow pass adds
+the fixed nonclaims `not_claude_code_qualification`,
+`not_cross_provider_failover`, and `not_provider_wide_outage_protection` to the
+ordinary controlled-pilot limitations.
 
 ## Active post-publication onboarding-validation milestone
 

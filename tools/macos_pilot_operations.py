@@ -18,6 +18,7 @@ import zipfile
 import zlib
 
 if __package__:
+    from tools import macos_pilot_scope as scope
     from tools import verify_external_pilot_deployment as deployment
     from tools import verify_macos_pilot_evidence as pilot
 else:
@@ -27,6 +28,7 @@ else:
     tools_directory = str(Path(__file__).resolve().parent)
     if tools_directory not in sys.path:
         sys.path.insert(0, tools_directory)
+    import macos_pilot_scope as scope  # type: ignore[no-redef]
     import verify_external_pilot_deployment as deployment  # type: ignore[no-redef]
     import verify_macos_pilot_evidence as pilot  # type: ignore[no-redef]
 
@@ -46,6 +48,7 @@ _INPUT_FIELDS = {
     "previous",
     "gateway",
 }
+_INPUT_V2_FIELDS = _INPUT_FIELDS | {"qualification_scope"}
 _DISTRIBUTION_INPUT_FIELDS = {
     "source_commit",
     "workflow_run_url",
@@ -61,10 +64,21 @@ _GATEWAY_INPUT_FIELDS = {
     "origin",
     "service_id",
 }
+_GATEWAY_INPUT_V2_FIELDS = _GATEWAY_INPUT_FIELDS | {
+    "profile",
+    "provider_protocols",
+}
 
 
 class MacPilotOperationsError(ValueError):
     """A fixed, content-free operations preparation or assembly failure."""
+
+
+def _scope_contract(value: object) -> scope.MacPilotScopeContract:
+    try:
+        return scope.resolve_requested_scope(value)
+    except scope.MacPilotScopeError as error:
+        raise MacPilotOperationsError(str(error)) from None
 
 
 def _now() -> datetime:
@@ -336,7 +350,12 @@ def _distribution(run: dict[str, Any], label: str) -> tuple[dict[str, Any], date
     }, artifact_created_at
 
 
-def _gateway(run: dict[str, Any]) -> dict[str, str]:
+def _gateway(
+    run: dict[str, Any],
+    scope_contract: scope.MacPilotScopeContract = scope.SCOPE_CONTRACTS[
+        scope.FULL_DUAL_PROVIDER
+    ],
+) -> dict[str, Any]:
     label = "gateway_deployment"
     if run.get("path") != pilot.EXTERNAL_PILOT_WORKFLOW:
         raise MacPilotOperationsError("gateway_deployment_workflow_invalid")
@@ -360,7 +379,7 @@ def _gateway(run: dict[str, Any]) -> dict[str, str]:
         "schema_id": deployment.SCHEMA_ID,
         "schema_version": deployment.SCHEMA_VERSION,
         "evidence_kind": "live_external_pilot",
-        **deployment.EXPECTED_CONTRACT,
+        **deployment.PROFILE_CONTRACTS[scope_contract.gateway_profile],
         "source_commit": run["head_sha"],
         "workflow_run_url": run["html_url"],
         "support_path_published": True,
@@ -377,12 +396,20 @@ def _gateway(run: dict[str, Any]) -> dict[str, str]:
         deployment._origin(str(evidence.get("gateway_origin", "")))
     except deployment.DeploymentEvidenceError as error:
         raise MacPilotOperationsError("gateway_deployment_evidence_invalid") from error
-    return {
+    result: dict[str, Any] = {
         "source_commit": run["head_sha"],
         "deployment_evidence_url": run["html_url"],
         "origin": str(evidence["gateway_origin"]),
         "service_id": str(evidence["render_service_id"]),
     }
+    if scope_contract.schema_version == 2:
+        result.update(
+            {
+                "profile": scope_contract.gateway_profile,
+                "provider_protocols": list(scope_contract.provider_protocols),
+            }
+        )
+    return result
 
 
 def prepare(
@@ -391,7 +418,9 @@ def prepare(
     previous_url: str,
     gateway_url: str,
     expected_source_commit: str,
+    qualification_scope: object = scope.DEFAULT_QUALIFICATION_SCOPE,
 ) -> dict[str, Any]:
+    selected = _scope_contract(qualification_scope)
     if pilot._REVISION_RE.fullmatch(expected_source_commit) is None:
         raise MacPilotOperationsError("expected_source_commit_invalid")
     candidate_run = _run(candidate_url, "candidate")
@@ -416,35 +445,65 @@ def prepare(
         or candidate["version"] == previous["version"]
     ):
         raise MacPilotOperationsError("distribution_history_not_immediate")
-    gateway = _gateway(gateway_run)
+    gateway = _gateway(gateway_run, selected)
     if gateway["source_commit"] != expected_source_commit:
         raise MacPilotOperationsError("gateway_source_commit_invalid")
     _, gateway_completed_at = _run_timeline(gateway_run, "gateway_deployment")
     if gateway_completed_at > _now() + timedelta(minutes=5):
         raise MacPilotOperationsError("gateway_deployment_chronology_invalid")
-    return {
+    result = {
         "schema_id": INPUT_SCHEMA_ID,
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": selected.schema_version,
         "source_commit": expected_source_commit,
         "candidate": candidate,
         "previous": previous,
         "gateway": gateway,
     }
+    if selected.schema_version == 2:
+        result["qualification_scope"] = selected.name
+    return result
 
 
-def _validate_inputs(value: object, source_commit: str) -> dict[str, Any]:
+def _validate_inputs(
+    value: object,
+    source_commit: str,
+    qualification_scope: object = scope.DEFAULT_QUALIFICATION_SCOPE,
+) -> dict[str, Any]:
+    selected = _scope_contract(qualification_scope)
     try:
-        root = pilot._require_fields(value, _INPUT_FIELDS, "operations_inputs")
-        pilot._require_int(root["schema_version"], 1, 1, "operations_inputs_schema_version")
+        if not isinstance(value, dict):
+            raise MacPilotOperationsError("operations_inputs_fields_invalid")
+        try:
+            evidence_scope = scope.resolve_evidence_scope(
+                value.get("schema_version"),
+                qualification_scope_present="qualification_scope" in value,
+                qualification_scope=value.get("qualification_scope"),
+            )
+            scope.require_matching_scope(selected, evidence_scope)
+        except scope.MacPilotScopeError as error:
+            raise MacPilotOperationsError(str(error)) from None
+        input_fields = (
+            _INPUT_FIELDS if selected.schema_version == 1 else _INPUT_V2_FIELDS
+        )
+        root = pilot._require_fields(value, input_fields, "operations_inputs")
+        pilot._require_int(
+            root["schema_version"],
+            selected.schema_version,
+            selected.schema_version,
+            "operations_inputs_schema_version",
+        )
         candidate = pilot._require_fields(
             root["candidate"], _DISTRIBUTION_INPUT_FIELDS, "candidate_input"
         )
         previous = pilot._require_fields(
             root["previous"], _DISTRIBUTION_INPUT_FIELDS, "previous_input"
         )
-        gateway = pilot._require_fields(
-            root["gateway"], _GATEWAY_INPUT_FIELDS, "gateway_input"
+        gateway_fields = (
+            _GATEWAY_INPUT_FIELDS
+            if selected.schema_version == 1
+            else _GATEWAY_INPUT_V2_FIELDS
         )
+        gateway = pilot._require_fields(root["gateway"], gateway_fields, "gateway_input")
         for label, item in (("candidate", candidate), ("previous", previous)):
             pilot._require_pattern(item["source_commit"], pilot._REVISION_RE, f"{label}_source")
             pilot._require_pattern(item["workflow_run_url"], pilot._ACTIONS_RUN_RE, f"{label}_run")
@@ -464,6 +523,11 @@ def _validate_inputs(value: object, source_commit: str) -> dict[str, Any]:
         pilot._require_pattern(
             gateway["service_id"], pilot._RENDER_SERVICE_ID_RE, "gateway_service_id"
         )
+        if selected.schema_version == 2 and (
+            gateway["profile"] != selected.gateway_profile
+            or gateway["provider_protocols"] != list(selected.provider_protocols)
+        ):
+            raise MacPilotOperationsError("gateway_scope_invalid")
     except (pilot.MacPilotEvidenceError, deployment.DeploymentEvidenceError) as error:
         raise MacPilotOperationsError(str(error)) from error
     if (
@@ -489,21 +553,29 @@ def assemble(
     x86_64_record: object,
     lifecycle: object,
     codex_record: object,
-    claude_record: object,
+    claude_record: object | None,
     source_commit: str,
     workflow_run_url: str,
+    qualification_scope: object = scope.DEFAULT_QUALIFICATION_SCOPE,
 ) -> dict[str, Any]:
+    selected = _scope_contract(qualification_scope)
+    if selected.name == scope.FULL_DUAL_PROVIDER and claude_record is None:
+        raise MacPilotOperationsError("claude_record_required")
+    if selected.name == scope.CODEX_OPENAI and claude_record is not None:
+        raise MacPilotOperationsError("claude_record_unexpected")
     if (
         pilot._REVISION_RE.fullmatch(source_commit) is None
         or pilot._ACTIONS_RUN_RE.fullmatch(workflow_run_url) is None
     ):
         raise MacPilotOperationsError("operations_identity_invalid")
-    root = _validate_inputs(inputs, source_commit)
+    root = _validate_inputs(inputs, source_commit, selected.name)
     candidate = root["candidate"]
     previous = root["previous"]
     gateway = root["gateway"]
     clean = [arm64_record, x86_64_record]
-    clients = [codex_record, claude_record]
+    clients = [codex_record]
+    if claude_record is not None:
+        clients.append(claude_record)
     reasons: list[str] = []
     try:
         architectures = pilot._validate_clean_machines(
@@ -517,16 +589,19 @@ def assemble(
             lifecycle, previous["build"], candidate["build"], reasons
         )
         pilot._validate_client_recovery(
-            clients, candidate["archive_sha256"], reasons
+            clients,
+            candidate["archive_sha256"],
+            reasons,
+            selected,
         )
     except pilot.MacPilotEvidenceError as error:
         raise MacPilotOperationsError(str(error)) from error
     if architectures != ["arm64", "x86_64"] or reasons:
         raise MacPilotOperationsError("operations_records_incomplete")
-    return {
+    result = {
         "schema_id": OPERATIONS_SCHEMA_ID,
-        "schema_version": SCHEMA_VERSION,
-        "claim_scope": pilot.CLAIM_SCOPE,
+        "schema_version": selected.schema_version,
+        "claim_scope": selected.claim_scope,
         "source_commit": source_commit,
         "workflow_run_url": workflow_run_url,
         "candidate_archive_sha256": candidate["archive_sha256"],
@@ -540,6 +615,9 @@ def assemble(
         "lifecycle": lifecycle,
         "client_auth_recovery": clients,
     }
+    if selected.schema_version == 2:
+        result["qualification_scope"] = selected.name
+    return result
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -550,6 +628,11 @@ def _parser() -> argparse.ArgumentParser:
     prepare_command.add_argument("--previous-distribution-run-url", required=True)
     prepare_command.add_argument("--gateway-deployment-evidence-url", required=True)
     prepare_command.add_argument("--expected-source-commit", required=True)
+    prepare_command.add_argument(
+        "--qualification-scope",
+        choices=scope.QUALIFICATION_SCOPE_CHOICES,
+        default=scope.DEFAULT_QUALIFICATION_SCOPE,
+    )
     prepare_command.add_argument("--output", type=Path, required=True)
     assemble_command = commands.add_parser("assemble")
     assemble_command.add_argument("--inputs", type=Path, required=True)
@@ -557,7 +640,12 @@ def _parser() -> argparse.ArgumentParser:
     assemble_command.add_argument("--x86-64-record", type=Path, required=True)
     assemble_command.add_argument("--lifecycle", type=Path, required=True)
     assemble_command.add_argument("--codex-record", type=Path, required=True)
-    assemble_command.add_argument("--claude-record", type=Path, required=True)
+    assemble_command.add_argument("--claude-record", type=Path)
+    assemble_command.add_argument(
+        "--qualification-scope",
+        choices=scope.QUALIFICATION_SCOPE_CHOICES,
+        default=scope.DEFAULT_QUALIFICATION_SCOPE,
+    )
     assemble_command.add_argument("--source-commit", required=True)
     assemble_command.add_argument("--workflow-run-url", required=True)
     assemble_command.add_argument("--output", type=Path, required=True)
@@ -573,33 +661,49 @@ def main(argv: list[str] | None = None) -> int:
                 previous_url=arguments.previous_distribution_run_url,
                 gateway_url=arguments.gateway_deployment_evidence_url,
                 expected_source_commit=arguments.expected_source_commit,
+                qualification_scope=arguments.qualification_scope,
             )
         else:
+            selected = _scope_contract(arguments.qualification_scope)
+            if (
+                selected.name == scope.FULL_DUAL_PROVIDER
+                and arguments.claude_record is None
+            ):
+                raise MacPilotOperationsError("claude_record_required")
+            if (
+                selected.name == scope.CODEX_OPENAI
+                and arguments.claude_record is not None
+            ):
+                raise MacPilotOperationsError("claude_record_unexpected")
+            claude_record = (
+                None
+                if arguments.claude_record is None
+                else _load_json(arguments.claude_record, "claude_record")
+            )
             value = assemble(
                 inputs=_load_json(arguments.inputs, "operations_inputs"),
                 arm64_record=_load_json(arguments.arm64_record, "arm64_record"),
                 x86_64_record=_load_json(arguments.x86_64_record, "x86_64_record"),
                 lifecycle=_load_json(arguments.lifecycle, "lifecycle"),
                 codex_record=_load_json(arguments.codex_record, "codex_record"),
-                claude_record=_load_json(arguments.claude_record, "claude_record"),
+                claude_record=claude_record,
                 source_commit=arguments.source_commit,
                 workflow_run_url=arguments.workflow_run_url,
+                qualification_scope=selected.name,
             )
         _write_exclusive(arguments.output, value)
     except (MacPilotOperationsError, OSError, UnicodeError) as error:
         print(str(error), file=sys.stderr)
         return 1
-    print(
-        json.dumps(
-            {
-                "schema_id": value["schema_id"],
-                "schema_version": SCHEMA_VERSION,
-                "status": "passed",
-                "source_commit": value["source_commit"],
-            },
-            sort_keys=True,
-        )
-    )
+    summary = {
+        "schema_id": value["schema_id"],
+        "schema_version": value["schema_version"],
+        "status": "passed",
+        "source_commit": value["source_commit"],
+    }
+    if value["schema_version"] == 2:
+        summary["qualification_scope"] = value["qualification_scope"]
+    print(json.dumps(summary, sort_keys=True))
     return 0
 
 

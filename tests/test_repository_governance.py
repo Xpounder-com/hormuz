@@ -575,6 +575,117 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 with self.assertRaisesRegex(RepositoryGovernanceError, expected):
                     validate_repository_governance(root)
 
+    def test_macos_pilot_scope_selection_and_assembly_fail_closed(self) -> None:
+        selector = (
+            "      qualification_scope:\n"
+            "        description: Explicit desktop scope; Codex/OpenAI does not qualify Claude Code or cross-provider availability\n"
+            "        required: true\n"
+            "        type: choice\n"
+            "        default: full_dual_provider\n"
+            "        options:\n"
+            "          - full_dual_provider\n"
+            "          - codex_openai\n"
+        )
+        conditional = (
+            '          case "$HORMUZ_QUALIFICATION_SCOPE" in\n'
+            "            full_dual_provider)\n"
+            "              HORMUZ_ASSEMBLE_ARGUMENTS+=(\n"
+            '                --claude-record "$RUNNER_TEMP/hormuz-macos-arm64-records/claude-recovery.json"\n'
+            "              )\n"
+            "              ;;\n"
+            "            codex_openai)\n"
+            "              ;;\n"
+            "            *)\n"
+            "              exit 1\n"
+            "              ;;\n"
+            "          esac\n"
+        )
+        mutations = (
+            ("missing selector", selector, ""),
+            (
+                "narrow default",
+                "        default: full_dual_provider\n",
+                "        default: codex_openai\n",
+            ),
+            (
+                "unknown option",
+                "          - codex_openai\n",
+                "          - unknown\n",
+            ),
+            ("free form selector", "        type: choice\n", "        type: string\n"),
+            (
+                "direct expression in shell",
+                '--qualification-scope "$HORMUZ_QUALIFICATION_SCOPE"',
+                '--qualification-scope "${{ inputs.qualification_scope }}"',
+            ),
+            (
+                "scope omitted from prepare",
+                '            --qualification-scope "$HORMUZ_QUALIFICATION_SCOPE" \\\n',
+                "",
+            ),
+            (
+                "unconditional Claude record",
+                conditional,
+                (
+                    "          HORMUZ_ASSEMBLE_ARGUMENTS+=(\n"
+                    '            --claude-record "$RUNNER_TEMP/hormuz-macos-arm64-records/claude-recovery.json"\n'
+                    "          )\n"
+                ),
+            ),
+            (
+                "missing exact source guard",
+                '          test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"\n',
+                "",
+            ),
+            (
+                "extra retained output",
+                '          test "$(find "$HORMUZ_OUTPUT" -type f | wc -l | tr -d \' \')" = 1\n',
+                '          test "$(find "$HORMUZ_OUTPUT" -type f | wc -l | tr -d \' \')" = 2\n',
+            ),
+            ("relaxed overwrite", "          overwrite: false\n", "          overwrite: true\n"),
+            ("relaxed retention", "          retention-days: 30\n", "          retention-days: 31\n"),
+            (
+                "continue on error",
+                "      - name: Validate and assemble the sole retained proof\n",
+                (
+                    "      - name: Validate and assemble the sole retained proof\n"
+                    "        continue-on-error: true\n"
+                ),
+            ),
+        )
+        for label, original, replacement in mutations:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/macos-pilot-operations.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertGreaterEqual(value.count(original), 1)
+                workflow.write_text(
+                    value.replace(original, replacement, 1), encoding="utf-8"
+                )
+                with self.assertRaisesRegex(
+                    RepositoryGovernanceError, "macOS pilot operations"
+                ):
+                    validate_repository_governance(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-pilot-operations.yml"
+            value = workflow.read_text(encoding="utf-8")
+            assemble_start = value.index("  assemble:\n")
+            assemble = value[assemble_start:]
+            marker = '            --qualification-scope "$HORMUZ_QUALIFICATION_SCOPE"\n'
+            self.assertEqual(assemble.count(marker), 1)
+            workflow.write_text(
+                value[:assemble_start] + assemble.replace(marker, "", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "macOS pilot operations"
+            ):
+                validate_repository_governance(root)
+
     def test_macos_pilot_clean_runners_cannot_checkout_or_receive_tokens(self) -> None:
         additions = (
             (

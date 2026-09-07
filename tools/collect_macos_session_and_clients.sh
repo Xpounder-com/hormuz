@@ -11,21 +11,70 @@ fail() {
 INPUTS="$1"
 OUTPUT_DIRECTORY="$2"
 [[ -f "$INPUTS" && ! -L "$INPUTS" ]] || fail inputs_unsafe
+INPUT_BYTES="$(/usr/bin/wc -c < "$INPUTS")" || fail inputs_unsafe
+[[ "$INPUT_BYTES" -le 1048576 ]] || fail inputs_too_large
 [[ -d "$OUTPUT_DIRECTORY" && ! -L "$OUTPUT_DIRECTORY" ]] || fail output_directory_unsafe
-/bin/chmod 700 "$OUTPUT_DIRECTORY"
-for output_name in lifecycle.json codex-recovery.json claude-recovery.json; do
-  [[ ! -e "$OUTPUT_DIRECTORY/$output_name" && ! -L "$OUTPUT_DIRECTORY/$output_name" ]] \
-    || fail output_path_unsafe
-done
 
 input_value() {
   /usr/bin/plutil -extract "$1" raw -o - "$INPUTS" 2>/dev/null \
     || fail inputs_invalid
 }
 
-[[ "$(input_value schema_id)" == "hormuz.macos-pilot-operations-inputs" ]] \
+SCHEMA_ID="$(input_value schema_id)"
+SCHEMA_VERSION="$(input_value schema_version)"
+[[ "$(/usr/bin/plutil -type schema_id "$INPUTS" 2>/dev/null || true)" == "string" \
+      && "$(/usr/bin/plutil -type schema_version "$INPUTS" 2>/dev/null || true)" == "integer" \
+      && "$SCHEMA_ID" == "hormuz.macos-pilot-operations-inputs" ]] \
   || fail inputs_schema_invalid
-[[ "$(input_value schema_version)" == "1" ]] || fail inputs_schema_invalid
+case "$SCHEMA_VERSION" in
+  1)
+    QUALIFICATION_SCOPE=full_dual_provider
+    if /usr/bin/plutil -type qualification_scope "$INPUTS" >/dev/null 2>&1 \
+        || /usr/bin/plutil -type gateway.profile "$INPUTS" >/dev/null 2>&1 \
+        || /usr/bin/plutil -type gateway.provider_protocols "$INPUTS" >/dev/null 2>&1; then
+      fail inputs_scope_invalid
+    fi
+    ;;
+  2)
+    [[ "$(/usr/bin/plutil -type qualification_scope "$INPUTS" 2>/dev/null || true)" == "string" \
+          && "$(input_value qualification_scope)" == "codex_openai" \
+          && "$(/usr/bin/plutil -type gateway.profile "$INPUTS" 2>/dev/null || true)" == "string" \
+          && "$(input_value gateway.profile)" == "external_pilot_openai" \
+          && "$(/usr/bin/plutil -type gateway.provider_protocols "$INPUTS" 2>/dev/null || true)" == "array" \
+          && "$(input_value gateway.provider_protocols)" == "1" \
+          && "$(/usr/bin/plutil -type gateway.provider_protocols.0 "$INPUTS" 2>/dev/null || true)" == "string" \
+          && "$(input_value gateway.provider_protocols.0)" == "openai" ]] \
+      || fail inputs_scope_invalid
+    QUALIFICATION_SCOPE=codex_openai
+    ;;
+  *)
+    fail inputs_schema_invalid
+    ;;
+esac
+
+for output_name in lifecycle.json codex-recovery.json; do
+  [[ ! -e "$OUTPUT_DIRECTORY/$output_name" && ! -L "$OUTPUT_DIRECTORY/$output_name" ]] \
+    || fail output_path_unsafe
+done
+if [[ "$QUALIFICATION_SCOPE" == "full_dual_provider" ]]; then
+  [[ ! -e "$OUTPUT_DIRECTORY/claude-recovery.json" \
+        && ! -L "$OUTPUT_DIRECTORY/claude-recovery.json" ]] \
+    || fail output_path_unsafe
+else
+  [[ ! -e "$OUTPUT_DIRECTORY/claude-recovery.json" \
+        && ! -L "$OUTPUT_DIRECTORY/claude-recovery.json" ]] \
+    || fail unexpected_claude_record
+fi
+shopt -s nullglob dotglob
+EXISTING_OUTPUTS=("$OUTPUT_DIRECTORY"/*)
+shopt -u nullglob dotglob
+for existing_output in "${EXISTING_OUTPUTS[@]}"; do
+  [[ "$(/usr/bin/basename "$existing_output")" == "clean-machine.json" \
+        && -f "$existing_output" && ! -L "$existing_output" ]] \
+    || fail output_directory_contents_invalid
+done
+/bin/chmod 700 "$OUTPUT_DIRECTORY"
+
 SOURCE_COMMIT="$(input_value source_commit)"
 CANDIDATE_SOURCE="$(input_value candidate.source_commit)"
 CANDIDATE_NAME="$(input_value candidate.archive_name)"
@@ -621,20 +670,22 @@ run_codex_recovery
   || fail session_removal_failed
 credential_files_absent
 
-restart_app
-require_empty_session_store
-wait_for_active_profile claude-code
-verify_session
-run_claude_recovery
-/Applications/Hormuz.app/Contents/MacOS/Hormuz \
-  pilot-evidence sign-out --profile "$ACTIVE_PROFILE_ID" \
-  --state-directory "$STATE_DIRECTORY" >/dev/null \
-  || fail claude_sign_out_failed
-/Applications/Hormuz.app/Contents/MacOS/Hormuz \
-  pilot-evidence session-absent --profile "$ACTIVE_PROFILE_ID" \
-  --state-directory "$STATE_DIRECTORY" >/dev/null \
-  || fail claude_session_removal_failed
-credential_files_absent
+if [[ "$QUALIFICATION_SCOPE" == "full_dual_provider" ]]; then
+  restart_app
+  require_empty_session_store
+  wait_for_active_profile claude-code
+  verify_session
+  run_claude_recovery
+  /Applications/Hormuz.app/Contents/MacOS/Hormuz \
+    pilot-evidence sign-out --profile "$ACTIVE_PROFILE_ID" \
+    --state-directory "$STATE_DIRECTORY" >/dev/null \
+    || fail claude_sign_out_failed
+  /Applications/Hormuz.app/Contents/MacOS/Hormuz \
+    pilot-evidence session-absent --profile "$ACTIVE_PROFILE_ID" \
+    --state-directory "$STATE_DIRECTORY" >/dev/null \
+    || fail claude_session_removal_failed
+  credential_files_absent
+fi
 
 LIFECYCLE_TMP="$OUTPUT_DIRECTORY/lifecycle.json.tmp"
 /usr/bin/plutil -create json "$LIFECYCLE_TMP"
