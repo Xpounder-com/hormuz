@@ -775,6 +775,80 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             )
         reliability.assert_called_once()
 
+    def test_cancellation_wait_requires_both_durable_evidence_and_idle_provider(self) -> None:
+        before = _counters(live=5, attempts=5, first=5, failovers=0)
+        recorded = _counters(live=6, attempts=6, first=6, failovers=0, unknown=1, cancellations=1)
+        snapshots = [
+            before | {"provider_inflight": 1},
+            recorded | {"provider_inflight": 1},
+            recorded,
+        ]
+        with (
+            patch("tools.qualify_external_pilot._json_gateway", side_effect=[
+                (snapshot, {"cache-control": "no-store"}) for snapshot in snapshots
+            ]) as gateway,
+            patch("tools.qualify_external_pilot.time.monotonic", return_value=0),
+            patch("tools.qualify_external_pilot.time.sleep") as sleep,
+        ):
+            result = _wait_for_cancellation_evidence(
+                ORIGIN, ACCESS, expected_commit=COMMIT, service_id=SERVICE_ID, before=before,
+            )
+        self.assertEqual(result, recorded)
+        self.assertEqual(gateway.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_recorded_cancellation_cannot_pass_while_provider_remains_inflight(self) -> None:
+        before = _counters(live=5, attempts=5, first=5, failovers=0)
+        snapshot = _counters(live=6, attempts=6, first=6, failovers=0, unknown=1, cancellations=1)
+        snapshot["provider_inflight"] = 1
+        with (
+            patch("tools.qualify_external_pilot._json_gateway", return_value=(snapshot, {"cache-control": "no-store"})),
+            patch("tools.qualify_external_pilot.time.monotonic", side_effect=[0, 0, 1]),
+            patch("tools.qualify_external_pilot.time.sleep") as sleep,
+            self.assertRaisesRegex(QualificationError, "^cancellation_evidence_timed_out$"),
+        ):
+            _wait_for_cancellation_evidence(
+                ORIGIN, ACCESS, expected_commit=COMMIT, service_id=SERVICE_ID,
+                before=before, timeout_seconds=1,
+            )
+        sleep.assert_called_once()
+
+    def test_reliability_checkpoints_still_require_idle_provider(self) -> None:
+        snapshot = _counters(live=5, attempts=5, first=5, failovers=0) | {"provider_inflight": 1}
+        with (
+            patch("tools.qualify_external_pilot._json_gateway", return_value=(snapshot, {"cache-control": "no-store"})),
+            self.assertRaisesRegex(QualificationError, "^provider_reliability_summary_invalid$"),
+        ):
+            _reliability(ORIGIN, ACCESS, expected_commit=COMMIT, service_id=SERVICE_ID)
+
+    def test_cancellation_poll_rejects_invalid_summaries_without_retrying(self) -> None:
+        before = _counters(live=5, attempts=5, first=5, failovers=0)
+        changes = (
+            {"provider_inflight": 2, "provider_peak_inflight": 1},
+            {"provider_inflight": 9},
+            {"provider_inflight": -1},
+            {"provider_inflight": True},
+            {"provider_inflight": "1"},
+            {"provider_capacity": 9},
+            {"scope": "all_actors"},
+            {"unexpected_field": 1},
+            {"deployment": before["deployment"] | {"source_commit": "c" * 40}},
+            {"deployment": before["deployment"] | {"service_id": "srv-other"}},
+            {"deployment": before["deployment"] | {"external_origin": "https://other.example"}},
+        )
+        for change in changes:
+            with (
+                self.subTest(change=change),
+                patch("tools.qualify_external_pilot._json_gateway", return_value=(before | change, {"cache-control": "no-store"})) as gateway,
+                patch("tools.qualify_external_pilot.time.sleep") as sleep,
+                self.assertRaisesRegex(QualificationError, "^provider_reliability_summary_invalid$"),
+            ):
+                _wait_for_cancellation_evidence(
+                    ORIGIN, ACCESS, expected_commit=COMMIT, service_id=SERVICE_ID, before=before,
+                )
+            gateway.assert_called_once()
+            sleep.assert_not_called()
+
     def test_unexpected_unknown_provider_outcome_rejects_qualification(self) -> None:
         provider_results = [
             ({"server-timing": "hormuz_upstream_headers;dur=1.000"}, False, False)
