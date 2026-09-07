@@ -557,6 +557,7 @@ def _reliability(
     *,
     expected_commit: str,
     service_id: str,
+    allow_inflight: bool = False,
 ) -> dict[str, Any]:
     value, headers = _json_gateway(origin, "/v1/gateway/reliability", access_token=access_token)
     integer_fields = (
@@ -586,7 +587,8 @@ def _reliability(
         or headers.get("cache-control") != "no-store"
         or any(type(value.get(name)) is not int or value[name] < 0 for name in integer_fields)
         or value.get("provider_capacity") != 8
-        or value.get("provider_inflight") != 0
+        or value.get("provider_inflight", 9) > 8
+        or (not allow_inflight and value.get("provider_inflight") != 0)
         or value.get("provider_peak_inflight", 9) > 8
         or value.get("connection_capacity") != 9
         or value.get("postgresql_pool_max_connections") != 4
@@ -754,7 +756,7 @@ def _wait_for_cancellation_evidence(
     before: dict[str, Any],
     timeout_seconds: float = CANCELLATION_EVIDENCE_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """Wait for the aborted stream to be finalized into durable counters."""
+    """Wait for durable cancellation evidence and for the aborted stream to drain."""
 
     deadline = time.monotonic() + timeout_seconds
     while True:
@@ -763,6 +765,7 @@ def _wait_for_cancellation_evidence(
             access_token,
             expected_commit=expected_commit,
             service_id=service_id,
+            allow_inflight=True,
         )
         if (
             _delta(
@@ -771,6 +774,7 @@ def _wait_for_cancellation_evidence(
                 "cancellation_outcome_unknown_count",
             )
             >= 1
+            and snapshot["provider_inflight"] == 0
         ):
             return snapshot
         remaining = deadline - time.monotonic()
