@@ -862,6 +862,11 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             "- name: Restart exact deployment and run content-free qualification",
             1,
         )[1]
+        for name in (
+            "HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN",
+            "HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN",
+        ):
+            self.assertIn("${{ secrets." + name + " }}", credential_step)
         self.assertNotIn("inputs.gateway_origin", credential_step)
         self.assertNotIn("inputs.render_service_id", credential_step)
         self.assertIn("actions: read", workflow)
