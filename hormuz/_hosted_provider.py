@@ -28,6 +28,12 @@ from .config import (
 
 
 PROVIDER_CONFIG_ENV = "HORMUZ_PROVIDER_CONFIG"
+PROVIDER_PROFILE_ENV = "HORMUZ_PROVIDER_PROFILE"
+PROVIDER_PROFILES = {
+    "external_pilot": ("anthropic", "openai"),
+    "external_pilot_openai": ("openai",),
+}
+
 PROVIDER_KEY_ENVS = {
     "openai": "HORMUZ_OPENAI_PROVIDER_KEY",
     "anthropic": "HORMUZ_ANTHROPIC_PROVIDER_KEY",
@@ -59,6 +65,7 @@ PROVIDER_OPERATOR_SECRET_NAMES = (
     PROVIDER_MIGRATION_DSN_ENV,
 )
 PROVIDER_CHILD_ENV_NAMES = (
+    PROVIDER_PROFILE_ENV,
     *PROVIDER_SECRET_NAMES,
     *PROVIDER_DEPLOYMENT_METADATA_NAMES,
 )
@@ -89,6 +96,13 @@ PROVIDER_USAGE_STORAGE = UsageStorageConfig(
         max_idle_seconds=300,
     ),
 )
+
+
+def provider_protocols(settings: dict[str, str]) -> tuple[str, ...]:
+    profile = settings.get(PROVIDER_PROFILE_ENV, "external_pilot")
+    if profile not in PROVIDER_PROFILES:
+        raise HostedError("hosted_provider_profile_invalid")
+    return PROVIDER_PROFILES[profile]
 
 
 def deployment_metadata(values: dict[str, str]) -> dict[str, object]:
@@ -177,7 +191,7 @@ def _safe_configuration_file(path: Path) -> None:
         raise HostedError("hosted_provider_configuration_file_unsafe")
 
 
-def _validate_credentials(credentials: dict[str, str]) -> None:
+def _validate_credentials(credentials: dict[str, str], protocols: tuple[str, ...]) -> None:
     if (
         credentials.get("HORMUZ_HOSTED_MODE") == "provider-pilot"
         and credentials.get(PROVIDER_MIGRATION_DSN_ENV, "")
@@ -186,11 +200,14 @@ def _validate_credentials(credentials: dict[str, str]) -> None:
         # owner credential in the supervisor environment would therefore make
         # it recoverable through process inspection after inference starts.
         raise HostedError("hosted_provider_migration_credential_forbidden")
-    values = [credentials.get(name, "") for name in PROVIDER_SECRET_NAMES]
+    inactive_names = {name for protocol, name in PROVIDER_KEY_ENVS.items() if protocol not in protocols}
+    if any(credentials.get(name, "") for name in inactive_names):
+        raise HostedError("hosted_provider_inactive_credential_forbidden")
+    values = [credentials.get(name, "") for name in PROVIDER_SECRET_NAMES if name not in inactive_names]
     if len(set(values)) != len(values):
         raise HostedError("hosted_provider_credentials_must_be_distinct")
-    for name in PROVIDER_KEY_ENVS.values():
-        value = credentials.get(name, "")
+    for protocol in protocols:
+        value = credentials.get(PROVIDER_KEY_ENVS[protocol], "")
         if not isinstance(value, str) or not 16 <= len(value) <= 512 or not value.isascii() or any(
             character.isspace() or ord(character) < 33 or ord(character) == 127
             for character in value
@@ -224,7 +241,7 @@ def _validate_state_binding(config: GatewayConfig, staging: GatewayConfig) -> No
         raise HostedError("hosted_provider_state_binding_mismatch")
 
 
-def _validate_provider_runtime(config: GatewayConfig) -> None:
+def _validate_provider_runtime(config: GatewayConfig, protocols: tuple[str, ...]) -> None:
     if (
         config.listen.host != "127.0.0.1"
         or config.listen.port != BACKEND_PORT
@@ -241,9 +258,10 @@ def _validate_provider_runtime(config: GatewayConfig) -> None:
     ):
         raise HostedError("hosted_provider_configuration_unsafe")
 
-    if set(config.upstreams) != set(PROVIDER_BASE_URLS):
+    if set(config.upstreams) != set(protocols):
         raise HostedError("hosted_provider_upstreams_invalid")
-    for protocol, base_url in PROVIDER_BASE_URLS.items():
+    for protocol in protocols:
+        base_url = PROVIDER_BASE_URLS[protocol]
         upstream = config.upstreams[protocol]
         if (
             upstream.base_url != base_url
@@ -254,10 +272,11 @@ def _validate_provider_runtime(config: GatewayConfig) -> None:
         ):
             raise HostedError("hosted_provider_upstreams_invalid")
 
-    expected_aliases = {alias for aliases in PROVIDER_ROUTE_ALIASES.values() for alias in aliases}
+    expected_aliases = {alias for protocol in protocols for alias in PROVIDER_ROUTE_ALIASES[protocol]}
     if set(config.model_routes) != expected_aliases:
         raise HostedError("hosted_provider_routes_invalid")
-    for protocol, (primary_alias, secondary_alias) in PROVIDER_ROUTE_ALIASES.items():
+    for protocol in protocols:
+        primary_alias, secondary_alias = PROVIDER_ROUTE_ALIASES[protocol]
         primary = config.model_routes[primary_alias]
         secondary = config.model_routes[secondary_alias]
         if (
@@ -281,11 +300,11 @@ def _validate_provider_runtime(config: GatewayConfig) -> None:
 
     policy = config.organization_policy
     if (
-        set(policy.allowed_clients or ()) != {"codex", "claude-code"}
+        set(policy.allowed_clients or ()) != {"codex" if protocol == "openai" else "claude-code" for protocol in protocols}
         or set(policy.allowed_models or ()) != expected_aliases
         or policy.fallback_model is not None
         or policy.fallback_models != {
-            protocol: aliases[0] for protocol, aliases in PROVIDER_ROUTE_ALIASES.items()
+            protocol: PROVIDER_ROUTE_ALIASES[protocol][0] for protocol in protocols
         }
         or policy.max_output_tokens is None
         or policy.max_output_tokens > MAX_PROVIDER_OUTPUT_TOKENS
@@ -332,15 +351,16 @@ def load_provider_profile(
 ) -> GatewayConfig:
     """Load one full gateway config only inside the fixed provider-pilot envelope."""
 
+    protocols = provider_protocols(credentials)
     staging = load_profile(hosted_path, credentials)
     _safe_configuration_file(provider_path)
-    _validate_credentials(credentials)
+    _validate_credentials(credentials, protocols)
     try:
         config = GatewayConfig.load(provider_path, environ=credentials)
     except (ConfigError, OSError, ValueError):
         raise HostedError("hosted_provider_configuration_invalid") from None
     _validate_state_binding(config, staging)
-    _validate_provider_runtime(config)
+    _validate_provider_runtime(config, protocols)
     metadata = deployment_metadata(credentials)
     _validate_render_runtime(config, metadata)
     return config

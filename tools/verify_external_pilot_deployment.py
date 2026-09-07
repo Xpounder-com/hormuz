@@ -39,6 +39,15 @@ EXPECTED_CONTRACT = {
     "max_inflight_streams": 8,
 }
 
+PROFILE_CONTRACTS = {
+    "external_pilot": EXPECTED_CONTRACT,
+    "external_pilot_openai": {
+        **EXPECTED_CONTRACT,
+        "profile": "external_pilot_openai",
+        "provider_protocols": ["openai"],
+    },
+}
+
 
 class DeploymentEvidenceError(ValueError):
     """A stable qualification failure without response or credential content."""
@@ -126,7 +135,11 @@ def build_evidence(
     expected_service_id: str,
     workflow_run_url: str,
     root: Path,
+    profile: str = "external_pilot",
 ) -> dict[str, Any]:
+    if profile not in PROFILE_CONTRACTS:
+        raise DeploymentEvidenceError("gateway_profile_invalid")
+    contract = PROFILE_CONTRACTS[profile]
     origin = _origin(origin)
     if COMMIT_RE.fullmatch(expected_commit) is None:
         raise DeploymentEvidenceError("expected_commit_invalid")
@@ -151,7 +164,7 @@ def build_evidence(
     }
     if any(health.get(name) != value or ready.get(name) != value for name, value in expected_base.items()):
         raise DeploymentEvidenceError("gateway_profile_not_ready")
-    if health.get("contract") != EXPECTED_CONTRACT or ready.get("contract") != EXPECTED_CONTRACT:
+    if health.get("contract") != contract or ready.get("contract") != contract:
         raise DeploymentEvidenceError("gateway_contract_invalid")
     if health.get("deployment") != ready.get("deployment"):
         raise DeploymentEvidenceError("gateway_deployment_identity_changed")
@@ -184,7 +197,7 @@ def build_evidence(
         "schema_id": SCHEMA_ID,
         "schema_version": SCHEMA_VERSION,
         "evidence_kind": "live_external_pilot",
-        **EXPECTED_CONTRACT,
+        **contract,
         "source_commit": expected_commit,
         "workflow_run_url": workflow_run_url,
         "gateway_origin": origin,
@@ -195,6 +208,7 @@ def build_evidence(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=tuple(PROFILE_CONTRACTS), default="external_pilot")
     parser.add_argument("--gateway-origin", required=True)
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--expected-service-id", required=True)
@@ -209,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_service_id=arguments.expected_service_id,
             workflow_run_url=arguments.workflow_run_url,
             root=arguments.root.resolve(),
+            profile=arguments.profile,
         )
         output = arguments.output.resolve()
         if output.exists() or output.is_symlink() or not output.parent.is_dir():

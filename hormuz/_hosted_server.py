@@ -191,10 +191,12 @@ class ProviderPilotGatewayServer(GatewayServer):
             else "configured_oidc"
         )
         on_render = self._deployment_metadata["platform"] == "render"
+        protocols = sorted(self.config.upstreams)
+        profile = "external_pilot_openai" if protocols == ["openai"] else "external_pilot"
         return {
-            "profile": "external_pilot" if on_render else "local_provider_fixture",
+            "profile": profile if on_render else "local_provider_fixture",
             "identity_provider": identity_provider,
-            "provider_protocols": ["anthropic", "openai"],
+            "provider_protocols": protocols,
             "https": on_render and self.config.session_broker.public_base_url.startswith("https://"),
             "inference_enabled": True,
             "provider_credentials_server_only": True,

@@ -11,6 +11,14 @@ on:
         options:
           - deployment
           - qualification
+      profile:
+        description: Explicit provider scope; OpenAI-only does not qualify Claude Code or the full Mac release
+        required: true
+        default: external_pilot
+        type: choice
+        options:
+          - external_pilot
+          - external_pilot_openai
       gateway_origin:
         description: Exact HTTPS origin of the Render gateway
         required: true
@@ -57,12 +65,14 @@ jobs:
         env:
           HORMUZ_GATEWAY_ORIGIN: ${{ inputs.gateway_origin }}
           HORMUZ_RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+          HORMUZ_PILOT_PROFILE: ${{ inputs.profile }}
           HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           umask 077
           mkdir "$RUNNER_TEMP/hormuz-external-pilot-deployment"
           python -I tools/verify_external_pilot_deployment.py \
+            --profile "$HORMUZ_PILOT_PROFILE" \
             --gateway-origin "$HORMUZ_GATEWAY_ORIGIN" \
             --expected-commit "$GITHUB_SHA" \
             --expected-service-id "$HORMUZ_RENDER_SERVICE_ID" \
@@ -112,9 +122,10 @@ jobs:
       - name: Restart exact deployment and run content-free qualification
         env:
           HORMUZ_DEPLOYMENT_EVIDENCE_URL: ${{ inputs.deployment_evidence_url }}
+          HORMUZ_PILOT_PROFILE: ${{ inputs.profile }}
           HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN: ${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}
-          HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN: ${{ secrets.HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN }}
+          HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN: ${{ inputs.profile == 'external_pilot' && secrets.HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN || '' }}
           HORMUZ_FAILOVER_REHEARSAL_KEY: ${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}
           HORMUZ_RENDER_DEPLOY_HOOK_URL: ${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}
           GH_TOKEN: ${{ github.token }}
@@ -123,6 +134,7 @@ jobs:
           umask 077
           mkdir "$RUNNER_TEMP/hormuz-external-pilot-qualification"
           python -I tools/qualify_external_pilot.py \
+            --profile "$HORMUZ_PILOT_PROFILE" \
             --gateway-origin "$HORMUZ_GATEWAY_ORIGIN" \
             --expected-commit "$GITHUB_SHA" \
             --expected-service-id "$HORMUZ_RENDER_SERVICE_ID" \

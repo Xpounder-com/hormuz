@@ -1,5 +1,10 @@
 # Signed Mac pilot qualification
 
+The `external_pilot_openai` gateway scope is intentionally not accepted by this
+full dual-provider Mac gate. Its narrower gateway evidence cannot establish
+Claude Code support or complete Mac release acceptance. See the
+[provider scope guide](RENDER_PROVIDER_PILOT.md#explicit-provider-scope).
+
 This protocol decides whether one exact notarized Hormuz Mac archive is ready
 for a small, controlled external pilot. It composes distribution, clean-machine
 installation, Keychain lifecycle, official-client authentication recovery,

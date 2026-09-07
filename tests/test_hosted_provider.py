@@ -135,6 +135,52 @@ class HostedProviderConfigTests(unittest.TestCase):
             with self.subTest(keys=sorted(candidate)), self.assertRaises(HostedError):
                 self.load(candidate)
 
+    def test_openai_profile_requires_explicit_selection_and_excludes_anthropic(self):
+        config, staging, settings, document = provider_profile(self.root, pilot_profile="external_pilot_openai")
+        self.assertEqual(set(config.upstreams), {"openai"})
+        self.assertEqual(set(config.model_routes), {"openai-primary", "openai-secondary"})
+        self.assertEqual(config.organization_policy.allowed_clients, ("codex",))
+        self.assertEqual(config.usage_storage.postgres_pool.max_connections, 4)
+        server = SimpleNamespace(config=config, _deployment_metadata={"platform": "render"})
+        contract = ProviderPilotGatewayServer.deployment_contract(server)
+        self.assertEqual(contract["profile"], "external_pilot_openai")
+        self.assertEqual(contract["provider_protocols"], ["openai"])
+        self.assertFalse(contract["availability_sla_claimed"])
+        for override in (
+            {"HORMUZ_PROVIDER_PROFILE": ""},
+            {"HORMUZ_PROVIDER_PROFILE": "openai"},
+            {"HORMUZ_PROVIDER_PROFILE": "external_pilot"},
+            {"HORMUZ_ANTHROPIC_PROVIDER_KEY": "synthetic-unwanted-provider-key"},
+            {"HORMUZ_OPENAI_PROVIDER_KEY": ""},
+            {"HORMUZ_OPENAI_PROVIDER_KEY": "short"},
+        ):
+            with self.subTest(override=tuple(override)), self.assertRaises(HostedError):
+                load_provider_profile(staging.source_path, config.source_path, {**settings, **override})
+        # Removing the selector cannot silently narrow the default dual-provider gate.
+        missing = dict(settings)
+        missing.pop("HORMUZ_PROVIDER_PROFILE")
+        with self.assertRaises(HostedError):
+            load_provider_profile(staging.source_path, config.source_path, missing)
+        for mutate in ("client", "route", "upstream", "pool", "failover", "no_openai", "no_upstreams"):
+            candidate = json.loads(json.dumps(document))
+            if mutate == "client":
+                candidate["policies"]["organization"]["allowed_clients"].append("claude-code")
+            elif mutate == "route":
+                candidate["model_routes"]["anthropic-primary"] = self.document["model_routes"]["anthropic-primary"]
+            elif mutate == "upstream":
+                candidate["upstreams"]["anthropic"] = self.document["upstreams"]["anthropic"]
+            elif mutate == "pool":
+                candidate["usage_storage"]["postgres_pool"]["max_connections"] = 8
+            elif mutate == "no_openai":
+                candidate["upstreams"] = {"anthropic": self.document["upstreams"]["anthropic"]}
+            elif mutate == "no_upstreams":
+                candidate["upstreams"] = {}
+            else:
+                candidate["model_routes"]["openai-primary"]["failover_alias"] = "openai-primary"
+            config.source_path.write_text(json.dumps(candidate))
+            with self.subTest(mutate=mutate), self.assertRaises(HostedError):
+                load_provider_profile(staging.source_path, config.source_path, settings)
+
     def test_every_provider_route_requires_explicit_cache_rates(self):
         for alias in self.document["model_routes"]:
             for field in ("cache_read_cost_per_million", "cache_write_cost_per_million"):
@@ -565,12 +611,14 @@ class HostedProviderConfigTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.name == "posix", "The hosted runtime uses POSIX file permissions")
-class HostedProviderHTTPTests(unittest.TestCase):
+class HostedProviderHTTPTestCase(unittest.TestCase):
+    pilot_profile = "external_pilot"
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        config, self.staging, self.settings, _ = provider_profile(self.root)
+        config, self.staging, self.settings, _ = provider_profile(self.root, pilot_profile=self.pilot_profile)
         initialize(self.staging)
         # HTTP behavior is exercised against a disposable local SQLite store;
         # the configuration tests above separately require the live profile's
@@ -581,7 +629,7 @@ class HostedProviderHTTPTests(unittest.TestCase):
             usage_storage=UsageStorageConfig(),
         )
         provider_environment = {
-            name: self.settings[name]
+            name: self.settings.get(name, "")
             for name in (
                 "HORMUZ_OPENAI_PROVIDER_KEY",
                 "HORMUZ_ANTHROPIC_PROVIDER_KEY",
@@ -618,6 +666,8 @@ class HostedProviderHTTPTests(unittest.TestCase):
         finally:
             connection.close()
 
+
+class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
     def test_health_is_provider_pilot_and_unauthenticated_requests_never_egress(self):
         status, _, body = self.request("GET", "/health")
         self.assertEqual(status, 200)
@@ -1023,6 +1073,31 @@ class HostedProviderHTTPTests(unittest.TestCase):
             self.assertEqual(connection.getresponse().status, 413)
         finally:
             connection.close()
+
+
+class HostedOpenAIProviderHTTPTests(HostedProviderHTTPTestCase):
+    pilot_profile = "external_pilot_openai"
+
+    def test_openai_model_failover_stays_with_openai(self):
+        # Same real HTTP, accounting and policy path as the dual-provider fixture.
+        HostedProviderHTTPTests.test_one_capacity_failover_records_two_attempts_and_two_egresses(self)
+        status, _, body = self.request("GET", "/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["contract"]["provider_protocols"], ["openai"])
+        self.assertNotIn("HORMUZ_ANTHROPIC_PROVIDER_KEY", self.settings)
+
+    def test_anthropic_requests_cannot_egress_even_with_a_valid_member_session(self):
+        directory_setup(self.gateway.session_broker.directory, self.config)
+        _, pair = activate_member(self.gateway.session_broker.store, self.gateway.session_broker.directory)
+        with patch("hormuz.server.urllib.request.urlopen") as provider:
+            status, _, _ = self.request(
+                "POST", "/v1/messages",
+                body={"model": "anthropic-primary", "max_tokens": 8,
+                      "messages": [{"role": "user", "content": "synthetic"}]},
+                headers={"Authorization": "Bearer " + pair.access_token},
+            )
+        self.assertEqual(status, 403)
+        provider.assert_not_called()
 
 
 if __name__ == "__main__":

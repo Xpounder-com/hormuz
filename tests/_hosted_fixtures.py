@@ -27,10 +27,11 @@ def profile(root: Path):
     return load_profile(path, settings), settings, document
 
 
-def provider_profile(root: Path):
+def provider_profile(root: Path, *, pilot_profile: str = "external_pilot"):
     staging, settings, hosted_document = profile(root)
     settings.update({
         "HORMUZ_HOSTED_MODE": "provider-pilot",
+        "HORMUZ_PROVIDER_PROFILE": pilot_profile,
         "HORMUZ_OPENAI_PROVIDER_KEY": "synthetic-openai-provider-key",
         "HORMUZ_ANTHROPIC_PROVIDER_KEY": "synthetic-anthropic-provider-key",
         "HORMUZ_FAILOVER_REHEARSAL_KEY": "synthetic_rehearsal_" + "r" * 43,
@@ -136,6 +137,14 @@ def provider_profile(root: Path):
             "teams": {}, "actors": {},
         },
     }
+    if pilot_profile == "external_pilot_openai":
+        settings.pop("HORMUZ_ANTHROPIC_PROVIDER_KEY")
+        document["upstreams"].pop("anthropic")
+        document["model_routes"] = {k: v for k, v in routes.items() if v["protocol"] == "openai"}
+        policy = document["policies"]["organization"]
+        policy["allowed_clients"] = ["codex"]
+        policy["allowed_models"] = list(document["model_routes"])
+        policy["fallback_models"] = {"openai": "openai-primary"}
     path = root / "provider.json"
     path.write_text(json.dumps(document))
     path.chmod(0o600)
