@@ -712,6 +712,10 @@ class MacPilotOperationsTests(unittest.TestCase):
         ):
             self.assertIn(marker, guarded_sequence)
 
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "collector execution requires the Apple plutil contract",
+    )
     def test_collectors_reject_malformed_scope_before_mutation(self) -> None:
         clean = ROOT / "tools/collect_macos_clean_machine.sh"
         session = ROOT / "tools/collect_macos_session_and_clients.sh"
