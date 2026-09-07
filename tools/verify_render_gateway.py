@@ -35,6 +35,7 @@ PROVIDER_SECRETS = {
     "HORMUZ_FAILOVER_REHEARSAL_KEY": "r" * 43,
 }
 PROVIDER_METADATA_NAMES = {
+    "HORMUZ_PROVIDER_PROFILE",
     "RENDER",
     "RENDER_CPU_COUNT",
     "RENDER_EXTERNAL_HOSTNAME",
@@ -148,7 +149,7 @@ import hashlib, json, hormuz
 from pathlib import Path
 package = Path(hormuz.__file__).parent
 paths = {'hormuz/' + name: package / name for name in
-    ('hosted.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_provider.py', '_hosted_server.py', '_hosted_state.py', 'secret-inventory-v1.json')}
+    ('hosted.py', '_config_routing.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_provider.py', '_hosted_server.py', '_hosted_state.py', 'secret-inventory-v1.json')}
 paths.update({'deploy/render/gateway/' + name: Path('/etc/hormuz/caddy') / name
     for name in ('active.Caddyfile', 'maintenance.Caddyfile', 'provider-pilot.Caddyfile')})
 print(json.dumps({name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}))
@@ -241,10 +242,10 @@ def verify(image: str) -> dict:
             raise RuntimeError("staging_check_failed:" + name)
         checks.append(name)
 
-    def start(suffix, mode):
+    def start(suffix, mode, *, extra_environment=()):
         name = prefix + "-" + suffix
         containers.append(name)
-        docker("run", "--detach", "--name", name, *common, "--env", "HORMUZ_HOSTED_MODE=" + mode,
+        docker("run", "--detach", "--name", name, *common, *extra_environment, "--env", "HORMUZ_HOSTED_MODE=" + mode,
                "-p", "127.0.0.1::10000", image)
         return name
 
@@ -541,6 +542,40 @@ def verify(image: str) -> dict:
         published = json.loads(docker("inspect", "--format", "{{json .HostConfig.PortBindings}}", provider_pilot))
         passed("provider_only_proxy_port_published", set(published) == {"10000/tcp"})
         stop(provider_pilot)
+        # Prove the narrower profile in the built image, using the same existing
+        # synthetic database and compute limits. Both provider DNS names remain
+        # pinned to container loopback; no paid upstream call is possible.
+        narrow_profile = """
+import json
+from pathlib import Path
+path = Path('/var/lib/hormuz/private/config/provider.json')
+value = json.loads(path.read_text())
+value['upstreams'].pop('anthropic')
+value['model_routes'] = {k: v for k, v in value['model_routes'].items() if v['protocol'] == 'openai'}
+policy = value['policies']['organization']
+policy['allowed_clients'] = ['codex']
+policy['allowed_models'] = list(value['model_routes'])
+policy['fallback_models'] = {'openai': 'openai-primary'}
+path.write_text(json.dumps(value))
+"""
+        docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image,
+               "-I", "-", input_text=narrow_profile)
+        openai_pilot = start("provider-openai", "provider-pilot", extra_environment=(
+            "--env", "HORMUZ_PROVIDER_PROFILE=external_pilot_openai",
+            "--env", "HORMUZ_ANTHROPIC_PROVIDER_KEY=",
+        ))
+        await_health(openai_pilot, "provider_pilot")
+        status, _, body = request(openai_pilot, "GET", "/ready")
+        passed("openai_only_profile_ready_in_built_image",
+               status == 200 and json.loads(body)["contract"]["provider_protocols"] == ["openai"])
+        absent = execute(openai_pilot, PYTHON, "-I", "-c",
+                         "import os; print(not bool(os.environ.get('HORMUZ_ANTHROPIC_PROVIDER_KEY')))" )
+        passed("openai_only_supervisor_has_no_anthropic_credential", absent == "True")
+        boundary = json.loads(execute(openai_pilot, PYTHON, "-I", "-", input_text=PROCESS_BOUNDARY))
+        passed("openai_only_backend_keeps_exact_environment_boundary",
+               boundary["backend_present"] and set(boundary["backend_names"]) - {"LC_CTYPE"}
+               == set(SECRETS) | set(PROVIDER_SECRETS) | PROVIDER_METADATA_NAMES)
+        stop(openai_pilot)
         exported = json.loads(operator("backup-export", "--key-file", "/var/lib/hormuz/private/config/backup.key",
                                        "--output-file", "/var/lib/hormuz/private/config/offsite.hzb"))
         verified = json.loads(operator("backup-verify", "--key-file", "/var/lib/hormuz/private/config/backup.key",
