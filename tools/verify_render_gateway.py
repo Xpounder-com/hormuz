@@ -556,12 +556,15 @@ policy = value['policies']['organization']
 policy['allowed_clients'] = ['codex']
 policy['allowed_models'] = list(value['model_routes'])
 policy['fallback_models'] = {'openai': 'openai-primary'}
-path.write_text(json.dumps(value))
+target = path.with_name('provider-openai.json')
+target.write_text(json.dumps(value))
+target.chmod(0o600)
 """
         docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image,
                "-I", "-", input_text=narrow_profile)
         openai_pilot = start("provider-openai", "provider-pilot", extra_environment=(
             "--env", "HORMUZ_PROVIDER_PROFILE=external_pilot_openai",
+            "--env", "HORMUZ_PROVIDER_CONFIG=/var/lib/hormuz/private/config/provider-openai.json",
             "--env", "HORMUZ_ANTHROPIC_PROVIDER_KEY=",
         ))
         await_health(openai_pilot, "provider_pilot")
