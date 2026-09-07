@@ -1,13 +1,74 @@
 # Render external provider pilot
 
-This profile connects hosted Okta login to governed OpenAI and Anthropic
-traffic. It is an explicit `provider-pilot` mode. The existing `active` mode
+These profiles connect hosted Okta login to governed provider traffic. The
+default scope includes OpenAI and Anthropic; an explicit OpenAI-only scope is
+available without an Anthropic credential. It is an explicit `provider-pilot` mode. The existing `active` mode
 continues to serve login and the administrator console while returning 503 for
 inference, and `maintenance` remains the container default.
 
 The first deployment is a controlled, single-region external pilot. It has no
 availability SLA. Customer invitations, public distribution, and an SLA remain
 separate decisions after the evidence gates below pass.
+
+## Explicit provider scope
+
+`HORMUZ_HOSTED_MODE=provider-pilot` remains the serving mode. Choose its scope
+with the non-secret `HORMUZ_PROVIDER_PROFILE` setting:
+
+| Value | Required providers and clients | Configuration example |
+| --- | --- | --- |
+| `external_pilot` (default when unset) | OpenAI + Anthropic; Codex + Claude Code; four aliases | [Dual-provider example](../deploy/render/gateway/provider-profile.example.json) |
+| `external_pilot_openai` | OpenAI only; Codex only; `openai-primary` + `openai-secondary` | [OpenAI-only example](../deploy/render/gateway/provider-openai-profile.example.json) |
+
+The selector and the configuration must agree. Unknown/empty selectors, extra
+upstreams, extra routes, broader client policies, and absent required provider
+credentials fail closed. In OpenAI-only mode, `HORMUZ_ANTHROPIC_PROVIDER_KEY`
+must be absent or empty, including in the supervisor environment. No dummy
+Anthropic credential or live Anthropic request is required. The general gateway
+configuration loader now allows the Anthropic upstream to be omitted; OpenAI
+remains required, and routes cannot reference an omitted upstream.
+
+Both scopes retain the exact same HTTPS, Okta, credential custody, budgets,
+secret inspection, tenant RLS, database pool, session recovery and compute
+requirements. Health/readiness reports the actual profile and protocol set.
+OpenAI model failover does not protect against an OpenAI-wide outage. Neither
+scope claims cross-provider failover or an availability SLA.
+
+For an existing service, first deploy the reviewed code without changing the
+current scope. Close inference admission in maintenance before editing the
+private configuration, changing the selector, or removing the unused Anthropic
+credential. Keep the existing OpenAI key, login state, database, model rates,
+rehearsal key and deploy hook unchanged. Validate the new profile with
+`provider-check`, then explicitly restore provider mode and verify a fresh
+instance, exact source, declared scope, readiness and unchanged compute. This
+profile change does not require a database migration, another service or a new
+OpenAI key. Do not delete or revoke provider credentials during active requests.
+A rollback to dual-provider mode also requires its matching profile and a valid
+Anthropic credential; rolling back code alone is insufficient.
+
+The protected `external-pilot-qualification.yml` workflow accepts a `profile`
+choice for **both** deployment and qualification operations. Select
+`external_pilot_openai` explicitly for both runs; the default remains the full
+dual-provider gate. The command-line verifiers accept the same `--profile`
+choice. A deployment artifact for one profile cannot qualify the other.
+
+For OpenAI-only qualification, create only the dedicated member's Codex session
+and store `HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN` in the existing protected
+environment. The workflow does not inject the Claude Code token for this scope;
+the qualifier rejects a nonempty Claude Code token if passed directly. It
+verifies Codex identity and scope before and after restart, exercises both
+OpenAI aliases in non-streaming and streaming modes, checks cancellation,
+one-hop model failover, latency/pressure counters and durable recovery, and
+revokes the session. Then disable the member and delete the temporary secret,
+including after a failed or abandoned run. Never give the member administrator
+access to simplify testing.
+
+OpenAI-only evidence is a bounded gateway result. It does **not** satisfy the
+existing signed-Mac aggregate, which still requires both protocols and official
+clients. That full gate stays unchanged and rejects OpenAI-only evidence. A
+separately scoped Codex-only Mac acceptance path and its actual clean-machine,
+session, update/rollback, security, accessibility and onboarding evidence remain
+necessary before claiming a customer-ready OpenAI-only desktop release.
 
 ## Compute and data topology
 
@@ -46,7 +107,7 @@ pool-pressure counters. A `member_admin` can inspect aggregate pressure at
 `GET /v1/admin/operations`. Neither endpoint exposes prompts, responses,
 credentials, provider request IDs, tenant names, or DSNs.
 
-## Fixed provider contract
+## Default dual-provider contract
 
 Copy
 [`deploy/render/gateway/provider-profile.example.json`](../deploy/render/gateway/provider-profile.example.json)
@@ -104,8 +165,8 @@ migrations. Retain the Render-managed operator DSN separately for database-role
 repair; never substitute it for the restricted migration login.
 
 Never put a credential in JSON, a command argument, logs, artifacts, Caddy, or
-GitHub workflow inputs. The protected qualification workflow receives a
-dedicated refresh token, rehearsal key, and Render deploy hook only through
+GitHub workflow inputs. The protected qualification workflow receives
+dedicated client-scoped refresh tokens, rehearsal key, and Render deploy hook only through
 environment secrets.
 
 Render secret files appear as symlinks, while Hormuz deliberately accepts only
@@ -232,19 +293,28 @@ reviewed `main` commit, and keep auto-deploy disabled. Then run the protected
    unauthenticated inference. Retain its exact artifact and run URL.
 2. `qualification` binds a deploy hook to that service and commit, restarts the
    instance, authenticates the successful deployment run and its exact artifact,
-   proves the encrypted session survived, runs non-streaming and streaming
+   proves both encrypted client sessions survived, runs non-streaming and streaming
    requests through all four aliases, exercises cancellation and one-hop
    failover, verifies latency and pressure counters, revokes the qualification
-   session, and emits content-free evidence.
+   sessions, and emits content-free evidence.
 
-The qualification environment must require review. Pin its non-secret
+For the default dual-provider scope, the qualification environment must require review. Pin its non-secret
 `HORMUZ_GATEWAY_ORIGIN` and `HORMUZ_RENDER_SERVICE_ID` environment variables to
 the approved service, and keep only `HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN`,
+`HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN`,
 `HORMUZ_FAILOVER_REHEARSAL_KEY`, and `HORMUZ_RENDER_DEPLOY_HOOK_URL` as secrets.
-The refresh token must belong to the dedicated qualification member. The
-workflow rotates it, writes one governed attempt before the restart, and then
+Both refresh tokens must belong to the same dedicated qualification member:
+the first comes from a `codex` login, the second from a `claude-code` login.
+The gateway intentionally restricts each session to its enrolled client; a Codex
+session cannot authorize the Claude Code endpoint. Do not broaden that access
+boundary for qualification. The workflow verifies the two client scopes and
+matching organization, actor and team before and after restart, rotates both
+tokens, writes one governed attempt before the restart, and then
 requires the same actor-scoped PostgreSQL counters to survive before it sends
 the remaining qualification traffic.
+Its cleanup attempts revocation of both session families even if one cleanup
+fails. After the run or an abandoned setup, disable the temporary member, verify
+that neither session remains live, and delete both protected refresh-token secrets.
 
 The protected workflow is evidence, not activation authority. Do not invite a
 customer until both runs pass and the signed-Mac gates in

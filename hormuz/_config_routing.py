@@ -26,8 +26,12 @@ def build_upstream_domain(
     key_custody: KeyCustodyConfig | None,
 ) -> dict[str, UpstreamConfig]:
     upstreams_raw = _object(raw.get("upstreams"), "upstreams")
+    if "openai" not in upstreams_raw or set(upstreams_raw) - {"openai", "anthropic"}:
+        raise ConfigError("upstreams must contain openai and may include anthropic")
     upstreams: dict[str, UpstreamConfig] = {}
     for protocol in ("openai", "anthropic"):
+        if protocol not in upstreams_raw:
+            continue
         item = _object(upstreams_raw.get(protocol), f"upstreams.{protocol}")
         unsupported_upstream_fields = set(item).difference(
             {

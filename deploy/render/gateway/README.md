@@ -22,10 +22,11 @@ validated `provider-pilot` profile enables only its fixed inference routes.
 
 The proxy receives only its port, temporary Caddy paths and ingress secret. The
 authentication-staging backend receives only the three explicitly named
-credentials below. The provider backend receives those three plus two provider
-keys, the restricted PostgreSQL runtime DSN, and the rehearsal credential
+credentials below. The provider backend receives those three plus the selected
+provider keys (OpenAI only or OpenAI and Anthropic), the restricted PostgreSQL runtime DSN, and the rehearsal credential
 documented in the provider-pilot guide. It also receives an allowlisted set of
-non-secret Render deployment metadata. The PostgreSQL migration-owner DSN is
+non-secret Render deployment metadata and the explicit provider-profile selector.
+See the [scope selection guide](../../../docs/RENDER_PROVIDER_PILOT.md#explicit-provider-scope). The PostgreSQL migration-owner DSN is
 available only to the explicit maintenance command and is removed before
 provider mode; it is never passed to either backend. Neither inherits unrelated
 deployment secrets or HTTP proxy settings. Caddy's admin

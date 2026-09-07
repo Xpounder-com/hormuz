@@ -105,6 +105,7 @@ EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
     ),
     "external-pilot-qualification.yml": (
         "${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}",
+        "${{ inputs.profile == 'external_pilot' && secrets.HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN || '' }}",
         "${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}",
         "${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}",
     ),
