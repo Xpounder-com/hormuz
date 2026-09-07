@@ -68,18 +68,18 @@ def _session_identity(client, **changes):
     return value | changes
 
 
-def _deployment_artifact(*, service_id: str = SERVICE_ID) -> bytes:
+def _deployment_artifact(*, service_id: str = SERVICE_ID, profile: str = "external_pilot") -> bytes:
     evidence = {
         "schema_id": "hormuz.external-pilot-deployment-evidence",
         "schema_version": 1,
         "evidence_kind": "live_external_pilot",
-        "profile": "external_pilot",
+        "profile": profile,
         "source_commit": COMMIT,
         "workflow_run_url": DEPLOYMENT_RUN,
         "gateway_origin": ORIGIN,
         "render_service_id": service_id,
         "identity_provider": "okta",
-        "provider_protocols": ["anthropic", "openai"],
+        "provider_protocols": ["openai"] if profile == "external_pilot_openai" else ["anthropic", "openai"],
         "https": True,
         "inference_enabled": True,
         "provider_credentials_server_only": True,
@@ -321,6 +321,24 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             )
         self.assertEqual(evidence["render_service_id"], SERVICE_ID)
 
+        # Authenticated artifact bytes must bind the explicitly requested scope.
+        for observed in ("external_pilot", "external_pilot_openai"):
+            for requested in ("external_pilot", "external_pilot_openai"):
+                payload = _deployment_artifact(profile=observed)
+                metadata = {**artifact, "size_in_bytes": len(payload)}
+                with self.subTest(observed=observed, requested=requested), patch(
+                    "tools.qualify_external_pilot._github_api_json",
+                    side_effect=[run, {"total_count": 1, "artifacts": [metadata]}],
+                ), patch("tools.qualify_external_pilot._github_api_bytes", return_value=payload):
+                    arguments = dict(expected_commit=COMMIT, service_id=SERVICE_ID,
+                                     origin=ORIGIN, profile=requested)
+                    if observed != requested:
+                        with self.assertRaisesRegex(QualificationError, "deployment_evidence_binding_invalid"):
+                            _authenticate_deployment_evidence(DEPLOYMENT_RUN, **arguments)
+                    else:
+                        result = _authenticate_deployment_evidence(DEPLOYMENT_RUN, **arguments)
+                        self.assertEqual(result["profile"], requested)
+
         failed = {**run, "conclusion": "failure"}
         with (
             patch("tools.qualify_external_pilot._github_api_json", return_value=failed),
@@ -516,6 +534,71 @@ class ExternalPilotQualificationTests(unittest.TestCase):
                 service_id=SERVICE_ID,
             )
 
+    def test_openai_only_qualifies_both_aliases_and_revokes_only_codex(self) -> None:
+        results = [({}, False, False)]
+        for _ in range(2):
+            results.extend([({}, False, False), ({}, True, True)])
+        results += [({"x-hormuz-cancellation-rehearsal": "v1"}, True, False),
+                    ({"x-hormuz-failover": "v1;reason=provider_rate_limited",
+                      "x-hormuz-failover-rehearsal": "v1"}, False, False)]
+        snapshots = [
+            _counters(live=0, attempts=0, first=0, failovers=0),
+            _counters(live=1, attempts=1, first=1, failovers=0),
+            _counters(live=1, attempts=1, first=1, failovers=0),
+            _counters(live=5, attempts=5, first=5, failovers=0),
+            _counters(live=6, attempts=6, first=6, failovers=0, unknown=1, cancellations=1),
+            _counters(live=7, attempts=8, first=7, failovers=1, unknown=1, cancellations=1),
+        ]
+        with (
+            patch("tools.qualify_external_pilot._authenticate_deployment_evidence") as deployment,
+            patch("tools.qualify_external_pilot._session_binding", return_value=BINDING) as binding,
+            patch("tools.qualify_external_pilot._restart_and_wait") as restart,
+            patch("tools.qualify_external_pilot._refresh", side_effect=[
+                (ACCESS, ROTATED_REFRESH), (ACCESS_AFTER_RESTART, ROTATED_REFRESH_AFTER_RESTART),
+            ]) as refresh,
+            patch("tools.qualify_external_pilot._reliability", side_effect=snapshots),
+            patch("tools.qualify_external_pilot._provider_request", side_effect=results) as provider,
+            patch("tools.qualify_external_pilot._logout") as logout,
+        ):
+            evidence = qualify(
+                origin=ORIGIN, expected_commit=COMMIT, service_id=SERVICE_ID,
+                deployment_evidence_url=DEPLOYMENT_RUN, workflow_run_url=QUALIFICATION_RUN,
+                refresh_token=REFRESH, rehearsal_key=REHEARSAL,
+                deploy_hook=f"https://api.render.com/deploy/{SERVICE_ID}?key={'z' * 32}",
+                profile="external_pilot_openai",
+            )
+        self.assertEqual(evidence["profile"], "external_pilot_openai")
+        self.assertEqual(evidence["provider_protocols"], ["openai"])
+        self.assertEqual(provider.call_count, 7)
+        self.assertEqual({call.kwargs["protocol"] for call in provider.call_args_list}, {"openai"})
+        self.assertEqual({call.kwargs["alias"] for call in provider.call_args_list}, {"openai-primary", "openai-secondary"})
+        self.assertEqual(refresh.call_count, 2)
+        self.assertEqual([call.args[2] for call in binding.call_args_list], ["codex", "codex"])
+        self.assertEqual(deployment.call_args.kwargs["profile"], "external_pilot_openai")
+        self.assertEqual(restart.call_args.kwargs["profile"], "external_pilot_openai")
+        logout.assert_called_once_with(ORIGIN, ROTATED_REFRESH_AFTER_RESTART)
+        self.assertTrue(evidence["cancellation_verified"])
+        self.assertTrue(evidence["recovery_drill_passed"])
+        self.assertTrue(evidence["policy_bounded_same_protocol_failover_verified"])
+        self.assertFalse(evidence["availability_sla_claimed"])
+
+    def test_openai_scope_rejects_unneeded_credentials_and_untrusted_deployment_before_token_use(self) -> None:
+        arguments = dict(origin=ORIGIN, expected_commit=COMMIT, service_id=SERVICE_ID,
+                         deployment_evidence_url=DEPLOYMENT_RUN, workflow_run_url=QUALIFICATION_RUN,
+                         refresh_token=REFRESH, rehearsal_key=REHEARSAL,
+                         deploy_hook="unused", profile="external_pilot_openai")
+        with patch("tools.qualify_external_pilot._refresh") as refresh, patch(
+            "tools.qualify_external_pilot._logout",
+        ) as logout:
+            with self.assertRaisesRegex(QualificationError, "qualification_input_invalid"):
+                qualify(**arguments, claude_code_refresh_token=CLAUDE_REFRESH)
+            with patch("tools.qualify_external_pilot._authenticate_deployment_evidence",
+                       side_effect=QualificationError("deployment_evidence_binding_invalid")):
+                with self.assertRaisesRegex(QualificationError, "deployment_evidence_binding_invalid"):
+                    qualify(**arguments)
+            refresh.assert_not_called()
+            logout.assert_not_called()
+
     def test_restart_and_live_provider_observations_bind_strict_evidence(self) -> None:
         provider_results = [
             ({"server-timing": "hormuz_upstream_headers;dur=1.000"}, False, False)
@@ -577,6 +660,7 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             expected_commit=COMMIT,
             service_id=SERVICE_ID,
             origin=ORIGIN,
+            profile="external_pilot",
         )
         self.assertEqual(
             refresh.call_args_list,
@@ -853,7 +937,7 @@ class ExternalPilotQualificationTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/external-pilot-qualification.yml").read_text()
         self.assertEqual(workflow.count("environment: external-pilot-qualification"), 2)
         self.assertEqual(workflow.count("${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}"), 1)
-        self.assertEqual(workflow.count("${{ secrets.HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN }}"), 1)
+        self.assertEqual(workflow.count("${{ inputs.profile == 'external_pilot' && secrets.HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN || '' }}"), 1)
         self.assertEqual(workflow.count("${{ secrets.HORMUZ_FAILOVER_REHEARSAL_KEY }}"), 1)
         self.assertEqual(workflow.count("${{ secrets.HORMUZ_RENDER_DEPLOY_HOOK_URL }}"), 1)
         self.assertEqual(workflow.count("${{ vars.HORMUZ_GATEWAY_ORIGIN }}"), 1)
@@ -862,11 +946,8 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             "- name: Restart exact deployment and run content-free qualification",
             1,
         )[1]
-        for name in (
-            "HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN",
-            "HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN",
-        ):
-            self.assertIn("${{ secrets." + name + " }}", credential_step)
+        self.assertIn("${{ secrets.HORMUZ_EXTERNAL_PILOT_REFRESH_TOKEN }}", credential_step)
+        self.assertIn("${{ inputs.profile == 'external_pilot' && secrets.HORMUZ_EXTERNAL_PILOT_CLAUDE_CODE_REFRESH_TOKEN || '' }}", credential_step)
         self.assertNotIn("inputs.gateway_origin", credential_step)
         self.assertNotIn("inputs.render_service_id", credential_step)
         self.assertIn("actions: read", workflow)

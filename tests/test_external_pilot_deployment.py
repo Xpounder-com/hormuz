@@ -8,6 +8,7 @@ from unittest.mock import patch
 from tools.verify_external_pilot_deployment import (
     DeploymentEvidenceError,
     EXPECTED_CONTRACT,
+    PROFILE_CONTRACTS,
     build_evidence,
 )
 
@@ -103,6 +104,24 @@ class ExternalPilotDeploymentTests(unittest.TestCase):
                         workflow_run_url=RUN_URL,
                         root=root,
                     )
+
+    def test_openai_contract_cannot_be_mistaken_for_dual_provider_evidence(self) -> None:
+        headers = {"cache-control": "no-store", "x-content-type-options": "nosniff"}
+        for observed in PROFILE_CONTRACTS:
+            for requested in PROFILE_CONTRACTS:
+                health = {**_health(), "contract": PROFILE_CONTRACTS[observed]}
+                with self.subTest(observed=observed, requested=requested), patch(
+                    "tools.verify_external_pilot_deployment._json_response", return_value=(health, headers),
+                ), patch("tools.verify_external_pilot_deployment._request", return_value=(401, headers, b"{}")):
+                    arguments = dict(origin=ORIGIN, expected_commit=COMMIT, expected_service_id=SERVICE_ID,
+                                     workflow_run_url=RUN_URL, root=ROOT, profile=requested)
+                    if observed != requested:
+                        with self.assertRaisesRegex(DeploymentEvidenceError, "gateway_contract_invalid"):
+                            build_evidence(**arguments)
+                    else:
+                        evidence = build_evidence(**arguments)
+                        self.assertEqual(evidence["profile"], requested)
+                        self.assertEqual(evidence["provider_protocols"], PROFILE_CONTRACTS[requested]["provider_protocols"])
 
     def test_workflow_is_manual_protected_and_exact_main_only(self) -> None:
         workflow = (ROOT / ".github/workflows/external-pilot-qualification.yml").read_text()

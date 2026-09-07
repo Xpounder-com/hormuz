@@ -35,23 +35,13 @@ RUN_URL_RE = re.compile(
     r"https://github\.com/Xpounder-com/hormuz/actions/runs/([1-9][0-9]{0,19})\Z"
 )
 TIMING_RE = re.compile(r"hormuz_upstream_headers;dur=[0-9]+(?:\.[0-9]{3})?\Z")
-EXPECTED_CONTRACT = {
-    "profile": "external_pilot",
-    "identity_provider": "okta",
-    "provider_protocols": ["anthropic", "openai"],
-    "https": True,
-    "inference_enabled": True,
-    "provider_credentials_server_only": True,
-    "postgresql_durable": True,
-    "tenant_rls": True,
-    "durable_sessions": True,
-    "monitoring_configured": True,
-    "worker_saturation_monitoring": True,
-    "postgresql_pool_wait_monitoring": True,
-    "single_region_acknowledged": True,
-    "availability_sla_claimed": False,
-    "max_inflight_streams": 8,
-}
+if __package__:
+    from tools.verify_external_pilot_deployment import EXPECTED_CONTRACT, PROFILE_CONTRACTS
+else:
+    # Keep isolated execution; import only from this resolved reviewed tools directory.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from verify_external_pilot_deployment import EXPECTED_CONTRACT, PROFILE_CONTRACTS
+
 DEPLOYMENT_EVIDENCE_FIELDS = {
     "schema_id",
     "schema_version",
@@ -241,9 +231,12 @@ def _authenticate_deployment_evidence(
     expected_commit: str,
     service_id: str,
     origin: str,
+    profile: str = "external_pilot",
 ) -> dict[str, Any]:
     """Bind one successful protected deployment run and its exact JSON artifact."""
 
+    if profile not in PROFILE_CONTRACTS:
+        raise QualificationError("qualification_profile_invalid")
     match = RUN_URL_RE.fullmatch(deployment_evidence_url)
     if match is None:
         raise QualificationError("deployment_evidence_url_invalid")
@@ -331,7 +324,7 @@ def _authenticate_deployment_evidence(
         "schema_id": "hormuz.external-pilot-deployment-evidence",
         "schema_version": 1,
         "evidence_kind": "live_external_pilot",
-        **EXPECTED_CONTRACT,
+        **PROFILE_CONTRACTS[profile],
         "source_commit": expected_commit,
         "workflow_run_url": deployment_evidence_url,
         "gateway_origin": origin,
@@ -406,13 +399,13 @@ def _json_gateway(
         response.close()
 
 
-def _health(origin: str, expected_commit: str, service_id: str) -> dict[str, Any]:
+def _health(origin: str, expected_commit: str, service_id: str, profile: str = "external_pilot") -> dict[str, Any]:
     value, headers = _json_gateway(origin, "/health")
     if (
         value.get("schema_id") != "hormuz.hosted-provider-pilot"
         or value.get("schema_version") != 1
         or value.get("status") != "provider_pilot"
-        or value.get("contract") != EXPECTED_CONTRACT
+        or value.get("contract") != PROFILE_CONTRACTS[profile]
         or headers.get("cache-control") != "no-store"
     ):
         raise QualificationError("gateway_profile_not_ready")
@@ -464,8 +457,9 @@ def _restart_and_wait(
     service_id: str,
     deploy_hook: str,
     deadline_seconds: int = 600,
+    profile: str = "external_pilot",
 ) -> str:
-    before = _health(origin, expected_commit, service_id)["deployment"]["instance_fingerprint"]
+    before = _health(origin, expected_commit, service_id, profile)["deployment"]["instance_fingerprint"]
     request = Request(
         _deploy_hook_url(deploy_hook, service_id, expected_commit),
         data=b"",
@@ -487,7 +481,7 @@ def _restart_and_wait(
     while time.monotonic() < deadline:
         time.sleep(10)
         try:
-            current = _health(origin, expected_commit, service_id)
+            current = _health(origin, expected_commit, service_id, profile)
             ready, _ = _json_gateway(origin, "/ready")
         except QualificationError:
             continue
@@ -793,10 +787,15 @@ def qualify(
     deployment_evidence_url: str,
     workflow_run_url: str,
     refresh_token: str,
-    claude_code_refresh_token: str,
+    claude_code_refresh_token: str = "",
     rehearsal_key: str,
     deploy_hook: str,
+    profile: str = "external_pilot",
 ) -> dict[str, Any]:
+    if profile not in PROFILE_CONTRACTS:
+        raise QualificationError("qualification_profile_invalid")
+    contract = PROFILE_CONTRACTS[profile]
+    needs_claude = "anthropic" in contract["provider_protocols"]
     origin = _origin(origin)
     if (
         COMMIT_RE.fullmatch(expected_commit) is None
@@ -805,8 +804,11 @@ def qualify(
         or RUN_URL_RE.fullmatch(workflow_run_url) is None
         or deployment_evidence_url == workflow_run_url
         or TOKEN_RE.fullmatch(refresh_token) is None
-        or TOKEN_RE.fullmatch(claude_code_refresh_token) is None
-        or refresh_token == claude_code_refresh_token
+        or (needs_claude and (
+            TOKEN_RE.fullmatch(claude_code_refresh_token) is None
+            or refresh_token == claude_code_refresh_token
+        ))
+        or (not needs_claude and bool(claude_code_refresh_token))
         or re.fullmatch(r"[A-Za-z0-9_-]{43,128}", rehearsal_key) is None
     ):
         raise QualificationError("qualification_input_invalid")
@@ -816,6 +818,7 @@ def qualify(
         expected_commit=expected_commit,
         service_id=service_id,
         origin=origin,
+        profile=profile,
     )
 
     access_token = ""
@@ -825,9 +828,10 @@ def qualify(
     primary_error: BaseException | None = None
     try:
         access_token, rotated_refresh = _refresh(origin, refresh_token)
-        claude_code_access, claude_code_rotated_refresh = _refresh(origin, claude_code_refresh_token)
+        if needs_claude:
+            claude_code_access, claude_code_rotated_refresh = _refresh(origin, claude_code_refresh_token)
         binding = _session_binding(origin, access_token, "codex")
-        if _session_binding(origin, claude_code_access, "claude-code") != binding:
+        if needs_claude and _session_binding(origin, claude_code_access, "claude-code") != binding:
             raise QualificationError("qualification_session_actor_mismatch")
         before_restart_write = _reliability(
             origin,
@@ -869,12 +873,14 @@ def qualify(
             expected_commit=expected_commit,
             service_id=service_id,
             deploy_hook=deploy_hook,
+            profile=profile,
         )
         access_token, rotated_refresh = _refresh(origin, rotated_refresh)
-        claude_code_access, claude_code_rotated_refresh = _refresh(origin, claude_code_rotated_refresh)
+        if needs_claude:
+            claude_code_access, claude_code_rotated_refresh = _refresh(origin, claude_code_rotated_refresh)
         if (
             _session_binding(origin, access_token, "codex") != binding
-            or _session_binding(origin, claude_code_access, "claude-code") != binding
+            or (needs_claude and _session_binding(origin, claude_code_access, "claude-code") != binding)
         ):
             raise QualificationError("qualification_session_actor_mismatch")
         baseline = _reliability(
@@ -890,7 +896,7 @@ def qualify(
             raise QualificationError("postgresql_recovery_evidence_missing")
         first_chunk_before_completion = True
         request_count = 0
-        for protocol in ("anthropic", "openai"):
+        for protocol in contract["provider_protocols"]:
             protocol_access = claude_code_access if protocol == "anthropic" else access_token
             for suffix in ("primary", "secondary"):
                 alias = f"{protocol}-{suffix}"
@@ -996,7 +1002,6 @@ def qualify(
         ):
             raise QualificationError("provider_reliability_evidence_incomplete")
 
-        contract = EXPECTED_CONTRACT
         return {
             "schema_id": SCHEMA_ID,
             "schema_version": SCHEMA_VERSION,
@@ -1048,10 +1053,10 @@ def qualify(
     finally:
         # Attempt both families even when refreshing or revoking the first fails.
         try:
-            _logout_sessions(origin, (
-                rotated_refresh or refresh_token,
-                claude_code_rotated_refresh or claude_code_refresh_token,
-            ))
+            credentials = (rotated_refresh or refresh_token,)
+            if needs_claude:
+                credentials += (claude_code_rotated_refresh or claude_code_refresh_token,)
+            _logout_sessions(origin, credentials)
         except QualificationError:
             if primary_error is None:
                 raise
@@ -1059,6 +1064,7 @@ def qualify(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=tuple(PROFILE_CONTRACTS), default="external_pilot")
     parser.add_argument("--gateway-origin", required=True)
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--expected-service-id", required=True)
@@ -1081,6 +1087,7 @@ def main(argv: list[str] | None = None) -> int:
             claude_code_refresh_token=claude_code_refresh_token,
             rehearsal_key=rehearsal_key,
             deploy_hook=deploy_hook,
+            profile=arguments.profile,
         )
         output = arguments.output.resolve()
         if output.exists() or output.is_symlink() or not output.parent.is_dir():

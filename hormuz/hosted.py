@@ -25,6 +25,7 @@ from ._hosted_config import BACKEND_PORT, SECRET_NAMES, HostedError, load_profil
 from ._hosted_provider import (
     PROVIDER_CHILD_ENV_NAMES,
     PROVIDER_CONFIG_ENV,
+    PROVIDER_PROFILE_ENV,
     PROVIDER_FAILOVER_REHEARSAL_ENV,
     PROVIDER_MIGRATION_DSN_ENV,
     PROVIDER_OPERATOR_SECRET_NAMES,
@@ -54,6 +55,7 @@ def runtime_settings() -> dict[str, str]:
         "HORMUZ_INGRESS_CREDENTIAL": os.environ.get("HORMUZ_INGRESS_CREDENTIAL", ""),
         "HORMUZ_SESSION_MASTER_KEY": os.environ.get("HORMUZ_SESSION_MASTER_KEY", ""),
         "HORMUZ_OIDC_CLIENT_SECRET": os.environ.get("HORMUZ_OIDC_CLIENT_SECRET", ""),
+        PROVIDER_PROFILE_ENV: os.environ.get(PROVIDER_PROFILE_ENV, "external_pilot"),
         PROVIDER_CONFIG_ENV: os.environ.get(PROVIDER_CONFIG_ENV, "/etc/secrets/hormuz-provider.json"),
         "HORMUZ_OPENAI_PROVIDER_KEY": os.environ.get("HORMUZ_OPENAI_PROVIDER_KEY", ""),
         "HORMUZ_ANTHROPIC_PROVIDER_KEY": os.environ.get("HORMUZ_ANTHROPIC_PROVIDER_KEY", ""),
