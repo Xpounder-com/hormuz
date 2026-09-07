@@ -11,22 +11,33 @@ from pathlib import Path
 STAGES = ('new', 'contacted', 'review_booked', 'qualified', 'proposal', 'agreed', 'paid_pilot', 'support', 'closed_won', 'closed_lost', 'not_fit', 'qa', 'spam')
 CLOSED = {'closed_won', 'closed_lost', 'not_fit', 'qa', 'spam'}
 FIELDS = ('request_reference', 'received_date', 'name', 'email', 'organization', 'interest', 'campaign', 'stage', 'owner', 'next_action', 'next_action_date', 'booking_reference', 'workflow', 'business_outcome', 'success_measure', 'technical_owner', 'decision_owner', 'budget_evidence', 'timing', 'proposal_reference', 'agreement_reference', 'payment_reference', 'pilot_start', 'day_60_review', 'day_90_decision', 'notes')
+QUALIFIED_STAGES = {'qualified', 'proposal', 'agreed', 'paid_pilot', 'support', 'closed_won'}
+REFERENCE_STAGES = {
+    'proposal_reference': {'proposal', 'agreed', 'paid_pilot', 'support', 'closed_won'},
+    'agreement_reference': {'agreed', 'paid_pilot', 'support', 'closed_won'},
+    'payment_reference': {'paid_pilot', 'support', 'closed_won'},
+}
+PILOT_DATES = ('pilot_start', 'day_60_review', 'day_90_decision')
 
 def validate(row):
     if not row.get('request_reference') or row.get('stage') not in STAGES:
         raise ValueError('A unique request reference and known stage are required')
-    for field in ('received_date', 'next_action_date', 'pilot_start', 'day_60_review', 'day_90_decision'):
-        if row.get(field): date.fromisoformat(row[field])
+    parsed_dates = {}
+    for field in ('received_date', 'next_action_date', *PILOT_DATES):
+        if row.get(field): parsed_dates[field] = date.fromisoformat(row[field])
     if row['stage'] not in CLOSED and not all(row.get(key) for key in ('owner', 'next_action', 'next_action_date')):
         raise ValueError('Every open inquiry needs an owner, next action, and date')
-    if row['stage'] in ('qualified', 'proposal', 'agreed', 'paid_pilot', 'support', 'closed_won'):
+    if row['stage'] in QUALIFIED_STAGES:
         if not all(row.get(key) for key in ('business_outcome', 'success_measure', 'technical_owner', 'decision_owner', 'budget_evidence', 'timing')):
             raise ValueError('Qualification requires outcome, success measure, technical and decision owners, budget evidence, and timing')
-    for stage, required in [('proposal', 'proposal_reference'), ('agreed', 'agreement_reference'), ('paid_pilot', 'payment_reference')]:
-        if row['stage'] in STAGES[STAGES.index(stage):STAGES.index('closed_won')+1] and not row.get(required):
+    for required, stages in REFERENCE_STAGES.items():
+        if row['stage'] in stages and not row.get(required):
             raise ValueError(f'{required} is required; do not infer it from a checkout visit')
-    if row['stage'] in ('paid_pilot', 'support', 'closed_won') and not all(row.get(key) for key in ('pilot_start', 'day_60_review', 'day_90_decision')):
-        raise ValueError('An active pilot needs its start, day-60 review, and day-90 decision dates')
+    if row['stage'] == 'paid_pilot' or any(row.get(key) for key in PILOT_DATES):
+        if not all(row.get(key) for key in PILOT_DATES):
+            raise ValueError('An active pilot needs its start, day-60 review, and day-90 decision dates')
+        if not parsed_dates['pilot_start'] < parsed_dates['day_60_review'] < parsed_dates['day_90_decision']:
+            raise ValueError('Pilot milestones must follow start, day-60 review, then day-90 decision')
 
 def load(path):
     if not path.exists(): return []

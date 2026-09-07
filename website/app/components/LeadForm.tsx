@@ -5,7 +5,7 @@ import { CampaignLink } from './CampaignLink';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { INTERESTS, campaignSource, isSalesInquiry } from '../../lib/contact.mjs';
-import { buildLead, createRequestReference, submitLead } from '../../lib/lead.mjs';
+import { prepareLeadAttempt, submitLead } from '../../lib/lead.mjs';
 import { trackConfirmedApplication } from '../../lib/x-ads.mjs';
 import { PILOT_PRICE, SUPPORT_PRICE } from '../../lib/commercial.mjs';
 import { CONTACT_EMAIL, sitePath } from '../../lib/site.mjs';
@@ -34,9 +34,13 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
     let payload;
     try {
       // Reuse this reference if the visitor retries an ambiguous transport result.
-      requestReference.current ||= createRequestReference();
+      payload = prepareLeadAttempt(
+        { ...Object.fromEntries(new FormData(event.currentTarget)), interest },
+        includeSource ? search : '',
+        { reference: requestReference.current, testSubmission },
+      );
+      requestReference.current = payload.request_reference;
       setReference(requestReference.current);
-      payload = buildLead({ ...Object.fromEntries(new FormData(event.currentTarget)), interest }, includeSource ? search : '', { reference: requestReference.current, testSubmission });
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Check your entries.'); setState('error'); return; }
     pending.current = true;

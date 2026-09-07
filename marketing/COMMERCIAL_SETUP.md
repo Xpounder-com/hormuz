@@ -15,7 +15,7 @@ Set only verified public destinations in `website/lib/commercial-config.mjs`:
 | Setting | Purpose | Activation check |
 | --- | --- | --- |
 | formEndpoint | Formspree `/f/<id>` endpoint | Owner identity, recipient, domain restriction, spam filtering, and test receipt verified |
-| bookingUrl | Public Calendly or Cal.com event | Correct owner, availability, timezone, duration, and notification recipient |
+| bookingUrl | Public Calendly, Cal.com, or Google Calendar appointment schedule | Correct owner, availability, timezone, duration, and notification recipient |
 | pilotPaymentUrl | Public live Stripe Payment Link | Correct merchant, USD 15,000, one-time, fixed quantity, no optional upsells |
 | supportPaymentUrl | Public live Stripe Payment Link | Correct merchant, USD 2,000 monthly, fixed quantity, disclosed recurring and cancellation terms |
 
@@ -94,12 +94,15 @@ Formspree configuration, September 6, 2026:
 
 - Separate project `Hormuz`, form `Hormuz Enterprise Applications`, endpoint
   `https://formspree.io/f/xoeqnbyq`.
-- Verified owner inbox `zaker.mehrdad@gmail.com`; email notifications, submission
+- Verified owner inbox `mehrdadz@neuralint.io`; email notifications, submission
   archive, and Formshield enabled. Domain restricted to `usehormuz.github.io`.
 - Current free account quota: 50 submissions/month shared across forms; dashboard
   archive: 30 days. Existing unrelated forms were not changed.
 - Applicant autoresponses require Professional: USD 30 monthly, or USD 240/year.
   No upgrade has been purchased; on-page receipt works without an upgrade.
-- Booking remains blank until the owner's event/availability is supplied.
-- Live form record, owner email delivery, and X event activity must be verified
-  after this source revision is published. Configuration is not delivery proof.
+- Google Calendar review booking is connected for Wednesday and Thursday,
+  10:00–15:00 America/Chicago, 30-minute appointments, subject to live availability.
+- A clearly marked QA submission produced a live Formspree record and the owner
+  confirmed delivery to `mehrdadz@neuralint.io`. QA remains excluded from sales
+  counts. X event activity still requires separate Events Manager verification;
+  configuration or a browser request alone is not attribution proof.

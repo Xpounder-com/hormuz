@@ -37,6 +37,13 @@ export function buildLead(fields, source = '', { reference = '', testSubmission 
     _subject: `${testSubmission ? '[QA TEST] ' : ''}Hormuz — ${interest}${reference ? ` — ${reference}` : ''}`, _gotcha: clean(fields._gotcha, 100) };
 }
 
+/** Validate before allocating a reference that implies a transmission attempt. */
+export function prepareLeadAttempt(fields, source = '', { reference = '', testSubmission = false, cryptoSource = globalThis.crypto } = {}) {
+  buildLead(fields, source, { testSubmission });
+  const requestReference = reference || createRequestReference(cryptoSource);
+  return { ...buildLead(fields, source, { reference: requestReference, testSubmission }), request_reference: requestReference };
+}
+
 /** A transport failure is ambiguous. Never retry automatically or claim delivery. */
 export async function submitLead(endpoint, payload, fetcher = fetch) {
   validateCommercialConfig({ formEndpoint: endpoint, bookingUrl: '', pilotPaymentUrl: '', supportPaymentUrl: '' });

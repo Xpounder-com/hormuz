@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateCommercialConfig } from '../lib/commercial.mjs';
-import { buildLead, campaignLink, createRequestReference, submitLead } from '../lib/lead.mjs';
+import { buildLead, campaignLink, createRequestReference, prepareLeadAttempt, submitLead } from '../lib/lead.mjs';
 
 const blank = { formEndpoint: '', bookingUrl: '', pilotPaymentUrl: '', supportPaymentUrl: '' };
 const endpoint = 'https://formspree.io/f/testfixture';
@@ -59,6 +59,20 @@ test('request reference identifies the submission and QA status cannot come from
   assert.equal(qa.test_submission, true);
   assert.match(qa._subject, /^\[QA TEST\]/);
   assert.throws(() => buildLead(fields, '', { reference: 'arbitrary contact data' }));
+});
+
+test('submission validation precedes reference allocation and ambiguous retries retain the reference', () => {
+  let allocations = 0;
+  const cryptoSource = { randomUUID: () => {
+    allocations++;
+    return '11111111-2222-4333-8444-555555555555';
+  } };
+  assert.throws(() => prepareLeadAttempt({ ...fields, organization: ' ' }, '', { cryptoSource }));
+  assert.equal(allocations, 0);
+  const first = prepareLeadAttempt(fields, '', { cryptoSource });
+  assert.equal(allocations, 1);
+  const retry = prepareLeadAttempt(fields, '', { reference: first.request_reference, cryptoSource: { randomUUID: () => { throw new Error('must not allocate'); } } });
+  assert.equal(retry.request_reference, first.request_reference);
 });
 
 test('Google booking configuration allows public schedules but rejects private calendar pages', () => {
