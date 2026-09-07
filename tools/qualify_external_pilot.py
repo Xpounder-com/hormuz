@@ -590,6 +590,7 @@ def _reliability(
         or value.get("provider_inflight", 9) > 8
         or (not allow_inflight and value.get("provider_inflight") != 0)
         or value.get("provider_peak_inflight", 9) > 8
+        or value["provider_inflight"] > value["provider_peak_inflight"]
         or value.get("connection_capacity") != 9
         or value.get("postgresql_pool_max_connections") != 4
         or value.get("postgresql_pool_requests_waiting", 9) > 8

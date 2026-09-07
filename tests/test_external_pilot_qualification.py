@@ -824,6 +824,7 @@ class ExternalPilotQualificationTests(unittest.TestCase):
     def test_cancellation_poll_rejects_invalid_summaries_without_retrying(self) -> None:
         before = _counters(live=5, attempts=5, first=5, failovers=0)
         changes = (
+            {"provider_inflight": 2, "provider_peak_inflight": 1},
             {"provider_inflight": 9},
             {"provider_inflight": -1},
             {"provider_inflight": True},
