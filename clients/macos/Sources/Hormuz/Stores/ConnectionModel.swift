@@ -7,8 +7,9 @@ import Observation
     var gateway = ""
     var organization = ""
     var issuer = ""
+    var setup = GatewaySetup.openAIPilot
     var client = AIClient.codex
-    var model = ""
+    var model = "openai-primary"
     var allowLoopbackHTTP = false
     private(set) var profile: ConnectionProfile?
     private(set) var hasSession = false
@@ -53,7 +54,7 @@ import Observation
             guard let controller = self.controller else { throw ClientError.storageUnavailable }
             let profile = try ConnectionProfile(gateway: self.gateway, organization: self.organization,
                 issuer: self.issuer.isEmpty ? nil : self.issuer, client: self.client, model: self.model,
-                allowLoopbackHTTP: self.allowLoopbackHTTP)
+                allowLoopbackHTTP: self.allowLoopbackHTTP, setup: self.setup)
             self.dashboard = nil
             self.connector = nil
             self.connectorSaved = false
@@ -74,6 +75,18 @@ import Observation
     }
 
     func cancelSignIn() { operation?.cancel() }
+
+    func selectSetup(_ selected: GatewaySetup) {
+        guard !isBusy else { return }
+        setup = selected
+        if selected == .openAIPilot {
+            client = .codex
+            if !["openai-primary", "openai-secondary"].contains(model) {
+                model = "openai-primary"
+            }
+            allowLoopbackHTTP = false
+        }
+    }
 
     func reopenBrowser() { if let loginURL { NSWorkspace.shared.open(loginURL) } }
 
@@ -134,6 +147,7 @@ import Observation
             gateway = profile.gateway
             organization = profile.organization
             issuer = profile.issuer ?? ""
+            setup = profile.setup
             client = profile.client
             model = profile.model
             allowLoopbackHTTP = profile.allowLoopbackHTTP

@@ -155,6 +155,14 @@ provider quotas, and customer-specific latency targets. The stored observations
 are the inputs for that later qualification; they do not establish it by
 themselves.
 
+The explicit `codex_openai` signed-Mac contract composes these controls with the
+`external_pilot_openai` gateway profile and the pinned Codex client. Its
+one-hop fallback stays between two OpenAI model routes. It therefore does not
+qualify Claude Code, cross-provider failover, or protection from an OpenAI-wide
+outage. The default `full_dual_provider` Mac contract continues to require both
+protocols and both pinned clients. See
+[signed Mac pilot qualification](MACOS_PILOT_QUALIFICATION.md).
+
 ## Verification boundary
 
 The provider-free integration suite proves prompt streaming before provider

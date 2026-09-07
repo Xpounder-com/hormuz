@@ -8,8 +8,12 @@ promise, or production-readiness claim is added here.
 
 ## Customer flow
 
-1. Open the local Hormuz app. Enter the gateway origin, organization ID, supported
-   client, and a model alias approved by the gateway operator. The optional issuer
+1. Open the local Hormuz app and select the gateway setup before entering the
+   gateway origin and organization ID. **Hormuz hosted pilot — Codex/OpenAI**
+   fixes the client to Codex, allows only `openai-primary` or
+   `openai-secondary`, and requires HTTPS. **Custom team gateway** preserves the
+   existing Codex or Claude Code and operator-approved model-alias controls,
+   including the explicit loopback-HTTP development option. The optional issuer
    disambiguates gateways with multiple configured identity providers.
 2. Select **Sign in with browser**, confirm that you initiated the connection, and
    complete your team's browser login. Credentials never appear in the browser.
@@ -37,7 +41,7 @@ Codex/Claude configuration or login files:
 
 | Local data | Purpose and custody |
 | --- | --- |
-| `profile.json` | Non-secret origin, organization, optional issuer, client, alias, local HTTP opt-in and random profile ID; mode `0600` |
+| `profile.json` | Non-secret setup selector, origin, organization, optional issuer, client, alias, local HTTP opt-in and random profile ID; mode `0600` |
 | `connection.lock` | Metadata-only cross-process lock; mode `0600`; bounded acquisition |
 | `<client>-<id>.command` | Quoted launcher with no credential values; mode `0700` |
 | `claude-code-<id>.settings.json` | Helper command and routing overrides; no credential values; mode `0600` |
@@ -50,6 +54,12 @@ overwritten. Preview does not write configuration. Saving checks that every file
 still matches its preview, preserves replaced bytes in a backup, and atomically
 replaces each owned file. A partial multi-file write is not reported as complete;
 a fresh preview can finish it. Repeated saves are idempotent.
+
+The saved `setup` value is either `openai-pilot` or `custom`. Profiles written
+before this field existed decode as `custom`, preserving their former behavior.
+An explicitly present `null`, an unknown setup string, or a hosted-pilot profile
+that selects Claude Code, loopback HTTP, or any other alias fails closed. Loading
+and re-saving a valid profile retains its setup and profile ID.
 
 Codex receives invocation-local TOML overrides for a complete `hormuz_connector`
 provider table. Claude Code receives a separate `--settings` file. Common ambient
@@ -135,8 +145,9 @@ python tools/verify_macos_client.py --serve
 ./script/build_and_run.sh
 ```
 
-Use the printed loopback origin, `org-a`, and `safe-openai` for Codex or
-`safe-claude` for Claude Code. Enable local HTTP. The browser's **fixture Alice**
+Select **Custom team gateway**, then use the printed loopback origin, `org-a`,
+and `safe-openai` for Codex or `safe-claude` for Claude Code. Enable local HTTP.
+The browser's **fixture Alice**
 button uses no real account or password. Save the connector, then run:
 
 ```sh
@@ -192,8 +203,11 @@ the acceptance boundary for any customer pilot.
   Follow [Apple's notarization requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
   and [hardened-runtime guidance](https://developer.apple.com/documentation/security/hardened-runtime).
 - Complete a real, owner-selected IdP integration: HTTPS callback, issuer/subject
-  mapping, consent, failure, deprovisioning, revocation and recovery. Qualify pinned
-  clients' cached-credential 401 recovery without retrying ambiguous inference.
+  mapping, consent, failure, deprovisioning, revocation and recovery. Qualify the
+  pinned clients selected by the explicit pilot contract: Codex for
+  `codex_openai`, or Codex and Claude Code for `full_dual_provider`. Never infer
+  a narrower contract from missing Claude evidence, and never retry ambiguous
+  inference.
 - Complete production gateway tenancy/provider custody, distributed rate limits,
   durable sessions, backup/recovery, operational monitoring and support. Those
   are hosted-service work, not supplied by this Mac window.

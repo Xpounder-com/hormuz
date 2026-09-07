@@ -8,6 +8,12 @@ struct ConnectedView: View {
         VStack(alignment: .leading, spacing: 20) {
             if let profile = connection.profile {
                 Grid(alignment: .leading, horizontalSpacing: 22, verticalSpacing: 9) {
+                    row(
+                        "Setup",
+                        profile.setup == .openAIPilot
+                            ? "Hormuz hosted pilot · Codex/OpenAI"
+                            : "Custom team gateway"
+                    )
                     row("Gateway", profile.gateway)
                     row("Organization", profile.organization)
                     row("Client", profile.client.title + " · " + profile.model)

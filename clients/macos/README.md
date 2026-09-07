@@ -2,8 +2,14 @@
 
 A small native connector for a team's Hormuz gateway. It signs in through an
 external browser, stores a revocable session in macOS Keychain, prepares a
-dedicated Codex or Claude Code launcher, and shows the signed-in person's usage.
-It is not a VPN, chat replacement, hosted signup service, or distributable release.
+dedicated client launcher, and shows the signed-in person's usage. The explicit
+**Hormuz hosted pilot — Codex/OpenAI** setup fixes the client to Codex, permits
+only `openai-primary` or `openai-secondary`, and requires HTTPS. The **Custom
+team gateway** setup preserves the existing Codex or Claude Code controls and
+the loopback-only HTTP development option. The OpenAI pilot provides
+same-provider model fallback; it does not qualify Claude Code, cross-provider
+failover, or protection from an OpenAI-wide outage. It is not a VPN, chat
+replacement, hosted signup service, or distributable release.
 
 Build from the repository root with the installed Swift toolchain:
 
@@ -16,6 +22,11 @@ signature**, and opens it. It does not use your Apple Developer credentials or
 submit anything for notarization. The Codex Run action calls the same script.
 `--build-only` stages without opening; `--verify` additionally checks process
 presence. `--debug`, `--logs`, and `--telemetry` support local troubleshooting.
+
+The non-secret setup selector is stored in `profile.json`. A legacy profile
+without the field remains `custom`; an explicit null or unknown value is
+rejected. A hosted-pilot profile also fails closed if its client, alias, scheme,
+or loopback setting does not match the bounded preset.
 
 SwiftPM products are `Hormuz` (the window and credential helper in one executable)
 and `HormuzClientCore` (session, transport, Keychain and connector logic). The

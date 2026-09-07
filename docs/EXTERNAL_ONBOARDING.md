@@ -246,3 +246,9 @@ usable by this bounded independent cohort. It does not prove the separate
 PostgreSQL apply/history/rollback state correctness, provider compatibility,
 production security or availability, disaster recovery, enterprise readiness,
 customer demand, or market validation.
+
+The signed-Mac controlled-pilot contracts in
+[MACOS_PILOT_QUALIFICATION.md](MACOS_PILOT_QUALIFICATION.md) are a separate
+artifact, client, gateway, and review gate. Neither their full dual-provider path
+nor their explicit Codex/OpenAI path changes this study's `0/5 initial` and
+`0/1 returning` human-evidence targets.

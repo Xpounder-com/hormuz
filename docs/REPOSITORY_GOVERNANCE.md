@@ -73,6 +73,26 @@ or a tag that is not the exact current `main` commit. GHCR is the first
 publication registry, while the verified signed OCI digest remains the portable
 artifact contract.
 
+## Protected Mac pilot operations
+
+The manual `.github/workflows/macos-pilot-operations.yml` workflow accepts one
+required `qualification_scope` choice with exactly two values. Its default
+`full_dual_provider` value preserves schema v1 and requires Codex plus Claude
+Code. The explicit `codex_openai` value emits schema v2, binds the
+`external_pilot_openai` deployment, and allows only the Codex record. The
+selector is passed unchanged to preparation and assembly; it is never inferred
+from omitted evidence. Unknown or free-form values fail before runner work.
+
+Both paths keep the `macos-pilot-operations` environment review, protected-main
+source binding, content-free artifacts, clean Apple Silicon and Intel runner
+labels, and short retention controls. Only the full-scope case may read, invoke,
+or submit Claude Code evidence. Repository governance tests reject direct shell
+interpolation of the selector, an unguarded Claude argument, missing scope
+propagation, `continue-on-error`, extra output files, and weakened overwrite or
+retention behavior. These static checks prove workflow shape; they do not prove
+that GitHub environment protection, hardware runners, or a real operations run
+exists.
+
 ## Discussions and public surfaces
 
 The maintained Discussions categories are Announcements, General, Ideas, Polls,

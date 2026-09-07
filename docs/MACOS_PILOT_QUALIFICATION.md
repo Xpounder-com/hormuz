@@ -1,18 +1,21 @@
 # Signed Mac pilot qualification
 
-The `external_pilot_openai` gateway scope is intentionally not accepted by this
-full dual-provider Mac gate. Its narrower gateway evidence cannot establish
-Claude Code support or complete Mac release acceptance. See the
-[provider scope guide](RENDER_PROVIDER_PILOT.md#explicit-provider-scope).
-
 This protocol decides whether one exact notarized Hormuz Mac archive is ready
 for a small, controlled external pilot. It composes distribution, clean-machine
 installation, Keychain lifecycle, official-client authentication recovery,
 hosted provider behavior, operational recovery, and independent review. A pass
 does not publish the archive, invite a customer, create an availability SLA, or
-count as external-human validation.
+count as external-human validation. The caller selects one of two exact
+contracts; missing evidence never narrows the default contract:
 
-The retained contract is `hormuz.macos-pilot-qualification` v1. Its verifier is
+| Selection | Evidence schema | Gateway | Selected clients | Claim |
+| --- | --- | --- | --- | --- |
+| `full_dual_provider` (default) | v1, with no `qualification_scope` field | `external_pilot`; protocols exactly `anthropic`, `openai` | Codex and Claude Code | `signed_macos_controlled_external_pilot_readiness` |
+| `codex_openai` (explicit) | v2, with `qualification_scope: codex_openai` | `external_pilot_openai`; protocol exactly `openai` | Codex only | `signed_macos_codex_openai_controlled_external_pilot_readiness` |
+
+The two representations share `hormuz.macos-pilot-qualification` as their
+schema ID. Version 1 remains byte-shape compatible and rejects a scope field;
+version 2 supports only `codex_openai`. The verifier is
 `tools/verify_macos_pilot_evidence.py`. The existing v1.0.0 external-onboarding
 study remains separate: this protocol always reports `0` initial and `0`
 returning completions and cannot change the `0/5 initial` or `0/1 returning`
@@ -58,8 +61,8 @@ affected gate on a new build when artifact bytes change.
    clean-machine run and completed review. Apple acceptance must contain zero
    issues and at least two ticket entries. The CLI streams each supplied archive
    into a private, owner-only snapshot before validation. It verifies that
-   snapshot's digest immediately before and after the macOS platform checks, so custody and
-   platform verification cannot observe different pathname contents.
+   snapshot's digest immediately before and after the macOS platform checks, so
+   custody and platform verification cannot observe different pathname contents.
 3. **Exercise clean machines.** Use one Apple Silicon Mac and one Intel Mac
    without developer tools. Download through the intended delivery channel so
    normal quarantine is present. Confirm Gatekeeper accepts the archive,
@@ -74,13 +77,16 @@ affected gate on a new build when artifact bytes change.
    the candidate, and roll back to the previous build. At every step verify the
    intended Keychain behavior and that no credential file appears. The
    candidate evidence binds `update_to_build` to the archive under review.
-5. **Repeat official-client `401` qualification through the signed helper.** The
-   pinned Codex client must receive one `401`, refresh once, replay once, and
+5. **Repeat selected official-client `401` qualification through the signed
+   helper.** The pinned Codex client must receive one `401`, refresh once,
+   replay once, and
    complete with zero provider egress on the rejected turn and one provider
-   egress after recovery. The pinned Claude Code client must receive one `401`,
-   refresh once, avoid automatic replay, and complete only after one explicit
-   next request. Both records bind to the notarized archive digest and attest
-   that the native Keychain helper supplied the Hormuz session.
+   egress after recovery. In `full_dual_provider`, the pinned Claude Code client
+   must receive one `401`, refresh once, avoid automatic replay, and complete
+   only after one explicit next request. In `codex_openai`, Claude Code is
+   neither invoked nor recorded; a Claude record is an error. Every selected
+   record binds to the notarized archive digest and attests that the native
+   Keychain helper supplied the Hormuz session.
    Real qualification authenticates gates 3 through 5 through one successful
    default-branch workflow-dispatch run of
    `.github/workflows/macos-pilot-operations.yml` at the candidate source
@@ -88,27 +94,30 @@ affected gate on a new build when artifact bytes change.
    created and finish before the aggregate's `generated_at`. It publishes one
    unexpired `hormuz-macos-pilot-operations-<run number>-<attempt>` artifact
    containing only `macos-pilot-operations-evidence.json`. That strict
-   `hormuz.macos-pilot-operations-evidence` v1 proof binds both distribution
-   run URLs, source commits, and archive digests, plus the exact hosted-gateway
-   source commit and deployment run URL, then reproduces the clean-machine,
-   lifecycle, and official-client recovery records. The verifier downloads the
-   artifact through the authenticated GitHub API and exact-compares all three
-   record groups and the gateway identity. The machine collector also requires
-the signed app's configured HTTPS origin to equal the origin authenticated
-from that gateway deployment artifact. Every client-side reliability snapshot
-also requires the live Render service ID, source commit, branch, repository,
-compute contract, and external origin to match that authenticated deployment,
-so a later redeploy at the same hostname cannot qualify. The authenticated gateway deployment
+   `hormuz.macos-pilot-operations-evidence` proof uses v1 for the default scope
+   and v2 plus `qualification_scope: codex_openai` for the narrow scope. It binds
+   both distribution run URLs, source commits, and archive digests, plus the
+   exact hosted-gateway source commit and deployment run URL, then reproduces
+   the clean-machine, lifecycle, and official-client recovery records. The
+   verifier downloads the artifact through the authenticated GitHub API and
+   exact-compares all three record groups and the gateway identity. The machine
+   collector also requires the signed app's configured HTTPS origin to equal
+   the origin authenticated from that gateway deployment artifact. Every
+   client-side reliability snapshot also requires the live Render service ID,
+   source commit, branch, repository, compute contract, and external origin to
+   match that authenticated deployment, so a later redeploy at the same
+   hostname cannot qualify. The authenticated gateway deployment
    must finish before the operations run starts. Every clean-machine start must
    fall within the operations run and no later than this immutable artifact's
-   creation time. While any of gates 3
-   through 5 is incomplete, `macos_operational_evidence_url` may be `none` and
+   creation time. While any of gates 3 through 5 is incomplete,
+   `macos_operational_evidence_url` may be `none` and
    the verifier reports not ready; once all three record groups qualify, a real
    authenticated run URL is required. The operational workflow and system-tool
    collectors are implemented, but no protected clean-machine run has qualified
    yet. Caller-authored booleans cannot qualify a real pilot.
-6. **Qualify the hosted gateway.** Use a separately deployed
-   `external_pilot` profile with HTTPS, real Okta login, server-only provider
+6. **Qualify the selected hosted gateway.** Full scope uses `external_pilot` and
+   exactly Anthropic plus OpenAI; narrow scope uses `external_pilot_openai` and
+   exactly OpenAI. Both require HTTPS, real Okta login, server-only provider
    credentials, PostgreSQL durability and tenant RLS, durable sessions,
    monitoring, a recovery drill, and a published support path. Prove that the
    first streaming chunk arrives before provider completion, cancellation
@@ -148,11 +157,13 @@ so a later redeploy at the same hostname cannot qualify. The authenticated gatew
    completion time. A qualifying public reference is an authenticated GitHub
    issue comment whose author differs from both the distribution workflow actor
    and triggering actor. Its entire body is a JSON object with exactly these
-   fields: `schema_id` (`hormuz.macos-pilot-review`), `schema_version` (`1`),
+   fields: `schema_id` (`hormuz.macos-pilot-review`), `schema_version`,
    `claim_scope`, `review_kind` (`security` or `accessibility`), `status`
    (`passed`), `independent_reviewer` (`true`), `artifact_sha256`, and
-   `source_commit`. The aggregate completion time must equal the comment's
-   authenticated GitHub update time. An opaque private-review reference remains
+   `source_commit`. Full-scope comments use v1 and the broad claim with no scope
+   field. Narrow comments use v2, the narrow claim, and
+   `qualification_scope: codex_openai`. The aggregate completion time must equal
+   the comment's authenticated GitHub update time. An opaque private-review reference remains
    structurally valid but cannot qualify until a separate private-reference
    authenticator is implemented. A self-review, bare issue URL, reused older
    review, or unreferenced `passed` value is rejected.
@@ -186,17 +197,21 @@ Before dispatch, use Safari on both Macs to download the exact candidate
 Archive Utility to create `~/Downloads/Hormuz.app`. On the Apple Silicon Mac,
 also retain the differently versioned previous notarized ZIP in `~/Downloads`.
 Leave `/Applications/Hormuz.app` absent on both machines. Install the official
-pinned Codex `0.147.0` and Claude Code `2.1.233` clients on the Apple Silicon Mac
-without installing Xcode or Command Line Tools. Use a private, fixed install
+pinned Codex `0.147.0` client on the Apple Silicon Mac. Install Claude Code
+`2.1.233` only for `full_dual_provider`; a `codex_openai` run neither requires
+nor invokes it. Do not install Xcode or Command Line Tools. Use a private, fixed install
 root so the collector never resolves an arbitrary `PATH` wrapper:
 
 ```sh
 install -d -m 0700 "$HOME/.hormuz-pilot-clients"
 npm install --prefix "$HOME/.hormuz-pilot-clients" --no-save --package-lock=false \
-  '@openai/codex@0.147.0' \
-  '@anthropic-ai/claude-code@2.1.233'
+  '@openai/codex@0.147.0'
 chmod 0700 "$HOME/.hormuz-pilot-clients"
 ```
+
+For a full-scope run, add the pinned Claude package to that same command:
+`'@anthropic-ai/claude-code@2.1.233'`. Do not install or exercise it merely to
+run the Codex/OpenAI contract.
 
 The reviewed collector invokes the authenticated native executables directly.
 It rejects changed bytes, a symlinked or shared install root, group/world
@@ -230,16 +245,21 @@ Dispatch **Mac controlled-pilot operations** from the exact candidate commit on
 `main`, supplying only:
 
 - the candidate signed-distribution run URL;
-- the immediately preceding signed-distribution run URL; and
+- the immediately preceding signed-distribution run URL;
 - the successful external-pilot deployment-evidence run URL from that same
-  source commit.
+  source commit; and
+- `qualification_scope`, explicitly `codex_openai` for the narrow contract or
+  the default `full_dual_provider` for the legacy contract.
 
 After the environment approval, the Intel job needs no interaction. On the
 Apple Silicon desktop, follow the fixed action messages in the runner log: sign
-in through the Hormuz app with a Codex profile, lock and unlock the Mac once,
-then sign in again with a Claude Code profile after the first session is
-revoked and removed. The collector never prints a session credential or client
-output. It rejects any session profile whose HTTPS gateway differs from the
+in through the Hormuz app with a Codex profile, then lock and unlock the Mac
+once. A full-scope run next asks for a Claude Code profile after the first
+session is revoked and removed. A Codex/OpenAI run ends after the common
+lifecycle, Codex recovery, revocation, sign-out, and empty-session checks; it
+cannot enter the Claude path or retain a stale Claude record. The collector
+never prints a session credential or client output. It rejects any session
+profile whose HTTPS gateway differs from the
 authenticated deployment origin. Immediately before each requested login, the
 signed app proves that its shared Keychain session slot is empty. Every
 authenticated reliability snapshot must also retain the first snapshot's exact
@@ -329,6 +349,17 @@ python3 tools/verify_macos_pilot_evidence.py \
   --previous-notarization-summary /private/path/previous-notarization.json
 ```
 
+That command selects the full v1 contract by default. For a v2 Codex/OpenAI
+aggregate, use the same exact artifacts and add:
+
+```bash
+--qualification-scope codex_openai
+```
+
+The selector must agree with the aggregate, operations proof, authenticated
+gateway profile/protocol list, selected client records, and both public review
+attestations. It is not inferred from the absence of Claude evidence.
+
 Exit status `0` means the real aggregate is ready for a controlled external
 pilot. Status `1` means the evidence is structurally valid but one or more
 gates remain incomplete. Status `2` means the evidence or artifact binding is
@@ -349,6 +380,21 @@ python3 tools/verify_macos_pilot_evidence.py \
   --allow-synthetic-fixture
 ```
 
+The separate narrow fixture uses an explicit selector:
+
+```bash
+python3 tools/verify_macos_pilot_evidence.py \
+  tests/fixtures/macos_pilot/complete-synthetic-codex-openai-v2.json \
+  --archive tests/fixtures/macos_pilot/Hormuz-0.1.0-notarized.zip \
+  --distribution-proof tests/fixtures/macos_pilot/distribution-proof-v2.json \
+  --notarization-summary tests/fixtures/macos_pilot/notarization-v1.json \
+  --previous-archive tests/fixtures/macos_pilot/Hormuz-0.0.9-notarized.zip \
+  --previous-distribution-proof tests/fixtures/macos_pilot/previous-distribution-proof-v2.json \
+  --previous-notarization-summary tests/fixtures/macos_pilot/previous-notarization-v1.json \
+  --qualification-scope codex_openai \
+  --allow-synthetic-fixture
+```
+
 That command exits successfully only to prove validator mechanics. Its result
 always says `ready_for_controlled_external_pilot: false` with reason
 `synthetic_fixture`. The fake `.zip` is plain fixture data and is never a Mac
@@ -358,9 +404,14 @@ application or distributable artifact.
 
 A passing real aggregate supports only this statement:
 
-> The exact signed and notarized Hormuz Mac archive passed the recorded
-> controlled-pilot installation, session, client-authentication, hosted-gateway,
-> recovery, security, accessibility, and support gates.
+> The exact signed and notarized Hormuz Mac archive passed the selected,
+> explicitly named controlled-pilot installation, session,
+> client-authentication, hosted-gateway, recovery, security, accessibility, and
+> support gates.
+
+For `codex_openai`, the result also states
+`not_claude_code_qualification`, `not_cross_provider_failover`, and
+`not_provider_wide_outage_protection`.
 
 It does not establish multi-region availability, zero-downtime operation, an
 availability or latency SLA, provider invoice accuracy, broad client

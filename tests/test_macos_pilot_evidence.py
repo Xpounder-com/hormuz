@@ -22,6 +22,9 @@ from tools import verify_macos_pilot_evidence as pilot
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "macos_pilot"
 EVIDENCE_PATH = FIXTURE_ROOT / "complete-synthetic-v1.json"
+CODEX_EVIDENCE_PATH = (
+    FIXTURE_ROOT / "complete-synthetic-codex-openai-v2.json"
+)
 ARCHIVE_PATH = FIXTURE_ROOT / "Hormuz-0.1.0-notarized.zip"
 PROOF_PATH = FIXTURE_ROOT / "distribution-proof-v2.json"
 NOTARIZATION_PATH = FIXTURE_ROOT / "notarization-v1.json"
@@ -56,6 +59,8 @@ class MacPilotEvidenceTests(unittest.TestCase):
 
     def _production_inputs(
         self,
+        *,
+        qualification_scope: str = "full_dual_provider",
     ) -> tuple[
         list[object],
         dict[str, object],
@@ -64,6 +69,8 @@ class MacPilotEvidenceTests(unittest.TestCase):
         str,
     ]:
         inputs = list(self._inputs())
+        if qualification_scope == "codex_openai":
+            inputs[0] = self._json(CODEX_EVIDENCE_PATH)
         evidence = copy.deepcopy(inputs[0])
         proof = copy.deepcopy(inputs[1])
         previous_proof = copy.deepcopy(inputs[7])
@@ -149,6 +156,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
         previous_notarization_payload: bytes,
         previous_archive_size: int,
         previous_archive_sha256: str,
+        expected_qualification_scope: object = "full_dual_provider",
     ) -> dict[str, object]:
         return pilot.validate_evidence(
             evidence,
@@ -167,6 +175,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
             previous_archive_size=previous_archive_size,
             previous_archive_sha256=previous_archive_sha256,
             now=NOW,
+            expected_qualification_scope=expected_qualification_scope,
         )
 
     def test_complete_synthetic_fixture_exercises_every_gate_but_never_qualifies(self) -> None:
@@ -203,6 +212,92 @@ class MacPilotEvidenceTests(unittest.TestCase):
         platform_verifier.assert_not_called()
         distribution_authenticator.assert_not_called()
         run_authenticator.assert_not_called()
+
+    def test_complete_codex_openai_fixture_is_explicit_and_never_qualifies(self) -> None:
+        inputs = list(self._inputs())
+        inputs[0] = self._json(CODEX_EVIDENCE_PATH)
+
+        result = self._validate(
+            *inputs, expected_qualification_scope="codex_openai"
+        )
+
+        self.assertFalse(result["ready_for_controlled_external_pilot"])
+        self.assertEqual(result["status"], "not_ready")
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["qualification_scope"], "codex_openai")
+        self.assertEqual(
+            result["claim_scope"],
+            "signed_macos_codex_openai_controlled_external_pilot_readiness",
+        )
+        self.assertEqual(result["reasons"], ["synthetic_fixture"])
+        self.assertIn("not_claude_code_qualification", result["nonclaims"])
+        self.assertIn("not_cross_provider_failover", result["nonclaims"])
+        self.assertIn(
+            "not_provider_wide_outage_protection", result["nonclaims"]
+        )
+
+    def test_scope_mismatch_and_version_scope_combinations_fail_closed(self) -> None:
+        inputs = list(self._inputs())
+        inputs[0] = self._json(CODEX_EVIDENCE_PATH)
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "qualification_scope_mismatch"
+        ):
+            self._validate(*inputs)
+
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "qualification_scope_mismatch"
+        ):
+            self._validate(
+                *self._inputs(), expected_qualification_scope="codex_openai"
+            )
+
+        evidence = self._json(EVIDENCE_PATH)
+        evidence["qualification_scope"] = "full_dual_provider"
+        inputs = list(self._inputs())
+        inputs[0] = evidence
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "qualification_scope_unexpected"
+        ):
+            self._validate(*inputs)
+
+        for selected in (None, "full_dual_provider", "unknown", [], {}):
+            evidence = self._json(CODEX_EVIDENCE_PATH)
+            evidence["qualification_scope"] = selected
+            inputs = list(self._inputs())
+            inputs[0] = evidence
+            with self.subTest(selected=selected), self.assertRaises(
+                pilot.MacPilotEvidenceError
+            ):
+                self._validate(
+                    *inputs, expected_qualification_scope="codex_openai"
+                )
+
+    def test_codex_openai_recovery_and_gateway_sets_are_exact(self) -> None:
+        inputs = list(self._inputs())
+        evidence = self._json(CODEX_EVIDENCE_PATH)
+        claude = self._json(EVIDENCE_PATH)["client_auth_recovery"][1]  # type: ignore[index]
+        evidence["client_auth_recovery"].append(claude)  # type: ignore[union-attr]
+        inputs[0] = evidence
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "client_auth_recovery_1_client_invalid",
+        ):
+            self._validate(
+                *inputs, expected_qualification_scope="codex_openai"
+            )
+
+        for protocols in ([], ["anthropic"], ["openai", "openai"], ["anthropic", "openai"]):
+            inputs = list(self._inputs())
+            evidence = self._json(CODEX_EVIDENCE_PATH)
+            evidence["hosted_gateway"]["provider_protocols"] = protocols  # type: ignore[index]
+            inputs[0] = evidence
+            with self.subTest(protocols=protocols), self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError,
+                "gateway_provider_protocols_invalid",
+            ):
+                self._validate(
+                    *inputs, expected_qualification_scope="codex_openai"
+                )
 
     def test_synthetic_fixture_cannot_be_promoted_by_changing_its_kind(self) -> None:
         inputs = list(self._inputs())
@@ -328,6 +423,91 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_mocked_real_path_narrow_scope_qualifies_only_codex_and_openai(self) -> None:
+        inputs, evidence, _artifact, gateway, signing_authority = (
+            self._production_inputs(qualification_scope="codex_openai")
+        )
+        selected = pilot._requested_scope("codex_openai")
+        with (
+            patch.object(
+                pilot,
+                "verify_archive",
+                return_value={
+                    "team_identifier": pilot.PRODUCTION_TEAM_IDENTIFIER,
+                    "authority": signing_authority,
+                },
+            ),
+            patch.object(
+                pilot,
+                "_authenticate_distribution_artifact",
+                side_effect=(
+                    {
+                        "run_number": 12,
+                        "run_attempt": 1,
+                        "artifact_created_at": datetime(
+                            2026, 9, 1, 14, 0, tzinfo=timezone.utc
+                        ),
+                        "actor_logins": {"release-owner"},
+                    },
+                    {
+                        "run_number": 11,
+                        "run_attempt": 1,
+                        "artifact_created_at": datetime(
+                            2026, 9, 1, 13, 0, tzinfo=timezone.utc
+                        ),
+                        "actor_logins": {"release-owner"},
+                    },
+                ),
+            ),
+            patch.object(
+                pilot,
+                "_authenticate_github_run",
+                side_effect=(
+                    {
+                        "created_at": "2026-09-01T14:00:00Z",
+                        "run_started_at": "2026-09-01T14:01:00Z",
+                        "updated_at": "2026-09-01T14:30:00Z",
+                    },
+                    {
+                        "created_at": "2026-09-01T14:31:00Z",
+                        "run_started_at": "2026-09-01T14:32:00Z",
+                        "updated_at": "2026-09-01T15:00:00Z",
+                    },
+                ),
+            ),
+            patch.object(pilot, "_authenticate_review_reference") as reviews,
+            patch.object(
+                pilot, "_authenticate_gateway_evidence_artifact"
+            ) as gateways,
+            patch.object(
+                pilot,
+                "_authenticate_macos_operational_evidence",
+                return_value=datetime(2026, 9, 1, 14, 31, tzinfo=timezone.utc),
+            ) as operations,
+        ):
+            result = self._validate(
+                *inputs, expected_qualification_scope="codex_openai"
+            )
+
+        self.assertTrue(result["ready_for_controlled_external_pilot"])
+        self.assertEqual(result["qualification_scope"], "codex_openai")
+        self.assertEqual(gateway["profile"], "external_pilot_openai")
+        self.assertEqual(gateway["provider_protocols"], ["openai"])
+        self.assertEqual(
+            [record["client"] for record in evidence["client_auth_recovery"]],  # type: ignore[index]
+            ["codex"],
+        )
+        self.assertEqual(reviews.call_count, 2)
+        self.assertTrue(
+            all(call.kwargs["scope_contract"] == selected for call in reviews.call_args_list)
+        )
+        self.assertEqual(gateways.call_count, 2)
+        self.assertTrue(
+            all(call.kwargs["scope_contract"] == selected for call in gateways.call_args_list)
+        )
+        operations.assert_called_once()
+        self.assertEqual(operations.call_args.kwargs["scope_contract"], selected)
 
     def test_incomplete_production_operations_accept_no_run_url(self) -> None:
         inputs, evidence, _artifact, gateway, signing_authority = (
@@ -700,6 +880,80 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
                 "security_review",
             )
+
+    def test_narrow_review_requires_v2_scope_and_narrow_claim(self) -> None:
+        evidence = self._json(CODEX_EVIDENCE_PATH)
+        review = evidence["reviews"]["security"]  # type: ignore[index]
+        candidate = evidence["artifact"]  # type: ignore[assignment]
+        validated = pilot._validate_review(
+            review,
+            "security_review",
+            candidate["archive_sha256"],
+            candidate["source_commit"],
+            datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+            datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+            [],
+        )
+        selected = pilot._requested_scope("codex_openai")
+        attestation = {
+            "schema_id": "hormuz.macos-pilot-review",
+            "schema_version": 2,
+            "qualification_scope": "codex_openai",
+            "claim_scope": selected.claim_scope,
+            "review_kind": "security",
+            "status": "passed",
+            "independent_reviewer": True,
+            "artifact_sha256": candidate["archive_sha256"],
+            "source_commit": candidate["source_commit"],
+        }
+
+        def response(body: object) -> dict[str, object]:
+            return {
+                "id": 9000009,
+                "html_url": review["reference"],
+                "issue_url": "https://api.github.com/repos/Xpounder-com/hormuz/issues/9",
+                "created_at": "2026-09-01T16:20:00Z",
+                "updated_at": "2026-09-01T16:30:00Z",
+                "body": json.dumps(body),
+                "user": {"login": "independent-reviewer", "type": "User"},
+            }
+
+        with patch.object(pilot, "_github_api_json", return_value=response(attestation)):
+            pilot._authenticate_review_reference(
+                validated,
+                "security",
+                {"release-owner"},
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+                "security_review",
+                selected,
+            )
+
+        old_attestation = copy.deepcopy(attestation)
+        old_attestation["schema_version"] = 1
+        old_attestation["claim_scope"] = pilot.CLAIM_SCOPE
+        del old_attestation["qualification_scope"]
+        missing_scope = copy.deepcopy(attestation)
+        del missing_scope["qualification_scope"]
+        broad_claim = copy.deepcopy(attestation)
+        broad_claim["claim_scope"] = pilot.CLAIM_SCOPE
+        for label, changed, expected in (
+            ("old", old_attestation, "qualification_scope_mismatch"),
+            ("missing", missing_scope, "qualification_scope_missing"),
+            ("claim", broad_claim, "attestation_invalid"),
+        ):
+            with (
+                self.subTest(label=label),
+                patch.object(pilot, "_github_api_json", return_value=response(changed)),
+                self.assertRaisesRegex(pilot.MacPilotEvidenceError, expected),
+            ):
+                pilot._authenticate_review_reference(
+                    validated,
+                    "security",
+                    {"release-owner"},
+                    datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+                    "security_review",
+                    selected,
+                )
 
     def test_exact_archive_bytes_and_proof_digests_are_bound(self) -> None:
         inputs = list(self._inputs())
@@ -1157,6 +1411,71 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 "gateway_recovery",
             )
 
+    def test_narrow_authenticated_gateway_payload_cannot_claim_dual_protocols(self) -> None:
+        evidence = self._json(CODEX_EVIDENCE_PATH)
+        gateway = copy.deepcopy(evidence["hosted_gateway"])
+        gateway["evidence_kind"] = "live_external_pilot"
+        selected = pilot._requested_scope("codex_openai")
+        deployment = {
+            "schema_id": "hormuz.external-pilot-deployment-evidence",
+            "schema_version": 1,
+            "evidence_kind": gateway["evidence_kind"],
+            "profile": gateway["profile"],
+            "source_commit": gateway["source_commit"],
+            "workflow_run_url": gateway["deployment_evidence_url"],
+            "gateway_origin": "https://hormuz-test.onrender.com",
+            "render_service_id": "srv-" + "a" * 20,
+            "identity_provider": gateway["identity_provider"],
+            "provider_protocols": gateway["provider_protocols"],
+            "https": gateway["https"],
+            "inference_enabled": gateway["inference_enabled"],
+            "provider_credentials_server_only": gateway[
+                "provider_credentials_server_only"
+            ],
+            "postgresql_durable": gateway["postgresql_durable"],
+            "tenant_rls": gateway["tenant_rls"],
+            "durable_sessions": gateway["durable_sessions"],
+            "monitoring_configured": gateway["monitoring_configured"],
+            "worker_saturation_monitoring": gateway[
+                "worker_saturation_monitoring"
+            ],
+            "postgresql_pool_wait_monitoring": gateway[
+                "postgresql_pool_wait_monitoring"
+            ],
+            "support_path_published": gateway["support_path_published"],
+            "single_region_acknowledged": gateway["single_region_acknowledged"],
+            "availability_sla_claimed": gateway["availability_sla_claimed"],
+            "max_inflight_streams": gateway["max_inflight_streams"],
+        }
+        pilot._validate_gateway_evidence_payload(
+            deployment, gateway, "deployment", "gateway_deployment", selected
+        )
+        qualification = {
+            "schema_id": "hormuz.external-pilot-qualification-evidence",
+            "schema_version": 1,
+            **gateway,
+        }
+        pilot._validate_gateway_evidence_payload(
+            qualification, gateway, "qualification", "gateway_recovery", selected
+        )
+
+        for role, payload in (
+            ("deployment", deployment),
+            ("qualification", qualification),
+        ):
+            changed = copy.deepcopy(payload)
+            changed["provider_protocols"] = ["anthropic", "openai"]
+            with self.subTest(role=role), self.assertRaises(
+                pilot.MacPilotEvidenceError
+            ):
+                pilot._validate_gateway_evidence_payload(
+                    changed,
+                    gateway,
+                    role,
+                    f"gateway_{role}",
+                    selected,
+                )
+
     def test_authenticated_macos_operations_artifact_binds_executed_records(self) -> None:
         evidence = self._json(EVIDENCE_PATH)
         artifact = copy.deepcopy(evidence["artifact"])
@@ -1398,6 +1717,64 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 evidence["clean_machine_runs"],
                 evidence["lifecycle"],
                 evidence["client_auth_recovery"],
+            )
+
+    def test_operations_proof_scope_must_match_aggregate_scope(self) -> None:
+        narrow = self._json(CODEX_EVIDENCE_PATH)
+        artifact = narrow["artifact"]
+        previous = narrow["previous_artifact"]
+        gateway = narrow["hosted_gateway"]
+        operations_url = narrow["macos_operational_evidence_url"]
+        selected = pilot._requested_scope("codex_openai")
+        proof = {
+            "schema_id": "hormuz.macos-pilot-operations-evidence",
+            "schema_version": 2,
+            "qualification_scope": "codex_openai",
+            "claim_scope": selected.claim_scope,
+            "source_commit": artifact["source_commit"],
+            "workflow_run_url": operations_url,
+            "candidate_archive_sha256": artifact["archive_sha256"],
+            "candidate_distribution_run_url": artifact["workflow_run_url"],
+            "previous_source_commit": previous["source_commit"],
+            "previous_archive_sha256": previous["archive_sha256"],
+            "previous_distribution_run_url": previous["workflow_run_url"],
+            "gateway_source_commit": gateway["source_commit"],
+            "gateway_deployment_evidence_url": gateway["deployment_evidence_url"],
+            "clean_machine_runs": narrow["clean_machine_runs"],
+            "lifecycle": narrow["lifecycle"],
+            "client_auth_recovery": narrow["client_auth_recovery"],
+        }
+        arguments = (
+            operations_url,
+            artifact,
+            previous,
+            gateway,
+            narrow["clean_machine_runs"],
+            narrow["lifecycle"],
+            narrow["client_auth_recovery"],
+        )
+        pilot._validate_macos_operations_evidence_payload(
+            proof, *arguments, selected
+        )
+
+        full_proof = copy.deepcopy(proof)
+        full_proof["schema_version"] = 1
+        full_proof["claim_scope"] = pilot.CLAIM_SCOPE
+        del full_proof["qualification_scope"]
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "qualification_scope_mismatch"
+        ):
+            pilot._validate_macos_operations_evidence_payload(
+                full_proof, *arguments, selected
+            )
+
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError, "qualification_scope_mismatch"
+        ):
+            pilot._validate_macos_operations_evidence_payload(
+                proof,
+                *arguments,
+                pilot._requested_scope("full_dual_provider"),
             )
 
     def test_bounded_artifact_stream_stops_before_disk_limit(self) -> None:

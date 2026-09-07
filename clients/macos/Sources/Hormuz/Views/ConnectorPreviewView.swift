@@ -11,7 +11,16 @@ struct ConnectorPreviewView: View {
                 Text(connection.connector?.previewText ?? "").font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled).padding(12).frame(maxWidth: .infinity, alignment: .leading)
             }.background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-            Text("Supported fixture versions: Codex 0.147.0 and Claude Code 2.1.233. Install the client separately. Start the launcher from your project directory; it accepts no override arguments. Moving Hormuz requires saving a new connector.")
+            if let profile = connection.profile {
+                if profile.setup == .openAIPilot {
+                    Text("Hosted pilot scope: Codex 0.147.0 through your team's OpenAI gateway. Fallback stays within OpenAI; this connector does not qualify Claude Code or cross-provider availability.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Custom gateway connector: \(profile.client.title) \(profile.client.testedVersion) is the tested fixture version for this integration. This app does not claim that this setup passed the hosted pilot.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Text("Install the selected client separately. Start the launcher from your project directory; it accepts no override arguments. Moving Hormuz requires saving a new connector.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("Cancel") { connection.showingPreview = false }.keyboardShortcut(.cancelAction)

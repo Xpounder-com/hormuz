@@ -75,7 +75,13 @@ Notarization proves Apple scanned and accepted the submitted bytes. It does not 
 
 - Download the artifact through the intended delivery channel, apply normal quarantine, extract it, and confirm Gatekeeper acceptance on clean Apple Silicon and Intel Macs without developer tools.
 - Install in `/Applications`, complete real IdP login, restart, lock/unlock, refresh, sign out, revoke, reinstall the same build, update to a newer build, and test a supported rollback. Confirm the credential remains available only where intended.
-- Re-run the pinned-client `401` gate with the signed installed app. The provider-free protocol gate proves Codex refreshes and completes with one provider egress; Claude Code refreshes without egress on the rejected turn, then an explicit next request matches its clean-credential egress count. The signed-artifact run must compose those semantics with the native Keychain helper.
+- Re-run the selected pinned-client `401` gate with the signed installed app.
+  `codex_openai` requires Codex only: it refreshes and completes with one
+  provider egress. The default `full_dual_provider` contract additionally
+  requires Claude Code to refresh without egress on the rejected turn, then
+  complete an explicit next request with the clean-credential egress count. The
+  signed-artifact run must compose the selected semantics with the native
+  Keychain helper. Missing Claude evidence never narrows the default contract.
 - Run a real hosted gateway with production tenant isolation, provider custody, durable sessions, monitoring, recovery, and a documented support path. Keep Render authentication staging inference-disabled until that separate gateway profile exists.
 - Complete security and accessibility review, then obtain independent initial and returning-user evidence. Internal and fixture runs do not change the `0/5 initial` or `0/1 returning` counts.
 
@@ -90,5 +96,12 @@ session lifecycle, and pinned-client authentication. It still requires separate
 clean Apple Silicon and Intel self-hosted runners and a completed real run; a
 developer workstation with Xcode or Command Line Tools is deliberately
 rejected.
+
+The operations workflow requires an explicit qualification contract. Its
+default `full_dual_provider` path retains the existing two-client behavior; the
+`codex_openai` choice emits schema v2 evidence, uses the
+`external_pilot_openai` deployment, and neither installs, invokes, nor records
+Claude Code. Signing and notarization establish artifact identity and macOS
+distribution trust; they do not select or satisfy either hosted-client scope.
 
 There is no authenticated automatic updater yet. Distribute versioned archives manually during the pilot and retain the previous notarized archive and digest for controlled rollback. Do not promise an availability or latency SLA from signing, notarization, or a single-node Render staging deployment.

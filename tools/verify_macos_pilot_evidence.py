@@ -28,6 +28,29 @@ from typing import Any
 from urllib.parse import urlsplit
 
 try:
+    from tools.macos_pilot_scope import (
+        DEFAULT_QUALIFICATION_SCOPE,
+        FULL_DUAL_PROVIDER,
+        QUALIFICATION_SCOPE_CHOICES,
+        MacPilotScopeContract,
+        MacPilotScopeError,
+        require_matching_scope,
+        resolve_evidence_scope,
+        resolve_requested_scope,
+    )
+except ModuleNotFoundError:  # Direct execution sets tools/ as sys.path[0].
+    from macos_pilot_scope import (  # type: ignore[no-redef]
+        DEFAULT_QUALIFICATION_SCOPE,
+        FULL_DUAL_PROVIDER,
+        QUALIFICATION_SCOPE_CHOICES,
+        MacPilotScopeContract,
+        MacPilotScopeError,
+        require_matching_scope,
+        resolve_evidence_scope,
+        resolve_requested_scope,
+    )
+
+try:
     from tools.client_release_versions import (
         SUPPORTED_CLAUDE_CODE_VERSION,
         SUPPORTED_CODEX_VERSION,
@@ -50,9 +73,10 @@ except ModuleNotFoundError:  # Direct execution sets tools/ as sys.path[0].
     )
 
 
+_FULL_SCOPE_CONTRACT = resolve_requested_scope(FULL_DUAL_PROVIDER)
 SCHEMA_ID = "hormuz.macos-pilot-qualification"
-SCHEMA_VERSION = 1
-CLAIM_SCOPE = "signed_macos_controlled_external_pilot_readiness"
+SCHEMA_VERSION = _FULL_SCOPE_CONTRACT.schema_version
+CLAIM_SCOPE = _FULL_SCOPE_CONTRACT.claim_scope
 EVIDENCE_KINDS = {"pilot_qualification", "synthetic_test_fixture"}
 PRODUCTION_BUNDLE_IDENTIFIER = "com.xpounder.hormuz"
 PRODUCTION_TEAM_IDENTIFIER = "R267LZMUTY"
@@ -107,6 +131,7 @@ _ROOT_FIELDS = {
     "operator_attestations",
     "open_blockers",
 }
+_ROOT_V2_FIELDS = _ROOT_FIELDS | {"qualification_scope"}
 _ARTIFACT_FIELDS = {
     "source_commit",
     "workflow_run_url",
@@ -216,6 +241,9 @@ _MACOS_OPERATIONS_EVIDENCE_FIELDS = {
     "lifecycle",
     "client_auth_recovery",
 }
+_MACOS_OPERATIONS_EVIDENCE_V2_FIELDS = _MACOS_OPERATIONS_EVIDENCE_FIELDS | {
+    "qualification_scope"
+}
 _HOSTED_GATEWAY_FIELDS = {
     "evidence_kind",
     "profile",
@@ -305,6 +333,9 @@ _REVIEW_ATTESTATION_FIELDS = {
     "artifact_sha256",
     "source_commit",
 }
+_REVIEW_ATTESTATION_V2_FIELDS = _REVIEW_ATTESTATION_FIELDS | {
+    "qualification_scope"
+}
 _OPERATOR_FIELDS = {
     "artifact_workflow_head_matches_source",
     "artifact_default_branch_source",
@@ -383,6 +414,30 @@ _BLOCKERS = {
 
 class MacPilotEvidenceError(ValueError):
     """A fail-closed signed-Mac pilot evidence contract violation."""
+
+
+def _requested_scope(value: object) -> MacPilotScopeContract:
+    try:
+        return resolve_requested_scope(value)
+    except MacPilotScopeError as error:
+        raise MacPilotEvidenceError(str(error)) from None
+
+
+def _document_scope(
+    value: object,
+    requested: MacPilotScopeContract,
+) -> MacPilotScopeContract:
+    if not isinstance(value, dict):
+        raise MacPilotEvidenceError("evidence_fields_invalid")
+    try:
+        evidence = resolve_evidence_scope(
+            value.get("schema_version"),
+            qualification_scope_present="qualification_scope" in value,
+            qualification_scope=value.get("qualification_scope"),
+        )
+        return require_matching_scope(requested, evidence)
+    except MacPilotScopeError as error:
+        raise MacPilotEvidenceError(str(error)) from None
 
 
 def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -1002,6 +1057,7 @@ def _authenticate_gateway_evidence_artifact(
     gateway: dict[str, Any],
     evidence_role: str,
     label: str,
+    scope_contract: MacPilotScopeContract = _FULL_SCOPE_CONTRACT,
 ) -> None:
     if evidence_role not in {"deployment", "qualification"}:
         raise MacPilotEvidenceError(f"{label}_role_invalid")
@@ -1013,7 +1069,13 @@ def _authenticate_gateway_evidence_artifact(
         f"external-pilot-{evidence_role}-evidence.json",
         label,
     )
-    _validate_gateway_evidence_payload(payload, gateway, evidence_role, label)
+    _validate_gateway_evidence_payload(
+        payload,
+        gateway,
+        evidence_role,
+        label,
+        scope_contract,
+    )
 
 
 def _verify_distribution_artifact_zip(
@@ -1450,7 +1512,12 @@ def _validate_lifecycle(
         reasons.append("keychain_and_session_lifecycle_incomplete")
 
 
-def _validate_client_recovery(value: object, artifact_sha256: str, reasons: list[str]) -> None:
+def _validate_client_recovery(
+    value: object,
+    artifact_sha256: str,
+    reasons: list[str],
+    scope_contract: MacPilotScopeContract = _FULL_SCOPE_CONTRACT,
+) -> None:
     if not isinstance(value, list) or len(value) > 2:
         raise MacPilotEvidenceError("client_auth_recovery_invalid")
     seen: set[str] = set()
@@ -1459,7 +1526,11 @@ def _validate_client_recovery(value: object, artifact_sha256: str, reasons: list
         label = f"client_auth_recovery_{index}"
         record = _require_fields(raw, _CLIENT_FIELDS, label)
         client = record["client"]
-        if not isinstance(client, str) or client not in _CLIENT_EXPECTATIONS or client in seen:
+        if (
+            not isinstance(client, str)
+            or client not in scope_contract.client_names
+            or client in seen
+        ):
             raise MacPilotEvidenceError(f"{label}_client_invalid")
         seen.add(client)
         version = _require_pattern(record["client_version"], _CLIENT_VERSION_RE, f"{label}_version")
@@ -1492,7 +1563,7 @@ def _validate_client_recovery(value: object, artifact_sha256: str, reasons: list
             and native_helper
         ):
             complete.add(client)
-    if complete != set(_CLIENT_EXPECTATIONS):
+    if complete != set(scope_contract.client_names):
         reasons.append("signed_client_401_recovery_incomplete")
 
 
@@ -1505,22 +1576,41 @@ def _validate_macos_operations_evidence_payload(
     clean_machine_runs: object,
     lifecycle: object,
     client_auth_recovery: object,
+    scope_contract: MacPilotScopeContract = _FULL_SCOPE_CONTRACT,
 ) -> None:
+    if not isinstance(value, dict):
+        raise MacPilotEvidenceError("macos_operations_evidence_fields_invalid")
+    try:
+        evidence_contract = resolve_evidence_scope(
+            value.get("schema_version"),
+            qualification_scope_present="qualification_scope" in value,
+            qualification_scope=value.get("qualification_scope"),
+        )
+        require_matching_scope(scope_contract, evidence_contract)
+    except MacPilotScopeError as error:
+        raise MacPilotEvidenceError(
+            f"macos_operations_evidence_{error}"
+        ) from None
+    fields = (
+        _MACOS_OPERATIONS_EVIDENCE_FIELDS
+        if scope_contract.schema_version == 1
+        else _MACOS_OPERATIONS_EVIDENCE_V2_FIELDS
+    )
     evidence = _require_fields(
         value,
-        _MACOS_OPERATIONS_EVIDENCE_FIELDS,
+        fields,
         "macos_operations_evidence",
     )
     _require_int(
         evidence["schema_version"],
-        1,
-        1,
+        scope_contract.schema_version,
+        scope_contract.schema_version,
         "macos_operations_evidence_schema_version",
     )
     expected = {
         "schema_id": "hormuz.macos-pilot-operations-evidence",
-        "schema_version": 1,
-        "claim_scope": CLAIM_SCOPE,
+        "schema_version": scope_contract.schema_version,
+        "claim_scope": scope_contract.claim_scope,
         "source_commit": artifact["source_commit"],
         "workflow_run_url": operations_url,
         "candidate_archive_sha256": artifact["archive_sha256"],
@@ -1534,6 +1624,8 @@ def _validate_macos_operations_evidence_payload(
         "lifecycle": lifecycle,
         "client_auth_recovery": client_auth_recovery,
     }
+    if scope_contract.schema_version == 2:
+        expected["qualification_scope"] = scope_contract.name
     if any(
         not _json_values_equal(evidence[field], expected_value)
         for field, expected_value in expected.items()
@@ -1552,6 +1644,7 @@ def _authenticate_macos_operational_evidence(
     artifact_created_at: datetime | None,
     gateway_deployment_completed_at: datetime,
     generated_at: datetime,
+    scope_contract: MacPilotScopeContract = _FULL_SCOPE_CONTRACT,
 ) -> datetime:
     label = "macos_operations"
     run = _authenticate_github_run(
@@ -1582,6 +1675,7 @@ def _authenticate_macos_operational_evidence(
         clean_machine_runs,
         lifecycle,
         client_auth_recovery,
+        scope_contract,
     )
     if not isinstance(clean_machine_runs, list):
         raise MacPilotEvidenceError("clean_machine_runs_invalid")
@@ -1604,7 +1698,10 @@ def _authenticate_macos_operational_evidence(
 
 
 def _validate_hosted_gateway(
-    value: object, evidence_kind: str, reasons: list[str]
+    value: object,
+    evidence_kind: str,
+    reasons: list[str],
+    scope_contract: MacPilotScopeContract = _FULL_SCOPE_CONTRACT,
 ) -> dict[str, Any]:
     gateway = _require_fields(value, _HOSTED_GATEWAY_FIELDS, "hosted_gateway")
     initial_reason_count = len(reasons)
@@ -1634,7 +1731,7 @@ def _validate_hosted_gateway(
         or not protocols
         or not all(isinstance(protocol, str) for protocol in protocols)
         or protocols != sorted(set(protocols))
-        or protocols != ["anthropic", "openai"]
+        or protocols != list(scope_contract.provider_protocols)
     ):
         raise MacPilotEvidenceError("gateway_provider_protocols_invalid")
     live_requests = _require_int(
@@ -1668,7 +1765,10 @@ def _validate_hosted_gateway(
         field: _require_bool(gateway[field], f"gateway_{field}") for field in _HOSTED_TRUE_FIELDS
     }
     sla_claimed = _require_bool(gateway["availability_sla_claimed"], "availability_sla_claimed")
-    if gateway["profile"] != "external_pilot" or gateway["identity_provider"] != "okta":
+    if (
+        gateway["profile"] != scope_contract.gateway_profile
+        or gateway["identity_provider"] != "okta"
+    ):
         reasons.append("external_pilot_gateway_profile_incomplete")
     if not all(true_values.values()):
         reasons.append("external_pilot_gateway_controls_incomplete")
@@ -1707,6 +1807,7 @@ def _validate_gateway_evidence_payload(
     gateway: dict[str, Any],
     evidence_role: str,
     label: str,
+    scope_contract: MacPilotScopeContract = _FULL_SCOPE_CONTRACT,
 ) -> None:
     if evidence_role == "deployment":
         evidence = _require_fields(
@@ -1777,7 +1878,10 @@ def _validate_gateway_evidence_payload(
     evidence_gateway = {field: evidence[field] for field in _HOSTED_GATEWAY_FIELDS}
     evidence_reasons: list[str] = []
     _validate_hosted_gateway(
-        evidence_gateway, "pilot_qualification", evidence_reasons
+        evidence_gateway,
+        "pilot_qualification",
+        evidence_reasons,
+        scope_contract,
     )
     if evidence_reasons or evidence_gateway != gateway:
         raise MacPilotEvidenceError(f"{label}_evidence_binding_invalid")
@@ -1835,6 +1939,7 @@ def _authenticate_review_reference(
     workflow_actor_logins: set[str],
     generated_at: datetime,
     label: str,
+    scope_contract: MacPilotScopeContract = _FULL_SCOPE_CONTRACT,
 ) -> None:
     reference = review["reference"]
     matched = _ISSUE_COMMENT_RE.fullmatch(reference)
@@ -1879,25 +1984,47 @@ def _authenticate_review_reference(
     body_payload = body.encode("utf-8")
     if not 1 <= len(body_payload) <= _MAX_FILE_BYTES:
         raise MacPilotEvidenceError(f"{label}_github_comment_not_trusted")
+    parsed_attestation = _parse_json(body_payload, f"{label}_attestation")
+    if not isinstance(parsed_attestation, dict):
+        raise MacPilotEvidenceError(f"{label}_attestation_fields_invalid")
+    try:
+        attestation_contract = resolve_evidence_scope(
+            parsed_attestation.get("schema_version"),
+            qualification_scope_present="qualification_scope"
+            in parsed_attestation,
+            qualification_scope=parsed_attestation.get("qualification_scope"),
+        )
+        require_matching_scope(scope_contract, attestation_contract)
+    except MacPilotScopeError as error:
+        raise MacPilotEvidenceError(f"{label}_attestation_{error}") from None
+    attestation_fields = (
+        _REVIEW_ATTESTATION_FIELDS
+        if scope_contract.schema_version == 1
+        else _REVIEW_ATTESTATION_V2_FIELDS
+    )
     attestation = _require_fields(
-        _parse_json(body_payload, f"{label}_attestation"),
-        _REVIEW_ATTESTATION_FIELDS,
+        parsed_attestation,
+        attestation_fields,
         f"{label}_attestation",
     )
     _require_int(
         attestation["schema_version"],
-        1,
-        1,
+        scope_contract.schema_version,
+        scope_contract.schema_version,
         f"{label}_attestation_schema_version",
     )
     if (
         attestation["schema_id"] != "hormuz.macos-pilot-review"
-        or attestation["claim_scope"] != CLAIM_SCOPE
+        or attestation["claim_scope"] != scope_contract.claim_scope
         or attestation["review_kind"] != review_kind
         or attestation["status"] != "passed"
         or attestation["independent_reviewer"] is not True
         or attestation["artifact_sha256"] != review["artifact_sha256"]
         or attestation["source_commit"] != review["source_commit"]
+        or (
+            scope_contract.schema_version == 2
+            and attestation["qualification_scope"] != scope_contract.name
+        )
     ):
         raise MacPilotEvidenceError(f"{label}_attestation_invalid")
 
@@ -1920,16 +2047,30 @@ def validate_evidence(
     previous_archive_size: int,
     previous_archive_sha256: str,
     now: datetime | None = None,
+    expected_qualification_scope: object = DEFAULT_QUALIFICATION_SCOPE,
 ) -> dict[str, object]:
-    root = _require_fields(value, _ROOT_FIELDS, "evidence")
-    _require_int(root["schema_version"], SCHEMA_VERSION, SCHEMA_VERSION, "schema_version")
+    requested_scope = _requested_scope(expected_qualification_scope)
+    scope_contract = _document_scope(value, requested_scope)
+    root_fields = _ROOT_FIELDS if scope_contract.schema_version == 1 else _ROOT_V2_FIELDS
+    root = _require_fields(value, root_fields, "evidence")
+    _require_int(
+        root["schema_version"],
+        scope_contract.schema_version,
+        scope_contract.schema_version,
+        "schema_version",
+    )
     if root["schema_id"] != SCHEMA_ID:
         raise MacPilotEvidenceError("schema_identity_invalid")
     evidence_kind = root["evidence_kind"]
     if not isinstance(evidence_kind, str) or evidence_kind not in EVIDENCE_KINDS:
         raise MacPilotEvidenceError("evidence_kind_invalid")
-    if root["claim_scope"] != CLAIM_SCOPE:
+    if root["claim_scope"] != scope_contract.claim_scope:
         raise MacPilotEvidenceError("claim_scope_invalid")
+    if (
+        scope_contract.schema_version == 2
+        and root["qualification_scope"] != scope_contract.name
+    ):
+        raise MacPilotEvidenceError("qualification_scope_invalid")
     operations_url = root["macos_operational_evidence_url"]
     if (
         not isinstance(operations_url, str)
@@ -2029,10 +2170,20 @@ def validate_evidence(
     _validate_lifecycle(
         root["lifecycle"], previous_artifact["build"], artifact["build"], reasons
     )
-    _validate_client_recovery(root["client_auth_recovery"], artifact["archive_sha256"], reasons)
+    _validate_client_recovery(
+        root["client_auth_recovery"],
+        artifact["archive_sha256"],
+        reasons,
+        scope_contract,
+    )
     macos_records_complete = len(reasons) == macos_operations_reason_count
     gateway_reason_count = len(reasons)
-    gateway = _validate_hosted_gateway(root["hosted_gateway"], evidence_kind, reasons)
+    gateway = _validate_hosted_gateway(
+        root["hosted_gateway"],
+        evidence_kind,
+        reasons,
+        scope_contract,
+    )
     gateway_complete = len(reasons) == gateway_reason_count
     gateway_deployment_completed_at: datetime | None = None
     if (
@@ -2059,12 +2210,14 @@ def validate_evidence(
             gateway,
             "deployment",
             "gateway_deployment",
+            scope_contract=scope_contract,
         )
         _authenticate_gateway_evidence_artifact(
             recovery_run,
             gateway,
             "qualification",
             "gateway_recovery",
+            scope_contract=scope_contract,
         )
     if evidence_kind == "pilot_qualification" and macos_records_complete:
         if operations_url == "none":
@@ -2081,6 +2234,7 @@ def validate_evidence(
                 artifact_created_at,
                 gateway_deployment_completed_at,
                 generated_at,
+                scope_contract=scope_contract,
             )
 
     reviews = _require_fields(root["reviews"], _REVIEWS_FIELDS, "reviews")
@@ -2120,6 +2274,7 @@ def validate_evidence(
                     actor_logins,
                     generated_at,
                     f"{review_kind}_review",
+                    scope_contract=scope_contract,
                 )
 
     attestations = _require_fields(root["operator_attestations"], _OPERATOR_FIELDS, "operator_attestations")
@@ -2145,12 +2300,27 @@ def validate_evidence(
 
     reasons = sorted(set(reasons))
     ready = evidence_kind == "pilot_qualification" and not reasons
-    return {
+    nonclaims = [
+        "not_external_human_validation",
+        "not_multi_region",
+        "not_zero_downtime",
+        "not_availability_or_latency_sla",
+        "not_customer_production_readiness",
+    ]
+    if scope_contract.schema_version == 2:
+        nonclaims.extend(
+            [
+                "not_claude_code_qualification",
+                "not_cross_provider_failover",
+                "not_provider_wide_outage_protection",
+            ]
+        )
+    result: dict[str, object] = {
         "schema_id": SCHEMA_ID,
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": scope_contract.schema_version,
         "status": "ready_for_controlled_external_pilot" if ready else "not_ready",
         "ready_for_controlled_external_pilot": ready,
-        "claim_scope": CLAIM_SCOPE,
+        "claim_scope": scope_contract.claim_scope,
         "artifact_sha256": artifact["archive_sha256"],
         "previous_artifact_sha256": previous_artifact["archive_sha256"],
         "source_commit": artifact["source_commit"],
@@ -2158,14 +2328,11 @@ def validate_evidence(
         "external_initial_completion_count": 0,
         "external_returning_completion_count": 0,
         "reasons": reasons,
-        "nonclaims": [
-            "not_external_human_validation",
-            "not_multi_region",
-            "not_zero_downtime",
-            "not_availability_or_latency_sla",
-            "not_customer_production_readiness",
-        ],
+        "nonclaims": nonclaims,
     }
+    if scope_contract.schema_version == 2:
+        result["qualification_scope"] = scope_contract.name
+    return result
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -2177,6 +2344,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--previous-archive", type=Path, required=True)
     parser.add_argument("--previous-distribution-proof", type=Path, required=True)
     parser.add_argument("--previous-notarization-summary", type=Path, required=True)
+    parser.add_argument(
+        "--qualification-scope",
+        choices=QUALIFICATION_SCOPE_CHOICES,
+        default=DEFAULT_QUALIFICATION_SCOPE,
+    )
     parser.add_argument("--allow-synthetic-fixture", action="store_true")
     return parser
 
@@ -2249,6 +2421,7 @@ def main(argv: list[str] | None = None) -> int:
                 previous_archive_path=previous_archive_path,
                 previous_archive_size=previous_archive_size,
                 previous_archive_sha256=previous_archive_sha256,
+                expected_qualification_scope=args.qualification_scope,
             )
     except MacPilotEvidenceError as error:
         print(f"macos_pilot_evidence=invalid code={error}", file=sys.stderr)

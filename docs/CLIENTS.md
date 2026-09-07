@@ -11,6 +11,15 @@ part of the supported baseline until its protocol path is deliberately
 verified. See [live client conformance](LIVE_CLIENT_CONFORMANCE.md) for the
 real-provider release gate and its metadata-only evidence boundary.
 
+Compatibility and pilot qualification are separate scopes. Hormuz continues to
+support both protocol adapters and both pinned clients. The explicitly selected
+`codex_openai` signed-Mac pilot qualifies only Codex `0.147.0` through the
+`external_pilot_openai` gateway profile, with exactly the OpenAI Responses
+protocol and the `openai-primary` and `openai-secondary` aliases. The legacy
+`full_dual_provider` contract remains the default and requires both pinned
+clients and both protocols. Missing Claude evidence never selects the narrow
+contract. See [signed Mac pilot qualification](MACOS_PILOT_QUALIFICATION.md).
+
 ## Codex
 
 Generate the configuration from the running Hormuz configuration:
@@ -94,6 +103,11 @@ opaque, rotating client sessions, and [local team onboarding](TEAM_ONBOARDING.md
 adds invitations and member removal. These previews still require real identity
 provider qualification, signed client distribution, and hosted recovery evidence
 before a managed rollout. SCIM remains future work. Provider keys remain server-side.
+
+The native app exposes the same distinction as an explicit setup choice. Its
+hosted Codex/OpenAI preset enforces HTTPS, Codex, and the two approved aliases;
+the custom setup retains the generic client controls. Selecting the preset does
+not change the server profile or prove any qualification gate by itself.
 
 Hormuz governs the model-provider request path. It does not govern Codex or
 Claude Code shell commands, MCP servers, Git traffic, browser requests, or

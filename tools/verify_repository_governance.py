@@ -165,6 +165,14 @@ MACOS_PILOT_OPERATIONS_TRIGGER = """on:
         description: Successful external-pilot deployment-evidence workflow URL
         required: true
         type: string
+      qualification_scope:
+        description: Explicit desktop scope; Codex/OpenAI does not qualify Claude Code or cross-provider availability
+        required: true
+        type: choice
+        default: full_dual_provider
+        options:
+          - full_dual_provider
+          - codex_openai
 
 permissions: {}
 """
@@ -1208,6 +1216,23 @@ def _validate_macos_pilot_operations_workflow(
     arm64 = job_blocks.get("arm64-operations", "")
     x86_64 = job_blocks.get("x86-64-install", "")
     assemble = job_blocks.get("assemble", "")
+    scope_environment = (
+        "HORMUZ_QUALIFICATION_SCOPE: ${{ inputs.qualification_scope }}"
+    )
+    scope_argument = '--qualification-scope "$HORMUZ_QUALIFICATION_SCOPE"'
+    conditional_claude_arguments = """          case "$HORMUZ_QUALIFICATION_SCOPE" in
+            full_dual_provider)
+              HORMUZ_ASSEMBLE_ARGUMENTS+=(
+                --claude-record "$RUNNER_TEMP/hormuz-macos-arm64-records/claude-recovery.json"
+              )
+              ;;
+            codex_openai)
+              ;;
+            *)
+              exit 1
+              ;;
+          esac
+"""
     source_guard = (
         "HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}",
         'test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"',
@@ -1240,6 +1265,18 @@ def _validate_macos_pilot_operations_workflow(
         or "ref: ${{ github.sha }}" not in assemble
         or "python3 -I tools/macos_pilot_operations.py prepare" not in prepare
         or "python3 -I tools/macos_pilot_operations.py assemble" not in assemble
+        or text.count(scope_environment) != 2
+        or text.count("${{ inputs.qualification_scope }}") != 2
+        or text.count(scope_argument) != 2
+        or prepare.count(scope_environment) != 1
+        or prepare.count(scope_argument) != 1
+        or assemble.count(scope_environment) != 1
+        or assemble.count(scope_argument) != 1
+        or assemble.count("HORMUZ_ASSEMBLE_ARGUMENTS=(") != 1
+        or assemble.count('"${HORMUZ_ASSEMBLE_ARGUMENTS[@]}"') != 1
+        or assemble.count(conditional_claude_arguments) != 1
+        or assemble.count("--claude-record") != 1
+        or "continue-on-error:" in text
         or "HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/"
         "${{ github.repository }}/actions/runs/${{ github.run_id }}"
         not in assemble
