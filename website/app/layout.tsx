@@ -7,6 +7,7 @@ import './landing.css';
 import './interior.css';
 import './brand.css';
 import './conversion.css';
+import './companion.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
