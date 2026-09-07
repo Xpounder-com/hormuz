@@ -629,6 +629,28 @@ class ExternalPilotQualificationTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(QualificationError):
                 _deploy_hook_url(invalid, SERVICE_ID, COMMIT)
 
+    def test_render_issued_short_hook_key_keeps_exact_commit_binding(self) -> None:
+        # Synthetic key with the length observed in the real Render dashboard.
+        hook = f"https://api.render.com/deploy/{SERVICE_ID}?key=exampleKey1"
+        self.assertEqual(_deploy_hook_url(hook, SERVICE_ID, COMMIT), hook + "&ref=" + COMMIT)
+
+    def test_deploy_hook_rejects_ambiguous_or_unsafe_credentials(self) -> None:
+        base = f"https://api.render.com/deploy/{SERVICE_ID}"
+        for invalid in (
+            base + "?key=",
+            base + "?key=" + "z" * 513,
+            base + "?key=example+key",
+            base + "?key=example%0Akey",
+            base + "?key=example%2Fkey",
+            base + "?key=exampleKey1&key=exampleKey2",
+            base + "?key=exampleKey1&ref=" + "c" * 40,
+            base + "?key=exampleKey1#fragment",
+            f"https://user@api.render.com/deploy/{SERVICE_ID}?key=exampleKey1",
+            f"https://api.render.com:444/deploy/{SERVICE_ID}?key=exampleKey1",
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(QualificationError):
+                _deploy_hook_url(invalid, SERVICE_ID, COMMIT)
+
     def test_workflow_keeps_live_credentials_in_the_protected_job(self) -> None:
         workflow = (ROOT / ".github/workflows/external-pilot-qualification.yml").read_text()
         self.assertEqual(workflow.count("environment: external-pilot-qualification"), 2)
