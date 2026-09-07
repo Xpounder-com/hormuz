@@ -445,7 +445,10 @@ def _deploy_hook_url(value: str, service_id: str, expected_commit: str) -> str:
             or parsed.fragment
             or len(query) != 1
             or query[0][0] != "key"
-            or not 16 <= len(query[0][1]) <= 512
+            # Render issues opaque hook keys, including 11-character keys.
+            # Validate their transport shape, not an invented entropy minimum;
+            # Render authenticates the key for the exact allowlisted service.
+            or re.fullmatch(r"[A-Za-z0-9_-]{1,512}", query[0][1]) is None
         )
     except ValueError:
         invalid = True
