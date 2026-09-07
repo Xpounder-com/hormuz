@@ -58,4 +58,4 @@ See [audit schemas](../docs/AUDIT.md), [architecture](../docs/ARCHITECTURE.md),
 
 Report vulnerabilities through [SECURITY.md](../SECURITY.md), not a public issue
 or marketing form. General evaluation contact: Mehrdad Zaker,
-zaker.mehrdad@gmail.com.
+mehrdadz@neuralint.io.

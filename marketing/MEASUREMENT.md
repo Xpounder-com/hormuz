@@ -1,9 +1,11 @@
 # Measurement without hidden telemetry
 
-Current implementation: **marketing tracking is off**. The static site has no
-analytics SDK, ad pixel, visitor ID, form backend, or product-telemetry collector.
+Current implementation: **X Ads measurement requires visitor opt-in**. The site
+uses the owner's X pixel `rf0s7` and Lead event `tw-rf0s7-rf0s8` ("Hormuz
+application received"). Formspree accepts enterprise inquiries through the
+separate Hormuz project. No product telemetry is collected by this website.
 GitHub Pages may retain hosting/security logs; see the website privacy notice.
-No conversion rate is available from this implementation.
+X counts consented browser events, not all inquiries or qualified customers.
 
 ## Useful signals and exact definitions
 
@@ -21,30 +23,66 @@ productivity from usage data. Keep study evidence separate from sales notes.
 
 ## Consent-aware source handling
 
-Campaign URLs may use bounded `utm_source`, `utm_medium`, and `utm_campaign`
-values, for example `?interest=pilot&utm_source=linkedin&utm_medium=founder&utm_campaign=oss_evaluation`.
+Campaign URLs may use bounded `utm_source`, `utm_medium`, `utm_campaign`, and `utm_content`
+values, for example `?interest=pilot&utm_source=x&utm_medium=paid_social&utm_campaign=enterprise_pilot`.
 The browser sends the requested URL, including its query string, to GitHub Pages
 when it loads the page; those values can be processed in hosting/security logs.
 The contact page then reads them locally and offers an **unchecked** checkbox to
-include them in the user-reviewed email draft. The application sends no analytics event;
-UTM support is not an installed analytics system. Native internal links do not
-persist campaign tags; link directly to the intended campaign landing/contact
-page when using this manual method.
+include them in the Formspree application. This choice is independent of X Ads
+consent. Internal page links retain only those four bounded campaign tags in the
+URL, without storing them. The site does not forward `twclid` in its CTA links;
+after consent, X's SDK handles its own click identifier and cookies.
 
 ## Private lead ledger
 
-Copy `templates/leads.example.csv` to an access-controlled, private location.
+Use `marketing/private/leads.csv` with `scripts/sales_pipeline.py`; see
+[sales workflow](SALES_WORKFLOW.md) for stages, required evidence, and follow-up drafts.
 `marketing/private/` is gitignored as an accidental-publication guard, not a
 security boundary. Never commit real contacts, customer notes, or credentials.
 Store only consented/necessary contact information, source, workflow,
 qualification, next action, and retention-review date. Agree access and retention
 before use. No real lead records were created by this task.
 
-## Before enabling an analytics provider
+## X Ads consent and event contract
 
-The owner must choose the service/account, define lawful/appropriate collection
-and consent requirements, retention and access, and approve the event schema.
-Suggested minimal events: anonymous page category and explicit CTA action,
-without form text, identity, prompts, credentials, persistent cross-site IDs, or
-product usage. Verify opt-out/consent and the privacy notice before deployment.
-Do not label `email_draft_prepared` as `lead_submitted` or `meeting_booked`.
+- No X SDK, cookies, or queued events before affirmative opt-in. Decline and
+  browser Global Privacy Control/Do Not Track keep measurement off.
+- A non-identifying consent preference is stored for up to 180 days. With blocked
+  storage, a choice lasts only for the page. Footer controls reopen preferences.
+- Withdrawal reloads the page to unload the SDK. The UI warns about unsent form
+  entries before the visitor chooses withdrawal. Existing X cookies/data may
+  remain; the privacy notice links X's cookie and advertising opt-out controls.
+- Only the canonical origin reports. Local previews cannot pollute production.
+- Page-location suppression is set before pixel configuration. No application
+  fields, hashed identities, prices, or campaign tags are passed as event data.
+- A single Lead event follows `submitLead` resolving with HTTP success and
+  `ok: true` for a review, pilot, or support inquiry. General integration,
+  security, and community inquiries and explicit QA mode do not trigger it.
+  Validation failures, rejected/ambiguous responses, honeypot input,
+  button clicks, and repeated renders do not create conversion events.
+- A blocked pixel cannot prevent saving an inquiry. The event is not retroactively
+  queued for a visitor who grants consent after submitting.
+- X's default attribution is 30-day post-engagement and 1-day post-view; website
+  activity audience is off. Existing ad budgets and campaigns are unchanged.
+
+Implementation follows [X's conversion documentation](https://business.x.com/en/help/campaign-measurement-and-analytics/conversion-tracking-for-websites)
+and [privacy controls](https://business.x.com/en/help/campaign-measurement-and-analytics/conversion-tracking-for-websites/about-conversion-tracking).
+
+## Commercial funnel activation
+
+The approved offer is a $15,000 USD 90-day pilot for one team/workflow and
+ongoing enterprise support from $2,000 USD/month under a separate agreement.
+See [activation and verification](COMMERCIAL_SETUP.md) for public destination configuration.
+
+- Application received: the form service acknowledges the submission; verify a
+  non-spam record in the private dashboard before counting it as an actual lead.
+- Review booked: a booking appears in the calendar service, not a booking-link click.
+- Pilot paid: a successful live Stripe payment for the agreed pilot, not a return URL.
+- Support subscribed: an active subscription and successful initial payment in Stripe.
+
+The X Lead event measures consented, acknowledged sales inquiries. Explicit
+`?qa=1` submissions are visibly marked, excluded from the event, and must be
+classified `qa` in the private ledger. Unflagged service-accepted spam can still
+trigger an event; exclude it from the sales ledger after review.
+Inspect Events Manager activity after publication; a browser request alone does
+not prove ad attribution. No purchase, booking, or subscription pixel is installed.

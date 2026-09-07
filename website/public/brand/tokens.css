@@ -1,0 +1,12 @@
+:root {
+  --hormuz-chalk: #f4f3ee;
+  --hormuz-forest: #24392d;
+  --hormuz-sage: #dce6d5;
+  --hormuz-signal: #dceda6;
+  --hormuz-ink: #202723;
+  --hormuz-muted: #5c6758;
+  --hormuz-line: #dcded5;
+  --hormuz-sans: 'Geist', Arial, sans-serif;
+  --hormuz-mono: 'Geist Mono', monospace;
+  --hormuz-editorial: Georgia, 'Times New Roman', serif;
+}

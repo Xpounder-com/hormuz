@@ -1,11 +1,14 @@
+import { CampaignLink } from './CampaignLink';
+import { BrandLockup } from './Brand';
 import { sitePath } from '../../lib/site.mjs';
 
 const navigation = [
-  { key: 'platform', label: 'Open source', href: '/' },
+  { key: 'platform', label: 'Platform', href: '/' },
   { key: 'demo', label: 'Demo', href: '/demo/' },
   { key: 'docs', label: 'Docs', href: '/docs/' },
-  { key: 'enterprise', label: 'Enterprise', href: '/enterprise/' },
+  { key: 'enterprise', label: 'Pricing', href: '/enterprise/' },
   { key: 'security', label: 'Security', href: '/security/' },
+  { key: 'resources', label: 'Resources', href: '/resources/' },
 ];
 
 export function SiteHeader({
@@ -18,25 +21,20 @@ export function SiteHeader({
   return (
     <header className={`nav-shell${overlay ? ' nav-shell-overlay' : ''}`}>
       <nav className="site-nav" aria-label="Primary navigation">
-        <a className="brand" href={sitePath('/')} aria-label="Hormuz home">
-          <span className="brand-mark" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
-          <span className="brand-name">HORMUZ</span>
-        </a>
+        <CampaignLink className="brand" href={sitePath('/')} aria-label="Hormuz home">
+          <BrandLockup />
+        </CampaignLink>
 
         <div className="nav-links">
           {navigation.map((item) => (
-            <a
+            <CampaignLink
               key={item.key}
               href={sitePath(item.href)}
               className={active === item.key ? 'nav-active' : undefined}
               aria-current={active === item.key ? 'page' : undefined}
             >
               {item.label}
-            </a>
+            </CampaignLink>
           ))}
         </div>
 
@@ -44,24 +42,26 @@ export function SiteHeader({
           <summary aria-label="Open navigation">Menu</summary>
           <div>
             {navigation.map((item) => (
-              <a
+              <CampaignLink
                 key={item.key}
                 href={sitePath(item.href)}
                 aria-current={active === item.key ? 'page' : undefined}
               >
                 {item.label}
-              </a>
+              </CampaignLink>
             ))}
+            <CampaignLink href={sitePath('/integrations/')} aria-current={active === 'integrations' ? 'page' : undefined}>Integrations</CampaignLink>
+            <CampaignLink className="mobile-pilot-cta" href={sitePath('/contact/?interest=review')}>Get a free review ↗</CampaignLink>
           </div>
         </details>
 
-        <a
+        <CampaignLink
           className="nav-cta"
-          href={sitePath('/contact/')}
+          href={sitePath('/contact/?interest=review')}
         >
-          Talk to the maintainer
+          Get a free review
           <span aria-hidden="true">↗</span>
-        </a>
+        </CampaignLink>
       </nav>
     </header>
   );

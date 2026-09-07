@@ -4,6 +4,8 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { BASE_PATH, SITE_ORIGIN, SITE_ROUTES, siteUrl } from '../lib/site.mjs';
 
+import { commercial } from '../lib/commercial.mjs';
+
 const siteRoot = fileURLToPath(new URL('../', import.meta.url));
 const out = path.join(siteRoot, 'out');
 const repo = path.resolve(siteRoot, '..');
@@ -47,7 +49,7 @@ for (const source of sourceLinks) {
 }
 const sitemap = await readFile(path.join(out, 'sitemap.xml'), 'utf8');
 for (const route of routes) if (!sitemap.includes(`<loc>${siteUrl(route)}</loc>`)) failures.push(`Sitemap missing ${route}`);
-for (const asset of ['icon.svg', 'og.png', 'robots.txt', '.nojekyll', '404.html']) await stat(path.join(out, asset));
+for (const asset of ['icon.svg', 'favicon.ico', 'apple-touch-icon.png', 'brand/hormuz-icons.zip', 'og.png', 'robots.txt', '.nojekyll', '404.html']) await stat(path.join(out, asset));
 const robots = await readFile(path.join(out, 'robots.txt'), 'utf8');
 assert.match(robots, /^Allow: \/$/m);
 assert.ok(robots.includes(`Sitemap: ${siteUrl('/sitemap.xml')}`));
@@ -56,4 +58,4 @@ assert.ok(contactSource.includes('Nothing has been sent.'));
 assert.doesNotMatch(contactSource, /fetch\(|sendBeacon|localStorage|sessionStorage/);
 assert.ok((await readdir(path.join(out, 'downloads'))).length >= 4, 'Missing buyer downloads');
 if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }
-else console.log(JSON.stringify({ verdict: 'passed', pages: pages.size, local_link_occurrences: localLinks, source_targets: sourceLinks.size, tracking: 'off', contact: 'local_email_draft_only' }, null, 2));
+else console.log(JSON.stringify({ verdict: 'passed', pages: pages.size, local_link_occurrences: localLinks, source_targets: sourceLinks.size, tracking: 'x_ads_opt_in', contact: commercial.formEndpoint ? 'formspree_submission' : 'local_email_draft_only', booking: Boolean(commercial.bookingUrl), payments: Boolean(commercial.pilotPaymentUrl || commercial.supportPaymentUrl) }, null, 2));

@@ -40,7 +40,7 @@ arbitrary paywall around the useful core.
 
 ## Next step
 
-Discuss one workflow with **Mehrdad Zaker**, **zaker.mehrdad@gmail.com**.
+Discuss one workflow with **Mehrdad Zaker**, **mehrdadz@neuralint.io**.
 Begin with fit and scope; a shorter evaluation may precede the proposed
 [90-day pilot](PILOT.md). Agree price, timing, responsibilities, terms, and
 support expectations before work begins.
@@ -48,3 +48,17 @@ support expectations before work begins.
 Evidence: [architecture](../docs/ARCHITECTURE.md), [clients](../docs/CLIENTS.md),
 [usage](../docs/USAGE.md), [support boundaries](../SUPPORT.md),
 [v1.0.0 release](https://github.com/Xpounder-com/hormuz/releases/tag/v1.0.0).
+
+## Enterprise pricing
+
+Approved September 6, 2026: **$15,000 USD total for a 90-day pilot**, covering
+one team and one workflow under an agreed scope. **Enterprise support starts
+at $2,000 USD/month**, with defined support hours, response targets, upgrade
+assistance, and policy guidance in a separate recurring agreement. The pilot
+does not automatically convert to a subscription. Provider usage, infrastructure,
+and applicable taxes are additional. A free governance review qualifies fit.
+
+Larger deployments and extra implementation work require a separate quote.
+Live payment collection requires verified merchant/account access, checkout
+prices, support/cancellation terms, and the publication checks in
+[commercial setup](COMMERCIAL_SETUP.md).

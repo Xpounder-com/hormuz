@@ -1,3 +1,4 @@
+import { CampaignLink } from '../components/CampaignLink';
 import { pageMetadata } from '../../lib/metadata';
 import { REPOSITORY, sitePath, sourcePath } from '../../lib/site.mjs';
 import { PageFrame, PageHero } from '../components/PageFrame';
@@ -22,11 +23,11 @@ export default function DocsPage() {
   return <PageFrame active="docs">
     <PageHero eyebrow="Documentation" title={<>Start locally.<br /><span>No provider key required.</span></>}>
       <p>See one allowed request, one reroute, one redaction, and one denial through the real HTTP gateway—with disposable loopback providers.</p>
-      <div className="hero-actions"><a className="button button-primary" href="#quickstart">Run the quickstart ↓</a><a className="button button-ghost" href={sitePath('/demo/')}>See the recording →</a></div>
+      <div className="hero-actions"><a className="button button-primary" href="#quickstart">Run the quickstart ↓</a><CampaignLink className="button button-ghost" href={sitePath('/demo/')}>See the recording →</CampaignLink></div>
     </PageHero>
     <div className="docs-shell">
       <aside className="docs-sidebar" aria-label="Documentation navigation">
-        <div><strong>Get started</strong><a href="#quickstart">Provider-free demo</a><a href="#downloads">Source & OCI versions</a><a href={sitePath('/integrations/')}>Connect a client</a><a href="#policy-tour">Try a policy change</a></div>
+        <div><strong>Get started</strong><a href="#quickstart">Provider-free demo</a><a href="#downloads">Source & OCI versions</a><CampaignLink href={sitePath('/integrations/')}>Connect a client</CampaignLink><a href="#policy-tour">Try a policy change</a></div>
         <div><strong>Go deeper</strong>{references.map(([tag, title, , path]) => <a key={tag} href={sourcePath(path)}>{title} ↗</a>)}<a href={sourcePath('SUPPORT.md')}>Support matrix ↗</a></div>
       </aside>
       <article className="docs-content">
@@ -62,7 +63,7 @@ PASS external provider calls: 0 (3 loopback simulator calls)`}</code></pre></div
           <p>Then follow the <a href={sourcePath('marketing/tutorials/policy-and-evidence.md')}>policy-and-evidence walkthrough</a> to inspect a proposed change and the <a href={sourcePath('docs/POLICY_CONTROL.md')}>governed policy guide</a> before staging or activating policies in a managed environment.</p>
         </section>
         <section className="docs-section"><p className="section-label">Reference library</p><h2>Go deeper by control surface.</h2><div className="doc-reference-grid">{references.map(([tag, title, copy, path]) => <a href={sourcePath(path)} key={tag}><span>{tag}</span><h3>{title}</h3><p>{copy}</p><strong>Open reference ↗</strong></a>)}</div></section>
-        <section className="docs-next"><div><span>Next</span><h2>Connect one supported client.</h2></div><a className="button button-primary" href={sitePath('/integrations/')}>Client walkthrough →</a></section>
+        <section className="docs-next"><div><span>Next</span><h2>Connect one supported client.</h2></div><CampaignLink className="button button-primary" href={sitePath('/integrations/')}>Client walkthrough →</CampaignLink></section>
       </article>
     </div>
   </PageFrame>;

@@ -1,15 +1,17 @@
 import { CONTACT_EMAIL } from './site.mjs';
 
-export const INTERESTS = Object.freeze({ pilot: 'Enterprise pilot', integration: 'Client integration', security: 'Security requirements', community: 'Open-source feedback' });
+export const INTERESTS = Object.freeze({ review: 'Free AI governance review', pilot: 'Enterprise pilot', support: 'Enterprise support subscription', integration: 'Client integration', security: 'Security requirements', community: 'Open-source feedback' });
+export const CAMPAIGN_TAGS = Object.freeze(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content']);
+export const isSalesInquiry = interest => ['review', 'pilot', 'support'].includes(interest);
 
 function clean(value, max) {
   return String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max);
 }
 
-/** Attribution stays in the browser and is only included in a user-reviewed email draft. */
+/** Only bounded, explicitly selected campaign labels enter an inquiry. */
 export function campaignSource(search) {
   const params = new URLSearchParams(search);
-  return ['utm_source', 'utm_medium', 'utm_campaign'].map(key => {
+  return CAMPAIGN_TAGS.map(key => {
     const value = params.get(key);
     return value && /^[a-zA-Z0-9_.-]{1,64}$/.test(value) ? `${key}=${value}` : '';
   }).filter(Boolean).join(' · ');

@@ -1,7 +1,12 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { pageMetadata } from '../lib/metadata';
+import { AdConsent } from './components/AdConsent';
 import './globals.css';
+import './landing.css';
+import './interior.css';
+import './brand.css';
+import './conversion.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -28,7 +33,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <a className="skip-link" href="#content">Skip to content</a>
-        {children}
+        <div className="landing-redesign">{children}<AdConsent /></div>
       </body>
     </html>
   );

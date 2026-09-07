@@ -1,0 +1,130 @@
+/* Controlled passage: one identity across the website and its shared assets. */
+.landing-redesign {
+  --brand-chalk: #f4f3ee;
+  --brand-forest: #24392d;
+  --brand-sage: #dce6d5;
+  --brand-signal: #dceda6;
+  --brand-ink: #202723;
+  --brand-muted: #5c6758;
+}
+.hormuz-mark { display: block; width: 34px; height: 34px; flex: 0 0 auto; color: currentColor; }
+.brand .hormuz-mark { color: var(--brand-forest); }
+.landing-redesign .brand { gap: 10px; }
+.landing-redesign .footer-brand .hormuz-mark { color: var(--brand-forest); }
+.gateway-h .hormuz-mark, .art-hormuz .hormuz-mark { width: 34px; height: 34px; }
+.passage-lines { display: block; pointer-events: none; }
+.subpage-hero > .passage-lines { position: absolute; right: -70px; bottom: -65px; width: min(48vw,650px); color: #64885b; opacity: .15; }
+.subpage-hero-inner { position: relative; z-index: 1; }
+.inner-page .subpage-grid { background-image: none; }
+.next-conversation { position: relative; overflow: hidden; isolation: isolate; }
+.next-conversation > .passage-lines { position: absolute; right: -100px; bottom: -135px; width: 570px; opacity: .12; z-index: -1; color: #51754a; }
+.passage-story { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 72px; width: min(100% - 64px,1160px); margin: 24px auto 20px; padding: 46px 0 65px; }
+.passage-art { position: relative; margin: 0; border: 1px solid #d3dccb; border-radius: 20px; overflow: hidden; aspect-ratio: 1.12; background: var(--brand-sage); }
+.passage-art > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.passage-art figcaption { position: absolute; bottom: 17px; left: 17px; right: 17px; display: flex; align-items: center; gap: 12px; padding: 12px 15px; color: #24392d; background: #f4f3eeed; border: 1px solid #fff9; border-radius: 10px; font-family: var(--font-geist-mono),monospace; font-size: 9px; letter-spacing: .06em; }
+.passage-art figcaption .hormuz-mark { width: 25px; height: 25px; }
+.passage-art figcaption > span:last-child { margin-left: auto; font-size: 16px; }
+.passage-story h2 { font-size: clamp(36px,4vw,55px); letter-spacing: -.055em; font-weight: 520; line-height: 1.1; margin-bottom: 24px; }
+.passage-story h2 em { color: #58714b; }
+.passage-story .landing-eyebrow { justify-content: flex-start; margin-bottom: 22px; }
+.passage-story-copy > p:not(.landing-eyebrow) { color: var(--brand-muted); font-size: 15px; line-height: 1.8; max-width: 440px; }
+.passage-principles { margin: 26px 0; }
+.passage-principles > div { padding: 13px 0; display: grid; grid-template-columns: 35px 1fr; border-top: 1px solid #d4dbcc; gap: 3px 4px; }
+.passage-principles dt { font-size: 12px; font-weight: 600; display: contents; }
+.passage-principles dt > span { font-family: var(--font-geist-mono),monospace; color: #637458; font-size: 10px; }
+.passage-principles dd { grid-column: 2; margin: 0; color: var(--brand-muted); font-size: 12px; line-height: 1.6; }
+.passage-story-copy > a { font-size: 12px; font-weight: 550; text-underline-offset: 5px; }
+.document-cover { overflow: hidden; }
+.document-cover .document-lockup { display: flex; align-items: center; gap: 6px; }
+.document-lockup .hormuz-mark { width: 20px; height: 20px; }
+.document-lockup .brand-name { font-size: 8px; }
+.document-cover > .passage-lines { position: absolute; width: 170px; right: -28px; bottom: 25px; color: #57784c; opacity: .2; }
+.document-stage-1 .document-cover > .passage-lines { color: #dceda6; }
+.resource-brand-link { display: grid; grid-template-columns: 110px 1fr auto; gap: 30px; align-items: center; border: 1px solid #cfd9c5; border-radius: 18px; padding: 26px 32px; margin-top: 38px; background: #e9eee1; text-decoration: none; }
+.resource-brand-link > .hormuz-mark { width: 78px; height: 78px; color: #31684b; }
+.inner-page .resource-brand-link h3 { margin: 5px 0 8px; font-size: 24px; letter-spacing: -.04em; }
+.inner-page .resource-brand-link p { margin: 0; color: var(--brand-muted); font-size: 13px; line-height: 1.6; }
+.resource-brand-link > span { font-size: 22px; }
+.resource-brand-link small { color: #526647; font-size: 10px; font-family: var(--font-geist-mono),monospace; letter-spacing: .09em; }
+.brand-section { width: min(100% - 64px,1160px); margin: 0 auto; padding: 70px 0; border-top: 1px solid #d4dbcc; }
+.brand-section h2 { font-size: clamp(32px,4vw,48px); letter-spacing: -.055em; font-weight: 500; line-height: 1.13; margin-bottom: 20px; }
+.brand-section p { font-size: 15px; line-height: 1.8; color: var(--brand-muted); max-width: 640px; }
+.brand-concept { display: grid; grid-template-columns: .8fr 1.2fr; gap: 66px; align-items: center; padding-top: 20px; border-top: 0; }
+.brand-concept figure { margin: 0; }
+.brand-concept img { display: block; width: 100%; aspect-ratio: 1.3; object-fit: cover; border-radius: 18px; }
+.brand-concept figcaption { color: var(--brand-muted); font-size: 11px; margin-top: 12px; line-height: 1.6; }
+.brand-positioning { margin-top: 30px; padding-left: 18px; border-left: 2px solid #86a272; }
+.brand-positioning strong { color: var(--brand-forest); font-size: 11px; font-family: var(--font-geist-mono),monospace; }
+.brand-positioning p { margin: 8px 0 0; font-size: 13px; }
+.brand-lockups { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 32px 0 20px; }
+.brand-lockup-card { position: relative; min-height: 265px; border-radius: 15px; border: 1px solid #d2daca; display: flex; align-items: center; justify-content: center; background: #e5ecdc; overflow: hidden; }
+.brand-lockup-card > img { width: min(75%,330px); height: auto; }
+.brand-lockup-dark { background: var(--brand-forest); border-color: var(--brand-forest); }
+.brand-lockup-card > span { position: absolute; bottom: 18px; left: 22px; color: #526647; font-family: var(--font-geist-mono),monospace; font-size: 10px; }
+.brand-lockup-dark > span { color: #dce6d5; }
+.brand-small-system { display: flex; gap: 26px; align-items: center; padding: 20px 0; }
+.brand-small-system > .hormuz-mark { width: 64px; height: 64px; color: #31684b; }
+.brand-small-system p { margin: 0; font-size: 13px; max-width: 740px; }
+.brand-icon-system { margin-top: 28px; }
+.brand-icon-row { padding: 24px; border: 1px solid #d2daca; border-radius: 15px; margin-bottom: 18px; }
+.brand-icon-row h3 { margin: 0 0 26px; font-size: 13px; font-weight: 550; }
+.brand-icon-row > div { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 28px; }
+.brand-icon-row figure { margin: 0; min-width: 40px; display: grid; justify-items: center; gap: 16px; }
+.brand-icon-row img { display: block; max-width: none; }
+.brand-icon-row figcaption { font: 11px var(--font-geist-mono),monospace; }
+.brand-icon-signal { background: var(--brand-forest); color: var(--brand-chalk); border-color: var(--brand-forest); }
+.brand-icon-system > a { font-size: 13px; text-underline-offset: 4px; }
+.brand-swatches { display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; margin: 32px 0 50px; }
+.brand-swatch { border: 1px solid #d2daca; border-radius: 12px; overflow: hidden; }
+.brand-swatch > div { height: 115px; }
+.brand-swatch > p { padding: 15px; margin: 0; font-size: 12px; }
+.brand-swatch strong, .brand-swatch code { display: block; }
+.brand-swatch code { font-size: 10px; margin-top: 5px; }
+.brand-type-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 24px; }
+.brand-type-card { border: 1px solid #d2daca; border-radius: 14px; padding: 32px; background: #fafbf6; }
+.brand-type-card > span { font-size: 10px; font-family: var(--font-geist-mono),monospace; color: #5c6758; }
+.brand-type-card h3 { font-size: clamp(32px,4vw,51px); letter-spacing: -.055em; font-weight: 500; line-height: 1.08; margin: 32px 0; }
+.brand-type-card h3 em { color: #58714b; }
+.brand-type-card p { font-size: 12px; margin: 0; }
+.brand-type-card code { display: block; color: #385130; font-size: 12px; line-height: 2; padding: 30px 0; font-family: var(--font-geist-mono),monospace; }
+.brand-voice { display: grid; grid-template-columns: repeat(3,1fr); gap: 35px; margin-top: 34px; }
+.brand-voice h3 { font-size: 19px; letter-spacing: -.035em; margin: 0 0 15px; }
+.brand-voice p { font-size: 13px; }
+.brand-voice blockquote { margin: 18px 0 0; border-left: 2px solid #9cb485; padding-left: 15px; font-size: 14px; line-height: 1.7; color: #30422d; }
+.brand-asset-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 16px; margin-top: 30px; }
+.brand-asset-grid a { display: flex; flex-direction: column; padding: 25px; border: 1px solid #cfd9c5; border-radius: 12px; background: #fafbf6; text-decoration: none; gap: 10px; transition: border-color .2s; }
+.brand-asset-grid a:hover { border-color: #678d75; }
+.brand-asset-grid strong { font-size: 16px; font-weight: 550; }
+.brand-asset-grid span { font-size: 12px; color: var(--brand-muted); }
+.brand-social { margin: 35px 0 0; }
+.brand-social img { display: block; width: 100%; height: auto; border: 1px solid #d2daca; border-radius: 12px; }
+.brand-section .brand-asset-note { margin-top: 25px; font-size: 12px; }
+@media (max-width: 800px) {
+  .passage-story { gap: 34px; }
+  .passage-story h2 { font-size: 37px; }
+  .passage-art { aspect-ratio: .9; }
+  .brand-concept { gap: 30px; }
+  .brand-swatches { grid-template-columns: repeat(3,1fr); }
+  .brand-type-grid { grid-template-columns: 1fr; }
+  .brand-voice { gap: 20px; }
+}
+@media (max-width: 600px) {
+  .passage-story, .brand-concept { grid-template-columns: 1fr; }
+  .passage-story { width: calc(100% - 36px); padding-top: 18px; gap: 32px; }
+  .passage-art { aspect-ratio: 1.25; }
+  .subpage-hero > .passage-lines { width: 350px; opacity: .1; }
+  .brand-section { width: calc(100% - 36px); padding: 46px 0; }
+  .brand-concept { padding-top: 10px; }
+  .brand-lockups, .brand-asset-grid, .brand-voice { grid-template-columns: 1fr; }
+  .brand-lockup-card { min-height: 210px; }
+  .brand-swatches { grid-template-columns: repeat(2,1fr); gap: 10px; }
+  .brand-swatch > div { height: 100px; }
+  .brand-type-card { padding: 24px; }
+  .brand-small-system { align-items: flex-start; gap: 20px; }
+  .resource-brand-link { grid-template-columns: 46px 1fr; gap: 18px; padding: 22px; }
+  .resource-brand-link > .hormuz-mark { width: 44px; height: 44px; }
+  .resource-brand-link > span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-asset-grid a { transition: none; }
+}

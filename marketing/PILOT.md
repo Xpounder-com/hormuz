@@ -1,7 +1,7 @@
 # Proposed Hormuz evaluation pilot
 
 Status: discussion brief, not a quote, service agreement, SLA, or certification.
-Owner: Mehrdad Zaker · zaker.mehrdad@gmail.com.
+Owner: Mehrdad Zaker · mehrdadz@neuralint.io.
 
 ## Fit and entry criteria
 
@@ -63,14 +63,20 @@ certifications, legal/compliance determinations, comprehensive semantic DLP,
 per-inference human approvals, native Hormuz login/refresh sessions, provider
 invoice reconciliation, guaranteed savings, and future portfolio features.
 
-## Terms that remain to be decided
+## Price and terms
 
-Price and payment schedule; start/end dates; time budget; meeting cadence;
+The 90-day pilot is $15,000 USD for one team and one workflow. Scope,
+availability, and start date are agreed before payment or work begins.
+Provider usage, infrastructure, and applicable taxes are additional.
+The pilot does not automatically renew. Enterprise support starts at $2,000
+USD/month under a separate agreement.
+
+Agree the payment schedule; start/end dates; time budget; meeting cadence;
 support hours/time zone and response targets; named delivery contact; customer
 prerequisites and delays; acceptance procedure; change control; confidentiality;
 data processing/access; liability; termination; and post-pilot support.
-No default amounts, promises, or legal terms are invented here. Obtain
-appropriate contractual review before signing an engagement.
+No default SLA or additional legal terms are implied. Obtain appropriate
+contractual review before signing an engagement.
 
 ## Post-pilot decision
 

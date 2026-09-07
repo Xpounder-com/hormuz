@@ -122,13 +122,14 @@ access to Figma. Render and inspect every generated document before committing.
 
 ## Privacy and measurement
 
-The contact form produces a local, reviewable email draft and a copy fallback.
-It never claims submission/delivery. No form field is sent automatically or
-saved to browser storage. Optional campaign attribution is unchecked by default.
-There is no analytics SDK or ad pixel. See `marketing/MEASUREMENT.md` for the
-manual measurement baseline and decisions required before enabling tracking.
+The contact form submits to the owner's Hormuz Formspree form and acknowledges
+receipt only after a positive service response. Entries are not saved to browser
+storage. Optional campaign attribution is unchecked by default. X Ads measurement
+loads only after visitor consent, only on the canonical origin. Its lead event
+follows acknowledged submission and contains no form entries. See
+`marketing/MEASUREMENT.md` for exact events, consent, and verification boundaries.
 GitHub Pages still receives requested URLs and query strings as the hosting
 provider; optional email attribution does not prevent that initial request.
 
 Figma handoff: https://www.figma.com/design/Ax2HWqdWzVnMANEOmB5Z4z
-Public author: Mehrdad Zaker · zaker.mehrdad@gmail.com.
+Public author: Mehrdad Zaker · mehrdadz@neuralint.io.

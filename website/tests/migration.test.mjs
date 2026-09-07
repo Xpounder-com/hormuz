@@ -34,7 +34,7 @@ async function preview(t, rootPath, basePath = '') {
 }
 
 test('all known old routes use fixed new destinations and retain fragments only', () => {
-  assert.equal(SITE_ROUTES.length, 9);
+  assert.equal(SITE_ROUTES.length, 10);
   assert.equal(new Set(SITE_ROUTES).size, SITE_ROUTES.length);
   for (const route of SITE_ROUTES) {
     const html = legacyPage(route);
@@ -65,7 +65,7 @@ test('legacy publication replaces every page but preserves existing download and
   const assets = ['downloads/brief.pdf', 'demo/recordings/sample.cast'];
   const originals = await Promise.all(assets.map(asset => readFile(path.join(root, asset))));
   assert.deepEqual(await prepareLegacyExport(root), {
-    verdict: 'passed', redirects: 9, target: 'https://usehormuz.github.io/', query_strings_forwarded: false,
+    verdict: 'passed', redirects: 10, target: 'https://usehormuz.github.io/', query_strings_forwarded: false,
   });
   for (const route of SITE_ROUTES) assert.equal(await readFile(path.join(root, route, 'index.html'), 'utf8'), legacyPage(route));
   for (const [index, asset] of assets.entries()) assert.deepEqual(await readFile(path.join(root, asset)), originals[index]);

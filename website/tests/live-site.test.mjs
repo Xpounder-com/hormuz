@@ -33,8 +33,8 @@ test('post-deploy verification checks the pinned source, all routes, metadata, a
   assert.equal(LIVE_ORIGIN, SITE_ORIGIN);
   assert.deepEqual(LIVE_ROUTES, SITE_ROUTES);
   const site = publishedSite();
-  assert.deepEqual(await verifyLiveSite(pin, site.fetcher), { verdict: 'passed', source_revision: pin.revision, pages: 9, downloads: 4 });
-  assert.equal(site.requests.length, 16);
+  assert.deepEqual(await verifyLiveSite(pin, site.fetcher), { verdict: 'passed', source_revision: pin.revision, pages: 10, downloads: 4 });
+  assert.equal(site.requests.length, 17);
 });
 
 test('a stale or invalid deployed pin fails before any page is accepted', async () => {

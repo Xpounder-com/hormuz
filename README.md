@@ -382,7 +382,7 @@ See the [OSS/support comparison](https://usehormuz.github.io/enterprise/),
 response targets, and terms must be agreed before work begins.
 
 Public maintainer: **Mehrdad Zaker**. For evaluation inquiries, use
-`zaker.mehrdad@gmail.com` or the
+`mehrdadz@neuralint.io` or the
 [local email-draft form](https://usehormuz.github.io/contact/).
 Vulnerabilities must still follow [SECURITY.md](SECURITY.md).
 
