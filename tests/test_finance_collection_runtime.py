@@ -583,6 +583,14 @@ class FinanceCollectionSQLiteRepositoryTests(unittest.TestCase):
             fingerprint_key=KEY,
         )
 
+    def test_fixed_precision_whole_second_storage_time_is_valid(self):
+        with unittest.mock.patch(
+            "hormuz._portfolio_sql.PortfolioSQL.now",
+            return_value="2026-09-08T16:23:35.000000Z",
+        ):
+            binding = self.bind()
+        self.assertEqual(binding.bound_at, "2026-09-08T16:23:35.000000Z")
+
     def test_binding_request_rejects_boolean_schema_version(self):
         with self.assertRaisesRegex(FinanceCollectionError, "invalid_request"):
             self.bind(schema_version=True)
