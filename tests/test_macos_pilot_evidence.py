@@ -206,7 +206,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertFalse(result["ready_for_controlled_external_pilot"])
         self.assertEqual(result["status"], "not_ready")
         self.assertEqual(result["reasons"], ["synthetic_fixture"])
-        self.assertEqual(result["clean_machine_architectures"], ["arm64", "x86_64"])
+        self.assertEqual(result["clean_machine_architectures"], ["arm64"])
         self.assertEqual(result["external_initial_completion_count"], 0)
         self.assertEqual(result["external_returning_completion_count"], 0)
         platform_verifier.assert_not_called()
@@ -1035,16 +1035,30 @@ class MacPilotEvidenceTests(unittest.TestCase):
         ):
             pilot._validate_distribution_proof(proof, "pilot_qualification")
 
-    def test_both_clean_architectures_require_real_gatekeeper_conditions(self) -> None:
+    def test_apple_silicon_requires_real_gatekeeper_conditions(self) -> None:
         inputs = list(self._inputs())
         evidence = copy.deepcopy(inputs[0])
-        evidence["clean_machine_runs"][1]["developer_tools_absent"] = False  # type: ignore[index]
+        evidence["clean_machine_runs"][0]["developer_tools_absent"] = False  # type: ignore[index]
+        inputs[0] = evidence
+
+        result = self._validate(*inputs)
+
+        self.assertEqual(result["clean_machine_architectures"], [])
+        self.assertIn("clean_machine_architecture_coverage_incomplete", result["reasons"])
+
+    def test_failed_apple_silicon_attempt_may_precede_a_qualifying_retry(self) -> None:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        failed = copy.deepcopy(evidence["clean_machine_runs"][0])  # type: ignore[index]
+        failed["run_id"] = "mcr:20000000-0000-4000-8000-000000000002"
+        failed["developer_tools_absent"] = False
+        evidence["clean_machine_runs"].insert(0, failed)  # type: ignore[union-attr]
         inputs[0] = evidence
 
         result = self._validate(*inputs)
 
         self.assertEqual(result["clean_machine_architectures"], ["arm64"])
-        self.assertIn("clean_machine_architecture_coverage_incomplete", result["reasons"])
+        self.assertEqual(result["reasons"], ["synthetic_fixture"])
 
     def test_no_clean_machine_runs_is_valid_incomplete_evidence(self) -> None:
         inputs = list(self._inputs())
@@ -1614,7 +1628,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
             )
 
         future_clean_machine_runs = copy.deepcopy(evidence["clean_machine_runs"])
-        future_clean_machine_runs[1]["started_at"] = "2026-09-01T16:20:00Z"
+        future_clean_machine_runs[0]["started_at"] = "2026-09-01T16:20:00Z"
         future_proof = copy.deepcopy(proof)
         future_proof["clean_machine_runs"] = future_clean_machine_runs
         with (
@@ -1629,7 +1643,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
             ),
             self.assertRaisesRegex(
                 pilot.MacPilotEvidenceError,
-                "clean_machine_run_1_after_operations_artifact",
+                "clean_machine_run_0_after_operations_artifact",
             ),
         ):
             pilot._authenticate_macos_operational_evidence(

@@ -146,8 +146,8 @@ summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 os.chmod(summary_path, 0o600)
 if issues:
     raise SystemExit("Apple accepted the submission with issues; inspect the private raw log before release.")
-if len(tickets) < 2:
-    raise SystemExit("Apple notarization log did not contain both universal app ticket entries.")
+if len(tickets) < 1:
+    raise SystemExit("Apple notarization log did not contain an Apple Silicon app ticket entry.")
 PY
 
 xcrun stapler staple "$HORMUZ_BUNDLE"

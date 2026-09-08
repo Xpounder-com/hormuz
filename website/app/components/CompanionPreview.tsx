@@ -59,9 +59,9 @@ export function CompanionPreview() {
 
   return <section className="companion-section" aria-labelledby="companion-title" id="companion" ref={section} data-in-view={inView}>
     <div className="companion-intro">
-      <p className="landing-eyebrow">HORMUZ FOR MAC · INTERACTIVE PREVIEW</p>
+      <p className="landing-eyebrow">HORMUZ FOR APPLE SILICON · INTERACTIVE PREVIEW</p>
       <h2 id="companion-title">A little presence.<br /><em>Everything within reach.</em></h2>
-      <p>Usage at the edge of your screen. Your connection, client setup, and session controls a click away.</p>
+      <p>Usage at the edge of your screen. Your connection, client setup, and session controls a click away. The signed pilot app supports Apple Silicon on macOS 14 or later.</p>
       <p className="companion-hint">Try a ring, then open the gear. The preview uses example data.</p>
       <a className="button landing-secondary" href={sitePath('/integrations/')}>Explore client setup <span aria-hidden="true">↗</span></a>
     </div>

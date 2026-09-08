@@ -11,7 +11,7 @@ The release needs two Apple-controlled credentials:
 1. A **Developer ID Application** certificate and private key, exported as a password-protected PKCS#12 (`.p12`) file. This signs the app outside the Mac App Store.
 2. An App Store Connect **team** API key authorized for notarization. Apple's [current API-key contract](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api) says individual keys cannot use `notarytool`. Team keys apply across every app in the account, so select the least privileged role that passes `notarytool store-credentials --validate`, dedicate the key to Hormuz notarization, and keep its one-time-download `.p8` private key outside the repository. Never put it in a workflow input, shell argument, issue, artifact, or log.
 
-The app uses hardened runtime and no custom entitlements. It is a universal `arm64`/`x86_64` binary for macOS 14 or later. Its only dynamic dependencies are Apple system frameworks and libraries. The same signed executable provides the window and the Keychain credential helper, avoiding a separately signed nested helper.
+The app uses hardened runtime and no custom entitlements. The customer binary targets Apple Silicon (`arm64`) on macOS 14 or later. Intel Macs are outside the supported distribution boundary: the release is neither built nor qualified for `x86_64`. Its only dynamic dependencies are Apple system frameworks and libraries. The same signed executable provides the window and the Keychain credential helper, avoiding a separately signed nested helper.
 
 ## Local packaging and notarization
 
@@ -41,9 +41,9 @@ Submit, staple, and repackage the same app:
   --keychain-profile hormuz-notary
 ```
 
-Packaging refuses an existing output directory, a `.local` identifier, a non-universal binary, an ambiguous signing identity, non-system runtime dependencies, custom entitlements, a missing secure timestamp, or unexpected archive files. Notarization must return `Accepted`; the ticket is then stapled to the app, Gatekeeper is assessed, and a new `Hormuz-<version>-notarized.zip` is produced. `distribution-proof.json` records only digests and content-free verification results. In the protected workflow its v2 shape also records the exact source commit and GitHub Actions run URL, allowing the pilot gate to verify provenance from the proof rather than an operator assertion.
+Packaging refuses an existing output directory, a `.local` identifier, any binary architecture other than exact `arm64`, an ambiguous signing identity, non-system runtime dependencies, custom entitlements, a missing secure timestamp, or unexpected archive files. Notarization must return `Accepted`; the ticket is then stapled to the app, Gatekeeper is assessed, and a new `Hormuz-<version>-notarized.zip` is produced. `distribution-proof.json` records only digests and content-free verification results. In the protected workflow its v2 shape also records the exact source commit and GitHub Actions run URL, allowing the pilot gate to verify provenance from the proof rather than an operator assertion.
 
-The notarization step also downloads Apple's private submission log into a temporary directory, requires no reported issues and at least two ticket entries for the universal app, then deletes the raw log. Its retained summary contains only the submission ID, acceptance state, issue counts, and ticket-entry count. The final verifier extracts the customer ZIP and repeats signature, stapler, and Gatekeeper checks on that extracted copy, so packaging cannot silently discard the ticket.
+The notarization step also downloads Apple's private submission log into a temporary directory, requires no reported issues and at least one ticket entry for the Apple Silicon app, then deletes the raw log. Its retained summary contains only the submission ID, acceptance state, issue counts, and ticket-entry count. The final verifier extracts the customer ZIP and repeats signature, stapler, and Gatekeeper checks on that extracted copy, so packaging cannot silently discard the ticket.
 
 For a credential-free rehearsal, use `--ad-hoc`. The resulting metadata always says `distribution_ready: false`; it cannot be promoted or given to customers.
 
@@ -59,7 +59,7 @@ The manual **Mac signed distribution** workflow performs the same steps on a Git
 | `APPLE_NOTARY_KEY_ID` | API key ID |
 | `APPLE_NOTARY_ISSUER_ID` | Team API issuer UUID |
 
-The workflow separates compilation from credential use. An unprivileged job tests and builds the universal executable, packages a disposable ad hoc bundle, and executes `--version` there to prove the bundle reports the requested release version. It records that result with the source commit, permanent bundle identifier, CI-derived build number, architectures, and SHA-256 digest, then transfers only the unsigned payload for one day. A fresh runner in the protected environment independently derives the same release identity, repeats the manifest, commit, architecture, and digest checks, and only then enters the one step that receives the five secrets. Neither tests nor Swift compilation run on the credential-bearing runner, and that runner never executes the transferred payload; its bundle and archive checks are static plus Apple signature, notarization, stapler, and Gatekeeper verification.
+The workflow separates compilation from credential use. An unprivileged job tests and builds the exact `arm64` executable, packages a disposable ad hoc bundle, and executes `--version` there to prove the bundle reports the requested release version. It records that result with the source commit, permanent bundle identifier, CI-derived build number, architecture, and SHA-256 digest, then transfers only the unsigned payload for one day. A fresh runner in the protected environment independently derives the same release identity, repeats the manifest, commit, architecture, and digest checks, and only then enters the one step that receives the five secrets. Neither tests nor Swift compilation run on the credential-bearing runner, and that runner never executes the transferred payload; its bundle and archive checks are static plus Apple signature, notarization, stapler, and Gatekeeper verification.
 
 The dispatcher supplies only the three-component marketing version. The bundle identifier is pinned in the protected workflow to `com.xpounder.hormuz`, and the imported Developer ID identity must belong to team `R267LZMUTY`. `CFBundleVersion` is derived as `GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT`, which increases for both new workflow runs and reruns and reserves up to 999 attempts per run. Operators cannot reuse, lower, or replace these release-identity values through workflow inputs.
 
@@ -73,7 +73,7 @@ Apple's stapler adds `Hormuz.app/Contents/CodeResources` to the accepted app. Th
 
 Notarization proves Apple scanned and accepted the submitted bytes. It does not prove customer behavior, Keychain continuity, gateway availability, or safe updates. Before an external pilot:
 
-- Download the artifact through the intended delivery channel, apply normal quarantine, extract it, and confirm Gatekeeper acceptance on clean Apple Silicon and Intel Macs without developer tools.
+- Download the artifact through the intended delivery channel, apply normal quarantine, extract it, and confirm Gatekeeper acceptance on a clean Apple Silicon Mac without developer tools.
 - Install in `/Applications`, complete real IdP login, restart, lock/unlock, refresh, sign out, revoke, reinstall the same build, update to a newer build, and test a supported rollback. Confirm the credential remains available only where intended.
 - Re-run the selected pinned-client `401` gate with the signed installed app.
   `codex_openai` requires Codex only: it refreshes and completes with one
@@ -92,8 +92,8 @@ workflow run and exact retained Actions-artifact members through GitHub's API.
 Its synthetic fixture validates only the contract shape; it can never qualify a
 pilot or change the external-onboarding counts. The protected **Mac
 controlled-pilot operations** workflow now collects gates for clean install,
-session lifecycle, and pinned-client authentication. It still requires separate
-clean Apple Silicon and Intel self-hosted runners and a completed real run; a
+session lifecycle, and pinned-client authentication. It requires one clean
+Apple Silicon self-hosted runner and a completed real run; a
 developer workstation with Xcode or Command Line Tools is deliberately
 rejected.
 

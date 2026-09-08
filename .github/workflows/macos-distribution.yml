@@ -50,11 +50,12 @@ jobs:
             >> "$GITHUB_OUTPUT"
       - name: Record native toolchain
         run: |
+          test "$(uname -m)" = arm64
           swift --version
           xcodebuild -version
       - name: Test native client without signing credentials
         run: swift test --package-path clients/macos
-      - name: Build unsigned universal payload
+      - name: Build unsigned Apple Silicon payload
         env:
           HORMUZ_VERSION: ${{ steps.release.outputs.version }}
           HORMUZ_BUILD_NUMBER: ${{ steps.release.outputs.build_number }}
@@ -66,10 +67,10 @@ jobs:
           HORMUZ_SCRATCH="$RUNNER_TEMP/hormuz-unsigned-build"
           mkdir "$HORMUZ_PAYLOAD"
           swift build --package-path clients/macos --scratch-path "$HORMUZ_SCRATCH" \
-            --configuration release --arch arm64 --arch x86_64 --product Hormuz
+            --configuration release --arch arm64 --product Hormuz
           HORMUZ_BINARY_SOURCE="$(swift build --package-path clients/macos \
             --scratch-path "$HORMUZ_SCRATCH" --configuration release \
-            --arch arm64 --arch x86_64 --show-bin-path)/Hormuz"
+            --arch arm64 --show-bin-path)/Hormuz"
           cp "$HORMUZ_BINARY_SOURCE" "$HORMUZ_PAYLOAD/Hormuz"
           chmod 755 "$HORMUZ_PAYLOAD/Hormuz"
           HORMUZ_DSYM_SOURCE="$(dirname "$HORMUZ_BINARY_SOURCE")/Hormuz.dSYM"
@@ -121,8 +122,8 @@ jobs:
                   ["lipo", "-archs", str(binary)], text=True
               ).split()
           )
-          if architectures != ["arm64", "x86_64"]:
-              raise SystemExit("unsigned payload is not exactly universal")
+          if architectures != ["arm64"]:
+              raise SystemExit("unsigned payload is not exactly Apple Silicon")
           manifest.write_text(
               json.dumps(
                   {
@@ -166,6 +167,7 @@ jobs:
         env:
           HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}
         run: |
+          test "$(uname -m)" = arm64
           test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
@@ -222,11 +224,11 @@ jobs:
               "bundle_identifier": os.environ["HORMUZ_BUNDLE_ID"],
               "version": os.environ["HORMUZ_VERSION"],
               "build": os.environ["HORMUZ_BUILD_NUMBER"],
-              "architectures": ["arm64", "x86_64"],
+              "architectures": ["arm64"],
               "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
               "credential_free_runtime_version_verified": True,
           }
-          if manifest != expected or architectures != ["arm64", "x86_64"]:
+          if manifest != expected or architectures != ["arm64"]:
               raise SystemExit("unsigned payload identity changed")
           PY
       - name: Import protected Apple credentials, sign and notarize

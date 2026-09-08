@@ -550,7 +550,6 @@ def assemble(
     *,
     inputs: object,
     arm64_record: object,
-    x86_64_record: object,
     lifecycle: object,
     codex_record: object,
     claude_record: object | None,
@@ -572,7 +571,7 @@ def assemble(
     candidate = root["candidate"]
     previous = root["previous"]
     gateway = root["gateway"]
-    clean = [arm64_record, x86_64_record]
+    clean = [arm64_record]
     clients = [codex_record]
     if claude_record is not None:
         clients.append(claude_record)
@@ -596,7 +595,7 @@ def assemble(
         )
     except pilot.MacPilotEvidenceError as error:
         raise MacPilotOperationsError(str(error)) from error
-    if architectures != ["arm64", "x86_64"] or reasons:
+    if architectures != ["arm64"] or reasons:
         raise MacPilotOperationsError("operations_records_incomplete")
     result = {
         "schema_id": OPERATIONS_SCHEMA_ID,
@@ -637,7 +636,6 @@ def _parser() -> argparse.ArgumentParser:
     assemble_command = commands.add_parser("assemble")
     assemble_command.add_argument("--inputs", type=Path, required=True)
     assemble_command.add_argument("--arm64-record", type=Path, required=True)
-    assemble_command.add_argument("--x86-64-record", type=Path, required=True)
     assemble_command.add_argument("--lifecycle", type=Path, required=True)
     assemble_command.add_argument("--codex-record", type=Path, required=True)
     assemble_command.add_argument("--claude-record", type=Path)
@@ -683,7 +681,6 @@ def main(argv: list[str] | None = None) -> int:
             value = assemble(
                 inputs=_load_json(arguments.inputs, "operations_inputs"),
                 arm64_record=_load_json(arguments.arm64_record, "arm64_record"),
-                x86_64_record=_load_json(arguments.x86_64_record, "x86_64_record"),
                 lifecycle=_load_json(arguments.lifecycle, "lifecycle"),
                 codex_record=_load_json(arguments.codex_record, "codex_record"),
                 claude_record=claude_record,

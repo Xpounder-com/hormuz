@@ -30,6 +30,7 @@ that every nearby version or platform works.
 | --- | --- |
 | Python source install | CPython 3.11, 3.12, 3.13, and 3.14 on GitHub-hosted `ubuntu-latest` runners |
 | Host operating system | Linux is release-gated; macOS and Windows source installs are community best effort and not release-gated |
+| Signed Mac companion | Apple Silicon (`arm64`) on macOS 14 or later; Intel Macs are unsupported and are neither built nor tested |
 | Official OCI image | Linux `amd64` only; the signed digest is the artifact contract |
 | Docker Compose pilot | One native Linux AMD64 VM, one gateway replica, the exact signed Hormuz digest, and one private digest-pinned PostgreSQL service; evaluation/pilots only, not HA or production certification |
 | Kubernetes + Helm reference | One disposable Linux AMD64 Kind `v0.32.0` cluster, Kubernetes `v1.36.1`, Helm `v3.21.4`, Cilium `1.20.1`, two Hormuz replicas, and customer-fixture PostgreSQL; Cilium is the first tested CNI, not a dependency, and the result is not HA/DR or production certification |

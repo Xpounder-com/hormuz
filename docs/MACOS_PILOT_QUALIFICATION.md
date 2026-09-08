@@ -43,7 +43,7 @@ affected gate on a new build when artifact bytes change.
 2. **Verify exact artifact custody.** Recompute the SHA-256 and byte size after
    downloading the artifact. They must match `distribution-proof.json`; the
    proof and notarization-summary file digests must match the aggregate. The
-   distribution proof must show a universal `arm64`/`x86_64` Developer ID
+   distribution proof must show an exact `arm64` Developer ID
    signature, hardened runtime, no entitlements, system-only dependencies, a
    stapled ticket, Gatekeeper acceptance, and the same permanent bundle and team
    identity. The verifier independently extracts both archives and reruns
@@ -59,17 +59,17 @@ affected gate on a new build when artifact bytes change.
    retained distribution runs must complete by the aggregate's `generated_at`.
    The candidate artifact creation time becomes the lower bound for every
    clean-machine run and completed review. Apple acceptance must contain zero
-   issues and at least two ticket entries. The CLI streams each supplied archive
+   issues and at least one ticket entry. The CLI streams each supplied archive
    into a private, owner-only snapshot before validation. It verifies that
    snapshot's digest immediately before and after the macOS platform checks, so
    custody and platform verification cannot observe different pathname contents.
-3. **Exercise clean machines.** Use one Apple Silicon Mac and one Intel Mac
-   without developer tools. Download through the intended delivery channel so
+3. **Exercise a clean machine.** Use one Apple Silicon Mac without developer
+   tools. Download through the intended delivery channel so
    normal quarantine is present. Confirm Gatekeeper accepts the archive,
    install `Hormuz.app` in `/Applications`, and launch it. Each recorded start
    time must follow the authenticated candidate artifact's creation time. A VM
-   that changes architecture or bypasses normal quarantine does not replace
-   either run.
+   that changes architecture or bypasses normal quarantine does not satisfy the
+   run.
 4. **Exercise signed Keychain and session lifecycle.** With the real pilot IdP,
    sign in, restart the app, lock and unlock macOS, refresh the session, sign
    out, and revoke the server-side session. Confirm the revoked session is
@@ -98,8 +98,11 @@ affected gate on a new build when artifact bytes change.
    and v2 plus `qualification_scope: codex_openai` for the narrow scope. It binds
    both distribution run URLs, source commits, and archive digests, plus the
    exact hosted-gateway source commit and deployment run URL, then reproduces
-   the clean-machine, lifecycle, and official-client recovery records. The
-   verifier downloads the artifact through the authenticated GitHub API and
+   the clean-machine, lifecycle, and official-client recovery records.
+   The clean-machine group may retain up to eight Apple Silicon attempts so every
+   failed attempt can remain disclosed before a qualifying retry; every record
+   must still report `architecture: arm64`.
+   The verifier downloads the artifact through the authenticated GitHub API and
    exact-compares all three record groups and the gateway identity. The machine
    collector also requires the signed app's configured HTTPS origin to equal
    the origin authenticated from that gateway deployment artifact. Every
@@ -179,24 +182,23 @@ has no secrets. Approval gates the Ubuntu preparation job, which authenticates
 the three supplied Actions run URLs and transfers only bounded metadata plus the
 two collectors from the exact reviewed default-branch commit.
 
-Register two dedicated self-hosted runners under these exact labels:
+Register one dedicated self-hosted runner under these exact labels:
 
 | Runner | Required labels | Required state |
 | --- | --- | --- |
 | Apple Silicon | `self-hosted`, `macOS`, `hormuz-pilot-clean-arm64` | macOS 14 or later; no Xcode app or Command Line Tools; interactive signed-in desktop user |
-| Intel | `self-hosted`, `macOS`, `hormuz-pilot-clean-x86_64` | macOS 14 or later; no Xcode app or Command Line Tools; interactive signed-in desktop user |
 
 Do not add checkout, repository credentials, environment secrets, or operator
-attestation inputs to either clean runner. They receive the authenticated input
-artifact from the protected preparation job and return only strict content-free
+attestation inputs to the clean runner. It receives the authenticated input
+artifact from the protected preparation job and returns only strict content-free
 records. The transfer artifacts expire after one day; the assembled operations
 proof is retained for 30 days.
 
-Before dispatch, use Safari on both Macs to download the exact candidate
+Before dispatch, use Safari on the Apple Silicon Mac to download the exact candidate
 `Hormuz-<version>-notarized.zip` named in its distribution proof and allow
-Archive Utility to create `~/Downloads/Hormuz.app`. On the Apple Silicon Mac,
-also retain the differently versioned previous notarized ZIP in `~/Downloads`.
-Leave `/Applications/Hormuz.app` absent on both machines. Install the official
+Archive Utility to create `~/Downloads/Hormuz.app`. Also retain the differently
+versioned previous notarized ZIP in `~/Downloads`. Leave
+`/Applications/Hormuz.app` absent. Install the official
 pinned Codex `0.147.0` client on the Apple Silicon Mac. Install Claude Code
 `2.1.233` only for `full_dual_provider`; a `codex_openai` run neither requires
 nor invokes it. Do not install Xcode or Command Line Tools. Use a private, fixed install
@@ -251,8 +253,8 @@ Dispatch **Mac controlled-pilot operations** from the exact candidate commit on
 - `qualification_scope`, explicitly `codex_openai` for the narrow contract or
   the default `full_dual_provider` for the legacy contract.
 
-After the environment approval, the Intel job needs no interaction. On the
-Apple Silicon desktop, follow the fixed action messages in the runner log: sign
+After the environment approval, follow the fixed action messages on the Apple
+Silicon desktop in the runner log: sign
 in through the Hormuz app with a Codex profile, then lock and unlock the Mac
 once. A full-scope run next asks for a Claude Code profile after the first
 session is revoked and removed. A Codex/OpenAI run ends after the common
@@ -304,7 +306,8 @@ both distribution workflows to finish before the declared evidence snapshot.
 The exact clean-machine, lifecycle, and official-client records must also occur
 in the authenticated candidate-bound macOS operations artifact; copying them into the
 aggregate cannot qualify, and a clean-machine start after that artifact was
-created is rejected. Qualifying
+created is rejected. Up to eight Apple Silicon clean-machine attempts may be
+retained so failed attempts remain visible; Intel records are rejected. Qualifying
 public review comments are fetched through GitHub's API; their exact candidate
 attestation, reviewer identity boundary, and update time are checked without
 retaining the reviewer login. Authenticated gateway deployment and recovery

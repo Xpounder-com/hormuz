@@ -1336,7 +1336,7 @@ def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str,
         or proof["passed"] is not True
         or proof["mode"] != "notarized"
         or proof["distribution_ready"] is not True
-        or proof["architectures"] != ["arm64", "x86_64"]
+        or proof["architectures"] != ["arm64"]
         or proof["minimum_macos"] != "14.0"
         or proof["hardened_runtime"] is not True
         or proof["entitlements"] != []
@@ -1392,7 +1392,7 @@ def _validate_notarization(value: object) -> dict[str, Any]:
     ):
         raise MacPilotEvidenceError("notarization_not_cleanly_accepted")
     _require_pattern(summary["submission_id"], _SUBMISSION_ID_RE, "notarization_submission_id")
-    _require_int(summary["ticket_entry_count"], 2, 100, "notarization_ticket_entry_count")
+    _require_int(summary["ticket_entry_count"], 1, 100, "notarization_ticket_entry_count")
     return summary
 
 
@@ -1474,7 +1474,7 @@ def _validate_clean_machines(
         if started_at > generated_at:
             raise MacPilotEvidenceError(f"{label}_after_generated_at")
         architecture = run["architecture"]
-        if not isinstance(architecture, str) or architecture not in {"arm64", "x86_64"}:
+        if architecture != "arm64":
             raise MacPilotEvidenceError(f"{label}_architecture_invalid")
         _require_int(run["macos_major"], 14, 99, f"{label}_macos_major")
         booleans = {
@@ -1484,7 +1484,7 @@ def _validate_clean_machines(
         }
         if all(booleans.values()):
             qualifying_architectures.add(architecture)
-    missing = {"arm64", "x86_64"} - qualifying_architectures
+    missing = {"arm64"} - qualifying_architectures
     if missing:
         reasons.append("clean_machine_architecture_coverage_incomplete")
     return sorted(qualifying_architectures)

@@ -11,8 +11,7 @@ fail() {
 INPUTS="$1"
 EXPECTED_ARCHITECTURE="$2"
 OUTPUT="$3"
-[[ "$EXPECTED_ARCHITECTURE" == "arm64" || "$EXPECTED_ARCHITECTURE" == "x86_64" ]] \
-  || fail architecture_invalid
+[[ "$EXPECTED_ARCHITECTURE" == "arm64" ]] || fail architecture_invalid
 [[ "$OUTPUT" == /* && ! -e "$OUTPUT" && ! -L "$OUTPUT" ]] || fail output_path_unsafe
 [[ -f "$INPUTS" && ! -L "$INPUTS" ]] || fail inputs_unsafe
 INPUT_BYTES="$(/usr/bin/wc -c < "$INPUTS")" || fail inputs_unsafe

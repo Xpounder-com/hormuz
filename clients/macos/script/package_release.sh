@@ -13,7 +13,7 @@ Options:
   --identity NAME      Developer ID Application identity; may also be set with
                        HORMUZ_CODESIGN_IDENTITY
   --prebuilt-binary PATH
-                       Package this previously built universal Hormuz binary
+                       Package this previously built Apple Silicon Hormuz binary
                        instead of compiling on the signing machine.
   --prebuilt-dsym PATH Optional dSYM directory paired with --prebuilt-binary.
   --ad-hoc             Build a distribution-shaped local validation archive.
@@ -126,15 +126,15 @@ if [ -n "$HORMUZ_PREBUILT_BINARY" ]; then
 else
   HORMUZ_SCRATCH="$HORMUZ_TEMPORARY/build"
   swift build --package-path "$HORMUZ_MAC_ROOT" --scratch-path "$HORMUZ_SCRATCH" \
-    --configuration release --arch arm64 --arch x86_64 --product Hormuz
+    --configuration release --arch arm64 --product Hormuz
   HORMUZ_BINARY_SOURCE="$(swift build --package-path "$HORMUZ_MAC_ROOT" --scratch-path "$HORMUZ_SCRATCH" \
-    --configuration release --arch arm64 --arch x86_64 --show-bin-path)/Hormuz"
+    --configuration release --arch arm64 --show-bin-path)/Hormuz"
   HORMUZ_DSYM_SOURCE="$(dirname "$HORMUZ_BINARY_SOURCE")/Hormuz.dSYM"
 fi
 case "$(lipo -archs "$HORMUZ_BINARY_SOURCE")" in
-  "arm64 x86_64"|"x86_64 arm64") ;;
+  "arm64") ;;
   *)
-    echo "The Hormuz release binary must contain exactly arm64 and x86_64." >&2
+    echo "The Hormuz release binary must contain exactly arm64." >&2
     exit 1
     ;;
 esac
@@ -144,7 +144,7 @@ HORMUZ_BINARY="$HORMUZ_BUNDLE/Contents/MacOS/Hormuz"
 mkdir -p "$HORMUZ_BUNDLE/Contents/MacOS" "$HORMUZ_BUNDLE/Contents/Resources"
 cp "$HORMUZ_BINARY_SOURCE" "$HORMUZ_BINARY"
 case "$(lipo -archs "$HORMUZ_BINARY")" in
-  "arm64 x86_64"|"x86_64 arm64") ;;
+  "arm64") ;;
   *)
     echo "The copied Hormuz release binary changed architecture." >&2
     exit 1

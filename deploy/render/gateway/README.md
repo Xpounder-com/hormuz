@@ -382,6 +382,6 @@ have separate staging evidence. The provider implementation now has strict
 PostgreSQL bootstrap, deployment, restart, streaming, latency, cancellation and
 failover qualification workflows. Those workflows still require successful
 protected runs against the exact live candidate. Signed client operations on
-clean Apple Silicon and Intel machines, independent review, and external
+one clean Apple Silicon machine, independent review, and external
 onboarding also remain separate gates. Local tests do not increase
 external-onboarding counts or establish pilot readiness.

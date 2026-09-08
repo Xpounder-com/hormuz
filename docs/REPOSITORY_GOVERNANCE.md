@@ -84,8 +84,8 @@ selector is passed unchanged to preparation and assembly; it is never inferred
 from omitted evidence. Unknown or free-form values fail before runner work.
 
 Both paths keep the `macos-pilot-operations` environment review, protected-main
-source binding, content-free artifacts, clean Apple Silicon and Intel runner
-labels, and short retention controls. Only the full-scope case may read, invoke,
+source binding, content-free artifacts, the exact clean Apple Silicon runner
+label, and short retention controls. Only the full-scope case may read, invoke,
 or submit Claude Code evidence. Repository governance tests reject direct shell
 interpolation of the selector, an unguarded Claude argument, missing scope
 propagation, `continue-on-error`, extra output files, and weakened overwrite or
