@@ -724,8 +724,11 @@ class MacPilotOperationsTests(unittest.TestCase):
             'diff -qr "$DOWNLOADED_APP" "$ARCHIVE_APP"',
             "archive_contents_mismatch",
             "PRELAUNCH_PIDS",
-            '/bin/ps -ww -p "$candidate_pid" -o command=',
+            '/bin/ps -ww -p "$pid" -o command=',
             '"$PRELAUNCH_PIDS" != *" $candidate_pid "*',
+            "running_app_matches",
+            "/T/AppTranslocation/",
+            'diff -qr "$installed_bundle" "$translocated_bundle"',
         ):
             self.assertIn(marker, clean_text)
         for marker in (
@@ -747,12 +750,18 @@ class MacPilotOperationsTests(unittest.TestCase):
             "134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477",
             "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
             "bc466b6cde63edafc773f471a1fb98787fabb31f52240c8616ce7e1f587b212d",
+            "running_app_matches",
+            "/T/AppTranslocation/",
+            'diff -qr "$installed_bundle" "$translocated_bundle"',
         ):
             self.assertIn(marker, session_text)
         self.assertNotIn("command -v codex", session_text)
         self.assertNotIn("command -v claude", session_text)
 
         for text in (clean_text, session_text):
+            self.assertNotIn("/usr/bin/plutil -create json", text)
+            self.assertIn("/usr/bin/plutil -create xml1", text)
+            self.assertIn("/usr/bin/plutil -convert json", text)
             self.assertIn('case "$SCHEMA_VERSION" in', text)
             self.assertIn("QUALIFICATION_SCOPE=full_dual_provider", text)
             self.assertIn("QUALIFICATION_SCOPE=codex_openai", text)
