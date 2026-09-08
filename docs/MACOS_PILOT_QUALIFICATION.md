@@ -98,8 +98,11 @@ affected gate on a new build when artifact bytes change.
    and v2 plus `qualification_scope: codex_openai` for the narrow scope. It binds
    both distribution run URLs, source commits, and archive digests, plus the
    exact hosted-gateway source commit and deployment run URL, then reproduces
-   the clean-machine, lifecycle, and official-client recovery records. The
-   verifier downloads the artifact through the authenticated GitHub API and
+   the clean-machine, lifecycle, and official-client recovery records.
+   The clean-machine group may retain up to eight Apple Silicon attempts so every
+   failed attempt can remain disclosed before a qualifying retry; every record
+   must still report `architecture: arm64`.
+   The verifier downloads the artifact through the authenticated GitHub API and
    exact-compares all three record groups and the gateway identity. The machine
    collector also requires the signed app's configured HTTPS origin to equal
    the origin authenticated from that gateway deployment artifact. Every
@@ -303,7 +306,8 @@ both distribution workflows to finish before the declared evidence snapshot.
 The exact clean-machine, lifecycle, and official-client records must also occur
 in the authenticated candidate-bound macOS operations artifact; copying them into the
 aggregate cannot qualify, and a clean-machine start after that artifact was
-created is rejected. Qualifying
+created is rejected. Up to eight Apple Silicon clean-machine attempts may be
+retained so failed attempts remain visible; Intel records are rejected. Qualifying
 public review comments are fetched through GitHub's API; their exact candidate
 attestation, reviewer identity boundary, and update time are checked without
 retaining the reviewer login. Authenticated gateway deployment and recovery

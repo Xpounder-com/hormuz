@@ -1455,7 +1455,7 @@ def _validate_clean_machines(
     generated_at: datetime,
     reasons: list[str],
 ) -> list[str]:
-    if not isinstance(value, list) or len(value) > 1:
+    if not isinstance(value, list) or len(value) > 8:
         raise MacPilotEvidenceError("clean_machine_runs_invalid")
     seen_ids: set[str] = set()
     qualifying_architectures: set[str] = set()

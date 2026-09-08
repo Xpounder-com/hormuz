@@ -259,6 +259,9 @@ proof, and notarization summary to the corresponding artifact members. The
 two distribution workflows must complete by the aggregate snapshot. The
 clean-machine, lifecycle, and official-client records must exact-match a
 candidate-bound artifact from the authenticated macOS operations workflow.
+The aggregate may retain up to eight Apple Silicon clean-machine attempts to
+preserve failed attempts before a successful retry; every retained architecture
+must be `arm64`.
 That artifact also binds the exact gateway source commit and deployment run;
 the deployment must finish before Mac operations start, and clean-machine
 starts must fall within the operations run and precede its artifact creation.

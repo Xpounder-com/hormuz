@@ -1046,6 +1046,20 @@ class MacPilotEvidenceTests(unittest.TestCase):
         self.assertEqual(result["clean_machine_architectures"], [])
         self.assertIn("clean_machine_architecture_coverage_incomplete", result["reasons"])
 
+    def test_failed_apple_silicon_attempt_may_precede_a_qualifying_retry(self) -> None:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        failed = copy.deepcopy(evidence["clean_machine_runs"][0])  # type: ignore[index]
+        failed["run_id"] = "mcr:20000000-0000-4000-8000-000000000002"
+        failed["developer_tools_absent"] = False
+        evidence["clean_machine_runs"].insert(0, failed)  # type: ignore[union-attr]
+        inputs[0] = evidence
+
+        result = self._validate(*inputs)
+
+        self.assertEqual(result["clean_machine_architectures"], ["arm64"])
+        self.assertEqual(result["reasons"], ["synthetic_fixture"])
+
     def test_no_clean_machine_runs_is_valid_incomplete_evidence(self) -> None:
         inputs = list(self._inputs())
         evidence = copy.deepcopy(inputs[0])
