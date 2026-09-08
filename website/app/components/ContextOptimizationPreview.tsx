@@ -1,4 +1,4 @@
-import { BrandMark } from './Brand';
+import { ContextFold } from './ContextFold';
 import { CampaignLink } from './CampaignLink';
 import { sitePath } from '../../lib/site.mjs';
 
@@ -17,22 +17,6 @@ export function ContextOptimizationPreview() {
       <p className="context-optimization-status">Proposed for Hormuz 1.2. This is an unshipped design preview. Savings depend on eligible structure; current evidence is synthetic, not billed-cost or model-quality proof.</p>
     </div>
 
-    <div className="context-optimization-stage" role="img" aria-label="Design preview: four identical worker retrying lines would become one local line-run structure containing the same value and a count of four. The proposed path is designed for exact reconstruction, normal Hormuz policy checks, and no content cache.">
-      <header><span><BrandMark /> HORMUZ / CONTEXT</span><span>LOCAL DESIGN</span></header>
-      <div className="context-optimization-board">
-        <article className="context-result context-result-before">
-          <span>TOOL RESULT · BEFORE</span>
-          <code><i>worker: retrying</i><i>worker: retrying</i><i>worker: retrying</i><i>worker: retrying</i></code>
-          <footer><strong>4</strong><small>repeated lines</small></footer>
-        </article>
-        <div className="context-transform"><span><BrandMark /></span><b>LOCAL</b><i /></div>
-        <article className="context-result context-result-after">
-          <span>STRUCTURAL-V1 · AFTER</span>
-          <code><i>line_run</i><span><b>value</b> worker: retrying</span><span><b>count</b> 4</span></code>
-          <footer><strong>1</strong><small>lossless block</small></footer>
-        </article>
-      </div>
-      <footer className="context-optimization-proof"><span><i>✓</i> Exact reconstruction</span><span><i>✓</i> Policies still apply</span><b>NO CONTENT CACHE</b></footer>
-    </div>
+    <ContextFold />
   </section>;
 }
