@@ -76,7 +76,7 @@ export function CompanionPreview() {
   }, []);
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting) return;
+      if (!entry.isIntersecting || entry.intersectionRatio < 1) return;
       setInviteReady(true);
       observer.disconnect();
     }, { threshold: 1 });
