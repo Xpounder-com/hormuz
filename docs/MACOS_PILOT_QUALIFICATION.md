@@ -69,7 +69,12 @@ affected gate on a new build when artifact bytes change.
    install `Hormuz.app` in `/Applications`, and launch it. Each recorded start
    time must follow the authenticated candidate artifact's creation time. A VM
    that changes architecture or bypasses normal quarantine does not satisfy the
-   run.
+   run. macOS may launch an approved quarantined bundle through App
+   Translocation even after it is copied into `/Applications`. The collector
+   accepts that system path only when it has the strict Apple translocation
+   shape, the translocated bundle independently passes the same signature,
+   team, version, build, and Gatekeeper checks, and its contents exactly match
+   the verified installed bundle.
 4. **Exercise signed Keychain and session lifecycle.** With the real pilot IdP,
    sign in, restart the app, lock and unlock macOS, refresh the session, sign
    out, and revoke the server-side session. Confirm the revoked session is

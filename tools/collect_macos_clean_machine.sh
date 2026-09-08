@@ -139,6 +139,26 @@ verify_bundle() {
     || fail gatekeeper_rejected
 }
 
+running_app_matches() {
+  local pid="$1"
+  local expected_binary="$2"
+  local installed_bundle="$3"
+  local command binary translocated_bundle
+  command="$(/bin/ps -ww -p "$pid" -o command= 2>/dev/null || true)"
+  if [[ "$command" == "$expected_binary" || "$command" == "$expected_binary "* ]]; then
+    return 0
+  fi
+  binary="${command%% *}"
+  [[ "$command" == "$binary" \
+        && "$binary" =~ ^/private/var/folders/[A-Za-z0-9_]{2}/[A-Za-z0-9_]{20,80}/T/AppTranslocation/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/d/Hormuz\.app/Contents/MacOS/Hormuz$ ]] \
+    || return 1
+  translocated_bundle="${binary%/Contents/MacOS/Hormuz}"
+  [[ -d "$translocated_bundle" && ! -L "$translocated_bundle" ]] || return 1
+  verify_bundle "$translocated_bundle" || return 1
+  /usr/bin/diff -qr "$installed_bundle" "$translocated_bundle" >/dev/null 2>&1 \
+    || return 1
+}
+
 verify_bundle "$DOWNLOADED_APP"
 [[ ! -e /Applications/Hormuz.app && ! -L /Applications/Hormuz.app ]] \
   || fail applications_destination_not_clean
@@ -153,12 +173,10 @@ for _attempt in {1..30}; do
   for candidate_pid in $(/usr/bin/pgrep -x Hormuz 2>/dev/null || true); do
     [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] || continue
     [[ "$PRELAUNCH_PIDS" != *" $candidate_pid "* ]] || continue
-    candidate_command="$(/bin/ps -ww -p "$candidate_pid" -o command= 2>/dev/null || true)"
-    if [[ "$candidate_command" == "$APP_BINARY" || "$candidate_command" == "$APP_BINARY "* ]]; then
+    if running_app_matches "$candidate_pid" "$APP_BINARY" /Applications/Hormuz.app; then
       /bin/sleep 2
-      candidate_command="$(/bin/ps -ww -p "$candidate_pid" -o command= 2>/dev/null || true)"
       if /bin/kill -0 "$candidate_pid" 2>/dev/null \
-          && [[ "$candidate_command" == "$APP_BINARY" || "$candidate_command" == "$APP_BINARY "* ]]; then
+          && running_app_matches "$candidate_pid" "$APP_BINARY" /Applications/Hormuz.app; then
         launched=true
         break 2
       fi
@@ -168,9 +186,9 @@ for _attempt in {1..30}; do
 done
 [[ "$launched" == true ]] || fail launch_failed
 
-TMP_OUTPUT="$OUTPUT.tmp"
+TMP_OUTPUT="$OUTPUT.tmp.plist"
 [[ ! -e "$TMP_OUTPUT" && ! -L "$TMP_OUTPUT" ]] || fail output_path_unsafe
-/usr/bin/plutil -create json "$TMP_OUTPUT"
+/usr/bin/plutil -create xml1 "$TMP_OUTPUT"
 /usr/bin/plutil -insert run_id -string "$RUN_ID" "$TMP_OUTPUT"
 /usr/bin/plutil -insert artifact_sha256 -string "$ARCHIVE_SHA256" "$TMP_OUTPUT"
 /usr/bin/plutil -insert started_at -string "$STARTED_AT" "$TMP_OUTPUT"
@@ -180,6 +198,7 @@ for field in developer_tools_absent quarantine_present gatekeeper_accepted \
   installed_in_applications launch_succeeded; do
   /usr/bin/plutil -insert "$field" -bool true "$TMP_OUTPUT"
 done
+/usr/bin/plutil -convert json "$TMP_OUTPUT" || fail output_conversion_failed
 /bin/chmod 600 "$TMP_OUTPUT"
 /bin/mv "$TMP_OUTPUT" "$OUTPUT"
 printf 'macos_clean_machine_status=passed\n'

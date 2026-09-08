@@ -239,11 +239,33 @@ verify_bundle() {
     || fail gatekeeper_rejected
 }
 
+running_app_matches() {
+  local pid="$1"
+  local expected_binary="$2"
+  local installed_bundle="$3"
+  local command binary translocated_bundle version build
+  command="$(/bin/ps -ww -p "$pid" -o command= 2>/dev/null || true)"
+  if [[ "$command" == "$expected_binary" || "$command" == "$expected_binary "* ]]; then
+    return 0
+  fi
+  binary="${command%% *}"
+  [[ "$command" == "$binary" \
+        && "$binary" =~ ^/private/var/folders/[A-Za-z0-9_]{2}/[A-Za-z0-9_]{20,80}/T/AppTranslocation/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/d/Hormuz\.app/Contents/MacOS/Hormuz$ ]] \
+    || return 1
+  translocated_bundle="${binary%/Contents/MacOS/Hormuz}"
+  [[ -d "$translocated_bundle" && ! -L "$translocated_bundle" ]] || return 1
+  version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$installed_bundle/Contents/Info.plist" 2>/dev/null || true)"
+  build="$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$installed_bundle/Contents/Info.plist" 2>/dev/null || true)"
+  verify_bundle "$translocated_bundle" "$version" "$build" || return 1
+  /usr/bin/diff -qr "$installed_bundle" "$translocated_bundle" >/dev/null 2>&1 \
+    || return 1
+}
+
 verify_bundle "$CANDIDATE_APP" "$CANDIDATE_VERSION" "$CANDIDATE_BUILD"
 verify_bundle "$PREVIOUS_APP" "$PREVIOUS_VERSION" "$PREVIOUS_BUILD"
 
 restart_app() {
-  local candidate_pid candidate_command
+  local candidate_pid
   /usr/bin/pkill -x Hormuz >/dev/null 2>&1 || true
   local stopped=false
   for _attempt in {1..10}; do
@@ -260,12 +282,10 @@ restart_app() {
   for _attempt in {1..30}; do
     for candidate_pid in $(/usr/bin/pgrep -x Hormuz 2>/dev/null || true); do
       [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] || continue
-      candidate_command="$(/bin/ps -ww -p "$candidate_pid" -o command= 2>/dev/null || true)"
-      if [[ "$candidate_command" == "$app_binary" || "$candidate_command" == "$app_binary "* ]]; then
+      if running_app_matches "$candidate_pid" "$app_binary" /Applications/Hormuz.app; then
         /bin/sleep 2
-        candidate_command="$(/bin/ps -ww -p "$candidate_pid" -o command= 2>/dev/null || true)"
         if /bin/kill -0 "$candidate_pid" 2>/dev/null \
-            && [[ "$candidate_command" == "$app_binary" || "$candidate_command" == "$app_binary "* ]]; then
+            && running_app_matches "$candidate_pid" "$app_binary" /Applications/Hormuz.app; then
           running=true
           break 2
         fi
@@ -479,8 +499,9 @@ write_client_record() {
   local version="$3"
   local automatic_replay="$4"
   local explicit_retry="$5"
-  local temporary="$output.tmp"
-  /usr/bin/plutil -create json "$temporary"
+  local temporary="$output.tmp.plist"
+  [[ ! -e "$temporary" && ! -L "$temporary" ]] || fail output_path_unsafe
+  /usr/bin/plutil -create xml1 "$temporary"
   /usr/bin/plutil -insert client -string "$client" "$temporary"
   /usr/bin/plutil -insert client_version -string "$version" "$temporary"
   /usr/bin/plutil -insert artifact_sha256 -string "$CANDIDATE_SHA256" "$temporary"
@@ -492,6 +513,7 @@ write_client_record() {
   /usr/bin/plutil -insert provider_egress_after_success -integer 1 "$temporary"
   /usr/bin/plutil -insert completed -bool true "$temporary"
   /usr/bin/plutil -insert native_keychain_helper -bool true "$temporary"
+  /usr/bin/plutil -convert json "$temporary" || fail output_conversion_failed
   /bin/chmod 600 "$temporary"
   /bin/mv "$temporary" "$output"
 }
@@ -552,20 +574,24 @@ run_claude_recovery() {
   local wrapper="$client_root/auth-helper.sh"
   local counter="$client_root/helper-count"
   local settings="$client_root/settings.json"
+  local settings_plist="$client_root/settings.plist"
   write_auth_wrapper "$wrapper"
-  /usr/bin/plutil -create json "$settings"
-  /usr/bin/plutil -insert apiKeyHelper -string "'$wrapper'" "$settings"
-  /usr/bin/plutil -insert env -json '{}' "$settings"
-  /usr/bin/plutil -insert env.ANTHROPIC_BASE_URL -string "$ACTIVE_GATEWAY" "$settings"
-  /usr/bin/plutil -insert env.CLAUDE_CODE_API_KEY_HELPER_TTL_MS -string 60000 "$settings"
-  /usr/bin/plutil -insert env.ANTHROPIC_API_KEY -string '' "$settings"
-  /usr/bin/plutil -insert env.ANTHROPIC_AUTH_TOKEN -string '' "$settings"
-  /usr/bin/plutil -insert env.CLAUDE_CODE_OAUTH_TOKEN -string '' "$settings"
-  /usr/bin/plutil -insert env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -string 0 "$settings"
-  /usr/bin/plutil -insert env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT -string 1 "$settings"
-  /usr/bin/plutil -insert env.DISABLE_AUTOUPDATER -string 1 "$settings"
-  /usr/bin/plutil -insert env.DISABLE_TELEMETRY -string 1 "$settings"
-  /usr/bin/plutil -insert env.DISABLE_ERROR_REPORTING -string 1 "$settings"
+  /usr/bin/plutil -create xml1 "$settings_plist"
+  /usr/bin/plutil -insert apiKeyHelper -string "'$wrapper'" "$settings_plist"
+  /usr/bin/plutil -insert env -json '{}' "$settings_plist"
+  /usr/bin/plutil -insert env.ANTHROPIC_BASE_URL -string "$ACTIVE_GATEWAY" "$settings_plist"
+  /usr/bin/plutil -insert env.CLAUDE_CODE_API_KEY_HELPER_TTL_MS -string 60000 "$settings_plist"
+  /usr/bin/plutil -insert env.ANTHROPIC_API_KEY -string '' "$settings_plist"
+  /usr/bin/plutil -insert env.ANTHROPIC_AUTH_TOKEN -string '' "$settings_plist"
+  /usr/bin/plutil -insert env.CLAUDE_CODE_OAUTH_TOKEN -string '' "$settings_plist"
+  /usr/bin/plutil -insert env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -string 0 "$settings_plist"
+  /usr/bin/plutil -insert env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT -string 1 "$settings_plist"
+  /usr/bin/plutil -insert env.DISABLE_AUTOUPDATER -string 1 "$settings_plist"
+  /usr/bin/plutil -insert env.DISABLE_TELEMETRY -string 1 "$settings_plist"
+  /usr/bin/plutil -insert env.DISABLE_ERROR_REPORTING -string 1 "$settings_plist"
+  /usr/bin/plutil -convert json -o "$settings" "$settings_plist" || fail settings_conversion_failed
+  /bin/rm -f "$settings_plist"
+  /bin/chmod 600 "$settings"
   export HORMUZ_PILOT_BINARY=/Applications/Hormuz.app/Contents/MacOS/Hormuz
   export HORMUZ_PILOT_PROFILE_ID="$ACTIVE_PROFILE_ID"
   export HORMUZ_PILOT_STATE_DIRECTORY="$STATE_DIRECTORY"
@@ -687,8 +713,9 @@ if [[ "$QUALIFICATION_SCOPE" == "full_dual_provider" ]]; then
   credential_files_absent
 fi
 
-LIFECYCLE_TMP="$OUTPUT_DIRECTORY/lifecycle.json.tmp"
-/usr/bin/plutil -create json "$LIFECYCLE_TMP"
+LIFECYCLE_TMP="$OUTPUT_DIRECTORY/lifecycle.json.tmp.plist"
+[[ ! -e "$LIFECYCLE_TMP" && ! -L "$LIFECYCLE_TMP" ]] || fail output_path_unsafe
+/usr/bin/plutil -create xml1 "$LIFECYCLE_TMP"
 /usr/bin/plutil -insert update_from_build -string "$PREVIOUS_BUILD" "$LIFECYCLE_TMP"
 /usr/bin/plutil -insert update_to_build -string "$CANDIDATE_BUILD" "$LIFECYCLE_TMP"
 /usr/bin/plutil -insert rollback_to_build -string "$PREVIOUS_BUILD" "$LIFECYCLE_TMP"
@@ -699,6 +726,7 @@ for field in real_oidc_login keychain_session_created restart_preserved_session 
   credential_file_absent native_helper_used previous_notarized_archive_retained; do
   /usr/bin/plutil -insert "$field" -bool true "$LIFECYCLE_TMP"
 done
+/usr/bin/plutil -convert json "$LIFECYCLE_TMP" || fail output_conversion_failed
 /bin/chmod 600 "$LIFECYCLE_TMP"
 /bin/mv "$LIFECYCLE_TMP" "$OUTPUT_DIRECTORY/lifecycle.json"
 printf 'macos_session_client_status=passed\n'
