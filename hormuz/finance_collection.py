@@ -1755,7 +1755,9 @@ def _canonical_time(value: object) -> bool:
     if not isinstance(value, str):
         return False
     try:
-        return _time_text(_parse_time(value, response=True)) == value
+        parsed = _parse_time(value, response=True)
+        fixed_precision = parsed.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        return value in {_time_text(parsed), fixed_precision}
     except FinanceCollectionError:
         return False
 
