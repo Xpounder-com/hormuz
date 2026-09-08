@@ -69,3 +69,8 @@ ring into view activated the two-iteration cue. Initial-launch scrolling is
 consumed once: keyboard navigation from Home to Connection retained page
 `scrollY = 2315` and focused the new panel. Build, TypeScript, export verification,
 and all 41 tests passed again after these corrections.
+
+Final enlarged-mobile spacing: reserve another 24 pixels in the canvas height
+for a two-line caption. At 320 pixels and 150% scale, the caption is 18.5 pixels
+below the Controls label with no horizontal overflow; the control remains
+clickable. Production build, TypeScript, and export verification passed.

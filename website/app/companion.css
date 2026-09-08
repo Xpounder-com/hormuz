@@ -146,6 +146,8 @@
 .companion-restore {margin-top:22px;min-height:46px;font-size:13px;gap:12px;padding:10px 15px}
 .companion-desktop:has(.companion-edge[data-folded=true]) .companion-invitation {width:calc(100% - 64px)}
 .companion-stage-caption {font-size:12px;color:#4c6042}
+/* Reserve two caption lines below the enlarged controls on narrow screens. */
+.companion-desktop {height:calc(460px * var(--companion-scale) + 84px)}
 @media(max-width:1200px) {
   .companion-invitation {top:58px}
   .companion-invitation h3 {font-size:23px;margin:9px 0;line-height:1.1}
