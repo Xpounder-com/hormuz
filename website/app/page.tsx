@@ -11,6 +11,7 @@ import { SiteHeader } from './components/SiteHeader';
 import { PilotPriceCard } from './components/PriceCard';
 import { BrandMark } from './components/Brand';
 import { CompanionPreview } from './components/CompanionPreview';
+import { ContextOptimizationPreview } from './components/ContextOptimizationPreview';
 
 export const metadata = pageMetadata('Hormuz — Control AI access, budgets, and provider keys', 'Keep Codex and Claude Code. Control model access, enforce budgets, and protect provider keys. Explore a founder-led 90-day paid pilot for your team.', '/');
 
@@ -29,6 +30,7 @@ const faqs = [
   ['Is this a hosted AI subscription?', 'The current offer supports a self-hosted gateway. You operate the infrastructure and bring your own provider accounts. Provider usage, infrastructure, and applicable taxes are additional. Managed hosting and 24/7 operations are not included.'],
   ['Does a pilot turn into an ongoing subscription?', 'No. The pilot does not automatically renew. Enterprise support starts at $2,000 USD/month under a separate agreement, with defined hours, response targets, and cancellation terms.'],
   ['Will Hormuz cover all of our AI traffic?', 'Hormuz governs supported requests routed through the gateway. Traffic that bypasses it is outside its coverage. Your environment’s TLS, credential custody, recovery, availability, and security review must be qualified before a production rollout.'],
+  ['How would context optimization handle my data?', 'The Hormuz 1.2 design goal is an optional feature that is Off by default. Eligible repetitive tool results would be encoded and verified on your device; one selected representation would then travel through your configured Hormuz gateway, where the usual controls would still apply. It would be an encoding, not encryption, and savings are not guaranteed. This public source does not ship the feature yet.'],
 ];
 
 export default function Home() {
@@ -49,6 +51,7 @@ export default function Home() {
       </section>
 
       <CompanionPreview />
+      <ContextOptimizationPreview />
       <section className="passage-story" aria-labelledby="passage-title">
         <figure className="passage-art"><img src={sitePath('/brand/controlled-passage.webp')} width="1536" height="1024" loading="lazy" alt="Layered sage and cream contours around a clear, open channel" /><figcaption><BrandMark /><span>ROOM TO MOVE. CLEAR BOUNDARIES.</span><span aria-hidden="true">↗</span></figcaption></figure>
         <div className="passage-story-copy"><p className="landing-eyebrow">THE HORMUZ APPROACH</p><h2 id="passage-title">Let good work<br /><em>move forward.</em></h2><p>Give supported AI requests a clear path through your organization’s controls. Keep the workflow familiar and make the decisions inspectable.</p><dl className="passage-principles"><div><dt><span>01</span> Your tools</dt><dd>Start with Codex and Claude Code.</dd></div><div><dt><span>02</span> Your boundaries</dt><dd>Apply policy, budgets, and secret controls before egress.</dd></div><div><dt><span>03</span> Your evidence</dt><dd>Review the outcome without routine prompt logging.</dd></div></dl><CampaignLink href={sitePath('/demo/')}>See how the request path works <span aria-hidden="true">↗</span></CampaignLink></div>
