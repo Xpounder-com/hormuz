@@ -283,7 +283,7 @@ def _distribution(run: dict[str, Any], label: str) -> tuple[dict[str, Any], date
                     pilot._parse_json(proof_payload, f"{label}_proof"),
                     "pilot_qualification",
                 )
-                notarization = pilot._validate_notarization(
+                pilot._validate_notarization(
                     pilot._parse_json(notarization_payload, f"{label}_notarization")
                 )
                 archive_name = f"Hormuz-{proof['version']}-notarized.zip"
@@ -335,7 +335,6 @@ def _distribution(run: dict[str, Any], label: str) -> tuple[dict[str, Any], date
         "build": str(run_number * 1000 + run_attempt),
         "archive_bytes": observed,
         "archive_sha256": archive_sha256,
-        "submission_id": notarization["submission_id"],
     }
     if any(proof.get(field) != value for field, value in expected.items()):
         raise MacPilotOperationsError(f"{label}_proof_binding_invalid")

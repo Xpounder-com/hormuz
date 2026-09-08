@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 from tools import macos_pilot_operations as operations
 
@@ -529,6 +531,85 @@ class MacPilotOperationsTests(unittest.TestCase):
                     gateway_url=gateway_run["html_url"],  # type: ignore[arg-type]
                     expected_source_commit=SOURCE,
                 )
+
+    def test_distribution_binds_notarization_without_requiring_it_in_proof(self) -> None:
+        run = _run(
+            12, 12, SOURCE, operations.pilot.MACOS_DISTRIBUTION_WORKFLOW
+        )
+        signed_archive = b"authenticated signed archive fixture"
+        proof = {
+            "schema_id": "hormuz.macos-distribution-proof",
+            "schema_version": 2,
+            "passed": True,
+            "mode": "notarized",
+            "distribution_ready": True,
+            "bundle_identifier": "com.xpounder.hormuz",
+            "version": "1.2.3",
+            "build": "12001",
+            "architectures": ["arm64"],
+            "minimum_macos": "14.0",
+            "hardened_runtime": True,
+            "entitlements": [],
+            "system_runtime_dependencies_only": True,
+            "executable_version_verified": True,
+            "notarization_ticket_stapled": True,
+            "team_identifier": "R267LZMUTY",
+            "signing_authority": (
+                "Developer ID Application: Test Operator (R267LZMUTY)"
+            ),
+            "archive_bytes": len(signed_archive),
+            "archive_sha256": hashlib.sha256(signed_archive).hexdigest(),
+            "executable_sha256": "d" * 64,
+            "icon_sha256": "e" * 64,
+            "source_commit": SOURCE,
+            "workflow_run_url": run["html_url"],
+        }
+        notarization = {
+            "schema_id": "hormuz.apple-notarization",
+            "schema_version": 1,
+            "submission_id": "12345678-1234-1234-8234-123456789abc",
+            "status": "Accepted",
+            "accepted": True,
+            "issue_count": 0,
+            "issue_severities": {},
+            "ticket_entry_count": 1,
+        }
+        created = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact_zip = Path(temporary) / "artifact.zip"
+            with zipfile.ZipFile(artifact_zip, "w") as package:
+                package.writestr("distribution-proof.json", json.dumps(proof))
+                package.writestr("notarization.json", json.dumps(notarization))
+                package.writestr("Hormuz-1.2.3-notarized.zip", signed_archive)
+
+            def download(_artifact_id: int, output: Path, *_args: object) -> None:
+                output.write_bytes(artifact_zip.read_bytes())
+
+            with (
+                patch.object(
+                    operations,
+                    "_artifacts",
+                    return_value=[{"name": "hormuz-macos-1.2.3-12-1"}],
+                ),
+                patch.object(
+                    operations,
+                    "_trusted_artifact",
+                    return_value=(7, artifact_zip.stat().st_size, created),
+                ),
+                patch.object(
+                    operations.pilot,
+                    "_download_github_artifact",
+                    side_effect=download,
+                ),
+                patch.object(operations.pilot, "_verify_distribution_artifact_zip"),
+            ):
+                value, observed_created = operations._distribution(run, "candidate")
+
+        self.assertNotIn("submission_id", proof)
+        self.assertEqual(observed_created, created)
+        self.assertEqual(value["source_commit"], SOURCE)
+        self.assertEqual(value["archive_sha256"], proof["archive_sha256"])
 
     def test_prepare_emits_authenticated_narrow_input_shape_only_when_selected(self) -> None:
         candidate_run = _run(
