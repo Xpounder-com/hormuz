@@ -18,6 +18,7 @@ export function CompanionPreview() {
   const [scale, setScale] = useState(1);
   const [expired, setExpired] = useState(false);
   const [inView, setInView] = useState(false);
+  const [inviteReady, setInviteReady] = useState(false);
   const [explored, setExplored] = useState(false);
   const cardId = useId();
   const section = useRef<HTMLElement>(null);
@@ -25,11 +26,14 @@ export function CompanionPreview() {
   const edge = useRef<HTMLDivElement>(null);
   const gear = useRef<HTMLButtonElement>(null);
   const peek = useRef<HTMLButtonElement>(null);
+  const invitationRing = useRef<HTMLSpanElement>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
+  const scrollOnOpen = useRef(false);
   const metric = metrics.find(item => item.id === panel);
   function focusControls() {
     controls.current?.focus({ preventScroll: true });
-    if (!trigger.current?.closest('.companion-desktop')) {
+    if (scrollOnOpen.current) {
+      scrollOnOpen.current = false;
       controls.current?.scrollIntoView({ block: 'center', behavior: 'instant' });
     }
   }
@@ -40,6 +44,7 @@ export function CompanionPreview() {
   }
   function open(next: Panel, button: HTMLButtonElement) {
     trigger.current = button;
+    scrollOnOpen.current = !button.closest('.companion-desktop');
     setExplored(true);
     setFolded(false);
     setPanel(next);
@@ -69,6 +74,15 @@ export function CompanionPreview() {
     if (section.current) observer.observe(section.current);
     return () => observer.disconnect();
   }, []);
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      setInviteReady(true);
+      observer.disconnect();
+    }, { threshold: 1 });
+    if (invitationRing.current) observer.observe(invitationRing.current);
+    return () => observer.disconnect();
+  }, []);
 
   return <section className="companion-section" aria-labelledby="companion-title" id="companion" ref={section} data-in-view={inView}>
     <div className="companion-intro">
@@ -82,7 +96,7 @@ export function CompanionPreview() {
       </div>
       <p className="companion-hint">Try it right here. Example data, no sign-in needed.</p>
     </div>
-    <div className="companion-desktop" style={{ '--companion-scale': scale } as CSSProperties} data-panel-open={panel !== null} data-explored={explored}
+    <div className="companion-desktop" style={{ '--companion-scale': scale } as CSSProperties} data-panel-open={panel !== null} data-explored={explored} data-invite-ready={inviteReady}
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
       <div className="companion-desktop-bar"><BrandMark /><span>Hormuz</span><span>EXAMPLE WORKSPACE</span></div>
       <div className="companion-wallpaper" aria-hidden="true"><BrandMark /><span>Stay in your flow.</span></div>
@@ -102,7 +116,7 @@ export function CompanionPreview() {
             {metrics.map(item => <button key={item.id} type="button" className="companion-metric" aria-label={`${item.invitation}: view ${item.label.toLowerCase()}`} aria-controls={cardId}
               aria-pressed={panel === item.id} onClick={event => open(item.id, event.currentTarget)}>
               <span className="companion-view-label" aria-hidden="true"><span className="companion-label-full">{item.invitation}</span><span className="companion-label-short">{item.short}</span><b>↗</b></span>
-              <span className="companion-ring"><span aria-hidden="true">{item.glyph}</span><i className={expired ? 'is-expired' : ''} /></span>
+              <span className="companion-ring" ref={item.id === 'cost' ? invitationRing : undefined}><span aria-hidden="true">{item.glyph}</span><i className={expired ? 'is-expired' : ''} /></span>
               {!expired && <span className="companion-reading">{item.value}</span>}
             </button>)}
           </div>

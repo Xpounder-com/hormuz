@@ -61,3 +61,11 @@ mobile launch focus/scroll timing and label clearance at compact desktop widths.
 No native code, dependencies, requests, credentials, lead submissions, or
 commercial configuration changed. Publication follows the reviewed-source pin;
 this UI check is not native app or provider qualification.
+
+Review follow-up: the attention cue now observes the first ring itself and runs
+only once it is fully visible. At 390 × 640, the section was intersecting while
+the ring remained below the viewport and the cue was inactive; scrolling the
+ring into view activated the two-iteration cue. Initial-launch scrolling is
+consumed once: keyboard navigation from Home to Connection retained page
+`scrollY = 2315` and focused the new panel. Build, TypeScript, export verification,
+and all 41 tests passed again after these corrections.

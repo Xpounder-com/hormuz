@@ -135,7 +135,7 @@
 }
 .companion-metric:focus-visible .companion-view-label,
 .companion-gear:focus-visible .companion-view-label {outline:2px solid #668649;outline-offset:3px}
-.companion-section[data-in-view=true] .companion-desktop[data-explored=false] .companion-metric:first-child .companion-ring {
+.companion-desktop[data-invite-ready=true][data-explored=false] .companion-metric:first-child .companion-ring {
   animation:companion-invite-ring 1.7s ease-out 2;
 }
 @keyframes companion-invite-ring {
