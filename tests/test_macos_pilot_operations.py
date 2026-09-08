@@ -112,7 +112,6 @@ class MacPilotOperationsTests(unittest.TestCase):
         result = operations.assemble(
             inputs=inputs,
             arm64_record=fixture["clean_machine_runs"][0],  # type: ignore[index]
-            x86_64_record=fixture["clean_machine_runs"][1],  # type: ignore[index]
             lifecycle=fixture["lifecycle"],
             codex_record=fixture["client_auth_recovery"][0],  # type: ignore[index]
             claude_record=fixture["client_auth_recovery"][1],  # type: ignore[index]
@@ -153,7 +152,6 @@ class MacPilotOperationsTests(unittest.TestCase):
         result = operations.assemble(
             inputs=_codex_inputs(),
             arm64_record=fixture["clean_machine_runs"][0],  # type: ignore[index]
-            x86_64_record=fixture["clean_machine_runs"][1],  # type: ignore[index]
             lifecycle=fixture["lifecycle"],
             codex_record=fixture["client_auth_recovery"][0],  # type: ignore[index]
             claude_record=None,
@@ -178,7 +176,6 @@ class MacPilotOperationsTests(unittest.TestCase):
         narrow = _codex_fixture()
         common = {
             "arm64_record": full["clean_machine_runs"][0],  # type: ignore[index]
-            "x86_64_record": full["clean_machine_runs"][1],  # type: ignore[index]
             "lifecycle": full["lifecycle"],
             "codex_record": full["client_auth_recovery"][0],  # type: ignore[index]
             "source_commit": SOURCE,
@@ -194,7 +191,6 @@ class MacPilotOperationsTests(unittest.TestCase):
             operations.assemble(
                 inputs=_codex_inputs(),
                 arm64_record=narrow["clean_machine_runs"][0],  # type: ignore[index]
-                x86_64_record=narrow["clean_machine_runs"][1],  # type: ignore[index]
                 lifecycle=narrow["lifecycle"],
                 codex_record=narrow["client_auth_recovery"][0],  # type: ignore[index]
                 claude_record=full["client_auth_recovery"][1],  # type: ignore[index]
@@ -260,8 +256,6 @@ class MacPilotOperationsTests(unittest.TestCase):
                     "/does/not/exist/inputs.json",
                     "--arm64-record",
                     "/does/not/exist/arm64.json",
-                    "--x86-64-record",
-                    "/does/not/exist/x86.json",
                     "--lifecycle",
                     "/does/not/exist/lifecycle.json",
                     "--codex-record",
@@ -387,7 +381,6 @@ class MacPilotOperationsTests(unittest.TestCase):
                 operations.assemble(
                     inputs=inputs,
                     arm64_record=fixture["clean_machine_runs"][0],  # type: ignore[index]
-                    x86_64_record=fixture["clean_machine_runs"][1],  # type: ignore[index]
                     lifecycle=fixture["lifecycle"],
                     codex_record=fixture["client_auth_recovery"][0],  # type: ignore[index]
                     claude_record=fixture["client_auth_recovery"][1],  # type: ignore[index]
@@ -395,15 +388,15 @@ class MacPilotOperationsTests(unittest.TestCase):
                     workflow_run_url=OPERATIONS_RUN_URL,
                 )
 
-        wrong_arch = copy.deepcopy(fixture["clean_machine_runs"][1])  # type: ignore[index]
-        wrong_arch["architecture"] = "arm64"
+        wrong_arch = copy.deepcopy(fixture["clean_machine_runs"][0])  # type: ignore[index]
+        wrong_arch["architecture"] = "x86_64"
         with self.assertRaisesRegex(
-            operations.MacPilotOperationsError, "operations_records_incomplete"
+            operations.MacPilotOperationsError,
+            "clean_machine_run_0_architecture_invalid",
         ):
             operations.assemble(
                 inputs=_inputs(),
-                arm64_record=fixture["clean_machine_runs"][0],  # type: ignore[index]
-                x86_64_record=wrong_arch,
+                arm64_record=wrong_arch,
                 lifecycle=fixture["lifecycle"],
                 codex_record=fixture["client_auth_recovery"][0],  # type: ignore[index]
                 claude_record=fixture["client_auth_recovery"][1],  # type: ignore[index]
@@ -419,7 +412,6 @@ class MacPilotOperationsTests(unittest.TestCase):
             operations.assemble(
                 inputs=_inputs(),
                 arm64_record=fixture["clean_machine_runs"][0],  # type: ignore[index]
-                x86_64_record=fixture["clean_machine_runs"][1],  # type: ignore[index]
                 lifecycle=wrong_lifecycle,
                 codex_record=fixture["client_auth_recovery"][0],  # type: ignore[index]
                 claude_record=fixture["client_auth_recovery"][1],  # type: ignore[index]

@@ -210,7 +210,7 @@ hosted `external_pilot_openai` gateway. Missing Claude evidence never selects
 the narrow scope, and a scope mismatch at any layer fails closed.
 
 Both scopes compose the exact notarized archive with its distribution proof and
-Apple summary, clean Gatekeeper installation on Apple Silicon and Intel Macs
+Apple summary, clean Gatekeeper installation on an Apple Silicon Mac
 without developer tools, and signed Keychain/session update and rollback
 behavior. The selected gateway evidence requires HTTPS, Okta, server-only
 provider credentials, PostgreSQL durability and tenant RLS, durable sessions,
@@ -224,10 +224,10 @@ Independent security and accessibility reviews are separate required records.
 The protected `.github/workflows/macos-pilot-operations.yml` workflow collects
 the clean-install, Keychain lifecycle, update/rollback, and pinned-client
 records. Its protected preparation job authenticates the two consecutive signed
-distribution runs and the exact-source gateway deployment; clean Apple Silicon
-and Intel self-hosted runners receive no checkout or repository token. A real
-run still requires both dedicated machines and operator interaction. The Apple
-Silicon collector pins the npm release integrities and exact executed-file
+distribution runs and the exact-source gateway deployment; the clean Apple
+Silicon self-hosted runner receives no checkout or repository token. A real run
+still requires that dedicated machine and operator interaction. The collector
+pins the npm release integrities and exact executed-file
 hashes for every selected official client; it also requires a newly launched
 app process,
 an empty Keychain session before each login, and one unchanged Render instance

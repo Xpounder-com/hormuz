@@ -85,7 +85,7 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
             patch(
                 "tools.verify_macos_distribution.run",
                 side_effect=(
-                    ("arm64 x86_64\n", ""),
+                    ("arm64\n", ""),
                     (
                         (
                             f"{executable}:\n"

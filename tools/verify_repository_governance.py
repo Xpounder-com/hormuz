@@ -1195,17 +1195,9 @@ def _validate_macos_pilot_operations_workflow(
             "permissions": "",
             "steps": "",
         },
-        "x86-64-install": {
-            "name": "Clean Intel install and launch",
-            "needs": "prepare",
-            "runs-on": "[self-hosted, macOS, hormuz-pilot-clean-x86_64]",
-            "timeout-minutes": "20",
-            "permissions": "",
-            "steps": "",
-        },
         "assemble": {
             "name": "Assemble exact content-free operations evidence",
-            "needs": "[prepare, arm64-operations, x86-64-install]",
+            "needs": "[prepare, arm64-operations]",
             "runs-on": "ubuntu-24.04",
             "timeout-minutes": "10",
             "permissions": "",
@@ -1214,7 +1206,6 @@ def _validate_macos_pilot_operations_workflow(
     }
     prepare = job_blocks.get("prepare", "")
     arm64 = job_blocks.get("arm64-operations", "")
-    x86_64 = job_blocks.get("x86-64-install", "")
     assemble = job_blocks.get("assemble", "")
     scope_environment = (
         "HORMUZ_QUALIFICATION_SCOPE: ${{ inputs.qualification_scope }}"
@@ -1247,8 +1238,6 @@ def _validate_macos_pilot_operations_workflow(
         or jobs.get("prepare") != {"actions": "read", "contents": "read"}
         or jobs.get("arm64-operations")
         != {"actions": "read", "contents": "none"}
-        or jobs.get("x86-64-install")
-        != {"actions": "read", "contents": "none"}
         or jobs.get("assemble") != {"actions": "read", "contents": "read"}
     ):
         raise RepositoryGovernanceError(
@@ -1274,8 +1263,10 @@ def _validate_macos_pilot_operations_workflow(
         or assemble.count(scope_argument) != 1
         or assemble.count("HORMUZ_ASSEMBLE_ARGUMENTS=(") != 1
         or assemble.count('"${HORMUZ_ASSEMBLE_ARGUMENTS[@]}"') != 1
+        or assemble.count("--arm64-record") != 1
         or assemble.count(conditional_claude_arguments) != 1
         or assemble.count("--claude-record") != 1
+        or any(marker in text for marker in ("x86_64", "x86-64", "Intel"))
         or "continue-on-error:" in text
         or "HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/"
         "${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -1284,10 +1275,7 @@ def _validate_macos_pilot_operations_workflow(
         raise RepositoryGovernanceError(
             "macOS pilot operations provenance boundary changed"
         )
-    for label, job, run_steps in (
-        ("arm64", arm64, 2),
-        ("x86_64", x86_64, 1),
-    ):
+    for label, job, run_steps in (("arm64", arm64, 2),):
         if (
             "actions/checkout@" in job
             or "${{ secrets." in job
@@ -1307,14 +1295,11 @@ def _validate_macos_pilot_operations_workflow(
             'collect_macos_clean_machine.sh"'
         )
         != 1
+        or '            arm64 "$HORMUZ_RECORDS/clean-machine.json"'
+        not in arm64
         or arm64.count(
             '/bin/bash "$RUNNER_TEMP/hormuz-macos-pilot-inputs/'
             'collect_macos_session_and_clients.sh"'
-        )
-        != 1
-        or x86_64.count(
-            '/bin/bash "$RUNNER_TEMP/hormuz-macos-pilot-inputs/'
-            'collect_macos_clean_machine.sh"'
         )
         != 1
     ):
@@ -1322,9 +1307,9 @@ def _validate_macos_pilot_operations_workflow(
             "macOS pilot downloaded collector invocation changed"
         )
     if (
-        text.count("retention-days: 1") != 3
+        text.count("retention-days: 1") != 2
         or text.count("retention-days: 30") != 1
-        or text.count("overwrite: false") != 4
+        or text.count("overwrite: false") != 3
         or "hormuz-macos-pilot-operations-${{ github.run_number }}-"
         "${{ github.run_attempt }}" not in assemble
         or "path: ${{ runner.temp }}/hormuz-macos-pilot-operations" not in assemble
@@ -1460,6 +1445,17 @@ def _validate_workflows(
                     "macOS distribution build/sign isolation changed"
                 )
             if (
+                text.count('test "$(uname -m)" = arm64') != 2
+                or build_job.count("--arch arm64") != 2
+                or "x86_64" in text
+                or build_job.count('architectures != ["arm64"]') != 1
+                or signing_job.count('architectures != ["arm64"]') != 1
+                or signing_job.count('"architectures": ["arm64"]') != 1
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution Apple Silicon boundary changed"
+                )
+            if (
                 "\n      build_number:\n" in text
                 or "\n      bundle_identifier:\n" in text
                 or text.count("HORMUZ_BUNDLE_ID: com.xpounder.hormuz") != 2
@@ -1533,6 +1529,7 @@ def _validate_workflows(
                 or 'test "$NATIVE_RESULT" = "success"' not in gate_job
                 or 'test "$NATIVE_RESULT" = "skipped"' not in gate_job
                 or "swift test --package-path clients/macos" not in native_job
+                or native_job.count('test "$(uname -m)" = arm64') != 1
             ):
                 raise RepositoryGovernanceError(
                     "native Mac required-check gate changed"

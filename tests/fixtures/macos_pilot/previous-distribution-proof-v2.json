@@ -1,7 +1,6 @@
 {
   "architectures": [
-    "arm64",
-    "x86_64"
+    "arm64"
   ],
   "archive_bytes": 69,
   "archive_sha256": "d4c596c1319a67644c6a3324e2b34ae0c49071cb79f3cd2d5289109f0a128474",

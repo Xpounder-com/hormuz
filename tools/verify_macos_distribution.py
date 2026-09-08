@@ -244,8 +244,8 @@ def main() -> int:
 
     architecture_output, _ = run("lipo", "-archs", str(executable))
     architectures = sorted(architecture_output.split())
-    if architectures != ["arm64", "x86_64"]:
-        raise VerificationError("universal_binary_required")
+    if architectures != ["arm64"]:
+        raise VerificationError("apple_silicon_binary_required")
     dependency_output, _ = run("otool", "-L", str(executable))
     dependencies = [line.strip().split(" (", 1)[0] for line in dependency_output.splitlines() if line.startswith("\t")]
     if not dependencies or any(not item.startswith(("/System/Library/", "/usr/lib/")) for item in dependencies):

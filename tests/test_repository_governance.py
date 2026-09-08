@@ -715,13 +715,13 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 workflow = root / ".github/workflows/macos-pilot-operations.yml"
                 value = workflow.read_text(encoding="utf-8")
                 arm_start = value.index("  arm64-operations:\n")
-                intel_start = value.index("  x86-64-install:\n")
-                arm = value[arm_start:intel_start]
+                assemble_start = value.index("  assemble:\n")
+                arm = value[arm_start:assemble_start]
                 self.assertEqual(arm.count(original), 1)
                 workflow.write_text(
                     value[:arm_start]
                     + arm.replace(original, replacement, 1)
-                    + value[intel_start:],
+                    + value[assemble_start:],
                     encoding="utf-8",
                 )
                 with self.assertRaisesRegex(
@@ -739,7 +739,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 '/bin/bash "$RUNNER_TEMP/hormuz-macos-pilot-inputs/'
                 'collect_macos_clean_machine.sh"'
             )
-            self.assertEqual(value.count(invocation), 2)
+            self.assertEqual(value.count(invocation), 1)
             workflow.write_text(
                 value.replace(invocation, invocation.removeprefix("/bin/bash "), 1),
                 encoding="utf-8",
@@ -793,6 +793,28 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 "distribution source guard changed",
             ):
                 validate_repository_governance(root)
+
+    def test_macos_distribution_requires_exact_apple_silicon_payload(self) -> None:
+        mutations = (
+            ('test "$(uname -m)" = arm64', 'test "$(uname -m)" = x86_64'),
+            ('--configuration release --arch arm64 --product Hormuz',
+             '--configuration release --arch arm64 --arch x86_64 --product Hormuz'),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/macos-distribution.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertGreaterEqual(value.count(original), 1)
+                workflow.write_text(
+                    value.replace(original, replacement, 1), encoding="utf-8"
+                )
+                with self.assertRaisesRegex(
+                    RepositoryGovernanceError,
+                    "distribution Apple Silicon boundary changed",
+                ):
+                    validate_repository_governance(root)
 
     def test_macos_distribution_must_bind_proof_to_workflow_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -977,6 +999,20 @@ class RepositoryGovernanceTests(unittest.TestCase):
                     RepositoryGovernanceError, "native Mac required-check gate changed"
                 ):
                     validate_repository_governance(root)
+
+    def test_native_macos_required_gate_requires_apple_silicon(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-client.yml"
+            value = workflow.read_text(encoding="utf-8")
+            marker = '          test "$(uname -m)" = arm64\n'
+            self.assertEqual(value.count(marker), 1)
+            workflow.write_text(value.replace(marker, "", 1), encoding="utf-8")
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "native Mac required-check gate changed"
+            ):
+                validate_repository_governance(root)
 
     def test_candidate_environment_secret_inventory_check_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

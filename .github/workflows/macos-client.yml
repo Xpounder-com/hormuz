@@ -85,6 +85,7 @@ jobs:
           python-version: "3.12"
       - name: Record native toolchain
         run: |
+          test "$(uname -m)" = arm64
           swift --version
           xcodebuild -version
       - name: Test native session and storage contracts
@@ -95,7 +96,7 @@ jobs:
           clients/macos/dist/Hormuz.app/Contents/MacOS/Hormuz --version
           codesign --verify --strict clients/macos/dist/Hormuz.app
           plutil -lint clients/macos/dist/Hormuz.app/Contents/Info.plist
-      - name: Prove the universal distribution-shaped package
+      - name: Prove the Apple Silicon distribution-shaped package
         run: >-
           ./script/package_macos_release.sh
           --ad-hoc

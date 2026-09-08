@@ -5,8 +5,8 @@
     "archive_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
     "build": "2",
     "bundle_identifier": "com.example.hormuzpilot",
-    "distribution_proof_sha256": "6f9d467ab9822de93bee3af45f9db73475e18f8aeecd80a47ecb56dbad65449e",
-    "notarization_summary_sha256": "ca4086fbdf115cb260ead3b3a8ac8e8d89ffde294b9f89ab5cf57a160a82c3c6",
+    "distribution_proof_sha256": "ddf80fa5affabdb569c84f7320c4c3f20ec524c8cb9db7399fe1c6978f59213e",
+    "notarization_summary_sha256": "0c6296880048974a4f17098d76f1b908b4840d79592b2dbcbb1f4a84112e6d5a",
     "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "submission_id": "11111111-1111-4111-8111-111111111111",
     "team_identifier": "ABCDEFGHIJ",
@@ -27,18 +27,6 @@
       "quarantine_present": true,
       "run_id": "mcr:20000000-0000-4000-8000-000000000001",
       "started_at": "2026-09-01T15:00:00Z"
-    },
-    {
-      "architecture": "x86_64",
-      "artifact_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
-      "developer_tools_absent": true,
-      "gatekeeper_accepted": true,
-      "installed_in_applications": true,
-      "launch_succeeded": true,
-      "macos_major": 15,
-      "quarantine_present": true,
-      "run_id": "mcr:20000000-0000-4000-8000-000000000002",
-      "started_at": "2026-09-01T16:00:00Z"
     }
   ],
   "client_auth_recovery": [
@@ -150,8 +138,8 @@
     "archive_sha256": "d4c596c1319a67644c6a3324e2b34ae0c49071cb79f3cd2d5289109f0a128474",
     "build": "1",
     "bundle_identifier": "com.example.hormuzpilot",
-    "distribution_proof_sha256": "acb00f061cf1b50380594060c3c4d25a1deab458646e58d1709ece20010d93ab",
-    "notarization_summary_sha256": "45043440fa15a900858f7adba3a4100a7ca22d0a8b1844f651deb3f9a34939f9",
+    "distribution_proof_sha256": "ce9f7ccd454a89fcf4d564e926763c299780f1b3cf20ba26979db163aa73a17c",
+    "notarization_summary_sha256": "4331299fb188420c88e8f869c824f6b4024f86068e813aba704526bda878a196",
     "source_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "submission_id": "22222222-2222-4222-8222-222222222222",
     "team_identifier": "ABCDEFGHIJ",
