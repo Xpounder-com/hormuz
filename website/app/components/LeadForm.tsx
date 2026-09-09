@@ -62,9 +62,10 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
   </section>;
   return <div className="contact-flow">
     {testSubmission && <p role="status" className="form-status">QA test mode: this sends a clearly marked test inquiry to the owner. It does not count as an X Ads lead.</p>}
-    <form className="contact-form" onSubmit={submit} aria-busy={state === 'sending'}>
+    <form className="contact-form" action={endpoint} method="post" onSubmit={submit} aria-busy={state === 'sending'}>
       <fieldset disabled={state === 'sending'} className="lead-fields">
         <legend className="sr-only">Enterprise application</legend>
+        <input type="hidden" name="_subject" value="Hormuz website inquiry" />
         <label>I am interested in<select name="interest" value={interest} onChange={e => setInterest(e.target.value)}>{Object.entries(INTERESTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {selectedOffer && <div className="selected-offer" aria-live="polite"><strong>{selectedOffer.price}</strong><span>{selectedOffer.detail}</span></div>}
         <label>Your name<input name="name" autoComplete="name" required maxLength={100} /></label>
@@ -82,6 +83,6 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
     </form>
     {state === 'sending' && <p role="status">Sending your application…</p>}
     {state === 'error' && <p role="alert" className="form-status">{error} {reference && <>Reference: <strong>{reference}</strong>. </>}<a href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(`Check Hormuz inquiry ${reference}`)}`}>Email Mehrdad</a>.</p>}
-    <noscript><p>Application submission needs JavaScript. Please email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.</p></noscript>
+    <noscript><p>The form will submit directly to Formspree. You can also email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.</p></noscript>
   </div>;
 }

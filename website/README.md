@@ -125,7 +125,8 @@ access to Figma. Render and inspect every generated document before committing.
 The contact form submits to the owner's Hormuz Formspree form and acknowledges
 receipt only after a positive service response. Entries are not saved to browser
 storage. Optional campaign attribution is unchecked by default. X Ads measurement
-loads only after visitor consent, only on the canonical origin. Its lead event
+loads only after visitor consent, only on the canonical origin, and never in
+Safari or browsers on iPhone and iPad. Its lead event
 follows acknowledged submission and contains no form entries. See
 `marketing/MEASUREMENT.md` for exact events, consent, and verification boundaries.
 GitHub Pages still receives requested URLs and query strings as the hosting

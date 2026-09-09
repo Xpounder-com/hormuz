@@ -63,8 +63,9 @@ with agreed scope and start date; they do not provision a hosted service.
 Application tags (`utm_source`, `utm_medium`, `utm_campaign`) are bounded and
 forwarded along commercial CTAs. Form submission includes them only when the
 visitor selects the unchecked attribution checkbox. Separately, visitor consent
-enables X Ads measurement of visits and acknowledged applications. Application contents
-are never sent in an analytics event. Use verified non-spam submissions, actual
+in supported browsers enables X Ads measurement of visits and acknowledged
+applications. Safari and browsers on iPhone and iPad keep X Ads measurement off.
+Application contents are never sent in an analytics event. Use verified non-spam submissions, actual
 bookings, successful payments, and active subscriptions as distinct funnel stages.
 See [measurement setup](MEASUREMENT.md) for consent and event details.
 

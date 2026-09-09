@@ -1,6 +1,7 @@
 # Measurement without hidden telemetry
 
-Current implementation: **X Ads measurement requires visitor opt-in**. The site
+Current implementation: **X Ads measurement requires visitor opt-in and is disabled
+in Safari and browsers on iPhone and iPad**. The site
 uses the owner's X pixel `rf0s7` and Lead event `tw-rf0s7-rf0s8` ("Hormuz
 application received"). Formspree accepts enterprise inquiries through the
 separate Hormuz project. No product telemetry is collected by this website.
@@ -47,6 +48,9 @@ before use. No real lead records were created by this task.
 
 - No X SDK, cookies, or queued events before affirmative opt-in. Decline and
   browser Global Privacy Control/Do Not Track keep measurement off.
+- Safari and browsers on iPhone and iPad never load the X SDK. This reliability
+  boundary keeps optional third-party code out of the WebKit process serving the
+  application path; the form, booking links, and payment links remain available.
 - A non-identifying consent preference is stored for up to 180 days. With blocked
   storage, a choice lasts only for the page. Footer controls reopen preferences.
 - Withdrawal reloads the page to unload the SDK. The UI warns about unsent form
