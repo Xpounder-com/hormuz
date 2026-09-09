@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AD_CONSENT_KEY, CONSENT_DURATION, X_LEAD_EVENT_ID, readAdConsent, saveAdConsent, startXPixel, trackConfirmedApplication } from '../lib/x-ads.mjs';
+import { AD_CONSENT_KEY, CONSENT_DURATION, X_LEAD_EVENT_ID, readAdConsent, saveAdConsent, startXPixel, trackConfirmedApplication, xPixelSupported } from '../lib/x-ads.mjs';
 import { submitLead } from '../lib/lead.mjs';
 
-function browser({ origin = 'https://usehormuz.github.io', signal = false, storageBlocked = false } = {}) {
+function browser({ origin = 'https://usehormuz.github.io', signal = false, storageBlocked = false, userAgent = '' } = {}) {
   const storage = new Map();
   const scripts = [];
   return {
-    scripts, storage, location: { origin }, navigator: { globalPrivacyControl: signal },
+    scripts, storage, location: { origin }, navigator: { globalPrivacyControl: signal, userAgent },
     localStorage: {
       getItem(key) { if (storageBlocked) throw Error('blocked'); return storage.get(key); },
       setItem(key, value) { if (storageBlocked) throw Error('blocked'); storage.set(key, value); },
@@ -58,6 +58,31 @@ test('opted-in previews never report to the production ad account', () => {
     assert.equal(trackConfirmedApplication(win, { interest: 'review' }), false);
     assert.equal(win.scripts.length, 0);
   }
+});
+
+test('Safari and iPhone or iPad WebKit never load optional third-party measurement', () => {
+  const userAgents = [
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.6 Safari/605.1.15',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 Version/18.6 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X) AppleWebKit/605.1.15 CriOS/140.0.0.0 Mobile/15E148 Safari/604.1',
+  ];
+  for (const userAgent of userAgents) {
+    const win = browser({ userAgent });
+    saveAdConsent('allowed', win);
+    assert.equal(xPixelSupported(win), false);
+    assert.equal(startXPixel(win), false);
+    assert.equal(trackConfirmedApplication(win, { interest: 'review' }), false);
+    assert.equal(win.scripts.length, 0);
+    assert.equal(win.twq, undefined);
+  }
+});
+
+test('desktop Chromium is not mistaken for Safari by its AppleWebKit token', () => {
+  const win = browser({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36' });
+  saveAdConsent('allowed', win);
+  assert.equal(xPixelSupported(win), true);
+  assert.equal(startXPixel(win), true);
+  assert.equal(win.scripts.length, 1);
 });
 
 test('one SDK initialization suppresses page URLs and one conversion contains no form data', () => {

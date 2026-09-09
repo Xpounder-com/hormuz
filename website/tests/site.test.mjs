@@ -103,7 +103,15 @@ test('privacy notices distinguish host URL processing from application analytics
     assert.match(text, /hosting\/security logs/);
   }
   assert.match(page, /Optional X Ads measurement stays off until you allow it/);
+  assert.match(page, /Safari and browsers on iPhone and iPad do not load X Ads code/);
   assert.match(page, /process or save it before you send/);
+});
+
+test('the application form retains a browser-native submission fallback', () => {
+  const form = readFileSync(new URL('../app/components/LeadForm.tsx', import.meta.url), 'utf8');
+  assert.match(form, /<form[^>]+action=\{endpoint\}[^>]+method="post"/);
+  assert.match(form, /<input type="hidden" name="_subject"/);
+  assert.match(form, /form will submit directly to Formspree/);
 });
 
 test('the shared main element clips decoration without breaking sticky descendants', () => {

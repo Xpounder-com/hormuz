@@ -16,6 +16,21 @@ export function privacySignal(win = window) {
   return win.navigator.globalPrivacyControl === true || win.navigator.doNotTrack === '1';
 }
 
+/**
+ * Keep third-party advertising code out of Apple's WebKit processes.
+ *
+ * Safari may share a WebContent process across tabs from the same site. The
+ * inquiry path must remain available even if an optional vendor script stalls,
+ * so measurement fails closed on Safari and on iPhone/iPad browsers. Desktop
+ * Chromium browsers also contain an AppleWebKit token and are excluded here.
+ */
+export function xPixelSupported(win = window) {
+  const userAgent = String(win.navigator?.userAgent || '');
+  const appleWebKit = /\bAppleWebKit\//.test(userAgent);
+  const desktopChromium = /\b(?:Chrome|Chromium|Edg|OPR)\//.test(userAgent);
+  return !appleWebKit || desktopChromium;
+}
+
 /** @returns {'allowed' | 'declined' | 'unset'} */
 export function readAdConsent(win = window, now = Date.now()) {
   if (privacySignal(win)) return 'declined';
@@ -38,7 +53,7 @@ export function saveAdConsent(choice, win = window, now = Date.now()) {
 /** No SDK request, cookies, or queued events before consent; previews never report. */
 export function startXPixel(win = window) {
   const state = session(win);
-  if (readAdConsent(win) !== 'allowed' || win.location.origin !== SITE_ORIGIN) return false;
+  if (!xPixelSupported(win) || readAdConsent(win) !== 'allowed' || win.location.origin !== SITE_ORIGIN) return false;
   if (state.started) return true;
   try {
     const twq = win.twq || function (...args) {
