@@ -34,6 +34,13 @@ class ReleaseIdentityTests(unittest.TestCase):
         self.assertEqual(dockerfile.count("ARG HORMUZ_VERSION=1.2.0"), 2)
         self.assertNotIn("ARG HORMUZ_VERSION=0.1.3", dockerfile)
 
+        hosted_dockerfile = (ROOT / "deploy/render/gateway/Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(hosted_dockerfile.count("ARG HORMUZ_VERSION=1.2.0"), 2)
+        self.assertIn('"hormuz==${HORMUZ_VERSION}"', hosted_dockerfile)
+        self.assertNotIn("hormuz==1.0.0", hosted_dockerfile)
+
         server = (ROOT / "hormuz" / "server.py").read_text(encoding="utf-8")
         self.assertIn('f"Hormuz/{__version__}"', server)
         self.assertNotIn("Hormuz/0.1.3", server)

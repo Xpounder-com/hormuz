@@ -631,7 +631,20 @@ raise SystemExit(0 if response.status == 200 else 1)
             self.assertEqual(len(output_requests), 1)
             payload, request_headers = output_requests[0]
             headers = {key.lower(): value for key, value in request_headers.items()}
-            self.assertEqual(headers[CONTEXT_FORMAT_HEADER.lower()], CONTEXT_FORMAT_VERSION)
+            shape = {
+                "payload_keys": sorted(payload),
+                "input_types": [
+                    item.get("type") if isinstance(item, dict) else type(item).__name__
+                    for item in payload.get("input", [])
+                ],
+                "has_previous_response_id": "previous_response_id" in payload,
+                "relay_status": headers.get(CONTEXT_FORMAT_HEADER.lower()),
+            }
+            self.assertEqual(
+                headers.get(CONTEXT_FORMAT_HEADER.lower()),
+                CONTEXT_FORMAT_VERSION,
+                msg=json.dumps(shape, sort_keys=True),
+            )
             output_item = next(
                 item
                 for item in payload["input"]
