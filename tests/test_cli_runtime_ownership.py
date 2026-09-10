@@ -142,6 +142,20 @@ if loaded:
         self.assertIn("--exclude-module keyring", build_script)
         self.assertIn("--exclude-module requests", build_script)
 
+    def test_context_helper_build_resigns_outer_binary_with_release_identity(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        build_script = (root / "tools/build_context_helper.sh").read_text(encoding="utf-8")
+        pyinstaller_start = build_script.index('"$HORMUZ_CONTEXT_PYTHON" -m PyInstaller')
+        outer_sign_start = build_script.index("  codesign --force \\\n")
+        verify_start = build_script.index("  codesign --verify", outer_sign_start)
+        outer_sign = build_script[outer_sign_start:verify_start]
+
+        self.assertLess(pyinstaller_start, outer_sign_start)
+        self.assertIn('--sign "$HORMUZ_CONTEXT_CODESIGN_IDENTITY"', outer_sign)
+        self.assertIn('--identifier "$HORMUZ_CONTEXT_IDENTIFIER"', outer_sign)
+        self.assertIn("--options runtime", outer_sign)
+        self.assertIn("--timestamp", outer_sign)
+
     def test_facade_retains_entry_normalization_and_thin_runtime_seams(self) -> None:
         self.assertEqual(cli.main.__module__, "hormuz.cli")
         self.assertEqual(cli.build_parser.__module__, "hormuz.cli")
