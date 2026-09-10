@@ -60,8 +60,8 @@ minimal privileges, a written data-handling scope, and appropriate review.
 
 Managed hosting, fleet-wide coverage, client-side tool governance, 24/7 on-call,
 certifications, legal/compliance determinations, comprehensive semantic DLP,
-per-inference human approvals, native Hormuz login/refresh sessions, provider
-invoice reconciliation, guaranteed savings, and future portfolio features.
+per-inference human approvals, provider invoice reconciliation, guaranteed
+savings, and future portfolio features.
 
 ## Price and terms
 

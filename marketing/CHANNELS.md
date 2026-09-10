@@ -15,10 +15,11 @@ The best introduction is the provider-free demo: an allowed request, a model
 fallback and cap, a redaction, and a denial with no upstream call. The recording
 and a synthetic evidence export are available without a signup.
 
-v1.0.0 stabilizes the CLI, policy, and evidence contracts. That is not blanket
-production certification. I'm looking for useful feedback on the first-run
-experience and conversations with platform teams evaluating a single governed
-coding-client workflow.
+v1.2.0 preserves the stable CLI, policy, and evidence contracts and adds
+default-Off local context optimization plus a signed Apple Silicon companion.
+That is not blanket production certification. I'm looking for useful feedback
+on the first-run experience and conversations with platform teams evaluating a
+single governed coding-client workflow.
 
 Project: https://usehormuz.github.io/
 Demo: https://usehormuz.github.io/demo/

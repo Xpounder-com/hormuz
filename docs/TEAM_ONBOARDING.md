@@ -1,8 +1,9 @@
-# Local team onboarding
+# Team onboarding
 
-This opt-in preview adds operator-managed organizations, teams, invitations and
-member removal to the single-node browser login broker. It does not deploy a
-hosted service or give an employee session access to administrative APIs.
+This opt-in capability adds operator-managed organizations, teams, invitations
+and member removal to the browser-login broker. Its local verification path uses
+the single-node store and does not itself deploy a hosted service. Employee
+sessions never gain access to administrative APIs.
 
 ## Contract
 
@@ -173,8 +174,10 @@ administrator console's separate local browser flow is also verified. These
 fixtures use no real Okta account or customer and do not qualify the final native
 Mac/Keychain invitation workflow.
 
-Real identity-provider claim configuration and HTTPS browser behavior,
-tenant-specific provider credentials and policies, distributed persistence/rate
-limits, signed client distribution, Render deployment and recovery evidence,
-service monitoring, and a real customer pilot remain separate work. A free hosting
-instance is not evidence of latency or availability guarantees.
+Hormuz v1.2.0 exercised one temporary, non-administrator evaluation member through
+real Okta login, the signed Apple Silicon client, HTTPS, Render deployment, and
+bounded recovery, then disabled that member. This does not qualify other identity
+providers, administrator roles, customer organizations, tenant-specific policies,
+distributed persistence or rate limits, service monitoring, or a real customer
+pilot. A single Render instance is not evidence of latency or availability
+guarantees.

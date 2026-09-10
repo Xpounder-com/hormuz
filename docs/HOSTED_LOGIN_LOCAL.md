@@ -1,17 +1,19 @@
-# Local browser-login milestone
+# Browser login and client sessions
 
-The follow-up [native Mac client milestone](MACOS_CLIENT_LOCAL.md) exercises this
-broker with a browser, Keychain-backed helper and dedicated client launchers.
-It remains a local development preview, separate from production deployment and
-signed/notarized distribution.
+Hormuz v1.2.0 ships this opt-in broker and the
+[native Apple Silicon client](MACOS_CLIENT_LOCAL.md) that exercises it with a
+browser, Keychain-backed helper, and dedicated client launchers. The release
+attaches signed/notarized distribution, clean-machine, bounded Okta/Render/OpenAI,
+and hosted-recovery evidence for one exact candidate. That evidence is not blanket
+production certification, qualification of other providers or architectures,
+customer acceptance, or an availability or latency SLA.
 
-This is the first implementation slice for the hosted direction: **we operate
-your team's governed access**. It provides browser login, client-bound opaque
-sessions, governed requests, personal usage, refresh, and logout without a
-paid cloud account or model call. It does not launch a hosted service, close
-[#13](https://github.com/Xpounder-com/hormuz/issues/13), or change the separate
-v1.1 portfolio program. No cloud accounts, production IdP registration, or
-customer credentials are required by the tests.
+This implements the hosted direction: **we operate your team's governed access**.
+It provides browser login, client-bound opaque sessions, governed requests,
+personal usage, refresh, and logout. The local verification path needs no paid
+cloud account, production IdP registration, customer credential, or model call;
+running those tests does not itself create or activate a hosted service. The
+separate v1.1 portfolio program remains independently gated.
 
 The [accepted session decision](decisions/0001-oidc-login-and-session-architecture.md)
 was previously implemented in experimental commit `49d3086`. Only the session
@@ -25,8 +27,10 @@ change the existing native client protocol.
 
 The [local administrator console](ADMIN_CONSOLE_LOCAL.md) builds on that directory
 with separate browser sessions, explicit operator grants, scoped usage reporting
-and member removal. It remains an opt-in draft, not a hosted launch or a real-IdP
-qualification. Employee access credentials remain unable to administer a team.
+and member removal. It remains opt-in and separately authorized. The v1.2.0
+qualification member had no administrator access, so that release evidence does
+not qualify every administrator-console role or workflow. Employee access
+credentials remain unable to administer a team.
 
 ## Verify locally
 
@@ -41,7 +45,8 @@ The integration tests start loopback-only identity and model fixtures. They
 simulate the external browser's consent and callback requests and inject an
 in-memory credential store. They do not exercise a real identity provider,
 the user's Keychain, a packaged Mac application, or official AI clients.
-The fixtures never contact model-provider endpoints.
+The fixtures never contact model-provider endpoints. They are useful local checks
+and do not substitute for the separate bounded release evidence.
 
 ## Operator configuration
 
@@ -150,7 +155,7 @@ actor, team, clearance, and client. A caller-supplied organization or client
 header cannot broaden it. Session credentials are deliberately not accepted
 by the policy or custody administrator authentication path.
 
-## Security and remaining launch gates
+## Security and remaining deployment gates
 
 Access credentials default to 10 minutes (configurable 5–15); sessions have a
 12-hour maximum absolute lifetime. Each refresh rotates both credentials;
@@ -169,17 +174,17 @@ Session credentials are also recognized by the built-in secret redactor.
 See the [secret inventory](SECRET_CUSTODY_INVENTORY.md) and
 [durable data inventory](DURABLE_DATA.md) for retention and restore limits.
 
-This is a single-node reference implementation with a bounded process-wide
-authentication request limit and enrollment capacity. Before a paid hosted
-pilot, implement/verify the production HTTP adapter, persistent distributed
-sessions and throttling, tenant-scoped provider custody, administrator web
-sessions/roles beyond local operator removal, directory synchronization, immutable session security evidence,
-real IdP and official-client refresh/401 behavior, and cross-platform secure
-storage. Restoring a session-only backup requires master-key rotation to prevent
-credential replay. The separate Render staging profile instead provides an
-encrypted, origin-bound managed-directory archive that restores every authority
-closed; see its [recovery runbook](../deploy/render/gateway/README.md#offline-snapshot-encrypted-export-and-conservative-restore).
-A signed/notarized Mac wrapper, customer dashboard, fresh-disk qualification,
-recovery timing, billing, and compatible provider
-failover remain separate milestones. This slice makes no availability or
-latency guarantee and performs no deployment or billing operation.
+The local SQLite path is a single-node reference implementation with a bounded
+process-wide authentication request limit and enrollment capacity. Restoring a
+session-only backup requires master-key rotation to prevent credential replay.
+The Render external-pilot profile instead provides an encrypted, origin-bound
+managed-directory archive that restores every authority closed; see its
+[recovery runbook](../deploy/render/gateway/README.md#offline-snapshot-encrypted-export-and-conservative-restore).
+
+The exact v1.2.0 release qualified one single-region, single-instance Render
+deployment with Okta, the signed Apple Silicon client, Codex/OpenAI session
+refresh, and bounded recovery. Other IdPs, providers, clients, operating systems,
+multi-instance or multi-region sessions and throttling, directory synchronization,
+automated updates and billing, compatible provider failover, independent
+security/accessibility review, and customer acceptance remain separate gates.
+No availability or latency guarantee follows from the bounded qualification.

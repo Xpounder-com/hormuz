@@ -2,7 +2,7 @@
 
 Hormuz can authenticate a short-lived JWT access token from a standards-based OpenID Connect issuer and resolve it to the same organization, team, person, and policy principal used by static bootstrap credentials.
 
-This is resource-server authentication. The employee's identity provider must issue a signed JWT access token whose audience represents the Hormuz API. An OIDC ID token is not an API access token and must not be supplied to Hormuz. Providers that issue only opaque access tokens require the future Hormuz login/session broker described under **Current boundary**.
+This is resource-server authentication. The employee's identity provider must issue a signed JWT access token whose audience represents the Hormuz API. An OIDC ID token is not an API access token and must not be supplied to this path. Providers that issue only opaque API access tokens cannot use the direct bearer-token path; human clients can instead use the optional Hormuz browser-login and session broker described under **Current boundary**.
 
 ## Identity-provider registration
 
@@ -114,4 +114,18 @@ resource-server verifier; it does not add browser-session behavior to Hormuz.
 
 ## Current boundary
 
-The implemented path works with identity providers that issue JWT access tokens for a Hormuz audience. Hormuz does not yet include its own browser authorization-code/PKCE flow, refresh-token custody, opaque-token introspection, SCIM provisioning, or revocation endpoint. [Proposed ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) specifies the session-broker recommendation and its security boundary. It remains non-binding until the product owner explicitly approves issue #2.
+The direct resource-server path works with identity providers that issue JWT
+access tokens for a Hormuz audience. The separately configured
+[browser-login broker](HOSTED_LOGIN_LOCAL.md) implements authorization code with
+PKCE, then mints rotating, client-bound Hormuz access and refresh credentials.
+It requests no `offline_access` scope and retains no identity-provider access or
+refresh token. Logout, refresh-token replay, identity-mapping changes, and
+managed-member removal revoke Hormuz sessions. The broker is disabled by default
+and does not add opaque provider-token introspection or SCIM provisioning.
+
+Hormuz v1.2.0 includes bounded Okta, Render, Apple Silicon, hosted-recovery, and
+OpenAI/Codex qualification evidence for one exact release candidate. That result
+does not qualify every identity provider, deployment, provider, client, operating
+system, customer workflow, or availability target. See the
+[accepted session ADR](decisions/0001-oidc-login-and-session-architecture.md) for
+the broker's security boundary.

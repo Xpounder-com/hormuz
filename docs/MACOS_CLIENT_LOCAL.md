@@ -1,11 +1,12 @@
-# Native Mac client: local milestone
+# Native Mac client
 
-This is the local development path for the opt-in [browser-login broker](HOSTED_LOGIN_LOCAL.md).
-Context optimization ships in Hormuz v1.2.0 while the separate v1.1 portfolio
-program remains independently gated.
-It requires no paid cloud service to build or test. No hosted signup, billing,
-team dashboard, provider credential custody, automatic failover, availability
-promise, or production-readiness claim is added here.
+Hormuz v1.2.0 publishes a Developer ID signed and notarized Apple Silicon client
+for the opt-in [browser-login broker](HOSTED_LOGIN_LOCAL.md). This document also
+keeps the local development and verification path explicit. Context optimization
+ships Off by default while the separate v1.1 portfolio program remains
+independently gated. Building and testing locally requires no paid cloud service.
+The app alone does not create hosted signup, billing, provider credential custody,
+automatic failover, an availability promise, or general production readiness.
 
 ## Customer flow
 
@@ -196,15 +197,19 @@ holds the rotated token. Codex reruns the command after `401` and completes with
 exactly one provider egress. Claude Code reruns the command but does not replay
 the rejected inference; the next explicit request succeeds with the same simulated
 generation-egress count as a clean-credential control. This qualifies the
-client-side retry semantics without a live provider. A signed installed-client
-run must still compose that behavior with the native Keychain helper after lock,
-restart, replacement, update, and rollback.
+client-side retry semantics without a live provider. The v1.2.0 release
+qualification separately composes the selected Codex/OpenAI path with the signed
+native Keychain helper after lock, restart, replacement, update, and rollback.
+Later candidates must repeat that composition for their declared scope.
 
-## Before any customer distribution
+## Released distribution and remaining customer gates
 
 The executable release workflow and credential boundary are documented in
-[direct Mac distribution](MACOS_DISTRIBUTION.md). The checklist below remains
-the acceptance boundary for any customer pilot.
+[direct Mac distribution](MACOS_DISTRIBUTION.md). Hormuz v1.2.0 completed
+Developer ID signing, notarization, a clean Apple Silicon install and lifecycle,
+the selected Codex/OpenAI refresh behavior, and bounded Okta/Render recovery for
+the exact release candidate. The checklist below remains the acceptance boundary
+for each later candidate and customer deployment.
 
 - Choose a permanent bundle identifier and signing/provisioning arrangement.
   Validate Keychain behavior in the app and CLI helper, after lock/unlock, denied
@@ -237,7 +242,8 @@ the acceptance boundary for any customer pilot.
 - Perform independent onboarding and security/accessibility review. Local fixture
   runs do not change the `0/5 initial` or `0/1 returning` onboarding counts.
 
-No app-store submission is required by this local milestone. Direct signed and
-notarized distribution remains the proposed first route. This change neither
-merges nor releases either PR, creates a cloud service, configures billing, nor
-accesses Apple signing credentials.
+No Mac App Store submission is required for this distribution path. Hormuz
+v1.2.0 is available as a versioned direct signed and notarized download. Its
+release evidence does not activate a customer, configure billing, qualify Intel
+Macs or Anthropic, complete independent onboarding/security/accessibility review,
+or promise availability or latency.

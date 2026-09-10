@@ -30,7 +30,7 @@ export default function SecurityPage() {
         <div className="subpage-hero-inner wide">
           <p className="eyebrow"><span className="pulse-dot" aria-hidden="true" />Security & trust</p>
           <h1>Controls, evidence,<br /><span>and the gaps between them.</span></h1>
-          <p>Hormuz documents what the v1.0.0 source contracts enforce, what your deployment must own, and what still requires independent proof.</p>
+          <p>Hormuz documents what the v1.2.0 source release enforces, what your deployment must own, and what still requires independent proof.</p>
           <div className="hero-actions">
             <a className="button button-primary" href="#data-handling">Review data handling <span aria-hidden="true">↓</span></a>
             <a className="button button-ghost" href="https://github.com/Xpounder-com/hormuz/blob/main/SECURITY.md" target="_blank" rel="noreferrer">Read SECURITY.md <span aria-hidden="true">↗</span></a>
@@ -39,7 +39,7 @@ export default function SecurityPage() {
       </section>
 
       <section className="security-status section" id="status">
-        <div><span>Source contracts</span><strong>v1.0.0</strong><i className="status-amber">Deployment qualification required</i></div>
+        <div><span>Source release</span><strong>v1.2.0</strong><i className="status-amber">Deployment qualification required</i></div>
         <div><span>Routine telemetry</span><strong>Content-free</strong><i>Schema-bound</i></div>
         <div><span>Provider keys</span><strong>Server-side</strong><i>Not sent to employees</i></div>
         <div><span>Independent review</span><strong>Open gate</strong><i className="status-amber">Not yet completed</i></div>
@@ -70,7 +70,7 @@ export default function SecurityPage() {
             <article><span>01</span><h3>Strict configuration</h3><p>Bounded parsing rejects duplicate members, malformed encoding, non-standard numbers, and unknown fields before startup.</p></article>
             <article><span>02</span><h3>Origin-bound egress</h3><p>Remote provider endpoints require HTTPS, credential-bearing URLs are rejected, and provider redirects are never followed.</p></article>
             <article><span>03</span><h3>Pre-provider enforcement</h3><p>Identity, model policy, budgets, privacy settings, and configured deterministic secret rules are checked before the governed provider call. Secret modes are redact, deny, or off.</p></article>
-            <article><span>04</span><h3>OIDC JWT verification</h3><p>Validate issuer, audience, expiry, asymmetric signatures, and explicit subject mapping. Hormuz does not currently provide browser login, refresh-token custody, or its own session-revocation endpoint.</p></article>
+            <article><span>04</span><h3>OIDC and sessions</h3><p>Validate issuer, audience, expiry, asymmetric signatures, and explicit subject mapping. The opt-in broker adds browser login and revocable Hormuz sessions without retaining identity-provider access or refresh tokens. Qualification remains deployment-specific.</p></article>
           </div>
         </div>
       </section>

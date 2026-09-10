@@ -41,7 +41,7 @@ function slide(kicker, title, number, sources, dark = false) {
 let s = slide('Open source + supported evaluation', '', 1, ['marketing/OFFER.md', 'LICENSE', 'docs/CLIENTS.md'], true);
 text(s, 'cover-title', 'Give your team AI.\nKeep control.', 64, 156, 1140, 222, 76, C.white, true);
 text(s, 'cover-summary', 'Self-hosted policy, budgets, secret controls,\nand metadata-only evidence for Codex and Claude Code.', 68, 438, 1110, 106, 31, '#d9e1df');
-text(s, 'cover-boundary', 'Apache-2.0 core  •  v1.0.0 source contracts', 68, 582, 1110, 42, 25, C.cyan, true);
+text(s, 'cover-boundary', 'Apache-2.0 core  •  v1.2.0 source release', 68, 582, 1110, 42, 25, C.cyan, true);
 
 s = slide('The control point', 'Put policy in the model-request path.', 2, ['docs/ARCHITECTURE.md', 'docs/CLIENTS.md', 'docs/AUDIT.md']);
 // A single simple native diagram makes the two credential boundaries explicit.
@@ -73,10 +73,10 @@ text(s, 'paid-body', 'Workflow and control mapping\nConfiguration and integratio
 text(s, 'same-core', 'USD · one team, one workflow. Optional support from $2,000/month. Provider usage, infrastructure, and applicable taxes are additional.', 64, 588, 1152, 68, 24, C.muted);
 
 s = slide('Maturity and responsibility', 'Stable contracts are not certification.', 5, ['SUPPORT.md', 'docs/OIDC.md', 'docs/SECRET_CONTROLS.md', 'docs/USAGE.md', 'marketing/TRUST.md']);
-text(s, 'release', 'v1.0.0 source contracts', 64, 268, 1152, 64, 42, C.teal, true);
-text(s, 'oci', 'Signed OCI v0.1.3 linux/amd64 is a separate reference stream.', 64, 346, 1152, 52, 28);
+text(s, 'release', 'v1.2.0 source + Apple Silicon app', 64, 268, 1152, 64, 42, C.teal, true);
+text(s, 'oci', 'Signed OCI v1.2.0 linux/amd64 is the matching reference image.', 64, 346, 1152, 52, 28);
 text(s, 'operators', 'You still qualify TLS, custody, retention, backups, recovery, availability, access controls, and independent security review in your environment.', 64, 432, 1152, 102, 31, C.ink, true);
-text(s, 'nonclaims', 'Not claimed: native Hormuz login/refresh sessions, complete semantic DLP, per-inference human approval, reconciled provider invoices, managed SaaS, or a 24/7 SLA.', 64, 569, 1152, 81, 25, C.muted);
+text(s, 'nonclaims', 'Not claimed: complete semantic DLP, per-inference human approval, reconciled provider invoices, generally available managed SaaS, or a 24/7 SLA.', 64, 569, 1152, 81, 25, C.muted);
 
 s = slide('Proposed 90-day pilot', 'Prove one workflow before expanding.', 6, ['marketing/PILOT.md']);
 const phases = [

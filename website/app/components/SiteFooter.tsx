@@ -12,7 +12,7 @@ export function SiteFooter() {
         </CampaignLink>
         <p className="footer-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a></p>
         <p>Open-source AI policy and evidence, at the request boundary.</p>
-        <span>Apache-2.0 · v1.0.0 source contracts<br />Production qualification remains deployment-specific.</span>
+        <span>Apache-2.0 · v1.2.0 source release<br />Production qualification remains deployment-specific.</span>
       </div>
 
       <div className="footer-column">

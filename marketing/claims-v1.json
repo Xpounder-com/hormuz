@@ -1,7 +1,7 @@
 {
   "schema": "hormuz.marketing-claims.v1",
-  "reviewed_at": "2026-08-30",
-  "evidence_revision": "38e7ba883b4f37d9f4d75664ccf0bc3f74d88230",
+  "reviewed_at": "2026-09-10",
+  "evidence_revision": "d854a5a453fcbe20cb3f4c1e261e146f2da93855",
   "public_author": "Mehrdad Zaker",
   "contact": "mehrdadz@neuralint.io",
   "website_implementation_authorized": true,
@@ -11,12 +11,13 @@
     { "id": "open_core", "claim": "Apache-2.0 self-hosted core", "sources": ["LICENSE", "README.md"] },
     { "id": "clients", "claim": "Pinned Codex and Claude Code protocol paths", "sources": ["docs/CLIENTS.md", "SUPPORT.md"] },
     { "id": "policy", "claim": "Monotone policy overlays and governed administration", "sources": ["docs/POLICY_CONTROL.md"] },
-    { "id": "identity", "claim": "OIDC JWT verification, not a Hormuz session broker", "sources": ["docs/OIDC.md"] },
+    { "id": "identity", "claim": "OIDC JWT verification plus an opt-in browser-login and revocable-session path for bounded hosted evaluation", "sources": ["docs/OIDC.md", "docs/HOSTED_LOGIN_LOCAL.md", "docs/RENDER_PROVIDER_PILOT.md"] },
     { "id": "secrets", "claim": "Deterministic redact, deny, off; not complete semantic DLP", "sources": ["docs/SECRET_CONTROLS.md"] },
     { "id": "usage", "claim": "Captured gateway traffic, current UTC month, configured-rate-card estimates", "sources": ["docs/USAGE.md"] },
     { "id": "evidence", "claim": "Routine metadata-only evidence excludes prompt and response bodies", "sources": ["docs/AUDIT.md", "hormuz/demo.py"] },
-    { "id": "maturity", "claim": "v1.0.0 source contracts; v0.1.3 signed OCI reference; no blanket production certification", "sources": ["SUPPORT.md", "docs/OCI.md", "docs/ROADMAP.md"] },
+    { "id": "maturity", "claim": "v1.2.0 source, signed Apple Silicon companion, and signed linux/amd64 OCI reference; no blanket production certification", "sources": ["README.md", "SUPPORT.md", "docs/OCI.md", "docs/MACOS_DISTRIBUTION.md"] },
+    { "id": "context_optimization", "claim": "Default-Off local context optimization with bounded lossless representations and no new content store", "sources": ["docs/CONTEXT_OPTIMIZATION.md", "docs/releases/v1.2.0-context-optimization.md"] },
     { "id": "demo", "claim": "Real recorded synthetic CLI runs, not independent people or customer proof", "sources": ["website/public/demo/gateway.json", "website/public/demo/policy.json"] }
   ],
-  "nonclaims": ["OpenAI endorsement or selection", "customer testimonials", "validated demand", "provider invoice reconciliation", "managed SaaS", "24/7 SLA", "independent security certification", "shipped v1.1 portfolio features", "shipped v1.2 context optimization", "native Hormuz login/refresh sessions", "per-inference human approvals"]
+  "nonclaims": ["OpenAI endorsement or selection", "customer testimonials", "validated demand", "provider invoice reconciliation", "managed SaaS", "24/7 SLA", "independent security certification", "shipped v1.1 portfolio features", "per-inference human approvals"]
 }
