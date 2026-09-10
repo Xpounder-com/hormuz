@@ -7,18 +7,17 @@ export function EnterprisePlans() {
   return <section className="section offer-section" id="plans" aria-labelledby="plans-title">
     <div className="section-heading">
       <p className="section-label">THE PRICE. THE SCOPE. THE NEXT STEP.</p>
-      <h2 id="plans-title">Start with a conversation.<br />Pay for a defined engagement.</h2>
-      <p className="offer-intro">The software is open source. Paid engagements add direct help from the person building it.</p>
+      <h2 id="plans-title">Install free.<br />Choose the help you need.</h2>
+      <p className="offer-intro">The controls stay open source. Add ongoing support or a guided pilot for integration, evaluation, and operating help.</p>
     </div>
     <div className="offer-grid conversion-offers">
       <article className="offer-card">
-        <p className="section-label">01 / EXPLORE THE FIT</p>
-        <h3>AI governance review</h3>
-        <PriceAmount amount="$0" period="Free conversation · no obligation" />
-        <p>Bring the AI workflow you want to govern. Work out whether Hormuz is a useful fit before committing.</p>
-        <ul><li>Discuss your client, team, and control needs</li><li>Identify the boundaries to evaluate</li><li>Choose a practical next step together</li></ul>
-        <CampaignLink className="button button-outline" href={sitePath('/contact/?interest=review')}>Get a free AI review <span aria-hidden="true">↗</span></CampaignLink>
-        <p className="field-hint">A fit discussion with Mehrdad. No card required.</p>
+        <p className="section-label">01 / INSTALL AND EXPLORE</p><h3>Open source</h3>
+        <PriceAmount amount="$0" period="Software license · Apache-2.0" />
+        <p>Use the product with your own gateway and provider accounts. Start with a local demo or join your team on Mac.</p>
+        <ul><li>Gateway, policy, model access, and budgets</li><li>Token, estimated-cost, and outcome reports</li><li>Mac companion and local context optimization</li><li>Documentation and community support</li></ul>
+        <CampaignLink className="button button-primary" href={sitePath('/docs/')}>Install free <span aria-hidden="true">↗</span></CampaignLink>
+        <p className="field-hint">No card required. You operate your infrastructure and pay your providers.</p>
       </article>
       <article className="offer-card offer-featured">
         <p className="section-label">02 / PUT IT TO THE TEST</p>
@@ -32,15 +31,15 @@ export function EnterprisePlans() {
       </article>
       <article className="offer-card">
         <p className="section-label">03 / KEEP MOVING</p>
-        <h3>Enterprise support</h3>
-        <PriceAmount amount={SUPPORT_PRICE} period="USD / month · separate agreement" from />
-        <p>Keep a direct line to the founder as your team operates Hormuz.</p>
-        <ul><li>Policy and configuration guidance</li><li>Upgrade and troubleshooting assistance</li><li>Operating questions and evidence review</li><li>Agreed hours and response targets</li></ul>
-        <CampaignLink className="button button-outline" href={sitePath('/contact/?interest=support')}>Discuss my support needs <span aria-hidden="true">↗</span></CampaignLink>
-        <p className="field-hint">Optional ongoing support. Hosting, 24/7 operations, and unlimited support are not included.</p>
+        <h3>Self-service support</h3>
+        <PriceAmount amount={SUPPORT_PRICE} period="USD / month · cancel before renewal" />
+        <p>Buy ongoing help for one self-hosted gateway. The product stays free; this plan adds direct founder support.</p>
+        <ul><li>One self-hosted gateway</li><li>Up to 4 support hours per billing month</li><li>Response within 2 business days</li><li>Policy, upgrade, and troubleshooting help</li></ul>
+        <CampaignLink className="button button-outline" href={sitePath('/enterprise/#support')}>See terms & start support <span aria-hidden="true">↗</span></CampaignLink>
+        <p className="field-hint">Monthly renewal. Cancel before the next renewal. Provider usage, hosting, and 24/7 operations are separate.</p>
       </article>
     </div>
-    <div className="open-source-option"><div><span className="section-label">PREFER TO BUILD IT YOURSELF?</span><h3>Open source. $0 software license.</h3><p>Apache-2.0. Your provider accounts, infrastructure, and operations. Community support on a best-effort basis.</p></div><CampaignLink className="button button-outline" href={sitePath('/docs/#quickstart')}>Start with open source <span aria-hidden="true">↗</span></CampaignLink></div>
+    <div className="open-source-option"><div><span className="section-label">WANT TO TALK IT THROUGH?</span><h3>Bring one workflow and one question.</h3><p>A free fit discussion with Mehrdad Zaker. No obligation to buy a pilot.</p></div><CampaignLink className="button button-outline" href={sitePath('/contact/?interest=review')}>Ask the founder <span aria-hidden="true">↗</span></CampaignLink></div>
     <p className="pricing-cost-note">All paid prices are in USD. Provider usage, infrastructure, and applicable taxes are additional.</p>
   </section>;
 }

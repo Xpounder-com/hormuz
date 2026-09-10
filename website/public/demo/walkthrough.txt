@@ -1,0 +1,149 @@
+HORMUZ: A WORKDAY WITH A $1M AI BUDGET
+
+This is a fictional company, not a customer case study.
+
+1. SPEND AND TOKENS
+At day 15 of a 30-day month, $50,000 estimated cost sits against an $83,333.33 budget. The $100,000 monthly pace is a straight-line estimate. Engineering uses 3.9B tokens and $30,000: uncached input $12,600, cached input $900, output $16,500. Output is 12.82% of tokens but 55% of cost.
+
+2. SET A POLICY
+Compare Standard (16,000 output tokens, redact configured secrets), Strict (4,000, deny configured secrets), or Lockdown (deny all). With $0.50 available, a $0.70 reservation is denied with zero provider calls. The lower output cap changes that example reservation to $0.22. The maximum output charge falls from $0.64 to $0.16; this is not measured savings. Historical spend does not change.
+
+3. COMPACT CONTEXT
+The actual setting is On/Off per device and connection, default Off. A complete 127-path synthetic tool block becomes 1,679 bytes from 3,108 and restores every line, duplicate, and order. It is structural encoding, not a prose summary. Small, unknown, or ineligible results pass through. See compaction-example.json for both full forms.
+
+4. MY SETUP
+The Mac app connects to an existing gateway. Gateway operators configure provider accounts, unique identities, and policies. Codex/OpenAI is live-qualified for 1.2; the Claude Code/Anthropic protocol exists but same-candidate live qualification is open. Ollama Responses/Messages are candidate integrations, not verified support.
+
+INSTALL FREE: https://usehormuz.github.io/docs/
+PAID ENGAGEMENTS: https://usehormuz.github.io/enterprise/
+EXAMPLE DATA: https://usehormuz.github.io/demo/customer-example.json
+
+PRACTICAL QUESTIONS
+
+Setup: Does the Mac app include a hosted gateway?
+The Mac app connects your coding client to a configured Hormuz gateway. Ask your administrator for its URL and your identity or invitation. Running your own gateway requires provider accounts, credentials, model rates, and identity/policy configuration.
+https://usehormuz.github.io/docs/#mac
+
+Setup: Can I try it without provider keys or a credit card?
+Yes. Install the source release and run hormuz demo. It exercises real HTTP gateway behavior with disposable loopback providers and zero external provider calls. The interactive website uses fictional data and makes no provider calls.
+https://usehormuz.github.io/docs/#quickstart
+
+Setup: What does my first real request look like?
+Configure a unique member identity, generate the supported client settings, select an approved model, and run a small authorized request. Confirm connection, attribution, token counts, and estimated cost. Then test an agreed denial and verify zero upstream calls.
+https://usehormuz.github.io/docs/#first-request
+
+Setup: Which computers and client versions can I use?
+The 1.2.0 Mac archive supports Apple Silicon on macOS 14+ and includes its helper and tokenizer resources. Source installation requires Python 3.11+. Codex 0.147.0 and Claude Code 2.1.233 are documented protocol baselines, not a promise about every newer client.
+https://usehormuz.github.io/integrations/#clients
+
+Setup: Where do company provider credentials live?
+On the controlled gateway boundary. Members use their own Hormuz identity. Sharing one identity collapses attribution and weakens administration. Outside local development, use an organization-controlled hostname and TLS.
+https://usehormuz.github.io/security/#data-handling
+
+Setup: What happens during an outage or expired session?
+An unavailable gateway or rejected identity does not grant direct-provider access. Check connection status, identity expiry, and the configured route. Do not blindly replay requests with unknown provider outcomes. Recovery and availability depend on your deployment.
+https://usehormuz.github.io/integrations/#verification
+
+Policy: Is policy setup a blank JSON file?
+No. Standard, Strict, and Lockdown templates create validated starting documents from configured client/model allowlists. Standard redacts secrets and caps output at 16,000; Strict denies secrets and caps output at 4,000. Lockdown denies all requests. Add budgets and team overlays explicitly.
+https://usehormuz.github.io/demo/#policy
+
+Policy: What knobs can an administrator actually turn?
+Model and client allowlists, configured fallback routes, maximum output tokens, organization/team/person token or USD caps, configured secret redaction or denial, and supported OpenAI storage/background controls. Policies live in validated configuration or the managed policy CLI; this website is a teaching editor.
+https://usehormuz.github.io/demo/#policy
+
+Policy: Can a team override the company’s rules?
+Lower scopes only tighten ancestor controls. An Engineering team policy cannot grant a model or client forbidden by the organization, and a person cannot enlarge an ancestor budget. Every applicable cap participates in request admission.
+https://usehormuz.github.io/demo/#policy
+
+Policy: How do I check a policy before applying it?
+Create and validate a candidate locally, then compare and preview using the documented administrative commands. Validation makes no network or policy mutations. A preview depends on its supplied policy, usage, and reservation evidence; incomplete inputs are not proof of production admission.
+https://usehormuz.github.io/demo/#policy
+
+Policy: Can I undo a change? What about requests already running?
+Managed policies have immutable versions. Guarded apply can reject a concurrent active-version change. Rollback creates a new activation and preserves history. New requests use the active policy; an in-flight request keeps its original snapshot.
+https://usehormuz.github.io/demo/#policy
+
+Policy: What happens when two requests use the last budget at once?
+Atomic reservations check all applicable scopes before provider egress. In the example, $0.50 available cannot fund a $0.70 reservation: it is denied with zero provider calls and $0.50 still available. Admission is conservative; a short eventual answer does not guarantee admission.
+https://usehormuz.github.io/demo/#policy
+
+Analytics: What can I see beyond the Mac counters?
+The administrator CLI reports organization, team, person, model, client, and provider usage for the current UTC month. It includes token categories, estimated cost, request outcomes, active identities, and redactions. The opt-in browser console preview has organization/team usage and limited member controls.
+https://usehormuz.github.io/demo/#spend
+
+Analytics: What do input, cached, output, and reasoning tokens mean?
+Total tokens are input plus output. Cache reads/writes and reasoning may already be subsets of those totals; do not add them again. The example splits uncached and cached input into disjoint categories so its totals reconcile. Categories appear when the provider reports them.
+https://usehormuz.github.io/demo/#spend
+
+Analytics: Why can fewer tokens cost more?
+Token categories and models have different configured rates. In the fictional Engineering example, 500M output tokens are 12.82% of token volume but 55% of cost. That identifies a cost driver; it does not prove waste or equal quality from a cheaper model.
+https://usehormuz.github.io/demo/#spend
+
+Analytics: Is the cost figure my final provider bill?
+No. It is a configured-rate-card estimate for captured requests. Provider discounts, credits, cache rules, tool charges, and invoice adjustments can differ. Reconcile against invoices before treating it as final spend. The website’s Advanced and Standard models and rates are invented.
+https://usehormuz.github.io/demo/#spend
+
+Analytics: What are committed, pending, uncertain, and available amounts?
+Committed is the terminal configured-rate estimate. Pending reserves for requests without a terminal outcome. Uncertain holds room for ambiguous outcomes. Available subtracts all three from the active plan. The internal work-budget report is a preview; it has no public CLI or HTTP route yet.
+https://usehormuz.github.io/demo/#spend
+
+Analytics: Can managers see work scopes and plan changes?
+The internal work-budget implementation tracks work-scope attribution, active plan and window, amount changes, and request-to-plan bindings. Its report distinguishes comparable changes from changes in currency, scope, or period. Delivery through a public manager interface is still open.
+https://usehormuz.github.io/demo/#spend
+
+Analytics: Will I see all company AI use and employee productivity?
+You see supported requests routed through Hormuz. Bypassing traffic is outside coverage. Unique identities and event-time team attribution explain allocation; shared credentials collapse it. Consumption is not a productivity or quality score. Later transfers do not rewrite historical team allocation.
+https://usehormuz.github.io/security/#data-handling
+
+Context: What does context compaction actually remove?
+Eligible structure can store repeated prefixes or keys once while preserving exact reconstruction. The 127-path example becomes a 1,679-byte block from 3,108 bytes and restores every line, duplicate, and order. It does not summarize prose or delete selected lines.
+https://usehormuz.github.io/demo/#compaction
+
+Context: What can I configure for compaction?
+The actual control is On/Off for one saved connection on one device, default Off. There is no aggressiveness slider. Internal size, reconstruction, byte-growth, and dual-tokenizer checks select eligible transformations. On means it may try; some results stay unchanged.
+https://usehormuz.github.io/demo/#compaction
+
+Context: Which tool results are eligible?
+Current automatic mappings are narrow: simple, uncomposed rg --files and rg -n results through Codex exec_command or Claude Code Bash, plus Claude Code Glob path results. Unknown tools, ambiguous history, code, diffs, user/system text, and malformed, oversized, or non-beneficial results pass through.
+https://usehormuz.github.io/demo/#compaction
+
+Context: Does my original context get uploaded just to optimize it?
+No. Selection, reconstruction checking, and token estimates happen on your device. One selected representation travels to the configured gateway, which can decode it in memory for normal secret checks. Compaction is not encryption and does not prevent the gateway reading governed traffic.
+https://usehormuz.github.io/demo/#compaction
+
+Context: Will switching it on save 40% of my bill?
+No fixed savings are promised. The release includes bounded synthetic OpenAI evidence, not a forecast for your workload or a provider-invoice result. The website measures one tool block in bytes; token counts, caching, model behavior, and final charges are different measurements.
+https://usehormuz.github.io/demo/#compaction
+
+Context: Does the switch require a restart or change an in-flight request?
+It applies to the next request; in-flight work retains its starting setting. Review and save a pre-1.2 connector once so its launcher uses the helper. Later toggles need no gateway restart. Start a new chat after toggling for the most stable provider prefix-cache behavior.
+https://usehormuz.github.io/demo/#compaction
+
+Compatibility: Does it work with Ollama?
+Ollama documents non-stateful OpenAI Responses and Anthropic Messages. Hormuz has configurable upstreams for those protocols, making these candidate integrations. End-to-end streaming, tool use, history, token accounting, and policy behavior still need qualification before claiming support.
+https://usehormuz.github.io/demo/#setup
+
+Compatibility: Does “OpenAI-compatible” mean every endpoint works?
+No. Hormuz routes Responses, its compaction relay, Anthropic Messages, and token counting. It does not expose Chat Completions or native Ollama /api/chat and /api/generate. Other clients, servers, and adapters require an exact protocol check.
+https://usehormuz.github.io/integrations/#protocols
+
+Compatibility: Can a remote gateway use the Ollama on my laptop?
+Localhost means the machine running the gateway. A remote gateway cannot reach your laptop’s server at its own localhost. You must design and secure a reachable route. Token accounting for local inference does not measure GPU, electricity, or hardware cost.
+https://usehormuz.github.io/demo/#setup
+
+Compatibility: Does Hormuz govern the coding tool’s shell and MCP traffic?
+Hormuz governs supported model requests routed through it. It does not govern every shell command, Git operation, MCP server, browser request, or direct-provider connection. Review those paths separately when defining coverage.
+https://usehormuz.github.io/security/#controls
+
+Billing: What stays free, and what do I pay for?
+The Apache-2.0 gateway, policy controls, budgets, evidence, and client software remain available without a software license fee. Paid services add human integration, evaluation, and operating help. You still pay your own provider and infrastructure costs.
+https://usehormuz.github.io/enterprise/#plans
+
+Billing: How does a paid pilot start?
+Discuss one team and workflow, agree scope, acceptance criteria, capacity, and start date, then pay the $15,000 one-time 90-day pilot fee. Payment follows the agreed engagement; it does not create a hosted account or certify production readiness.
+https://usehormuz.github.io/enterprise/#pilot
+
+Billing: How does support activate, renew, or cancel?
+Current support starts at $2,000/month with scope, hours, response targets, start date, and cancellation terms agreed in writing. Stripe processes payment; the benefit is the agreed human service, not extra software features. Free use remains available if you cancel or do not buy.
+https://usehormuz.github.io/enterprise/#payment

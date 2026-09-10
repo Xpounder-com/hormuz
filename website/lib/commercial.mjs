@@ -1,4 +1,4 @@
-import { commercialConfig } from './commercial-config.mjs';
+import { commercialConfig, selfServiceSupportPaymentUrl } from './commercial-config.mjs';
 
 export const PILOT_PRICE = '$15,000';
 export const SUPPORT_PRICE = '$2,000';
@@ -21,3 +21,10 @@ export function validateCommercialConfig(config) {
 }
 
 export const commercial = validateCommercialConfig(commercialConfig);
+export const selfServiceSupport = Object.freeze({
+  price: SUPPORT_PRICE,
+  paymentUrl: validateCommercialConfig({ ...commercialConfig, supportPaymentUrl: selfServiceSupportPaymentUrl }).supportPaymentUrl,
+  hoursPerMonth: 4,
+  gatewayCount: 1,
+  responseBusinessDays: 2,
+});

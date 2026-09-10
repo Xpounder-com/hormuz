@@ -6,3 +6,6 @@ export const commercialConfig = Object.freeze({
   pilotPaymentUrl: 'https://buy.stripe.com/3cI9AUddYaIRej44l78og01',
   supportPaymentUrl: 'https://buy.stripe.com/3cIeVeddY9ENej47xj8og00',
 });
+
+// Separate from the existing proposal-based support link. Populate after verification.
+export const selfServiceSupportPaymentUrl = '';

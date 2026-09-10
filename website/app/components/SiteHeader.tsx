@@ -3,10 +3,10 @@ import { BrandLockup } from './Brand';
 import { sitePath } from '../../lib/site.mjs';
 
 const navigation = [
-  { key: 'platform', label: 'Platform', href: '/' },
-  { key: 'demo', label: 'Demo', href: '/demo/' },
-  { key: 'docs', label: 'Docs', href: '/docs/' },
-  { key: 'enterprise', label: 'Pricing', href: '/enterprise/' },
+  { key: 'platform', label: 'Product', href: '/' },
+  { key: 'demo', label: 'Try Hormuz', href: '/demo/' },
+  { key: 'docs', label: 'Install & docs', href: '/docs/' },
+  { key: 'enterprise', label: 'Plans', href: '/enterprise/' },
   { key: 'security', label: 'Security', href: '/security/' },
   { key: 'resources', label: 'Resources', href: '/resources/' },
 ];
@@ -51,15 +51,15 @@ export function SiteHeader({
               </CampaignLink>
             ))}
             <CampaignLink href={sitePath('/integrations/')} aria-current={active === 'integrations' ? 'page' : undefined}>Integrations</CampaignLink>
-            <CampaignLink className="mobile-pilot-cta" href={sitePath('/contact/?interest=review')}>Get a free review ↗</CampaignLink>
+            <CampaignLink className="mobile-pilot-cta" href={sitePath('/docs/')}>Install free ↗</CampaignLink>
           </div>
         </details>
 
         <CampaignLink
           className="nav-cta"
-          href={sitePath('/contact/?interest=review')}
+          href={sitePath('/docs/')}
         >
-          Get a free review
+          Install free
           <span aria-hidden="true">↗</span>
         </CampaignLink>
       </nav>

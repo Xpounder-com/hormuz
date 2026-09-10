@@ -3,6 +3,7 @@ import { pageMetadata } from '../../lib/metadata';
 import { sitePath, sourcePath } from '../../lib/site.mjs';
 import { PageFrame, PageHero } from '../components/PageFrame';
 import { CodeBlock } from '../components/CodeBlock';
+import { SetupExample } from '../components/SetupExample';
 
 export const metadata = pageMetadata('Codex & Claude Code integrations — Hormuz', 'Connect the supported AI coding-client paths through Hormuz, with provider keys on the gateway and explicit compatibility limits.', '/integrations/');
 
@@ -10,8 +11,9 @@ export default function IntegrationsPage() {
   return <PageFrame active="integrations">
     <PageHero eyebrow="Client integrations" title={<>Keep the tools.<br /><span>Change the control point.</span></>}>
       <p>Route Codex and Claude Code model requests through a self-hosted policy boundary. Keep company provider keys on the gateway, not on employee laptops.</p>
-      <div className="hero-actions"><CampaignLink className="button button-primary" href={sitePath('/docs/')}>Start with the local demo →</CampaignLink><a className="button button-ghost" href={sourcePath('docs/CLIENTS.md')}>Full client guide ↗</a></div>
+      <div className="hero-actions"><a className="button button-primary" href="#my-stack">Check my stack ↓</a><CampaignLink className="button button-ghost" href={sitePath('/docs/')}>Install free →</CampaignLink></div>
     </PageHero>
+    <section className="section" id="my-stack"><div className="experience-shell experience-panel"><SetupExample /></div></section>
     <section className="section" id="clients">
       <div className="section-heading narrow"><p className="section-label">After the provider-free demo</p><h2>One identity. One client. One verified route.</h2><p>First configure a gateway, unique employee credentials, and server-side provider keys using the repository guide. Outside local development, use TLS and an organization-controlled hostname. The example hostname below is not a running service.</p></div>
       <div className="integration-card-grid">
@@ -28,7 +30,7 @@ export default function IntegrationsPage() {
           <p>Leave optional gateway model discovery disabled and select an explicit supported model. Hormuz does not implement that optional discovery endpoint.</p>
         </article>
       </div>
-      <p className="after-grid">These are the pinned v1 client baselines, not a claim that every newer release is supported. See <a href={sourcePath('SUPPORT.md')}>Support</a> and <a href={sourcePath('docs/LIVE_CLIENT_CONFORMANCE.md')}>live-client conformance</a> for exact protocol, version, and provider evidence boundaries.</p>
+      <p className="after-grid">These are documented protocol baselines, not a claim that every newer client is supported. Hormuz 1.2.0 has OpenAI-only live-provider qualification; same-candidate Claude Code/Anthropic qualification remains open. See <a href={sourcePath('SUPPORT.md')}>Support</a> and <a href={sourcePath('docs/LIVE_CLIENT_CONFORMANCE.md')}>live-client conformance</a> for the evidence boundaries.</p>
     </section>
     <section className="protocol-section" id="protocols"><div className="protocol-inner"><div><p className="section-label light">Provider protocols</p><h2>Model traffic, not every client action.</h2><p>Hormuz does not govern shell commands, MCP servers, browser requests, Git traffic, or requests that bypass it.</p></div><div className="protocol-table">
       <div className="protocol-head"><span>Surface</span><span>Current contract</span><span>Boundary</span></div>
