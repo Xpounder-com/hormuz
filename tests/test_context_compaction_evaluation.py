@@ -27,6 +27,21 @@ class ContextEvaluationTests(unittest.TestCase):
         first = [entry["arm"] for entry in entries if entry["case_id"] == "case-01"]
         self.assertEqual(first[:4], ["original", "compact", "compact", "original"])
 
+    def test_each_task_declares_the_exact_answer_keys(self) -> None:
+        manifest = generate_manifest(
+            model="fixture-model", protocol="responses", repetitions=5, counters=COUNTERS
+        )
+        first_by_case = {}
+        for entry in manifest["entries"]:
+            first_by_case.setdefault(entry["case_id"], entry)
+        for entry in first_by_case.values():
+            question = entry["request"]["input"][0]["content"]
+            expected = entry["expected"]
+            keys = ", ".join(f'"{key}"' for key in expected)
+            self.assertTrue(
+                question.endswith(f"Return one JSON object with exactly these keys in this order: {keys}.")
+            )
+
     def test_scorer_is_type_aware_and_reports_paired_regression(self) -> None:
         manifest = generate_manifest(
             model="fixture-model", protocol="responses", repetitions=5, counters=COUNTERS
