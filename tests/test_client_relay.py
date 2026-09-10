@@ -536,19 +536,6 @@ raise SystemExit(0 if response.status == 200 else 1)
         credential = bin_directory / "credential-helper"
         credential.write_text("#!/bin/sh\nprintf '%s\\n' '" + ACCESS_TOKEN + "'\n", encoding="utf-8")
         credential.chmod(0o700)
-        # Linux Codex confines command execution to the selected work tree.
-        # Keep the deterministic fake rg inside that tree while leaving the
-        # credential helper outside the model-visible sandbox.
-        tool_directory = root / ".hormuz-test-bin"
-        tool_directory.mkdir()
-        rg = tool_directory / "rg"
-        rg.write_text(
-            "#!/bin/sh\n"
-            "test \"$1\" = --files || exit 2\n"
-            "exec /usr/bin/find \"$2\" -type f\n",
-            encoding="utf-8",
-        )
-        rg.chmod(0o700)
         codex = bin_directory / "codex"
         codex.write_text(
             "#!/usr/bin/env python3\n"
@@ -587,9 +574,7 @@ raise SystemExit(0 if response.status == 200 else 1)
         )
         (self.state / "profile.json").chmod(0o600)
         old_path = os.environ.get("PATH")
-        os.environ["PATH"] = ":".join(
-            value for value in (str(tool_directory), str(bin_directory), old_path) if value
-        )
+        os.environ["PATH"] = str(bin_directory) + (":" + old_path if old_path else "")
         try:
             packaged_helper = os.environ.get("HORMUZ_PACKAGED_CONTEXT_HELPER")
             def launch() -> tuple[int, str]:
