@@ -412,6 +412,15 @@ gateway integration suite. Additional PostgreSQL, deployment, live-provider,
 and supply-chain checks retain their own explicit prerequisites and claims. See
 [verification](docs/VERIFICATION.md) for the complete test boundary.
 
+Pull requests use a fail-closed CI scope classifier. Only a change set composed
+entirely of `website/**`, `marketing/COMMERCIAL_SETUP.md`, and
+`marketing/MEASUREMENT.md` may skip the named PostgreSQL, Kubernetes, HA, DR,
+and OCI jobs. Unknown paths, mixed changes, invalid or unreadable diffs, every
+push to `main`, and every manual run execute the complete suite. The stable
+`CI / required` check accepts only successful applicable jobs and the exact
+expected skips; the independent website and native Mac aggregate checks remain
+required as well.
+
 ## Contributing and community
 
 Contributions that make Hormuz safer, easier to operate, or easier to verify are

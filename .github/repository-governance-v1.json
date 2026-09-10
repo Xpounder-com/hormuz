@@ -46,51 +46,15 @@
   },
   "required_checks": [
     {
-      "context": "Build and install package",
-      "integration_id": 15368
-    },
-    {
-      "context": "Codex and Claude Code compatibility",
-      "integration_id": 15368
-    },
-    {
-      "context": "OCI reference runtime",
-      "integration_id": 15368
-    },
-    {
-      "context": "OCI reproducibility",
-      "integration_id": 15368
-    },
-    {
-      "context": "OCI supply-chain evidence",
-      "integration_id": 15368
-    },
-    {
-      "context": "PostgreSQL compatibility",
-      "integration_id": 15368
-    },
-    {
-      "context": "PostgreSQL recovery drills",
-      "integration_id": 15368
-    },
-    {
-      "context": "Python 3.11",
-      "integration_id": 15368
-    },
-    {
-      "context": "Python 3.12",
-      "integration_id": 15368
-    },
-    {
-      "context": "Python 3.13",
-      "integration_id": 15368
-    },
-    {
-      "context": "Python 3.14",
+      "context": "CI / required",
       "integration_id": 15368
     },
     {
       "context": "Native Mac client and loopback contract",
+      "integration_id": 15368
+    },
+    {
+      "context": "Website checks",
       "integration_id": 15368
     }
   ],

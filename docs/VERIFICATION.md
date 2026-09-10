@@ -652,6 +652,24 @@ GitHub Actions runs independent gates without provider credentials:
 - CycloneDX SBOM generation and a fix-aware OCI vulnerability gate for the exact local candidate image;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
 
+For pull requests only, a conservative classifier may omit the eight expensive
+PostgreSQL, Kubernetes, HA, disaster-recovery, and OCI jobs when every changed
+path is under `website/**` or is exactly
+`marketing/COMMERCIAL_SETUP.md` or `marketing/MEASUREMENT.md`. The Python
+matrix, package, Render, Compose, pinned-client, and website checks still run.
+Any other path, a mixed change, an empty or unreadable diff, a push to `main`,
+or a manual qualification runs the complete suite. Renames are evaluated as
+both deletion and addition so moving a core file into an allowlisted directory
+cannot take the reduced path.
+
+The `CI / required` aggregate runs after every CI job. In full mode it requires
+every job to succeed. In the reduced mode it requires every always-applicable
+job to succeed and every one of the eight path-scoped jobs to be skipped. A
+failed or canceled job, a missing result, an inconsistent classification, or an
+unexpected skip blocks the aggregate. `Website checks` and `Native Mac client
+and loopback contract` remain separate required checks because they are owned
+by separate workflows.
+
 The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA and the scanner image to an immutable digest, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
 
 Repository-side enforcement is a separate checked contract. Run

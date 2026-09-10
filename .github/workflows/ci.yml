@@ -15,6 +15,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect CI scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      run_full: ${{ steps.scope.outcome == 'success' && steps.scope.outputs.run_full || 'true' }}
+      classification: ${{ steps.scope.outcome == 'success' && steps.scope.outputs.classification || 'full_detection_failure' }}
+      changed_path_count: ${{ steps.scope.outcome == 'success' && steps.scope.outputs.changed_path_count || '0' }}
+    steps:
+      - name: Check out source history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the pull request conservatively
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 tools/classify_ci_scope.py \
+            --event-name "$EVENT_NAME" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --github-output "$GITHUB_OUTPUT" \
+            --step-summary "$GITHUB_STEP_SUMMARY"
+
   test:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
@@ -169,6 +197,8 @@ jobs:
 
   postgres-compatibility:
     name: PostgreSQL compatibility
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -487,6 +517,8 @@ jobs:
 
   postgres-backup-restore:
     name: PostgreSQL recovery drills
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -539,6 +571,8 @@ jobs:
 
   oci-reference-runtime:
     name: OCI reference runtime
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -679,6 +713,8 @@ jobs:
 
   kubernetes-reference:
     name: Kubernetes + Helm multi-replica reference
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     services:
@@ -731,6 +767,8 @@ jobs:
 
   postgres-ha-reference:
     name: PostgreSQL HA failover reference
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     steps:
@@ -756,6 +794,8 @@ jobs:
 
   disaster-recovery-reference:
     name: Disaster recovery reference
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 80
     steps:
@@ -782,6 +822,8 @@ jobs:
 
   oci-supply-chain:
     name: OCI supply-chain evidence
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -804,6 +846,8 @@ jobs:
 
   oci-reproducibility:
     name: OCI reproducibility
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -872,3 +916,68 @@ jobs:
             tests.test_gateway.GatewayIntegrationTests.test_installed_codex_command_auth_recovers_after_401_without_duplicate_provider_egress \
             tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway \
             tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_refreshes_after_401_and_requires_explicit_request_retry
+
+  required:
+    name: CI / required
+    if: ${{ always() }}
+    needs:
+      - changes
+      - test
+      - package
+      - postgres-compatibility
+      - postgres-backup-restore
+      - oci-reference-runtime
+      - render-https-preflight
+      - render-authentication-staging
+      - compose-reference
+      - kubernetes-reference
+      - postgres-ha-reference
+      - disaster-recovery-reference
+      - oci-supply-chain
+      - oci-reproducibility
+      - client-compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check out the strict aggregate gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require every applicable CI job
+        env:
+          SCOPE_RESULT: ${{ needs.changes.result }}
+          RUN_FULL: ${{ needs.changes.outputs.run_full }}
+          CLASSIFICATION: ${{ needs.changes.outputs.classification }}
+          TEST_RESULT: ${{ needs.test.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          POSTGRES_COMPATIBILITY_RESULT: ${{ needs.postgres-compatibility.result }}
+          POSTGRES_BACKUP_RESTORE_RESULT: ${{ needs.postgres-backup-restore.result }}
+          OCI_REFERENCE_RUNTIME_RESULT: ${{ needs.oci-reference-runtime.result }}
+          RENDER_HTTPS_PREFLIGHT_RESULT: ${{ needs.render-https-preflight.result }}
+          RENDER_AUTHENTICATION_STAGING_RESULT: ${{ needs.render-authentication-staging.result }}
+          COMPOSE_REFERENCE_RESULT: ${{ needs.compose-reference.result }}
+          KUBERNETES_REFERENCE_RESULT: ${{ needs.kubernetes-reference.result }}
+          POSTGRES_HA_REFERENCE_RESULT: ${{ needs.postgres-ha-reference.result }}
+          DISASTER_RECOVERY_REFERENCE_RESULT: ${{ needs.disaster-recovery-reference.result }}
+          OCI_SUPPLY_CHAIN_RESULT: ${{ needs.oci-supply-chain.result }}
+          OCI_REPRODUCIBILITY_RESULT: ${{ needs.oci-reproducibility.result }}
+          CLIENT_COMPATIBILITY_RESULT: ${{ needs.client-compatibility.result }}
+        run: |
+          python3 tools/verify_ci_required.py \
+            --scope-result "$SCOPE_RESULT" \
+            --run-full "$RUN_FULL" \
+            --classification "$CLASSIFICATION" \
+            --result "test=$TEST_RESULT" \
+            --result "package=$PACKAGE_RESULT" \
+            --result "postgres-compatibility=$POSTGRES_COMPATIBILITY_RESULT" \
+            --result "postgres-backup-restore=$POSTGRES_BACKUP_RESTORE_RESULT" \
+            --result "oci-reference-runtime=$OCI_REFERENCE_RUNTIME_RESULT" \
+            --result "render-https-preflight=$RENDER_HTTPS_PREFLIGHT_RESULT" \
+            --result "render-authentication-staging=$RENDER_AUTHENTICATION_STAGING_RESULT" \
+            --result "compose-reference=$COMPOSE_REFERENCE_RESULT" \
+            --result "kubernetes-reference=$KUBERNETES_REFERENCE_RESULT" \
+            --result "postgres-ha-reference=$POSTGRES_HA_REFERENCE_RESULT" \
+            --result "disaster-recovery-reference=$DISASTER_RECOVERY_REFERENCE_RESULT" \
+            --result "oci-supply-chain=$OCI_SUPPLY_CHAIN_RESULT" \
+            --result "oci-reproducibility=$OCI_REPRODUCIBILITY_RESULT" \
+            --result "client-compatibility=$CLIENT_COMPATIBILITY_RESULT"
