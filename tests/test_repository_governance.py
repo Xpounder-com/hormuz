@@ -30,7 +30,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["repository"], "Xpounder-com/hormuz")
         self.assertEqual(result["ruleset_count"], 4)
-        self.assertEqual(result["required_check_count"], 12)
+        self.assertEqual(result["required_check_count"], 3)
         self.assertGreaterEqual(result["workflow_count"], 4)
         self.assertGreater(result["pinned_action_use_count"], 0)
         self.assertEqual(result["public_transition_check_count"], 10)
@@ -216,6 +216,82 @@ class RepositoryGovernanceTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(
                 RepositoryGovernanceError, "required CI check set changed"
+            ):
+                validate_repository_governance(root)
+
+    def test_path_scoped_infrastructure_condition_cannot_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/ci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            condition = (
+                "    if: ${{ !cancelled() && "
+                "needs.changes.outputs.run_full != 'false' }}\n"
+            )
+            self.assertIn(condition, value)
+            workflow.write_text(
+                value.replace(condition, "    if: false\n", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "path-scoped CI job contract changed"
+            ):
+                validate_repository_governance(root)
+
+    def test_ci_required_gate_cannot_omit_an_applicable_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/ci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            result = (
+                '            --result "oci-reproducibility='
+                '$OCI_REPRODUCIBILITY_RESULT" \\\n'
+            )
+            self.assertIn(result, value)
+            workflow.write_text(value.replace(result, "", 1), encoding="utf-8")
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "strict CI required-check result set changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_ci_required_gate_must_run_after_failures_and_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/ci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            marker = "  required:\n    name: CI / required\n    if: ${{ always() }}\n"
+            self.assertIn(marker, value)
+            workflow.write_text(
+                value.replace(
+                    marker,
+                    "  required:\n    name: CI / required\n    if: success()\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "strict CI required-check gate changed"
+            ):
+                validate_repository_governance(root)
+
+    def test_ci_jobs_cannot_continue_on_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/ci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            marker = "      - name: Run provider-free five-minute quickstart\n"
+            self.assertIn(marker, value)
+            workflow.write_text(
+                value.replace(marker, marker + "        continue-on-error: true\n", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "CI job failure semantics changed"
             ):
                 validate_repository_governance(root)
 

@@ -20,18 +20,35 @@ RULESET_PATHS = (
     ".github/rulesets/version-tag-immutability.json",
 )
 REQUIRED_CHECK_CONTEXTS = (
-    "Build and install package",
-    "Codex and Claude Code compatibility",
-    "OCI reference runtime",
-    "OCI reproducibility",
-    "OCI supply-chain evidence",
-    "PostgreSQL compatibility",
-    "PostgreSQL recovery drills",
-    "Python 3.11",
-    "Python 3.12",
-    "Python 3.13",
-    "Python 3.14",
+    "CI / required",
     "Native Mac client and loopback contract",
+    "Website checks",
+)
+CI_JOB_NAMES = {
+    "test": "Python ${{ matrix.python-version }}",
+    "package": "Build and install package",
+    "postgres-compatibility": "PostgreSQL compatibility",
+    "postgres-backup-restore": "PostgreSQL recovery drills",
+    "oci-reference-runtime": "OCI reference runtime",
+    "render-https-preflight": "Closed Render HTTPS preflight",
+    "render-authentication-staging": "Render authentication staging container",
+    "compose-reference": "Single-VM Compose pilot reference",
+    "kubernetes-reference": "Kubernetes + Helm multi-replica reference",
+    "postgres-ha-reference": "PostgreSQL HA failover reference",
+    "disaster-recovery-reference": "Disaster recovery reference",
+    "oci-supply-chain": "OCI supply-chain evidence",
+    "oci-reproducibility": "OCI reproducibility",
+    "client-compatibility": "Codex and Claude Code compatibility",
+}
+CI_PATH_SCOPED_JOB_IDS = (
+    "postgres-compatibility",
+    "postgres-backup-restore",
+    "oci-reference-runtime",
+    "kubernetes-reference",
+    "postgres-ha-reference",
+    "disaster-recovery-reference",
+    "oci-supply-chain",
+    "oci-reproducibility",
 )
 DISCUSSION_CATEGORIES = (
     "Announcements",
@@ -1324,6 +1341,84 @@ def _validate_macos_pilot_operations_workflow(
         )
 
 
+def _validate_ci_workflow(
+    text: str,
+    job_blocks: dict[str, str],
+    job_fields: dict[str, dict[str, str]],
+) -> None:
+    expected_job_ids = {"changes", "required", *CI_JOB_NAMES}
+    if set(job_blocks) != expected_job_ids:
+        raise RepositoryGovernanceError("CI job set changed")
+    if "continue-on-error:" in text:
+        raise RepositoryGovernanceError("CI job failure semantics changed")
+
+    for job_id, job_name in CI_JOB_NAMES.items():
+        if job_fields[job_id].get("name") != job_name:
+            raise RepositoryGovernanceError(f"CI job identity changed: {job_id}")
+
+    changes = job_blocks["changes"]
+    if (
+        job_fields["changes"].get("name") != "Detect CI scope"
+        or "fetch-depth: 0" not in changes
+        or "persist-credentials: false" not in changes
+        or "python3 tools/classify_ci_scope.py" not in changes
+        or "github.event.pull_request.base.sha || github.event.before" not in changes
+        or "github.event.pull_request.head.sha || github.sha" not in changes
+        or "steps.scope.outcome == 'success' && steps.scope.outputs.run_full || 'true'"
+        not in changes
+        or (
+            "steps.scope.outcome == 'success' && "
+            "steps.scope.outputs.classification || 'full_detection_failure'"
+        )
+        not in changes
+    ):
+        raise RepositoryGovernanceError("CI scope detection contract changed")
+
+    scoped_condition = (
+        "${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}"
+    )
+    for job_id in CI_PATH_SCOPED_JOB_IDS:
+        fields = job_fields[job_id]
+        if fields.get("needs") != "changes" or fields.get("if") != scoped_condition:
+            raise RepositoryGovernanceError(
+                f"path-scoped CI job contract changed: {job_id}"
+            )
+    for job_id in set(CI_JOB_NAMES) - set(CI_PATH_SCOPED_JOB_IDS):
+        if "needs.changes.outputs.run_full" in job_blocks[job_id]:
+            raise RepositoryGovernanceError(
+                f"always-applicable CI job became path-scoped: {job_id}"
+            )
+
+    required = job_blocks["required"]
+    expected_needs = ("changes", *CI_JOB_NAMES)
+    needs_match = re.search(
+        r"^    needs:\s*\n((?:      - [a-z][a-z0-9-]*\s*\n)+)",
+        required,
+        flags=re.MULTILINE,
+    )
+    actual_needs = (
+        tuple(re.findall(r"^      - ([a-z][a-z0-9-]*)\s*$", needs_match.group(1), re.MULTILINE))
+        if needs_match is not None
+        else ()
+    )
+    if (
+        job_fields["required"].get("name") != "CI / required"
+        or job_fields["required"].get("if") != "${{ always() }}"
+        or actual_needs != expected_needs
+        or "python3 tools/verify_ci_required.py" not in required
+        or "SCOPE_RESULT: ${{ needs.changes.result }}" not in required
+        or "RUN_FULL: ${{ needs.changes.outputs.run_full }}" not in required
+        or "CLASSIFICATION: ${{ needs.changes.outputs.classification }}" not in required
+        or "persist-credentials: false" not in required
+    ):
+        raise RepositoryGovernanceError("strict CI required-check gate changed")
+    for job_id in CI_JOB_NAMES:
+        if required.count(f'--result "{job_id}=$') != 1:
+            raise RepositoryGovernanceError(
+                f"strict CI required-check result set changed: {job_id}"
+            )
+
+
 def _validate_workflows(
     root: Path, allowed_owners: set[str]
 ) -> tuple[int, int]:
@@ -1391,6 +1486,8 @@ def _validate_workflows(
                 job_blocks,
                 job_fields,
             )
+        if path.name == "ci.yml":
+            _validate_ci_workflow(text, job_blocks, job_fields)
         if path.name == "macos-distribution.yml":
             if any(
                 text.count(marker)
@@ -1744,10 +1841,6 @@ def _validate_workflows(
     versions = re.findall(r'"(3\.\d+)"', versions_match.group(1) if versions_match else "")
     if versions != ["3.11", "3.12", "3.13", "3.14"]:
         raise RepositoryGovernanceError("required Python check matrix changed")
-    for context in REQUIRED_CHECK_CONTEXTS[:7]:
-        if f"name: {context}" not in ci:
-            raise RepositoryGovernanceError(f"required CI job is absent: {context}")
-
     release = (root / ".github/workflows/release-oci.yml").read_text(encoding="utf-8")
     if '- "v[0-9]*.[0-9]*.[0-9]*"' not in release:
         raise RepositoryGovernanceError("release workflow tag trigger changed")

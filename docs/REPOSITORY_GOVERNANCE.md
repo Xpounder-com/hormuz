@@ -27,7 +27,9 @@ also capture allowlisted API evidence when applying or reviewing those settings.
 | Anonymous/public checks | Not applicable | Clone, templates, Discussions, license detection, and GHCR pull verified without owner credentials |
 
 The blocking CI workflow runs once for each pull request and once after merge to
-`main`. A feature-branch push does not also start a duplicate 11-job run.
+`main`. A feature-branch push does not also start a duplicate full-suite run.
+Pull requests proven to contain only the narrowly allowlisted website paths may
+skip eight infrastructure jobs; all `main` and manual runs remain full.
 
 GitHub documents both the full-SHA requirement and the limitation on selected
 third-party patterns for private repositories outside an enterprise in its
@@ -56,8 +58,11 @@ controls:
    turn a failed authorization into success. The custody environment must
    contain exactly the two release-token names before checkout or build.
 2. `main` cannot be deleted or force-pushed. Every change uses a pull request,
-   resolves review threads, is tested against current `main`, and passes all 11
-   release-blocking checks from the GitHub Actions app.
+   resolves review threads, is tested against current `main`, and passes three
+   stable release-blocking checks from the GitHub Actions app: `CI / required`,
+   `Native Mac client and loopback contract`, and `Website checks`. The first
+   aggregates every logical job in `.github/workflows/ci.yml` and rejects
+   failed, canceled, missing, or unexpected skipped results.
 3. Only an organization administrator may create a `v*` tag.
 4. After creation, neither a `v*` nor a `candidate-v1.0.0-*` tag can be updated,
    force-moved, or deleted. The immutability ruleset has no bypass actor.
@@ -66,6 +71,17 @@ Separating tag creation from tag immutability is intentional: the organization
 owner can create the protected annotated release tag without receiving an
 ordinary path to rewrite it afterward. An emergency change requires an explicit,
 auditable ruleset-administration action.
+
+### Required-check migration
+
+Apply a required-check identity change in two stages. First merge the workflow
+and checked-in governance contract while the legacy checks still run; a change
+to CI machinery always selects the full suite. Verify `CI / required`, the
+native Mac aggregate, and `Website checks` on that exact `main` commit. Only
+then replace the live required-check list with
+`.github/rulesets/main.json` and read the ruleset back. This prevents a window
+where branch protection waits for a check name that has never completed on the
+default branch.
 
 The release workflow independently rejects a private repository, an unprotected
 or lightweight tag, the wrong repository/workflow identity, a non-version tag,
@@ -115,7 +131,7 @@ A remote review must use allowlisted output and confirm at least:
 
 - repository visibility, description, topics, enabled surfaces, and homepage;
 - the four active rulesets and their full rule parameters;
-- all 11 required checks bound to GitHub Actions application ID `15368`;
+- all three stable required checks bound to GitHub Actions application ID `15368`;
 - Actions enabled, full-SHA pinning required, default token permission `read`,
   and workflow approval disabled;
 - Dependabot vulnerability alerts and security updates enabled;
