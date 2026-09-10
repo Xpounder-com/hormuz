@@ -225,10 +225,13 @@ The current `v1.2.0` release is
 `sha256:2f9c619c184139032c8af6782a2229b56e5f28980bfded5c5da14e620577b4b1`.
 The prior `v1.0.0` release is
 `sha256:e74fd7c527d257ff337510436f25a0eaf1e2fb799e1258566c9f393025e6b5a3`.
-The bounded cross-version drill below still exercises the older `v1.0.0` to
-`v0.1.1` rollback pair; it does not establish a v1.2.0 production rollback or
-data downgrade. `v0.1.3` remains a separately verified historical reference,
-while the failed `v0.1.2` attempt is not a supported release.
+The prior supported rollback target for the bounded cross-version drill is the
+original `v0.1.1` digest
+`sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a`.
+That drill still exercises the older `v1.0.0` to `v0.1.1` pair; it does not
+establish a v1.2.0 production rollback or data downgrade. `v0.1.3` remains a
+separately verified historical reference, while the failed `v0.1.2` attempt is
+not a supported release.
 
 Run the bounded cross-version drill only from a trusted checkout with Docker,
 ORAS `1.3.4`, and Cosign `v3.1.3`:
