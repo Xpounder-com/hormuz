@@ -4,11 +4,14 @@ Hormuz is a model-neutral enterprise AI gateway and policy control plane for emp
 
 This roadmap is evidence-gated. A milestone is not complete because code exists or a narrow test passes. Every closure needs an explicit scope, executable checks, package or deployment proof where relevant, and a truthful statement of what remains unproven.
 
-## v1.1.0 current implementation order
+## v1.3.0 portfolio-intelligence implementation order
 
 The accepted [portfolio-intelligence contract](PORTFOLIO_INTELLIGENCE.md) and
-[ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md) define the
-next minor release. The work is organized under
+[ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md) originated
+under the unreleased v1.1.0 plan. Because v1.2.0 shipped first, the remaining
+portfolio program now targets v1.3.0. Frozen v1.1 contract identifiers and
+accepted checkpoint evidence remain historical inputs and are not rewritten.
+The work is organized under
 [epic #226](https://github.com/Xpounder-com/hormuz/issues/226) and must proceed
 through these gates in order:
 
@@ -34,23 +37,24 @@ through these gates in order:
    that never apply policy automatically
    ([#222](https://github.com/Xpounder-com/hormuz/issues/222)–[#224](https://github.com/Xpounder-com/hormuz/issues/224)).
 5. **Prove the release claim.** Close #214 with the exact final candidate's
-   v1.0.0-to-v1.1.0 artifact, migration, rollback, and recovery evidence. Run
+   v1.0.0/v1.2.0-to-v1.3.0 artifact, migration, rollback, and recovery evidence. Run
    the preregistered, immutable-candidate external validation gate in
    [#225](https://github.com/Xpounder-com/hormuz/issues/225). Internal,
    synthetic, or observational evidence cannot be relabeled as that proof.
 
 #214 has two checkpoints: accepted pre-implementation plans/tests unblock the
 corresponding feature work after #212 and #213 close; final candidate evidence
-closes #214 before the v1.1.0 tag. Keep #214 open between those checkpoints and
+closes #214 before the v1.3.0 tag. Keep #214 open between those checkpoints and
 record acceptance with exact reviewed commits and test references. #213 itself
 remains feature-free and introduces no portfolio schema or migration.
 
-The #217 analytics-first preflight is accepted on merged main `b12966f` with
-exact-main CI run `33461691657`. Its version-2 successor now owns the bounded
-work-budget runtime implementation: additive SQLite 9/PostgreSQL 13 storage,
-atomic event-time attribution and reservation binding, conservative settlement,
-and a current management report. #217 remains open until the runtime PR passes
-exact-head review, protected checks, normal merge and exact merged-main CI.
+The #217 analytics-first work-budget runtime is complete through PR #262 and
+merged main `4e3133f19db4c34d7a181848ebc36754bce164ea`, with exact-main CI run
+`33630063750`. It provides additive SQLite 9/PostgreSQL 13 storage, atomic
+event-time attribution and reservation binding, conservative settlement, and a
+current management report. Its accepted evidence remains a prerequisite for
+the open finance, association, scorecard, API, recommendation, and pilot gates;
+it does not make the v1.3.0 portfolio milestone complete.
 
 Every issue inherits the release gates in #226: authorization before access,
 strict versioned schemas, metadata-only persistence and evidence, tenant
@@ -72,14 +76,15 @@ Recheck the resulting `main` evidence before claiming issue completion.
 
 ## v1.2.0 context-optimization release
 
-Client-side context optimization follows v1.1.0 as a normal Hormuz minor
-release. Its [implementation and trust-boundary contract](CONTEXT_OPTIMIZATION.md)
+Client-side context optimization shipped as v1.2.0 before the unfinished
+portfolio program. Its [implementation and trust-boundary contract](CONTEXT_OPTIMIZATION.md)
 keeps selection, transformation, reconstruction verification, and token
 estimates on the user's machine while preserving existing gateway policy,
 budget, accounting, and secret controls. The preference is Off by default and
 can change per saved local profile without changing a server policy.
 
-The published v1.2.0 release does not reuse the frozen v1.1.0 portfolio scope.
+The published v1.2.0 release does not claim the frozen portfolio scope, whose
+remaining product work now targets v1.3.0.
 Its exact-commit evidence covers the packaged Apple Silicon helper and
 tokenizers, clean installation, supported-client behavior, a bounded
 OpenAI-only paired evaluation, CI/review, hosted recovery, and signed OCI
@@ -298,8 +303,8 @@ regional-failure claim.
 
 Before v1.0.0, a change was current-priority only if it removed deprecated
 context coupling, stabilized the policy/evidence contract, fixed a security or
-correctness defect, or closed a production-readiness gate. The ordered v1.1.0
-gate above now supersedes that release-specific prioritization.
+correctness defect, or closed a production-readiness gate. The ordered v1.3.0
+portfolio gate above now supersedes that release-specific prioritization.
 
 Work is organized as a small PR for one issue and one verifiable outcome. Contract and package evidence are required before merge. Schema compatibility, migration, rollback, recovery, and failure behavior are implementation work, not deferred operational cleanup.
 

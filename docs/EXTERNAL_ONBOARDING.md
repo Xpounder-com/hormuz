@@ -1,7 +1,12 @@
 # External onboarding validation for Hormuz v1.0.0
 
-This is the active, post-release validation tracked by
-[issue #110](https://github.com/Xpounder-com/hormuz/issues/110). Current human
+> **Historical protocol.** Issue #110 closed as superseded after v1.2.0
+> publication with its result unchanged at 0/5 initial completions and 0/1
+> returning user. Current Apple Silicon app onboarding is tracked in issue #307;
+> no observation from this study counts toward that release's acceptance.
+
+This was the post-release validation tracked by
+[issue #110](https://github.com/Xpounder-com/hormuz/issues/110). Its final human
 evidence is **0/5 independent initial completions** and **0 returning users**.
 Internal repetitions, maintainers, AI agents, sandboxes, and synthetic fixtures
 do not count.
@@ -14,11 +19,11 @@ installation and provider-free-demo usability claim. It does not prove the
 separate policy-administrator workflow, PostgreSQL state correctness,
 production readiness, security certification, customer demand, or market fit.
 
-## Volunteer
+## Historical volunteer intake
 
-Add a thumbs-up reaction or the single word `Interested` to
-[issue #110](https://github.com/Xpounder-com/hormuz/issues/110). Do not post an
-email address, participant ID, session result, employer, customer information,
+This study is no longer recruiting. Its original intake asked a volunteer to
+add a thumbs-up reaction or the single word `Interested` to issue #110 and not
+post an email address, participant ID, session result, employer, customer information,
 configuration, credential, prompt, response, path, hostname, log, or screenshot.
 
 A maintainer will schedule a session only after both sides establish a mutually
@@ -234,11 +239,11 @@ and cannot count for the new digest.
 
 ## Completion and nonclaims
 
-Issue #110 is complete only when the real aggregate passes, every started
-session is included, five to ten distinct humans are attested off-repository,
-all four personas are covered, at least five independent initial sessions
-qualify, a successful participant returns on a later date, and no onboarding
-blocker remains open.
+Under this historical protocol, issue #110 would have been complete only when
+the real aggregate passed, every started session was included, five to ten
+distinct humans were attested off-repository, all four personas were covered,
+at least five independent initial sessions qualified, a successful participant
+returned on a later date, and no onboarding blocker remained open.
 
 Passing proves only the tested v1.0.0 installation and provider-free demo were
 usable by this bounded independent cohort. It does not prove the separate

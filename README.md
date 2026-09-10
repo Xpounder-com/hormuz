@@ -348,7 +348,7 @@ Public TLS remains a customer-controlled ingress responsibility. Read
 | Policy administration | [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) |
 | Usage, tokens, cost, and budgets | [docs/USAGE.md](docs/USAGE.md) |
 | Provider streaming, latency, failover, and compute boundaries | [docs/PROVIDER_RELIABILITY.md](docs/PROVIDER_RELIABILITY.md) |
-| v1.1.0 source development: portfolio registry, attribution, outcomes, finance, and internal work budgets | [docs/PORTFOLIO_INTELLIGENCE.md](docs/PORTFOLIO_INTELLIGENCE.md) and [docs/WORK_BUDGETS.md](docs/WORK_BUDGETS.md) |
+| Post-v1.2 portfolio development (v1.3.0 target): registry, attribution, outcomes, finance, and internal work budgets | [docs/PORTFOLIO_INTELLIGENCE.md](docs/PORTFOLIO_INTELLIGENCE.md) and [docs/WORK_BUDGETS.md](docs/WORK_BUDGETS.md) |
 | Secret-egress controls | [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) |
 | Audit contracts and export | [docs/AUDIT.md](docs/AUDIT.md) |
 | Persistence and migrations | [docs/STORAGE.md](docs/STORAGE.md) |
@@ -380,15 +380,17 @@ It does not prove provider-invoice reconciliation or every client feature.
 It does not prove enterprise production readiness.
 It does not cover traffic bypassing Hormuz.
 
-External onboarding is now recruiting under
-[issue #110](https://github.com/Xpounder-com/hormuz/issues/110) using the
-[v1.0.0 study protocol](docs/EXTERNAL_ONBOARDING.md). As of August 30, 2026, its published count is
-**0/5 independent initial completions** and **0 returning users**. Every counted
-session is bound to the immutable released source-archive digest, and its strict
-aggregate uses only opaque IDs and fixed metadata fields; Hormuz adds no product
-telemetry. Issue #110 must close before Hormuz claims validated human
-onboarding, but it is not a dependency for the already published v1.0.0 release
-or its bounded internal-repeatability claim.
+Current external onboarding is tracked in
+[issue #307](https://github.com/Xpounder-com/hormuz/issues/307) against the exact
+published v1.2.0 Apple Silicon app and the bounded Okta/Codex/OpenAI hosted path.
+As of September 10, 2026, its published count is **0/1 independent completion**
+and **0/1 returning session**. AI assistance may explain the shipped
+instructions, but an AI-only run cannot count as the external participant or
+customer acceptance. The earlier v1.0.0 source-archive study remains as the
+[historical protocol](docs/EXTERNAL_ONBOARDING.md) and closed
+[issue #110](https://github.com/Xpounder-com/hormuz/issues/110); its 0/5 result
+was not reclassified. This post-release validation does not block v1.2.0 and
+does not create a production-readiness or SLA claim.
 
 ## Open source and enterprise evaluation
 
