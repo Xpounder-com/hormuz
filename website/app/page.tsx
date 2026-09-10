@@ -30,7 +30,7 @@ const faqs = [
   ['Is this a hosted AI subscription?', 'The current offer supports a self-hosted gateway. You operate the infrastructure and bring your own provider accounts. Provider usage, infrastructure, and applicable taxes are additional. Managed hosting and 24/7 operations are not included.'],
   ['Does a pilot turn into an ongoing subscription?', 'No. The pilot does not automatically renew. Enterprise support starts at $2,000 USD/month under a separate agreement, with defined hours, response targets, and cancellation terms.'],
   ['Will Hormuz cover all of our AI traffic?', 'Hormuz governs supported requests routed through the gateway. Traffic that bypasses it is outside its coverage. Your environment’s TLS, credential custody, recovery, availability, and security review must be qualified before a production rollout.'],
-  ['How would context optimization handle my data?', 'The Hormuz 1.2 design goal is an optional feature that is Off by default. Eligible repetitive tool results would be encoded and verified on your device; one selected representation would then travel through your configured Hormuz gateway, where the usual controls would still apply. It would be an encoding, not encryption, and savings are not guaranteed. This public source does not ship the feature yet.'],
+  ['How does context optimization handle my data?', 'Hormuz 1.2.0 ships context optimization as an optional feature that is Off by default. Eligible repetitive tool results are encoded and verified on your device; one selected representation then travels through your configured Hormuz gateway, where the usual controls still apply. It is an encoding, not encryption, and savings are not guaranteed.'],
 ];
 
 export default function Home() {

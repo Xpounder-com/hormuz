@@ -6,7 +6,7 @@ import { CodeBlock } from '../components/CodeBlock';
 
 export const metadata = pageMetadata('Quickstart & downloads — Hormuz', 'Install the stable source release, run the real gateway without provider keys, and connect a supported AI client.', '/docs/');
 
-const quickstart = `git clone --branch v1.0.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
+const quickstart = `git clone --branch v1.2.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
 cd hormuz
 python3 -m venv .venv
 source .venv/bin/activate
@@ -46,14 +46,15 @@ PASS external provider calls: 0 (3 loopback simulator calls)`}</code></pre></div
           <div className="docs-callout"><span aria-hidden="true">i</span><p><strong>Something failed?</strong> Confirm Python 3.11+, the active virtual environment, and permission to bind local ports. Share the command, version, and sanitized error via <a href={sourcePath('SUPPORT.md')}>Support</a>—never provider tokens, prompts, or customer configuration.</p></div>
         </section>
         <section id="downloads" className="docs-section">
-          <p className="section-label">02 / Select a distribution</p><h2>Two version streams. Explicit evidence.</h2>
+          <p className="section-label">02 / Select a distribution</p><h2>Three distributions. Explicit evidence.</h2>
           <div className="table-scroll"><table className="comparison-table"><caption>Current published distribution boundaries</caption><thead><tr><th scope="col">Distribution</th><th scope="col">Version</th><th scope="col">Use and boundary</th></tr></thead><tbody>
-            <tr><th scope="row">Source</th><td>v1.0.0</td><td>Stable CLI, policy, and evidence contracts. The quickstart checks out this tag. <a href={REPOSITORY + '/releases/tag/v1.0.0'}>Release & canonical archive ↗</a></td></tr>
-            <tr><th scope="row">Signed OCI reference</th><td>v0.1.3</td><td>Separately pinned linux/amd64 reference image. Do not relabel it v1.0.0. <a href={sourcePath('docs/OCI.md')}>Image and signature verification ↗</a></td></tr>
+            <tr><th scope="row">Source</th><td>v1.2.0</td><td>Stable v1 CLI, policy, and evidence contracts with default-Off local context optimization. The quickstart checks out this tag. <a href={REPOSITORY + '/releases/tag/v1.2.0'}>Release & evidence ↗</a></td></tr>
+            <tr><th scope="row">Apple Silicon companion</th><td>v1.2.0</td><td>Developer ID signed and notarized for Apple Silicon on macOS 14 or later. Intel Macs are unsupported. <a href={REPOSITORY + '/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip'}>Download notarized ZIP ↓</a></td></tr>
+            <tr><th scope="row">Signed OCI reference</th><td>v1.2.0</td><td>Public <code>linux/amd64</code> image at <code>ghcr.io/xpounder-com/hormuz:v1.2.0</code>. Pin the immutable digest from the release evidence. <a href={sourcePath('docs/OCI.md')}>Image and signature verification ↗</a></td></tr>
           </tbody></table></div>
-          <p>The immutable final source release points to its original custody archive; it does not duplicate or rebuild those bytes. For exact-artifact evaluation, use the archive and verification instructions linked from the release, not a fresh source build.</p>
-          <p><a href={REPOSITORY + '/releases/download/candidate-v1.0.0-2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a/hormuz-1.0.0.tar.gz'}>Download canonical hormuz-1.0.0.tar.gz ↗</a></p>
-          <details className="disclosure"><summary>Canonical archive SHA-256</summary><code className="hash">2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a</code></details>
+          <p>The v1.2.0 release attaches the exact Mac archive, Python wheel and source archive, checksum manifest, and content-free qualification evidence. Use the tagged source and attached checksums when reproducing a version-specific result.</p>
+          <div className="resource-actions"><a href={REPOSITORY + '/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip'}>Download signed Mac app ↓</a><a href={REPOSITORY + '/releases/download/v1.2.0/SHA256SUMS.txt'}>Download SHA256SUMS.txt ↓</a></div>
+          <details className="disclosure"><summary>Notarized Mac archive SHA-256</summary><code className="hash">0a18536765245a3b2510644303a0a4ce253af2ab4d08168e129feb9d7e2501f0</code></details>
           <p>Documentation links follow the public main branch and can evolve beyond a release. Use the tagged source when reproducing a version-specific result. No PyPI installation or package ownership is implied by this guide.</p>
         </section>
         <section id="policy-tour" className="docs-section">

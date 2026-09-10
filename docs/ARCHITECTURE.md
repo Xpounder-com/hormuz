@@ -188,7 +188,16 @@ Hormuz implements the provider endpoints required by Codex and Claude Code rathe
 
 ## Identity boundary
 
-OIDC authentication is currently a resource-server path for JWT access tokens. Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one refresh, and authorization attributes come only from the configured `(issuer, subject)` mapping. Hormuz does not trust caller-provided group or team claims. Browser login, refresh-token custody, opaque-token introspection, SCIM, and active revocation remain separate enterprise milestones; see [OIDC.md](OIDC.md).
+Direct OIDC authentication is a resource-server path for JWT access tokens.
+Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one
+refresh, and authorization attributes come only from the configured `(issuer,
+subject)` mapping. Hormuz does not trust caller-provided group or team claims.
+The optional browser-login broker uses authorization code with PKCE and mints
+client-bound, rotating Hormuz sessions without retaining identity-provider
+access or refresh tokens. Logout, mapping changes, and managed-member removal
+provide active Hormuz-session revocation. The broker is disabled by default;
+opaque provider-token introspection, SCIM, and distributed or multi-region
+session enforcement remain separate deployment work. See [OIDC.md](OIDC.md).
 
 ## Root-authority boundary
 

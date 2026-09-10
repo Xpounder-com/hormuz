@@ -47,7 +47,7 @@ support expectations before work begins.
 
 Evidence: [architecture](../docs/ARCHITECTURE.md), [clients](../docs/CLIENTS.md),
 [usage](../docs/USAGE.md), [support boundaries](../SUPPORT.md),
-[v1.0.0 release](https://github.com/Xpounder-com/hormuz/releases/tag/v1.0.0).
+[v1.2.0 release](https://github.com/Xpounder-com/hormuz/releases/tag/v1.2.0).
 
 ## Enterprise pricing
 

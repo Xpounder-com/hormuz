@@ -2,6 +2,8 @@
 
 Hormuz's first customer distribution path is a Developer ID signed and Apple-notarized download. It does not require Mac App Store review, App Sandbox adoption, or an App Store listing; Apple's [notarization overview](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) describes this automated trust check as separate from App Review. The existing local preview remains an ad hoc build with bundle identifier `com.hormuz.mac.local`; it is never a customer artifact.
 
+The current customer artifact is [Hormuz v1.2.0 for Apple Silicon](https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip). Verify it against the release's [SHA-256 manifest](https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0/SHA256SUMS.txt) before installation. The [release page](https://github.com/Xpounder-com/hormuz/releases/tag/v1.2.0) publishes the exact source commit, qualification boundaries, and content-free evidence.
+
 The permanent identifier is `com.xpounder.hormuz`, registered as an explicit App ID in Apple Developer team `R267LZMUTY`. Treat both values as identity decisions: changing the identifier or signing team later changes the app's designated requirement and can disrupt Keychain access, updates, and rollback behavior. The current app has no custom entitlements and uses no provisioning profile. Apple's [Developer ID guidance](https://developer.apple.com/support/developer-id/) requires a Developer ID provisioning profile only when an app adopts advanced capabilities such as CloudKit; registering the explicit App ID now reserves the customer identity without adding such a profile to this build.
 
 ## What the Developer membership supplies

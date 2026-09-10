@@ -1,7 +1,7 @@
 # Hormuz trust and data-flow brief
 
 Scope: current v1 source contracts and public reference evidence, reviewed
-August 30, 2026. This is an engineering summary, not an independent assessment,
+September 10, 2026. This is an engineering summary, not an independent assessment,
 certification, legal opinion, or data-processing agreement.
 
 ## Request path
@@ -24,16 +24,18 @@ traffic, and requests outside this route are not governed by Hormuz.
 
 ## Implemented versus not claimed
 
-- OIDC JWT resource-server verification is implemented. Issuance and refresh
-  stay with the identity tooling. Native Hormuz browser login, refresh custody,
-  and its own session-revocation endpoint are not currently provided.
+- OIDC JWT resource-server verification is implemented. The opt-in hosted
+  evaluation path also provides browser login and revocable Hormuz sessions;
+  real-IdP, recovery, and operating evidence remain deployment-specific.
 - Deterministic secret modes are redact, deny, and off. No complete semantic
   DLP guarantee is made. Custody-lifecycle approvals are not per-inference
   human approval.
 - Costs are configured-rate-card estimates for captured requests, not
   reconciled provider invoices or complete provider-account spending.
-- v1.0.0 stabilizes CLI/policy/evidence contracts. The separately signed OCI
-  reference is v0.1.3 linux/amd64. Neither label certifies a customer deployment.
+- v1.2.0 preserves the stable CLI/policy/evidence contracts and adds default-Off
+  local context optimization plus a signed Apple Silicon companion. Its matching
+  signed OCI reference is linux/amd64. None of those artifacts certifies a
+  customer deployment.
 - Public reference tests and the synthetic demo are not independent security
   review, human onboarding validation, customer endorsements, or an SLA.
 

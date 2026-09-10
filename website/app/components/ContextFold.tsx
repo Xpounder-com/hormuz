@@ -12,10 +12,10 @@ export function ContextFold() {
   const shadow = `${id}-shadow`;
   const caption = `${id}-caption`;
 
-  return <figure className="context-fold" data-optimized={optimized} aria-label="Interactive context optimization design preview">
+  return <figure className="context-fold" data-optimized={optimized} aria-label="Interactive context optimization illustration">
     <header className="context-fold-header">
       <span><BrandMark /> THE CONTEXT FOLD</span>
-      <span className="context-fold-preview">DESIGN PREVIEW</span>
+      <span className="context-fold-preview">INTERACTIVE ILLUSTRATION</span>
     </header>
     <div className="context-fold-heading">
       <span className="context-fold-kicker">LESS REPETITION. SAME INFORMATION.</span>

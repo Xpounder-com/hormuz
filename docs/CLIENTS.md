@@ -121,11 +121,14 @@ The helper does not load server configuration and does not mint tokens. It re-re
 For a company rollout, endpoint management should install the client configuration
 and provision a unique identity for each human or service account. Shared employee
 tokens make per-person attribution and revocation unreliable. OIDC JWT verification
-is available. The opt-in [local browser login preview](HOSTED_LOGIN_LOCAL.md) adds
-opaque, rotating client sessions, and [local team onboarding](TEAM_ONBOARDING.md)
-adds invitations and member removal. These previews still require real identity
-provider qualification, signed client distribution, and hosted recovery evidence
-before a managed rollout. SCIM remains future work. Provider keys remain server-side.
+is available. The opt-in [browser-login broker](HOSTED_LOGIN_LOCAL.md) adds opaque,
+rotating client sessions, and [team onboarding](TEAM_ONBOARDING.md) adds invitations
+and member removal. Hormuz v1.2.0 includes a signed Apple Silicon distribution and
+bounded Okta, Render, hosted-recovery, and OpenAI/Codex qualification for the exact
+release candidate. Other identity providers, model providers, deployments, clients,
+operating systems and architectures require their own qualification. SCIM,
+independent customer acceptance, and any availability or latency SLA remain future
+work. Provider keys remain server-side.
 
 The native app exposes the same distinction as an explicit setup choice. Its
 hosted Codex/OpenAI preset enforces HTTPS, Codex, and the two approved aliases;

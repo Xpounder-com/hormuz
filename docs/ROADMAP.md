@@ -79,11 +79,13 @@ estimates on the user's machine while preserving existing gateway policy,
 budget, accounting, and secret controls. The preference is Off by default and
 can change per saved local profile without changing a server policy.
 
-The v1.2.0 release does not reuse the frozen v1.1.0
-portfolio scope. Release qualification additionally requires the packaged
-Apple Silicon helper and tokenizers, installed-client proof, paired model-quality
-evaluation, exact-head CI/review, and explicit publication authorization. See the
-[v1.2.0 release note](releases/v1.2.0-context-optimization.md).
+The published v1.2.0 release does not reuse the frozen v1.1.0 portfolio scope.
+Its exact-commit evidence covers the packaged Apple Silicon helper and
+tokenizers, clean installation, supported-client behavior, a bounded
+OpenAI-only paired evaluation, CI/review, hosted recovery, and signed OCI
+publication. Intel support, same-candidate Anthropic qualification, independent
+certification, customer acceptance, and a production SLA remain outside that
+release claim. See the [v1.2.0 release note](releases/v1.2.0-context-optimization.md).
 
 ## v1.0.0 foundation implementation history
 
@@ -223,8 +225,9 @@ The approved deployment hierarchy in [#100](https://github.com/Xpounder-com/horm
 keeps the signed OCI digest as the application contract and treats deployment
 profiles as separately verified operational references. [#101](https://github.com/Xpounder-com/hormuz/issues/101)
 is complete with the first signed, anonymously pullable `v0.1.1` Linux AMD64
-digest. The current supported artifact is the separately verified `v0.1.3`
-digest; `v0.1.1` remains the prior supported rollback target.
+digest. The current signed artifact is the verified `v1.2.0` digest; the older
+`v1.0.0`, `v0.1.3`, and `v0.1.1` artifacts retain their documented historical
+and rollback-evidence roles.
 The first deployment profile, [#102](https://github.com/Xpounder-com/hormuz/issues/102),
 is implemented in [PR #137](https://github.com/Xpounder-com/hormuz/pull/137):
 one hardened gateway and one private persistent PostgreSQL service on a single

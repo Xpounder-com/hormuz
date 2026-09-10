@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { BrandMark } from './Brand';
-import { sitePath } from '../../lib/site.mjs';
+import { REPOSITORY, sitePath } from '../../lib/site.mjs';
 
 type Panel = 'home' | 'connection' | 'client' | 'appearance' | 'cost' | 'tokens' | 'requests';
 const metrics = [
@@ -88,10 +88,11 @@ export function CompanionPreview() {
     <div className="companion-intro">
       <p className="landing-eyebrow">HORMUZ FOR APPLE SILICON · INTERACTIVE PREVIEW</p>
       <h2 id="companion-title">A little presence.<br /><em>Everything within reach.</em></h2>
-      <p>Usage at the edge of your screen. Your connection, client setup, and session controls a click away. The signed pilot app supports Apple Silicon on macOS 14 or later.</p>
+      <p>Usage at the edge of your screen. Your connection, client setup, and session controls a click away. The signed v1.2.0 app supports Apple Silicon on macOS 14 or later.</p>
       <div className="companion-intro-actions">
         <button type="button" className="companion-launch" aria-controls={cardId} aria-expanded={panel !== null}
           onClick={event => open('home', event.currentTarget)}>Explore the controls <span aria-hidden="true">↗</span></button>
+        <a className="companion-setup-link" href={`${REPOSITORY}/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip`}>Download v1.2.0 <span aria-hidden="true">↓</span></a>
         <a className="companion-setup-link" href={sitePath('/integrations/')}>Explore client setup <span aria-hidden="true">↗</span></a>
       </div>
       <p className="companion-hint">Try it right here. Example data, no sign-in needed.</p>
@@ -136,7 +137,7 @@ export function CompanionPreview() {
           {panel === 'home' && <><h3>Your AI, governed.</h3><p>Engineering · Example team</p><p className={expired ? 'companion-warning' : 'companion-status'}>{expired ? 'Session expired' : 'Connected in this example'}</p>
             {(['connection', 'client', 'appearance'] as const).map((page, index) => <button type="button" className="companion-row" key={page} onClick={() => setPanel(page)}><span><strong>{['Connection', 'Client setup', 'Appearance'][index]}</strong><small>{['Session & Keychain', 'Review your client configuration', 'Size & visibility'][index]}</small></span><span aria-hidden="true">›</span></button>)}</>}
           {panel === 'connection' && <><h3>{expired ? 'Session expired' : 'Your access, kept close.'}</h3><dl><div><dt>Organization</dt><dd>Example team</dd></div><div><dt>Client</dt><dd>Codex</dd></div><div><dt>Session storage</dt><dd>macOS Keychain</dd></div></dl><p>The Mac app stores your revocable Hormuz session in Keychain. Provider keys stay with your team.</p><button type="button" className="companion-action" onClick={() => setExpired(!expired)}>{expired ? 'Restore connected example' : 'Preview expired session'}</button><small>This only changes the illustration. This website cannot access your Keychain.</small></>}
-          {panel === 'client' && <><h3>Keep your tools.</h3><p>The Mac app helps you review client settings before saving and launching a governed session.</p><dl><div><dt>Example client</dt><dd>Codex</dd></div><div><dt>Provider</dt><dd>OpenAI</dd></div><div><dt>Scope</dt><dd>Launched session</dd></div><div><dt>Context optimization</dt><dd>Off · v1.2 design preview</dd></div></dl><a className="companion-action" href={sitePath('/integrations/')}>Read the setup guide ↗</a></>}
+          {panel === 'client' && <><h3>Keep your tools.</h3><p>The Mac app helps you review client settings before saving and launching a governed session.</p><dl><div><dt>Example client</dt><dd>Codex</dd></div><div><dt>Provider</dt><dd>OpenAI</dd></div><div><dt>Scope</dt><dd>Launched session</dd></div><div><dt>Context optimization</dt><dd>Off by default · v1.2.0</dd></div></dl><a className="companion-action" href={sitePath('/integrations/')}>Read the setup guide ↗</a></>}
           {panel === 'appearance' && <><h3>Make room for your work.</h3><p>Widget size</p><div className="companion-sizes" role="group" aria-label="Example widget size">{[1, 1.25, 1.5].map(value => <button type="button" key={value} aria-pressed={value === scale} onClick={() => setScale(value)}>{value * 100}%</button>)}</div><p>Visibility</p><button type="button" className="companion-action" onClick={() => { close(); setFolded(true); }}>Fold the widget</button><small>Click the edge tab to bring it back.</small></>}
           {metric && <><h3>{expired ? 'Session expired' : metric.detail}</h3><p>{expired ? 'Reconnect in the Mac app to refresh your usage. Unavailable totals are hidden rather than shown as zero.' : metric.copy}</p><small>Example totals · No percentage is implied without a configured limit.</small><button type="button" className="companion-action" onClick={() => setPanel('home')}>Open Hormuz controls</button></>}
           {panel && panel !== 'home' && <button type="button" className="companion-back" onClick={() => setPanel('home')}>← All controls</button>}

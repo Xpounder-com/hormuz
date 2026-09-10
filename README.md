@@ -330,7 +330,7 @@ concurrency, rollback, and compatibility behavior.
 | --- | --- | --- |
 | Source + SQLite | Local evaluation and one-process operation | Not a shared or HA store |
 | [Signed OCI image](docs/OCI.md) | Version-matched Linux `amd64` reference | Digest is the artifact contract; no mutable `latest` tag |
-| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | Developer ID signed and notarized direct download; Intel Macs are unsupported |
+| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | Developer ID signed and notarized [v1.2.0 download](https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip); [checksums and qualification evidence](https://github.com/Xpounder-com/hormuz/releases/tag/v1.2.0); Intel Macs are unsupported |
 | [Docker Compose](deploy/compose/README.md) | Provider-free single-VM evaluation or pilot | One gateway replica; not HA or production certification |
 | [Kubernetes + Helm](deploy/kubernetes/README.md) | Bounded multi-replica reference | Customer-operated PostgreSQL and ingress; not general HA/DR certification |
 
