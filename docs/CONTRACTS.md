@@ -10,9 +10,11 @@ hormuz contract manifest
 
 The manifest is the canonical inventory of current schema IDs, versions, error codes, enforcement meanings, and compatibility rules. The fixtures in `tests/fixtures/contracts/` are the executable examples for those contracts.
 
-## Accepted v1.1 additive contract
+## Accepted portfolio additive contract
 
-The planned v1.1.0 portfolio-intelligence surface is frozen separately in
+The portfolio-intelligence surface was originally frozen for the unreleased
+v1.1.0 plan and now feeds the v1.3.0 target without rewriting its historical
+contract identifiers. It is defined separately in
 [`portfolio-intelligence-contract-v1.json`](portfolio-intelligence-contract-v1.json),
 [the field-level wire-schema bundle](portfolio-intelligence-wire-v1.json),
 [ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md), and the

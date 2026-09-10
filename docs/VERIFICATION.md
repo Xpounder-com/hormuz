@@ -2,7 +2,7 @@
 
 This file records executable evidence for client/provider compatibility. It intentionally contains no provider credentials, prompts, responses beyond fixed test markers, or employee secrets.
 
-## v1.1 portfolio-intelligence contract gate
+## Frozen v1.1 portfolio contract gate for the v1.3 program
 
 The accepted v1.1.0 design, exact v1.0.0 baseline manifest, documentation set,
 and additive-compatibility guard are verified with:
@@ -109,7 +109,7 @@ migration, wire field, command, version bump, or release is provided by this
 gate. Close #213 only after review, package/client checks, and exact-main CI;
 #214 and the downstream portfolio issues remain separate gates.
 
-## v1.1.0 registry implementation and transition
+## Registry implementation and transition (v1.3 foundation)
 
 The [#214/#215 transition guide](REGISTRY_TRANSITION.md) records the exact
 released-v1 source baseline, compatibility inventory, stop/migrate/restart
@@ -143,7 +143,7 @@ cases, for 103 total owned cases.
 Populated policy/custody recovery and exact final signed OCI/Compose transitions
 remain #214 final-candidate gates. Do not close #214 on registry-only evidence.
 
-## v1.1.0 attribution implementation and transition
+## Attribution implementation and transition (v1.3 foundation)
 
 The [#214/#216 transition](ATTRIBUTION_TRANSITION.md) implements the accepted
 optional admission contract and SQLite 5-to-6 / PostgreSQL 9-to-10 transitions.
@@ -299,7 +299,21 @@ the fixed nonclaims `not_claude_code_qualification`,
 `not_cross_provider_failover`, and `not_provider_wide_outage_protection` to the
 ordinary controlled-pilot limitations.
 
-## Active post-publication onboarding-validation milestone
+## Current post-release customer acceptance
+
+Current Apple Silicon app onboarding is tracked in
+[issue #307](https://github.com/Xpounder-com/hormuz/issues/307) against the exact
+published v1.2.0 artifact and bounded Okta/Codex/OpenAI hosted path. Its current
+count is 0/1 independent completion and 0/1 returning session. AI assistance
+may explain shipped instructions, but an AI-only run cannot count as the
+participant or customer acceptance. The release remains published while that
+post-release validation is open.
+
+The v1.0.0 procedure below is retained as a historical verifier contract. Issue
+#110 closed as superseded with its result unchanged; it is no longer recruiting
+and none of its evidence can qualify #307.
+
+## Historical v1.0.0 onboarding-validation contract
 
 The v1.0.0 invited-reviewer procedure and strict content-free aggregate are
 defined in [EXTERNAL_ONBOARDING.md](EXTERNAL_ONBOARDING.md). Every counted
@@ -321,21 +335,23 @@ python tools/verify_external_onboarding_evidence.py \
   --allow-synthetic-fixture
 ```
 
-Synthetic evidence always reports `validated_human_onboarding: false`. Actual
-evidence requires an off-repository distinct-human attestation, five to ten
+Synthetic evidence always reports `validated_human_onboarding: false`. Under
+the historical contract, actual evidence would require an off-repository
+distinct-human attestation, five to ten
 preregistered participants, at least five independent installation/demo
 completions across all four reviewer personas, a later returning-user session,
 and correction plus automated regression and independent retest of every
-blocker. Recruitment is active; the honest count remains 0/5 initial
-completions and zero returning users. Internal and synthetic runs do not count.
-Closing #110 remains mandatory before any validated-human-onboarding claim, but
-it is not a v1.0.0 release dependency. The validator does not prove the
+blocker. Recruitment ended with the honest count at 0/5 initial completions and
+zero returning users. Internal and synthetic runs do not count. Issue #110
+closed as superseded, not completed; current v1.2.0 onboarding claims depend on
+#307 instead. The historical validator does not prove the
 off-repository identity attestation or replace #115's separately completed
 live-provider evidence.
 
 The older [QUIET_ALPHA.md](QUIET_ALPHA.md) protocol and
 `hormuz.quiet-alpha-evidence` v1 validator remain archived v0.1.3 compatibility
-material. They cannot satisfy the active v1.0.0 milestone.
+material. They cannot satisfy either the historical v1.0.0 contract or current
+issue #307.
 
 ## Durable-data inventory boundary
 
@@ -480,15 +496,16 @@ new digest.
 
 Synthetic and internal results never satisfy this deferred human study. The
 current count remains 0/5 offline and 0/3 PostgreSQL. This is separate from the
-installation/demo evidence tracked by issue #110: the same people may
-participate in both, but neither result may be relabeled as the other. The
+historical installation/demo evidence tracked by closed issue #110: the same
+people could have participated in both, but neither result may be relabeled as
+the other or counted toward current issue #307. The
 legacy human-evidence schema is not accepted by the v1 candidate manifest or
 promotion command and must not be reported as completed from the internal
 sandbox result.
 
 ## Launch-claim boundary
 
-The tester-recruitment drafts and their schema-v2 claim ledger live under
+The archived tester-recruitment drafts and their schema-v2 claim ledger live under
 [`docs/launch`](launch/README.md). Validate them with:
 
 ```bash
@@ -502,9 +519,9 @@ claims to closed issues plus repository evidence, labels roadmap and nonclaim
 statements separately, rejects unapproved links or template tokens, and freezes
 the privacy-bounded launch measures. It does not query GitHub or prove that an
 issue remains closed; final publication requires a fresh remote review and
-recorded owner approval. Issue #110 remains an explicitly pending
-post-publication validation milestone at 0/5, not a prerequisite for the
-bounded tester-recruitment announcement.
+recorded owner approval. Issue #110 closed as superseded at 0/5. These assets
+remain historical fixtures and are not a current announcement or a substitute
+for the v1.2.0 customer-acceptance issue #307.
 
 ## 2026-08-15
 

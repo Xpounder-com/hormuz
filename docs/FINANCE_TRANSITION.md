@@ -1,4 +1,4 @@
-# v1.1.0 finance reconciliation checkpoint
+# Finance reconciliation checkpoint (frozen v1.1 design; v1.3 target)
 
 Historical preflight: the later [durable rate-card slice](FINANCE_RATE_CARDS.md)
 uses the reviewed [v2 successor](finance-transition-plan-v2.json) for schema 8/12.
@@ -208,7 +208,8 @@ set `HORMUZ_TEST_OUTCOME_PYTHON` to its interpreter. The isolated driver checks
 the distribution source digest, all 105 runtime files, schema 7/11, and loads
 fixtures from the same verified archive bytes. Changed, extra or missing
 runtime files fail verification. This is an accepted development checkpoint,
-not a published v1.1.0 artifact.
+not a published portfolio release artifact. The current product target is
+v1.3.0.
 
 Supply the earlier `HORMUZ_TEST_V1_PYTHON`, `HORMUZ_TEST_REGISTRY_PYTHON` and
 `HORMUZ_TEST_ATTRIBUTION_PYTHON` from the

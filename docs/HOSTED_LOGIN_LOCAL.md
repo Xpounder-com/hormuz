@@ -13,7 +13,8 @@ It provides browser login, client-bound opaque sessions, governed requests,
 personal usage, refresh, and logout. The local verification path needs no paid
 cloud account, production IdP registration, customer credential, or model call;
 running those tests does not itself create or activate a hosted service. The
-separate v1.1 portfolio program remains independently gated.
+separate v1.3 portfolio program remains independently gated; its frozen
+contract identifiers retain their original v1.1 names.
 
 The [accepted session decision](decisions/0001-oidc-login-and-session-architecture.md)
 was previously implemented in experimental commit `49d3086`. Only the session

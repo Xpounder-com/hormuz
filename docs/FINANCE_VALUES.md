@@ -1,4 +1,4 @@
-# v1.1.0 finance value foundation
+# Finance value foundation (frozen v1.1 design; v1.3 target)
 
 This is the first **non-durable implementation slice** of #8, under the
 [finance checkpoint](FINANCE_TRANSITION.md). It supplies pure, provider-free

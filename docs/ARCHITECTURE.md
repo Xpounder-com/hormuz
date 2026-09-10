@@ -40,11 +40,13 @@ Custody authorization (managed PostgreSQL mode)
         +--> no KMS work in the human-authorization service
 ```
 
-## Planned v1.1 portfolio plane
+## Planned portfolio plane
 
-The accepted v1.1.0 design adds a portfolio-intelligence plane beside the v1
-request and evidence path. It is planned work, not an implemented runtime
-claim:
+The accepted design originated under the unreleased v1.1.0 plan. Its remaining
+product work now targets v1.3.0 after v1.2.0 shipped, while frozen contract
+identifiers remain unchanged. It adds a portfolio-intelligence plane beside the
+v1 request and evidence path; the complete plane is planned work, not a current
+runtime claim:
 
 ```text
 immutable v1 request / usage / policy evidence
@@ -147,7 +149,7 @@ Future portfolio repositories require the relevant #214 compatibility preflight
 and feature gates; they must own their own protocols, schemas, and SQL beside
 the unchanged usage ledger. See the [verification record](VERIFICATION.md#v1-usage-repository-composition-gate).
 
-The v1.1 work-budget runtime keeps that public boundary intact. Gateway startup
+The portfolio work-budget runtime keeps that public boundary intact. Gateway startup
 explicitly composes a separate typed `WorkBudgetRequestRepository` adapter only
 for the two built-in usage stores. That adapter reaches the private
 adapter-owned transaction required to commit the request root, attribution,

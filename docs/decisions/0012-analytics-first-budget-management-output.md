@@ -2,14 +2,15 @@
 
 - Status: Accepted
 - Date: 2026-08-31
-- Target: Hormuz 1.1.0
+- Target: originally Hormuz 1.1.0; current portfolio target v1.3.0
 - Issues: #214, #217, #222, #223, #224
 - Supersedes: only the planned default budget-report output version in ADR 0011
 - Approval: owner-approved direction recorded in
   https://github.com/Xpounder-com/hormuz/issues/217#issuecomment-5487469699
 - Preflight acceptance: merged-main evidence recorded in
   https://github.com/Xpounder-com/hormuz/issues/214#issuecomment-5487882220
-- Open gates: #217 runtime acceptance and #214 final-candidate acceptance
+- Acceptance update: #217 runtime accepted through PR #262 and exact-main CI
+  run `33630063750`; #214 final-candidate acceptance remains open
 
 ## Context
 
@@ -77,6 +78,7 @@ is one explicit output version transition before runtime, plus deterministic
 rounding and non-comparability rules that implementation and client tests must
 honor.
 
-This ADR and its accepted preflight are not #217 runtime acceptance, #214
-final-candidate acceptance, role-view acceptance, finance-grade reconciliation,
-an external pilot, or a release.
+This ADR and its preflight did not by themselves establish runtime acceptance.
+The later #217 implementation is accepted through PR #262; that result is not
+#214 final-candidate acceptance, role-view acceptance, finance-grade
+reconciliation, an external pilot, or a release.

@@ -3,7 +3,7 @@
 Hormuz v1.2.0 publishes a Developer ID signed and notarized Apple Silicon client
 for the opt-in [browser-login broker](HOSTED_LOGIN_LOCAL.md). This document also
 keeps the local development and verification path explicit. Context optimization
-ships Off by default while the separate v1.1 portfolio program remains
+ships Off by default while the separate v1.3 portfolio program remains
 independently gated. Building and testing locally requires no paid cloud service.
 The app alone does not create hosted signup, billing, provider credential custody,
 automatic failover, an availability promise, or general production readiness.

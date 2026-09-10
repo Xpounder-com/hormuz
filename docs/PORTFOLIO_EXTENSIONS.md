@@ -1,13 +1,19 @@
-# Budget reports and Linear context: v1.1.0 design contracts
+# Budget reports and Linear context: frozen v1.1 designs, v1.3 target
 
 These began as owner-approved, separately versioned design records. #217 now
-implements the internal work-budget owner, atomic gateway enforcement, and the
-version-2 current report in source. The implementation is not yet a
-protected-main acceptance, public budget route or CLI command, running
-connector, or live/customer proof. The existing `hormuz contract manifest`
-describes the installed public surface and is unchanged.
+has protected-main acceptance for the internal work-budget owner, atomic
+gateway enforcement, and the version-2 current report through PR #262 and
+exact-main CI run `33630063750`. It does not add a public budget route or CLI
+command, running connector, or live/customer proof. Linear issue #220 and the
+rest of the v1.3.0 portfolio program remain separately gated. The existing
+`hormuz contract manifest` describes the installed public surface and is
+unchanged.
 
-The separately gated #217 transition checkpoint now selects
+The frozen extension verifier still reports `runtime_implemented: false`
+because it validates the original design bundle, not the later #217 runtime
+acceptance. That compatibility result is deliberately not rewritten.
+
+The #217 transition checkpoint selected
 `hormuz.work-budget-report` version 2 as the first runtime management result.
 ADR 0012 and [`BUDGET_TRANSITION.md`](BUDGET_TRANSITION.md) define that
 analytics-first successor. The digest-pinned version-1 bundle below remains

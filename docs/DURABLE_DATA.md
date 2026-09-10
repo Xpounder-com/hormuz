@@ -53,7 +53,7 @@ unregistered table.
 | `custody_lifecycle_and_projection` | — | `custody_envelope_attestations`, `custody_lifecycle_asset_identities`, `custody_lifecycle_chain_heads`, `custody_lifecycle_events`, `custody_runtime_projection_acks`, `custody_runtime_projection_barriers`, `custody_runtime_projection_heads`, `custody_runtime_projection_restrictions`, `custody_runtime_replicas` | Immutable asset identities/fingerprints, restriction events, projection versions, replica leases/acknowledgments, recovery codes, hashes, and envelope attestations. It stores no customer KMS key or provider credential plaintext. |
 | `custody_deletion_block_evidence` | — | `custody_deletion_events` | Evidence that a custody-history deletion request was blocked by retention, legal hold, or stronger-approval requirements. This table is not a delete executor and cannot authorize tenant deletion. |
 
-## v1.1 registry data and remaining portfolio plan
+## Frozen v1.1 registry identifiers and remaining v1.3 portfolio plan
 
 The #215 source implementation adds the five registry tables above in SQLite
 migration 5 and PostgreSQL migration 9. The #216 source implementation adds five
@@ -62,7 +62,7 @@ The #218 source implementation adds nine outcome tables in SQLite migration 7
 / PostgreSQL migration 11. The bounded #8 rate-card slice adds two finance tables
 in SQLite migration 8 / PostgreSQL migration 12. The #217 work-budget runtime
 adds five tables in SQLite migration 9 / PostgreSQL migration 13. None of these
-source changes is by itself a v1.1.0 release. Provider-invoice/general-ledger
+source changes is by itself a v1.3.0 portfolio release. Provider-invoice/general-ledger
 reconciliation, live connectors, scorecards and recommendations remain
 separately gated and have no tables in this inventory.
 The provider-reliability source slice adds two content-free, append-only tables

@@ -1,4 +1,4 @@
-# v1.1.0 governed-run attribution transition
+# Governed-run attribution transition (frozen v1.1 design; v1.3 foundation)
 
 This is #216's **source implementation and transition proof**, not #214
 final-candidate acceptance or a release. The #215 registry was accepted at main
@@ -22,7 +22,7 @@ v1.0.0 baseline archive/manifest digests and stop/migrate/restart procedure.
 | --- | --- | --- |
 | SQLite migration ledger | 5 | 6 |
 | PostgreSQL migration ledger | 9 | 10 |
-| Product release target | v1.1.0 development | v1.1.0 development |
+| Product release target | Frozen v1.1.0 design | v1.3.0 program foundation |
 | New attribution envelopes | Not implemented | Approved schema version 1 implemented |
 
 The immutable released-v1 baseline is still SQLite 4 / PostgreSQL 8. The final

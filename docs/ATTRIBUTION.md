@@ -1,10 +1,12 @@
-# Governed-run attribution (v1.1.0 development)
+# Governed-run attribution (frozen v1.1 design; accepted v1.3 foundation)
 
 Attribute an accounted AI request to one exact tenant-local use-case version
 without collecting its prompt, response, source code or work-item content.
-This is #216's source implementation, not a v1.1.0 release or external pilot.
-It adds SQLite migration 6 / PostgreSQL migration 10 and preserves v1 evidence.
-Follow the stopped-writer [transition procedure](ATTRIBUTION_TRANSITION.md).
+This is closed #216's source implementation and a foundation for the v1.3.0
+portfolio program, not completion of that release or its external pilot. It
+adds SQLite migration 6 / PostgreSQL migration 10 and preserves v1 evidence.
+Frozen v1.1 identifiers remain compatibility provenance. Follow the
+stopped-writer [transition procedure](ATTRIBUTION_TRANSITION.md).
 
 ## Operator-controlled admission
 

@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-09-01
-- Target: source development after the v1.1 work-budget runtime
+- Target: v1.3 portfolio development; the work-budget prerequisite is complete
 
 ## Context
 

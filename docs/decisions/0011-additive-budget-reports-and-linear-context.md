@@ -1,9 +1,10 @@
 # ADR 0011: Additive budget reports and Linear parent/context records
 
-- **Status:** Accepted design direction; runtime and feature checkpoints remain open.
+- **Status:** Accepted; the #217 budget runtime is complete and #220 Linear work remains open.
 - **Decision date:** August 31, 2026.
 - **Owner decision records:** [budget #217](https://github.com/Xpounder-com/hormuz/issues/217#issuecomment-5482219903) and [Linear #220](https://github.com/Xpounder-com/hormuz/issues/220#issuecomment-5482220483).
-- **Release:** v1.1.0, under #226; no release/tag or deployment authorization.
+- **Release:** Originally planned for v1.1.0 under #226; remaining delivery now
+  targets v1.3.0. This record grants no release/tag or deployment authorization.
 - **Contract:** [portfolio-extension-contract-v1.json](../portfolio-extension-contract-v1.json).
 
 ## Context and decision

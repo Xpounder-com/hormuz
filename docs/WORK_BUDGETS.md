@@ -1,11 +1,16 @@
-# Governed work budgets — v1.1.0 implementation slice
+# Governed work budgets — frozen v1.1 design, accepted v1.3 foundation
 
 This slice implements Hormuz's internal work-budget owner, pre-egress
 enforcement, and the analytics-first current report selected by ADR 0012. It
-does not add an HTTP route or CLI command, close #217, complete #214, or release
-v1.1.0. The frozen [v1 preflight](budget-transition-plan-v1.json) remains
-historical; the [v2 successor](budget-transition-plan-v2.json) records the
-bounded implementation and its still-open acceptance gates.
+does not add an HTTP route or CLI command, complete #214, or release the
+v1.3.0 portfolio program. The frozen
+[v1 preflight](budget-transition-plan-v1.json) remains historical; the
+[v2 successor](budget-transition-plan-v2.json) records the bounded
+implementation. Issue #217 closed after exact-head review, protected checks,
+normal merge, and exact-main acceptance through PR #262.
+The successor's frozen `budget_runtime_accepted: false` field records its
+pre-acceptance plan state; current issue closure is deliberately not written
+back into that evidence artifact.
 
 ## Management result
 
@@ -216,13 +221,13 @@ that provider-side URLs/files/state/tools cannot use request bytes as a false
 input bound while inline data remains supported, and that per-window denial
 reporting is bounded without dropping or hiding audit facts.
 
-## Remaining gates
+## Accepted boundary and remaining gates
 
-The implementation is not accepted merely because these files or local tests
-exist. #217 still requires exact-head technical review, every protected check,
-normal merge, and CI on the exact merged-main commit. #214 remains open for the
-final v1.0.0-to-v1.1.0 candidate artifact, migration, rollback, and populated
-recovery proof. Finance reconciliation (#8), external observations and
+The implementation was accepted on merged main
+`4e3133f19db4c34d7a181848ebc36754bce164ea` through PR #262 and exact-main CI
+run `33630063750`; files or local tests alone would not have closed #217. #214
+remains open for the final v1.0.0/v1.2.0-to-v1.3.0 candidate artifact,
+migration, rollback, and populated recovery proof. Finance reconciliation (#8), external observations and
 associations (#219–#221), model scorecards (#222), role-scoped delivery (#223),
 reviewable recommendations (#224), the preregistered independent pilot (#225),
 and owner authorization for release, tag, or deployment remain separate.

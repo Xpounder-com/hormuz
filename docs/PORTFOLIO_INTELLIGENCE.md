@@ -1,7 +1,12 @@
-# v1.1 portfolio intelligence contract
+# Portfolio intelligence contract (frozen v1.1 design; v1.3 release target)
 
-Hormuz v1.1.0 is designed to help authorized organizations align AI budgets
-and select models for declared use cases. The governing decision is
+This contract originated under the unreleased v1.1.0 plan. Because v1.2.0
+shipped first, the remaining portfolio program targets v1.3.0. Frozen v1.1
+schema identifiers, decision records, and accepted checkpoint evidence remain
+unchanged as compatibility provenance.
+
+The portfolio program is designed to help authorized organizations align AI
+budgets and select models for declared use cases. The governing decision is
 [ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md); the strict
 [machine-readable contract](portfolio-intelligence-contract-v1.json) and its
 verifier are the release gate.
@@ -10,11 +15,11 @@ This document describes the accepted implementation boundary. The
 [#215 registry](REGISTRY.md) now exists in source with six additive routes and
 SQLite/PostgreSQL persistence. [#216 attribution](ATTRIBUTION.md) adds optional
 authorized request admission, append-only corrections and immutable fact joins
-in source. [#217 work budgets](WORK_BUDGETS.md) now add an internal owner,
-atomic request enforcement, and analytics-first current reporting in source;
-protected-main runtime acceptance and public delivery remain open. Connectors,
+in source. [#217 work budgets](WORK_BUDGETS.md) add an accepted internal owner,
+atomic request enforcement, and analytics-first current reporting. Connectors,
 scorecards, recommendations, exact-candidate verification and the external
-pilot remain separately gated. This is not a claim that v1.1.0 is released.
+pilot remain separately gated. No v1.1.0 release was published, and these
+foundations do not establish completion of the v1.3.0 product scope.
 
 ## Decision loop
 
@@ -229,7 +234,7 @@ The ordered release plan is [epic #226](https://github.com/Xpounder-com/hormuz/i
 The first #214 checkpoint unblocks the corresponding feature work only after
 #212 and #213 close; feature PRs must pass their applicable transition tests.
 #214 remains open until the final candidate satisfies its complete artifact,
-migration, rollback, and recovery gate before the v1.1.0 tag.
+migration, rollback, and recovery gate before the v1.3.0 tag.
 
 The [registry transition preflight](REGISTRY_TRANSITION.md) freezes #215's
 SQLite 4-to-5 / PostgreSQL 8-to-9 plan, released-v1 baseline, red-first
@@ -250,5 +255,5 @@ python3 -m unittest -v tests.test_portfolio_intelligence_contract tests.test_por
 ```
 
 Passing proves only that the accepted plan, v1.0.0 fixture, and additive-change
-guard are internally consistent. It does not prove any v1.1 feature is
-implemented.
+guard are internally consistent. It does not prove the complete v1.3.0 feature
+set, final candidate, or external pilot.
