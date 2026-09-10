@@ -117,7 +117,7 @@ def optimize_request(
         return _unchanged(original, "counter_unavailable")
     try:
         validate_tree(original, max_depth=MAX_DEPTH, max_nodes=MAX_NODES)
-        before_serialized = _request_json(original)
+        before_serialized = serialize_request(original)
     except (CompactionFormatError, TypeError, ValueError, OverflowError, RecursionError):
         return _unchanged(original, "limit_exceeded", measured=False)
     before_bytes = len(before_serialized.encode("utf-8"))
@@ -154,9 +154,9 @@ def optimize_request(
         if candidate == text:
             continue
         try:
-            old_item = _request_json(target.item)
+            old_item = serialize_request(target.item)
             target.owner[target.field] = candidate
-            new_item = _request_json(target.item)
+            new_item = serialize_request(target.item)
             before_counts = _count(old_item, counters)
             after_counts = _count(new_item, counters)
         except Exception:
@@ -175,7 +175,7 @@ def optimize_request(
             serialized=before_serialized,
         )
     try:
-        after_serialized = _request_json(changed)
+        after_serialized = serialize_request(changed)
         before_tokens = _count(before_serialized, counters)
         after_tokens = _count(after_serialized, counters)
     except Exception:
@@ -464,8 +464,10 @@ def _count(value: str, counters: Mapping[str, Callable[[str], int]]) -> dict[str
     return result
 
 
-def _request_json(value: object) -> str:
-    return json.dumps(value, separators=(",", ":"), allow_nan=False)
+def serialize_request(value: object) -> str:
+    """Serialize the exact request representation used for metrics and egress."""
+
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
 def _unchanged(
@@ -480,7 +482,7 @@ def _unchanged(
     counts: dict[str, int] = {}
     if measured and serialized is None:
         try:
-            serialized = _request_json(payload)
+            serialized = serialize_request(payload)
         except (TypeError, ValueError, OverflowError, RecursionError):
             measured = False
     if measured and serialized is not None:

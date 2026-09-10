@@ -104,6 +104,28 @@ class CompactionEnforcementTests(unittest.TestCase):
         self.assertEqual(result.redaction.count, 0)
         self.assertFalse(result.expanded_for_egress)
 
+    def test_valid_compaction_does_not_reinterpret_unselected_marker_like_content(self) -> None:
+        compact = compact_text("same\n" * 100, "line_runs")
+        malformed = '{"format":"hormuz-line-runs-v1","runs":[["ordinary",true]]}'
+        payload = openai_payload(compact)
+        payload["input"].extend([
+            {"type": "function_call", "call_id": "y", "name": "other_tool", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "y", "output": malformed},
+        ])
+        expected = copy.deepcopy(payload)
+
+        result = inspect_request(
+            payload,
+            protocol="openai",
+            redactor=redactor("not-present"),
+            mode="redact",
+            declared_version=CONTEXT_FORMAT_VERSION,
+        )
+
+        self.assertEqual(result.recognized_blocks, 1)
+        self.assertEqual(result.redaction.value, expected)
+        self.assertFalse(result.expanded_for_egress)
+
     def test_header_cannot_authorize_or_hide_missing_and_malformed_envelopes(self) -> None:
         with self.assertRaisesRegex(CompactionEnforcementError, "unsupported_compaction_version"):
             inspect_request(
@@ -122,7 +144,7 @@ class CompactionEnforcementTests(unittest.TestCase):
         )
         self.assertEqual(ordinary.recognized_blocks, 0)
         self.assertEqual(ordinary.redaction.value, openai_payload(malformed))
-        with self.assertRaises(CompactionEnforcementError):
+        with self.assertRaisesRegex(CompactionEnforcementError, "declared_compaction_missing"):
             inspect_request(
                 openai_payload(malformed), protocol="openai", redactor=redactor("not-present"),
                 mode="redact", declared_version=CONTEXT_FORMAT_VERSION

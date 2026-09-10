@@ -73,7 +73,7 @@ import Observation
         guard let controller else { throw ClientError.storageUnavailable }
         let profile = try ConnectionProfile(gateway: gateway, organization: organization,
             issuer: issuer.isEmpty ? nil : issuer, client: client, model: model,
-            allowLoopbackHTTP: allowLoopbackHTTP)
+            allowLoopbackHTTP: allowLoopbackHTTP, setup: setup)
         dashboard = nil
         connector = nil
         connectorSaved = false

@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +20,7 @@ from hormuz.client_relay import (
     RelayOptimizer,
     SavedClientProfile,
     _client_command,
+    load_saved_profile,
     run_client,
     supported_client_executable,
 )
@@ -268,6 +270,44 @@ class RelayTests(unittest.TestCase):
              "arguments": json.dumps({"cmd": "rg --files src/generated"})},
             {"type": "function_call_output", "call_id": "records", "output": paths},
         ]}
+
+    def test_loader_accepts_native_setup_and_rejects_invalid_setup_metadata(self) -> None:
+        profile_key = str(uuid.uuid4())
+        path = self.state / "profile.json"
+        profile = {
+            "id": profile_key,
+            "gateway": "https://gateway.example.test",
+            "organization": "org-a",
+            "issuer": "https://issuer.example.test",
+            "client": "codex",
+            "model": "openai-primary",
+            "allowLoopbackHTTP": False,
+            "setup": "openai-pilot",
+        }
+
+        def write(value: dict[str, object]) -> None:
+            path.write_text(json.dumps(value), encoding="utf-8")
+            path.chmod(0o600)
+
+        write(profile)
+        loaded = load_saved_profile(self.state, profile_key)
+        self.assertEqual((loaded.client, loaded.model), ("codex", "openai-primary"))
+
+        legacy = dict(profile)
+        legacy.pop("setup")
+        write(legacy)
+        self.assertEqual(load_saved_profile(self.state, profile_key), loaded)
+
+        for setup in (None, "future", True, [], {}):
+            write({**profile, "setup": setup})
+            with self.subTest(setup=setup), self.assertRaisesRegex(
+                ClientRelayError, "profile_invalid"
+            ):
+                load_saved_profile(self.state, profile_key)
+
+        write({**profile, "client": "claude-code"})
+        with self.assertRaisesRegex(ClientRelayError, "profile_invalid"):
+            load_saved_profile(self.state, profile_key)
 
     def test_toggle_is_pinned_per_request_and_off_is_exact(self) -> None:
         optimizer = RelayOptimizer(

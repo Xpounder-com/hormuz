@@ -49,7 +49,6 @@ def inspect_request(
         recognized = _decode_eligible_fields(
             reconstructed,
             protocol=protocol,
-            strict_envelopes=declared_version is not None,
         )
     except CompactionFormatError as error:
         raise CompactionEnforcementError(error.code) from error
@@ -92,8 +91,10 @@ def _decode_eligible_fields(
     payload: dict[str, Any],
     *,
     protocol: Literal["openai", "anthropic"],
-    strict_envelopes: bool,
 ) -> int:
+    # The request-wide header promises at least one valid compact block. Other,
+    # unselected tool results may legitimately contain marker-like text; keep
+    # malformed candidates opaque and let the caller enforce the positive count.
     count = 0
     if protocol == "openai":
         items = payload.get("input")
@@ -107,8 +108,6 @@ def _decode_eligible_fields(
             try:
                 decoded = decode_text(item["output"])
             except CompactionFormatError:
-                if strict_envelopes:
-                    raise
                 continue
             if decoded.recognized:
                 item["output"] = decoded.text
@@ -134,8 +133,6 @@ def _decode_eligible_fields(
             try:
                 decoded = decode_text(block["content"])
             except CompactionFormatError:
-                if strict_envelopes:
-                    raise
                 continue
             if decoded.recognized:
                 block["content"] = decoded.text

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import stat
 import sys
@@ -32,6 +31,7 @@ from ..compaction import (
     Protocol,
     Selection,
     optimize_request,
+    serialize_request,
 )
 from ..compaction_formats import (
     MAX_REQUEST_BYTES,
@@ -185,7 +185,7 @@ def _compact(args: argparse.Namespace) -> int:
     except CompactionConfigError as error:
         raise ContextCommandError(error.code, 2) from error
     output_bytes = (
-        canonical_json(result.payload).encode("utf-8") if result.changed else input_bytes
+        serialize_request(result.payload).encode("utf-8") if result.changed else input_bytes
     )
     metadata = {
         "schema_version": 1,

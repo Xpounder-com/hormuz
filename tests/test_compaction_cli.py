@@ -129,10 +129,10 @@ class ContextCommandTests(unittest.TestCase):
         selection = self.root / "selection.json"
         output = self.root / "output.json"
         metadata = self.root / "metadata.json"
-        rows = [{"id": index, "status": "ok", "category": "same"} for index in range(120)]
+        rows = [{"id": index, "status": "ok", "category": "همان"} for index in range(120)]
         payload = {"model": "approved", "input": [
             {"type": "function_call", "call_id": "records", "name": "list_records", "arguments": "{}"},
-            {"type": "function_call_output", "call_id": "records", "output": json.dumps(rows, separators=(",", ":"))},
+            {"type": "function_call_output", "call_id": "records", "output": json.dumps(rows, ensure_ascii=False, separators=(",", ":"))},
         ]}
         request.write_text(json.dumps(payload), encoding="utf-8")
         selection.write_text(json.dumps({
@@ -150,8 +150,10 @@ class ContextCommandTests(unittest.TestCase):
         self.assertEqual(restore_text(changed["input"][1]["output"]), payload["input"][1]["output"])
         evidence = json.loads(metadata.read_text())
         self.assertEqual(evidence["action"], "compacted")
+        self.assertEqual(evidence["after_bytes"], len(output.read_bytes()))
+        self.assertIn("همان", output.read_text())
         self.assertNotIn("records", metadata.read_text())
-        self.assertNotIn("same", metadata.read_text())
+        self.assertNotIn("همان", metadata.read_text())
 
     def test_invalid_selection_collision_and_missing_resources_write_nothing(self) -> None:
         request = self.root / "request.json"

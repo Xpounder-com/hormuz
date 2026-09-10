@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Literal, cast
 
-from .compaction import MAX_REQUEST_BYTES, CompactionResult, optimize_request
+from .compaction import MAX_REQUEST_BYTES, CompactionResult, optimize_request, serialize_request
 from .client_versions import SUPPORTED_CLIENT_VERSIONS
 from .compaction_formats import CompactionFormatError, strict_json_loads
 from .compaction_contract import (
@@ -132,7 +132,7 @@ class RelayOptimizer:
         self._record_result(result)
         if not result.changed:
             return body, {}
-        changed = json.dumps(result.payload, separators=(",", ":")).encode("utf-8")
+        changed = serialize_request(result.payload).encode("utf-8")
         return changed, {CONTEXT_FORMAT_HEADER: CONTEXT_FORMAT_VERSION}
 
     def note_oversized_passthrough(self) -> None:
@@ -433,7 +433,7 @@ def load_saved_profile(directory: Path, profile: str) -> SavedClientProfile:
     if not isinstance(value, dict):
         raise ClientRelayError("profile_invalid")
     required = {"id", "gateway", "organization", "client", "model", "allowLoopbackHTTP"}
-    if not required <= set(value) or set(value) - (required | {"issuer"}):
+    if not required <= set(value) or set(value) - (required | {"issuer", "setup"}):
         raise ClientRelayError("profile_invalid")
     identifier = value.get("id")
     organization = value.get("organization")
@@ -441,6 +441,7 @@ def load_saved_profile(directory: Path, profile: str) -> SavedClientProfile:
     client = value.get("client")
     model = value.get("model")
     allow = value.get("allowLoopbackHTTP")
+    setup = value.get("setup")
     if (
         not isinstance(identifier, str)
         or _canonical_uuid(identifier) is None
@@ -451,12 +452,23 @@ def load_saved_profile(directory: Path, profile: str) -> SavedClientProfile:
         or not isinstance(model, str)
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model)
         or not isinstance(allow, bool)
+        or (
+            "setup" in value
+            and (not isinstance(setup, str) or setup not in {"custom", "openai-pilot"})
+        )
     ):
         raise ClientRelayError("profile_invalid")
     try:
         gateway = validate_session_gateway(value.get("gateway"), allow_insecure_http=allow)
     except (SessionClientError, TypeError) as error:
         raise ClientRelayError("profile_invalid") from error
+    if setup == "openai-pilot" and (
+        client != "codex"
+        or model not in {"openai-primary", "openai-secondary"}
+        or allow
+        or urllib.parse.urlsplit(gateway).scheme != "https"
+    ):
+        raise ClientRelayError("profile_invalid")
     return SavedClientProfile(profile.lower(), gateway, client, model, allow)
 
 
