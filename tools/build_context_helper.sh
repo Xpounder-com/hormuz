@@ -73,6 +73,15 @@ if [ "$(lipo -archs "$HORMUZ_CONTEXT_OUTPUT/dist/hormuz-context")" != "$HORMUZ_C
   exit 1
 fi
 if [ -n "$HORMUZ_CONTEXT_CODESIGN_IDENTITY" ]; then
+  # PyInstaller signs embedded code as it assembles the one-file executable,
+  # but its console executable keeps the file basename as the outer identifier.
+  # Re-sign the completed outer binary with Hormuz's permanent release identity.
+  codesign --force \
+    --sign "$HORMUZ_CONTEXT_CODESIGN_IDENTITY" \
+    --identifier "$HORMUZ_CONTEXT_IDENTIFIER" \
+    --options runtime \
+    --timestamp \
+    "$HORMUZ_CONTEXT_OUTPUT/dist/hormuz-context"
   codesign --verify --strict --verbose=4 "$HORMUZ_CONTEXT_OUTPUT/dist/hormuz-context"
   HORMUZ_CONTEXT_SIGNATURE="$(codesign -dvvv "$HORMUZ_CONTEXT_OUTPUT/dist/hormuz-context" 2>&1)"
   printf '%s\n' "$HORMUZ_CONTEXT_SIGNATURE" | grep -Fqx "Identifier=$HORMUZ_CONTEXT_IDENTIFIER"
