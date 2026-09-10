@@ -8,6 +8,9 @@ v1.3.0 portfolio program. The frozen
 [v2 successor](budget-transition-plan-v2.json) records the bounded
 implementation. Issue #217 closed after exact-head review, protected checks,
 normal merge, and exact-main acceptance through PR #262.
+The successor's frozen `budget_runtime_accepted: false` field records its
+pre-acceptance plan state; current issue closure is deliberately not written
+back into that evidence artifact.
 
 ## Management result
 

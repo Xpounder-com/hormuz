@@ -2,7 +2,7 @@
 
 This file records executable evidence for client/provider compatibility. It intentionally contains no provider credentials, prompts, responses beyond fixed test markers, or employee secrets.
 
-## v1.1 portfolio-intelligence contract gate
+## Frozen v1.1 portfolio contract gate for the v1.3 program
 
 The accepted v1.1.0 design, exact v1.0.0 baseline manifest, documentation set,
 and additive-compatibility guard are verified with:
@@ -109,7 +109,7 @@ migration, wire field, command, version bump, or release is provided by this
 gate. Close #213 only after review, package/client checks, and exact-main CI;
 #214 and the downstream portfolio issues remain separate gates.
 
-## v1.1.0 registry implementation and transition
+## Registry implementation and transition (v1.3 foundation)
 
 The [#214/#215 transition guide](REGISTRY_TRANSITION.md) records the exact
 released-v1 source baseline, compatibility inventory, stop/migrate/restart
@@ -143,7 +143,7 @@ cases, for 103 total owned cases.
 Populated policy/custody recovery and exact final signed OCI/Compose transitions
 remain #214 final-candidate gates. Do not close #214 on registry-only evidence.
 
-## v1.1.0 attribution implementation and transition
+## Attribution implementation and transition (v1.3 foundation)
 
 The [#214/#216 transition](ATTRIBUTION_TRANSITION.md) implements the accepted
 optional admission contract and SQLite 5-to-6 / PostgreSQL 9-to-10 transitions.

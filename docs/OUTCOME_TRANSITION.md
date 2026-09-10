@@ -1,8 +1,9 @@
-# v1.1.0 work-outcome transition
+# Work-outcome transition (frozen v1.1 design; accepted v1.3 foundation)
 
-This is #218's source implementation and transition proof, not feature
-acceptance, #214 final-candidate proof, or a release. The historical checkpoint
-remains frozen in [outcome-transition-plan-v1.json](outcome-transition-plan-v1.json).
+This records closed #218's source implementation and transition proof. It does
+not complete #214 final-candidate proof, a connector, or the v1.3.0 portfolio
+release. The historical checkpoint remains frozen in
+[outcome-transition-plan-v1.json](outcome-transition-plan-v1.json).
 [Version 2](outcome-transition-plan-v2.json) describes the real additive schema
 and internal implementation. The prerequisite PR #238 was accepted at main
 `9af53c79d1671638a57dba9d758482c7d4f88ef8` after exact-main CI `33349047557`.

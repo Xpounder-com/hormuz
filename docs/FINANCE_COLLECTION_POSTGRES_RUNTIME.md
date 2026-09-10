@@ -1,8 +1,9 @@
-# PostgreSQL collection runtime candidate — v1.1.0
+# PostgreSQL finance collection runtime candidate — v1.3.0 target
 
 The owner authorized this bounded implementation on [#8](https://github.com/Xpounder-com/hormuz/issues/8#issuecomment-5559866894).
 Transition plan v7 adds schema 17; SQLite stays at 12. It does not rewrite plan v6
 or migration 0016, and does not grant release or finance-feature acceptance.
+Frozen v1.1 plan identifiers remain unchanged as compatibility provenance.
 
 Migration 0017 adds only SELECT and INSERT on the seven collection tables: fourteen
 permissions. Schemas 15 and 16 retain the literal 185 boundary and reject the

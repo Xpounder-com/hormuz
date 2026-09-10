@@ -1,8 +1,10 @@
-# Work-outcome foundation (v1.1.0 development)
+# Work-outcome foundation (frozen v1.1 design; accepted v1.3 foundation)
 
-Issue #218 adds source-neutral, metadata-only outcome storage and administrator
-reads. This is source implementation, not a released connector, associated or
-controlled evidence, final-candidate acceptance, or a live customer pilot.
+Closed issue #218 added source-neutral, metadata-only outcome storage and
+administrator reads as a foundation for the v1.3.0 portfolio program. This is
+not a released connector, associated or controlled evidence, final-candidate
+acceptance, or a live customer pilot. Frozen v1.1 identifiers remain
+compatibility provenance.
 GitHub (#219), Linear (#220), association (#221), and evaluation (#222) remain
 separate gates. A source observation is not proof of AI productivity or a basis
 for employee ranking.

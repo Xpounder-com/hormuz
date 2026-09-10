@@ -1,8 +1,8 @@
-# Durable rate-card history — v1.1.0 implementation slice
+# Durable rate-card history — frozen v1.1 design, v1.3 implementation slice
 
 This implements only append-only rate-card registration and exact-version
-administrative reads. It does **not** complete finance issue #8 or the v1.1.0
-release. Provider imports, native per-request usage, immutable request-cost
+administrative reads. It does **not** complete finance issue #8 or the v1.3.0
+portfolio release. Provider imports, native per-request usage, immutable request-cost
 sidecars, reconciliation, budget/report integration, live finance evidence and
 the independent pilot remain gated separately.
 

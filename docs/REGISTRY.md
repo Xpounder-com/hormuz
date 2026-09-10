@@ -1,10 +1,12 @@
-# v1.1.0 portfolio registry
+# Portfolio registry (frozen v1.1 design; accepted v1.3 foundation)
 
-The #215 source implementation supplies tenant-scoped work scopes and external
-work bindings. It does not release v1.1.0, attribute runs, enforce portfolio
-budgets, ingest provider webhooks, or produce scorecards. Those roadmap gates
-remain separate. Read [REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) before
-upgrading any existing database.
+The closed #215 source implementation supplies tenant-scoped work scopes and
+external work bindings. It is a foundation for the v1.3.0 portfolio program;
+it does not complete that release, attribute runs, enforce portfolio budgets,
+ingest provider webhooks, or produce scorecards. Those roadmap gates remain
+separate. Frozen v1.1 identifiers remain compatibility provenance. Read
+[REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) before upgrading any existing
+database.
 
 ## Enable explicit operator authority
 

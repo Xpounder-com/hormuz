@@ -1,4 +1,4 @@
-# v1.1.0 registry compatibility and transition
+# Registry compatibility and transition (frozen v1.1 design; v1.3 foundation)
 
 This guide now covers the **#215 registry implementation**, following the
 accepted #214 registry preflight in PR #232. The historical
@@ -6,13 +6,14 @@ accepted #214 registry preflight in PR #232. The historical
 The [version-2 implementation plan](registry-transition-plan-v2.json) replaces
 only its phase and missing-migration probes with real migration verification;
 baseline digests, compatibility and rollback policy remain identical.
-Neither plan closes #214 or authorizes a v1.1.0 release. See
+Neither plan closes #214 or authorizes the v1.3.0 portfolio release. See
 [REGISTRY.md](REGISTRY.md) for the new operations and operator authority.
 
 ## Versions and exact baseline
 
-The product target is **v1.1.0**. Product versions, database migration integers,
-and version-1 wire envelopes are separate identifiers:
+The current portfolio product target is **v1.3.0**. The plans retain the
+original v1.1.0 product label as frozen provenance; product versions, database
+migration integers, and version-1 wire envelopes are separate identifiers:
 
 | Boundary | Released v1.0.0 | #215 implementation |
 | --- | --- | --- |
@@ -104,7 +105,7 @@ portfolio tables exist, not for the test probe.
 ## Operator sequence and rollback decision
 
 Both registry migrations are bundled. This remains the bounded registry
-operator sequence, not final v1.1.0 candidate/production deployment acceptance.
+operator sequence, not final v1.3.0 candidate/production deployment acceptance.
 
 1. Identify the exact old application artifact, database schema and backup,
    configurations, role bindings, and evidence/checkpoint references. Confirm
