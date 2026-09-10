@@ -145,5 +145,5 @@ Discuss one team and workflow, agree scope, acceptance criteria, capacity, and s
 https://usehormuz.github.io/enterprise/#pilot
 
 Billing: How does support activate, renew, or cancel?
-Current support starts at $2,000/month with scope, hours, response targets, start date, and cancellation terms agreed in writing. Stripe processes payment; the benefit is the agreed human service, not extra software features. Free use remains available if you cancel or do not buy.
-https://usehormuz.github.io/enterprise/#payment
+Self-service support costs $2,000/month for one gateway, up to four hours per billing month, and a response within two business days. After Stripe confirms payment, email the founder with your receipt to activate support. Cancel by email before the next renewal. Free software access remains available.
+https://usehormuz.github.io/enterprise/#support

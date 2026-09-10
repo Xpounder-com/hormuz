@@ -49,7 +49,7 @@ preserves the visitor's experiment. Arrow keys, Home, and End select tabs.
 | Setup chapter/integrations | Recognize a stack and setup role | Mac joining guide or gateway quickstart |
 | Docs | Download → configure → first governed request → report | Supported client instructions or paid help |
 | Plans | Choose free software, ongoing support, or pilot | Install; support terms; pilot inquiry |
-| Payment | Finish an already agreed engagement | Existing Stripe payment links and service terms |
+| Payment | Start fixed support or finish an agreed engagement | Separate self-service checkout; retained custom/pilot links; activation and cancellation instructions |
 | FAQ | Answer 32 practical questions in context | Link to the relevant example or next action |
 | Resources/security/footer | Resolve evaluation questions | Install, supported setup, or paid engagement |
 

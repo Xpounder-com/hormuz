@@ -20,7 +20,16 @@ export function EnterprisePlans() {
         <p className="field-hint">No card required. You operate your infrastructure and pay your providers.</p>
       </article>
       <article className="offer-card offer-featured">
-        <p className="section-label">02 / PUT IT TO THE TEST</p>
+        <p className="section-label">02 / KEEP MOVING</p>
+        <h3>Self-service support</h3>
+        <PriceAmount amount={SUPPORT_PRICE} period="USD / month · cancel before renewal" />
+        <p>Buy ongoing help for one self-hosted gateway. The product stays free; this plan adds direct founder support.</p>
+        <ul><li>One self-hosted gateway</li><li>Up to 4 support hours per billing month</li><li>Response within 2 business days</li><li>Policy, upgrade, and troubleshooting help</li></ul>
+        <CampaignLink className="button button-primary" href={sitePath('/enterprise/#support')}>See terms & start support <span aria-hidden="true">↗</span></CampaignLink>
+        <p className="field-hint">Monthly renewal. Cancel before the next renewal. Provider usage, hosting, and 24/7 operations are separate.</p>
+      </article>
+      <article className="offer-card">
+        <p className="section-label">03 / PUT IT TO THE TEST</p>
         <h3>90-day pilot</h3>
         <PriceAmount amount={PILOT_PRICE} period="USD · one-time fee for 90 days" />
         <p>Evaluate one workflow with founder-led guidance and evidence for your rollout decision.</p>
@@ -28,15 +37,6 @@ export function EnterprisePlans() {
         <CampaignLink className="button button-primary" href={sitePath('/contact/?interest=pilot')}>Discuss my pilot <span aria-hidden="true">↗</span></CampaignLink>
         <p className="field-hint">One team, one workflow. Scope, availability, and terms agreed before payment. No automatic renewal.</p>
         <CampaignLink className="text-link" href={sitePath('/enterprise/#pilot')}>See the 90-day plan →</CampaignLink>
-      </article>
-      <article className="offer-card">
-        <p className="section-label">03 / KEEP MOVING</p>
-        <h3>Self-service support</h3>
-        <PriceAmount amount={SUPPORT_PRICE} period="USD / month · cancel before renewal" />
-        <p>Buy ongoing help for one self-hosted gateway. The product stays free; this plan adds direct founder support.</p>
-        <ul><li>One self-hosted gateway</li><li>Up to 4 support hours per billing month</li><li>Response within 2 business days</li><li>Policy, upgrade, and troubleshooting help</li></ul>
-        <CampaignLink className="button button-outline" href={sitePath('/enterprise/#support')}>See terms & start support <span aria-hidden="true">↗</span></CampaignLink>
-        <p className="field-hint">Monthly renewal. Cancel before the next renewal. Provider usage, hosting, and 24/7 operations are separate.</p>
       </article>
     </div>
     <div className="open-source-option"><div><span className="section-label">WANT TO TALK IT THROUGH?</span><h3>Bring one workflow and one question.</h3><p>A free fit discussion with Mehrdad Zaker. No obligation to buy a pilot.</p></div><CampaignLink className="button button-outline" href={sitePath('/contact/?interest=review')}>Ask the founder <span aria-hidden="true">↗</span></CampaignLink></div>

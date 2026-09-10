@@ -19,7 +19,7 @@ export function monthPace(committed, elapsedDays, monthDays) {
 }
 export function policyTemplate(name) {
   if (!['standard', 'strict', 'lockdown'].includes(name)) throw new Error('Unknown template');
-  return { template: name, budget: 45000, outputCap: name === 'strict' ? 4000 : 16000, advanced: name !== 'lockdown', standard: name !== 'lockdown', secrets: name === 'standard' ? 'redact' : 'deny' };
+  return { template: name, budget: 45000, outputCap: name === 'strict' ? 4000 : 16000, clientAllowed: name !== 'lockdown', advanced: name !== 'lockdown', standard: name !== 'lockdown', secrets: name === 'standard' ? 'redact' : 'deny' };
 }
 export function evaluateExamplePolicy(policy, { model = 'Advanced', nearLimit = false, secret = false } = {}) {
   if (!Number.isFinite(policy.budget) || policy.budget < 0 || policy.budget > 83333.33 || !Number.isInteger(policy.outputCap) || policy.outputCap < 1 || policy.outputCap > 16000) return { decision: 'invalid', reason: 'Enter a team budget between $0 and $83,333.33 and an output cap between 1 and 16,000.', calls: 0, reservation: 0, available: 0, after: 0, outputCeiling: 0 };
@@ -29,8 +29,8 @@ export function evaluateExamplePolicy(policy, { model = 'Advanced', nearLimit = 
   const occupied = nearLimit ? 44999.50 : 31500;
   const available = budgetBalance(policy.budget, occupied, 0, 0);
   const allowed = model === 'Advanced' ? policy.advanced : policy.standard;
-  const reason = !allowed ? `${model} is outside the approved model list.` : secret && policy.secrets === 'deny' ? 'A configured secret was detected. The request stops here.' : reservation > available ? `The next reservation exceeds the available team budget.` : secret ? 'Configured secret redacted; the governed request can proceed.' : 'Approved model, output cap, and budget checks pass.';
-  const decision = !allowed || (secret && policy.secrets === 'deny') || reservation > available ? 'denied' : 'allowed';
+  const reason = !policy.clientAllowed ? 'Codex is outside the approved client list.' : !allowed ? `${model} is outside the approved model list.` : secret && policy.secrets === 'deny' ? 'A configured secret was detected. The request stops here.' : reservation > available ? `The next reservation exceeds the available team budget.` : secret ? 'Configured secret redacted; the governed request can proceed.' : 'Approved client, model, output cap, and budget checks pass.';
+  const decision = !policy.clientAllowed || !allowed || (secret && policy.secrets === 'deny') || reservation > available ? 'denied' : 'allowed';
   return { decision, reason, calls: decision === 'allowed' ? 1 : 0, reservation, available, after: decision === 'allowed' ? available - reservation : available, outputCeiling };
 }
 export function restorePathExample(compact) {

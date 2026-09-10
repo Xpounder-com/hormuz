@@ -52,6 +52,8 @@ test('near-limit comparison conserves denied budget and charges no imaginary sav
 test('model, secret, lockdown, and invalid candidates change the next decision safely', () => {
   for (const model of ['Advanced', 'Standard']) assert.equal(evaluateExamplePolicy(policyTemplate('lockdown'), { model }).calls, 0);
   assert.equal(evaluateExamplePolicy({ ...policyTemplate('standard'), advanced: false }).decision, 'denied');
+  assert.equal(evaluateExamplePolicy({ ...policyTemplate('standard'), clientAllowed: false }).decision, 'denied');
+  assert.equal(evaluateExamplePolicy({ ...policyTemplate('lockdown'), advanced: true }).decision, 'denied');
   assert.equal(evaluateExamplePolicy(policyTemplate('standard'), { secret: true }).decision, 'allowed');
   assert.equal(evaluateExamplePolicy(policyTemplate('strict'), { secret: true }).decision, 'denied');
   for (const budget of [NaN, -1, 100000, Infinity]) assert.equal(evaluateExamplePolicy({ ...policyTemplate('standard'), budget }).decision, 'invalid');
