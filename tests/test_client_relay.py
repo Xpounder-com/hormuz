@@ -22,13 +22,14 @@ from hormuz.client_relay import (
     run_client,
     supported_client_executable,
 )
-from hormuz.compaction import MAX_REQUEST_BYTES
+from hormuz.compaction import MAX_REQUEST_BYTES, optimize_request
 from hormuz.compaction_enforcement import (
     CONTEXT_FORMAT_HEADER,
     CONTEXT_FORMAT_VERSION,
     CONTEXT_FORMATS_HEADER,
 )
 from hormuz.compaction_formats import restore_text
+from hormuz.compaction_protocols import derive_selections
 from hormuz.compaction_runtime import ContextPreferenceStore
 
 
@@ -631,13 +632,56 @@ raise SystemExit(0 if response.status == 200 else 1)
             self.assertEqual(len(output_requests), 1)
             payload, request_headers = output_requests[0]
             headers = {key.lower(): value for key, value in request_headers.items()}
+            diagnostic_selections = derive_selections(payload, "responses", client="codex")
+            diagnostic_result = optimize_request(
+                payload,
+                "responses",
+                diagnostic_selections,
+                COUNTERS,
+                enabled=True,
+            )
+            diagnostic_outputs = [
+                item.get("output")
+                for item in payload.get("input", [])
+                if isinstance(item, dict) and item.get("type") == "function_call_output"
+            ]
+            diagnostic_output = diagnostic_outputs[0] if len(diagnostic_outputs) == 1 else None
             shape = {
                 "payload_keys": sorted(payload),
                 "input_types": [
                     item.get("type") if isinstance(item, dict) else type(item).__name__
                     for item in payload.get("input", [])
                 ],
+                "call_names": [
+                    item.get("name")
+                    for item in payload.get("input", [])
+                    if isinstance(item, dict) and item.get("type") == "function_call"
+                ],
                 "has_previous_response_id": "previous_response_id" in payload,
+                "selection_formats": [selection.format for selection in diagnostic_selections],
+                "optimizer_reason": diagnostic_result.reason,
+                "output_bytes": (
+                    len(diagnostic_output.encode("utf-8"))
+                    if isinstance(diagnostic_output, str)
+                    else None
+                ),
+                "output_lines": (
+                    diagnostic_output.count("\n")
+                    if isinstance(diagnostic_output, str)
+                    else None
+                ),
+                "has_first_fixture_path": (
+                    "generated/structural_context_repetition_for_hormuz/file_000.py"
+                    in diagnostic_output
+                    if isinstance(diagnostic_output, str)
+                    else False
+                ),
+                "has_last_fixture_path": (
+                    "generated/structural_context_repetition_for_hormuz/file_047.py"
+                    in diagnostic_output
+                    if isinstance(diagnostic_output, str)
+                    else False
+                ),
                 "relay_status": headers.get(CONTEXT_FORMAT_HEADER.lower()),
             }
             self.assertEqual(
