@@ -11,15 +11,17 @@ export function SiteFooter() {
           <BrandLockup />
         </CampaignLink>
         <p className="footer-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a></p>
-        <p>Open-source AI policy and evidence, at the request boundary.</p>
-        <span>Apache-2.0 · v1.2.0 source release<br />Production qualification remains deployment-specific.</span>
+        <p>Understand AI usage. Set the policy for what happens next.</p>
+        <span>Apache-2.0 · Hormuz 1.2.0<br />Production qualification remains deployment-specific.</span>
       </div>
 
       <div className="footer-column">
         <strong>Build with Hormuz</strong>
-        <CampaignLink href={sitePath('/docs/')}>Quickstart</CampaignLink>
-        <CampaignLink href={sitePath('/demo/')}>Recorded demo</CampaignLink>
-        <CampaignLink href={sitePath('/integrations/')}>Codex & Claude Code</CampaignLink>
+        <CampaignLink href={sitePath('/docs/')}>Install free</CampaignLink>
+        <CampaignLink href={sitePath('/demo/')}>Explore the $1M example</CampaignLink>
+        <CampaignLink href={sitePath('/demo/#policy')}>Try a policy</CampaignLink>
+        <CampaignLink href={sitePath('/demo/#compaction')}>See context compaction</CampaignLink>
+        <CampaignLink href={sitePath('/integrations/')}>Check my stack</CampaignLink>
         <a href={`${REPOSITORY}/discussions`}>Community ↗</a>
         <a href={sourcePath('CONTRIBUTING.md')}>Contribute ↗</a>
       </div>

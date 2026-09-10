@@ -1,0 +1,62 @@
+{
+  "kind": "fictional_customer_illustration",
+  "name": "A company managing $1 million a year in AI",
+  "currency": "USD",
+  "annual_budget": "1000000.00",
+  "monthly_budget": "83333.33",
+  "elapsed_days": 15,
+  "month_days": 30,
+  "cost_basis": "illustrative_configured_rate_card_estimate",
+  "coverage_assumption": "All example provider usage is routed through Hormuz and attributed to one team. This is a fictional scenario assumption, not a product coverage guarantee.",
+  "forecast_basis": "Current committed estimate divided by 15 elapsed days, multiplied by 30 days. A straight-line scenario estimate, not a prediction or released-feature claim.",
+  "rates_usd_per_million_tokens": {
+    "Advanced": {"uncached_input": "8.00", "cache_read_input": "0.80", "output": "40.00"},
+    "Standard": {"uncached_input": "1.50", "cache_read_input": "0.20", "output": "5.00"}
+  },
+  "rates_note": "Invented model aliases and invented rates solely for this example; no actual provider pricing is represented.",
+  "token_note": "Uncached input and cache-read input are disjoint. Total input includes both. Cache-read tokens must not be added to total input a second time.",
+  "teams": [
+    {"name": "Engineering", "monthly_budget": "45000.00", "pending": "1200.00", "uncertain": "300.00", "expected_cost": "30000.00", "expected_tokens": 3900000000},
+    {"name": "Customer support", "monthly_budget": "20000.00", "pending": "500.00", "uncertain": "100.00", "expected_cost": "10000.00", "expected_tokens": 3500000000},
+    {"name": "Data science", "monthly_budget": "13333.33", "pending": "200.00", "uncertain": "100.00", "expected_cost": "7500.00", "expected_tokens": 1200000000},
+    {"name": "Internal operations", "monthly_budget": "5000.00", "pending": "100.00", "uncertain": "0.00", "expected_cost": "2500.00", "expected_tokens": 390000000}
+  ],
+  "usage": [
+    {"team": "Engineering", "model": "Advanced", "uncached_input": 1500000000, "cache_read_input": 1000000000, "output": 400000000},
+    {"team": "Engineering", "model": "Standard", "uncached_input": 400000000, "cache_read_input": 500000000, "output": 100000000},
+    {"team": "Customer support", "model": "Advanced", "uncached_input": 250000000, "cache_read_input": 250000000, "output": 100000000},
+    {"team": "Customer support", "model": "Standard", "uncached_input": 1000000000, "cache_read_input": 1500000000, "output": 400000000},
+    {"team": "Data science", "model": "Advanced", "uncached_input": 500000000, "cache_read_input": 0, "output": 50000000},
+    {"team": "Data science", "model": "Standard", "uncached_input": 500000000, "cache_read_input": 0, "output": 150000000},
+    {"team": "Internal operations", "model": "Advanced", "uncached_input": 125000000, "cache_read_input": 0, "output": 25000000},
+    {"team": "Internal operations", "model": "Standard", "uncached_input": 200000000, "cache_read_input": 0, "output": 40000000}
+  ],
+  "output_cap_example": {
+    "model": "Advanced",
+    "before_max_output_tokens": 16000,
+    "after_max_output_tokens": 4000,
+    "expected_before_output_cost_ceiling": "0.64",
+    "expected_after_output_cost_ceiling": "0.16",
+    "meaning": "Maximum output-token charge only at the illustrative rate. Input/reservation charges are separate. This is not an observed cost reduction and does not predict monthly savings."
+  },
+  "budget_denial_example": {
+    "available_before_request": "0.50",
+    "computed_reservation_for_next_request": "0.70",
+    "expected_decision": "deny_before_provider_egress",
+    "expected_provider_calls": 0,
+    "expected_remaining_after_denial": "0.50"
+  },
+  "expected": {
+    "committed": "50000.00",
+    "pending": "2000.00",
+    "uncertain": "500.00",
+    "remaining_after_holds": "30833.33",
+    "total_tokens": 8990000000,
+    "straight_line_month_cost": "100000.00",
+    "straight_line_over_budget": "16666.67",
+    "engineering_output_cost": "16500.00",
+    "engineering_output_share_of_cost_percent": "55.00",
+    "engineering_output_share_of_tokens_percent": "12.82",
+    "engineering_advanced_share_of_cost_percent": "96.00"
+  }
+}

@@ -19,7 +19,7 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
   const [reference, setReference] = useState('');
   const requestReference = useRef('');
   const testSubmission = new URLSearchParams(search).get('qa') === '1';
-  const selectedOffer = interest === 'review' ? { price: '$0', detail: 'Free AI governance review · no obligation', action: 'Request my free review →' } : interest === 'pilot' ? { price: PILOT_PRICE, detail: 'USD · one-time fee for a scoped 90-day pilot', action: 'Discuss my pilot →' } : interest === 'support' ? { price: `From ${SUPPORT_PRICE}/mo`, detail: 'USD · separately agreed enterprise support', action: 'Request support details →' } : null;
+  const selectedOffer = interest === 'review' ? { price: '$0', detail: 'Free AI governance review · no obligation', action: 'Request my free review →' } : interest === 'pilot' ? { price: PILOT_PRICE, detail: 'USD · one-time fee for a scoped 90-day pilot', action: 'Discuss my pilot →' } : interest === 'support' ? { price: `${SUPPORT_PRICE}/mo`, detail: 'USD · ask about fixed support or a custom engagement', action: 'Request support details →' } : null;
   const pending = useRef(false);
   const confirmation = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -68,6 +68,7 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
         <input type="hidden" name="_subject" value="Hormuz website inquiry" />
         <label>I am interested in<select name="interest" value={interest} onChange={e => setInterest(e.target.value)}>{Object.entries(INTERESTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {selectedOffer && <div className="selected-offer" aria-live="polite"><strong>{selectedOffer.price}</strong><span>{selectedOffer.detail}</span></div>}
+        {interest === 'support' && <p className="field-hint">Ready to subscribe? <CampaignLink href={sitePath('/enterprise/#support')}>See the self-service plan and start directly →</CampaignLink>. This form sends an inquiry.</p>}
         <label>Your name<input name="name" autoComplete="name" required maxLength={100} /></label>
         <label>Work email<input name="email" type="email" autoComplete="email" required maxLength={254} /></label>
         <label>Organization<input name="organization" autoComplete="organization" required maxLength={150} /></label>

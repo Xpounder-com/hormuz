@@ -1,0 +1,35 @@
+'use client';
+
+import { useState } from 'react';
+import { sitePath, sourcePath, REPOSITORY } from '../../lib/site.mjs';
+
+export function SetupExample() {
+  const [client, setClient] = useState('Codex');
+  const [provider, setProvider] = useState('OpenAI');
+  const [role, setRole] = useState('join');
+  const native = (client === 'Codex' && provider === 'OpenAI') || (client === 'Claude Code' && provider === 'Anthropic');
+  const ollama = provider === 'Ollama';
+  const candidate = ollama || provider === 'Another endpoint' || client === 'Another client';
+  const status = native ? (client === 'Codex' ? 'OpenAI path qualified for 1.2' : 'Protocol supported · 1.2 live qualification open') : candidate ? 'Candidate integration · validate your exact path' : 'This client/provider pairing is not a documented path';
+  return <div>
+    <div className="experience-view-heading"><div><span className="experience-kicker">MAKE IT LOOK LIKE YOUR ENVIRONMENT</span><h3>Keep your tools. Connect the governed path.</h3></div><span className="period-pill">Client ≠ model provider</span></div>
+    <p className="chapter-intro">Choose the application your team uses and where its models run. Then see who sets it up, what they need, and what to check on the first request.</p>
+    <div className="setup-selectors"><label className="example-field">AI client<select aria-label="AI client" value={client} onChange={event => setClient(event.target.value)}><option>Codex</option><option>Claude Code</option><option>Another client</option></select></label><span aria-hidden="true">→ Hormuz →</span><label className="example-field">Model provider<select aria-label="Model provider" value={provider} onChange={event => setProvider(event.target.value)}><option>OpenAI</option><option>Anthropic</option><option>Ollama</option><option>Another endpoint</option></select></label></div>
+    <div className={`compatibility-result ${native && client === 'Codex' ? 'compatibility-ready' : ''}`} role="status"><strong>{status}</strong><p>{native ? client === 'Codex' ? 'Codex uses the OpenAI Responses route. The 1.2 release has OpenAI-only live qualification; start from the documented client baseline and verify your selected version.' : 'Claude Code uses Anthropic Messages, streaming, and token counting. The public protocol contract exists, but no same-candidate paid Anthropic evaluation was run for 1.2.' : ollama ? 'Ollama documents non-stateful OpenAI Responses and Anthropic Messages interfaces. Hormuz has configurable upstreams for those protocols, but an Ollama end-to-end integration has not been qualified. A matching endpoint name alone does not prove streaming, tools, history, accounting, or policy behavior.' : candidate ? 'Verify the exact endpoint, authentication, streaming and tool round trips, history handling, token accounting, and policy denial. “OpenAI-compatible” is too broad to establish compatibility.' : 'Codex’s Responses path and Claude Code’s Messages path are distinct. Choose the corresponding provider or evaluate a compatible adapter explicitly.'}</p>{(ollama || candidate) && <p>Hormuz does not expose /v1/chat/completions or Ollama’s native /api/chat and /api/generate routes. No automatic compatibility badge is implied.</p>}</div>
+    {ollama && <div className="setup-callout"><strong>What “local” means matters.</strong><p>A gateway configured with localhost reaches its own machine. A remote gateway cannot reach your laptop’s Ollama server at localhost. Local token quotas can still be useful, but token estimates do not measure GPU, electricity, or hardware costs. <a href="https://docs.ollama.com/api/openai-compatibility">Ollama Responses docs ↗</a> · <a href="https://docs.ollama.com/api/anthropic-compatibility">Messages docs ↗</a></p></div>}
+    <div className="setup-role" aria-label="Choose your setup role"><button type="button" aria-pressed={role === 'join'} onClick={() => setRole('join')}>I’m joining a team</button><button type="button" aria-pressed={role === 'operate'} onClick={() => setRole('operate')}>I’m setting up the gateway</button></div>
+    <ol className="setup-steps">{(role === 'join' ? [
+      ['Get your connection details', 'Your administrator supplies the gateway URL, organization, and your own identity or invitation. The Mac app is a connector; it needs a configured gateway.'],
+      ['Install and connect', 'On Apple Silicon with macOS 14+, extract the notarized archive and move Hormuz.app to Applications. Connect to your team gateway and sign in using its configured identity flow.'],
+      ['Review your client launcher', 'Choose the supported coding client and an approved model, review the generated settings, and save the launcher. Use it for governed model requests.'],
+      ['Send a request. Inspect the result.', 'Run a small authorized request. Confirm the app shows the connected state and usage, and have the administrator check attribution. Try an agreed policy denial before expanding usage.'],
+    ] : [
+      ['Install the gateway', 'Use the v1.2.0 source release or the signed Linux AMD64 OCI image. The provider-free demo verifies your local setup before using company provider accounts.'],
+      ['Configure identity, providers, and policy', 'Choose the supported protocol, provide server-side provider credentials, configure model rates, and provision unique identities. Set model access, secret handling, and budget/output caps.'],
+      ['Publish a team connection', 'Use an organization-controlled hostname and TLS outside local development. Give each member the gateway connection and their own identity, not a shared provider key.'],
+      ['Verify the first governed workflow', 'Check an allowed request, a denied request with zero upstream calls, and the team/model usage report. Qualify recovery, credential custody, and operations before production rollout.'],
+    ]).map(([title, copy], index) => <li key={title}><span>{String(index + 1).padStart(2, '0')}</span><div><h4>{title}</h4><p>{copy}</p></div></li>)}</ol>
+    <div className="experience-bottom-actions"><a className="button landing-primary" href={sitePath(role === 'join' ? '/docs/#mac' : '/docs/#quickstart')}>{role === 'join' ? 'Install free for Mac' : 'Install the gateway'} →</a><a className="button landing-secondary" href={sitePath('/enterprise/')}>See plans & setup help →</a></div>
+    <details className="experience-details"><summary>What if setup or the gateway fails?</summary><p>A Mac installation does not create a provider account or provision a hosted gateway. Check the gateway URL, client version, model allowlist, identity expiry, and connection status. A failed connection does not grant a direct-provider bypass. Do not blindly replay a request whose provider outcome is unknown.</p><p>The Mac app has no automatic updater; use versioned archives. Windows/Linux users can use the documented CLI/client configuration path; the Mac app itself supports Apple Silicon only. <a href={sourcePath('docs/CLIENTS.md')}>Client setup and baselines ↗</a> · <a href={`${REPOSITORY}/releases/tag/v1.2.0`}>Release and downloads ↗</a></p></details>
+  </div>;
+}
