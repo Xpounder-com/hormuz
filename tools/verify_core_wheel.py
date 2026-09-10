@@ -312,6 +312,41 @@ REQUIRED_PROVIDER_RELIABILITY_SDIST_PATHS = (
     "tests/test_provider_reliability_schema.py",
     "tests/test_gateway.py",
 )
+REQUIRED_CONTEXT_OPTIMIZATION_WHEEL_PATHS = (
+    "hormuz/client_relay.py",
+    "hormuz/client_versions.py",
+    "hormuz/commands/context.py",
+    "hormuz/compaction.py",
+    "hormuz/compaction_contract.py",
+    "hormuz/compaction_enforcement.py",
+    "hormuz/compaction_formats.py",
+    "hormuz/compaction_protocols.py",
+    "hormuz/compaction_runtime.py",
+    "hormuz/context-tool-mappings-v1.json",
+)
+REQUIRED_CONTEXT_OPTIMIZATION_SDIST_PATHS = (
+    *REQUIRED_CONTEXT_OPTIMIZATION_WHEEL_PATHS,
+    "clients/macos/Resources/hormuz-context-release",
+    "clients/macos/Resources/ThirdPartyNotices/Codenotch-LICENSE.txt",
+    "clients/macos/Resources/ThirdPartyNotices/PyInstaller-COPYING.txt",
+    "clients/macos/Resources/ThirdPartyNotices/Python-LICENSE.txt",
+    "clients/macos/Resources/ThirdPartyNotices/regex-LICENSE.txt",
+    "clients/macos/Resources/ThirdPartyNotices/tiktoken-LICENSE.txt",
+    "docs/CONTEXT_COMPACTION_IMPLEMENTATION_HANDOFF.md",
+    "docs/CONTEXT_OPTIMIZATION.md",
+    "docs/releases/v1.2.0-context-optimization.md",
+    "docs/evidence/context-compaction/native-v1-results.json",
+    "tests/fixtures/context_compaction/cases.json",
+    "tests/test_client_relay.py",
+    "tests/test_compaction.py",
+    "tests/test_compaction_cli.py",
+    "tests/test_compaction_enforcement.py",
+    "tests/test_compaction_runtime.py",
+    "tests/test_context_compaction_evaluation.py",
+    "tools/build_context_helper.sh",
+    "tools/context_helper_entry.py",
+    "tools/evaluate_context_compaction.py",
+)
 
 SESSION_PROOF_TEST_MODULES = (
     "tests.test_session_config", "tests.test_session_store", "tests.test_credential_store",
@@ -364,9 +399,21 @@ def main(argv: list[str] | None = None) -> int:
     _assert_budget_preflight_sdist_boundary(sdist)
     _assert_budget_runtime_sdist_boundary(sdist)
     _assert_provider_reliability_sdist_boundary(sdist)
+    _assert_required_archive_paths(
+        wheel,
+        _wheel_members,
+        REQUIRED_CONTEXT_OPTIMIZATION_WHEEL_PATHS,
+        "Context optimization wheel",
+    )
+    _assert_required_archive_paths(
+        sdist,
+        _sdist_members,
+        REQUIRED_CONTEXT_OPTIMIZATION_SDIST_PATHS,
+        "Context optimization source kit",
+    )
     _verify_isolated_install(wheel, config, python, sdist=sdist)
     print(
-        "verified core distribution boundary: no context/runtime data and complete deployment/usability assets"
+        "verified core distribution boundary: stateless context optimization, no retired context data, and complete deployment/usability assets"
     )
     return 0
 
@@ -392,6 +439,17 @@ def _sdist_members(path: Path) -> list[str]:
 def _is_forbidden_archive_path(name: str) -> bool:
     normalized = name.lstrip("./")
     return any(f"/{forbidden}" in f"/{normalized}" for forbidden in FORBIDDEN_ARCHIVE_PATHS)
+
+
+def _assert_required_archive_paths(path: Path, members, required_paths, label: str) -> None:
+    available = tuple(name.lstrip("./") for name in members(path))
+    missing = [
+        required
+        for required in required_paths
+        if not any(f"/{member}".endswith(f"/{required}") for member in available)
+    ]
+    if missing:
+        raise RuntimeError(f"{label} incomplete in {path.name}: {', '.join(sorted(missing))}")
 
 
 def _assert_compose_sdist_boundary(path: Path) -> None:
@@ -627,8 +685,28 @@ def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Pa
             env=environment,
             text=True,
         )
-        if help_result.returncode != 0 or "context-pack" in help_result.stdout:
+        if (
+            help_result.returncode != 0
+            or "context-pack" in help_result.stdout
+            or "context" not in help_result.stdout
+        ):
             raise RuntimeError("installed core wheel exposes the retired context command")
+
+        context_help = subprocess.run(
+            [python, "-I", "-m", "hormuz", "context", "--help"],
+            capture_output=True,
+            check=False,
+            cwd=root,
+            env=environment,
+            text=True,
+        )
+        if (
+            context_help.returncode != 0
+            or "compact" not in context_help.stdout
+            or "run" not in context_help.stdout
+            or context_help.stderr
+        ):
+            raise RuntimeError("installed core wheel lacks the context optimization command")
 
         manifest_result = subprocess.run(
             [python, "-I", "-m", "hormuz", "contract", "manifest"],
@@ -666,6 +744,7 @@ def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Pa
             textwrap.dedent(
                 f"""
                 import importlib.util
+                import importlib.resources
                 import sys
                 from pathlib import Path
 
@@ -676,7 +755,9 @@ def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Pa
 
                 root = Path({str(root)!r})
                 assert importlib.util.find_spec("hormuz.context") is None
+                assert importlib.util.find_spec("tiktoken") is None
                 package_root = Path(hormuz.__file__).resolve().parents[1]
+                assert importlib.resources.files("hormuz").joinpath("context-tool-mappings-v1.json").is_file()
                 secret_inventory = load_secret_inventory(source_root=package_root)
                 assert secret_inventory["schema_id"] == "hormuz.secret-inventory"
                 assert secret_inventory["schema_version"] == 1

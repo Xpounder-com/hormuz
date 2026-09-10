@@ -5,23 +5,41 @@ import unittest
 from pathlib import Path
 
 import hormuz
-from tools import v1_candidate
+from hormuz import client_versions
+from tools import client_release_versions, v1_candidate
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseIdentityTests(unittest.TestCase):
-    def test_v1_package_runtime_and_container_identity_are_consistent(self) -> None:
+    def test_runtime_and_isolated_qualification_client_versions_match(self) -> None:
+        self.assertEqual(
+            client_versions.SUPPORTED_CODEX_VERSION,
+            client_release_versions.SUPPORTED_CODEX_VERSION,
+        )
+        self.assertEqual(
+            client_versions.SUPPORTED_CLAUDE_CODE_VERSION,
+            client_release_versions.SUPPORTED_CLAUDE_CODE_VERSION,
+        )
+
+    def test_current_package_runtime_and_container_identity_are_consistent(self) -> None:
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         project = pyproject["project"]
-        self.assertEqual(project["version"], "1.0.0")
-        self.assertEqual(hormuz.__version__, "1.0.0")
+        self.assertEqual(project["version"], "1.2.0")
+        self.assertEqual(hormuz.__version__, "1.2.0")
         self.assertNotIn("Development Status :: 3 - Alpha", project["classifiers"])
 
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-        self.assertEqual(dockerfile.count("ARG HORMUZ_VERSION=1.0.0"), 2)
+        self.assertEqual(dockerfile.count("ARG HORMUZ_VERSION=1.2.0"), 2)
         self.assertNotIn("ARG HORMUZ_VERSION=0.1.3", dockerfile)
+
+        hosted_dockerfile = (ROOT / "deploy/render/gateway/Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(hosted_dockerfile.count("ARG HORMUZ_VERSION=1.2.0"), 2)
+        self.assertIn('"hormuz==${HORMUZ_VERSION}"', hosted_dockerfile)
+        self.assertNotIn("hormuz==1.0.0", hosted_dockerfile)
 
         server = (ROOT / "hormuz" / "server.py").read_text(encoding="utf-8")
         self.assertIn('f"Hormuz/{__version__}"', server)

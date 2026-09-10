@@ -1,0 +1,458 @@
+{
+  "schema_version": 1,
+  "headroom_commit": "e67b3c8a29443a60d6b0018fb22f525c5cd7e709",
+  "source_modules": {
+    "folds": [
+      "headroom/transforms/lossless_compaction.py",
+      "a1084e69edbad3a2cd9aa03bd89cab20f249f6162c076f384d2c57944bc2f0c8"
+    ],
+    "schemas": [
+      "headroom/proxy/tool_schema_compaction.py",
+      "4f7922cb6322bfe0976bfdcbe1978544d120f565e311a0d5510d16abbb91160f"
+    ]
+  },
+  "tokenizer": "tiktoken==0.12.0",
+  "python": "3.14.0 (main, Oct  7 2025, 09:34:52) [Clang 17.0.0 (clang-1700.3.19.1)]",
+  "evidence_scope": "synthetic offline data preservation and standalone content token counts; not model accuracy, provider billing, or full Headroom pipeline",
+  "results": [
+    {
+      "fixture": "repeated_log_with_one_error",
+      "kind": "log",
+      "input_sha256": "f6a514964b38ce5e110f87f9e1604ce56d75b3a49c897573bb330ff1a1d05a93",
+      "baseline_tokens": {
+        "cl100k_base": 559,
+        "o200k_base": 559
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 35,
+        "o200k_base": 35
+      },
+      "guarded_tokens": {
+        "cl100k_base": 35,
+        "o200k_base": 35
+      },
+      "changed": true,
+      "upstream_changed": true,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 3348,
+      "guarded_bytes": 156
+    },
+    {
+      "fixture": "unique_timestamped_log",
+      "kind": "log",
+      "input_sha256": "3624dd63137ba8e525604d4918044786920569d67920a5dbc75d475828a443ca",
+      "baseline_tokens": {
+        "cl100k_base": 1261,
+        "o200k_base": 1261
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 1261,
+        "o200k_base": 1261
+      },
+      "guarded_tokens": {
+        "cl100k_base": 1261,
+        "o200k_base": 1261
+      },
+      "changed": false,
+      "upstream_changed": false,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 2684,
+      "guarded_bytes": 2684
+    },
+    {
+      "fixture": "search_repeated_file",
+      "kind": "search",
+      "input_sha256": "d80831fd0ffec90f7e2647525dd46a2299ae19a911403a7ab667836a845b89f7",
+      "baseline_tokens": {
+        "cl100k_base": 840,
+        "o200k_base": 840
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 486,
+        "o200k_base": 486
+      },
+      "guarded_tokens": {
+        "cl100k_base": 486,
+        "o200k_base": 486
+      },
+      "changed": true,
+      "upstream_changed": true,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 3402,
+      "guarded_bytes": 1573
+    },
+    {
+      "fixture": "path_listing",
+      "kind": "paths",
+      "input_sha256": "37fb1979df3f39dee875da321e16ce0cfe85c1064580a38b47914e42f31ddc25",
+      "baseline_tokens": {
+        "cl100k_base": 540,
+        "o200k_base": 540
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 304,
+        "o200k_base": 304
+      },
+      "guarded_tokens": {
+        "cl100k_base": 304,
+        "o200k_base": 304
+      },
+      "changed": true,
+      "upstream_changed": true,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 2210,
+      "guarded_bytes": 913
+    },
+    {
+      "fixture": "repeated_config_stanzas",
+      "kind": "config",
+      "input_sha256": "48c1d12919e94f25bb345272ed7f7277ac9f95b01a7180af2579a5414a667fe9",
+      "baseline_tokens": {
+        "cl100k_base": 490,
+        "o200k_base": 490
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 106,
+        "o200k_base": 112
+      },
+      "guarded_tokens": {
+        "cl100k_base": 106,
+        "o200k_base": 112
+      },
+      "changed": true,
+      "upstream_changed": true,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 1330,
+      "guarded_bytes": 324
+    },
+    {
+      "fixture": "uniform_json_tool_results",
+      "kind": "json",
+      "input_sha256": "690404c2626586958c27210d13ff7cc12cb6fd61476d5d4070f7c499925d0e55",
+      "baseline_tokens": {
+        "cl100k_base": 1612,
+        "o200k_base": 1612
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 1612,
+        "o200k_base": 1612
+      },
+      "guarded_tokens": {
+        "cl100k_base": 799,
+        "o200k_base": 800
+      },
+      "changed": true,
+      "upstream_changed": false,
+      "method": "native_table_baseline",
+      "baseline_bytes": 5011,
+      "guarded_bytes": 1821
+    },
+    {
+      "fixture": "nested_uniform_json",
+      "kind": "json",
+      "input_sha256": "65d14a520cff2579c4ed8f2027e187ebb649968b884a96c9599efe08137bc40d",
+      "baseline_tokens": {
+        "cl100k_base": 1083,
+        "o200k_base": 1043
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 1083,
+        "o200k_base": 1043
+      },
+      "guarded_tokens": {
+        "cl100k_base": 864,
+        "o200k_base": 865
+      },
+      "changed": true,
+      "upstream_changed": false,
+      "method": "native_table_baseline",
+      "baseline_bytes": 3951,
+      "guarded_bytes": 2795
+    },
+    {
+      "fixture": "heterogeneous_json",
+      "kind": "json",
+      "input_sha256": "810cbf82f5c968f6ac972a7522720e85fbc8e803b91d56ec261995890c7fda7e",
+      "baseline_tokens": {
+        "cl100k_base": 17,
+        "o200k_base": 17
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 17,
+        "o200k_base": 17
+      },
+      "guarded_tokens": {
+        "cl100k_base": 17,
+        "o200k_base": 17
+      },
+      "changed": false,
+      "upstream_changed": false,
+      "method": "native_table_baseline",
+      "baseline_bytes": 56,
+      "guarded_bytes": 56
+    },
+    {
+      "fixture": "dense_instruction_text",
+      "kind": "text",
+      "input_sha256": "210a9422a788bd9306a96f32d8cbf0813d39ef92939e6f7e3cf2d351de2f44b2",
+      "baseline_tokens": {
+        "cl100k_base": 20,
+        "o200k_base": 20
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 20,
+        "o200k_base": 20
+      },
+      "guarded_tokens": {
+        "cl100k_base": 20,
+        "o200k_base": 20
+      },
+      "changed": false,
+      "upstream_changed": false,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 104,
+      "guarded_bytes": 104
+    },
+    {
+      "fixture": "source_code_verbatim",
+      "kind": "code",
+      "input_sha256": "053f80dae2b81b7ae1fc92166a5ef9beb514389ffbfb0dc71170db25b6204057",
+      "baseline_tokens": {
+        "cl100k_base": 21,
+        "o200k_base": 20
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 21,
+        "o200k_base": 20
+      },
+      "guarded_tokens": {
+        "cl100k_base": 21,
+        "o200k_base": 20
+      },
+      "changed": false,
+      "upstream_changed": false,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 91,
+      "guarded_bytes": 91
+    },
+    {
+      "fixture": "diff_with_index",
+      "kind": "diff",
+      "input_sha256": "a23f56dde9ed7b6f02dd464ee1109f5b79f7670de1ebcfd80e6274745b2e5606",
+      "baseline_tokens": {
+        "cl100k_base": 49,
+        "o200k_base": 50
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 36,
+        "o200k_base": 37
+      },
+      "guarded_tokens": {
+        "cl100k_base": 49,
+        "o200k_base": 50
+      },
+      "changed": false,
+      "upstream_changed": true,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 118,
+      "guarded_bytes": 118
+    },
+    {
+      "fixture": "ansi_log",
+      "kind": "log",
+      "input_sha256": "49b78a3b19bc7d22f2fb1572fae57d2544cc02eb63897d2a3383c44e6e16e93b",
+      "baseline_tokens": {
+        "cl100k_base": 440,
+        "o200k_base": 520
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 13,
+        "o200k_base": 13
+      },
+      "guarded_tokens": {
+        "cl100k_base": 440,
+        "o200k_base": 520
+      },
+      "changed": false,
+      "upstream_changed": true,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 1440,
+      "guarded_bytes": 1440
+    },
+    {
+      "fixture": "literal_marker_collision",
+      "kind": "log",
+      "input_sha256": "4dc8fefabfb022d1c46f0c09cc89082146a05fef704c6092ca7feebf29796f0d",
+      "baseline_tokens": {
+        "cl100k_base": 51,
+        "o200k_base": 51
+      },
+      "upstream_fold_tokens": {
+        "cl100k_base": 51,
+        "o200k_base": 51
+      },
+      "guarded_tokens": {
+        "cl100k_base": 51,
+        "o200k_base": 51
+      },
+      "changed": false,
+      "upstream_changed": false,
+      "method": "headroom_fold_with_strict_guard",
+      "baseline_bytes": 142,
+      "guarded_bytes": 142
+    }
+  ],
+  "request_envelope_checks": [
+    {
+      "protocol": "chat",
+      "fixture": "uniform_json_tool_results",
+      "full_json_before_tokens": {
+        "cl100k_base": 1761,
+        "o200k_base": 1763
+      },
+      "full_json_after_tokens": {
+        "cl100k_base": 884,
+        "o200k_base": 886
+      },
+      "request_reconstruction_exact": true
+    },
+    {
+      "protocol": "responses",
+      "fixture": "uniform_json_tool_results",
+      "full_json_before_tokens": {
+        "cl100k_base": 1756,
+        "o200k_base": 1757
+      },
+      "full_json_after_tokens": {
+        "cl100k_base": 879,
+        "o200k_base": 880
+      },
+      "request_reconstruction_exact": true
+    },
+    {
+      "protocol": "anthropic",
+      "fixture": "uniform_json_tool_results",
+      "full_json_before_tokens": {
+        "cl100k_base": 1767,
+        "o200k_base": 1770
+      },
+      "full_json_after_tokens": {
+        "cl100k_base": 890,
+        "o200k_base": 893
+      },
+      "request_reconstruction_exact": true
+    }
+  ],
+  "tool_schema_probes": [
+    {
+      "probe": "property_named_title",
+      "preserved": true,
+      "modified": true,
+      "before": {
+        "type": "object",
+        "title": "Annotation",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "after": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
+      "probe": "const_object_keys",
+      "preserved": false,
+      "modified": true,
+      "before": {
+        "type": "object",
+        "const": {
+          "title": "approved",
+          "status": "ok"
+        }
+      },
+      "after": {
+        "type": "object",
+        "const": {
+          "status": "ok"
+        }
+      }
+    },
+    {
+      "probe": "enum_object_keys",
+      "preserved": false,
+      "modified": true,
+      "before": {
+        "enum": [
+          {
+            "title": "approved"
+          },
+          {
+            "title": "denied"
+          }
+        ]
+      },
+      "after": {
+        "enum": [
+          {},
+          {}
+        ]
+      }
+    },
+    {
+      "probe": "default_object_keys",
+      "preserved": false,
+      "modified": true,
+      "before": {
+        "type": "object",
+        "default": {
+          "title": "approved"
+        }
+      },
+      "after": {
+        "type": "object",
+        "default": {}
+      }
+    },
+    {
+      "probe": "defs_named_title",
+      "preserved": false,
+      "modified": true,
+      "before": {
+        "$defs": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "$ref": "#/$defs/title"
+      },
+      "after": {
+        "$defs": {},
+        "$ref": "#/$defs/title"
+      }
+    },
+    {
+      "probe": "instruction_spacing",
+      "preserved": false,
+      "modified": true,
+      "before": {
+        "description": "The literal separator is two spaces: 'a  b'."
+      },
+      "after": {
+        "description": "The literal separator is two spaces: 'a b'."
+      }
+    }
+  ]
+}

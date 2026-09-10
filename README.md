@@ -17,8 +17,10 @@ credentials remain on the Hormuz service; prompts and responses are relayed, not
 written to the usage database.
 
 > [!IMPORTANT]
-> Hormuz 1.0 is the first stable CLI and policy/evidence-contract release line.
-> Release qualification included five isolated internal repetitions of one exact
+> Hormuz 1.0 established the stable CLI and policy/evidence contracts. Hormuz
+> 1.2 preserves those contracts and adds default-Off client-side context
+> optimization plus an Apple Silicon companion distribution. The original
+> release qualification included five isolated internal repetitions of one exact
 > offline policy workflow plus exact-byte candidate custody. That bounded result
 > does not prove external human usability, blanket production fitness, customer
 > SLA coverage, provider billing accuracy, or independent security review.
@@ -40,6 +42,7 @@ written to the usage database.
 | Understand adoption and spend | Group current-month requests, tokens, and estimated cost by organization, team, person, model, client, or provider. |
 | Attribute usage responsibly | Bind each request to a unique human or workload identity and preserve event-time team attribution without storing prompts or responses. |
 | Reduce secret-egress risk | Detect, redact, or deny configured credentials and high-confidence secret formats before provider serialization. |
+| Reduce repetitive tool context | Optionally encode eligible structured tool results on the user's machine before the governed request leaves the device. |
 | Keep control in your environment | Self-host the gateway and metadata store, keep provider keys server-side, and export versioned evidence for independent analysis. |
 
 Hormuz is designed for usage governance, not employee surveillance. Token volume
@@ -54,7 +57,7 @@ The provider-free demo exercises the real HTTP gateway, policy, redaction,
 request-attempt, and SQLite evidence paths with disposable loopback providers:
 
 ~~~bash
-git clone --branch v1.0.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
+git clone --branch v1.2.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
 cd hormuz
 python3 -m venv .venv
 source .venv/bin/activate
@@ -62,7 +65,7 @@ python -m pip install --editable .
 hormuz demo
 ~~~
 
-The commands above select the stable v1.0.0 source tag. Installation downloads
+The commands above select the stable v1.2.0 source tag. Installation downloads
 Python dependencies; the demo itself uses only disposable local loopback
 providers. No OpenAI or Anthropic account is required. A successful run reports:
 
@@ -212,6 +215,21 @@ field semantics and coverage limits.
   interruption, backup/restore, and bounded HA reference proofs.
 - Versioned liveness and readiness endpoints plus graceful shutdown.
 
+### Client-side context optimization
+
+- A persistent **Context optimization** toggle that is Off by default and scoped
+  to one saved connection on one device.
+- An authenticated, launcher-owned loopback helper for Codex and Claude Code;
+  selection, exact reconstruction, and token estimates happen locally.
+- Four bounded, lossless representations for uniform JSON rows, repeated lines,
+  single-file search output, and shared-prefix path lists.
+- No context cache, prompt/response storage, content hash, or optimization
+  telemetry. The gateway still sees the selected request and applies all normal
+  identity, policy, budget, accounting, and secret controls.
+
+See [client-side context optimization](docs/CONTEXT_OPTIMIZATION.md) for setup,
+supported tool shapes, limits, privacy boundaries, and current evidence.
+
 The included rate cards are examples current as of August 15, 2026. Verify them
 against provider pricing before production use and reconcile estimates against
 provider invoices before describing spend as final.
@@ -220,6 +238,9 @@ provider invoices before describing spend as final.
 
 ~~~text
 Codex / Claude Code
+        |
+        v
+optional authenticated helper on the user's loopback interface
         |
         v
 authenticated person + team
@@ -308,7 +329,8 @@ concurrency, rollback, and compatibility behavior.
 | Path | Intended use | Boundary |
 | --- | --- | --- |
 | Source + SQLite | Local evaluation and one-process operation | Not a shared or HA store |
-| [Signed OCI image](docs/OCI.md) | Separately versioned `v0.1.3` Linux `amd64` reference | Digest is the artifact contract; no mutable `latest` tag; not the v1.0.0 source release |
+| [Signed OCI image](docs/OCI.md) | Version-matched Linux `amd64` reference | Digest is the artifact contract; no mutable `latest` tag |
+| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | Developer ID signed and notarized direct download; Intel Macs are unsupported |
 | [Docker Compose](deploy/compose/README.md) | Provider-free single-VM evaluation or pilot | One gateway replica; not HA or production certification |
 | [Kubernetes + Helm](deploy/kubernetes/README.md) | Bounded multi-replica reference | Customer-operated PostgreSQL and ingress; not general HA/DR certification |
 
@@ -322,6 +344,7 @@ Public TLS remains a customer-controlled ingress responsibility. Read
 | --- | --- |
 | Architecture and trust boundaries | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Codex and Claude Code setup | [docs/CLIENTS.md](docs/CLIENTS.md) |
+| Client-side context optimization and privacy boundary | [docs/CONTEXT_OPTIMIZATION.md](docs/CONTEXT_OPTIMIZATION.md) |
 | Policy administration | [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) |
 | Usage, tokens, cost, and budgets | [docs/USAGE.md](docs/USAGE.md) |
 | Provider streaming, latency, failover, and compute boundaries | [docs/PROVIDER_RELIABILITY.md](docs/PROVIDER_RELIABILITY.md) |
@@ -346,7 +369,7 @@ python3 -m hormuz contract manifest
 
 | Status | Current boundary |
 | --- | --- |
-| Stable public contract | v1.0.0 stabilizes the CLI and policy/evidence contracts. |
+| Stable public contract | v1.2.0 preserves the v1.0 CLI and policy/evidence contracts and adds default-Off local context optimization. |
 | Production certification | None claimed; deployment fitness remains operator- and environment-specific. |
 | Verified references | Only the exact profiles documented in [SUPPORT.md](SUPPORT.md) and their retained evidence. |
 | Unfinished | Independent external onboarding, general production HA/DR, cloud certification, complete provider-account coverage, and independent review. |

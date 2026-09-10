@@ -5,6 +5,7 @@ FROM caddy@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a7
 RUN setcap -r /usr/bin/caddy
 
 FROM ${PYTHON_BASE} AS builder
+ARG HORMUZ_VERSION=1.2.0
 ARG TARGETPLATFORM
 WORKDIR /build
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 PIP_NO_COMPILE=1 PYTHONDONTWRITEBYTECODE=1
@@ -19,13 +20,15 @@ RUN python -m pip wheel --no-build-isolation --no-deps --wheel-dir /wheelhouse .
     && /opt/hormuz/bin/pip install --no-index --no-compile --require-hashes \
         --find-links=/wheelhouse -r requirements/oci-runtime-linux-amd64.lock \
     && /opt/hormuz/bin/pip install --no-index --no-compile --no-deps \
-        --find-links=/wheelhouse hormuz==1.0.0 \
+        --find-links=/wheelhouse "hormuz==${HORMUZ_VERSION}" \
     && /opt/hormuz/bin/pip uninstall --yes pip setuptools
 
 FROM ${PYTHON_BASE}
+ARG HORMUZ_VERSION=1.2.0
 LABEL org.opencontainers.image.title="Hormuz hosted single-node pilot" \
       org.opencontainers.image.description="Maintenance-first login and opt-in provider-pilot qualification" \
-      org.opencontainers.image.source="https://github.com/Xpounder-com/hormuz"
+      org.opencontainers.image.source="https://github.com/Xpounder-com/hormuz" \
+      org.opencontainers.image.version="${HORMUZ_VERSION}"
 ENV PATH="/opt/hormuz/bin:${PATH}" HOME=/home/hormuz PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     HORMUZ_CONFIG=/etc/secrets/hormuz-hosted.json \
     HORMUZ_PROVIDER_CONFIG=/etc/secrets/hormuz-provider.json \

@@ -70,6 +70,21 @@ evaluate the linked issue and exact diff, resolve substantive findings, verify
 the applicable gates, then merge under the owner's standing authorization.
 Recheck the resulting `main` evidence before claiming issue completion.
 
+## v1.2.0 context-optimization release
+
+Client-side context optimization follows v1.1.0 as a normal Hormuz minor
+release. Its [implementation and trust-boundary contract](CONTEXT_OPTIMIZATION.md)
+keeps selection, transformation, reconstruction verification, and token
+estimates on the user's machine while preserving existing gateway policy,
+budget, accounting, and secret controls. The preference is Off by default and
+can change per saved local profile without changing a server policy.
+
+The v1.2.0 release does not reuse the frozen v1.1.0
+portfolio scope. Release qualification additionally requires the packaged
+Apple Silicon helper and tokenizers, installed-client proof, paired model-quality
+evaluation, exact-head CI/review, and explicit publication authorization. See the
+[v1.2.0 release note](releases/v1.2.0-context-optimization.md).
+
 ## v1.0.0 foundation implementation history
 
 ### 1. Separate the deprecated context experiment
@@ -294,7 +309,7 @@ does not authorize the broader versions of these capabilities:
 - unversioned cost-allocation APIs, unrestricted allocation roles, or ad hoc reporting dimensions;
 - new DLP detector families unless they close a demonstrated bypass;
 - ticket, source, productivity, quality, or workflow content ingestion;
-- new context, memory, lifecycle, cache, retrieval, provenance, or content-governance capabilities.
+- stored context, memory, lifecycle, cache, retrieval, provenance, or content-governance capabilities. The separately scoped v1.2.0 stateless client encoding above adds none of those stores or retrieval surfaces.
 
 The separately packaged context experiment is outside the core release surface. It does not make Hormuz an organizational-memory system; the AI Metadata Compiler remains the separate product for enterprise asset ingestion, normalization, claims, provenance, and freshness.
 

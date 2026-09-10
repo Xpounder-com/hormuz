@@ -1,0 +1,14 @@
+{"schema_version":1,"cases":[
+{"case_id":"case-01","format":"json_table","operation":"record_count","expected":{"count":80}},
+{"case_id":"case-02","format":"json_table","operation":"signed_sum","expected":{"sum":0}},
+{"case_id":"case-03","format":"json_table","operation":"rare_denied","expected":{"id":57,"status":"denied"}},
+{"case_id":"case-04","format":"json_table","operation":"typed_values","expected":{"values":[null,false,0,""]}},
+{"case_id":"case-05","format":"json_table","operation":"quoted_unicode","expected":{"value":"He said \"سلام\" — 東京"}},
+{"case_id":"case-06","format":"json_table","operation":"nested_value","expected":{"owner":"team-a","level":7}},
+{"case_id":"case-07","format":"line_runs","operation":"repeated_count","expected":{"events":121}},
+{"case_id":"case-08","format":"line_runs","operation":"rare_error","expected":{"line":61,"message":"ERROR permission denied"}},
+{"case_id":"case-09","format":"search_lines","operation":"search_location","expected":{"path":"src/service/request_handler.py","line":73}},
+{"case_id":"case-10","format":"path_list","operation":"duplicate_paths","expected":{"path":"src/generated/item_7.py","count":6}},
+{"case_id":"case-11","format":"line_runs","operation":"instruction_attack","expected":{"decision":"follow-system"}},
+{"case_id":"case-12","format":"line_runs","operation":"literal_marker","expected":{"occurrences":40}}
+]}

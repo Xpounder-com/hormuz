@@ -21,6 +21,8 @@ import Observation
     private(set) var loginURL: URL?
     private(set) var connector: ConnectorPlan?
     private(set) var connectorSaved = false
+    private(set) var contextOptimizationEnabled = false
+    private(set) var contextOptimizationStatus = ContextOptimizationStatus.off
     var showingPreview = false
     var message: String?
     private var controller: SessionController?
@@ -37,6 +39,8 @@ import Observation
         return hasSession ? "Signed in · not yet verified" : "Not connected"
     }
 
+    var contextOptimizationStatusLabel: String { contextOptimizationStatus.label }
+
     func restore() async {
         guard !didRestore else { return }
         didRestore = true
@@ -50,28 +54,42 @@ import Observation
     }
 
     func signIn() {
+        run { try await self.performSignIn() }
+    }
+
+    func reconnect() {
         run {
             guard let controller = self.controller else { throw ClientError.storageUnavailable }
-            let profile = try ConnectionProfile(gateway: self.gateway, organization: self.organization,
-                issuer: self.issuer.isEmpty ? nil : self.issuer, client: self.client, model: self.model,
-                allowLoopbackHTTP: self.allowLoopbackHTTP, setup: self.setup)
             self.dashboard = nil
-            self.connector = nil
-            self.connectorSaved = false
-            try await controller.signIn(profile: profile) { url in
-                await MainActor.run {
-                    self.loginURL = url
-                    self.awaitingBrowser = true
-                    if !NSWorkspace.shared.open(url) {
-                        self.message = "The browser could not open. Use Open sign-in page to continue."
-                    }
+            // Retire the previous session first. Failed revocation must not create
+            // a second session or silently discard the Keychain retry record.
+            try await controller.signOut()
+            try await self.syncStatus()
+            try await self.performSignIn()
+        }
+    }
+
+    private func performSignIn() async throws {
+        guard let controller else { throw ClientError.storageUnavailable }
+        let profile = try ConnectionProfile(gateway: gateway, organization: organization,
+            issuer: issuer.isEmpty ? nil : issuer, client: client, model: model,
+            allowLoopbackHTTP: allowLoopbackHTTP, setup: setup)
+        dashboard = nil
+        connector = nil
+        connectorSaved = false
+        try await controller.signIn(profile: profile) { url in
+            await MainActor.run {
+                self.loginURL = url
+                self.awaitingBrowser = true
+                if !NSWorkspace.shared.open(url) {
+                    self.message = "The browser could not open. Use Open sign-in page to continue."
                 }
             }
-            self.awaitingBrowser = false
-            self.loginURL = nil
-            try await self.syncStatus()
-            self.dashboard = try await controller.dashboard(profileID: profile.id)
         }
+        awaitingBrowser = false
+        loginURL = nil
+        try await syncStatus()
+        dashboard = try await controller.dashboard(profileID: profile.id)
     }
 
     func cancelSignIn() { operation?.cancel() }
@@ -110,13 +128,18 @@ import Observation
         }
     }
 
-    func previewConnector() {
+    @discardableResult
+    func previewConnector(presentSheet: Bool = true) -> Bool {
         do {
             guard let profile, let directory, hasSession, sessionState == .active,
                   let executable = Bundle.main.executableURL else { throw ClientError.loginRequired }
             connector = try ConnectorPlan.preview(profile: profile, directory: directory, helper: executable)
-            showingPreview = true
-        } catch { message = ClientError.message(for: error) }
+            showingPreview = presentSheet
+            return true
+        } catch {
+            message = ClientError.message(for: error)
+            return false
+        }
     }
 
     func saveConnector() {
@@ -136,6 +159,24 @@ import Observation
         message = "Launcher command copied. No credentials were copied."
     }
 
+    func setContextOptimization(enabled: Bool) {
+        run {
+            guard let profile = self.profile, let directory = self.directory else {
+                throw ClientError.loginRequired
+            }
+            let preference = try await ContextOptimizationSettings.save(
+                enabled: enabled, profile: profile, directory: directory
+            )
+            self.contextOptimizationEnabled = preference.enabled
+            self.contextOptimizationStatus = await self.contextStatus(
+                preference: preference, profile: profile, directory: directory
+            )
+            self.message = preference.enabled
+                ? "Context optimization is on. Its readiness applies to the next request; new chats have the most stable cache behavior."
+                : "Context optimization is off. Requests pass through the local helper unchanged."
+        }
+    }
+
     private func syncStatus() async throws {
         guard let controller else { throw ClientError.storageUnavailable }
         let status = try await controller.status()
@@ -151,7 +192,40 @@ import Observation
             client = profile.client
             model = profile.model
             allowLoopbackHTTP = profile.allowLoopbackHTTP
+            if let directory {
+                do {
+                    let preference = try ContextOptimizationSettings.load(
+                        profile: profile, directory: directory
+                    )
+                    contextOptimizationEnabled = preference.enabled
+                    contextOptimizationStatus = await contextStatus(
+                        preference: preference, profile: profile, directory: directory
+                    )
+                } catch {
+                    contextOptimizationEnabled = false
+                    contextOptimizationStatus = .settingsInvalid
+                }
+            }
+        } else {
+            contextOptimizationEnabled = false
+            contextOptimizationStatus = .off
         }
+    }
+
+    private func contextStatus(
+        preference: ContextOptimizationPreference,
+        profile: ConnectionProfile,
+        directory: PrivateDirectory
+    ) async -> ContextOptimizationStatus {
+        guard preference.enabled else { return .off }
+        guard let executable = Bundle.main.executableURL else {
+            return .resourcesUnavailable
+        }
+        let helper = executable.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/ContextHelper/hormuz-context")
+        return await ContextOptimizationSettings.probeStatus(
+            profile: profile, directory: directory, helper: helper
+        )
     }
 
     private func run(_ action: @escaping @MainActor () async throws -> Void) {

@@ -131,6 +131,8 @@ EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
         "${{ secrets.APPLE_NOTARY_KEY_ID }}",
         "${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}",
         "${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}",
+        "${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}",
+        "${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}",
         "${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}",
     ),
     "release-oci.yml": (
@@ -153,6 +155,7 @@ EXPECTED_WORKFLOW_JOB_ENVIRONMENTS = {
         "live-clients": "live-provider-conformance"
     },
     "macos-distribution.yml": {
+        "context-helper": "macos-distribution",
         "sign-and-notarize": "macos-distribution"
     },
     "macos-pilot-operations.yml": {
@@ -166,7 +169,7 @@ MACOS_DISTRIBUTION_SOURCE_GUARD = (
     'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
     'test -z "$(git status --porcelain)"',
 )
-MACOS_DISTRIBUTION_SOURCE_GUARD_OCCURRENCES = 2
+MACOS_DISTRIBUTION_SOURCE_GUARD_OCCURRENCES = 3
 MACOS_PILOT_OPERATIONS_TRIGGER = """on:
   workflow_dispatch:
     inputs:
@@ -1506,9 +1509,13 @@ def _validate_workflows(
                     "macOS distribution proof provenance binding changed"
                 )
             if (
-                text.count("HORMUZ_TEAM_ID: R267LZMUTY") != 1
+                text.count("HORMUZ_TEAM_ID: R267LZMUTY") != 2
                 or text.count(
                     '[[ "$HORMUZ_CODESIGN_IDENTITY" == *"($HORMUZ_TEAM_ID)" ]]'
+                )
+                != 1
+                or text.count(
+                    '[[ "$HORMUZ_CONTEXT_IDENTITY" == *"($HORMUZ_TEAM_ID)" ]]'
                 )
                 != 1
             ):
@@ -1516,13 +1523,24 @@ def _validate_workflows(
                     "macOS distribution signing team binding changed"
                 )
             build_job = job_blocks.get("build-and-test")
+            helper_job = job_blocks.get("context-helper")
             signing_job = job_blocks.get("sign-and-notarize")
             signing_fields = job_fields.get("sign-and-notarize", {})
             if (
                 build_job is None
+                or helper_job is None
                 or signing_job is None
                 or signing_fields.get("needs") != "build-and-test"
                 or "${{ secrets." in build_job
+                or helper_job.count("${{ secrets.") != 2
+                or "${{ secrets.APPLE_NOTARY_" in helper_job
+                or "./tools/build_context_helper.sh" not in helper_job
+                or 'rm -f "$HORMUZ_CONTEXT_CERTIFICATE"' not in helper_job
+                or (
+                    "unset HORMUZ_CERTIFICATE_BASE64 "
+                    "HORMUZ_CERTIFICATE_PASSWORD"
+                )
+                not in helper_job
                 or "swift test --package-path clients/macos" not in build_job
                 or "swift build --package-path clients/macos" not in build_job
                 or "actions/upload-artifact@" not in build_job
@@ -1602,17 +1620,23 @@ def _validate_workflows(
                 )
         if path.name == "macos-client.yml":
             change_job = job_blocks.get("changes")
+            helper_job = job_blocks.get("context-helper")
             native_job = job_blocks.get("native-client")
             gate_job = job_blocks.get("native-client-gate")
             if (
                 change_job is None
+                or helper_job is None
                 or native_job is None
                 or gate_job is None
                 or "pull_request:\n    paths:" in text
                 or 'git diff --quiet "$BASE_SHA" "$HEAD_SHA" --' not in change_job
                 or change_job.count('echo "macos=true" >> "$GITHUB_OUTPUT"') != 2
                 or change_job.count('echo "macos=false" >> "$GITHUB_OUTPUT"') != 1
-                or job_fields.get("native-client", {}).get("needs") != "changes"
+                or job_fields.get("context-helper", {}).get("needs") != "changes"
+                or job_fields.get("context-helper", {}).get("if")
+                != "needs.changes.outputs.macos == 'true'"
+                or job_fields.get("native-client", {}).get("needs")
+                != "[changes, context-helper]"
                 or job_fields.get("native-client", {}).get("if")
                 != "needs.changes.outputs.macos == 'true'"
                 or job_fields.get("native-client", {}).get("name")
@@ -1621,12 +1645,20 @@ def _validate_workflows(
                 != "Native Mac client and loopback contract"
                 or job_fields.get("native-client-gate", {}).get("if") != "always()"
                 or job_fields.get("native-client-gate", {}).get("needs")
-                != "[changes, native-client]"
+                != "[changes, context-helper, native-client]"
                 or 'test "$CHANGES_RESULT" = "success"' not in gate_job
+                or 'test "$HELPER_RESULT" = "success"' not in gate_job
+                or 'test "$HELPER_RESULT" = "skipped"' not in gate_job
                 or 'test "$NATIVE_RESULT" = "success"' not in gate_job
                 or 'test "$NATIVE_RESULT" = "skipped"' not in gate_job
                 or "swift test --package-path clients/macos" not in native_job
                 or native_job.count('test "$(uname -m)" = arm64') != 1
+                or "./tools/build_context_helper.sh" not in helper_job
+                or helper_job.count("architecture: arm64") != 1
+                or any(
+                    marker in helper_job
+                    for marker in ("x86_64", "macos-15-intel")
+                )
             ):
                 raise RepositoryGovernanceError(
                     "native Mac required-check gate changed"

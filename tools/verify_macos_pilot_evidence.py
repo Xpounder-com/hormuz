@@ -146,7 +146,7 @@ _ARTIFACT_FIELDS = {
     "notarization_summary_sha256",
     "submission_id",
 }
-_DISTRIBUTION_PROOF_FIELDS = {
+_DISTRIBUTION_PROOF_V2_FIELDS = {
     "schema_id",
     "schema_version",
     "passed",
@@ -170,6 +170,16 @@ _DISTRIBUTION_PROOF_FIELDS = {
     "icon_sha256",
     "source_commit",
     "workflow_run_url",
+}
+_DISTRIBUTION_PROOF_V3_FIELDS = _DISTRIBUTION_PROOF_V2_FIELDS | {
+    "context_helper_architectures",
+    "context_helper_packaged",
+    "context_helper_runtime_verified",
+    "context_helper_launcher_sealed_by_bundle",
+    "context_helper_signatures",
+    "context_tokenizers_packaged",
+    "context_helper_sha256",
+    "context_helper_backend_sha256",
 }
 _NOTARIZATION_FIELDS = {
     "schema_id",
@@ -1329,8 +1339,20 @@ def _verify_production_archive(
 
 
 def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str, Any]:
-    proof = _require_fields(value, _DISTRIBUTION_PROOF_FIELDS, "distribution_proof")
-    _require_int(proof["schema_version"], 2, 2, "distribution_proof_schema_version")
+    if not isinstance(value, dict):
+        raise MacPilotEvidenceError("distribution_proof_fields_invalid")
+    schema_version = _require_int(
+        value.get("schema_version"),
+        2,
+        3,
+        "distribution_proof_schema_version",
+    )
+    fields = (
+        _DISTRIBUTION_PROOF_V2_FIELDS
+        if schema_version == 2
+        else _DISTRIBUTION_PROOF_V3_FIELDS
+    )
+    proof = _require_fields(value, fields, "distribution_proof")
     if (
         proof["schema_id"] != "hormuz.macos-distribution-proof"
         or proof["passed"] is not True
@@ -1350,7 +1372,7 @@ def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str,
     _require_bool(proof["executable_version_verified"], "proof_executable_version_verified")
     _require_pattern(proof["source_commit"], _REVISION_RE, "proof_source_commit")
     _require_pattern(proof["workflow_run_url"], _ACTIONS_RUN_RE, "proof_workflow_run_url")
-    _require_pattern(proof["version"], _VERSION_RE, "proof_version")
+    version = _require_pattern(proof["version"], _VERSION_RE, "proof_version")
     _require_pattern(proof["build"], _BUILD_RE, "proof_build")
     team_id = _require_pattern(proof["team_identifier"], _TEAM_ID_RE, "proof_team_identifier")
     authority = proof["signing_authority"]
@@ -1373,6 +1395,45 @@ def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str,
         or authority != "Developer ID Application: Synthetic Fixture (ABCDEFGHIJ)"
     ):
         raise MacPilotEvidenceError("synthetic_distribution_proof_identity_invalid")
+    if tuple(int(part) for part in version.split(".")) >= (1, 2, 0) and schema_version != 3:
+        raise MacPilotEvidenceError("distribution_proof_context_contract_required")
+    if schema_version == 3:
+        if (
+            proof["context_helper_packaged"] is not True
+            or proof["context_helper_architectures"]
+            != {"arm64": ["arm64"]}
+            or proof["context_tokenizers_packaged"]
+            != ["cl100k_base", "o200k_base"]
+        ):
+            raise MacPilotEvidenceError("distribution_proof_context_not_ready")
+        _require_bool(
+            proof["context_helper_runtime_verified"],
+            "proof_context_helper_runtime_verified",
+        )
+        expected_helper_signature = {
+            "team_identifier": team_id,
+            "authority": authority,
+        }
+        if proof["context_helper_launcher_sealed_by_bundle"] is not True:
+            raise MacPilotEvidenceError("distribution_proof_context_not_ready")
+        if proof["context_helper_signatures"] != {"arm64": expected_helper_signature}:
+            raise MacPilotEvidenceError("distribution_proof_context_identity_invalid")
+        _require_pattern(
+            proof["context_helper_sha256"],
+            _SHA256_RE,
+            "proof_context_helper_sha256",
+        )
+        backend_digests = _require_fields(
+            proof["context_helper_backend_sha256"],
+            {"arm64"},
+            "proof_context_helper_backend_sha256",
+        )
+        for architecture, helper_digest in backend_digests.items():
+            _require_pattern(
+                helper_digest,
+                _SHA256_RE,
+                f"proof_context_helper_backend_{architecture}_sha256",
+            )
     _require_int(proof["archive_bytes"], 1, _MAX_ARCHIVE_BYTES, "proof_archive_bytes")
     for field in ("archive_sha256", "executable_sha256", "icon_sha256"):
         _require_pattern(proof[field], _SHA256_RE, f"proof_{field}")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import plistlib
 import stat
 import sys
@@ -29,6 +30,7 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
         root: Path,
         *,
         verify_executable_version: bool,
+        verify_context_helper: bool = False,
         source_commit: str | None = None,
         workflow_run_url: str | None = None,
     ) -> tuple[dict[str, object], object]:
@@ -36,10 +38,20 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
         executable = bundle / "Contents/MacOS/Hormuz"
         information = bundle / "Contents/Info.plist"
         icon = bundle / "Contents/Resources/Hormuz.icns"
+        context_helper = bundle / "Contents/Resources/ContextHelper/hormuz-context"
+        context_helper_arm64 = bundle / "Contents/Helpers/hormuz-context-arm64"
         executable.parent.mkdir(parents=True)
         icon.parent.mkdir(parents=True)
+        context_helper.parent.mkdir(parents=True)
+        context_helper_arm64.parent.mkdir(parents=True)
         executable.write_bytes(b"unexecuted-test-binary")
+        context_helper.write_bytes(b"unexecuted-context-launcher")
+        context_helper_arm64.write_bytes(b"unexecuted-arm64-context-helper")
         icon.write_bytes(b"icon")
+        tokenizers = bundle / "Contents/Resources/ContextTokenizers"
+        tokenizers.mkdir()
+        (tokenizers / "9b5ad71b2ce5302211f9c61530b329a4922fc6a4").write_bytes(b"cl100k")
+        (tokenizers / "fb374d419588a4632f3f557e76b4b70aebbca790").write_bytes(b"o200k")
         with information.open("wb") as output:
             plistlib.dump(
                 {
@@ -76,24 +88,51 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
         ]
         if verify_executable_version:
             arguments.append("--verify-executable-version")
+        if verify_context_helper:
+            arguments.append("--verify-context-helper")
         if source_commit is not None:
             arguments.extend(("--source-commit", source_commit))
         if workflow_run_url is not None:
             arguments.extend(("--workflow-run-url", workflow_run_url))
+        command_results = [
+            ("arm64\n", ""),
+            (
+                f"{executable}:\n"
+                "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n",
+                "",
+            ),
+            ("arm64\n", ""),
+            (
+                f"{context_helper_arm64}:\n"
+                "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n",
+                "",
+            ),
+        ]
+        if verify_context_helper:
+            command_results.append(
+                (
+                    "usage: hormuz-context context [-h] "
+                    "{compact,settings,status,run,resources}\n",
+                    "",
+                )
+            )
         with (
             patch.object(sys, "argv", arguments),
             patch(
                 "tools.verify_macos_distribution.run",
-                side_effect=(
-                    ("arm64\n", ""),
-                    (
-                        (
-                            f"{executable}:\n"
-                            "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n"
-                        ),
-                        "",
-                    ),
-                ),
+                side_effect=command_results,
+            ),
+            patch(
+                "tools.verify_macos_distribution.CONTEXT_LAUNCHER_SHA256",
+                hashlib.sha256(context_helper.read_bytes()).hexdigest(),
+            ),
+            patch.dict(
+                "tools.verify_macos_distribution.TOKENIZER_SHA256",
+                {
+                    "9b5ad71b2ce5302211f9c61530b329a4922fc6a4": hashlib.sha256(b"cl100k").hexdigest(),
+                    "fb374d419588a4632f3f557e76b4b70aebbca790": hashlib.sha256(b"o200k").hexdigest(),
+                },
+                clear=True,
             ),
             patch(
                 "tools.verify_macos_distribution.signing_details",
@@ -123,7 +162,11 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
                 output.writestr(entry, b"")
             for name in sorted(files):
                 entry = zipfile.ZipInfo(name)
-                mode = 0o755 if name.endswith("/MacOS/Hormuz") else 0o644
+                mode = 0o755 if name.endswith((
+                    "/MacOS/Hormuz",
+                    "/Resources/ContextHelper/hormuz-context",
+                    "/Helpers/hormuz-context-arm64",
+                )) else 0o644
                 entry.external_attr = (stat.S_IFREG | mode) << 16
                 output.writestr(entry, (root / name).read_bytes())
         return archive, bundle
@@ -222,7 +265,7 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
             )
         runtime.assert_not_called()
         self.assertFalse(proof["executable_version_verified"])
-        self.assertEqual(proof["schema_version"], 1)
+        self.assertEqual(proof["schema_version"], 3)
         self.assertNotIn("source_commit", proof)
 
     def test_distribution_verifier_executes_payload_only_with_explicit_opt_in(self) -> None:
@@ -232,6 +275,17 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
             )
         runtime.assert_called_once()
         self.assertTrue(proof["executable_version_verified"])
+
+    def test_distribution_verifier_executes_context_helper_only_with_explicit_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            proof, runtime = self._run_distribution_main(
+                Path(temporary),
+                verify_executable_version=False,
+                verify_context_helper=True,
+            )
+        runtime.assert_not_called()
+        self.assertTrue(proof["context_helper_runtime_verified"])
+        self.assertTrue(proof["context_helper_launcher_sealed_by_bundle"])
 
     def test_distribution_proof_binds_protected_workflow_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -243,7 +297,7 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
                     "https://github.com/Xpounder-com/hormuz/actions/runs/12345"
                 ),
             )
-        self.assertEqual(proof["schema_version"], 2)
+        self.assertEqual(proof["schema_version"], 3)
         self.assertEqual(proof["source_commit"], "a" * 40)
         self.assertEqual(
             proof["workflow_run_url"],

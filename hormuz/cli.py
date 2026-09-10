@@ -13,6 +13,7 @@ from .audit_chain import AuditChainError
 from .auth import Authenticator
 from .commands import audit as audit_commands
 from .commands import client as client_commands
+from .commands import context as context_commands
 from .commands import custody as custody_commands
 from .commands import finance as finance_commands
 from .commands import policy as policy_commands
@@ -75,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     portfolio_commands.add_portfolio_commands(subparsers)
 
     client_commands.add_client_commands(subparsers)
+    context_commands.add_context_commands(subparsers)
     session_commands.add_session_commands(subparsers)
     onboarding_commands.add_onboarding_commands(subparsers)
 
@@ -112,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
         return session_commands.run(args)
     if args.command == "client" and args.auth_mode == "session":
         return session_commands.client_config(args)
+    if args.command == "context":
+        return context_commands.run(args)
     if args.command == "contract" and args.contract_command == "manifest":
         return runtime_commands._contract_manifest()
     if args.command == "demo":

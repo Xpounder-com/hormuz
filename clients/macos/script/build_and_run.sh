@@ -9,6 +9,7 @@ esac
 HORMUZ_MAC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HORMUZ_BUNDLE="$HORMUZ_MAC_ROOT/dist/Hormuz.app"
 HORMUZ_BINARY="$HORMUZ_BUNDLE/Contents/MacOS/Hormuz"
+HORMUZ_CONTEXT_HELPER="$HORMUZ_BUNDLE/Contents/Resources/ContextHelper/hormuz-context"
 if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Developer ]; then
   # Process-local selection only; do not change the machine-wide xcode-select.
   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
@@ -25,13 +26,27 @@ fi
 swift build --package-path "$HORMUZ_MAC_ROOT" --product Hormuz
 HORMUZ_BUILD_DIR="$(swift build --package-path "$HORMUZ_MAC_ROOT" --show-bin-path)"
 mkdir -p "$HORMUZ_BUNDLE/Contents/MacOS"
-mkdir -p "$HORMUZ_BUNDLE/Contents/Resources"
+mkdir -p "$HORMUZ_BUNDLE/Contents/Resources/ContextHelper"
+mkdir -p "$HORMUZ_BUNDLE/Contents/Helpers"
 cp "$HORMUZ_BUILD_DIR/Hormuz" "$HORMUZ_BINARY"
 cp "$HORMUZ_MAC_ROOT/Resources/Info.plist" "$HORMUZ_BUNDLE/Contents/Info.plist"
 cp "$HORMUZ_MAC_ROOT/Resources/Hormuz.icns" "$HORMUZ_BUNDLE/Contents/Resources/Hormuz.icns"
-chmod 755 "$HORMUZ_BINARY"
-# Local debug signature only. Does not access a Developer ID private key, submit
-# to Apple, notarize, or produce an artifact suitable for public distribution.
+cp "$HORMUZ_MAC_ROOT/Resources/HormuzMark.png" "$HORMUZ_MAC_ROOT/Resources/HormuzMenuMark.png" "$HORMUZ_BUNDLE/Contents/Resources/"
+cp "$HORMUZ_MAC_ROOT/Resources/hormuz-context-dev" "$HORMUZ_CONTEXT_HELPER"
+mkdir -p "$HORMUZ_BUNDLE/Contents/Resources/ThirdPartyNotices"
+for HORMUZ_NOTICE in \
+  Codenotch-LICENSE.txt \
+  Python-LICENSE.txt \
+  PyInstaller-COPYING.txt \
+  regex-LICENSE.txt \
+  tiktoken-LICENSE.txt; do
+  cp "$HORMUZ_MAC_ROOT/Resources/ThirdPartyNotices/$HORMUZ_NOTICE" \
+    "$HORMUZ_BUNDLE/Contents/Resources/ThirdPartyNotices/"
+done
+chmod 755 "$HORMUZ_BINARY" "$HORMUZ_CONTEXT_HELPER"
+# The shell launcher is a sealed app resource. Shell scripts cannot carry a
+# durable embedded signature, so signing it separately would rely on extended
+# attributes that are lost during ordinary archive transfer.
 codesign --force --sign - --identifier com.hormuz.mac.local --options runtime --timestamp=none "$HORMUZ_BUNDLE"
 codesign --verify --strict "$HORMUZ_BUNDLE"
 

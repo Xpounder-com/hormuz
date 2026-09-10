@@ -1,0 +1,84 @@
+[
+  {
+    "bodyHeight" : 318,
+    "bodyHostHeight" : 318,
+    "bodyHostWidth" : 70,
+    "bodyWidth" : 70,
+    "expectedBodyWidth" : 70,
+    "hubHeight" : 480,
+    "hubHostWidth" : 336,
+    "hubWidth" : 336,
+    "passed" : true,
+    "rightEdge" : 1352,
+    "scale" : 1,
+    "screenRightEdge" : 1352
+  },
+  {
+    "bodyHeight" : 397,
+    "bodyHostHeight" : 397,
+    "bodyHostWidth" : 88,
+    "bodyWidth" : 88,
+    "expectedBodyWidth" : 88,
+    "hubHeight" : 600,
+    "hubHostWidth" : 420,
+    "hubWidth" : 420,
+    "passed" : true,
+    "rightEdge" : 1352,
+    "scale" : 1.25,
+    "screenRightEdge" : 1352
+  },
+  {
+    "bodyHeight" : 476,
+    "bodyHostHeight" : 476,
+    "bodyHostWidth" : 105,
+    "bodyWidth" : 105,
+    "expectedBodyWidth" : 105,
+    "hubHeight" : 720,
+    "hubHostWidth" : 504,
+    "hubWidth" : 504,
+    "passed" : true,
+    "rightEdge" : 1352,
+    "scale" : 1.5,
+    "screenRightEdge" : 1352
+  },
+  {
+    "bodyHeight" : 397,
+    "bodyHostHeight" : 397,
+    "bodyHostWidth" : 88,
+    "bodyWidth" : 88,
+    "expectedBodyWidth" : 88,
+    "hubHeight" : 600,
+    "hubHostWidth" : 420,
+    "hubWidth" : 420,
+    "passed" : true,
+    "rightEdge" : 1352,
+    "scale" : 1.25,
+    "screenRightEdge" : 1352
+  },
+  {
+    "bodyHeight" : 318,
+    "bodyHostHeight" : 318,
+    "bodyHostWidth" : 70,
+    "bodyWidth" : 70,
+    "expectedBodyWidth" : 70,
+    "hubHeight" : 480,
+    "hubHostWidth" : 336,
+    "hubWidth" : 336,
+    "passed" : true,
+    "rightEdge" : 1352,
+    "scale" : 1,
+    "screenRightEdge" : 1352
+  },
+  {
+    "folded" : true,
+    "passed" : true
+  },
+  {
+    "hidden" : true,
+    "passed" : true
+  },
+  {
+    "passed" : true,
+    "reopened" : true
+  }
+]

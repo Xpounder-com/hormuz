@@ -58,10 +58,12 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
                                               helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"))
         try await again.apply(in: directory)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.root.path).sorted(), namesBefore)
-        let json = try JSONSerialization.jsonObject(with: plan.files.first!.content) as! [String: Any]
-        XCTAssertNotNil(json["apiKeyHelper"])
+        XCTAssertEqual(plan.files.count, 1)
+        XCTAssertTrue(plan.previewText.contains("hormuz-context"))
+        XCTAssertTrue(plan.previewText.contains("context"))
+        XCTAssertTrue(plan.previewText.contains("run"))
+        XCTAssertTrue(plan.previewText.contains("--credential-helper"))
         XCTAssertFalse(plan.previewText.contains("hox_"))
-        XCTAssertFalse(plan.previewText.contains("settings.json' >"))
     }
 
     func testHostedCodexAliasesProduceOnlyBoundCodexLaunchers() throws {
@@ -83,8 +85,11 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
             XCTAssertEqual(plan.profile.setup, .openAIPilot)
             XCTAssertEqual(plan.files.count, 1)
             XCTAssertTrue(plan.launcher.lastPathComponent.hasPrefix("codex-"))
-            XCTAssertTrue(plan.previewText.contains("https://gateway.example.test/v1"))
-            XCTAssertTrue(plan.previewText.contains("model=\"\(alias)\""))
+            XCTAssertTrue(plan.previewText.contains("hormuz-context"))
+            XCTAssertTrue(plan.previewText.contains("--profile"))
+            XCTAssertTrue(plan.previewText.contains(profile.key))
+            XCTAssertFalse(plan.previewText.contains("https://gateway.example.test"))
+            XCTAssertFalse(plan.previewText.contains("model=\"\(alias)\""))
             XCTAssertFalse(plan.previewText.contains("ANTHROPIC_BASE_URL"))
         }
         XCTAssertEqual(
@@ -194,14 +199,16 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         try directory.saveProfile(profile)
         let marker = temporary.appendingPathComponent("injected")
         let helper = URL(fileURLWithPath: "/Applications/O'Brien $(touch " + marker.path + ").app/Contents/MacOS/Hormuz")
-        let plan = try ConnectorPlan.preview(profile: profile, directory: directory, helper: helper)
+        let contextHelper = try directory.fileURL("hormuz-context")
+        try directory.write(Data("#!/bin/sh\ntest -z \"${OPENAI_API_KEY+x}\" || exit 9\nprintf '%s\\n' \"$@\"\n".utf8),
+                            to: "hormuz-context", expected: nil, executable: true)
+        let plan = try ConnectorPlan.preview(profile: profile, directory: directory, helper: helper,
+                                             contextHelper: contextHelper)
         try await plan.apply(in: directory)
         let userSettings = temporary.appendingPathComponent("config.toml")
         let original = Data("# Personal config\nmodel = \"my-model\"\n".utf8)
         try original.write(to: userSettings)
-        let stub = try directory.fileURL("codex")
-        try directory.write(Data("#!/bin/sh\ntest -z \"${OPENAI_API_KEY+x}\" || exit 9\nprintf '%s\\n' \"$@\"\n".utf8), to: "codex", expected: nil, executable: true)
-        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: stub.path))
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: contextHelper.path))
         let process = Process(), pipe = Pipe()
         process.executableURL = plan.launcher
         process.environment = ["PATH": directory.root.path + ":/usr/bin:/bin", "OPENAI_API_KEY": "synthetic-test-only"]
@@ -212,11 +219,49 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0)
         let args = String(decoding: output, as: UTF8.self)
-        XCTAssertTrue(args.contains("model_providers.hormuz_connector="))
+        XCTAssertTrue(args.contains("context\nrun\n--profile"))
         XCTAssertTrue(args.contains(helper.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
         XCTAssertEqual(try Data(contentsOf: userSettings), original)
         let attributes = try FileManager.default.attributesOfItem(atPath: plan.launcher.path)
         XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o700)
+    }
+
+    func testContextOptimizationDefaultsOffAndSharesClosedPrivateSetting() async throws {
+        let profile = try profile()
+        XCTAssertFalse(try ContextOptimizationSettings.load(profile: profile, directory: directory).enabled)
+        let enabled = try await ContextOptimizationSettings.save(
+            enabled: true, profile: profile, directory: directory
+        )
+        XCTAssertTrue(enabled.enabled)
+        let name = ContextOptimizationSettings.fileName(profile: profile)
+        let data = try XCTUnwrap(directory.read(name))
+        let value = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertEqual(value["schema_version"] as? Int, 1)
+        XCTAssertEqual(value["enabled"] as? Bool, true)
+        let attributes = try FileManager.default.attributesOfItem(atPath: directory.fileURL(name).path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
+    func testContextOptimizationRejectsDuplicateUnknownAndNonBooleanValues() throws {
+        let profile = try profile()
+        let name = ContextOptimizationSettings.fileName(profile: profile)
+        for body in [
+            "{\"schema_version\":1,\"enabled\":true,\"enabled\":false}",
+            "{\"schema_version\":1,\"enabled\":1}",
+            "{\"schema_version\":1.0,\"enabled\":true}",
+            "{\"enabled\":false,\"enabl\\u0065d\":true,\"schema_version\":1}",
+            "{ \"enabled\": true, \"schema_version\": 1 }",
+            "{\"schema_version\":1,\"enabled\":true,\"extra\":false}",
+        ] {
+            if try directory.read(name) == nil {
+                try directory.write(Data(body.utf8), to: name, expected: nil)
+            } else {
+                try directory.write(Data(body.utf8), to: name, expected: try directory.read(name))
+            }
+            XCTAssertThrowsError(try ContextOptimizationSettings.load(profile: profile, directory: directory)) {
+                XCTAssertEqual($0 as? ClientError, .contextSettingsInvalid)
+            }
+        }
     }
 }

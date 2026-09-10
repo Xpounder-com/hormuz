@@ -135,6 +135,19 @@ class SecretInventoryTests(unittest.TestCase):
                 validate_secret_inventory(self.inventory, source_root=root)
         self.assertEqual(raised.exception.code, "secret_inventory_environment_read_mismatch")
 
+    def test_environment_writes_are_not_misclassified_as_reads(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "hormuz"
+            package.mkdir()
+            (package / "environment_write.py").write_text(
+                "import os\n\ndef update_environment():\n"
+                "    os.environ['WRITE_ONLY'] = 'value'\n"
+                "    del os.environ['WRITE_ONLY']\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(discover_environment_reads(root), ())
+
     def test_duplicate_read_at_an_existing_coordinate_requires_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

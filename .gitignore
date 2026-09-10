@@ -16,4 +16,6 @@ hormuz.json
 deploy/compose/runtime/
 clients/macos/.build/
 clients/macos/.swiftpm/
+apps/macos/HormuzCompanion/.build/
+apps/macos/HormuzCompanion/.swiftpm/
 marketing/private/

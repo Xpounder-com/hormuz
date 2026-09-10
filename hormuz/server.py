@@ -25,6 +25,13 @@ from .attribution_admission import (
     select_admission,
 )
 from .budget_runtime import configured_route_rate_card
+from .compaction_enforcement import (
+    CONTEXT_FORMAT_HEADER,
+    CONTEXT_FORMAT_VERSION,
+    CONTEXT_FORMATS_HEADER,
+    CompactionEnforcementError,
+    inspect_request as inspect_compacted_request,
+)
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -459,6 +466,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "service": "hormuz",
                     "protocols": ["openai-responses", "anthropic-messages"],
                 },
+                extra_headers={CONTEXT_FORMATS_HEADER: CONTEXT_FORMAT_VERSION},
             )
             return
         if path == "/ready":
@@ -747,8 +755,33 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             current_output = request_body.get(output_field)
             if current_output is None or current_output > decision.max_output_tokens:
                 request_body[output_field] = decision.max_output_tokens
+        context_headers = self.headers.get_all(CONTEXT_FORMAT_HEADER, [])
+        if len(context_headers) > 1:
+            self._send_protocol_error(
+                protocol,
+                "Context representation header must occur at most once.",
+                HTTPStatus.BAD_REQUEST,
+                code="invalid_request",
+            )
+            return
+        declared_context = context_headers[0].strip() if context_headers else None
         try:
-            redaction = self.server.secret_redactor.inspect(request_body, mode=decision.snapshot.secret_mode)
+            inspection = inspect_compacted_request(
+                request_body,
+                protocol=protocol,
+                redactor=self.server.secret_redactor,
+                mode=decision.snapshot.secret_mode,
+                declared_version=declared_context,
+            )
+            redaction = inspection.redaction
+        except CompactionEnforcementError:
+            self._send_protocol_error(
+                protocol,
+                "Context representation is invalid or exceeds its safety bounds.",
+                HTTPStatus.BAD_REQUEST,
+                code="invalid_request",
+            )
+            return
         except RedactionError as error:
             self._send_protocol_error(protocol, str(error), HTTPStatus.BAD_REQUEST)
             return
@@ -1594,12 +1627,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         status: HTTPStatus,
         schema_id: str,
         value: Mapping[str, Any],
+        *,
+        extra_headers: Mapping[str, str] | None = None,
     ) -> None:
         payload = contract_envelope(schema_id, value)
         self._send_json(
             status,
             payload,
             contract_header_value=f"{schema_id};v={payload['schema_version']}",
+            extra_headers=extra_headers,
         )
 
     def _send_json(
@@ -1609,6 +1645,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         *,
         contract_header_value: str | None = None,
         error_code: str | None = None,
+        extra_headers: Mapping[str, str] | None = None,
     ) -> None:
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
@@ -1619,6 +1656,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self.send_header("X-Hormuz-Contract", contract_header_value)
         if error_code is not None:
             self.send_header("X-Hormuz-Error-Code", error_code)
+        if extra_headers is not None:
+            for name, value in extra_headers.items():
+                self.send_header(name, value)
         self._send_attribution_header()
         self.end_headers()
         self.wfile.write(body)
