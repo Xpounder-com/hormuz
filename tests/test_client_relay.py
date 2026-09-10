@@ -447,6 +447,9 @@ class RelayTests(unittest.TestCase):
         credential.write_text("#!/bin/sh\nprintf '%s\\n' '" + ACCESS_TOKEN + "'\n", encoding="utf-8")
         credential.chmod(0o700)
         codex = bin_directory / "codex"
+        # GitHub's Linux runner blocks the nested bubblewrap namespace that Codex's
+        # read-only sandbox requires. The outer job already isolates this synthetic,
+        # disposable fixture, so bypass only the nested client sandbox here.
         codex.write_text(
             """#!/usr/bin/env python3
 import http.client, json, os, re, sys, urllib.parse
@@ -545,7 +548,7 @@ raise SystemExit(0 if response.status == 200 else 1)
             "    os.execv(real, [real, '--version'])\n"
             f"root = {str(root)!r}\n"
             "arguments = [real, 'exec', '--ignore-user-config', '--skip-git-repo-check', "
-            "'--ephemeral', '--sandbox', 'read-only', '-C', root, *sys.argv[1:], "
+            "'--ephemeral', '--dangerously-bypass-approvals-and-sandbox', '-C', root, *sys.argv[1:], "
             "'Call exec_command with exactly `rg --files generated`, then finish.']\n"
             "os.execv(real, arguments)\n",
             encoding="utf-8",
