@@ -2,6 +2,9 @@
 
 # DRAFT — DO NOT PUBLISH
 
+> Historical recruitment copy. Issue #110 is closed as superseded; current
+> v1.2.0 Apple Silicon onboarding is tracked in #307. Do not reuse this 0/5 copy.
+
 ## Tester recruitment and later human-controlled conversion
 
 The bounded announcement has two public-alpha calls to action:

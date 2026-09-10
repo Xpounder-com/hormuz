@@ -310,7 +310,8 @@ The v1 candidate checkpoint is defined in
 [POLICY_ADMIN_USABILITY.md](POLICY_ADMIN_USABILITY.md). It requires five
 isolated internal repetitions against one exact frozen archive and proves only
 mechanical offline-workflow repeatability. The separate external-human and
-PostgreSQL study remains deferred at 0/5 and 0/3 under issue #110.
+PostgreSQL administrator study remains deferred at 0/5 and 0/3. It is distinct
+from both historical issue #110 and current v1.2.0 app-onboarding issue #307.
 
 ## Compare and preview a candidate
 

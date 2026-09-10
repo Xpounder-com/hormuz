@@ -2,6 +2,9 @@
 
 # DRAFT — DO NOT PUBLISH
 
+> Historical recruitment copy. Issue #110 is closed as superseded; current
+> v1.2.0 Apple Silicon onboarding is tracked in #307. Do not reuse this 0/5 copy.
+
 ## The missing organizational layer between AI clients and model providers
 
 Developers already have AI tools they like. The organizational problem is not

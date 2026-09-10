@@ -47,9 +47,10 @@ The original five-person offline and three-person PostgreSQL protocol below is
 retained as a versioned, auditable design for possible future work. Current
 counts remain **0/5** and **0/3**. They are not v1.0.0 release dependencies and
 must not be inferred from the internal sandbox result. This protocol is
-separate from the installation/demo evidence tracked by
-[issue #110](https://github.com/Xpounder-com/hormuz/issues/110); the same people
-may participate in both, but neither result may be relabeled as the other.
+separate from the historical installation/demo evidence in closed
+[issue #110](https://github.com/Xpounder-com/hormuz/issues/110). The same people
+could have participated in both, but neither result may be relabeled as the
+other or counted toward current v1.2.0 onboarding issue #307.
 
 ### Qualifying participants
 
@@ -549,5 +550,5 @@ separately inspecting those systems. Passing this gate proves only the bounded
 administrator workflow's usability and apply/history/rollback state
 correctness for the tested candidate. It does not prove complete enterprise
 readiness, production security or availability, disaster recovery,
-live-provider behavior, customer demand, market validation, or the separate
-issue #110 claim.
+live-provider behavior, customer demand, market validation, the historical
+issue #110 claim, or current v1.2.0 customer acceptance in #307.

@@ -2,6 +2,9 @@
 
 # DRAFT — DO NOT PUBLISH
 
+> Historical recruitment copy. Issue #110 is closed as superseded; current
+> v1.2.0 Apple Silicon onboarding is tracked in #307. Do not reuse this 0/5 copy.
+
 ## Five-minute terminal demonstration
 
 This is the canonical screen-recording and live-demo script for the first

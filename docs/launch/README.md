@@ -1,21 +1,23 @@
 # Hormuz launch package
 
-> Archived v0.1.3 recruitment material. Do not use these drafts as the v1.0.0
-> release claim set; the current boundary is documented in the root README and
-> `docs/POLICY_ADMIN_USABILITY.md`.
+> Archived v0.1.3/v1.0 recruitment material. Issue #110 is closed as
+> superseded. Do not publish or use these drafts for v1.2.0 onboarding; the
+> current boundary is documented in the root README and issue #307.
 
 This directory contains the evidence-grounded tester-recruitment launch package
 for the Hormuz v0.1.3 public open-source alpha. Every public asset is currently
-marked **DRAFT — DO NOT PUBLISH** until the owner completes the final
-post-change copy review. Hormuz is not production-ready, and external
-onboarding validation is pending at 0/5 independent completions.
+marked **DRAFT — DO NOT PUBLISH**. Hormuz was not production-ready under this
+package, and its historical external onboarding validation ended at 0/5
+independent completions.
 
-The machine-readable source of truth is [claims-v2.json](claims-v2.json). It
-binds each public claim to repository evidence, distinguishes implemented or
-verified alpha behavior from roadmap statements and nonclaims, lists the
-release gates that must close, and binds the announcement to public tester and
-installation-report calls to action. Commercial conversion remains deferred
-until onboarding is independently validated.
+The machine-readable source of truth for this archived package is
+[claims-v2.json](claims-v2.json). Its release identity, issue #110 status, 0/5
+count, and `public_recruitment` fields are frozen compatibility fixtures; they
+do not describe the current release or issue tracker. It binds each historical
+public claim to repository evidence, distinguishes implemented or verified
+alpha behavior from roadmap statements and nonclaims, lists the gates that
+applied to that announcement, and records its public tester and
+installation-report calls to action.
 
 ## Assets
 
@@ -38,11 +40,11 @@ The verifier is intentionally successful for a complete draft while returning
 unsupported claim classes, unapproved template tokens, omitted safety labels,
 and analytics drift.
 
-## Publication sequence
+## Historical publication sequence — do not execute
 
 1. Reverify the closed disclosure, community, client/provider, repository,
    signed-OCI, and bounded deployment-reference gates listed in the manifest.
-2. Confirm issue #110 remains open, report the external tester count honestly
+2. Confirm issue #110 remained open, report the external tester count honestly
    as 0/5, and do not count internal, maintainer-assisted, or synthetic runs.
    Public testing is self-service; evidence submission into the aggregate is
    invitation-only through a separately agreed private channel.
@@ -52,10 +54,11 @@ and analytics drift.
 4. Only then publish the bounded tester-recruitment landing page, article,
    social posts, or Show HN entry with the phrases **public alpha**, **not
    production-ready**, and **external onboarding validation pending**.
-5. Continue issue #110 after publication until five independent completions, a
-   returning user, and resolved plus independently retested blockers are proven.
-6. Treat closing #110 as a prerequisite for validated-onboarding, beyond-alpha,
-   or stronger commercial-readiness claims—not for the initial announcement.
+5. The plan would have continued issue #110 after publication until five
+   independent completions, a returning user, and resolved plus independently
+   retested blockers were proven.
+6. Closing #110 was a prerequisite for validated-onboarding, beyond-alpha, or
+   stronger commercial-readiness claims under that historical protocol.
 
 The package does not automate prospect selection, outreach, replies,
 qualification, pricing, proposals, publication, or tenant-data lifecycle

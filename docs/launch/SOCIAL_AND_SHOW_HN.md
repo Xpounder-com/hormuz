@@ -2,9 +2,13 @@
 
 # DRAFT — DO NOT PUBLISH
 
-Publish none of these drafts until the repository and release artifacts are
-publicly verifiable and the owner approves the final post-change copy. Issue
-#110 remains open after publication as the onboarding-validation ledger.
+> Historical recruitment copy. Issue #110 is closed as superseded; current
+> v1.2.0 Apple Silicon onboarding is tracked in #307. Do not reuse this 0/5 copy.
+
+Under the archived publication plan, none of these drafts could be published
+until the repository and release artifacts were publicly verifiable and the
+owner approved the final copy. Issue #110 was intended to remain open after
+publication as the onboarding-validation ledger.
 
 ## X post
 
