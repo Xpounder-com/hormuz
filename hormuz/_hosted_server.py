@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from ._hosted_config import HostedError
 from ._hosted_provider import PROVIDER_FAILOVER_REHEARSAL_ENV, deployment_metadata
 from ._hosted_state import DATABASES, MARKER, _private, check_initialized
+from .compaction_contract import CONTEXT_FORMATS_HEADER, CONTEXT_FORMAT_VERSION
 from .postgres import verify_postgres_deployment_runtime
 from .server import GatewayRequestHandler, GatewayServer
 
@@ -362,6 +363,8 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self.path == "/health" and status == HTTPStatus.OK and state == "provider_pilot":
+            self.send_header(CONTEXT_FORMATS_HEADER, CONTEXT_FORMAT_VERSION)
         self.send_header("Connection", "close")
         self.end_headers()
         if self.command != "HEAD":
