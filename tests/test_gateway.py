@@ -712,6 +712,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         status, headers, body = self._get("/health", token=None)
         self.assertEqual(status, 200)
         self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-health;v=1")
+        self.assertEqual(headers["x-hormuz-context-formats"], "structural-v1")
         validate_contract(json.loads(body))
 
         status, headers, body = self._get("/v1/gateway/whoami")
@@ -1752,6 +1753,88 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.redaction_count, 1)
         secret_totals = self.gateway.store.monthly_secret_totals(actor_id="alice")
         self.assertEqual(secret_totals.denied_requests, 1)
+
+    def test_compact_request_is_relayed_and_declaration_is_not_sent_to_provider(self) -> None:
+        compact = json.dumps(
+            {"format": "hormuz-line-runs-v1", "runs": [["heartbeat", 80], ["", 1]]},
+            separators=(",", ":"),
+        )
+        status, _, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": [
+                    {"type": "function_call", "call_id": "x", "name": "read_service_log", "arguments": "{}"},
+                    {"type": "function_call_output", "call_id": "x", "output": compact},
+                ],
+            },
+            extra_headers={"X-Hormuz-Context-Format": "structural-v1"},
+        )
+        self.assertEqual(status, 200)
+        upstream = FakeProviderHandler.requests[-1]
+        self.assertEqual(upstream["body"]["input"][1]["output"], compact)
+        self.assertNotIn("x-hormuz-context-format", upstream["headers"])
+
+    def test_compact_multiline_secret_is_denied_after_bounded_reconstruction(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["egress_controls"] = {
+            "secrets": {"mode": "deny", "builtins": True, "custom_secret_envs": []}
+        }
+        self._restart_gateway(config_value)
+        compact = json.dumps(
+            {"format": "hormuz-line-runs-v1", "runs": [
+                ["-----BEGIN PRIVATE KEY-----", 1], ["synthetic-body", 1],
+                ["-----END PRIVATE KEY-----", 1], ["", 1],
+            ]},
+            separators=(",", ":"),
+        )
+        before = len(FakeProviderHandler.requests)
+        status, headers, response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": [
+                {"type": "function_call", "call_id": "x", "name": "read_service_log", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "x", "output": compact},
+            ]},
+            extra_headers={"X-Hormuz-Context-Format": "structural-v1"},
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(headers["x-hormuz-error-code"], "hormuz_secret_detected")
+        self.assertEqual(json.loads(response)["error"]["code"], "hormuz_secret_detected")
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+    def test_compact_multiline_secret_redaction_expands_before_provider_and_budget(self) -> None:
+        compact = json.dumps(
+            {"format": "hormuz-line-runs-v1", "runs": [
+                ["-----BEGIN PRIVATE KEY-----", 1], ["synthetic-body", 1],
+                ["-----END PRIVATE KEY-----", 1], ["", 1],
+            ]},
+            separators=(",", ":"),
+        )
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": [
+                {"type": "function_call", "call_id": "x", "name": "read_service_log", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "x", "output": compact},
+            ]},
+            extra_headers={"X-Hormuz-Context-Format": "structural-v1"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-policy-decision"], "allowed+redacted")
+        output = FakeProviderHandler.requests[-1]["body"]["input"][1]["output"]
+        self.assertIn("[REDACTED:HORMUZ_SECRET]", output)
+        self.assertNotIn("hormuz-line-runs-v1", output)
+        self.assertNotIn("synthetic-body", output)
+
+    def test_invalid_compaction_declaration_fails_before_provider(self) -> None:
+        before = len(FakeProviderHandler.requests)
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "ordinary"},
+            extra_headers={"X-Hormuz-Context-Format": "future-v2"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(headers["x-hormuz-error-code"], "invalid_request")
+        self.assertEqual(len(FakeProviderHandler.requests), before)
 
     def test_token_count_redaction_has_security_audit_without_usage_charge(self) -> None:
         secret = "sk-" + "proj-" + ("E" * 24)

@@ -11,7 +11,19 @@ The release needs two Apple-controlled credentials:
 1. A **Developer ID Application** certificate and private key, exported as a password-protected PKCS#12 (`.p12`) file. This signs the app outside the Mac App Store.
 2. An App Store Connect **team** API key authorized for notarization. Apple's [current API-key contract](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api) says individual keys cannot use `notarytool`. Team keys apply across every app in the account, so select the least privileged role that passes `notarytool store-credentials --validate`, dedicate the key to Hormuz notarization, and keep its one-time-download `.p8` private key outside the repository. Never put it in a workflow input, shell argument, issue, artifact, or log.
 
-The app uses hardened runtime and no custom entitlements. The customer binary targets Apple Silicon (`arm64`) on macOS 14 or later. Intel Macs are outside the supported distribution boundary: the release is neither built nor qualified for `x86_64`. Its only dynamic dependencies are Apple system frameworks and libraries. The same signed executable provides the window and the Keychain credential helper, avoiding a separately signed nested helper.
+The app uses hardened runtime and no custom entitlements. The customer binary
+targets Apple Silicon (`arm64`) on macOS 14 or later. Intel Macs are outside the
+supported distribution boundary: the release is neither built nor qualified for
+`x86_64`. Its only dynamic dependencies are Apple system frameworks and libraries.
+The same signed executable provides the window and the Keychain credential helper.
+Context optimization adds one separately signed arm64 standalone backend behind a
+fixed local dispatcher; it contains the same Hormuz release code and uses the two
+digest-verified tokenizer vocabularies bundled as resources. The dispatcher is a
+shell resource at `Contents/Resources/ContextHelper/hormuz-context`, sealed by the
+outer app signature. The Mach-O backend remains nested code at
+`Contents/Helpers/hormuz-context-arm64` and carries its own Developer ID signature.
+This layout keeps the script's integrity in the bundle seal when ZIP transfer drops
+extended attributes used by standalone script signatures.
 
 ## Local packaging and notarization
 
@@ -26,22 +38,40 @@ Store notarization credentials in Keychain using `xcrun notarytool store-credent
 ```sh
 HORMUZ_CODESIGN_IDENTITY='Developer ID Application: Company Name (TEAMID)' \
   ./script/package_macos_release.sh \
-  --output-directory /private/tmp/hormuz-macos-0.1.0 \
+  --output-directory /private/tmp/hormuz-macos-1.2.0 \
   --bundle-id com.xpounder.hormuz \
-  --version 0.1.0 \
-  --build 1
+  --version 1.2.0 \
+  --build 1 \
+  --context-helper-directory /private/path/context-helpers \
+  --tokenizer-cache /private/path/context-tokenizers
 ```
 
 Submit, staple, and repackage the same app:
 
 ```sh
 ./script/notarize_macos_release.sh \
-  --bundle /private/tmp/hormuz-macos-0.1.0/Hormuz.app \
-  --upload-archive /private/tmp/hormuz-macos-0.1.0/Hormuz-0.1.0-notarization-upload.zip \
+  --bundle /private/tmp/hormuz-macos-1.2.0/Hormuz.app \
+  --upload-archive /private/tmp/hormuz-macos-1.2.0/Hormuz-1.2.0-notarization-upload.zip \
   --keychain-profile hormuz-notary
 ```
 
-Packaging refuses an existing output directory, a `.local` identifier, any binary architecture other than exact `arm64`, an ambiguous signing identity, non-system runtime dependencies, custom entitlements, a missing secure timestamp, or unexpected archive files. Notarization must return `Accepted`; the ticket is then stapled to the app, Gatekeeper is assessed, and a new `Hormuz-<version>-notarized.zip` is produced. `distribution-proof.json` records only digests and content-free verification results. In the protected workflow its v2 shape also records the exact source commit and GitHub Actions run URL, allowing the pilot gate to verify provenance from the proof rather than an operator assertion.
+Build the arm64 backend with `tools/build_context_helper.sh` on an Apple Silicon
+runner. Populate the tokenizer directory with `hormuz context resources install`;
+this is the explicit network step, while model request handling never downloads
+resources. The protected workflow performs the helper build and resource
+installation automatically.
+
+Packaging refuses an existing output directory, a `.local` identifier, any app or
+helper architecture other than exact `arm64`, tokenizer digest mismatches, an
+ambiguous signing identity, non-system runtime dependencies, custom entitlements,
+a missing secure timestamp, or unexpected archive files. Notarization must return
+`Accepted`; the ticket is then stapled to the app, Gatekeeper is assessed, and a
+new `Hormuz-<version>-notarized.zip` is produced. `distribution-proof.json`
+records only digests and content-free verification results. Historical pre-v1.2
+releases use the exact v2 shape. Context-capable v1.2.0 and later candidates
+require v3, which adds helper packaging, the arm64 helper signature and digest,
+the bundle-sealed launcher state and digest, tokenizer names, and an explicit runtime-verification boolean
+while retaining the exact source commit and GitHub Actions run URL.
 
 The notarization step also downloads Apple's private submission log into a temporary directory, requires no reported issues and at least one ticket entry for the Apple Silicon app, then deletes the raw log. Its retained summary contains only the submission ID, acceptance state, issue counts, and ticket-entry count. The final verifier extracts the customer ZIP and repeats signature, stapler, and Gatekeeper checks on that extracted copy, so packaging cannot silently discard the ticket.
 
@@ -59,11 +89,27 @@ The manual **Mac signed distribution** workflow performs the same steps on a Git
 | `APPLE_NOTARY_KEY_ID` | API key ID |
 | `APPLE_NOTARY_ISSUER_ID` | Team API issuer UUID |
 
-The workflow separates compilation from credential use. An unprivileged job tests and builds the exact `arm64` executable, packages a disposable ad hoc bundle, and executes `--version` there to prove the bundle reports the requested release version. It records that result with the source commit, permanent bundle identifier, CI-derived build number, architecture, and SHA-256 digest, then transfers only the unsigned payload for one day. A fresh runner in the protected environment independently derives the same release identity, repeats the manifest, commit, architecture, and digest checks, and only then enters the one step that receives the five secrets. Neither tests nor Swift compilation run on the credential-bearing runner, and that runner never executes the transferred payload; its bundle and archive checks are static plus Apple signature, notarization, stapler, and Gatekeeper verification.
+The workflow separates general compilation and testing from final notarization.
+An Apple Silicon helper job in the protected environment imports only the
+Developer ID certificate and builds the one-file arm64 context backend with
+PyInstaller's signing option, because its embedded libraries must be signed while
+the executable is assembled. It executes a credential-free help path and Codex
+relay check, then deletes its temporary Keychain and certificate before
+transferring the helper. A credential-free job tests and builds the exact arm64
+app, installs verified tokenizer resources, executes the helper, packages a
+disposable ad hoc bundle, and records the source commit, permanent bundle
+identifier, CI-derived build number, architecture, tokenizer digests, and payload
+digests. A fresh protected runner independently repeats the manifest, commit,
+architecture, helper signature, team, resource, and digest checks before receiving
+notarization credentials. That final runner never executes the transferred
+payload; its v3 proof therefore records `context_helper_runtime_verified: false`,
+while the earlier jobs supply separate runtime execution gates. Its bundle and
+archive checks are static plus Apple signature, notarization, stapler, and
+Gatekeeper verification.
 
-The dispatcher supplies only the three-component marketing version. The bundle identifier is pinned in the protected workflow to `com.xpounder.hormuz`, and the imported Developer ID identity must belong to team `R267LZMUTY`. `CFBundleVersion` is derived as `GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT`, which increases for both new workflow runs and reruns and reserves up to 999 attempts per run. Operators cannot reuse, lower, or replace these release-identity values through workflow inputs.
+The dispatcher supplies only the three-component marketing version, and the workflow requires it to equal the root Hormuz package version. The bundle identifier is pinned in the protected workflow to `com.xpounder.hormuz`, and the imported Developer ID identity must belong to team `R267LZMUTY`. `CFBundleVersion` is derived as `GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT`, which increases for both new workflow runs and reruns and reserves up to 999 attempts per run. Operators cannot reuse, lower, or replace these release-identity values through workflow inputs.
 
-Both jobs refuse a feature branch: the checked-out commit must be the repository's exact default-branch commit selected by the workflow run. The protected environment should independently restrict deployment to protected branches, require a reviewer, and disallow administrator bypass. The signing job creates an ephemeral Keychain, imports only the supplied identity, validates notarization credentials, then deletes the raw credential files and unsets their environment values before it handles the payload. It deletes the Keychain before the step exits. It has read-only repository permission. It uploads the notarized archive, dSYM, and content-free proofs for 30 days; it cannot create a GitHub release or publish the artifact. Publication remains a separate digest-reviewed decision.
+All jobs refuse a feature branch: the checked-out commit must be the repository's exact default-branch commit selected by the workflow run. The protected environment should independently restrict deployment to protected branches, require a reviewer, and disallow administrator bypass. The signing job creates an ephemeral Keychain, imports only the supplied identity, validates notarization credentials, then deletes the raw credential files and unsets their environment values before it handles the payload. It deletes the Keychain before the step exits. It has read-only repository permission. It uploads the notarized archive, dSYM, and content-free proofs for 30 days; it cannot create a GitHub release or publish the artifact. Publication remains a separate digest-reviewed decision.
 
 Generate the team key with a dedicated name such as `Hormuz Notarization CI`. Apple makes the private half downloadable only once. Record the key ID and issuer ID separately, provision the five environment secrets through an encrypted secret-setting path, validate that the environment contains exactly those five names, then remove the downloaded `.p8` and exported `.p12` from ordinary working directories. Do not reuse an Admin key merely because it already exists: team keys are account-wide, and their role cannot be edited after creation.
 

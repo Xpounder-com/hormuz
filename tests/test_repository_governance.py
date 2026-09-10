@@ -816,6 +816,30 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 ):
                     validate_repository_governance(root)
 
+    def test_macos_client_helper_requires_apple_silicon(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-client.yml"
+            value = workflow.read_text(encoding="utf-8")
+            marker = "          - architecture: arm64\n            runner: macos-15\n"
+            self.assertEqual(value.count(marker), 1)
+            workflow.write_text(
+                value.replace(
+                    marker,
+                    marker
+                    + "          - architecture: x86_64\n"
+                    + "            runner: macos-15-intel\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "native Mac required-check gate changed",
+            ):
+                validate_repository_governance(root)
+
     def test_macos_distribution_must_bind_proof_to_workflow_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -838,7 +862,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
             workflow = root / ".github/workflows/macos-distribution.yml"
             value = workflow.read_text(encoding="utf-8")
             marker = "          HORMUZ_TEAM_ID: R267LZMUTY\n"
-            self.assertEqual(value.count(marker), 1)
+            self.assertEqual(value.count(marker), 2)
             workflow.write_text(
                 value.replace(marker, "          HORMUZ_TEAM_ID: WRONGTEAM1\n", 1),
                 encoding="utf-8",
@@ -966,8 +990,9 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 "          unset HORMUZ_CERTIFICATE_BASE64 "
                 "HORMUZ_CERTIFICATE_PASSWORD\n"
             )
-            self.assertEqual(value.count(marker), 1)
-            workflow.write_text(value.replace(marker, "", 1), encoding="utf-8")
+            self.assertEqual(value.count(marker), 2)
+            before, after = value.rsplit(marker, 1)
+            workflow.write_text(before + after, encoding="utf-8")
             with self.assertRaisesRegex(
                 RepositoryGovernanceError,
                 "distribution credential execution boundary changed",

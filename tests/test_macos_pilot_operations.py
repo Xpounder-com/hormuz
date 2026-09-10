@@ -539,7 +539,7 @@ class MacPilotOperationsTests(unittest.TestCase):
         signed_archive = b"authenticated signed archive fixture"
         proof = {
             "schema_id": "hormuz.macos-distribution-proof",
-            "schema_version": 2,
+            "schema_version": 3,
             "passed": True,
             "mode": "notarized",
             "distribution_ready": True,
@@ -557,6 +557,19 @@ class MacPilotOperationsTests(unittest.TestCase):
             "signing_authority": (
                 "Developer ID Application: Test Operator (R267LZMUTY)"
             ),
+            "context_helper_packaged": True,
+            "context_helper_architectures": {"arm64": ["arm64"]},
+            "context_helper_runtime_verified": True,
+            "context_helper_launcher_sealed_by_bundle": True,
+            "context_helper_signatures": {
+                "arm64": {
+                    "team_identifier": "R267LZMUTY",
+                    "authority": "Developer ID Application: Test Operator (R267LZMUTY)",
+                }
+            },
+            "context_tokenizers_packaged": ["cl100k_base", "o200k_base"],
+            "context_helper_sha256": "f" * 64,
+            "context_helper_backend_sha256": {"arm64": "c" * 64},
             "archive_bytes": len(signed_archive),
             "archive_sha256": hashlib.sha256(signed_archive).hexdigest(),
             "executable_sha256": "d" * 64,

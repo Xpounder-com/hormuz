@@ -27,6 +27,7 @@ CODEX_EVIDENCE_PATH = (
 )
 ARCHIVE_PATH = FIXTURE_ROOT / "Hormuz-0.1.0-notarized.zip"
 PROOF_PATH = FIXTURE_ROOT / "distribution-proof-v2.json"
+CONTEXT_PROOF_PATH = FIXTURE_ROOT / "distribution-proof-v3.json"
 NOTARIZATION_PATH = FIXTURE_ROOT / "notarization-v1.json"
 PREVIOUS_ARCHIVE_PATH = FIXTURE_ROOT / "Hormuz-0.0.9-notarized.zip"
 PREVIOUS_PROOF_PATH = FIXTURE_ROOT / "previous-distribution-proof-v2.json"
@@ -1034,6 +1035,54 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "distribution_proof_product_identity_invalid",
         ):
             pilot._validate_distribution_proof(proof, "pilot_qualification")
+
+    def test_context_distribution_proof_v3_binds_packaged_helper_identity(self) -> None:
+        proof = self._json(CONTEXT_PROOF_PATH)
+
+        validated = pilot._validate_distribution_proof(
+            proof, "synthetic_test_fixture"
+        )
+
+        self.assertEqual(validated["schema_version"], 3)
+        self.assertEqual(
+            validated["context_helper_architectures"],
+            {"arm64": ["arm64"]},
+        )
+        self.assertTrue(validated["context_helper_launcher_sealed_by_bundle"])
+
+        changed = copy.deepcopy(proof)
+        changed["context_helper_launcher_sealed_by_bundle"] = False
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "distribution_proof_context_not_ready",
+        ):
+            pilot._validate_distribution_proof(
+                changed, "synthetic_test_fixture"
+            )
+
+        changed = copy.deepcopy(proof)
+        changed["context_helper_signatures"]["arm64"][  # type: ignore[index]
+            "team_identifier"
+        ] = "ZYXWVUTSRQ"
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "distribution_proof_context_identity_invalid",
+        ):
+            pilot._validate_distribution_proof(
+                changed, "synthetic_test_fixture"
+            )
+
+    def test_release_1_2_requires_context_distribution_proof_v3(self) -> None:
+        proof = self._json(PROOF_PATH)
+        proof["version"] = "1.2.0"
+
+        with self.assertRaisesRegex(
+            pilot.MacPilotEvidenceError,
+            "distribution_proof_context_contract_required",
+        ):
+            pilot._validate_distribution_proof(
+                proof, "synthetic_test_fixture"
+            )
 
     def test_apple_silicon_requires_real_gatekeeper_conditions(self) -> None:
         inputs = list(self._inputs())

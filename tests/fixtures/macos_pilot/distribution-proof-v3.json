@@ -1,0 +1,49 @@
+{
+  "architectures": [
+    "arm64"
+  ],
+  "archive_bytes": 59,
+  "archive_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
+  "build": "3",
+  "bundle_identifier": "com.example.hormuzpilot",
+  "context_helper_architectures": {
+    "arm64": [
+      "arm64"
+    ]
+  },
+  "context_helper_backend_sha256": {
+    "arm64": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "context_helper_launcher_sealed_by_bundle": true,
+  "context_helper_packaged": true,
+  "context_helper_runtime_verified": false,
+  "context_helper_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "context_helper_signatures": {
+    "arm64": {
+      "authority": "Developer ID Application: Synthetic Fixture (ABCDEFGHIJ)",
+      "team_identifier": "ABCDEFGHIJ"
+    }
+  },
+  "context_tokenizers_packaged": [
+    "cl100k_base",
+    "o200k_base"
+  ],
+  "distribution_ready": true,
+  "entitlements": [],
+  "executable_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "executable_version_verified": false,
+  "hardened_runtime": true,
+  "icon_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "minimum_macos": "14.0",
+  "mode": "notarized",
+  "notarization_ticket_stapled": true,
+  "passed": true,
+  "schema_id": "hormuz.macos-distribution-proof",
+  "schema_version": 3,
+  "signing_authority": "Developer ID Application: Synthetic Fixture (ABCDEFGHIJ)",
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "system_runtime_dependencies_only": true,
+  "team_identifier": "ABCDEFGHIJ",
+  "version": "1.2.0",
+  "workflow_run_url": "https://github.com/Xpounder-com/hormuz/actions/runs/1"
+}

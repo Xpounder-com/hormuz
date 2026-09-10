@@ -1,0 +1,1 @@
+{"schema_version":1,"transform_version":"structural-v1","clients":{"codex":{"responses":{"exec_command":"structural_rg"}},"claude-code":{"anthropic":{"Bash":"structural_rg","Glob":"path_list"}}}}

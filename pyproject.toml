@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hormuz"
-version = "1.0.0"
+version = "1.2.0"
 description = "Enterprise AI gateway policy, usage, and control plane."
 readme = "README.md"
 license = "Apache-2.0"
@@ -29,6 +29,13 @@ dependencies = [
 client = [
   "keyring>=25.6,<26"
 ]
+context = [
+  "tiktoken==0.12.0"
+]
+context-build = [
+  "tiktoken==0.12.0",
+  "pyinstaller==6.22.2"
+]
 postgres = [
   "psycopg[binary]>=3.3.4,<3.4",
   "psycopg-pool>=3.3.1,<3.4"
@@ -47,5 +54,5 @@ hormuz = "hormuz.cli:main"
 include = ["hormuz*"]
 
 [tool.setuptools.package-data]
-"hormuz" = ["secret-inventory-v1.json", "portfolio-registry-wire-v1.json", "portfolio-attribution-wire-v1.json", "portfolio-outcome-wire-v1.json", "console.css"]
+"hormuz" = ["secret-inventory-v1.json", "portfolio-registry-wire-v1.json", "portfolio-attribution-wire-v1.json", "portfolio-outcome-wire-v1.json", "context-tool-mappings-v1.json", "console.css"]
 "hormuz.migrations.postgresql" = ["*.sql"]

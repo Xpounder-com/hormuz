@@ -11,8 +11,13 @@ on:
       - "script/notarize_macos_release.sh"
       - "tools/verify_macos_client.py"
       - "tools/verify_macos_distribution.py"
+      - "tools/build_context_helper.sh"
+      - "tools/context_helper_entry.py"
       - "tests/test_macos_distribution_verifier.py"
+      - "tests/test_client_relay.py"
+      - "tests/test_compaction*.py"
       - "tools/verify_macos_installed_client.py"
+      - "pyproject.toml"
       - "hormuz/**"
       - "tests/_session_fixtures.py"
       - "tests/test_gateway.py"
@@ -56,10 +61,15 @@ jobs:
             script/notarize_macos_release.sh \
             tools/verify_macos_client.py \
             tools/verify_macos_distribution.py \
+            tools/build_context_helper.sh \
+            tools/context_helper_entry.py \
             tools/verify_macos_installed_client.py \
             tests/_session_fixtures.py \
+            tests/test_client_relay.py \
+            tests/test_compaction*.py \
             tests/test_gateway.py \
             tests/test_macos_distribution_verifier.py \
+            pyproject.toml \
             hormuz \
             .github/workflows/macos-client.yml \
             .github/workflows/macos-distribution.yml; then
@@ -68,9 +78,68 @@ jobs:
             echo "macos=true" >> "$GITHUB_OUTPUT"
           fi
 
+  context-helper:
+    name: Context helper (${{ matrix.architecture }})
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Build native standalone context helper
+        env:
+          HORMUZ_CONTEXT_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check '.[context-build]'
+          ./tools/build_context_helper.sh "$(command -v python)" \
+            "$RUNNER_TEMP/context-helper-build" "$HORMUZ_CONTEXT_ARCH"
+          mkdir "$RUNNER_TEMP/context-helper-artifact"
+          cp "$RUNNER_TEMP/context-helper-build/dist/hormuz-context" \
+            "$RUNNER_TEMP/context-helper-artifact/hormuz-context-$HORMUZ_CONTEXT_ARCH"
+      - name: Set up Node.js for packaged-client conformance
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Prove actual Codex On and Off paths through the packaged helper
+        env:
+          HORMUZ_CONTEXT_ARCH: ${{ matrix.architecture }}
+          HORMUZ_RUN_CONTEXT_CLIENT_TEST: "1"
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/hormuz-context-client" \
+            --no-package-lock --no-save '@openai/codex@0.147.0'
+          python -m hormuz context resources install \
+            --directory "$RUNNER_TEMP/context-tokenizers"
+          PATH="$RUNNER_TEMP/hormuz-context-client/node_modules/.bin:$PATH" \
+            HORMUZ_CONTEXT_TOKENIZER_CACHE="$RUNNER_TEMP/context-tokenizers" \
+            HORMUZ_PACKAGED_CONTEXT_HELPER="$RUNNER_TEMP/context-helper-artifact/hormuz-context-$HORMUZ_CONTEXT_ARCH" \
+            python -m unittest -v \
+              tests.test_client_relay.RelayTests.test_official_codex_exec_command_output_is_compacted_through_relay
+      - name: Transfer architecture-bound helper
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-context-helper-${{ matrix.architecture }}-${{ github.sha }}
+          path: ${{ runner.temp }}/context-helper-artifact/hormuz-context-${{ matrix.architecture }}
+          if-no-files-found: error
+          retention-days: 1
+
   native-client:
     name: Native Mac client verification
-    needs: changes
+    needs: [changes, context-helper]
     if: needs.changes.outputs.macos == 'true'
     runs-on: macos-15
     timeout-minutes: 15
@@ -90,6 +159,18 @@ jobs:
           xcodebuild -version
       - name: Test native session and storage contracts
         run: swift test --package-path clients/macos
+      - name: Install client feature dependencies
+        run: python -m pip install --disable-pip-version-check --editable '.[context]'
+      - name: Download the standalone Apple Silicon helper
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: hormuz-context-helper-*-${{ github.sha }}
+          path: ${{ runner.temp }}/hormuz-context-helpers
+          merge-multiple: true
+      - name: Install pinned tokenizer resources explicitly
+        run: >-
+          python -m hormuz context resources install
+          --directory "$RUNNER_TEMP/hormuz-context-tokenizers"
       - name: Stage and inspect the local app bundle
         run: |
           ./script/build_and_run.sh --build-only
@@ -101,13 +182,20 @@ jobs:
           ./script/package_macos_release.sh
           --ad-hoc
           --bundle-id com.xpounder.hormuz
-          --version 0.1.0
           --build 1
+          --context-helper-directory "$RUNNER_TEMP/hormuz-context-helpers"
+          --tokenizer-cache "$RUNNER_TEMP/hormuz-context-tokenizers"
           --output-directory "$RUNNER_TEMP/hormuz-macos-package"
       - name: Test distribution archive contracts
         run: python -m unittest tests.test_macos_distribution_verifier
-      - name: Install gateway fixture dependencies
-        run: python -m pip install --editable .
+      - name: Test local optimizer and relay contracts
+        run: >-
+          python -m unittest
+          tests.test_compaction
+          tests.test_compaction_runtime
+          tests.test_compaction_enforcement
+          tests.test_compaction_cli
+          tests.test_client_relay
       - name: Verify native client against the local gateway
         run: >-
           python tools/verify_macos_client.py
@@ -126,7 +214,7 @@ jobs:
   native-client-gate:
     name: Native Mac client and loopback contract
     if: always()
-    needs: [changes, native-client]
+    needs: [changes, context-helper, native-client]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -134,12 +222,15 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           NATIVE_REQUIRED: ${{ needs.changes.outputs.macos }}
+          HELPER_RESULT: ${{ needs.context-helper.result }}
           NATIVE_RESULT: ${{ needs.native-client.result }}
         run: |
           test "$CHANGES_RESULT" = "success"
           if [ "$NATIVE_REQUIRED" = "true" ]; then
+            test "$HELPER_RESULT" = "success"
             test "$NATIVE_RESULT" = "success"
           else
             test "$NATIVE_REQUIRED" = "false"
+            test "$HELPER_RESULT" = "skipped"
             test "$NATIVE_RESULT" = "skipped"
           fi

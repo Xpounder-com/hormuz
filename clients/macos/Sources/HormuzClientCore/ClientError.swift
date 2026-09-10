@@ -8,6 +8,7 @@ public enum ClientError: String, Error, LocalizedError {
     case loginTimedOut, loginRequired, alreadySignedIn, identityMismatch
     case refreshInterrupted, logoutPending, secureStoreUnavailable, unsafeStorage
     case storageUnavailable, profileBusy, configurationChanged, invalidArguments
+    case contextSettingsInvalid, contextHelperUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -31,6 +32,8 @@ public enum ClientError: String, Error, LocalizedError {
         case .profileBusy: return "Another Hormuz process is updating this connection. Try again shortly."
         case .configurationChanged: return "The connector changed after preview. Review it again before saving."
         case .invalidArguments: return "Unsupported helper arguments. Open Hormuz to configure the connection."
+        case .contextSettingsInvalid: return "The local context optimization setting could not be verified. Optimization remains off."
+        case .contextHelperUnavailable: return "The local context optimization helper is unavailable. Save a new connector after reinstalling Hormuz."
         }
     }
 

@@ -54,6 +54,13 @@ The active core has four custody categories:
    command argument, log field or archive member. Keep the archive, backup key,
    and session master key in separate custody locations. This path does not use
    provider custody or the runtime session key, and the CLI rejects key reuse.
+5. **Local context-helper process inheritance.** The opt-in context launcher
+   transiently passes the user's existing process environment to the official
+   Codex or Claude Code child process so client-owned tools continue to work.
+   It removes that client's direct provider credentials and endpoint selectors,
+   injects only a short-lived loopback relay credential, and never sends the
+   inherited environment to the Hormuz gateway. Hormuz does not persist, log,
+   hash, or serialize these values.
 
 The second category must not be recursively placed behind the same service it
 is needed to access. For example, Hormuz cannot use OpenBao Transit to decrypt

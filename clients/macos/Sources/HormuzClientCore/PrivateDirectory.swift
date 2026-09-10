@@ -96,8 +96,8 @@ public final class PrivateDirectory: @unchecked Sendable {
         catch { throw ClientError.storageUnavailable }
     }
 
-    public func lock(timeout: TimeInterval = 10) async throws -> ProfileLock {
-        let path = try fileURL("connection.lock").path
+    public func lock(name: String = "connection.lock", timeout: TimeInterval = 10) async throws -> ProfileLock {
+        let path = try fileURL(name).path
         let fd = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw ClientError.unsafeStorage }
         do {

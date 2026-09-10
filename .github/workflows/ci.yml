@@ -866,8 +866,10 @@ jobs:
       - name: Verify both clients through Hormuz
         env:
           HORMUZ_RUN_CLAUDE_CLIENT_TEST: "1"
+          HORMUZ_RUN_CONTEXT_CLIENT_TEST: "1"
         run: |
           python -m unittest -v \
+            tests.test_client_relay.RelayTests.test_official_codex_exec_command_output_is_compacted_through_relay \
             tests.test_gateway.GatewayIntegrationTests.test_installed_codex_routes_through_gateway \
             tests.test_gateway.GatewayIntegrationTests.test_installed_codex_command_auth_recovers_after_401_without_duplicate_provider_egress \
             tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway \

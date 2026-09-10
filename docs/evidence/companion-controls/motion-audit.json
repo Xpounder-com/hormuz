@@ -1,0 +1,129 @@
+{
+  "compactHeight" : 318,
+  "compactLayoutPassed" : true,
+  "opacitySamples" : [
+    {
+      "alpha" : 0.99999999996003264,
+      "expanded" : false,
+      "height" : 79,
+      "step" : 0
+    },
+    {
+      "alpha" : 0.62433851992154588,
+      "expanded" : false,
+      "height" : 79,
+      "step" : 1
+    },
+    {
+      "alpha" : 0.30655559618530759,
+      "expanded" : false,
+      "height" : 79,
+      "step" : 2
+    },
+    {
+      "alpha" : 0.070952581633492384,
+      "expanded" : false,
+      "height" : 79,
+      "step" : 3
+    },
+    {
+      "alpha" : 5.1667485705325007e-13,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 4
+    },
+    {
+      "alpha" : 0.020658224188764559,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 5
+    },
+    {
+      "alpha" : 0.078095959416894886,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 6
+    },
+    {
+      "alpha" : 0.16451514307623785,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 7
+    },
+    {
+      "alpha" : 0.27275174707832084,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 8
+    },
+    {
+      "alpha" : 0.51090079724480408,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 9
+    },
+    {
+      "alpha" : 0.76221623229668856,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 10
+    },
+    {
+      "alpha" : 0.86451248875986364,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 11
+    },
+    {
+      "alpha" : 0.94274906343783493,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 12
+    },
+    {
+      "alpha" : 0.98980900254200987,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 13
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 14
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 15
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 16
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 17
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 18
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 19
+    }
+  ],
+  "passed" : true,
+  "rapidReversalPassed" : true,
+  "smoothOpacityPassed" : true
+}

@@ -1,0 +1,25 @@
+{
+  "all_changed": true,
+  "all_exact": true,
+  "billed_cost_evidence": "pending",
+  "fixture_count": 12,
+  "model_quality": "pending",
+  "protocol": "responses",
+  "results": [
+    {"after_bytes":1496,"after_tokens":{"cl100k_base":529,"o200k_base":531},"before_bytes":2857,"before_tokens":{"cl100k_base":905,"o200k_base":907},"case_id":"case-01","changed":true,"exact_reconstruction":true,"format":"json_table"},
+    {"after_bytes":1214,"after_tokens":{"cl100k_base":454,"o200k_base":456},"before_bytes":3073,"before_tokens":{"cl100k_base":874,"o200k_base":876},"case_id":"case-02","changed":true,"exact_reconstruction":true,"format":"json_table"},
+    {"after_bytes":2231,"after_tokens":{"cl100k_base":630,"o200k_base":632},"before_bytes":3952,"before_tokens":{"cl100k_base":1106,"o200k_base":1108},"case_id":"case-03","changed":true,"exact_reconstruction":true,"format":"json_table"},
+    {"after_bytes":1410,"after_tokens":{"cl100k_base":477,"o200k_base":479},"before_bytes":2029,"before_tokens":{"cl100k_base":662,"o200k_base":664},"case_id":"case-04","changed":true,"exact_reconstruction":true,"format":"json_table"},
+    {"after_bytes":4013,"after_tokens":{"cl100k_base":1825,"o200k_base":1827},"before_bytes":4785,"before_tokens":{"cl100k_base":2051,"o200k_base":2053},"case_id":"case-05","changed":true,"exact_reconstruction":true,"format":"json_table"},
+    {"after_bytes":2932,"after_tokens":{"cl100k_base":908,"o200k_base":910},"before_bytes":4051,"before_tokens":{"cl100k_base":1123,"o200k_base":1125},"case_id":"case-06","changed":true,"exact_reconstruction":true,"format":"json_table"},
+    {"after_bytes":545,"after_tokens":{"cl100k_base":129,"o200k_base":131},"before_bytes":2400,"before_tokens":{"cl100k_base":465,"o200k_base":467},"case_id":"case-07","changed":true,"exact_reconstruction":true,"format":"line_runs"},
+    {"after_bytes":577,"after_tokens":{"cl100k_base":141,"o200k_base":143},"before_bytes":970,"before_tokens":{"cl100k_base":347,"o200k_base":349},"case_id":"case-08","changed":true,"exact_reconstruction":true,"format":"line_runs"},
+    {"after_bytes":3156,"after_tokens":{"cl100k_base":932,"o200k_base":934},"before_bytes":5233,"before_tokens":{"cl100k_base":1301,"o200k_base":1303},"case_id":"case-09","changed":true,"exact_reconstruction":true,"format":"search_lines"},
+    {"after_bytes":2403,"after_tokens":{"cl100k_base":769,"o200k_base":771},"before_bytes":3693,"before_tokens":{"cl100k_base":992,"o200k_base":994},"case_id":"case-10","changed":true,"exact_reconstruction":true,"format":"path_list"},
+    {"after_bytes":595,"after_tokens":{"cl100k_base":141,"o200k_base":143},"before_bytes":2084,"before_tokens":{"cl100k_base":405,"o200k_base":407},"case_id":"case-11","changed":true,"exact_reconstruction":true,"format":"line_runs"},
+    {"after_bytes":613,"after_tokens":{"cl100k_base":160,"o200k_base":163},"before_bytes":3380,"before_tokens":{"cl100k_base":1180,"o200k_base":1182},"case_id":"case-12","changed":true,"exact_reconstruction":true,"format":"line_runs"}
+  ],
+  "schema_id": "hormuz.context-optimization-native-evidence",
+  "schema_version": 1,
+  "transform_version": "structural-v1"
+}

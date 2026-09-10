@@ -67,6 +67,7 @@ _RUNTIME_CONSUMERS = frozenset(
     {
         "configuration_loader",
         "client_credential_helper",
+        "client_context_helper",
         "custody_operator_cli",
         "gateway_runtime",
         "custody_runtime",
@@ -345,7 +346,7 @@ class _EnvironmentReadVisitor(_ScopedVisitor):
         self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:  # noqa: N802
-        if _is_environment_value(node.value):
+        if isinstance(node.ctx, ast.Load) and _is_environment_value(node.value):
             self.coordinates.append(
                 SourceCoordinate(
                     self.source_module,

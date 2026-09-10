@@ -158,7 +158,7 @@ frozen protocol.
 
 ## Trust boundary
 
-Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage store is deliberately metadata-only. Redaction runs after authentication and policy selection but before upstream serialization. The core has no context retrieval, context lifecycle, context cache, provenance, memory, or content-storage path; the separately packaged experiment is not imported by normal gateway operation. See [CONTEXT_EXPERIMENT_MIGRATION.md](CONTEXT_EXPERIMENT_MIGRATION.md).
+Hormuz is trusted with readable requests and responses because it must inspect and relay them. The usage store is deliberately metadata-only. Redaction runs after authentication and policy selection but before upstream serialization. The core has no context retrieval, context lifecycle, context cache, provenance, memory, or content-storage path. The optional client-side optimizer sends one request representation; the gateway can reconstruct its bounded tool-result encodings in memory so secret enforcement cannot be bypassed. It never selects content or loads a tokenizer. See [CONTEXT_OPTIMIZATION.md](CONTEXT_OPTIMIZATION.md) and [CONTEXT_EXPERIMENT_MIGRATION.md](CONTEXT_EXPERIMENT_MIGRATION.md).
 
 For an enterprise-facing listener, customer-controlled infrastructure terminates
 public TLS. Hormuz accepts only a network-restricted and separately

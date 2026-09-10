@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -40,6 +42,13 @@ EXPECTED_COMMAND_TREE = {
     "auth": {"token": None, "session": None},
     "client": {"config": None},
     "contract": {"manifest": None},
+    "context": {
+        "compact": None,
+        "resources": {"install": None},
+        "run": None,
+        "settings": None,
+        "status": None,
+    },
     "custody": {
         "administrator": {
             "grant": None,
@@ -101,6 +110,38 @@ EXPECTED_COMMAND_TREE = {
 
 
 class RuntimeCliOwnershipTests(unittest.TestCase):
+    def test_context_helper_import_path_keeps_gateway_runtime_unloaded(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        script = """
+import sys
+import hormuz.commands.context
+
+forbidden = {
+    'hormuz.auth',
+    'hormuz.config',
+    'hormuz.custody',
+    'hormuz.server',
+    'hormuz.session_store',
+}
+loaded = sorted(forbidden.intersection(sys.modules))
+if loaded:
+    raise SystemExit('gateway modules loaded: ' + ','.join(loaded))
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_context_helper_build_excludes_optional_network_and_keyring_stacks(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        build_script = (root / "tools/build_context_helper.sh").read_text(encoding="utf-8")
+        self.assertIn("--exclude-module keyring", build_script)
+        self.assertIn("--exclude-module requests", build_script)
+
     def test_facade_retains_entry_normalization_and_thin_runtime_seams(self) -> None:
         self.assertEqual(cli.main.__module__, "hormuz.cli")
         self.assertEqual(cli.build_parser.__module__, "hormuz.cli")

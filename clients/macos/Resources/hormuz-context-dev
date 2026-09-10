@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+HORMUZ_CONTEXT_HELPER_DIRECTORY=$(CDPATH= cd "$(dirname "$0")" && pwd)
+HORMUZ_CONTEXT_REPOSITORY=$(CDPATH= cd "$HORMUZ_CONTEXT_HELPER_DIRECTORY/../../../../../../.." && pwd)
+HORMUZ_CONTEXT_PYTHON="$HORMUZ_CONTEXT_REPOSITORY/.venv/bin/python"
+if [ ! -x "$HORMUZ_CONTEXT_PYTHON" ]; then
+  echo "Hormuz context helper is unavailable. Rebuild the local app after creating .venv." >&2
+  exit 1
+fi
+exec "$HORMUZ_CONTEXT_PYTHON" -m hormuz "$@"

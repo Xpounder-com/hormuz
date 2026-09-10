@@ -46,7 +46,9 @@ affected gate on a new build when artifact bytes change.
    distribution proof must show an exact `arm64` Developer ID
    signature, hardened runtime, no entitlements, system-only dependencies, a
    stapled ticket, Gatekeeper acceptance, and the same permanent bundle and team
-   identity. The verifier independently extracts both archives and reruns
+   identity. Exact v2 proofs remain valid for historical versions before 1.2.0;
+   v1.2.0 and later require exact v3 helper architecture, signature, digest, and
+   tokenizer fields. The verifier independently extracts both archives and reruns
    `codesign`, stapler, and Gatekeeper assessment, requiring Apple team
    `R267LZMUTY`; hand-authored JSON cannot replace those platform checks. It
    also authenticates each distribution run through `gh api`, requiring a
@@ -375,6 +377,10 @@ malformed or unsafe.
 
 The repository carries a deliberately fake archive and complete synthetic
 shape so CI can execute every branch of the contract:
+
+The example below deliberately exercises the historical v2 path with pre-v1.2
+synthetic versions. Context-capable candidate fixtures use
+`distribution-proof-v3.json`.
 
 ```bash
 python3 tools/verify_macos_pilot_evidence.py \

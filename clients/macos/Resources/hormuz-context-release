@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+case "$0" in
+  /*) HORMUZ_CONTEXT_HELPERS=${0%/*} ;;
+  *) echo "Hormuz context helper requires an absolute launcher path." >&2; exit 1 ;;
+esac
+if [ "$(/usr/bin/uname -m)" != arm64 ]; then
+  echo "Hormuz context helper requires Apple Silicon." >&2
+  exit 1
+fi
+HORMUZ_CONTEXT_BACKEND="$HORMUZ_CONTEXT_HELPERS/../../Helpers/hormuz-context-arm64"
+exec "$HORMUZ_CONTEXT_BACKEND" "$@"

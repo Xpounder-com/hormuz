@@ -27,4 +27,7 @@ hormuz-context-experiment --config hormuz.json context-pack \
   --policy-version engineering-v1
 ```
 
-The former core command returns `context_experiment_moved` through Hormuz 0.2.x. See the core migration note at [`../../docs/CONTEXT_EXPERIMENT_MIGRATION.md`](../../docs/CONTEXT_EXPERIMENT_MIGRATION.md).
+The former core `context-pack` command continues to return
+`context_experiment_moved`. Hormuz's client-side Context optimization feature is
+a separate, stateless request encoding and does not call this package. See the
+core migration note at [`../../docs/CONTEXT_EXPERIMENT_MIGRATION.md`](../../docs/CONTEXT_EXPERIMENT_MIGRATION.md).

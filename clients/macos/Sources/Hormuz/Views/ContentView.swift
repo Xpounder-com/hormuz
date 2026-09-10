@@ -8,8 +8,8 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .top) {
-                    Image(systemName: "point.3.connected.trianglepath.dotted")
-                        .font(.system(size: 34)).foregroundStyle(.tint).accessibilityHidden(true)
+                    HormuzBrandMark()
+                        .frame(width: 44, height: 44).foregroundStyle(.tint)
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Your team's AI access").font(.title.bold())
                         Text("Connect the tools you use. Keep access governed.").foregroundStyle(.secondary)
@@ -19,7 +19,8 @@ struct ContentView: View {
                 }
                 Label(connection.statusLabel, systemImage: connection.dashboard == nil ? "circle.dotted" : "checkmark.shield")
                     .font(.headline)
-                    .foregroundStyle(connection.dashboard == nil ? Color.secondary : Color.green)
+                    .foregroundStyle(connection.hasSession && (connection.expiresAt.map { $0 <= Date() } ?? false)
+                        ? Color.orange : connection.dashboard == nil ? Color.secondary : Color.green)
                     .accessibilityIdentifier("connection-status")
                 if let message = connection.message {
                     Text(message).font(.callout).textSelection(.enabled)

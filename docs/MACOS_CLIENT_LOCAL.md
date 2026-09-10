@@ -1,7 +1,8 @@
 # Native Mac client: local milestone
 
-This is a development milestone built on the opt-in [browser-login broker](HOSTED_LOGIN_LOCAL.md).
-It does not change the released v1 gateway or the separate v1.1 portfolio program.
+This is the local development path for the opt-in [browser-login broker](HOSTED_LOGIN_LOCAL.md).
+Context optimization ships in Hormuz v1.2.0 while the separate v1.1 portfolio
+program remains independently gated.
 It requires no paid cloud service to build or test. No hosted signup, billing,
 team dashboard, provider credential custody, automatic failover, availability
 promise, or production-readiness claim is added here.
@@ -23,7 +24,9 @@ promise, or production-readiness claim is added here.
    has been verified. Refreshing status does not send a model request.
 4. Select **Set up client**, review the exact generated files, then save. Run the
    copied launcher command from your project directory. The launcher uses the
-   separately installed `codex` or `claude` from your terminal's `PATH`.
+   separately installed `codex` or `claude` from your terminal's `PATH`. The
+   default-Off **Context optimization** toggle applies to the next request and
+   does not require another connector save.
 5. **Sign out** first disables local use, then revokes the server session and removes
    its Keychain item. If the gateway cannot confirm revocation, the credential
    remains suspended solely for a sign-out retry. The UI does not claim success.
@@ -43,8 +46,9 @@ Codex/Claude configuration or login files:
 | --- | --- |
 | `profile.json` | Non-secret setup selector, origin, organization, optional issuer, client, alias, local HTTP opt-in and random profile ID; mode `0600` |
 | `connection.lock` | Metadata-only cross-process lock; mode `0600`; bounded acquisition |
+| `context-optimization-<id>.json` | Schema version and one boolean toggle; mode `0600` |
+| `context-optimization.lock` | Metadata-only toggle lock; mode `0600` |
 | `<client>-<id>.command` | Quoted launcher with no credential values; mode `0700` |
-| `claude-code-<id>.settings.json` | Helper command and routing overrides; no credential values; mode `0600` |
 | `backup-<id>.txt` | Previous bytes of a changed Hormuz-owned generated file; mode `0600` |
 | macOS Keychain service `com.hormuz.mac.session.v1`, account `active-connection-v1` | Access/refresh pair, expiry, bound profile metadata and refresh/revocation state |
 
@@ -61,24 +65,38 @@ An explicitly present `null`, an unknown setup string, or a hosted-pilot profile
 that selects Claude Code, loopback HTTP, or any other alias fails closed. Loading
 and re-saving a valid profile retains its setup and profile ID.
 
-Codex receives invocation-local TOML overrides for a complete `hormuz_connector`
-provider table. Claude Code receives a separate `--settings` file. Common ambient
-provider credential and backend selectors are cleared for that invocation. The
-launcher accepts no extra override arguments. It does not weaken tool permissions,
-sandbox policies or approval settings, or modify unrelated user preferences.
+The saved launcher invokes the version-matched context helper inside the app.
+That helper starts an authenticated loopback relay and gives Codex
+invocation-local TOML overrides or Claude Code invocation-local environment
+overrides. Common ambient provider credential and backend selectors are cleared
+for that invocation. The launcher accepts no extra override arguments. It does
+not weaken tool permissions, sandbox policies or approval settings, or modify
+unrelated user preferences.
 Managed/client settings and changing the tool configuration can still affect
 routing; this is not device enforcement. Moving the app requires regenerating
 the launcher so its absolute helper path remains valid.
 
 ## Session and network safety
 
-The app and helper are the same executable. The helper accepts only a profile ID
-and explicit private state directory; `--force-refresh` is available for controlled
-diagnostics. **Its stdout is a machine credential channel. Do not paste, record,
-or print it.** Errors contain fixed diagnostics, not server bodies or credentials.
+The app executable remains the Keychain credential helper. The separate context
+helper accepts only a profile ID, the explicit private state directory, and the
+fixed app-helper path supplied by the generated launcher. It starts one relay and
+one client process, then exits with the client. **Credential-helper stdout is a
+machine credential channel. Do not paste, record, or print it.** Errors contain
+fixed diagnostics, not server bodies or credentials.
 
-The helper reads Keychain and validates the entire saved profile before returning
-an access token. Both the app and helper take the same process lock. Before a
+The context helper binds an OS-selected IPv4 loopback port and creates a fresh
+credential for each launch. It accepts only the expected local host, protocol
+paths, and methods, replaces that credential before gateway egress, follows no
+redirect, retries no inference request, and logs no model body. With optimization
+Off it forwards body bytes without JSON inspection or tokenizer loading. With it
+On, selection, reconstruction checks, and token estimates stay on the device;
+only one chosen request representation reaches the gateway. See [client-side
+context optimization](CONTEXT_OPTIMIZATION.md).
+
+The app's credential-helper mode reads Keychain and validates the entire saved
+profile before returning an access token. Both the app and that mode take the
+same process lock. Before a
 refresh it persists a pending state, so a crash or lost response cannot cause the
 next helper to replay a possibly consumed refresh token. Interrupted refresh
 requires sign-out/revocation and a new login. The native code does not replay
@@ -124,7 +142,9 @@ app or credentials.
 
 Tests cover profile validation, shell quoting, safe files, stale previews, backups,
 concurrent helpers, interrupted refresh, pending logout, identity mismatches and
-save-failure revocation. Keychain tests skip unless explicitly enabled:
+save-failure revocation. Python tests additionally cover exact compaction,
+request-pinned settings, authenticated relay forwarding, gateway reconstruction,
+and Off byte equivalence. Keychain tests skip unless explicitly enabled:
 
 ```sh
 HORMUZ_TEST_KEYCHAIN=1 swift test --package-path clients/macos --filter KeychainTests
@@ -192,7 +212,10 @@ the acceptance boundary for any customer pilot.
   Data Protection Keychain migration; do not infer its guarantees from this build.
 - Produce supported architecture artifacts from a controlled build. Test on the
   declared minimum macOS version and clean Macs without Python or development
-  tools. Install the app at a stable location before creating helper paths.
+  tools. The artifact must include the signed native Apple Silicon context helper
+  plus both digest-verified tokenizer vocabularies. Intel Macs are outside the
+  supported and tested distribution boundary.
+  Install the app at a stable location before creating helper paths.
 - Sign with the intended **Developer ID Application** identity, hardened runtime
   and a secure timestamp. Use only justified entitlements. The local `codesign -s -`
   step is not Developer ID signing. Verify the bundle with `codesign --verify --strict`

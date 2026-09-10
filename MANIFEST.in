@@ -65,6 +65,11 @@ include tools/verify_finance_collection_runtime.py
 include tools/verify_finance_collection_postgres_runtime.py
 include tools/verify_budget_transition_plan.py
 include tools/verify_core_wheel.py
+include tools/build_context_helper.sh
+include tools/context_helper_entry.py
+include tools/evaluate_context_compaction.py
+include clients/macos/Resources/hormuz-context-release
+recursive-include clients/macos/Resources/ThirdPartyNotices *.txt
 include tools/verify_render_gateway.py
 include deploy/render/gateway/Dockerfile
 include deploy/render/gateway/Dockerfile.dockerignore
