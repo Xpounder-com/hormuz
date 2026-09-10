@@ -26,6 +26,7 @@ from hormuz._hosted_server import (
     ProviderPilotGatewayServer,
 )
 from hormuz._hosted_state import initialize
+from hormuz.compaction_contract import CONTEXT_FORMATS_HEADER, CONTEXT_FORMAT_VERSION
 from hormuz.config import UsageStorageConfig
 from hormuz.hosted import main
 from hormuz.onboarding import TeamDirectory
@@ -669,8 +670,9 @@ class HostedProviderHTTPTestCase(unittest.TestCase):
 
 class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
     def test_health_is_provider_pilot_and_unauthenticated_requests_never_egress(self):
-        status, _, body = self.request("GET", "/health")
+        status, headers, body = self.request("GET", "/health")
         self.assertEqual(status, 200)
+        self.assertEqual(headers[CONTEXT_FORMATS_HEADER], CONTEXT_FORMAT_VERSION)
         self.assertEqual(json.loads(body)["status"], "provider_pilot")
         self.assertEqual(json.loads(body)["deployment"]["platform"], "local")
         self.assertEqual(json.loads(body)["contract"]["profile"], "local_provider_fixture")
@@ -680,6 +682,12 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
         with patch("hormuz.server.urllib.request.urlopen") as provider:
             self.assertEqual(self.request("POST", "/v1/responses", body={"model": "openai-primary"})[0], 401)
         provider.assert_not_called()
+
+        head_status, head_headers, head_body = self.request("HEAD", "/health")
+        self.assertEqual((head_status, head_body), (200, b""))
+        self.assertEqual(head_headers[CONTEXT_FORMATS_HEADER], CONTEXT_FORMAT_VERSION)
+        _, ready_headers, _ = self.request("GET", "/ready")
+        self.assertNotIn(CONTEXT_FORMATS_HEADER, ready_headers)
 
     def test_health_keeps_reserved_capacity_and_has_no_readiness_dependency(self):
         held = []
