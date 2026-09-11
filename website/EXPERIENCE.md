@@ -3,7 +3,10 @@
 The public walkthrough starts with a fictional company planning $1M/year in AI,
 then follows a manager's decision: spend → Engineering → token/model driver →
 candidate policy → next request → install. Existing fonts, palette, illustrations,
-brand files, and companion interaction are retained.
+brand files, and companion interaction are retained. The opening report derives
+Engineering’s rounded 13% output-token share and 55% cost share from the same
+fixture as the tour, labels the data as fictional, and links directly to the
+spend and policy chapters. It renders without JavaScript.
 
 ## Capability and availability map
 
@@ -42,7 +45,8 @@ preserves the visitor's experiment. Arrow keys, Home, and End select tabs.
 
 | Surface | Job | Next step |
 | --- | --- | --- |
-| Header/home hero | Understand the value and begin | Install free; See plans; Explore the $1M example |
+| Home hero | Recognize the $1M buyer and see the first cost finding | Install free; Try the $1M example; Try an output cap |
+| Header | Reach installation and commercial options throughout the journey | Install free; Plans |
 | Spend chapter | Explain the cost driver | Try Engineering output cap; inspect usage CLI |
 | Policy chapter | Compare and apply a safe example | Inspect real template/validation workflow |
 | Compaction chapter | Inspect exactly what changes | Download Mac; read setup/status reference |
