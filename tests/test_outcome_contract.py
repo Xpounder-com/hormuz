@@ -15,6 +15,22 @@ from hormuz.portfolio_wire import PortfolioError, outcome_catalogue, route, vali
 BINDING = PortfolioConnectorBinding("acme", "github-one", "github", "123", None, ("456", "789"))
 DELIVERY = "12345678-1234-4234-8234-123456789abc"
 
+# Recorded explicitly so the matrix does not introspect the production dataclass.
+REQUIRED_OBSERVATION_FIELDS = (
+    "schema_id", "schema_version", "source_event_id", "external_object_id",
+    "container_id", "source_revision", "ordering_domain", "revision_order",
+    "object_type", "event_type", "quality_state", "duration_ms", "state",
+    "supersedes_source_event_id", "reason_code", "event_at",
+)
+NONNULL_OBSERVATION_FIELDS = (
+    "schema_id", "schema_version", "source_event_id", "external_object_id",
+    "container_id", "object_type", "event_type", "quality_state", "state", "reason_code",
+)
+NULLABLE_OBSERVATION_FIELDS = (
+    "source_revision", "ordering_domain", "revision_order",
+    "duration_ms", "supersedes_source_event_id", "event_at",
+)
+
 
 def observation(**changes):
     return {
@@ -71,6 +87,21 @@ class OutcomeContractTests(unittest.TestCase):
                         {"revision_order": "-1"}, {"revision_order": "9223372036854775808"},
                         {"revision_order": "4.5"}, {"ordering_domain": "SYNTHETIC_EXCLUDED"}):
             self.error(lambda changes=changes: observation_from_mapping(observation(**changes), BINDING))
+
+    def test_every_observation_key_is_required(self):
+        for name in REQUIRED_OBSERVATION_FIELDS:
+            with self.subTest(missing=name):
+                dropped = {key: value for key, value in observation().items() if key != name}
+                self.error(lambda dropped=dropped: observation_from_mapping(dropped, BINDING))
+
+    def test_nonnullable_observation_fields_reject_none(self):
+        for name in NONNULL_OBSERVATION_FIELDS:
+            with self.subTest(null=name):
+                self.error(lambda name=name: observation_from_mapping(observation(**{name: None}), BINDING))
+
+    def test_all_nullable_observation_fields_preserve_explicit_none(self):
+        expected = observation(**{name: None for name in NULLABLE_OBSERVATION_FIELDS})
+        self.assertEqual(asdict(observation_from_mapping(expected, BINDING)), expected)
 
     def test_linear_projection_requires_native_uuid_scope_without_connector_claim(self):
         binding = PortfolioConnectorBinding("acme", "linear-one", "linear", None,
