@@ -7,6 +7,7 @@ import { SiteHeader } from './components/SiteHeader';
 import { BrandMark } from './components/Brand';
 import { CompanionPreview } from './components/CompanionPreview';
 import { CustomerExperience } from './components/CustomerExperience';
+import { SpendHookPreview } from './components/SpendHookPreview';
 import { ContextOptimizationPreview } from './components/ContextOptimizationPreview';
 import { QuestionIndex } from './components/QuestionIndex';
 
@@ -14,15 +15,16 @@ export const metadata = pageMetadata('Hormuz — Understand AI spend. Control th
 
 export default function Home() {
   return <div className="landing-home"><SiteHeader active="platform" /><main id="content" tabIndex={-1}>
-    <section className="landing-hero customer-hero" id="top"><div className="landing-hero-copy">
-      <p className="landing-eyebrow"><span className="mini-dot" /> THE OPEN-SOURCE CONTROL POINT FOR YOUR TEAM’S AI</p>
-      <h1>Know your AI spend.<br /><em>Control what comes next.</em></h1>
-      <p className="landing-deck">See which teams, models, and tokens drive the bill. Set budgets and policies before the next request. Keep Codex, Claude Code, and your provider accounts.</p>
-      <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/')}>Install free <span aria-hidden="true">↗</span></CampaignLink><CampaignLink className="button landing-secondary" href={sitePath('/enterprise/')}>See plans <span aria-hidden="true">→</span></CampaignLink></div>
-      <p className="landing-reassurance">Apache-2.0 · No card required · Mac app, source & gateway</p>
-      <a className="hero-evidence-link" href="#experience">Explore the $1M example ↓</a>
+    <section className="landing-hero customer-hero" id="top">
+      <div className="customer-hero-grid"><div className="landing-hero-copy">
+        <p className="landing-eyebrow"><span className="mini-dot" /> OPEN-SOURCE AI CONTROL</p>
+        <h1>Spending $1M a year on AI?<br /><em>See what drives the bill.</em></h1>
+        <p className="landing-deck">Follow a team’s spend from the bill to the tokens. Try a budget or output cap, then see how to connect your own tools.</p>
+        <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/')}>Install free <span aria-hidden="true">↗</span></CampaignLink><a className="button landing-secondary" href="#spend">Try the $1M example <span aria-hidden="true">↓</span></a></div>
+        <p className="landing-reassurance">Apache-2.0 · No card required · Your provider accounts</p>
+      </div><SpendHookPreview /></div>
       <p className="hero-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a> · Led by Mehrdad Zaker</p>
-    </div></section>
+    </section>
     <CustomerExperience />
     <section className="passage-story" aria-labelledby="passage-title"><figure className="passage-art"><img src={sitePath('/brand/controlled-passage.webp')} width="1536" height="1024" loading="lazy" alt="Layered sage and cream contours around a clear, open channel" /><figcaption><BrandMark /><span>YOUR TOOLS. YOUR BOUNDARIES. YOUR EVIDENCE.</span><span aria-hidden="true">↗</span></figcaption></figure><div className="passage-story-copy"><p className="landing-eyebrow">FROM INSIGHT TO ACTION</p><h2 id="passage-title">A budget is useful<br /><em>when it can act.</em></h2><p>A manager can explain the spend. A policy administrator can set the boundary. An employee can keep using their coding tool through the governed connection.</p><dl className="passage-principles"><div><dt><span>01</span> See the driver</dt><dd>Break down captured usage by team, person, model, client, and provider.</dd></div><div><dt><span>02</span> Change a control</dt><dd>Set model access, output caps, scoped budgets, and secret handling.</dd></div><div><dt><span>03</span> Inspect the result</dt><dd>Trace request outcomes and estimates without routine prompt or response logging.</dd></div></dl><CampaignLink href={sitePath('/demo/#policy')}>Try setting up a policy <span aria-hidden="true">↗</span></CampaignLink></div></section>
     <CompanionPreview />
