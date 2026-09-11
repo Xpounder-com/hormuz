@@ -28,9 +28,11 @@ include docs/finance-transition-plan-v4.json
 include docs/finance-transition-plan-v5.json
 include docs/finance-transition-plan-v6.json
 include docs/finance-transition-plan-v7.json
+include docs/finance-transition-plan-v8.json
 include docs/finance-source-contract-v1.json
 include docs/finance-attempt-evidence-contract-v1.json
 include docs/finance-collection-contract-v1.json
+include docs/finance-account-binding-contract-v1.json
 include docs/budget-transition-plan-v1.json
 include docs/budget-transition-plan-v2.json
 include docs/WORK_BUDGETS.md
@@ -63,6 +65,8 @@ include tools/verify_finance_native_attempt_transition_plan.py
 include tools/verify_finance_collection_transition_plan.py
 include tools/verify_finance_collection_runtime.py
 include tools/verify_finance_collection_postgres_runtime.py
+include tools/verify_finance_account_binding_contract.py
+include tools/verify_finance_account_binding_preflight.py
 include tools/verify_budget_transition_plan.py
 include tools/verify_core_wheel.py
 include tools/build_context_helper.sh
@@ -102,6 +106,7 @@ recursive-include docs *.md
 include examples/policy-admin-usability-baseline.json
 include examples/policy-admin-usability-scenarios.json
 recursive-include docs/evidence *.json
+include docs/evidence/reconciliation_scope_probe.py
 recursive-include tests *.py *.json
 recursive-include hormuz/migrations/postgresql *.sql
 prune experiments
