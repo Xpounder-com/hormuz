@@ -28,6 +28,7 @@ include docs/finance-transition-plan-v4.json
 include docs/finance-transition-plan-v5.json
 include docs/finance-transition-plan-v6.json
 include docs/finance-transition-plan-v7.json
+include docs/finance-transition-plan-v8.json
 include docs/finance-source-contract-v1.json
 include docs/finance-attempt-evidence-contract-v1.json
 include docs/finance-collection-contract-v1.json
@@ -65,6 +66,7 @@ include tools/verify_finance_collection_transition_plan.py
 include tools/verify_finance_collection_runtime.py
 include tools/verify_finance_collection_postgres_runtime.py
 include tools/verify_finance_account_binding_contract.py
+include tools/verify_finance_account_binding_preflight.py
 include tools/verify_budget_transition_plan.py
 include tools/verify_core_wheel.py
 include tools/build_context_helper.sh

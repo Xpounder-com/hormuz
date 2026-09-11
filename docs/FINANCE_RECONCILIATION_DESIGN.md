@@ -1,13 +1,23 @@
-# Finance reconciliation — decision preflight for v1.1.0
+# Finance reconciliation — account-binding preflight for v1.3.0
 
 Status: **owner-approved scope; exact #214 preflight acceptance pending**.
 The owner approved prospective metadata-only account capture on 2026-09-06;
 [durable approval record](https://github.com/Xpounder-com/hormuz/issues/8#issuecomment-5562564894).
 This is a continuation of #8, not a replacement for its remaining criteria.
-Baseline: protected main `c877f49da8baf6a837924f33f06494964cd7118b`
+Original decision baseline: protected main `c877f49da8baf6a837924f33f06494964cd7118b`
 ([collection acceptance](https://github.com/Xpounder-com/hormuz/issues/8#issuecomment-5560266260)).
 SQLite is 12; PostgreSQL is 17. This document changes no runtime, schema,
 permission, public contract, credential, provider access, or release gate.
+
+Current implementation-preflight baseline: protected main
+`16fe3640abd9935d9d16d8ccc80af236b546dbfd`, whose runtime matches published v1.2.0.
+The [account-binding transition guide](FINANCE_ACCOUNT_BINDING_TRANSITION.md)
+and `finance-transition-plan-v8.json` now specify configuration, registration,
+storage/audit shapes, the measured four-grant ACL proposal and published-binary
+transition/recovery probes. Test-only DDL is not a runtime migration. Historical
+v1.1.0 contract identifiers and the initial scope contract remain frozen.
+OpenAI is the required live-finance scope; Anthropic is optional and requires
+separate authorization. Neither provider is accessed by this preflight.
 
 ## Management result
 
@@ -97,8 +107,9 @@ Approval authorizes developing this bounded successor preflight, not
 accepting its runtime. Its precise configuration contract, table shapes,
 audit-source additions, migration versions and any fixed ACL delta must be
 measured and reviewed before implementation. Versions 12/17 and the accepted
-199-entry ACL boundary are not rewritten or weakened. No successor version
-or fingerprint is reserved or claimed by this draft. The internal evidence
+199-entry ACL boundary are not rewritten or weakened. The current successor
+proposal is specified in the transition guide; it changes no production
+version or ACL expectation. The original internal evidence
 contract is recorded in `finance-account-binding-contract-v1.json`; its
 verifier/tests freeze the scope and failure semantics, not an implemented
 gateway, configuration surface, migration, or final transition checkpoint.
