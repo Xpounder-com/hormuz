@@ -30,10 +30,10 @@ client = [
   "keyring>=25.6,<26"
 ]
 context = [
-  "tiktoken==0.12.0"
+  "tiktoken==0.14.0"
 ]
 context-build = [
-  "tiktoken==0.12.0",
+  "tiktoken==0.14.0",
   "pyinstaller==6.22.2"
 ]
 postgres = [
