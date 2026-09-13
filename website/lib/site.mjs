@@ -1,7 +1,7 @@
 export const BASE_PATH = '';
 export const SITE_ORIGIN = 'https://usehormuz.github.io';
 export const LEGACY_BASE_PATH = '/hormuz';
-export const SITE_ROUTES = Object.freeze(['/', '/docs/', '/demo/', '/integrations/', '/enterprise/', '/security/', '/resources/', '/contact/', '/privacy/', '/brand/']);
+export const SITE_ROUTES = Object.freeze(['/', '/docs/', '/demo/', '/integrations/', '/enterprise/', '/security/', '/resources/', '/contact/', '/privacy/', '/brand/', '/guides/team-ai-budgets/', '/guides/codex-claude-code-gateway/']);
 export const REPOSITORY = 'https://github.com/Xpounder-com/hormuz';
 export const AUTHOR = 'Mehrdad Zaker';
 export const CONTACT_EMAIL = 'mehrdadz@neuralint.io';
