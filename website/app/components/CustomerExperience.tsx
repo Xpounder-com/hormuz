@@ -6,6 +6,7 @@ import { SpendExample } from './SpendExample';
 import { PolicyExample } from './PolicyExample';
 import { CompactionExample } from './CompactionExample';
 import { SetupExample } from './SetupExample';
+import { trackAnalyticsEvent } from '../../lib/analytics.mjs';
 
 const chapters = [['spend', 'Spend & tokens'], ['policy', 'Set a policy'], ['compaction', 'Compact context'], ['setup', 'My setup']];
 
@@ -19,6 +20,7 @@ export function CustomerExperience() {
   }, []);
   function select(key: string, focus = false) {
     setChapter(key);
+    trackAnalyticsEvent('demo_interaction', key);
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${key}`);
     if (focus) tabs.current[chapters.findIndex(([id]) => id === key)]?.focus();
   }

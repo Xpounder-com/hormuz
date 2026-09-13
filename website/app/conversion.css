@@ -1,4 +1,10 @@
 /* The offer stays legible from the first visit through the inquiry. */
+.ad-consent { max-height: 80vh; overflow-y: auto; }
+.measurement-options { display: grid; gap: 12px; margin-block: 14px; }
+.measurement-options label { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.measurement-options input { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 3px; accent-color: #304828; }
+.measurement-options strong { display: block; font-size: 13px; }
+.measurement-options small { display: block; max-width: 62ch; font-size: 12px; line-height: 1.6; margin-top: 2px; }
 .landing-home .landing-hero { padding-top: 46px; }
 .hero-conversion-grid { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0,1.3fr) minmax(360px,1fr); gap: clamp(32px,5vw,76px); align-items: center; width: min(100% - 64px,1200px); margin: 0 auto 64px; }
 .hero-conversion-grid .landing-hero-copy { width: auto; margin: 0; text-align: left; }

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { BASE_PATH, SITE_ORIGIN, SITE_ROUTES, siteUrl } from '../lib/site.mjs';
+import { GA_MEASUREMENT_ID, GOOGLE_SITE_VERIFICATION } from '../lib/measurement-config.mjs';
 
 import { commercial } from '../lib/commercial.mjs';
 
@@ -22,6 +23,8 @@ for (const route of routes) {
   if (!html.includes('property="og:image"') || !html.includes(siteUrl('/og.png'))) failures.push(`${route}: missing canonical social image`);
   if ((html.match(/<h1[ >]/g) || []).length !== 1) failures.push(`${route}: expected one h1`);
   if (!html.includes('id="content"')) failures.push(`${route}: missing skip-link target`);
+  if (GOOGLE_SITE_VERIFICATION && !html.includes(`name="google-site-verification" content="${GOOGLE_SITE_VERIFICATION}"`)) failures.push(`${route}: missing Search Console verification tag`);
+  if (/<script\b[^>]*\bsrc="https:\/\/(?:www\.googletagmanager\.com|static\.ads-twitter\.com)\//.test(html)) failures.push(`${route}: measurement SDK must not load before consent`);
   for (const stale of ['xpounder-com.github.io', 'mehrdadz@neralint.io', 'hormuz-control.mehrdadz.chatgpt.site', 'POLICY_ADMIN_API.md', 'USAGE_ADMIN_API.md', 'COMPATIBILITY.md', 'THREAT_MODEL.md']) if (html.includes(stale)) failures.push(`${route}: stale target ${stale}`);
 }
 for (const [route, html] of pages) {
@@ -58,4 +61,4 @@ assert.ok(contactSource.includes('Nothing has been sent.'));
 assert.doesNotMatch(contactSource, /fetch\(|sendBeacon|localStorage|sessionStorage/);
 assert.ok((await readdir(path.join(out, 'downloads'))).length >= 4, 'Missing buyer downloads');
 if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }
-else console.log(JSON.stringify({ verdict: 'passed', pages: pages.size, local_link_occurrences: localLinks, source_targets: sourceLinks.size, tracking: 'x_ads_opt_in_non_webkit', contact: commercial.formEndpoint ? 'formspree_submission' : 'local_email_draft_only', booking: Boolean(commercial.bookingUrl), payments: Boolean(commercial.pilotPaymentUrl || commercial.supportPaymentUrl) }, null, 2));
+else console.log(JSON.stringify({ verdict: 'passed', pages: pages.size, local_link_occurrences: localLinks, source_targets: sourceLinks.size, tracking: GA_MEASUREMENT_ID ? 'ga4_and_x_independent_opt_in' : 'x_ads_opt_in_non_webkit', search_console_tag: Boolean(GOOGLE_SITE_VERIFICATION), contact: commercial.formEndpoint ? 'formspree_submission' : 'local_email_draft_only', booking: Boolean(commercial.bookingUrl), payments: Boolean(commercial.pilotPaymentUrl || commercial.supportPaymentUrl) }, null, 2));

@@ -1,12 +1,86 @@
 # Measurement without hidden telemetry
 
-Current implementation: **X Ads measurement requires visitor opt-in and is disabled
+Current implementation: **Google Analytics and X Ads have independent opt-in choices.
+X Ads measurement requires visitor opt-in and is disabled
 in Safari and browsers on iPhone and iPad**. The site
 uses the owner's X pixel `rf0s7` and Lead event `tw-rf0s7-rf0s8` ("Hormuz
 application received"). Formspree accepts enterprise inquiries through the
 separate Hormuz project. No product telemetry is collected by this website.
 GitHub Pages may retain hosting/security logs; see the website privacy notice.
 X counts consented browser events, not all inquiries or qualified customers.
+
+## Website analytics and campaign reporting
+
+GA4 is configured using the public `GA_MEASUREMENT_ID` in
+`website/lib/measurement-config.mjs`. An empty value keeps Google collection off.
+Never place an Analytics API secret or account credential in that file. Disable
+enhanced measurement on the web stream: this site owns its explicit event
+definitions and does not collect automatic form entries, searches, or arbitrary
+outbound URLs. Keep Google signals and ad personalization off.
+
+Analytics requires a new, separate visitor choice; old X consent is never reused.
+No Google script, queue, request or Analytics cookie is created before opt-in.
+Decline, Global Privacy Control and Do Not Track keep collection off. The consent
+choice lasts up to 180 days. With blocked storage it lasts only for the page.
+The configured Analytics cookie expiry is 180 days with automatic renewal off.
+Withdrawal disables collection and reloads the page to unload the SDK. Previously
+sent data and existing vendor cookies are not deleted by withdrawal.
+
+Only known routes on the canonical origin report. Local previews, unknown routes
+and `?qa=1` pages are excluded. Page locations omit queries and fragments;
+referrers retain their origin only. Four bounded campaign labels are sent through
+GA4's explicit campaign fields. No application entries or request reference is
+passed to Analytics. Explicit events are:
+
+| Event | Trigger | Interpretation |
+| --- | --- | --- |
+| `page_view` | One page view after Analytics consent | Measured visit; consent means this is not all visitors |
+| `demo_open` | A link to the website demo is clicked | Demo interest, not completion |
+| `demo_interaction` | A user selects a spend, policy, compaction, or setup section | Use of the illustration, not a product evaluation |
+| `install_click` | A setup-guide or official Mac download link is clicked | Install interest, not a completed installation |
+| `inquiry_open` | A contact-page link is clicked | Inquiry intent, not a submitted lead |
+| `generate_lead` | A sales inquiry receives a positive Formspree acknowledgement | Consented receipt, not qualification or payment |
+
+Mark only `generate_lead` as the primary GA4 key event for the inquiry funnel.
+Its success, sales-interest, QA, spam-trap, and duplicate guards match the X Lead
+contract. No automatic Google Ads linking or new ad audience is required.
+
+Tag each X ad destination with a stable campaign name and unique creative label:
+
+```sh
+cd website
+npm run campaign:url -- --campaign=hormuz_technical_us_2026_09 --content=technical_demo_01
+```
+
+The example labels are a naming template, not evidence that an ad uses this URL.
+Replace the content label with the actual ad's stable identifier. Preserve the
+existing destination and campaign when adding attribution to an existing ad.
+UTM tags already survive internal page navigation; personal fields, click IDs,
+unknown query parameters, downloads, and external destinations are not decorated.
+
+In X, review spend, impressions, link clicks, CTR, cost per link click, landing
+page views, leads and cost per lead. Keep post-engagement and post-view lead
+columns separate. In GA4, use Traffic acquisition grouped by Session campaign
+and Session manual ad content, filtered to the X paid-social source/medium.
+Review actual non-spam inquiries and qualification in the private sales ledger.
+For a consistent reporting period, cost per qualified lead is attributable ad
+spend divided by the count of qualified leads attributed to that campaign. If
+none can be established, show it as unavailable; do not manufacture a zero cost.
+Advertising-platform attribution does not by itself establish incremental lift.
+
+Account-side acceptance requires observing live activity in X Events Manager,
+and a tagged visit plus the intended events in GA4 Realtime/DebugView. A queued
+browser command, passing unit test, or installed tag is not account acceptance.
+New instrumentation cannot backfill unrecorded website actions.
+
+## Search indexing
+
+Use a Search Console URL-prefix property for `https://usehormuz.github.io/`.
+Add the exact public HTML verification value to `GOOGLE_SITE_VERIFICATION`,
+publish the reviewed source, verify ownership, and submit
+`https://usehormuz.github.io/sitemap.xml`. The existing robots, canonical metadata,
+and sitemap permit crawling; only Search Console can establish the observed
+index status. Search impressions and clicks are separate from paid X reporting.
 
 ## Useful signals and exact definitions
 
