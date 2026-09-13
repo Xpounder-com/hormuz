@@ -102,7 +102,8 @@ test('privacy notices distinguish host URL processing from application analytics
     assert.match(text, /query string/);
     assert.match(text, /hosting\/security logs/);
   }
-  assert.match(page, /Optional X Ads measurement stays off until you allow it/);
+  assert.match(page, /Optional Google Analytics and X Ads measurement each stay off until you allow that service/);
+  assert.match(page, /An earlier choice to allow X does not allow Google Analytics/);
   assert.match(page, /Safari and browsers on iPhone and iPad do not load X Ads code/);
   assert.match(page, /process or save it before you send/);
 });

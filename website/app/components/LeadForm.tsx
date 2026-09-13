@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { INTERESTS, campaignSource, isSalesInquiry } from '../../lib/contact.mjs';
 import { prepareLeadAttempt, submitLead } from '../../lib/lead.mjs';
 import { trackConfirmedApplication } from '../../lib/x-ads.mjs';
+import { trackAnalyticsLead } from '../../lib/analytics.mjs';
 import { PILOT_PRICE, SUPPORT_PRICE } from '../../lib/commercial.mjs';
 import { CONTACT_EMAIL, sitePath } from '../../lib/site.mjs';
 
@@ -48,7 +49,10 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
     try {
       await submitLead(endpoint, payload);
       setState('success');
-      if (!payload._gotcha) trackConfirmedApplication(window, { interest, testSubmission });
+      if (!payload._gotcha) {
+        trackConfirmedApplication(window, { interest, testSubmission });
+        trackAnalyticsLead(window, { interest, testSubmission });
+      }
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Receipt could not be confirmed. Please contact us by email.'); setState('error'); }
     finally { pending.current = false; }

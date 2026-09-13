@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
     "verify": "node scripts/verify-export.mjs",
-    "prepare:legacy": "node scripts/prepare-legacy-export.mjs"
+    "prepare:legacy": "node scripts/prepare-legacy-export.mjs",
+    "campaign:url": "node scripts/campaign-url.mjs"
   },
   "engines": { "node": ">=22.14.0" },
   "dependencies": { "next": "16.3.3", "react": "19.2.6", "react-dom": "19.2.6" },

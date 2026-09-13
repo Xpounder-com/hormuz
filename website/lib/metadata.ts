@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 import { AUTHOR, sitePath, siteUrl } from './site.mjs';
+import { GOOGLE_SITE_VERIFICATION } from './measurement-config.mjs';
 
 export function pageMetadata(title: string, description: string, path: string): Metadata {
   return {
     title,
     description,
     authors: [{ name: AUTHOR }],
+    ...(GOOGLE_SITE_VERIFICATION ? { verification: { google: GOOGLE_SITE_VERIFICATION } } : {}),
     alternates: { canonical: siteUrl(path) },
     openGraph: {
       title, description, url: siteUrl(path), type: 'website', siteName: 'Hormuz',

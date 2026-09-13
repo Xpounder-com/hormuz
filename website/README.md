@@ -132,5 +132,25 @@ follows acknowledged submission and contains no form entries. See
 GitHub Pages still receives requested URLs and query strings as the hosting
 provider; optional email attribution does not prevent that initial request.
 
+Google Analytics has a separate opt-in choice; existing X permission never enables
+it. Public GA4 and Search Console identifiers live in
+`lib/measurement-config.mjs`; empty values disable the corresponding setup.
+The Google tag loads only on known canonical production routes after consent,
+with advertising storage, Google signals, and personalization disabled. Website
+analytics can operate in Safari without loading X. Keep enhanced measurement off
+in the GA4 web stream so automatic form, search, and outbound-link events do not
+expand the explicit event contract. Local previews and `?qa=1` never report.
+
+Create a tagged X destination with:
+
+```sh
+npm run campaign:url -- --campaign=hormuz_technical_us_2026_09 --content=technical_demo_01
+```
+
+Use one stable campaign label and a distinct content label for each ad. These are
+public labels, never personal information or credentials. The generator accepts
+only canonical website routes and bounded labels. See the measurement guide for
+event definitions and account-side activation checks.
+
 Figma handoff: https://www.figma.com/design/Ax2HWqdWzVnMANEOmB5Z4z
 Public author: Mehrdad Zaker · mehrdadz@neuralint.io.
