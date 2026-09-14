@@ -75,7 +75,12 @@ use disposable IdP/provider simulators; their output is not customer evidence.
 
 Capture is a nonblocking queue of at most 256 attempt records. The sidecar stores
 up to 4,000 observations per organization and 20,000 globally, with a seven-day
-window. Queue saturation, unavailable storage, interrupted requests and process
+window. Expired rows are purged on startup, reads, and writes; the running
+capture worker also sweeps every 60 seconds while idle. An offline or disabled
+process cannot delete files: the next open sweeps them, and the operator owns
+deletion while the feature is off. Proposals are capped at 100 per organization
+and 1,000 globally, preventing a single organization from consuming the shared
+capacity. Queue saturation, unavailable storage, interrupted requests and process
 exit can lose capture; the denominator is always the **captured sample**, not all
 usage. Pending or missing outcomes are unknown. No request/response content is
 stored, and the immutable usage ledger is unchanged.

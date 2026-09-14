@@ -17,6 +17,7 @@ import re
 import sqlite3
 import stat
 import threading
+import time
 from typing import Iterator
 
 from .policy_repository import PolicyControlError
@@ -25,9 +26,11 @@ from .session_store import SQLiteSessionStore
 MAX_OBSERVATIONS = 20_000
 MAX_SCOPE_OBSERVATIONS = 4_000
 MAX_PREVIEWS = 1_000
+MAX_ORGANIZATION_PREVIEWS = 100
 MAX_QUEUE = 256
 RETENTION = timedelta(days=7)
 PREVIEW_TTL = timedelta(minutes=10)
+SWEEP_INTERVAL_SECONDS = 60
 _ID = re.compile(r"[A-Za-z0-9_.:/-]{1,256}\Z")
 _STATES = {"pending", "succeeded", "failed", "rate_limited"}
 
@@ -59,10 +62,13 @@ class Observation:
     cost_microusd: int | None = None
 
     def validate(self) -> None:
-        for name in ("request_id", "organization_id", "team_id", "actor_id", "model_alias", "policy_version", "routing_fingerprint"):
+        for name in ("request_id", "organization_id", "team_id", "actor_id", "policy_version", "routing_fingerprint"):
             value = getattr(self, name)
             if not isinstance(value, str) or not _ID.fullmatch(value):
                 raise PolicyControlError("impact_invalid_observation")
+        # Match routing configuration: aliases are nonempty strings, not IDs.
+        if not isinstance(self.model_alias, str) or not self.model_alias.strip():
+            raise PolicyControlError("impact_invalid_observation")
         for name in ("requested_limit", "effective_limit", "output_tokens", "cost_microusd"):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or not 0 <= value <= 2**63 - 1):
@@ -117,6 +123,16 @@ class ImpactStore:
                 raise PolicyControlError("impact_schema_unsupported")
             if db.execute("SELECT 1 FROM sqlite_master WHERE type IN ('trigger','view')").fetchone():
                 raise PolicyControlError("impact_schema_unsupported")
+            self._purge_expired(db)
+
+    @staticmethod
+    def _purge_expired(db) -> None:
+        db.execute("DELETE FROM observations WHERE started_at < ?", (iso(utcnow() - RETENTION),))
+        db.execute("DELETE FROM previews WHERE expires_at <= ?", (iso(utcnow()),))
+
+    def purge_expired(self) -> None:
+        with self.connection() as db:
+            self._purge_expired(db)
 
     def _check_parent(self) -> None:
         SQLiteSessionStore._validate_parent_chain(self.path.parent, allow_trusted_symlinks=True, trusted_parent_path=self._trusted_parent)
@@ -163,12 +179,13 @@ class ImpactStore:
                 observation.request_id, observation.organization_id, observation.team_id, observation.model_alias,
                 observation.policy_version, observation.started_at, json.dumps(asdict(observation), sort_keys=True),
             ))
-            db.execute("DELETE FROM observations WHERE started_at < ?", (iso(utcnow() - RETENTION),))
+            self._purge_expired(db)
             db.execute("DELETE FROM observations WHERE request_id IN (SELECT request_id FROM observations WHERE organization_id=? ORDER BY started_at DESC, request_id DESC LIMIT -1 OFFSET ?)", (observation.organization_id, MAX_SCOPE_OBSERVATIONS))
             db.execute("DELETE FROM observations WHERE request_id IN (SELECT request_id FROM observations ORDER BY started_at DESC, request_id DESC LIMIT -1 OFFSET ?)", (MAX_OBSERVATIONS,))
 
     def observations(self, *, organization_id: str, team_id: str, model_alias: str, policy_version: str) -> tuple[Observation, ...]:
         with self.connection() as db:
+            self._purge_expired(db)
             rows = db.execute("SELECT value FROM observations WHERE organization_id=? AND team_id=? AND model_alias=? AND policy_version=? AND started_at>=? ORDER BY started_at DESC, request_id DESC LIMIT ?", (
                 organization_id, team_id, model_alias, policy_version, iso(utcnow() - RETENTION), MAX_SCOPE_OBSERVATIONS,
             )).fetchall()
@@ -180,13 +197,16 @@ class ImpactStore:
     def save_preview(self, *, preview_id: str, organization_id: str, membership_id: str, expires_at: str, value: dict) -> None:
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("DELETE FROM previews WHERE expires_at <= ?", (iso(utcnow()),))
+            self._purge_expired(db)
+            if db.execute("SELECT COUNT(*) FROM previews WHERE organization_id=?", (organization_id,)).fetchone()[0] >= MAX_ORGANIZATION_PREVIEWS:
+                raise PolicyControlError("impact_capacity_reached")
             if db.execute("SELECT COUNT(*) FROM previews").fetchone()[0] >= MAX_PREVIEWS:
                 raise PolicyControlError("impact_capacity_reached")
             db.execute("INSERT INTO previews VALUES (?,?,?,?,?)", (preview_id, organization_id, membership_id, expires_at, json.dumps(value, sort_keys=True)))
 
     def recent_preview_ids(self, *, organization_id: str, membership_id: str) -> tuple[str, ...]:
         with self.connection() as db:
+            self._purge_expired(db)
             return tuple(row[0] for row in db.execute(
                 "SELECT id FROM previews WHERE organization_id=? AND membership_id=? AND expires_at>? ORDER BY expires_at DESC LIMIT 20",
                 (organization_id, membership_id, iso(utcnow())),
@@ -194,6 +214,7 @@ class ImpactStore:
 
     def preview(self, *, preview_id: str, organization_id: str, membership_id: str) -> dict:
         with self.connection() as db:
+            self._purge_expired(db)
             row = db.execute("SELECT value FROM previews WHERE id=? AND organization_id=? AND membership_id=? AND expires_at>?", (preview_id, organization_id, membership_id, iso(utcnow()))).fetchone()
         if row is None:
             raise PolicyControlError("impact_preview_expired")
@@ -237,7 +258,14 @@ class ImpactRecorder:
             self.dropped += 1
 
     def _run(self) -> None:
+        next_sweep = time.monotonic() + SWEEP_INTERVAL_SECONDS
         while not self._stop.is_set() or not self._queue.empty():
+            if time.monotonic() >= next_sweep:
+                try:
+                    self.store.purge_expired()
+                except (OSError, ValueError, RuntimeError, sqlite3.Error):
+                    pass
+                next_sweep = time.monotonic() + SWEEP_INTERVAL_SECONDS
             try:
                 observation = self._queue.get(timeout=.1)
             except queue.Empty:

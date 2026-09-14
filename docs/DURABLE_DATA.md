@@ -285,8 +285,11 @@ an undocumented content boundary.
 
 `policy_impact_database_file` is disposable metadata beside the session database,
 not part of the immutable usage ledger. It retains up to 20,000 observations
-(4,000 per organization) and 1,000 proposals. Seven-day expiry is enforced on
-reads; expired rows are physically pruned on subsequent writes. With both
-processes stopped, operators can delete this sidecar and its SQLite journals.
+(4,000 per organization) and 1,000 proposals (100 per organization). Seven-day expiry is enforced on
+reads. Expired rows are physically pruned on startup, reads, and writes, plus
+an idle sweep every 60 seconds while the capture worker runs. Offline or
+disabled processes cannot delete data; operators own deletion while stopped
+and the next open sweeps expired rows. Operators can delete this sidecar and
+its SQLite journals with both processes stopped.
 Backups and filesystem snapshots remain operator-managed. Deleting it removes
 comparisons and result links but never activates or rolls back a policy.

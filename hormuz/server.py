@@ -1031,10 +1031,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             assert failover_route is not None
             if failover_decision.max_output_tokens is not None:
                 request_value = dict(request_value)
+                previous_limit = request_value.get(output_field)
                 request_value[output_field] = min(
                     request_value.get(output_field, failover_decision.max_output_tokens),
                     failover_decision.max_output_tokens,
                 )
+                if previous_limit is not None and request_value[output_field] < previous_limit:
+                    action = failover_decision.action
+                    if "capped" not in action.split("+"):
+                        action = "capped" if action == "allowed" else action + "+capped"
+                    policy_action = action + ("+redacted" if redaction_count else "")
+                    failover_decision = replace(failover_decision, action=action,
+                        reason=failover_decision.reason + " Output limit reduced for the failover destination.")
             failover_body = self._provider_body(request_value, failover_route)
             try:
                 failover_attempt = self._begin_governed_attempt(

@@ -11,7 +11,7 @@ ADD --checksum=sha256:81c5502941118a24d47af69a17b8b0b9548d75cc6d72b3eb3fe01047b4
     https://deb.debian.org/debian-security/pool/updates/main/p/pcre2/libpcre2-8-0_10.42-1+deb12u1_amd64.deb /tmp/pcre2-security.deb
 RUN test "${TARGETPLATFORM}" = "linux/amd64" \
     && dpkg -i /tmp/pcre2-security.deb \
-    && rm -f /tmp/pcre2-security.deb /var/log/dpkg.log /var/log/alternatives.log
+    && rm -f /tmp/pcre2-security.deb /var/log/dpkg.log /var/log/alternatives.log /var/cache/ldconfig/aux-cache
 
 FROM patched-base AS builder
 

@@ -323,7 +323,8 @@ Both container Dockerfiles install the exact linux/amd64 package from
 Debian's signed bookworm-security index, with Docker ADD verifying SHA-256
 `81c5502941118a24d47af69a17b8b0b9548d75cc6d72b3eb3fe01047b46fa10e`.
 No moving package index is resolved during the build. Generated dpkg logs are
-removed so their wall-clock timestamps do not enter reproducible images.
+removed, as is ldconfig’s host-specific auxiliary cache, so generated timestamps
+and inode metadata do not enter reproducible images.
 The release provenance and its strict public-metadata validator include this
 sixth, checksum-bound dependency. Historical unpatched images are not qualified
 by this updated release verifier. Reproducibility and vulnerability scans remain

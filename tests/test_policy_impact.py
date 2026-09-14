@@ -17,6 +17,46 @@ def observation(**changes):
 
 
 class ImpactStoreTests(unittest.TestCase):
+    def test_capture_accepts_configured_alias_punctuation_and_unicode(self):
+        for index, alias in enumerate(("gpt@prod", "model + preview", "模型")):
+            item = observation(request_id=f"alias-{index}", model_alias=alias)
+            self.store.record(item)
+            self.assertEqual(self.rows(model_alias=alias), (item,))
+
+    def test_expired_metadata_is_physically_purged_on_read_and_restart(self):
+        for action in (lambda: self.rows(), lambda: ImpactStore(self.path)):
+            self.store.record(observation())
+            self.store.save_preview(preview_id="retained", organization_id="org-a", membership_id="member-a",
+                expires_at=iso(utcnow() + timedelta(days=7)), value={})
+            with patch("hormuz.policy_impact.utcnow", return_value=utcnow() + timedelta(days=8)):
+                action()
+            with self.store.connection() as db:
+                for table in ("observations", "previews"):
+                    self.assertEqual(db.execute("SELECT count(*) FROM " + table).fetchone()[0], 0)
+
+    def test_one_organization_cannot_fill_global_preview_capacity(self):
+        def save(identifier, organization):
+            self.store.save_preview(preview_id=identifier, organization_id=organization, membership_id="member-a",
+                expires_at=iso(utcnow() + timedelta(days=7)), value={})
+        with patch("hormuz.policy_impact.MAX_ORGANIZATION_PREVIEWS", 1), patch("hormuz.policy_impact.MAX_PREVIEWS", 2):
+            save("a1", "org-a")
+            with self.assertRaisesRegex(PolicyControlError, "impact_capacity_reached"):
+                save("a2", "org-a")
+            save("b1", "org-b")
+            self.assertEqual(self.store.preview(preview_id="b1", organization_id="org-b", membership_id="member-a"), {})
+
+    def test_idle_recorder_sweeps_without_request_writes(self):
+        swept = threading.Event()
+        class IdleStore:
+            def purge_expired(self):
+                swept.set()
+        with patch("hormuz.policy_impact.SWEEP_INTERVAL_SECONDS", .01):
+            recorder = ImpactRecorder(IdleStore())
+            try:
+                self.assertTrue(swept.wait(1))
+            finally:
+                recorder.close()
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
