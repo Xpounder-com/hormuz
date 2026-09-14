@@ -418,6 +418,14 @@ jobs:
           test -f "$HORMUZ_TEST_ACCOUNT_BINDING_SOURCE"
           test -n "$HORMUZ_TEST_PG_CONTAINER"
           test -n "$HORMUZ_TEST_POSTGRES_DSN"
+          # The browser fixture imports sibling test helpers from the source
+          # package; use the installed candidate's PostgreSQL dependencies.
+          # The isolated installed-wheel transition checks below remain intact.
+          (
+            cd "$GITHUB_WORKSPACE"
+            "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest \
+              tests.test_postgres_policy_impact -v
+          )
           cd "$RUNNER_TEMP"
           for module in test_sqlite_finance test_postgres_finance; do
             "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
