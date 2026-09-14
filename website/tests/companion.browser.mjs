@@ -11,7 +11,7 @@ for (const name of targets) {
   const browser = await (name === 'webkit' ? webkit : chromium).launch({ headless: true, ...(name === 'chrome' ? { channel: 'chrome' } : {}) });
   try {
     for (const width of [1440, 390, 320]) await test(`${name}: companion at ${width}px`, async () => {
-      const context = await browser.newContext({ viewport: { width, height: width > 1000 ? 1000 : 844 }, reducedMotion: width === 320 ? 'reduce' : 'no-preference' });
+      const context = await browser.newContext({ viewport: { width, height: width > 1000 ? 1000 : 844 }, hasTouch: width < 621, isMobile: width < 621, reducedMotion: width === 320 ? 'reduce' : 'no-preference' });
       try {
         const page = await context.newPage();
         page.setDefaultTimeout(10_000);
@@ -47,6 +47,37 @@ for (const name of targets) {
         } else await page.getByRole('button', { name: 'Decline', exact: true }).click();
 
         const cost = page.getByRole('button', { name: 'Cost details: view estimated cost', exact: true });
+        if (width === 1440) {
+          const hints = page.locator('.companion-view-label:visible');
+          const costHint = cost.locator('.companion-view-label');
+          const tokens = page.getByRole('button', { name: 'Token usage: view tokens', exact: true });
+          await cost.locator('.companion-ring').hover();
+          await costHint.waitFor({ state: 'visible' });
+          assert.match(await costHint.innerText(), /\$73.00/);
+          assert.equal(await hints.count(), 1);
+          assert.equal(await card.count(), 0, 'Hover must not open the persistent panel');
+          assert.ok(await launch.evaluate(el => document.activeElement === el), 'Hover must not move focus');
+          const bounds = await costHint.boundingBox();
+          await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, { steps: 8 });
+          assert.ok(await costHint.isVisible(), 'The pointer can enter the preview without closing it');
+          await page.keyboard.press('Escape');
+          await costHint.waitFor({ state: 'hidden' });
+          assert.ok(await launch.evaluate(el => document.activeElement === el), 'Escape keeps the original focus');
+          await tokens.hover();
+          await tokens.locator('.companion-view-label').waitFor({ state: 'visible' });
+          assert.match(await tokens.locator('.companion-view-label').innerText(), /150K input/);
+          await cost.focus();
+          assert.equal(await hints.count(), 1, 'Pointer preview takes precedence over a different focused metric');
+          await page.locator('.companion-desktop-bar').hover();
+          await costHint.waitFor({ state: 'visible' });
+          await cost.press('Escape');
+          await costHint.waitFor({ state: 'hidden' });
+          await gear.hover();
+          await gear.locator('.companion-view-label').waitFor({ state: 'visible' });
+          assert.match(await gear.locator('.companion-view-label').innerText(), /Make it yours/);
+          assert.equal(await card.count(), 0);
+          await cost.hover();
+        } else assert.ok(await cost.locator('.companion-view-label').isVisible(), 'Touch labels stay visible');
         await cost.locator('.companion-view-label').click();
         await waitPanel();
         assert.match(await card.innerText(), /\$73.00 this month/);

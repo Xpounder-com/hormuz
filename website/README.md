@@ -44,7 +44,8 @@ node tests/companion.browser.mjs http://127.0.0.1:3100
 If Playwright lives outside this package, set `PLAYWRIGHT_MODULE` to its module
 specifier or absolute entry-point path. `COMPANION_BROWSERS=chrome,webkit` uses
 installed Google Chrome and WebKit; the default is `chromium,webkit`. The check
-exercises desktop/phone layouts, metric-to-settings navigation, size controls,
+exercises pointer previews without focus changes, Escape dismissal, visible touch
+labels, desktop/phone layouts, metric-to-settings navigation, size controls,
 session state, keyboard focus, folding from both entry points, and dismissal of
 the optional privacy prompt without saving consent. It sends no provider calls,
 uses QA-excluded page URLs, and does not install dependencies or publish a site.
