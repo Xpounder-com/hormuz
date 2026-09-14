@@ -118,7 +118,10 @@ class PolicyControlService:
     def browser_apply(self, caller: PolicyAdministrator, document: PolicyDocument, *, baseline_version: str, generation: int) -> PolicyActivation:
         self._require_configured_organization(caller.organization_id)
         # Reparse a bounded, closed document; do not accept a browser-selected path.
-        document = PolicyDocument.from_json_bytes(document.canonical_json.encode(), config=self._config)
+        content = document.canonical_json.encode()
+        if len(content) > _MAX_POLICY_DOCUMENT_BYTES:
+            raise PolicyControlError("policy_document_too_large")
+        document = PolicyDocument.from_json_bytes(content, config=self._config)
         return self._repository.apply(organization_id=caller.organization_id, caller=caller, document=document,
                                       expected_active_version_id=_version_id(baseline_version), expected_generation=generation)
 

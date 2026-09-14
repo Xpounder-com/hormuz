@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 
 _ERRORS = {
+    "policy_document_too_large": (400, "The proposed policy exceeds the supported document size."),
     "impact_invalid_request": (400, "Choose a valid team, model, and output limit."),
     "impact_limit_not_lower": (400, "Choose a positive output limit below the current ceiling, at most 1,000,000 tokens."),
     "impact_scope_unavailable": (404, "This team and model are not available for your organization."),
