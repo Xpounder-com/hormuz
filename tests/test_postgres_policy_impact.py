@@ -10,6 +10,30 @@ from tests._postgres_fixture import PostgresTestCase
 
 
 class PostgresPolicyImpactTests(PostgresTestCase):
+    def test_managed_directory_two_listener_apply_receipt_and_rollback(self):
+        from tests._policy_impact_evaluation_fixture import policy_impact_evaluation
+        with policy_impact_evaluation(self) as (case, controller, root, gateway, console, proxy, request, info):
+            self.assertNotIn("customer-a", gateway.config.organization_ids)
+            self.assertIn("customer-a", gateway.session_broker.directory.managed_organization_ids())
+            case.login_console()
+            def post(action, values):
+                status, _, result = case.request("POST", "/v1/admin/policy/" + action,
+                    {"csrf_token": case.csrf, **values}, {"Origin": case.gateway_url, "Cookie": case.cookie})
+                self.assertEqual(status, 200, result)
+                return result
+            preview = post("preview", {"team_id": "customer-a-eng", "model_alias": "safe-openai", "proposed_limit": 16})
+            values = {"preview_id": preview["preview_id"], "acknowledged": True}
+            post("review", {"preview_id": preview["preview_id"]})
+            self.assertTrue(post("apply", values)["candidate_active"])
+            self.assertEqual(request(), 200)
+            result = console.policy_console.results(case.cookie.split("=", 1)[1], preview["preview_id"])
+            self.assertEqual(result["captured_requests"], 1)
+            self.assertEqual(result["receipts"][0]["effective_limit"], 16)
+            self.assertEqual(result["receipts"][0]["policy_version"], preview["candidate_version"])
+            self.assertEqual(post("rollback", values)["active_version"], preview["baseline_version"])
+            self.assertEqual(controller.browser_baseline(root)[1], 3)
+            self.assertTrue(controller.browser_history(root).events)
+            self.assertFalse(hasattr(gateway, "policy_console"))
     def initialized(self):
         config, environment, _ = self._managed_config(include_bob=True)
         service = PolicyControlService(config, environ=environment)

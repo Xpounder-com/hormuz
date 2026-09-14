@@ -6,7 +6,7 @@ import os
 from typing import Mapping
 
 from .config import GatewayConfig, Identity
-from .policy_document import PolicyDocumentError, PolicySnapshot, local_policy_snapshot
+from .policy_document import PolicyDocumentError, PolicySnapshot, local_policy_snapshot, policy_validation_context
 from .postgres import PostgresConnectionPool, PostgresStorageError
 from .postgres_policy_store import PostgresPolicyRuntimeStore
 
@@ -25,6 +25,7 @@ class PolicyRuntime:
         *,
         environ: Mapping[str, str] | None = None,
         connection_pool: PostgresConnectionPool | None = None,
+        organization_ids: tuple[str, ...] | None = None,
     ) -> None:
         self._config = config
         self._store: PostgresPolicyRuntimeStore | None = None
@@ -38,7 +39,7 @@ class PolicyRuntime:
             raise PostgresStorageError("postgres_dsn_unavailable")
         self._store = PostgresPolicyRuntimeStore(
             dsn,
-            config=config,
+            config=policy_validation_context(config, organization_ids),
             schema=config.usage_storage.postgres_schema,
             runtime_role=config.usage_storage.postgres_runtime_role,
             connection_pool=connection_pool,

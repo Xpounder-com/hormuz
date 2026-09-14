@@ -8,9 +8,13 @@ hosted deployment or release claim. Native clients keep their existing controls.
 ## Operator setup and process boundary
 
 Use an existing managed PostgreSQL policy deployment with the local administrator
-console and managed onboarding configured. The organization must be present in
-both the configured policy identities and the managed directory. Upgrade all
-policy readers/writers before staging a version-2 document.
+console and managed onboarding configured. Provision the managed organization’s
+initial policy and persistent administrator grants before evaluation. Keep its
+static login identities out of the gateway configuration: onboarding rejects
+those overlapping identities. Gateway and console take a credential-free policy
+validation projection from the local managed directory at startup; restart both
+after adding organizations. This projection grants no authentication or policy
+write authority. Upgrade all policy readers/writers before staging a version-2 document.
 
 1. Set `authentication.session_broker.policy_impact_enabled: true` alongside
    `enabled`, `onboarding_enabled`, and `console_enabled`. All defaults remain off.

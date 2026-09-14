@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from uuid import uuid4
 
-from .config import GatewayConfig
+from .config import GatewayConfig, PolicyValidationContext
 from .contracts import (
     POLICY_CONTROL_EVENT_SCHEMA_ID,
     POLICY_CONTROL_EVENT_SCHEMA_VERSION,
@@ -48,7 +48,7 @@ class PostgresPolicyRuntimeStore:
         self,
         dsn: str,
         *,
-        config: GatewayConfig,
+        config: GatewayConfig | PolicyValidationContext,
         schema: str,
         runtime_role: str,
         connection_pool: PostgresConnectionPool | None = None,
@@ -109,7 +109,7 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         self,
         dsn: str,
         *,
-        config: GatewayConfig,
+        config: GatewayConfig | PolicyValidationContext,
         schema: str,
         policy_control_role: str,
         connection_pool: PostgresConnectionPool | None = None,
@@ -942,7 +942,7 @@ def _administrator_from_row(row: dict[str, object]) -> PolicyAdministrator:
         raise PostgresStorageError("policy_document_invalid") from error
 
 
-def _version_from_row(row: dict[str, object], *, config: GatewayConfig) -> PolicyVersionRecord:
+def _version_from_row(row: dict[str, object], *, config: GatewayConfig | PolicyValidationContext) -> PolicyVersionRecord:
     raw_document = row["document_json"]
     if isinstance(raw_document, str):
         try:

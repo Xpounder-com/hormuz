@@ -275,7 +275,8 @@ class GatewayServer(ThreadingHTTPServer):
             if provider_reliability_store is None:
                 raise StorageSchemaError("storage_schema_partial_upgrade")
             self.provider_reliability_store = provider_reliability_store
-            policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
+            policy_runtime = PolicyRuntime(config, environ=environ, connection_pool=self.postgres_pool,
+                                           organization_ids=storage_organizations)
             self.policy_engine = PolicyEngine(
                 config,
                 self.store,

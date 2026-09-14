@@ -7,7 +7,7 @@ import json
 import secrets
 
 from .policy_control import PolicyControlService
-from .policy_document import PolicyDocument
+from .policy_document import PolicyDocument, policy_validation_context
 from .policy_impact import ImpactStore, PREVIEW_TTL, RETENTION, compare, iso, utcnow, routing_fingerprint
 from .policy_repository import PolicyControlError
 
@@ -25,6 +25,7 @@ def candidate_document(baseline: PolicyDocument, *, config, team_id: str, model_
 class PolicyImpactControl:
     def __init__(self, *, config, sessions, controller: PolicyControlService, store: ImpactStore):
         self.config, self.sessions, self.controller, self.store = config, sessions, controller, store
+        self.validation = policy_validation_context(config, sessions.directory.managed_organization_ids())
 
     def baseline(self, credential: str):
         principal, caller = self.sessions.policy_identity(credential)
@@ -58,7 +59,7 @@ class PolicyImpactControl:
         previous_limit = min(limits) if limits else None
         if type(cap) is not int or not 1 <= cap <= 1_000_000 or previous_limit is not None and cap >= previous_limit:
             raise PolicyControlError("impact_limit_not_lower")
-        candidate = candidate_document(baseline, config=self.config, team_id=team_id, model_alias=model_alias, cap=cap)
+        candidate = candidate_document(baseline, config=self.validation, team_id=team_id, model_alias=model_alias, cap=cap)
         observations = self.store.observations(organization_id=principal.organization_id, team_id=team_id,
                                              model_alias=model_alias, policy_version=baseline.version_id)
         observations = tuple(o for o in observations if o.routing_fingerprint == routing_fingerprint(self.config))
@@ -111,7 +112,7 @@ class PolicyImpactControl:
             return self.results(credential, preview_id)
         if baseline.version_id != preview["baseline_version"] or generation != preview["baseline_generation"]:
             raise PolicyControlError("policy_active_version_mismatch")
-        candidate = candidate_document(baseline, config=self.config, team_id=preview["team_id"], model_alias=preview["model_alias"], cap=preview["proposed_limit"])
+        candidate = candidate_document(baseline, config=self.validation, team_id=preview["team_id"], model_alias=preview["model_alias"], cap=preview["proposed_limit"])
         if candidate.version_id != preview["candidate_version"]:
             raise PolicyControlError("policy_active_version_mismatch")
         self.controller.browser_apply(caller, candidate, baseline_version=baseline.version_id, generation=generation)

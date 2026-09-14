@@ -57,10 +57,11 @@ class PolicyConsoleServer(ThreadingHTTPServer):
                                    access_ttl_seconds=settings.access_ttl_seconds, absolute_ttl_seconds=settings.absolute_ttl_seconds,
                                    enrollment_ttl_seconds=settings.enrollment_ttl_seconds, trusted_parent_path=settings.trusted_parent_path)
         broker = SessionBroker(config, Authenticator(config), store)
-        usage = create_usage_store(config, environ=environ, read_only=True)
+        organizations = tuple(sorted(set(config.organization_ids) | set(broker.directory.managed_organization_ids())))
+        usage = create_usage_store(config, environ=environ, read_only=True, organization_ids=organizations)
         self.console = ConsoleService(broker, usage)
         self.policy_console = PolicyImpactControl(config=config, sessions=self.console.sessions,
-            controller=PolicyControlService(config, environ=environ),
+            controller=PolicyControlService(config, environ=environ, organization_ids=organizations),
             store=ImpactStore(impact_path(settings.database_path), trusted_parent_path=settings.trusted_parent_path))
         super().__init__(address, PolicyConsoleHandler)
 

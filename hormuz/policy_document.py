@@ -32,6 +32,20 @@ _POLICY_FIELDS = frozenset(
 _EGRESS_FIELDS = ("openai.allow_background", "openai.allow_response_storage", "secrets.mode")
 
 
+def policy_validation_context(config: GatewayConfig, organization_ids: tuple[str, ...] | None = None) -> PolicyValidationContext:
+    """Project trusted configured/directory scopes without adding login identities.
+
+    Additional organizations come only from the local managed directory at
+    process startup, never from browser input or submitted policy documents.
+    This projection grants no policy authority; PostgreSQL grants remain required.
+    """
+    return PolicyValidationContext(
+        organization_ids=tuple(sorted(set(config.organization_ids) | set(organization_ids or ()))),
+        identities_by_actor=config.identities_by_actor,
+        model_routes=config.model_routes,
+    )
+
+
 class PolicyDocumentError(ValueError):
     """A stable, operator-readable error which never repeats submitted values."""
 
