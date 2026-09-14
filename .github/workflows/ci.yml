@@ -423,6 +423,10 @@ jobs:
           # The isolated installed-wheel transition checks below remain intact.
           (
             cd "$GITHUB_WORKSPACE"
+            # Session storage rejects world-writable ancestors such as /tmp.
+            # Match the secure temporary root used by the Python matrix.
+            export TMPDIR="$GITHUB_WORKSPACE/.hormuz-policy-test-tmp"
+            mkdir -m 700 "$TMPDIR"
             "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest \
               tests.test_postgres_policy_impact -v
           )
