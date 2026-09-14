@@ -27,12 +27,12 @@ else:
 if __package__:
     from ._portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from ._registry_transition_fixture import (
-        ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot,
+        assert_released_manifest_preserved, ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot,
     )
 else:
     from _portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from _registry_transition_fixture import (
-        ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot,
+        assert_released_manifest_preserved, ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot,
     )
 
 
@@ -138,11 +138,7 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         request = {"backend": "sqlite", "path": str(self.path), "mode": "seed"}
         seeded = released_v1_call(request)
         self.assertEqual(seeded["status"], "ready")
-        from tools.verify_portfolio_intelligence_contract import _validate_additive_manifest
-        frozen_manifest = json.loads((Path(__file__).resolve().parents[1] /
-            "tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json").read_text())
-        self.assertEqual(seeded["manifest"], frozen_manifest)
-        _validate_additive_manifest(seeded["manifest"], contract_manifest())
+        assert_released_manifest_preserved(self, seeded["manifest"], contract_manifest())
         self.assertEqual(seeded["unknown_holds"], 1)
         self.before = sqlite_snapshot(self.path)
         self.assertEqual(ledger_observation(UsageStore(self.path)), {
