@@ -6,9 +6,9 @@ import { REPOSITORY, sitePath } from '../../lib/site.mjs';
 
 type Panel = 'home' | 'connection' | 'client' | 'appearance' | 'cost' | 'tokens' | 'requests';
 const metrics = [
-  { id: 'cost', label: 'Estimated cost', invitation: 'Cost details', short: 'Cost', glyph: '$', value: '$73', detail: '$73.00 this month', copy: 'Based on the team’s configured rate card. This is an estimate, not a provider invoice.' },
-  { id: 'tokens', label: 'Tokens', invitation: 'Token usage', short: 'Tokens', glyph: '#', value: '210K', detail: '210,000 tokens this month', copy: '150,000 input · 60,000 output. Only requests routed through the Hormuz gateway are counted.' },
-  { id: 'requests', label: 'Requests', invitation: 'Request activity', short: 'Requests', glyph: '↕', value: '520', detail: '520 requests this month', copy: '508 allowed · 12 denied. Routine evidence records outcomes without prompt or response content.' },
+  { id: 'cost', label: 'Estimated cost', invitation: 'Cost details', short: 'Cost', glyph: '$', value: '$73', preview: '$73.00', breakdown: 'This month · Configured rates', detail: '$73.00 this month', copy: 'Based on the team’s configured rate card. This is an estimate, not a provider invoice.' },
+  { id: 'tokens', label: 'Tokens', invitation: 'Token usage', short: 'Tokens', glyph: '#', value: '210K', preview: '210,000', breakdown: '150K input · 60K output', detail: '210,000 tokens this month', copy: '150,000 input · 60,000 output. Only requests routed through the Hormuz gateway are counted.' },
+  { id: 'requests', label: 'Requests', invitation: 'Request activity', short: 'Requests', glyph: '↕', value: '520', preview: '520', breakdown: '508 allowed · 12 denied', detail: '520 requests this month', copy: '508 allowed · 12 denied. Routine evidence records outcomes without prompt or response content.' },
 ] as const;
 
 /** Isolated, synthetic UI demonstration. Never reads a session or calls a gateway. */
@@ -20,6 +20,8 @@ export function CompanionPreview() {
   const [inView, setInView] = useState(false);
   const [inviteReady, setInviteReady] = useState(false);
   const [explored, setExplored] = useState(false);
+  const [hovered, setHovered] = useState<Panel | null>(null);
+  const [peekDismissed, setPeekDismissed] = useState(false);
   const cardId = useId();
   const controlsId = panel !== null ? cardId : undefined;
   const section = useRef<HTMLElement>(null);
@@ -40,6 +42,8 @@ export function CompanionPreview() {
     }
   }
   function close() {
+    setPeekDismissed(true);
+    setHovered(null);
     returnFocus.current = true;
     setPanel(null);
   }
@@ -47,6 +51,8 @@ export function CompanionPreview() {
     // Move an optional first-visit prompt out of the preview's way. This event
     // changes only the prompt's visibility, never a saved measurement choice.
     window.dispatchEvent(new Event('hormuz:open-companion-preview'));
+    setHovered(null);
+    setPeekDismissed(true);
     returnFocus.current = false;
     trigger.current = button;
     scrollOnOpen.current = !button.closest('.companion-desktop');
@@ -55,6 +61,22 @@ export function CompanionPreview() {
     setPanel(next);
     if (next === panel) focusControls();
   }
+  function preview(next: Panel, pointerType: string) {
+    if (panel || pointerType !== 'mouse' || !window.matchMedia('(min-width: 621px) and (hover: hover) and (pointer: fine)').matches) return;
+    setPeekDismissed(false);
+    setHovered(next);
+  }
+  useEffect(() => {
+    if (!hovered && !peekDismissed) return;
+    // Hover does not move focus. Escape must still dismiss its preview when
+    // keyboard focus is elsewhere, and the next Tab can reveal a fresh hint.
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') { setHovered(null); setPeekDismissed(true); }
+      else if (event.key === 'Tab') setPeekDismissed(false);
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [hovered, peekDismissed]);
   useEffect(() => {
     // The panel mounts already visible. Restore focus only after its trigger is
     // visible again, including the compact layout where the panel covers it.
@@ -112,14 +134,14 @@ export function CompanionPreview() {
       </div>
       <p className="companion-hint">Try it right here. Example data, no sign-in needed.</p>
     </div>
-    <div className="companion-desktop" style={{ '--companion-scale': scale } as CSSProperties} data-panel-open={panel !== null} data-explored={explored} data-invite-ready={inviteReady}
-      onKeyDown={event => { if (event.key === 'Escape' && panel) { event.preventDefault(); close(); } }}>
+    <div className="companion-desktop" style={{ '--companion-scale': scale } as CSSProperties} data-panel-open={panel !== null} data-explored={explored} data-invite-ready={inviteReady} data-peek-dismissed={peekDismissed} data-hovering={hovered !== null}
+      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); if (panel) close(); else { setHovered(null); setPeekDismissed(true); } } }}>
       <div className="companion-desktop-bar"><span className="companion-window-dots" aria-hidden="true"><i /><i /><i /></span><BrandMark /><span>Hormuz</span><span className="companion-workspace-label">EXAMPLE WORKSPACE</span></div>
       <div className="companion-wallpaper" aria-hidden="true"><div className="companion-orbit" /><BrandMark /><span>Stay in your flow.</span></div>
       {panel === null && <div className="companion-invitation">
         <span className="companion-invitation-kicker"><span /> YOUR DESKTOP, WITH HORMUZ</span>
         <h3>{folded ? 'Room to focus.' : explored ? 'Everything, a click away.' : 'Small widget.\nClear picture.'}</h3>
-        <p>{folded ? 'Bring the widget back whenever you need it.' : 'Choose a view at the edge. Make it yours.'}</p>
+        <p>{folded ? 'Bring the widget back whenever you need it.' : <><span className="companion-hover-hint">Hover for a quick look.<br />Click to explore.</span><span className="companion-touch-hint">Tap a number or open<br />the controls.</span></>}</p>
         {folded && <button type="button" className="companion-restore" onClick={event => open('home', event.currentTarget)}>Reopen the widget <span aria-hidden="true">↗</span></button>}
       </div>}
       <div className="companion-edge" data-folded={folded} ref={edge}>
@@ -130,15 +152,18 @@ export function CompanionPreview() {
           <svg className="companion-silhouette" viewBox="0 0 70 399" preserveAspectRatio="none" aria-hidden="true"><path d="M70 0 A39 39 0 0 1 31 39 H30 A30 30 0 0 0 0 69 V330 A30 30 0 0 0 30 360 H31 A39 39 0 0 1 70 399Z" /></svg>
           <div className="companion-rings">
             {metrics.map(item => <button key={item.id} type="button" className="companion-metric" aria-label={`${item.invitation}: view ${item.label.toLowerCase()}`} aria-controls={controlsId}
+              aria-description={expired ? 'Session expired. Open for connection details.' : `${item.detail}. ${item.breakdown}. Example data.`}
+              data-preview={hovered === item.id} onPointerEnter={event => preview(item.id, event.pointerType)} onPointerLeave={() => setHovered(null)}
               aria-pressed={panel === item.id} onClick={event => open(item.id, event.currentTarget)}>
-              <span className="companion-view-label" aria-hidden="true"><span className="companion-label-full">{item.invitation}</span><span className="companion-label-short">{item.short}</span><b>↗</b></span>
+              <span className="companion-view-label" aria-hidden="true"><span className="companion-label-full">{item.label}</span><span className="companion-label-short">{item.short}</span><strong className="companion-peek-value">{expired ? 'Session expired' : item.preview}</strong><span className="companion-peek-copy">{expired ? 'Reconnect to refresh your usage.' : item.breakdown}</span><span className="companion-peek-action"><span>Click to open</span><b>↗</b></span></span>
               <span className="companion-ring" ref={item.id === 'cost' ? invitationRing : undefined}><span aria-hidden="true">{item.glyph}</span><i className={expired ? 'is-expired' : ''} /></span>
               {!expired && <span className="companion-reading">{item.value}</span>}
             </button>)}
           </div>
           <button type="button" className="companion-gear" aria-label="Settings & setup: open Hormuz controls" aria-controls={controlsId} aria-expanded={panel !== null} ref={gear}
+            data-preview={hovered === 'home'} onPointerEnter={event => preview('home', event.pointerType)} onPointerLeave={() => setHovered(null)}
             onClick={event => panel === 'home' ? close() : open('home', event.currentTarget)}>
-            <span className="companion-view-label" aria-hidden="true"><span className="companion-label-full">Settings &amp; setup</span><span className="companion-label-short">Controls</span><b>↗</b></span>
+            <span className="companion-view-label" aria-hidden="true"><span className="companion-label-full">Your controls</span><span className="companion-label-short">Controls</span><strong className="companion-peek-value">Make it yours.</strong><span className="companion-peek-copy">Connection, clients &amp; appearance.</span><span className="companion-peek-action"><span>Open controls</span><b>↗</b></span></span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m9 3-.6 2.4-2 .9-2.2-.7-2 3.4 1.7 1.8v2.4L2.2 15l2 3.4 2.2-.7 2 .9L9 21h4l.6-2.4 2-.9 2.2.7 2-3.4-1.7-1.8v-2.4L19.8 9l-2-3.4-2.2.7-2-.9L13 3Z"/><circle cx="11" cy="12" r="3"/></svg>
           </button>
         </div>
@@ -159,7 +184,7 @@ export function CompanionPreview() {
         </div>
         <footer><span aria-hidden="true" />Gateway requests only · Example data</footer>
       </div>}
-      <p className="companion-stage-caption"><span className={expired ? 'is-expired' : ''} aria-hidden="true" />{panel ? 'Close the panel to explore another view.' : 'Interactive preview · No account needed'}</p>
+      <p className="companion-stage-caption"><i className={expired ? 'is-expired' : ''} aria-hidden="true" /><span>{panel ? 'Close the panel to explore another view.' : folded ? 'Reopen from the edge tab · Example data' : <><span className="companion-hover-hint">Hover to preview · Click for details</span><span className="companion-touch-hint">Tap a label to explore</span> · Example data</>}</span></p>
     </div>
   </section>;
 }
