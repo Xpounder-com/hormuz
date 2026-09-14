@@ -108,6 +108,9 @@ class PolicyEngine:
             reason = f"Model {requested_model} is not allowed; routed to {fallback}."
 
         output_cap = policy.max_output_tokens
+        model_cap = snapshot.model_output_limits.get(selected_alias)
+        if model_cap is not None:
+            output_cap = model_cap if output_cap is None else min(output_cap, model_cap)
         if output_cap is not None and requested_output_tokens is not None and requested_output_tokens > output_cap:
             action = "capped" if action == "allowed" else f"{action}+capped"
             reason = f"{reason} Output limit reduced from {requested_output_tokens} to {output_cap}."
@@ -235,6 +238,10 @@ class PolicyEngine:
         allowed_models = decision.snapshot.effective_policy.allowed_models
         if allowed_models is not None and failover_route.alias not in allowed_models:
             return None
+        output_cap = decision.max_output_tokens
+        model_cap = decision.snapshot.model_output_limits.get(failover_route.alias)
+        if model_cap is not None:
+            output_cap = model_cap if output_cap is None else min(output_cap, model_cap)
         return PolicyDecision(
             allowed=True,
             action=decision.action,
@@ -245,7 +252,7 @@ class PolicyEngine:
             requested_model=decision.requested_model,
             resolved_alias=failover_route.alias,
             route=failover_route,
-            max_output_tokens=decision.max_output_tokens,
+            max_output_tokens=output_cap,
             policy_version=decision.policy_version,
             snapshot=decision.snapshot,
         )

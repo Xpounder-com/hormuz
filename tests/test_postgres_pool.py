@@ -264,7 +264,8 @@ class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
                 connection_pool=pool,
             )
             create_reliability.assert_called_once_with(store)
-            create_runtime.assert_called_once_with(config, connection_pool=pool)
+            create_runtime.assert_called_once_with(config, environ=bounded_environment,
+                                                   connection_pool=pool, organization_ids=None)
             runtime.verify_active_policies.assert_called_once_with()
             server.server_close()
             base_close.assert_called_once_with()

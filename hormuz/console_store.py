@@ -251,6 +251,17 @@ class ConsoleStore:
             connection.execute("BEGIN IMMEDIATE")
             return self._current(connection, credential)
 
+    def policy_identity(self, credential: str):
+        """Resolve verified OIDC identity, never infer policy authority from console role."""
+        from .policy_repository import PolicyAdministrator
+        with self.store._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            principal = self._current(connection, credential)
+            member = self.directory._member(connection, principal.organization_id, principal.membership_id)
+            caller = PolicyAdministrator(organization_id=principal.organization_id, authentication_kind="oidc",
+                                         issuer=member["issuer"], subject=member["subject"])
+        return principal, caller
+
     def csrf_token(self, credential: str) -> str:
         return "hox_cs_" + base64.urlsafe_b64encode(self.store._digest("console-csrf", credential)).rstrip(b"=").decode("ascii")
 

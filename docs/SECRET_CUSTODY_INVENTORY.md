@@ -166,3 +166,13 @@ to the per-organization gateway audit chain; implement all-administrator-loss
 break-glass recovery; migrate reserved purpose classes; certify a customer
 cloud environment; or close issue #17. Customer KMS authority remains a
 separate security boundary.
+
+## Isolated policy console
+
+The opt-in policy console reads the runtime and policy-control DSNs separately
+and resolves existing session/OIDC/ingress credentials. It does not resolve
+inference keys, static employee tokens, migration or recovery credentials. Its
+short-lived, membership-bound proposal signatures use the existing session
+master key with a dedicated domain; they are not standalone durable approval
+credentials. PostgreSQL rechecks root authority at each policy mutation. See
+[Policy impact](POLICY_IMPACT.md) for process isolation and rotation behavior.

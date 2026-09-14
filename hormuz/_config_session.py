@@ -81,6 +81,7 @@ def build_session_broker(raw: dict[str, Any], *, source_path: Path) -> SessionBr
         allow_insecure_http=insecure,
         onboarding_enabled=_boolean(item.get("onboarding_enabled", False), f"{prefix}.onboarding_enabled"),
         console_enabled=_boolean(item.get("console_enabled", False), f"{prefix}.console_enabled"),
+        policy_impact_enabled=_boolean(item.get("policy_impact_enabled", False), f"{prefix}.policy_impact_enabled"),
     )
 
 
@@ -95,6 +96,8 @@ def validate_session_references(config: GatewayConfig) -> None:
         raise ConfigError("session broker requires at least one OIDC login issuer")
     if broker.console_enabled and not broker.onboarding_enabled:
         raise ConfigError("administrator console requires managed team onboarding")
+    if broker.policy_impact_enabled and (not broker.console_enabled or config.policy_control.mode != "postgresql"):
+        raise ConfigError("policy impact requires the administrator console and managed PostgreSQL policies")
     if broker.database_path is None or broker.database_path.resolve() == config.database_path.resolve():
         raise ConfigError("session database must be separate from usage storage")
     if broker.allow_insecure_http and config.ingress.mode != "local":

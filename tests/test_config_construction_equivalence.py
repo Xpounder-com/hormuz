@@ -56,6 +56,11 @@ def _canonical(value: Any, *, config_directory: Path) -> object:
                     type(value).__name__ == "ModelRoute"
                     and field.name == "failover_alias"
                     and getattr(value, field.name) is None
+                ) and not (
+                    # Preserve the original disabled-feature snapshot rather than re-pin it.
+                    type(value).__name__ == "SessionBrokerConfig"
+                    and field.name == "policy_impact_enabled"
+                    and getattr(value, field.name) is False
                 )
             },
         }

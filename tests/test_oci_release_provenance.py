@@ -98,7 +98,7 @@ class OciReleaseProvenanceTests(unittest.TestCase):
             "linux/amd64",
         )
         dependencies = predicate["buildDefinition"]["resolvedDependencies"]
-        self.assertEqual(len(dependencies), 5)
+        self.assertEqual(len(dependencies), 6)
         self.assertEqual(predicate["runDetails"]["metadata"]["invocationId"], (
             "https://github.com/Xpounder-com/hormuz/actions/runs/123/attempts/1"
         ))

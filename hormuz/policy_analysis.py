@@ -359,6 +359,8 @@ class _CurrentUsageSnapshot:
 
 def _semantic_policy_mapping(document: PolicyDocument) -> dict[str, object]:
     mapping = document.to_mapping()
+    # Absent v1 model bindings and an empty v2 binding map have the same behavior.
+    cast(dict[str, object], mapping["policies"]).setdefault("team_model_output_limits", {})
     return cast(
         dict[str, object],
         _normalize_value(

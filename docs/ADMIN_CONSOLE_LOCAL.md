@@ -3,6 +3,9 @@
 This opt-in preview adds a browser console to the managed-team directory. It
 provides organization/team usage and member removal. It does not deploy a hosted
 service, grant policy/custody authority, or replace the native client session.
+The separate opt-in [policy impact console](POLICY_IMPACT.md) adds reviewed
+policy changes for members who also hold an independent policy-administrator
+grant. It runs in a separate process with the policy-control database role.
 
 ## Authorization contract
 

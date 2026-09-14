@@ -22,8 +22,9 @@ published. Ceph-specific issue #68 cannot satisfy that runtime gate.
 base by digest. It accepts only `linux/amd64`, resolves its build and runtime
 Python wheels from reviewed exact-version/hash locks under `requirements/`,
 does not compile bytecode, and performs no moving Debian update inside the
-build. A fixable base vulnerability is addressed by reviewing a new base
-digest, not by resolving a package index during a release build.
+build. Fixable base vulnerabilities require a reviewed base digest refresh or
+a checksum-pinned security package recorded in provenance; builds never resolve
+a moving package index. The current Debian correction is documented below.
 
 The Dockerfile-specific `Dockerfile.dockerignore` starts from an empty context
 and admits only the Dockerfile, core packaging files including the Apache 2.0
@@ -313,3 +314,18 @@ evaluation/pilot boundary and retains all of those broader nonclaims.
 The optional [Kubernetes + Helm profile](../deploy/kubernetes/README.md) uses
 this same exact digest behind a private ClusterIP and adds only its bounded
 disposable multi-replica proof; it does not change or expand the OCI contract.
+
+### Pinned Debian security correction
+
+The Python 3.14.7 base currently lacks Debian's `libpcre2-8-0`
+`10.42-1+deb12u1` correction for CVE-2026-86145 and CVE-2026-89161.
+Both container Dockerfiles install the exact linux/amd64 package from
+Debian's signed bookworm-security index, with Docker ADD verifying SHA-256
+`81c5502941118a24d47af69a17b8b0b9548d75cc6d72b3eb3fe01047b46fa10e`.
+No moving package index is resolved during the build. Generated dpkg logs are
+removed, as is ldconfig’s host-specific auxiliary cache, so generated timestamps
+and inode metadata do not enter reproducible images.
+The release provenance and its strict public-metadata validator include this
+sixth, checksum-bound dependency. Historical unpatched images are not qualified
+by this updated release verifier. Reproducibility and vulnerability scans remain
+required; this change does not waive either gate or publish an image.

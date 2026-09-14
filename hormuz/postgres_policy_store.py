@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from uuid import uuid4
 
-from .config import GatewayConfig
+from .config import GatewayConfig, PolicyValidationContext
 from .contracts import (
     POLICY_CONTROL_EVENT_SCHEMA_ID,
     POLICY_CONTROL_EVENT_SCHEMA_VERSION,
@@ -48,7 +48,7 @@ class PostgresPolicyRuntimeStore:
         self,
         dsn: str,
         *,
-        config: GatewayConfig,
+        config: GatewayConfig | PolicyValidationContext,
         schema: str,
         runtime_role: str,
         connection_pool: PostgresConnectionPool | None = None,
@@ -109,7 +109,7 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         self,
         dsn: str,
         *,
-        config: GatewayConfig,
+        config: GatewayConfig | PolicyValidationContext,
         schema: str,
         policy_control_role: str,
         connection_pool: PostgresConnectionPool | None = None,
@@ -223,6 +223,7 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         caller: PolicyAdministrator,
         document: PolicyDocument,
         expected_active_version_id: str | None = None,
+        expected_generation: int | None = None,
     ) -> PolicyActivation:
         """Atomically stage, when needed, and activate a validated document."""
 
@@ -233,7 +234,7 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
                 self._lock_tenant(cursor, organization_id)
                 self._require_administrator(cursor, organization_id=organization_id, caller=caller)
                 existing = self._active_activation_row(cursor, organization_id=organization_id)
-                self._require_expected_active(existing, expected_active_version_id)
+                self._require_expected_active(existing, expected_active_version_id, expected_generation)
                 if existing is not None and str(existing["version_id"]) == document.version_id:
                     return _activation_from_row(existing, action="policy_activated")
 
@@ -283,13 +284,14 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         caller: PolicyAdministrator,
         version_id: str | None = None,
         expected_active_version_id: str | None = None,
+        expected_generation: int | None = None,
     ) -> PolicyActivation:
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
                 self._lock_tenant(cursor, organization_id)
                 self._require_administrator(cursor, organization_id=organization_id, caller=caller)
                 existing = self._active_activation_row(cursor, organization_id=organization_id)
-                self._require_expected_active(existing, expected_active_version_id)
+                self._require_expected_active(existing, expected_active_version_id, expected_generation)
                 target_version_id = version_id
                 if target_version_id is None:
                     if existing is None or int(existing["generation"]) <= 1:
@@ -528,6 +530,21 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
             administrators=administrators,
         )
 
+    def reviewed_baseline(self, *, organization_id: str, caller: PolicyAdministrator) -> tuple[PolicyVersionRecord, int]:
+        """Read one version and its activation generation in one bounded query."""
+        with self._transaction(organization_id) as connection:
+            with connection.cursor() as cursor:
+                self._require_administrator(cursor, organization_id=organization_id, caller=caller)
+                cursor.execute("""
+                    SELECT v.*, a.generation FROM policy_active_versions a
+                    JOIN policy_versions v ON v.organization_id=a.organization_id AND v.version_id=a.version_id
+                    WHERE a.organization_id=%s
+                """, (organization_id,))
+                row = cursor.fetchone()
+        if row is None:
+            raise PolicyControlError("policy_active_version_unavailable")
+        return _version_from_row(row, config=self._config), int(row["generation"])
+
     def policy_version(
         self,
         *,
@@ -711,7 +728,11 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         self,
         existing: dict[str, object] | None,
         expected_active_version_id: str | None,
+        expected_generation: int | None = None,
     ) -> None:
+        if expected_generation is not None:
+            if type(expected_generation) is not int or expected_generation < 1 or existing is None or int(existing["generation"]) != expected_generation:
+                raise PolicyControlError("policy_active_version_mismatch")
         if expected_active_version_id is None:
             return
         if existing is None or str(existing["version_id"]) != expected_active_version_id:
@@ -921,7 +942,7 @@ def _administrator_from_row(row: dict[str, object]) -> PolicyAdministrator:
         raise PostgresStorageError("policy_document_invalid") from error
 
 
-def _version_from_row(row: dict[str, object], *, config: GatewayConfig) -> PolicyVersionRecord:
+def _version_from_row(row: dict[str, object], *, config: GatewayConfig | PolicyValidationContext) -> PolicyVersionRecord:
     raw_document = row["document_json"]
     if isinstance(raw_document, str):
         try:

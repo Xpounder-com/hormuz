@@ -368,3 +368,10 @@ HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
 ```
 
 The contract tests validate current and legacy audit fixtures, reject unknown fields, verify the gateway preserves provider bodies, validate strict policy documents, and validate the migration-generated audit evidence. The PostgreSQL suite additionally proves the same normalized repository outcomes, forced tenant isolation, policy-admin bootstrap/activation/rollback, custody-admin bootstrap and approval thresholds, role separation, migration idempotency, partial/newer-schema failure, and content-free malformed-evidence handling against a disposable database.
+
+## Opt-in policy impact
+
+[Policy impact](POLICY_IMPACT.md) documents document v2, nested structural summary
+v2, temporary comparison/preview/results schemas, single-host sidecar v1, and
+upgrade/rollback limits. Document v1 canonical bytes and immutable usage schemas
+are unchanged. New v2 policy state requires upgraded policy readers and writers.

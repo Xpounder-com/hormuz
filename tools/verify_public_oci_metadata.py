@@ -27,6 +27,8 @@ try:
         EXPECTED_REPOSITORY,
         FRONTEND_DIGEST,
         FRONTEND_IMAGE,
+        OS_PATCH_URI,
+        OS_PATCH_DIGEST,
     )
 except ModuleNotFoundError:  # Direct execution resolves helpers beside this script.
     from _verification_runtime import (  # type: ignore[no-redef]
@@ -42,6 +44,8 @@ except ModuleNotFoundError:  # Direct execution resolves helpers beside this scr
         EXPECTED_REPOSITORY,
         FRONTEND_DIGEST,
         FRONTEND_IMAGE,
+        OS_PATCH_URI,
+        OS_PATCH_DIGEST,
     )
 
 
@@ -345,7 +349,7 @@ def _validate_provenance(
         raise PublicMetadataError("provenance_external_parameters_invalid")
 
     dependencies = _array(definition["resolvedDependencies"], "provenance_dependencies")
-    if len(dependencies) != 5:
+    if len(dependencies) != 6:
         raise PublicMetadataError("provenance_dependency_count_invalid")
     normalized: dict[str, dict[str, str]] = {}
     for index, dependency_value in enumerate(dependencies):
@@ -360,7 +364,7 @@ def _validate_provenance(
     source_uri = f"git+https://github.com/{EXPECTED_REPOSITORY}@{ref}"
     build_lock_uri = f"git+https://github.com/{EXPECTED_REPOSITORY}#requirements/oci-build-linux-amd64.lock"
     runtime_lock_uri = f"git+https://github.com/{EXPECTED_REPOSITORY}#requirements/oci-runtime-linux-amd64.lock"
-    expected_uris = {source_uri, BASE_IMAGE, FRONTEND_IMAGE, build_lock_uri, runtime_lock_uri}
+    expected_uris = {source_uri, BASE_IMAGE, FRONTEND_IMAGE, build_lock_uri, runtime_lock_uri, OS_PATCH_URI}
     if set(normalized) != expected_uris:
         raise PublicMetadataError("provenance_dependency_set_invalid")
     source_digest = normalized[source_uri]
@@ -369,6 +373,7 @@ def _validate_provenance(
     provenance_commit = source_digest["gitCommit"]
     if provenance_commit != commit:
         raise PublicMetadataError("provenance_source_commit_mismatch")
+    _exact_sha_dependency(normalized[OS_PATCH_URI], OS_PATCH_DIGEST, "provenance_os_patch_digest")
     _exact_sha_dependency(normalized[BASE_IMAGE], BASE_DIGEST, "provenance_base_digest")
     _exact_sha_dependency(normalized[FRONTEND_IMAGE], FRONTEND_DIGEST, "provenance_frontend_digest")
     _exact_sha_dependency(

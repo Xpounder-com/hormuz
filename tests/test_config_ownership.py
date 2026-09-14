@@ -102,6 +102,7 @@ class ConfigurationOwnershipTests(unittest.TestCase):
             {
                 "build_gateway_config",
                 "build_policy_analysis_context",
+                "build_policy_console_config",
                 "build_policy_validation_context",
                 "_build_gateway_config",
             },

@@ -289,6 +289,7 @@ class SessionBrokerConfig:
     allow_insecure_http: bool = False
     onboarding_enabled: bool = False
     console_enabled: bool = False
+    policy_impact_enabled: bool = False
 
 
 @dataclass(frozen=True)

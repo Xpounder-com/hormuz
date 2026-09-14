@@ -136,6 +136,10 @@ def policy_schema_entries() -> list[dict[str, object]]:
             ["schema_id", "schema_version", "organization_id", "policies", "egress_controls"],
         ),
         _manifest_schema(
+            POLICY_DOCUMENT_SCHEMA_ID, 2, "durable-evidence",
+            ["schema_id", "schema_version", "organization_id", "policies", "egress_controls"],
+        ),
+        _manifest_schema(
             POLICY_CONTROL_EVENT_SCHEMA_ID,
             POLICY_CONTROL_EVENT_SCHEMA_VERSION,
             "durable-evidence",
@@ -904,9 +908,18 @@ def _administrator_key_fields(value: Mapping[str, Any], *, prefix: str, path: st
 
 
 def _validate_redacted_change_summary(value: Mapping[str, Any]) -> None:
-    _exact_keys(value, {"summary_version", "scopes", "egress_fields"}, path="change_summary")
-    if _value_integer(value, "summary_version", minimum=1, path="change_summary") != 1:
+    version = _value_integer(value, "summary_version", minimum=1, path="change_summary")
+    keys = {"summary_version", "scopes", "egress_fields"}
+    if version == 2:
+        keys.add("model_output_limits")
+    _exact_keys(value, keys, path="change_summary")
+    if version not in {1, 2}:
         raise ContractValidationError("change_summary.summary_version is unsupported")
+    if version == 2:
+        limits = _value_mapping(value, "model_output_limits", path="change_summary")
+        _exact_keys(limits, {"team_count", "binding_count"}, path="change_summary.model_output_limits")
+        for key in ("team_count", "binding_count"):
+            _value_integer(limits, key, minimum=0, path="change_summary.model_output_limits")
     if tuple(_value_string_list(value, "egress_fields", path="change_summary")) != _POLICY_EGRESS_FIELDS:
         raise ContractValidationError("change_summary.egress_fields is invalid")
     scopes = _value_mapping(value, "scopes", path="change_summary")
