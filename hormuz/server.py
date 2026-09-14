@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hmac
 import http.client
 import ipaddress
@@ -212,6 +213,7 @@ class GatewayServer(ThreadingHTTPServer):
         self.session_request_limit = SessionRequestLimit()
         self.console_request_limit = SessionRequestLimit()
         self.console: ConsoleService | None = None
+        self.impact_recorder = None
         # Keep injected-process tests and the hosted child's reviewed secret
         # inventory authoritative. Falling back to ``os.environ`` here would
         # let storage silently use a credential that the caller deliberately
@@ -310,8 +312,16 @@ class GatewayServer(ThreadingHTTPServer):
                 if issuer.login is not None and len(issuer.login.client_secret) >= 8
             )
             self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
+            if config.session_broker.policy_impact_enabled:
+                from .policy_impact import ImpactRecorder, ImpactStore, impact_path
+                self.impact_recorder = ImpactRecorder(ImpactStore(
+                    impact_path(config.session_broker.database_path),
+                    trusted_parent_path=config.session_broker.trusted_parent_path,
+                ))
             super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
         except Exception:
+            if self.impact_recorder is not None:
+                self.impact_recorder.close()
             self._close_postgres_pool()
             raise
         self._accepting_requests.set()
@@ -368,6 +378,8 @@ class GatewayServer(ThreadingHTTPServer):
         try:
             super().server_close()
         finally:
+            if self.impact_recorder is not None:
+                self.impact_recorder.close()
             self._close_postgres_pool()
 
     def readiness_reason(self) -> str | None:
@@ -660,6 +672,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         client: str,
         account_usage: bool,
     ) -> None:
+        self._impact_observations = {}
         admission = select_admission(
             self.server.config, identity, client, self.headers.get_all(ATTRIBUTION_REQUEST_HEADER, []),
             account_usage=account_usage,
@@ -676,6 +689,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         requested_model = requested_model.strip()
         output_field = "max_output_tokens" if protocol == "openai" else "max_tokens"
         requested_output = request_body.get(output_field)
+        self._impact_requested_limit = requested_output
         if requested_output is not None and (
             isinstance(requested_output, bool) or not isinstance(requested_output, int) or requested_output <= 0
         ):
@@ -1009,8 +1023,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     downstream_bytes_sent=0,
                 ),
             )
+            observation = getattr(self, "_impact_observations", {}).get(attempt.attempt_id)
+            if observation is not None and self.server.impact_recorder is not None:
+                self.server.impact_recorder.submit(replace(observation, status=request_status))
             failover_route = failover_decision.route
             assert failover_route is not None
+            if failover_decision.max_output_tokens is not None:
+                request_value = dict(request_value)
+                request_value[output_field] = min(
+                    request_value.get(output_field, failover_decision.max_output_tokens),
+                    failover_decision.max_output_tokens,
+                )
             failover_body = self._provider_body(request_value, failover_route)
             try:
                 failover_attempt = self._begin_governed_attempt(
@@ -1272,6 +1295,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 finance_observation=parsed_usage.finance,
                 configured_estimate=configured_estimate,
             )
+            observation = getattr(self, "_impact_observations", {}).get(attempt.attempt_id)
+            if observation is not None and self.server.impact_recorder is not None:
+                self.server.impact_recorder.submit(replace(
+                    observation, status=request_status,
+                    output_tokens=usage.output_tokens if usage.evidence_complete else None,
+                    cost_microusd=cost if usage.evidence_complete else None,
+                ))
             LOGGER.info(
                 "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d redactions=%d",
                 identity.actor_id,
@@ -1397,6 +1427,19 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 raise
         if admission is not None:
             self._attribution_result = admission.result_header
+        recorder = getattr(self.server, "impact_recorder", None)
+        if recorder is not None:
+            from .policy_impact import Observation, iso, utcnow, routing_fingerprint
+            observation = Observation(
+                request_id=attempt.attempt_id, organization_id=identity.organization_id,
+                team_id=identity.team_id, actor_id=identity.actor_id,
+                model_alias=decision.resolved_alias, policy_version=decision.policy_version,
+                requested_limit=getattr(self, "_impact_requested_limit", None),
+                routing_fingerprint=routing_fingerprint(self.server.config),
+                effective_limit=request_value.get(output_field), started_at=iso(utcnow()),
+            )
+            self._impact_observations[attempt.attempt_id] = observation
+            recorder.submit(observation)
         return attempt
 
     def _deny_budget_reservation(

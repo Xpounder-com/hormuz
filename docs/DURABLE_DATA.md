@@ -47,6 +47,7 @@ unregistered table.
 | `provider_attempt_finance_evidence` | `gateway_finance_attempt_evidence` | `gateway_finance_attempt_evidence` | One append-only fact per post-migration terminal provider attempt: bounded allowlisted native counters/dimensions, nullable normalized values, configured estimate and immutable rate-card provenance. No prompt, response body, or provider-final invoice claim. |
 | `provider_finance_collection_evidence` | `portfolio_finance_source_binding_versions`, `portfolio_finance_collection_attempts`, `portfolio_finance_collection_events`, `portfolio_finance_snapshots`, `portfolio_finance_snapshot_bucket_coverage`, `portfolio_finance_usage_observations`, `portfolio_finance_cost_observations` | `portfolio_finance_source_binding_versions`, `portfolio_finance_collection_attempts`, `portfolio_finance_collection_events`, `portfolio_finance_snapshots`, `portfolio_finance_snapshot_bucket_coverage`, `portfolio_finance_usage_observations`, `portfolio_finance_cost_observations` | Append-only source-binding versions, content-free collection attempts and terminal events, complete typed snapshots, explicit empty-bucket coverage, tenant-keyed provider dimensions, and exact native/canonical cost text. No raw provider payload, cursor, credential, prompt, response, or invoice-final claim. |
 | `audit_chain_state` | `gateway_audit_chain_checkpoints`, `gateway_audit_chain_entries`, `gateway_audit_chain_epochs`, `gateway_audit_chain_heads` | `gateway_audit_chain_checkpoints`, `gateway_audit_chain_entries`, `gateway_audit_chain_epochs`, `gateway_audit_chain_heads` | Tenant-qualified event references, sequence, timestamps, hashes, checkpoint receipts, and external object versions. |
+| `policy_impact_sample` | `observations`, `previews` (separate sidecar) | — | Optional bounded seven-day request metadata and signed, membership-bound proposals. No prompts, responses, or guaranteed savings. See [Policy impact](POLICY_IMPACT.md). |
 | `policy_control` | — | `policy_active_versions`, `policy_administrators`, `policy_control_events`, `policy_tenants`, `policy_versions` | Administrator identity keys, immutable policy JSON/documents, activation pointers, hashes, summaries, and control events. Policy documents are organization configuration, not request content. |
 | `custody_control` | — | `custody_administrators`, `custody_control_events`, `custody_operation_approvals`, `custody_operation_intents`, `custody_tenants` | Tenant/admin identities, fixed operation types, approvals, target/parameter fingerprints, retention configuration, and content-free control events. No plaintext protected input. |
 | `custody_execution` | — | `custody_execution_attempts`, `custody_execution_events` | Authorized execution IDs, operation metadata/fingerprints, fixed state/reason codes, and canonical metadata-only evidence. |
@@ -279,3 +280,13 @@ The verifier compares the registry to SQLite schema ownership, every bundled
 PostgreSQL migration, and the migration-ledger DDL owned by PostgreSQL
 bootstrap. A newly created table cannot enter the release unnoticed or inherit
 an undocumented content boundary.
+
+### Policy impact sidecar
+
+`policy_impact_database_file` is disposable metadata beside the session database,
+not part of the immutable usage ledger. It retains up to 20,000 observations
+(4,000 per organization) and 1,000 proposals. Seven-day expiry is enforced on
+reads; expired rows are physically pruned on subsequent writes. With both
+processes stopped, operators can delete this sidecar and its SQLite journals.
+Backups and filesystem snapshots remain operator-managed. Deleting it removes
+comparisons and result links but never activates or rolls back a policy.

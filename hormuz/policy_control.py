@@ -106,6 +106,28 @@ class PolicyControlService:
             ),
         )
 
+    def browser_baseline(self, caller: PolicyAdministrator) -> tuple[PolicyVersionRecord, int]:
+        """Trusted session transport only; persistent policy authority is still required."""
+        self._require_configured_organization(caller.organization_id)
+        return self._repository.reviewed_baseline(organization_id=caller.organization_id, caller=caller)
+
+    def browser_history(self, caller: PolicyAdministrator) -> PolicyHistory:
+        self._require_configured_organization(caller.organization_id)
+        return self._repository.history(organization_id=caller.organization_id, caller=caller, limit=20)
+
+    def browser_apply(self, caller: PolicyAdministrator, document: PolicyDocument, *, baseline_version: str, generation: int) -> PolicyActivation:
+        self._require_configured_organization(caller.organization_id)
+        # Reparse a bounded, closed document; do not accept a browser-selected path.
+        document = PolicyDocument.from_json_bytes(document.canonical_json.encode(), config=self._config)
+        return self._repository.apply(organization_id=caller.organization_id, caller=caller, document=document,
+                                      expected_active_version_id=_version_id(baseline_version), expected_generation=generation)
+
+    def browser_rollback(self, caller: PolicyAdministrator, *, target_version: str, active_version: str, generation: int) -> PolicyActivation:
+        self._require_configured_organization(caller.organization_id)
+        return self._repository.rollback(organization_id=caller.organization_id, caller=caller,
+                                         version_id=_version_id(target_version), expected_active_version_id=_version_id(active_version),
+                                         expected_generation=generation)
+
     def stage(
         self,
         *,

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .config import GatewayConfig, Identity, Policy, PolicyValidationContext
@@ -61,6 +61,7 @@ class PolicySnapshot:
     effective_policy: Policy
     openai_egress: OpenAIEgressPolicy
     secret_mode: str
+    model_output_limits: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,8 @@ class PolicyDocument:
     actor_policies: dict[str, Policy]
     openai_egress: OpenAIEgressPolicy
     secret_mode: str
+    schema_version: int = 1
+    team_model_output_limits: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @classmethod
     def from_mapping(
@@ -89,7 +92,8 @@ class PolicyDocument:
                 "policy document schema_id is unsupported",
                 hint=f'Set schema_id to "{POLICY_DOCUMENT_SCHEMA_ID}".',
             )
-        if _integer(value.get("schema_version"), "schema_version", minimum=1) != POLICY_DOCUMENT_SCHEMA_VERSION:
+        schema_version = _integer(value.get("schema_version"), "schema_version", minimum=1)
+        if schema_version not in {1, 2}:
             raise PolicyDocumentError(
                 "policy document schema_version is unsupported",
                 hint=f"Set schema_version to {POLICY_DOCUMENT_SCHEMA_VERSION}.",
@@ -102,10 +106,31 @@ class PolicyDocument:
             )
 
         policies = _mapping(value.get("policies"), "policies")
-        _exact_keys(policies, {"organization", "teams", "actors"}, "policies")
+        policy_keys = {"organization", "teams", "actors"}
+        if schema_version == 2:
+            policy_keys.add("team_model_output_limits")
+        _exact_keys(policies, policy_keys, "policies")
         organization_policy = _policy(policies.get("organization"), "policies.organization")
         team_policies = _policy_map(policies.get("teams"), "policies.teams")
         actor_policies = _policy_map(policies.get("actors"), "policies.actors")
+        model_limits: dict[str, dict[str, int]] = {}
+        if schema_version == 2:
+            raw_limits = _mapping(policies["team_model_output_limits"], "team_model_output_limits")
+            if len(raw_limits) > 128:
+                raise PolicyDocumentError("too many model output limit teams")
+            for team, raw_models in raw_limits.items():
+                team = _identifier(team, "model output limit team")
+                models = _mapping(raw_models, "model output limits")
+                if not 1 <= len(models) <= 128:
+                    raise PolicyDocumentError("model output limit count invalid")
+                model_limits[team] = {}
+                for alias, raw_cap in models.items():
+                    if alias not in config.model_routes:
+                        raise PolicyDocumentError("model output limit alias unavailable")
+                    cap = _integer(raw_cap, "model output limit", minimum=1)
+                    if cap > 1_000_000:
+                        raise PolicyDocumentError("model output limit exceeds supported maximum")
+                    model_limits[team][alias] = cap
 
         egress_controls = _mapping(value.get("egress_controls"), "egress_controls")
         _exact_keys(egress_controls, {"openai", "secrets"}, "egress_controls")
@@ -133,6 +158,8 @@ class PolicyDocument:
             actor_policies=actor_policies,
             openai_egress=openai_egress,
             secret_mode=secret_mode,
+            schema_version=schema_version,
+            team_model_output_limits=model_limits,
         )
         document._validate_references(config)
         return document
@@ -173,7 +200,7 @@ class PolicyDocument:
     def to_mapping(self) -> dict[str, object]:
         return {
             "schema_id": POLICY_DOCUMENT_SCHEMA_ID,
-            "schema_version": POLICY_DOCUMENT_SCHEMA_VERSION,
+            "schema_version": self.schema_version,
             "organization_id": self.organization_id,
             "policies": {
                 "organization": _policy_mapping(self.organization_policy),
@@ -185,6 +212,10 @@ class PolicyDocument:
                     scope_id: _policy_mapping(policy)
                     for scope_id, policy in sorted(self.actor_policies.items())
                 },
+                **({"team_model_output_limits": {
+                    team: dict(sorted(limits.items()))
+                    for team, limits in sorted(self.team_model_output_limits.items())
+                }} if self.schema_version == 2 else {}),
             },
             "egress_controls": {
                 "openai": {
@@ -213,6 +244,12 @@ class PolicyDocument:
             },
             "egress_fields": list(_EGRESS_FIELDS),
         }
+        if self.schema_version == 2:
+            summary["summary_version"] = 2
+            summary["model_output_limits"] = {
+                "team_count": len(self.team_model_output_limits),
+                "binding_count": sum(len(limits) for limits in self.team_model_output_limits.values()),
+            }
         validate_redacted_change_summary(summary)
         return summary
 
@@ -231,6 +268,7 @@ class PolicyDocument:
             effective_policy=effective,
             openai_egress=self.openai_egress,
             secret_mode=self.secret_mode,
+            model_output_limits=dict(self.team_model_output_limits.get(identity.team_id, {})),
         )
 
     def _validate_references(self, config: GatewayConfig | PolicyValidationContext) -> None:
@@ -356,8 +394,16 @@ def validate_redacted_change_summary(value: object) -> None:
     """
 
     summary = _mapping(value, "change_summary")
-    _exact_keys(summary, {"summary_version", "scopes", "egress_fields"}, "change_summary")
-    if _integer(summary.get("summary_version"), "change_summary.summary_version", minimum=1) != 1:
+    summary_version = _integer(summary.get("summary_version"), "change_summary.summary_version", minimum=1)
+    keys = {"summary_version", "scopes", "egress_fields"}
+    if summary_version == 2:
+        keys.add("model_output_limits")
+        limits = _mapping(summary.get("model_output_limits"), "model_output_limits")
+        _exact_keys(limits, {"team_count", "binding_count"}, "model_output_limits")
+        for key in limits:
+            _integer(limits[key], key, minimum=0)
+    _exact_keys(summary, keys, "change_summary")
+    if summary_version not in {1, 2}:
         raise PolicyDocumentError("change_summary.summary_version is unsupported")
     egress_fields = _string_list(summary.get("egress_fields"), "change_summary.egress_fields")
     if tuple(egress_fields) != _EGRESS_FIELDS:

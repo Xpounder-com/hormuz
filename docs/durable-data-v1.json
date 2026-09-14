@@ -397,6 +397,16 @@
         "session_security_events"
       ],
       "postgresql_tables": []
+    },
+    {
+      "id": "policy_impact_sample",
+      "content_boundary": "identity_and_policy_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "observations",
+        "previews"
+      ],
+      "postgresql_tables": []
     }
   ],
   "operator_artifacts": [
@@ -527,6 +537,14 @@
       "content_boundary": "opaque_access_refresh_pair_and_gateway_client_expiry_metadata",
       "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
       "customer_operator_authority": "session_owner_logs_out_to_revoke_before_local_deletion"
+    },
+    {
+      "id": "policy_impact_database_file",
+      "created_when": "opt_in_policy_impact_capture_or_console_startup",
+      "storage_location": "separate_owner_only_sqlite_file_beside_session_database",
+      "content_boundary": "bounded_request_metadata_and_membership_bound_signed_proposals_no_request_content",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "seven_day_retention_and_offline_deletion_no_restore_required_no_effect_on_immutable_policy_history"
     }
   ],
   "customer_operator_responsibilities": [
