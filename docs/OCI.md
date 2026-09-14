@@ -22,8 +22,9 @@ published. Ceph-specific issue #68 cannot satisfy that runtime gate.
 base by digest. It accepts only `linux/amd64`, resolves its build and runtime
 Python wheels from reviewed exact-version/hash locks under `requirements/`,
 does not compile bytecode, and performs no moving Debian update inside the
-build. A fixable base vulnerability is addressed by reviewing a new base
-digest, not by resolving a package index during a release build.
+build. Fixable base vulnerabilities require a reviewed base digest refresh or
+a checksum-pinned security package recorded in provenance; builds never resolve
+a moving package index. The current Debian correction is documented below.
 
 The Dockerfile-specific `Dockerfile.dockerignore` starts from an empty context
 and admits only the Dockerfile, core packaging files including the Apache 2.0
