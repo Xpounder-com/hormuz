@@ -313,3 +313,17 @@ evaluation/pilot boundary and retains all of those broader nonclaims.
 The optional [Kubernetes + Helm profile](../deploy/kubernetes/README.md) uses
 this same exact digest behind a private ClusterIP and adds only its bounded
 disposable multi-replica proof; it does not change or expand the OCI contract.
+
+### Pinned Debian security correction
+
+The Python 3.14.7 base currently lacks Debian's `libpcre2-8-0`
+`10.42-1+deb12u1` correction for CVE-2026-86145 and CVE-2026-89161.
+Both container Dockerfiles install the exact linux/amd64 package from
+Debian's signed bookworm-security index, with Docker ADD verifying SHA-256
+`81c5502941118a24d47af69a17b8b0b9548d75cc6d72b3eb3fe01047b46fa10e`.
+No moving package index is resolved during the build. Generated dpkg logs are
+removed so their wall-clock timestamps do not enter reproducible images.
+The release provenance and its strict public-metadata validator include this
+sixth, checksum-bound dependency. Historical unpatched images are not qualified
+by this updated release verifier. Reproducibility and vulnerability scans remain
+required; this change does not waive either gate or publish an image.

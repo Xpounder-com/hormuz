@@ -29,6 +29,8 @@ PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 BUILD_TYPE = "https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@v1"
 BASE_IMAGE = "docker.io/library/python"
 BASE_DIGEST = "sha256:23c59390fc717bf09f9336908199a0ae75d9c4264bf296123f94ad772fea3b52"
+OS_PATCH_URI = "https://deb.debian.org/debian-security/pool/updates/main/p/pcre2/libpcre2-8-0_10.42-1+deb12u1_amd64.deb"
+OS_PATCH_DIGEST = "sha256:81c5502941118a24d47af69a17b8b0b9548d75cc6d72b3eb3fe01047b46fa10e"
 FRONTEND_IMAGE = "docker.io/docker/dockerfile"
 FRONTEND_DIGEST = "sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32"
 EXPECTED_ISSUER = "https://token.actions.githubusercontent.com"
@@ -213,6 +215,7 @@ def create_predicate(
                     "uri": f"git+https://github.com/{EXPECTED_REPOSITORY}@{ref}",
                 },
                 {"digest": {"sha256": BASE_DIGEST.removeprefix("sha256:")}, "uri": BASE_IMAGE},
+                {"digest": {"sha256": OS_PATCH_DIGEST.removeprefix("sha256:")}, "uri": OS_PATCH_URI},
                 {
                     "digest": {"sha256": FRONTEND_DIGEST.removeprefix("sha256:")},
                     "uri": FRONTEND_IMAGE,

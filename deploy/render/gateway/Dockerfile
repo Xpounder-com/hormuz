@@ -4,7 +4,17 @@ ARG PYTHON_BASE=python@sha256:23c59390fc717bf09f9336908199a0ae75d9c4264bf296123f
 FROM caddy@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d AS proxy
 RUN setcap -r /usr/bin/caddy
 
-FROM ${PYTHON_BASE} AS builder
+FROM ${PYTHON_BASE} AS patched-base
+ARG TARGETPLATFORM
+# Debian's signed bookworm-security index supplies this exact fixed package.
+# Keep the update reproducible while the official Python base awaits a rebuild.
+ADD --checksum=sha256:81c5502941118a24d47af69a17b8b0b9548d75cc6d72b3eb3fe01047b46fa10e \
+    https://deb.debian.org/debian-security/pool/updates/main/p/pcre2/libpcre2-8-0_10.42-1+deb12u1_amd64.deb /tmp/pcre2-security.deb
+RUN test "${TARGETPLATFORM}" = "linux/amd64" \
+    && dpkg -i /tmp/pcre2-security.deb \
+    && rm -f /tmp/pcre2-security.deb /var/log/dpkg.log /var/log/alternatives.log
+
+FROM patched-base AS builder
 ARG HORMUZ_VERSION=1.2.0
 ARG TARGETPLATFORM
 WORKDIR /build
@@ -23,7 +33,7 @@ RUN python -m pip wheel --no-build-isolation --no-deps --wheel-dir /wheelhouse .
         --find-links=/wheelhouse "hormuz==${HORMUZ_VERSION}" \
     && /opt/hormuz/bin/pip uninstall --yes pip setuptools
 
-FROM ${PYTHON_BASE}
+FROM patched-base
 ARG HORMUZ_VERSION=1.2.0
 LABEL org.opencontainers.image.title="Hormuz hosted single-node pilot" \
       org.opencontainers.image.description="Maintenance-first login and opt-in provider-pilot qualification" \

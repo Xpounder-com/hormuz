@@ -22,6 +22,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class OciPublicMetadataTests(unittest.TestCase):
+    def test_os_security_patch_cannot_be_omitted_or_substituted(self) -> None:
+        for mode in ("missing", "substituted"):
+            value = self._provenance()
+            dependencies = value["buildDefinition"]["resolvedDependencies"]
+            patch = next(item for item in dependencies if item["uri"] == release_provenance.OS_PATCH_URI)
+            if mode == "missing":
+                dependencies.remove(patch)
+            else:
+                patch["digest"]["sha256"] = "0" * 64
+            with self.subTest(mode=mode), self.assertRaises(public_metadata.PublicMetadataError):
+                self._validate(provenance=value)
+
     def _validate(
         self,
         *,
@@ -218,6 +230,7 @@ class OciPublicMetadataTests(unittest.TestCase):
                         },
                         "uri": release_provenance.BASE_IMAGE,
                     },
+                    {"uri": release_provenance.OS_PATCH_URI, "digest": {"sha256": release_provenance.OS_PATCH_DIGEST.removeprefix("sha256:")}},
                     {
                         "digest": {
                             "sha256": release_provenance.FRONTEND_DIGEST.removeprefix("sha256:")
