@@ -70,7 +70,7 @@ def verify_artifacts(source, wheel):
     return {name: hashlib.sha256(payload).hexdigest() for name, payload in actual.items()}
 
 
-def verify(root=ROOT, *, predecessor_source=None, predecessor_wheel=None):
+def verify(root=ROOT, *, predecessor_source=None, predecessor_wheel=None, historical_plan_only=False):
     root = Path(root)
     if any(not (root / name).is_file() for name in REQUIRED_FILES):
         raise ValueError("account_binding_preflight_source_kit_incomplete")
@@ -82,28 +82,36 @@ def verify(root=ROOT, *, predecessor_source=None, predecessor_wheel=None):
         expected["runtime_file_count"]) != (SOURCE_COMMIT, SOURCE_SHA256, WHEEL_SHA256, RUNTIME_FILE_COUNT):
         raise ValueError("account_binding_preflight_driver_binding_changed")
     runtime = runtime_tree(root / "hormuz")
-    if len(runtime) != RUNTIME_FILE_COUNT or canonical_digest(runtime) != expected["runtime_tree_sha256"]:
+    if not historical_plan_only and (len(runtime) != RUNTIME_FILE_COUNT or canonical_digest(runtime) != expected["runtime_tree_sha256"]):
         raise ValueError("account_binding_preflight_runtime_changed")
     for name, digest in plan["frozen_file_sha256"].items():
         if not (root / name).is_file() or hashlib.sha256((root / name).read_bytes()).hexdigest() != digest:
             raise ValueError("account_binding_preflight_frozen_history_changed")
     if (predecessor_source is None) != (predecessor_wheel is None):
         raise ValueError("account_binding_preflight_requires_both_artifacts")
+    artifact_runtime = None
     if predecessor_source is not None:
-        if verify_artifacts(predecessor_source, predecessor_wheel) != runtime:
+        artifact_runtime = verify_artifacts(predecessor_source, predecessor_wheel)
+        if canonical_digest(artifact_runtime) != expected["runtime_tree_sha256"]:
+            raise ValueError("account_binding_preflight_predecessor_runtime_changed")
+        if not historical_plan_only and artifact_runtime != runtime:
             raise ValueError("account_binding_preflight_predecessor_runtime_changed")
     return {
-        "status": "account_binding_preflight_plan_verified", "plan_sha256": PLAN_SHA256,
-        "runtime_files_verified": len(runtime), "published_artifacts_verified": predecessor_source is not None,
-        "proof_scope": "static_plan_and_artifact_binding_transition_execution_required_separately",
+        "status": "account_binding_historical_plan_verified" if historical_plan_only else "account_binding_preflight_plan_verified",
+        "plan_sha256": PLAN_SHA256,
+        "runtime_files_verified": (len(artifact_runtime) if artifact_runtime is not None else 0) if historical_plan_only else len(runtime),
+        "current_runtime_checked": not historical_plan_only,
+        "published_artifacts_verified": predecessor_source is not None,
+        "proof_scope": "historical_plan_only_no_current_runtime_acceptance" if historical_plan_only else "static_plan_and_artifact_binding_transition_execution_required_separately",
         "gates": plan["gates"],
     }
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--historical-plan-only", action="store_true", help="Validate the frozen historical plan and optional predecessor artifacts without qualifying the current runtime")
     parser.add_argument("--predecessor-source", type=Path)
     parser.add_argument("--predecessor-wheel", type=Path)
     args = parser.parse_args()
     print(json.dumps(verify(predecessor_source=args.predecessor_source,
-                            predecessor_wheel=args.predecessor_wheel), sort_keys=True))
+                            predecessor_wheel=args.predecessor_wheel, historical_plan_only=args.historical_plan_only), sort_keys=True))

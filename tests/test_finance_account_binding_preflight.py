@@ -21,9 +21,11 @@ class FinanceAccountBindingPreflightTests(unittest.TestCase):
     def setUp(self):
         self.plan = json.loads((ROOT / verifier.PLAN_PATH).read_bytes())
 
-    def test_complete_plan_preserves_runtime_and_does_not_claim_acceptance(self):
-        result = verifier.verify(ROOT)
-        self.assertEqual(result["runtime_files_verified"], 161)
+    def test_historical_plan_does_not_qualify_the_current_runtime(self):
+        result = verifier.verify(ROOT, historical_plan_only=True)
+        self.assertEqual(result["runtime_files_verified"], 0)
+        self.assertFalse(result["current_runtime_checked"])
+        self.assertEqual(result["proof_scope"], "historical_plan_only_no_current_runtime_acceptance")
         self.assertFalse(result["published_artifacts_verified"])
         self.assertTrue(result["gates"].pop("owner_scope_approved"))
         self.assertTrue(all(value is False for value in result["gates"].values()))
@@ -58,7 +60,7 @@ class FinanceAccountBindingPreflightTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "source_mismatch"):
                 predecessor.verified_source(corrupt)
         with self.assertRaisesRegex(ValueError, "requires_both_artifacts"):
-            verifier.verify(ROOT, predecessor_source="absent")
+            verifier.verify(ROOT, predecessor_source="absent", historical_plan_only=True)
 
     def test_source_kit_requires_every_new_file(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -84,11 +86,11 @@ class FinanceAccountBindingPreflightTests(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes((ROOT / name).read_bytes())
             shutil.copytree(ROOT / "hormuz", root / "hormuz", ignore=shutil.ignore_patterns("__pycache__"))
-            verifier.verify(root)
+            verifier.verify(root, historical_plan_only=True)
             path = root / "docs/finance-transition-plan-v7.json"
             path.write_bytes(path.read_bytes() + b"\n")
             with self.assertRaisesRegex(ValueError, "frozen_history_changed"):
-                verifier.verify(root)
+                verifier.verify(root, historical_plan_only=True)
 
     def test_candidate_runtime_mismatch_is_rejected(self):
         runtime = verifier.runtime_tree(ROOT / "hormuz")
@@ -106,18 +108,23 @@ class FinanceAccountBindingPreflightTests(unittest.TestCase):
                     verifier.verify(ROOT)
 
     def test_predecessor_verifier_rejects_missing_altered_and_extra_installed_files(self):
-        # Use actual current runtime bytes, which the plan independently binds
-        # to the published 161-file predecessor, in an in-memory source tar.
+        # Exercise byte-for-byte installation comparison using a synthetic
+        # 161-file source/package. The separately hash-verified release artifacts
+        # remain mandatory for the real predecessor driver; current source is
+        # allowed to evolve and is never relabeled as the published predecessor.
+        files = {"hormuz/__init__.py": b"# synthetic installation fixture\n"}
+        files.update({f"hormuz/fixture_{i}.py": str(i).encode() for i in range(160)})
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w:") as archive:
-            for name in verifier.runtime_tree(ROOT / "hormuz"):
-                payload = (ROOT / name).read_bytes()
+            for name, payload in files.items():
                 info = tarfile.TarInfo(predecessor.ARCHIVE_PREFIX + name)
                 info.size = len(payload)
                 archive.addfile(info, io.BytesIO(payload))
         with tempfile.TemporaryDirectory() as temporary, tarfile.open(fileobj=io.BytesIO(buffer.getvalue()), mode="r:") as archive:
             package = Path(temporary) / "hormuz"
-            shutil.copytree(ROOT / "hormuz", package, ignore=shutil.ignore_patterns("__pycache__"))
+            package.mkdir()
+            for name, payload in files.items():
+                (Path(temporary) / name).write_bytes(payload)
             self.assertEqual(predecessor.verify_installed_runtime(archive, package), 161)
             path = package / "__init__.py"
             original = path.read_bytes()
