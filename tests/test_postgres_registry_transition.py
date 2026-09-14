@@ -157,7 +157,11 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
         self._drop_schema(self.schema)
         seeded = released_v1_call(self.request("seed"))
         self.assertEqual(seeded["status"], "ready")
-        self.assertEqual(seeded["manifest"], contract_manifest())
+        from tools.verify_portfolio_intelligence_contract import _validate_additive_manifest
+        frozen_manifest = json.loads((Path(__file__).resolve().parents[1] /
+            "tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json").read_text())
+        self.assertEqual(seeded["manifest"], frozen_manifest)
+        _validate_additive_manifest(seeded["manifest"], contract_manifest())
         self.assertEqual(seeded["unknown_holds"], 1)
         self.before = self.snapshot()
         self.migrate()

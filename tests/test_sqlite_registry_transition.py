@@ -138,7 +138,11 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         request = {"backend": "sqlite", "path": str(self.path), "mode": "seed"}
         seeded = released_v1_call(request)
         self.assertEqual(seeded["status"], "ready")
-        self.assertEqual(seeded["manifest"], contract_manifest())
+        from tools.verify_portfolio_intelligence_contract import _validate_additive_manifest
+        frozen_manifest = json.loads((Path(__file__).resolve().parents[1] /
+            "tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json").read_text())
+        self.assertEqual(seeded["manifest"], frozen_manifest)
+        _validate_additive_manifest(seeded["manifest"], contract_manifest())
         self.assertEqual(seeded["unknown_holds"], 1)
         self.before = sqlite_snapshot(self.path)
         self.assertEqual(ledger_observation(UsageStore(self.path)), {
