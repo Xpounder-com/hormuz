@@ -24,11 +24,11 @@ from hormuz.postgres_usage_store import PostgresUsageStore
 if __package__:
     from ._portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from ._postgres_fixture import PostgresTestCase, without_finance_attempt_successor
-    from ._registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
+    from ._registry_transition_fixture import assert_released_manifest_preserved, ledger_observation, released_v1_call, seed_registry_ledger
 else:
     from _portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from _postgres_fixture import PostgresTestCase, without_finance_attempt_successor
-    from _registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
+    from _registry_transition_fixture import assert_released_manifest_preserved, ledger_observation, released_v1_call, seed_registry_ledger
 
 
 class PostgresRegistryTransitionTests(PostgresTestCase):
@@ -157,7 +157,7 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
         self._drop_schema(self.schema)
         seeded = released_v1_call(self.request("seed"))
         self.assertEqual(seeded["status"], "ready")
-        self.assertEqual(seeded["manifest"], contract_manifest())
+        assert_released_manifest_preserved(self, seeded["manifest"], contract_manifest())
         self.assertEqual(seeded["unknown_holds"], 1)
         self.before = self.snapshot()
         self.migrate()

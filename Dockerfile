@@ -3,7 +3,17 @@
 ARG PYTHON_BASE=python@sha256:23c59390fc717bf09f9336908199a0ae75d9c4264bf296123f94ad772fea3b52
 ARG SOURCE_DATE_EPOCH=0
 
-FROM ${PYTHON_BASE} AS builder
+FROM ${PYTHON_BASE} AS patched-base
+ARG TARGETPLATFORM
+# Debian's signed bookworm-security index supplies this exact fixed package.
+# Keep the update reproducible while the official Python base awaits a rebuild.
+ADD --checksum=sha256:81c5502941118a24d47af69a17b8b0b9548d75cc6d72b3eb3fe01047b46fa10e \
+    https://deb.debian.org/debian-security/pool/updates/main/p/pcre2/libpcre2-8-0_10.42-1+deb12u1_amd64.deb /tmp/pcre2-security.deb
+RUN test "${TARGETPLATFORM}" = "linux/amd64" \
+    && dpkg -i /tmp/pcre2-security.deb \
+    && rm -f /tmp/pcre2-security.deb /var/log/dpkg.log /var/log/alternatives.log /var/cache/ldconfig/aux-cache
+
+FROM patched-base AS builder
 
 ARG HORMUZ_VERSION=1.2.0
 ARG SOURCE_DATE_EPOCH
@@ -53,7 +63,7 @@ RUN python -m pip wheel \
         "hormuz[postgres]==${HORMUZ_VERSION}" \
     && /opt/hormuz/bin/pip uninstall --yes pip setuptools
 
-FROM ${PYTHON_BASE} AS runtime
+FROM patched-base AS runtime
 
 ARG HORMUZ_VERSION=1.2.0
 ARG SOURCE_DATE_EPOCH
@@ -72,9 +82,8 @@ ENV PATH="/opt/hormuz/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     HORMUZ_CONFIG=/etc/hormuz/hormuz.json
 
-# The pinned base digest supplies the complete OS state. Never resolve moving
-# Debian package indexes inside a reproducible release build; refresh the base
-# digest through a reviewed security update instead. Remove the unused global
+# The pinned base plus checksum-pinned security package supplies the OS state.
+# Never resolve moving Debian package indexes inside the build. Remove the unused global
 # installer so it is not shipped or scanned as a reachable application package.
 RUN rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14 \
         /usr/local/lib/python3.14/ensurepip \

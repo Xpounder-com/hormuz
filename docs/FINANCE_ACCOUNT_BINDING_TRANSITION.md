@@ -250,3 +250,16 @@ matrix, actual runtime migration replacements, live OpenAI finance authority,
 reconciliation/reporting and #225 remain separate unfinished work. Accepting
 this preflight closes neither #8 nor #214 nor #226, and authorizes no service
 deployment, customer-data collection, migration, tag or release.
+
+## Historical verification after unrelated runtime changes
+
+The frozen v8 plan and published predecessor hashes remain unchanged. The policy
+impact source feature advances the current runtime beyond those 161 predecessor
+files. CI therefore passes `--historical-plan-only` when checking this old plan.
+That mode still checks the frozen plan, scope, history and, when supplied, both
+exact published artifacts. It explicitly reports `current_runtime_checked: false`
+and never qualifies the current runtime for finance account binding. Without
+artifacts it reports zero verified runtime files. The default verifier still
+rejects any current-runtime mismatch; the isolated predecessor driver still
+requires the exact published source and installed wheel. No implementation,
+transition, reconciliation, deployment or acceptance gate is changed.

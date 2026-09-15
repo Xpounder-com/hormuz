@@ -15,7 +15,7 @@ from typing import Mapping
 
 from .auth import AuthenticationError, Authenticator, ControlPrincipal
 from .config import BootstrapAdministrator, GatewayConfig, PolicyValidationContext
-from .policy_document import PolicyDocument
+from .policy_document import PolicyDocument, policy_validation_context
 from .policy_repository import (
     POLICY_HISTORY_MAX_LIMIT,
     PolicyActivation,
@@ -53,7 +53,8 @@ def load_policy_document(
 class PolicyControlService:
     """Authorize and execute policy-control commands through one narrow API."""
 
-    def __init__(self, config: GatewayConfig, *, environ: Mapping[str, str] | None = None) -> None:
+    def __init__(self, config: GatewayConfig, *, environ: Mapping[str, str] | None = None,
+                 organization_ids: tuple[str, ...] | None = None) -> None:
         if config.policy_control.mode != "postgresql":
             raise PolicyControlError("policy_control_postgresql_required")
         environment = os.environ if environ is None else environ
@@ -61,11 +62,12 @@ class PolicyControlService:
         if not dsn:
             raise PostgresStorageError("policy_control_dsn_unavailable")
         self._config = config
+        self._validation = policy_validation_context(config, organization_ids)
         self._environ = environment
         self._authenticator = Authenticator(config)
         self._repository = PostgresPolicyControlStore(
             dsn,
-            config=config,
+            config=self._validation,
             schema=config.usage_storage.postgres_schema,
             policy_control_role=config.policy_control.postgres_control_role,
         )
@@ -106,6 +108,31 @@ class PolicyControlService:
             ),
         )
 
+    def browser_baseline(self, caller: PolicyAdministrator) -> tuple[PolicyVersionRecord, int]:
+        """Trusted session transport only; persistent policy authority is still required."""
+        self._require_configured_organization(caller.organization_id)
+        return self._repository.reviewed_baseline(organization_id=caller.organization_id, caller=caller)
+
+    def browser_history(self, caller: PolicyAdministrator) -> PolicyHistory:
+        self._require_configured_organization(caller.organization_id)
+        return self._repository.history(organization_id=caller.organization_id, caller=caller, limit=20)
+
+    def browser_apply(self, caller: PolicyAdministrator, document: PolicyDocument, *, baseline_version: str, generation: int) -> PolicyActivation:
+        self._require_configured_organization(caller.organization_id)
+        # Reparse a bounded, closed document; do not accept a browser-selected path.
+        content = document.canonical_json.encode()
+        if len(content) > _MAX_POLICY_DOCUMENT_BYTES:
+            raise PolicyControlError("policy_document_too_large")
+        document = PolicyDocument.from_json_bytes(content, config=self._validation)
+        return self._repository.apply(organization_id=caller.organization_id, caller=caller, document=document,
+                                      expected_active_version_id=_version_id(baseline_version), expected_generation=generation)
+
+    def browser_rollback(self, caller: PolicyAdministrator, *, target_version: str, active_version: str, generation: int) -> PolicyActivation:
+        self._require_configured_organization(caller.organization_id)
+        return self._repository.rollback(organization_id=caller.organization_id, caller=caller,
+                                         version_id=_version_id(target_version), expected_active_version_id=_version_id(active_version),
+                                         expected_generation=generation)
+
     def stage(
         self,
         *,
@@ -115,7 +142,7 @@ class PolicyControlService:
     ) -> PolicyVersionRecord:
         self._require_configured_organization(organization_id)
         caller = self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env)
-        document = load_policy_document(self._config, policy_path)
+        document = load_policy_document(getattr(self, "_validation", self._config), policy_path)
         return self._repository.stage(
             organization_id=organization_id,
             caller=caller,
@@ -136,7 +163,7 @@ class PolicyControlService:
         caller = self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env)
         # File access, parsing, validation, and canonicalization deliberately
         # happen before the repository acquires the tenant transaction lock.
-        document = load_policy_document(self._config, policy_path)
+        document = load_policy_document(getattr(self, "_validation", self._config), policy_path)
         return self._repository.apply(
             organization_id=organization_id,
             caller=caller,
@@ -316,7 +343,7 @@ class PolicyControlService:
         return _principal_to_administrator(principal, organization_id=organization_id)
 
     def _require_configured_organization(self, organization_id: str) -> None:
-        if organization_id not in self._config.organization_ids:
+        if organization_id not in getattr(self, "_validation", self._config).organization_ids:
             raise PolicyControlError("policy_organization_not_configured")
 
     def _oidc_administrator(self, *, organization_id: str, issuer: str, subject: str) -> PolicyAdministrator:

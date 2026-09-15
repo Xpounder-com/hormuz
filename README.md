@@ -39,6 +39,7 @@ written to the usage database.
 | --- | --- |
 | Preserve developer workflows | Codex and Claude Code continue to use their native OpenAI- and Anthropic-compatible protocols. |
 | Centralize AI policy | Enforce allowed clients and models, policy-bounded one-hop capacity failover, output caps, monthly token limits, and USD budgets at organization, team, and person scope. |
+| Preview a policy change | Opt-in local console compares a proposed team/model output cap with captured requests, requires review, and shows request receipts and rollback. [Setup and limits](docs/POLICY_IMPACT.md). |
 | Understand adoption and spend | Group current-month requests, tokens, and estimated cost by organization, team, person, model, client, or provider. |
 | Attribute usage responsibly | Bind each request to a unique human or workload identity and preserve event-time team attribution without storing prompts or responses. |
 | Reduce secret-egress risk | Detect, redact, or deny configured credentials and high-confidence secret formats before provider serialization. |

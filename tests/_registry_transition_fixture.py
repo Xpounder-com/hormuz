@@ -25,6 +25,22 @@ ARCHIVE_SHA256 = "2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b
 PROBE_TABLE = "registry_transition_test_probe"
 
 
+def assert_released_manifest_preserved(testcase, released, current):
+    """Keep this assertion usable from both installed wheels and source tests."""
+    baseline = json.loads((Path(__file__).resolve().parent /
+        "fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json").read_text())
+    testcase.assertEqual(released, baseline)
+    for field in ("schema_id", "compatibility", "policy_action_semantics", "request_status_semantics", "content_boundary"):
+        testcase.assertEqual(current[field], baseline[field])
+    testcase.assertGreaterEqual(current["schema_version"], baseline["schema_version"])
+    identity = lambda item: (item["schema_id"], item["schema_version"])
+    current_schemas = {identity(item): item for item in current["schemas"]}
+    testcase.assertEqual(len(current_schemas), len(current["schemas"]))
+    for item in baseline["schemas"]:
+        testcase.assertEqual(current_schemas.get(identity(item)), item)
+    testcase.assertTrue(set(baseline["error_codes"]).issubset(current["error_codes"]))
+
+
 @contextmanager
 def managed_sqlite_connection(*args: Any, **kwargs: Any) -> Iterator[sqlite3.Connection]:
     """Keep the released-v1 standalone driver independent of sibling test modules."""

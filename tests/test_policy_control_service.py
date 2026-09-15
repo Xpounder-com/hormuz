@@ -9,6 +9,16 @@ from hormuz.policy_repository import PolicyActivation, PolicyAdministrator, Poli
 
 
 class PolicyControlServiceTests(unittest.TestCase):
+    def test_browser_apply_rejects_oversized_document_before_storage(self) -> None:
+        service = object.__new__(PolicyControlService)
+        service._config = SimpleNamespace(organization_ids={"xpounder"})
+        service._repository = mock.Mock()
+        caller = PolicyAdministrator(organization_id="xpounder", authentication_kind="static", actor_id="alice")
+        document = SimpleNamespace(canonical_json=" " * (1024 * 1024 + 1))
+        with self.assertRaisesRegex(PolicyControlError, "policy_document_too_large"):
+            service.browser_apply(caller, document, baseline_version="sha256:" + "a" * 64, generation=1)
+        service._repository.apply.assert_not_called()
+
     def test_authorize_confirms_persisted_administrator_authority(self) -> None:
         service = object.__new__(PolicyControlService)
         service._config = SimpleNamespace(organization_ids={"xpounder"})

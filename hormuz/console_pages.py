@@ -36,7 +36,7 @@ def login_page(*, message: str = "") -> str:
         {notice}<form method="post" action="/v1/admin/auth/start" class="login-form">
         <label for="organization">Organization ID</label>
         <input id="organization" name="organization_id" required maxlength="96" autocomplete="organization"
-               pattern="[A-Za-z0-9][A-Za-z0-9_-]*" placeholder="Your organization ID" aria-describedby="login-help">
+               pattern="[A-Za-z0-9][A-Za-z0-9_\\-]*" placeholder="Your organization ID" aria-describedby="login-help">
         <button type="submit">Continue to sign in <span aria-hidden="true">→</span></button></form>
         <p class="muted" id="login-help">Console access must first be granted by your Hormuz operator.
         An employee client session does not grant administrator access.</p></section>''')
@@ -65,7 +65,7 @@ def _next_page(query: dict[str, str], key: str, cursor: str | None, label: str) 
 
 
 def dashboard(principal: ConsolePrincipal, report: dict, teams: dict, members: dict | None,
-              csrf: str, query: dict[str, str], *, message: str = "") -> str:
+              csrf: str, query: dict[str, str], *, message: str = "", policy_enabled: bool = False) -> str:
     totals, window = report["totals"], report["window"]
     role = "Member administrator" if principal.role == "member_admin" else "Usage viewer"
     notice = f'<p class="notice" role="status">{_e(message)}</p>' if message else ""
@@ -109,6 +109,7 @@ def dashboard(principal: ConsolePrincipal, report: dict, teams: dict, members: d
             {table}{member_next}<p class="muted panel-note">Invitations and administrator grants are managed by the server operator.
             Removing access also revokes existing sessions.</p></section>'''
     return page("Team overview", f'''
+        {'<p class="panel-note"><a href="/console/policy">Preview a policy change →</a></p>' if policy_enabled else ''}
         <div class="workspace-bar"><div><strong>{_e(principal.organization_name)}</strong><code>{_e(principal.organization_id)}</code></div>
         <div class="account"><span>{_e(principal.name)}<small>{_e(role)}</small></span>
         <form method="post" action="/v1/admin/logout">{hidden_csrf}<button class="secondary" type="submit">Sign out</button></form></div></div>

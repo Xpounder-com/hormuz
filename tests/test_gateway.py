@@ -939,6 +939,26 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(headers["x-hormuz-failover"], "v1;reason=provider_rate_limited")
         self.assertEqual(len(FakeProviderHandler.requests) - before, 2)
 
+    def test_destination_only_cap_is_reported_in_failover_header_and_usage(self) -> None:
+        from dataclasses import replace
+        from hormuz.policy_document import local_policy_snapshot
+        self._restart_gateway(self._config_with_failover())
+        runtime = self.gateway.policy_engine.policy_runtime
+        for content, suffix in (("bounded failover", ""), (OPENAI_KEY, "+redacted")):
+            FakeProviderHandler.requests.clear()
+            with mock.patch.object(runtime, "snapshot_for", side_effect=lambda identity: replace(
+                local_policy_snapshot(self.config, identity), model_output_limits={"engineering-deep": 16},
+            )):
+                status, headers, body = self._post("/v1/responses", {
+                    "model": "engineering-fast", "input": content, "max_output_tokens": 50,
+                    "force_primary_rate_limit": True,
+                })
+            self.assertEqual(status, 200, body)
+            self.assertEqual(headers["x-hormuz-policy-decision"], "capped" + suffix)
+            self.assertEqual([r["body"]["max_output_tokens"] for r in FakeProviderHandler.requests], [50, 16])
+            events = self.gateway.store.audit_events(since="2000-01-01T00:00:00+00:00")
+            self.assertEqual([event["policy_action"] for event in events[-2:]], ["allowed" + suffix, "capped" + suffix])
+
     def test_anthropic_overload_uses_the_same_bounded_failover_contract(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())
         config_value["model_routes"]["claude-standard"]["failover_alias"] = "claude-haiku-4-5"

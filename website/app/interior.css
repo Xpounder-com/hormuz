@@ -12,7 +12,7 @@
   --night: #1b271f;
   --night-soft: #26372a;
 }
-.landing-redesign .nav-links a[aria-current="page"] { color: #253c2a; background: #e5ebdb; border-radius: 20px; box-shadow: 0 0 0 8px #e5ebdb; }
+.landing-redesign .nav-links a[aria-current="page"] { color: #253c2a; background: #e5ebdb; box-shadow: inset 0 0 0 1px #d9e3cc; }
 .landing-redesign .mobile-nav a { min-height: 44px; padding: 12px 15px; }
 .landing-redesign .mobile-nav a[aria-current="page"] { background: #e4ecd9; border-radius: 8px; color: #233b28; }
 .landing-redesign .mobile-nav .mobile-pilot-cta { border-radius: 24px; margin-top: 8px; color: #fff; background: #25392c; }

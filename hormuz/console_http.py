@@ -15,6 +15,7 @@ from . import console_pages
 from .console_store import ConsoleError
 from .evidence import EvidenceStorageError
 from .postgres import PostgresStorageError
+from .policy_repository import PolicyControlError
 from .session import SessionBrokerError
 from .session_http import _form, _read_body
 from .session_store import SessionStoreError
@@ -25,6 +26,17 @@ if TYPE_CHECKING:
 
 
 _ERRORS = {
+    "policy_document_too_large": (400, "The proposed policy exceeds the supported document size."),
+    "impact_invalid_request": (400, "Choose a valid team, model, and output limit."),
+    "impact_limit_not_lower": (400, "Choose a positive output limit below the current ceiling, at most 1,000,000 tokens."),
+    "impact_scope_unavailable": (404, "This team and model are not available for your organization."),
+    "impact_preview_expired": (409, "This preview expired or is no longer valid. Create a new preview."),
+    "impact_acknowledgement_required": (400, "Review the scope and acknowledge the change before applying."),
+    "impact_no_observations": (409, "Capture requests under the active policy, then create a new preview."),
+    "impact_capacity_reached": (503, "The preview service is at capacity. Try again later."),
+    "policy_active_version_mismatch": (409, "The active policy changed. Create a fresh preview before applying or rolling back."),
+    "policy_organization_not_configured": (403, "This organization is not configured for managed policy control."),
+    "policy_administrator_required": (403, "Your verified identity needs a separate policy-administrator grant."),
     "admin_not_found": (404, "This console route is not available."),
     "admin_session_required": (401, "Your console session expired or access changed. Sign in again."),
     "admin_access_denied": (403, "This account does not have the required console permission."),
@@ -54,6 +66,9 @@ def handle_console_request(handler: GatewayRequestHandler) -> None:
     except (BrokenPipeError, ConnectionResetError):
         # The browser navigated away; do not attempt a second response.
         return
+    except PolicyControlError as error:
+        code = error.code if error.code in _ERRORS else "admin_storage_unavailable"
+        _failure(handler, code)
     except SessionStoreError as error:
         code = error.code
         if code.startswith("session_store_"):
@@ -87,6 +102,10 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
     if request.scheme or request.netloc or request.fragment or len(request.query) > 2048:
         raise ConsoleError("admin_invalid_request")
     path = request.path
+    if path == "/console/policy.css" or path == "/console/policy" or path.startswith(("/console/policy/", "/v1/admin/policy/")):
+        from .policy_impact_http import dispatch
+        dispatch(handler, request)
+        return
     if handler.command == "GET":
         if handler.headers.get("Transfer-Encoding") is not None or handler.headers.get_all("Content-Length", []) not in ([], ["0"]):
             raise ConsoleError("admin_invalid_request")
@@ -199,10 +218,11 @@ def _dashboard(handler, principal, credential, query, *, message="") -> None:
     teams = service.list_records(principal, "teams", after=query.get("teams_after", ""))
     members = (service.list_records(principal, "memberships", after=query.get("members_after", ""))
                if principal.role == "member_admin" else None)
-    _html(handler, console_pages.dashboard(principal, report, teams, members, service.sessions.csrf_token(credential), query, message=message))
+    _html(handler, console_pages.dashboard(principal, report, teams, members, service.sessions.csrf_token(credential), query, message=message,
+                                          policy_enabled=getattr(handler.server, "policy_console", None) is not None))
 
 
-def _values(handler, *, allowed: set[str], required: set[str], form_only=False) -> dict:
+def _values(handler, *, allowed: set[str], required: set[str], form_only=False, integer_fields=frozenset(), boolean_fields=frozenset()) -> dict:
     if len(handler.headers.get_all("Content-Type", [])) != 1:
         raise ConsoleError("admin_invalid_request")
     content_type = handler.headers.get_content_type()
@@ -222,7 +242,9 @@ def _values(handler, *, allowed: set[str], required: set[str], form_only=False) 
     if not isinstance(value, dict) or set(value) - allowed or not required <= set(value):
         raise ConsoleError("admin_invalid_request")
     for key, item in value.items():
-        if key == "expected_version" and type(item) is int:
+        if (key == "expected_version" or key in integer_fields) and type(item) is int:
+            continue
+        if key in boolean_fields and type(item) is bool:
             continue
         if not isinstance(item, str) or len(item) > 4096 or any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in item):
             raise ConsoleError("admin_invalid_request")
@@ -261,7 +283,7 @@ def _cookie_header(handler, purpose: str, credential: str) -> str:
 
 def _failure(handler, code: str) -> None:
     status, message = _ERRORS[code]
-    if urlsplit(handler.path).path == "/console" or handler.headers.get_content_type() == "application/x-www-form-urlencoded":
+    if urlsplit(handler.path).path.startswith("/console") or handler.headers.get_content_type() == "application/x-www-form-urlencoded":
         _html(handler, console_pages.failure_page(message), status=status)
     else:
         _json_response(handler, {"schema_id": "hormuz.admin-error", "schema_version": 1, "error": {"code": code, "message": message}}, status=status)

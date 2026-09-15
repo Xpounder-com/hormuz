@@ -39,6 +39,9 @@ export function AdConsent() {
       opener.current = document.activeElement as HTMLElement | null;
       readChoices(); setReopened(true); setOpen(true);
     };
+    // Opening the interactive preview dismisses this non-modal prompt only.
+    // Unset choices stay unset; measurement still requires explicit consent.
+    const makeRoomForPreview = () => setOpen(false);
     const trackLink = (event: MouseEvent) => {
       if (!event.isTrusted || !(event.target instanceof Element)) return;
       const link = event.target.closest('a[href]');
@@ -46,9 +49,11 @@ export function AdConsent() {
       if (measurement) trackAnalyticsEvent(measurement[0], measurement[1]);
     };
     window.addEventListener(OPEN_PREFERENCES, show);
+    window.addEventListener('hormuz:open-companion-preview', makeRoomForPreview);
     document.addEventListener('click', trackLink);
     return () => {
       window.removeEventListener(OPEN_PREFERENCES, show);
+      window.removeEventListener('hormuz:open-companion-preview', makeRoomForPreview);
       document.removeEventListener('click', trackLink);
     };
   }, [hasAnalytics]);

@@ -75,6 +75,11 @@ def build_policy_validation_context(
         model_routes=dict(config.model_routes),
     )
 
+def build_policy_console_config(path: str | Path, *, environ: dict[str, str]) -> GatewayConfig:
+    """Resolve only browser-session and ingress credentials, never inference secrets."""
+    config = _build_gateway_config(GatewayConfig, path, environ={}, resolve_credentials=False)
+    return resolve_session_credentials(replace(config, ingress=resolve_ingress_credential(config.ingress, environ)), environ)
+
 
 def build_policy_analysis_context(
     config_type: type[GatewayConfig],
