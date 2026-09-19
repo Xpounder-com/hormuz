@@ -190,10 +190,19 @@ impl Future for RequestTask {
         }
         match Pin::new(&mut self.result).poll(cx) {
             Poll::Ready(Ok(value)) => Poll::Ready(value),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(TransportError {
-                kind: ErrorKind::Unavailable,
-                outcome: outcome(self.cancellation.state.load(Ordering::SeqCst)),
-            })),
+            Poll::Ready(Err(_)) => {
+                // Cancellation may race the state snapshot above and close the
+                // channel while it is being polled. Preserve that cause.
+                let state = self.cancellation.state.load(Ordering::SeqCst);
+                Poll::Ready(Err(TransportError {
+                    kind: if matches!(state, CANCELLED_BEFORE | CANCELLED_AFTER) {
+                        ErrorKind::Cancelled
+                    } else {
+                        ErrorKind::Unavailable
+                    },
+                    outcome: outcome(state),
+                }))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
