@@ -86,3 +86,10 @@ Swift-compatible credential codec and shared transitions preserve the existing
 native record. #336 then builds authoritative snapshots on that coordinated
 session. These source milestones do not bump the shipping gateway/app version
 or rename historical v1.1 portfolio contracts.
+
+Issue #336 adds coordinated immutable usage snapshots to that same unpublished
+session library. Identity/profile/credential changes clear cached data, obsolete
+requests cannot publish, and a single change slot preserves explicit
+current/stale/offline/authentication states with authoritative personal labels.
+Scheduling and power behavior remain the next #337 scope; connected UI and native
+platform acceptance remain open.

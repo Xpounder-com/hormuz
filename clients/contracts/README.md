@@ -188,3 +188,9 @@ and all three pending-state spellings. Python consumes only the explicitly
 marked active-session expiry/refresh vectors: its separate CLI record has no
 native pending-state field. The session controller's failure/crash tests live in
 `clients/rust/session`; this fixture does not migrate the shipping app.
+
+`snapshots.json` supplies gateway-valid identity/usage examples and ordered
+freshness/change-delivery vectors for #336. Rust executes the snapshot transitions;
+Swift/Python verify the inputs through their existing validators. New immutable
+native snapshots are in-memory display projections, not a new gateway wire or
+durable settings schema. Zero remains a measured value and missing remains absent.

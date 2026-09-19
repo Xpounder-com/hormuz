@@ -4,9 +4,10 @@
 
 mod io;
 mod record;
+mod snapshot;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hormuz_client_core::{
-    ClientError, ConnectionProfile, ConnectionStatus, GatewayIdentity, SessionState,
+    ClientError, ConnectionProfile, ConnectionStatus, GatewayIdentity, ReadingStatus, SessionState,
 };
 use hormuz_client_platform::{
     BrowserOpener, CredentialStore, PlatformError, PrivateFiles, RefreshCoordinator,
@@ -15,6 +16,7 @@ pub use io::{Clock, NativeTransport, Operation, Reply, SessionTransport, SystemC
 pub use record::SessionRecord;
 use record::{timestamp, CredentialPair, FOUNDATION_EPOCH};
 use serde::Deserialize;
+pub use snapshot::UsageSnapshot;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use zeroize::Zeroizing;
@@ -46,6 +48,7 @@ pub struct SessionController<C, S, T = NativeTransport, K = SystemClock> {
     // including when lock acquisition or durable persistence subsequently fails.
     disabled: AtomicBool,
     generation: AtomicU64,
+    snapshots: snapshot::Snapshots,
 }
 
 impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
@@ -59,6 +62,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
             clock,
             disabled: AtomicBool::new(false),
             generation: AtomicU64::new(0),
+            snapshots: snapshot::Snapshots::default(),
         }
     }
 
@@ -131,6 +135,8 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
         if self.load()?.is_some() {
             return Err(ClientError::AlreadySignedIn);
         }
+        self.snapshots
+            .invalidate(ReadingStatus::NeedsAuthentication);
         SessionRecord::preflight(profile, self.store.maximum_record_bytes())?;
         let prior = guard.read("profile.json").map_err(platform_error)?;
         let profile_bytes = serde_json::to_vec(profile).map_err(|_| ClientError::InvalidProfile)?;
@@ -253,10 +259,20 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
         force_refresh: bool,
         operation: &Operation,
     ) -> Result<AccessCredential, ClientError> {
-        let guard = self.lock(operation)?;
-        let record = self.credential(&guard, profile, force_refresh, operation)?;
-        self.check_enabled(operation)?;
-        Ok(AccessCredential(record.access))
+        let result = (|| {
+            let guard = self.lock(operation)?;
+            let record = self.credential(&guard, profile, force_refresh, operation)?;
+            self.check_enabled(operation)?;
+            Ok(AccessCredential(record.access))
+        })();
+        if result
+            .as_ref()
+            .is_err_and(|error| *error != ClientError::ProfileBusy)
+        {
+            self.snapshots
+                .invalidate(ReadingStatus::NeedsAuthentication);
+        }
+        result
     }
 
     fn check_enabled(&self, operation: &Operation) -> Result<(), ClientError> {
@@ -283,6 +299,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
         if &saved_profile != profile || record.profile != *profile {
             return Err(ClientError::IdentityMismatch);
         }
+        self.snapshots.bind_credential(profile, &record.refresh);
         match record.state {
             SessionState::RevocationPending => return Err(ClientError::LogoutPending),
             SessionState::RefreshPending => return Err(ClientError::RefreshInterrupted),
@@ -338,12 +355,16 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
             self.revoke_unsaved(&suspended);
             return Err(error);
         }
+        self.snapshots
+            .rotate_credential(&record.refresh, &updated.refresh);
         Ok(updated)
     }
 
     pub fn sign_out(&self, operation: &Operation) -> Result<(), ClientError> {
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.disabled.store(true, Ordering::SeqCst);
+        self.snapshots
+            .invalidate(ReadingStatus::NeedsAuthentication);
         let _guard = self.lock(operation)?;
         let Some(mut record) = self.load()? else {
             return Ok(());
@@ -354,6 +375,69 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
             return Err(ClientError::LogoutPending);
         }
         self.store.delete().map_err(platform_error)
+    }
+
+    pub fn snapshot(&self) -> std::sync::Arc<UsageSnapshot> {
+        self.snapshots.snapshot()
+    }
+
+    /// Single-consumer, bounded change delivery. Native UI adapters drain this
+    /// after worker completion or local sign-out; equivalent states emit nothing.
+    pub fn take_snapshot_change(&self) -> Option<std::sync::Arc<UsageSnapshot>> {
+        self.snapshots.take_change()
+    }
+
+    /// A relay completion can call this same refresh entry point. No local usage
+    /// is added and no scheduler or background polling loop is started here.
+    pub fn refresh_snapshot(
+        &self,
+        profile: &ConnectionProfile,
+        operation: &Operation,
+    ) -> Result<(), ClientError> {
+        let ticket = self.snapshots.begin(profile);
+        let result = (|| {
+            let guard = self.lock(operation)?;
+            if !self.snapshots.current(&ticket) {
+                return Err(ClientError::ConfigurationChanged);
+            }
+            let record = self.credential(&guard, profile, false, operation)?;
+            let identity = self.identity(&record, operation)?;
+            self.snapshots.verify_identity(&ticket, &identity)?;
+            self.check_enabled(operation)?;
+            let reply = self
+                .transport
+                .request(
+                    profile,
+                    "/v1/gateway/usage",
+                    None,
+                    Some(&record.access),
+                    operation,
+                )
+                .map_err(|_| ClientError::GatewayUnavailable)?;
+            if reply.status == 401 {
+                return Err(ClientError::LoginRequired);
+            }
+            if reply.status != 200 {
+                return Err(ClientError::GatewayUnavailable);
+            }
+            let usage = snapshot::personal_usage(reply.body())?;
+            self.check_enabled(operation)?;
+            // Configuration can be edited outside the cooperating lock. Re-read
+            // before publishing so even that change cannot relabel this result.
+            let bytes = guard
+                .read("profile.json")
+                .map_err(platform_error)?
+                .ok_or(ClientError::LoginRequired)?;
+            if ConnectionProfile::from_json(&bytes)? != *profile {
+                return Err(ClientError::IdentityMismatch);
+            }
+            self.snapshots
+                .success(&ticket, identity, usage, self.clock.now())
+        })();
+        if let Err(error) = result {
+            self.snapshots.failure(&ticket, error);
+        }
+        result
     }
 
     fn identity(

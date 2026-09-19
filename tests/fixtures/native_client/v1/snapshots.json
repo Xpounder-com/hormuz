@@ -1,0 +1,175 @@
+{
+  "schema_id": "hormuz.native-client-fixtures",
+  "schema_version": 1,
+  "source_revision": "97f362439a66346e99f8d53302a3adc1a5b32568",
+  "profile": {
+    "id": "00000000-0000-0000-0000-000000000335",
+    "gateway": "https://gateway.example.test",
+    "organization": "org-a",
+    "client": "codex",
+    "model": "openai-primary",
+    "allowLoopbackHTTP": false,
+    "setup": "custom"
+  },
+  "identity": {
+    "schema_id": "hormuz.gateway-identity",
+    "schema_version": 1,
+    "actor_id": "alice",
+    "actor_name": "Alice",
+    "team_id": "engineering",
+    "team_name": "Engineering",
+    "organization_id": "org-a",
+    "identity_type": "human",
+    "allowed_clients": [
+      "codex"
+    ],
+    "authentication_source": "session:fixture"
+  },
+  "usage": {
+    "schema_id": "hormuz.gateway-usage-summary",
+    "schema_version": 1,
+    "month": "current",
+    "requests": 3,
+    "denied_requests": 1,
+    "rate_limited_requests": 0,
+    "input_tokens": 120,
+    "output_tokens": 30,
+    "cache_read_tokens": 20,
+    "cache_write_tokens": 0,
+    "reasoning_tokens": 7,
+    "cost_usd": 0.00012,
+    "cost_basis": "configured_rate_card_estimate",
+    "allocation_basis": "direct_gateway_request",
+    "coverage": "gateway_captured_requests_only",
+    "redactions": 1,
+    "secret_events": 1,
+    "secret_detections": 1,
+    "secret_denied_requests": 0
+  },
+  "zero": {
+    "schema_id": "hormuz.gateway-usage-summary",
+    "schema_version": 1,
+    "month": "current",
+    "requests": 0,
+    "denied_requests": 0,
+    "rate_limited_requests": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "reasoning_tokens": 0,
+    "cost_usd": 0,
+    "cost_basis": "configured_rate_card_estimate",
+    "allocation_basis": "direct_gateway_request",
+    "coverage": "gateway_captured_requests_only",
+    "redactions": 0,
+    "secret_events": 0,
+    "secret_detections": 0,
+    "secret_denied_requests": 0
+  },
+  "cases": [
+    {
+      "id": "first_load_offline",
+      "events": [
+        "offline"
+      ],
+      "states": [
+        "offline"
+      ],
+      "has_usage": [
+        false
+      ],
+      "changes": [
+        false
+      ]
+    },
+    {
+      "id": "measured_zero",
+      "events": [
+        "zero"
+      ],
+      "states": [
+        "current"
+      ],
+      "has_usage": [
+        true
+      ],
+      "changes": [
+        true
+      ]
+    },
+    {
+      "id": "success_offline_repeat_recovery",
+      "events": [
+        "success",
+        "offline",
+        "offline",
+        "success"
+      ],
+      "states": [
+        "current",
+        "offline",
+        "offline",
+        "current"
+      ],
+      "has_usage": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "changes": [
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "id": "malformed_after_success",
+      "events": [
+        "success",
+        "malformed",
+        "malformed"
+      ],
+      "states": [
+        "current",
+        "stale",
+        "stale"
+      ],
+      "has_usage": [
+        true,
+        true,
+        true
+      ],
+      "changes": [
+        true,
+        true,
+        false
+      ]
+    },
+    {
+      "id": "authentication_loss",
+      "events": [
+        "success",
+        "unauthorized",
+        "unauthorized"
+      ],
+      "states": [
+        "current",
+        "needsAuthentication",
+        "needsAuthentication"
+      ],
+      "has_usage": [
+        true,
+        false,
+        false
+      ],
+      "changes": [
+        true,
+        true,
+        false
+      ]
+    }
+  ]
+}

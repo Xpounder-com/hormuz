@@ -88,3 +88,49 @@ and active cancellation behavior. The platform workspace retains native
 two-process lock/crash and isolated Keychain/Credential Manager tests. Session
 crash vectors use an in-memory synthetic store; they are not signed-app,
 power-loss, native browser, or connected-companion acceptance.
+
+## Authoritative usage snapshots (#336)
+
+`refresh_snapshot(profile, operation)` holds the same session transaction while
+fetching identity and personal usage with one validated credential. The snapshot
+contains immutable identity, `UsageReading`, an explicit `current_actor` scope,
+and the last successful check time. Both responses and the current saved profile
+must pass validation before that time advances. Gateway vocabulary remains
+`configured_rate_card_estimate` and `gateway_captured_requests_only`; no local
+relay traffic or invented organization-wide total enters the reading. The exact
+native `u64` token sum handles two valid i64 counters without signed overflow.
+
+`snapshot()` returns an immutable `Arc<UsageSnapshot>`. A native adapter drains
+`take_snapshot_change()` after worker operations and local sign-out. Its single
+pending slot coalesces intermediate changes, and equivalent states do not emit
+again. There is no callback, timer, permanent subscriber worker or redraw loop.
+An updated successful timestamp is a real state change even when counts are the
+same. Existing holders of an older immutable snapshot retain that value; the UI
+must process the next change to update what it displays.
+
+| Result | Display state and retained data |
+| --- | --- |
+| First load/offline with no successful response | `offline`, absent identity/usage/time |
+| Valid measured zero | `current`, real zero values and successful time |
+| Connection failure after success | `offline`, last valid same-session data/time |
+| Malformed usage after success | `stale`, last valid same-session data/time |
+| Authentication loss, unsafe storage or identity mismatch | `needsAuthentication`, cleared display identity/usage/time |
+| Sign-out or different profile | Immediately cleared; late earlier work is discarded |
+
+An internal connection/attempt ticket rejects completions from another profile,
+sign-out, older refresh or another controller. A non-display, zeroizing copy of
+the current refresh token binds the cache to the authoritative credential
+record. A replacement by another helper clears cached identity before the first
+fallible request; a known local rotation updates that binding. Actor, team,
+organization or session changes under the same credential reject the response
+and remain rejected until the connection or credential changes. Tokens and the
+saved profile are never members of the serialized display snapshot.
+
+Shared `snapshots.json` vectors distinguish zero/missing, offline/stale retention,
+repeated equivalent errors, authentication loss and recovery. Additional tests
+cover late completions, credential/identity changes, exact integer limits,
+credential exclusion and a real concurrent sign-out during a blocked usage
+response. Swift and Python verify the shared inputs against their existing
+native/gateway validators. Age-based staleness, refresh coalescing, sleep/network
+events and relay-completion scheduling remain #337; callers may request a fresh
+snapshot without synthesizing accounting or creating another polling loop.

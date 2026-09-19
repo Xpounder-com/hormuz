@@ -790,3 +790,196 @@ fn real_transport_adapter_preserves_responses_and_cancels_active_requests() {
     });
     server.join().unwrap();
 }
+
+fn usage_reply() -> Value {
+    serde_json::from_str::<Value>(include_str!(
+        "../../../../tests/fixtures/native_client/v1/snapshots.json"
+    ))
+    .unwrap()["usage"]
+        .clone()
+}
+
+#[test]
+fn coordinated_snapshot_retains_valid_data_without_inventing_zero_or_advancing_failed_time() {
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+        step("/v1/gateway/whoami", 200, identity()),
+        offline("/v1/gateway/usage"),
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, json!({})),
+        step("/v1/gateway/whoami", 401, json!({})),
+    ]);
+    h.seed(&record());
+    let controller = h.controller();
+    controller.take_snapshot_change();
+    controller
+        .refresh_snapshot(&profile(), &Operation::default())
+        .unwrap();
+    let first = controller.snapshot();
+    assert!(first.identity().is_some());
+    assert_eq!(first.scope(), "current_actor");
+    assert!(controller.take_snapshot_change().is_some());
+    h.clock.sleep(Duration::from_secs(1));
+    assert!(controller
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert_eq!(
+        controller.snapshot().reading().status(),
+        ReadingStatus::Offline
+    );
+    assert!(controller.snapshot().reading().usage() == first.reading().usage());
+    assert_eq!(
+        controller.snapshot().reading().checked_at_epoch_seconds(),
+        first.reading().checked_at_epoch_seconds()
+    );
+    assert!(controller
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert_eq!(
+        controller.snapshot().reading().status(),
+        ReadingStatus::Stale
+    );
+    assert!(controller
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert_eq!(
+        controller.snapshot().reading().status(),
+        ReadingStatus::NeedsAuthentication
+    );
+    assert!(controller.snapshot().total_tokens().is_none());
+    h.done();
+}
+
+#[test]
+fn external_session_replacement_clears_cached_identity_before_network_failure() {
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+        offline("/v1/gateway/whoami"),
+    ]);
+    h.seed(&record());
+    let c = h.controller();
+    c.refresh_snapshot(&profile(), &Operation::default())
+        .unwrap();
+    let replacement = serde_json::from_value::<CredentialPair>(pair("b", NOW))
+        .unwrap()
+        .record(&profile(), NOW)
+        .unwrap();
+    h.seed(&replacement);
+    assert!(c
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert!(c.snapshot().identity().is_none());
+    assert!(c.snapshot().total_tokens().is_none());
+    h.done();
+}
+
+#[test]
+fn known_local_rotation_preserves_cache_but_failed_refresh_removes_usable_identity() {
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+        step("/v1/auth/refresh", 200, pair("b", NOW)),
+        offline("/v1/gateway/whoami"),
+        offline("/v1/auth/refresh"),
+    ]);
+    let mut old = record();
+    old.session_expires = NOW - FOUNDATION_EPOCH + 43_200.0;
+    h.seed(&old);
+    let c = h.controller();
+    c.refresh_snapshot(&profile(), &Operation::default())
+        .unwrap();
+    let total = c.snapshot().total_tokens();
+    c.access_credential(&profile(), true, &Operation::default())
+        .unwrap();
+    assert!(c
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert_eq!(c.snapshot().total_tokens(), total);
+    assert!(c
+        .access_credential(&profile(), true, &Operation::default())
+        .is_err());
+    assert!(c.snapshot().identity().is_none());
+    assert_eq!(
+        c.snapshot().reading().status(),
+        ReadingStatus::NeedsAuthentication
+    );
+    h.done();
+}
+
+#[test]
+fn signout_during_usage_fetch_immediately_clears_snapshot_and_discards_the_late_reply() {
+    struct FixedClock(SystemClock);
+    impl Clock for FixedClock {
+        fn now(&self) -> f64 {
+            NOW
+        }
+        fn elapsed(&self) -> Duration {
+            self.0.elapsed()
+        }
+        fn sleep(&self, d: Duration) {
+            self.0.sleep(d)
+        }
+    }
+    struct BlockUsage {
+        inner: Transport,
+        started: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl SessionTransport for BlockUsage {
+        fn request(
+            &self,
+            p: &ConnectionProfile,
+            path: &str,
+            body: Option<&[u8]>,
+            access: Option<&str>,
+            op: &Operation,
+        ) -> Result<Reply, TransportError> {
+            let reply = self.inner.request(p, path, body, access, op);
+            if path == "/v1/gateway/usage" {
+                self.started.send(()).unwrap();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+            }
+            reply
+        }
+    }
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+        revoked(),
+    ]);
+    h.seed(&record());
+    let (started, received) = std::sync::mpsc::channel();
+    let (release, waiting) = std::sync::mpsc::channel();
+    let c = SessionController::new(
+        h.coordinator.clone(),
+        h.store.clone(),
+        BlockUsage {
+            inner: h.transport.clone(),
+            started,
+            release: Mutex::new(waiting),
+        },
+        FixedClock(SystemClock::default()),
+    );
+    std::thread::scope(|scope| {
+        let refresh = scope.spawn(|| c.refresh_snapshot(&profile(), &Operation::default()));
+        received.recv_timeout(Duration::from_secs(5)).unwrap();
+        let logout = scope.spawn(|| c.sign_out(&Operation::default()));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while c.snapshot().reading().status() != ReadingStatus::NeedsAuthentication {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        release.send(()).unwrap();
+        assert!(refresh.join().unwrap().is_err());
+        logout.join().unwrap().unwrap();
+    });
+    assert!(c.snapshot().total_tokens().is_none());
+    assert!(h.store.state().is_none());
+    h.done();
+}
