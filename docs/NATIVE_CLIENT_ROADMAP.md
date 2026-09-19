@@ -59,16 +59,22 @@ baselines. Native keyboard/accessibility, focus, display, sleep/reopen and clean
 install/upgrade evidence are required for each declared platform. Compilation
 alone does not establish platform support or a measured footprint benefit.
 
-## First implementation slice
+## Implementation progress
 
-Issue #330 starts with identity and personal-usage validation in a small Rust
-crate and shared compatibility vectors consumed by Rust, the existing Swift
-models and the existing Python gateway validators. The gateway and client have
+Issue #330 establishes identity, personal usage, connection profiles, session
+and reading status, context preferences and the complete safe-error catalog in
+a small Rust crate. Compatibility vectors are consumed by Rust, the existing
+Swift models and the existing Python validators. The gateway and client have
 different validation responsibilities; expected differences must be recorded
 rather than silently changing either implementation. See
 [the fixture contract](../clients/contracts/README.md).
 
-Connection profiles, session transitions, freshness, settings, client status,
-the complete safe-error catalog and native integrations remain subsequent #330
-or dependent-issue slices. The initial library is unpublished and is not loaded
-by the shipped app. The gateway and app version remain v1.2.0.
+Session operations, refresh scheduling, secure platform services, transport and
+native integrations remain dependent issues. The library is unpublished and is
+not loaded by the shipped app. The gateway and app version remain v1.2.0.
+
+The #331 Windows preview is an explicitly synthetic native shell. Its draft
+build and process smoke do not establish connected-client behavior or manual
+platform acceptance. The [#332 baseline checkpoint](evidence/native-client-baseline-2026-09-19/README.md)
+records verified artifact sizes and preliminary Mac preview measurements.
+Complete platform measurements are still required before setting budgets.
