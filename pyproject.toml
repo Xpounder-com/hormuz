@@ -34,7 +34,7 @@ context = [
 ]
 context-build = [
   "tiktoken==0.12.0",
-  "pyinstaller==6.22.2"
+  "pyinstaller==6.22.3"
 ]
 postgres = [
   "psycopg[binary]>=3.3.4,<3.4",
