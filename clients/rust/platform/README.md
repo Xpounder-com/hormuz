@@ -73,6 +73,11 @@ The `PrivateFiles` interface is available only through the retained transaction.
   preserves both files instead of deleting the displaced data. All normal
   writers must cooperate with the connection lock; this is not isolation from a
   malicious process running as the same user or an administrator.
+- Windows replacement preserves the destination's DACL. If a raced ACL change
+  makes it unsafe, recovery compares the installed file with the staging file's
+  native identity and bounded bytes before rollback; public reads still reject
+  the unsafe ACL. A destination created during an exclusive write returns
+  `Changed` and removes only the untouched staging file.
 - An interrupted process can leave a private `.write-` staging/backup file.
   Readers ignore it, the committed file remains independently readable, and
   retries never adopt it as configuration. This layer deliberately does not

@@ -263,6 +263,78 @@ fn read(root: &Root, name: &str) -> Result<Option<Vec<u8>>> {
     Ok(Some(bytes))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    volume: u64,
+    id: [u8; 16],
+}
+fn file_identity(file: &File) -> Result<FileIdentity> {
+    let mut info = FILE_ID_INFO::default();
+    if unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileIdInfo,
+            (&mut info as *mut FILE_ID_INFO).cast(),
+            std::mem::size_of::<FILE_ID_INFO>() as u32,
+        )
+    } == 0
+    {
+        return Err(PlatformError::Unavailable);
+    }
+    Ok(FileIdentity {
+        volume: info.VolumeSerialNumber,
+        id: info.FileId.Identifier,
+    })
+}
+
+/// Recovery-only comparison with the file we staged. ReplaceFile preserves the
+/// destination DACL, including an unsafe concurrent ACL edit. Public reads must
+/// still reject that ACL, but rollback must not depend on accepting it. Check
+/// native identity, regular-file bounds and unchanged bytes without exposing or
+/// adopting the contents. An inaccessible or externally replaced file is never
+/// treated as ours; uncertain recovery retains both candidates.
+fn replacement_matches(root: &Root, name: &str, identity: FileIdentity, bytes: &[u8]) -> bool {
+    if validate(&root.file, true, &root.user).is_err() {
+        return false;
+    }
+    let Ok(path) = wide(&root.path.join(name)) else {
+        return false;
+    };
+    let handle = unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return false;
+    }
+    let mut file = unsafe { File::from_raw_handle(handle) };
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    if unsafe { GetFileType(handle) } != FILE_TYPE_DISK
+        || unsafe { GetFileInformationByHandle(handle, &mut info) } == 0
+        || info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY) != 0
+        || info.nNumberOfLinks != 1
+        || info.nFileSizeHigh != 0
+        || info.nFileSizeLow as usize != bytes.len()
+        || file_identity(&file) != Ok(identity)
+    {
+        return false;
+    }
+    let mut actual = Vec::new();
+    (&mut file)
+        .take((MAX_PRIVATE_FILE_BYTES + 1) as u64)
+        .read_to_end(&mut actual)
+        .is_ok()
+        && actual == bytes
+        && file_identity(&file) == Ok(identity)
+}
+
 impl PrivateDirectory {
     pub fn open(path: &Path) -> Result<Self> {
         if !path.is_absolute() {
@@ -398,6 +470,7 @@ impl PrivateTransaction {
         file.write_all(bytes)
             .and_then(|_| file.sync_all())
             .map_err(|_| PlatformError::Unavailable)?;
+        let staged_identity = file_identity(&file)?;
         // ReplaceFile opens its replacement without sharing. Keeping our write
         // handle open would make every replacement fail with a sharing error.
         drop(file);
@@ -424,6 +497,14 @@ impl PrivateTransaction {
             unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), MOVEFILE_WRITE_THROUGH) }
         };
         if replaced == 0 {
+            let error = unsafe { GetLastError() };
+            if expected.is_none() && matches!(error, ERROR_FILE_EXISTS | ERROR_ALREADY_EXISTS) {
+                // A same-volume move without replacement did not move either
+                // file. The destination belongs to the other writer; only our
+                // untouched staging file should be removed.
+                temporary.remove = true;
+                return Err(PlatformError::Changed);
+            }
             if read(&self.root, name).ok() == Some(None)
                 && matches!(read(&self.root, &backup_name), Ok(Some(_)))
             {
@@ -435,12 +516,29 @@ impl PrivateTransaction {
             }
             return Err(PlatformError::Unavailable);
         }
-        let displaced_matches = match read(&self.root, &backup_name) {
-            Ok(displaced) => displaced.as_deref() == expected,
-            Err(_) => false,
-        };
-        if expected.is_some() && !displaced_matches {
-            if read(&self.root, name)?.as_deref() == Some(bytes)
+        let displaced = read(&self.root, &backup_name);
+        let displaced_matches = displaced
+            .as_ref()
+            .is_ok_and(|value| value.as_deref() == expected);
+        // Validate and flush before deleting the displaced file. In particular,
+        // an inherited unsafe ACL is a rollback input, not an early return.
+        let committed = open(
+            &self.root,
+            name,
+            GENERIC_WRITE,
+            OPEN_EXISTING,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        )
+        .and_then(|file| file.ok_or(PlatformError::Unavailable))
+        .and_then(|file| file.sync_all().map_err(|_| PlatformError::Unavailable));
+        if expected.is_some() && (!displaced_matches || committed.is_err()) {
+            let conflict = displaced
+                .as_ref()
+                .err()
+                .or(committed.as_ref().err())
+                .copied()
+                .unwrap_or(PlatformError::Changed);
+            if replacement_matches(&self.root, name, staged_identity, bytes)
                 && unsafe {
                     ReplaceFileW(
                         target.as_ptr(),
@@ -453,29 +551,111 @@ impl PrivateTransaction {
                 } != 0
             {
                 temporary.remove = true;
-                return Err(PlatformError::Changed);
+                return Err(conflict);
             }
             return Err(PlatformError::Unavailable);
         }
+        committed?;
         backup.remove = true;
         temporary.remove = true;
-        // Flush replacement data; Windows exposes no portable directory fsync.
-        open(
-            &self.root,
-            name,
-            GENERIC_WRITE,
-            OPEN_EXISTING,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        )?
-        .ok_or(PlatformError::Unavailable)?
-        .sync_all()
-        .map_err(|_| PlatformError::Unavailable)
+        // Windows exposes no portable directory fsync.
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn grant_world_read(directory: &PrivateDirectory, path: &Path) {
+        let sddl = format!(
+            "O:{}D:P(A;;FA;;;{})(A;;FR;;;WD)",
+            directory.root.user.text, directory.root.user.text
+        );
+        let changed = descriptor(&sddl).unwrap();
+        assert_ne!(
+            unsafe {
+                SetFileSecurityW(
+                    wide(path).unwrap().as_ptr(),
+                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                    changed.0,
+                )
+            },
+            0
+        );
+    }
+
+    #[test]
+    fn unsafe_acl_at_replacement_restores_displaced_bytes_without_repairing_permissions() {
+        let temporary = tempfile::tempdir().unwrap();
+        let directory = PrivateDirectory::open(&temporary.path().join("private")).unwrap();
+        let guard = directory.try_lock().unwrap();
+        guard.write("profile.json", b"original", None).unwrap();
+        let path = directory.root.path.join("profile.json");
+        let result =
+            guard.write_with_hook("profile.json", b"replacement", Some(b"original"), || {
+                std::fs::write(&path, b"external-edit").unwrap();
+                grant_world_read(&directory, &path);
+                Ok(())
+            });
+        assert_eq!(result, Err(PlatformError::UnsafeStorage));
+        // Test-only inspection of our synthetic file proves rollback preserved
+        // the external edit, while the public adapter still refuses its ACL.
+        assert_eq!(std::fs::read(&path).unwrap(), b"external-edit");
+        assert_eq!(
+            guard.read("profile.json"),
+            Err(PlatformError::UnsafeStorage)
+        );
+        assert!(std::fs::read_dir(&directory.root.path)
+            .unwrap()
+            .all(|entry| {
+                !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".write-")
+            }));
+    }
+
+    #[test]
+    fn recovery_comparison_requires_original_file_identity_and_unchanged_bytes() {
+        let temporary = tempfile::tempdir().unwrap();
+        let directory = PrivateDirectory::open(&temporary.path().join("private")).unwrap();
+        let guard = directory.try_lock().unwrap();
+        guard.write("first", b"same", None).unwrap();
+        guard.write("second", b"same", None).unwrap();
+        let file = File::open(directory.root.path.join("first")).unwrap();
+        let identity = file_identity(&file).unwrap();
+        drop(file);
+        assert!(replacement_matches(
+            &directory.root,
+            "first",
+            identity,
+            b"same"
+        ));
+        assert!(!replacement_matches(
+            &directory.root,
+            "second",
+            identity,
+            b"same"
+        ));
+        grant_world_read(&directory, &directory.root.path.join("first"));
+        assert_eq!(guard.read("first"), Err(PlatformError::UnsafeStorage));
+        assert!(replacement_matches(
+            &directory.root,
+            "first",
+            identity,
+            b"same"
+        ));
+        std::fs::write(directory.root.path.join("first"), b"edit").unwrap();
+        assert!(!replacement_matches(
+            &directory.root,
+            "first",
+            identity,
+            b"same"
+        ));
+    }
+
     #[test]
     fn rejects_a_real_acl_grant_to_everyone_even_with_readonly_attributes() {
         let temporary = tempfile::tempdir().unwrap();
@@ -487,21 +667,7 @@ mod tests {
         let mut readonly = permissions.clone();
         readonly.set_readonly(true);
         std::fs::set_permissions(&path, readonly).unwrap();
-        let sddl = format!(
-            "O:{}D:P(A;;FA;;;{})(A;;FR;;;WD)",
-            directory.root.user.text, directory.root.user.text
-        );
-        let changed = descriptor(&sddl).unwrap();
-        assert_ne!(
-            unsafe {
-                SetFileSecurityW(
-                    wide(&path).unwrap().as_ptr(),
-                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                    changed.0,
-                )
-            },
-            0
-        );
+        grant_world_read(&directory, &path);
         assert_eq!(
             guard.read("profile.json"),
             Err(PlatformError::UnsafeStorage)

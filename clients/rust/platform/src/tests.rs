@@ -311,6 +311,29 @@ mod native {
     }
 
     #[test]
+    fn raced_destination_creation_preserves_the_other_file_and_removes_staging() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private");
+        let directory = PrivateDirectory::open(&path).unwrap();
+        let guard = directory.try_lock().unwrap();
+        let result = guard.write_with_hook("profile.json", b"replacement", None, || {
+            guard.write("profile.json", b"external-create", None)
+        });
+        assert_eq!(result, Err(PlatformError::Changed));
+        assert_eq!(
+            guard.read("profile.json").unwrap().unwrap(),
+            b"external-create"
+        );
+        assert!(std::fs::read_dir(&path).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".write-")
+        }));
+    }
+
+    #[test]
     fn concurrent_external_edit_is_restored_at_atomic_exchange() {
         let temporary = tempfile::tempdir().unwrap();
         let path = temporary.path().join("private");
