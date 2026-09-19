@@ -4,6 +4,63 @@ use hormuz_client_core::{
 use serde::Deserialize;
 use serde_json::Value;
 
+#[test]
+fn raw_json_counters_preserve_exact_integer_values() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/native_client/v1/raw-numbers.json"
+    ))
+    .unwrap();
+    for case in fixture["cases"].as_array().unwrap() {
+        let result = PersonalUsage::from_json(case["response_json"].as_str().unwrap().as_bytes());
+        let expected = case["expected_requests"]
+            .as_str()
+            .map(|value| value.parse::<i64>().unwrap());
+        assert_eq!(
+            result.ok().map(|usage| usage.requests()),
+            expected,
+            "{}",
+            case["id"]
+        );
+    }
+}
+
+#[test]
+fn fractional_counts_and_extreme_exponents_cannot_round_into_integers() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/native_client/v1/raw-numbers.json"
+    ))
+    .unwrap();
+    let template = fixture["cases"][0]["response_json"].as_str().unwrap();
+    for literal in [
+        r#"{"$serde_json::private::Number":"3"}"#,
+        "9007199254740993.5",
+        "1.0000000000000001",
+        "1e-999",
+        "1e999",
+        "1e99999999999999999999999999",
+        "9223372036854775808.0",
+        "-9223372036854775809.0",
+    ] {
+        let raw = template.replace("9007199254740993", literal);
+        assert!(
+            PersonalUsage::from_json(raw.as_bytes()).is_err(),
+            "{literal}"
+        );
+    }
+    for literal in [
+        "0e99999999999999999999999999",
+        "-0.0",
+        "0e-999",
+        "0.000e999",
+    ] {
+        let raw = template.replace("9007199254740993", literal);
+        assert_eq!(
+            PersonalUsage::from_json(raw.as_bytes()).unwrap().requests(),
+            0
+        );
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Fixtures {

@@ -6,7 +6,7 @@
 
 #![forbid(unsafe_code)]
 
-use serde::de::{self, Visitor};
+use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
@@ -53,34 +53,71 @@ impl AIClient {
     }
 }
 
-// Swift JSONDecoder accepts exactly integral JSON numbers (including 1.0)
-// for Int. Keep the signed 64-bit boundary used by supported native platforms.
-fn swift_integer<'de, D: Deserializer<'de>>(decoder: D) -> Result<i64, D::Error> {
-    struct Integer;
-    impl Visitor<'_> for Integer {
-        type Value = i64;
-        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("a signed 64-bit integral JSON number")
-        }
-        fn visit_i64<E: de::Error>(self, value: i64) -> Result<i64, E> {
-            Ok(value)
-        }
-        fn visit_u64<E: de::Error>(self, value: u64) -> Result<i64, E> {
-            i64::try_from(value).map_err(|_| E::custom("integer out of range"))
-        }
-        fn visit_f64<E: de::Error>(self, value: f64) -> Result<i64, E> {
-            if value.is_finite()
-                && value.fract() == 0.0
-                && value >= i64::MIN as f64
-                && value < 9_223_372_036_854_775_808.0
-            {
-                Ok(value as i64)
-            } else {
-                Err(E::custom("integer out of range or fractional"))
-            }
-        }
+// Preserve integral decimal/exponent values without passing through f64.
+// A display count must never be silently rounded. The gateway emits integers;
+// integral decimal spellings support the existing client's compatibility case.
+fn exact_integer<'de, D: Deserializer<'de>>(decoder: D) -> Result<i64, D::Error> {
+    let raw = Box::<serde_json::value::RawValue>::deserialize(decoder)?;
+    let literal = raw.get();
+    // RawValue validates JSON syntax but permits all JSON types. Check the
+    // primitive before interpreting its digits; objects/strings/bools are not numbers.
+    if !literal
+        .as_bytes()
+        .first()
+        .is_some_and(|byte| byte.is_ascii_digit() || *byte == b'-')
+    {
+        return Err(de::Error::custom("expected an integral JSON number"));
     }
-    decoder.deserialize_any(Integer)
+    parse_exact_integer(literal)
+        .ok_or_else(|| de::Error::custom("integer out of range or fractional"))
+}
+
+fn parse_exact_integer(value: &str) -> Option<i64> {
+    let (negative, unsigned) = match value.strip_prefix('-') {
+        Some(unsigned) => (true, unsigned),
+        None => (false, value),
+    };
+    let (mantissa, exponent) = unsigned.split_once(['e', 'E']).unwrap_or((unsigned, "0"));
+    let fraction_len = mantissa.split_once('.').map_or(0, |(_, tail)| tail.len());
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let digits = digits.trim_start_matches('0');
+    if digits.is_empty() {
+        return Some(0);
+    }
+    // Lexical validity is enforced by serde_json. Limit arithmetic and work even
+    // for extremely long exponent strings inside the bounded response body.
+    let scale = exponent
+        .parse::<i64>()
+        .ok()?
+        .checked_sub(fraction_len as i64)?;
+    let (digits, padding) = if scale < 0 {
+        let trim = usize::try_from(scale.checked_neg()?).ok()?;
+        if trim > digits.len()
+            || !digits.as_bytes()[digits.len() - trim..]
+                .iter()
+                .all(|c| *c == b'0')
+        {
+            return None;
+        }
+        (&digits[..digits.len() - trim], 0)
+    } else {
+        (digits, usize::try_from(scale).ok()?)
+    };
+    if digits.len().checked_add(padding)? > 19 {
+        return None;
+    }
+    digits
+        .bytes()
+        .chain(std::iter::repeat_n(b'0', padding))
+        .try_fold(0_i64, |acc, digit| {
+            let acc = acc.checked_mul(10)?;
+            let digit = i64::from(digit - b'0');
+            if negative {
+                acc.checked_sub(digit)
+            } else {
+                acc.checked_add(digit)
+            }
+        })
 }
 
 fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, ClientError> {
@@ -112,23 +149,23 @@ pub struct PersonalUsage {
 #[derive(Deserialize)]
 struct UsageWire {
     schema_id: String,
-    #[serde(deserialize_with = "swift_integer")]
+    #[serde(deserialize_with = "exact_integer")]
     schema_version: i64,
     month: String,
-    #[serde(deserialize_with = "swift_integer")]
+    #[serde(deserialize_with = "exact_integer")]
     requests: i64,
-    #[serde(deserialize_with = "swift_integer")]
+    #[serde(deserialize_with = "exact_integer")]
     denied_requests: i64,
-    #[serde(deserialize_with = "swift_integer")]
+    #[serde(deserialize_with = "exact_integer")]
     rate_limited_requests: i64,
-    #[serde(deserialize_with = "swift_integer")]
+    #[serde(deserialize_with = "exact_integer")]
     input_tokens: i64,
-    #[serde(deserialize_with = "swift_integer")]
+    #[serde(deserialize_with = "exact_integer")]
     output_tokens: i64,
     cost_usd: f64,
     cost_basis: String,
     coverage: String,
-    #[serde(deserialize_with = "swift_integer")]
+    #[serde(deserialize_with = "exact_integer")]
     redactions: i64,
 }
 
@@ -209,7 +246,7 @@ pub struct GatewayIdentity {
 #[derive(Deserialize)]
 struct IdentityWire {
     schema_id: String,
-    #[serde(deserialize_with = "swift_integer")]
+    #[serde(deserialize_with = "exact_integer")]
     schema_version: i64,
     actor_id: String,
     actor_name: String,

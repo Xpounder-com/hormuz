@@ -12,6 +12,18 @@ FIXTURES = Path(__file__).parent / "fixtures" / "native_client" / "v1" / "gatewa
 
 
 class NativeClientContractTests(unittest.TestCase):
+    def test_raw_number_vectors_preserve_gateway_expectations(self) -> None:
+        fixtures = json.loads(FIXTURES.with_name("raw-numbers.json").read_text())
+        self.assertEqual(len(fixtures["cases"]), 10)
+        for case in fixtures["cases"]:
+            with self.subTest(case=case["id"]):
+                response = json.loads(case["response_json"])
+                if case["gateway_valid"]:
+                    validate_contract(response)
+                else:
+                    with self.assertRaises(ContractValidationError):
+                        validate_contract(response)
+
     def test_shared_vectors_preserve_gateway_schema_expectations(self) -> None:
         fixtures = json.loads(FIXTURES.read_text(encoding="utf-8"))
         self.assertEqual(fixtures["schema_id"], "hormuz.native-client-fixtures")

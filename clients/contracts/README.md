@@ -16,6 +16,9 @@ The new Rust crate lives in [`clients/rust`](../rust).
   and agree on acceptance and selected display values.
 - The existing Python gateway validator consumes those same vectors against its
   independently recorded `gateway_valid` expectation.
+- Ten additional raw-JSON vectors in `raw-numbers.json` preserve integer,
+  decimal and exponent spellings through all three consumers. Expected counts
+  are decimal strings so the fixture reader cannot round the expected value.
 - Organization and supported-client binding, human/session identity, UTF-8 name
   bounds, current-month usage, nonnegative counts/cost, and original cost/coverage
   labels retain the current native meaning.
@@ -44,8 +47,13 @@ the Python server schema requires an integer. Every vector where the client and
 gateway differ has a note. No existing validator is relaxed or changed here.
 
 The common vectors characterize the normal unique snake_case gateway keys.
-Duplicate keys, alternative key spellings and every possible JSON numeric
-lexical form are not yet a cross-language compatibility claim. Rust independently
+Duplicate keys and alternative key spellings are not yet a cross-language
+compatibility claim. Counts are decoded from decimal digits with checked signed
+64-bit arithmetic, including exact integral decimal/exponent spellings. Rust
+rejects actual fractions and nonzero underflow instead of rounding; Foundation
+can round some such inputs and reject some boundary decimal forms. Those inputs
+are not emitted by the gateway's integer contract, and reproducing Foundation's
+lossy behavior is deliberately outside this port. Rust independently
 rejects malformed/nonfinite JSON and oversized responses. Transport must also
 bound bytes while reading; a parser size check is not streaming transport.
 

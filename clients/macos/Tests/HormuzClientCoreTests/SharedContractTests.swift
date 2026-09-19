@@ -3,6 +3,26 @@ import XCTest
 @testable import HormuzClientCore
 
 final class SharedContractTests: XCTestCase {
+    func testRawJSONCountersPreserveExactIntegerValues() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/native_client/v1/raw-numbers.json"))
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let cases = try XCTUnwrap(fixture["cases"] as? [[String: Any]])
+        for item in cases {
+            let id = try XCTUnwrap(item["id"] as? String)
+            let raw = try XCTUnwrap(item["response_json"] as? String)
+            let expected = (item["expected_requests"] as? String).flatMap(Int.init)
+            var actual: Int?
+            do {
+                let usage = try GatewayJSON.decoder().decode(PersonalUsage.self, from: Data(raw.utf8))
+                try usage.validate()
+                actual = usage.requests
+            } catch { }
+            XCTAssertEqual(actual, expected, id)
+        }
+    }
+
     func testSharedGatewayVectorsAgainstExistingNativeModels() throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
