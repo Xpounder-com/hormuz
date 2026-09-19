@@ -600,6 +600,63 @@ fn interrupted_signout_retains_intent_and_cancelled_enrollment_never_starts() {
 }
 
 #[test]
+fn transport_safety_errors_remain_specific_until_a_refresh_intent_requires_recovery() {
+    for (kind, expected) in [
+        (ErrorKind::Redirect, ClientError::UnexpectedRedirect),
+        (ErrorKind::ResponseTooLarge, ClientError::ResponseTooLarge),
+        (ErrorKind::InvalidResponse, ClientError::InvalidResponse),
+        (ErrorKind::Offline, ClientError::GatewayUnavailable),
+    ] {
+        let error = TransportError {
+            kind,
+            outcome: RequestOutcome::Unconfirmed,
+        };
+        let h = Harness::new(vec![Step {
+            path: "/v1/auth/enrollments",
+            result: Err(error),
+            state: None,
+            cancel: false,
+        }]);
+        let browser = Browser::default();
+        assert_eq!(
+            h.controller()
+                .sign_in(&profile(), &browser, &Operation::default()),
+            Err(expected)
+        );
+        assert!(browser.0.lock().unwrap().is_empty());
+        h.done();
+
+        let mut steps = enrollment();
+        steps.last_mut().unwrap().result = Err(error);
+        steps.push(revoked());
+        let h = Harness::new(steps);
+        assert_eq!(
+            h.controller()
+                .sign_in(&profile(), &Browser::default(), &Operation::default()),
+            Err(expected)
+        );
+        assert!(h.store.state().is_none());
+        h.done();
+
+        let h = Harness::new(vec![Step {
+            path: "/v1/auth/refresh",
+            result: Err(error),
+            state: Some(SessionState::RefreshPending),
+            cancel: false,
+        }]);
+        h.seed(&record());
+        assert_eq!(
+            h.controller()
+                .access_credential(&profile(), true, &Operation::default())
+                .unwrap_err(),
+            ClientError::RefreshInterrupted
+        );
+        assert_eq!(h.store.state(), Some(SessionState::RefreshPending));
+        h.done();
+    }
+}
+
+#[test]
 fn changed_profile_cannot_redirect_access_and_lock_wait_is_bounded_cancelable() {
     let h = Harness::new(vec![]);
     h.seed(&record());

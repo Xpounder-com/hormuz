@@ -370,7 +370,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
                 Some(&record.access),
                 operation,
             )
-            .map_err(|_| ClientError::GatewayUnavailable)?;
+            .map_err(transport_error)?;
         if reply.status == 401 {
             return Err(ClientError::LoginRequired);
         }
@@ -397,7 +397,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
             Zeroizing::new(serde_json::to_vec(&map).map_err(|_| ClientError::InvalidResponse)?);
         self.transport
             .request(profile, path, Some(&body), None, operation)
-            .map_err(|_| ClientError::GatewayUnavailable)
+            .map_err(transport_error)
     }
     fn revoke(&self, record: &SessionRecord, operation: &Operation) -> bool {
         #[derive(Deserialize)]
@@ -426,6 +426,17 @@ fn platform_error(error: PlatformError) -> ClientError {
         PlatformError::Changed => ClientError::ConfigurationChanged,
         PlatformError::Unavailable => ClientError::StorageUnavailable,
         _ => ClientError::SecureStoreUnavailable,
+    }
+}
+
+fn transport_error(error: hormuz_client_transport::TransportError) -> ClientError {
+    use hormuz_client_transport::ErrorKind;
+    match error.kind {
+        ErrorKind::Redirect => ClientError::UnexpectedRedirect,
+        ErrorKind::ResponseTooLarge => ClientError::ResponseTooLarge,
+        ErrorKind::InvalidResponse | ErrorKind::InvalidRequest => ClientError::InvalidResponse,
+        ErrorKind::RequestTooLarge => ClientError::InvalidArguments,
+        _ => ClientError::GatewayUnavailable,
     }
 }
 
