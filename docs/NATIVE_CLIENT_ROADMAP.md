@@ -68,7 +68,13 @@ different validation responsibilities; expected differences must be recorded
 rather than silently changing either implementation. See
 [the fixture contract](../clients/contracts/README.md).
 
-Connection profiles, session transitions, freshness, settings, client status,
-the complete safe-error catalog and native integrations remain subsequent #330
-or dependent-issue slices. The initial library is unpublished and is not loaded
-by the shipped app. The gateway and app version remain v1.2.0.
+Issue #330's contract inventory is now implemented: connection profiles, state
+codes, freshness representations, settings, client status and the complete safe
+error catalog have shared compatibility fixtures. Session transitions and native
+integration remain in their dependent issues.
+
+Issue #334 adds a separate unpublished `1.5.0-dev.1`
+[Rust transport](../clients/rust/transport/README.md) with one bounded runtime,
+verified TLS, request cancellation and no automatic replay after an ambiguous
+outcome. It is not loaded by the shipped app. The gateway and app version remain
+v1.2.0; a library test pass is not a connected-companion or release claim.
