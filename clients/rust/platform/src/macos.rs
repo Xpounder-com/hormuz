@@ -8,6 +8,9 @@ use core_foundation::string::{CFString, CFStringRef};
 use security_framework::os::macos::keychain::SecKeychain;
 use security_framework_sys::base::{errSecItemNotFound, errSecSuccess};
 use security_framework_sys::item::*;
+use security_framework_sys::keychain::{
+    SecKeychainGetUserInteractionAllowed, SecKeychainSetUserInteractionAllowed,
+};
 use security_framework_sys::keychain_item::{
     SecItemAdd, SecItemCopyMatching, SecItemDelete, SecItemUpdate,
 };
@@ -18,6 +21,41 @@ extern "C" {
     static kSecMatchLimitOne: CFStringRef;
     static kSecUseAuthenticationUI: CFStringRef;
     static kSecUseAuthenticationUIFail: CFStringRef;
+}
+
+// The legacy file Keychain also has an application-wide interaction switch.
+// Serialize our use of it and restore the exact prior setting. A query's modern
+// authentication-UI option alone is not a reliable noninteractive boundary for
+// every supported file-Keychain implementation.
+static INTERACTION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+struct NoInteraction {
+    previous: u8,
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+impl NoInteraction {
+    fn enter() -> Result<Self> {
+        let guard = INTERACTION
+            .lock()
+            .map_err(|_| PlatformError::SecureStoreUnavailable)?;
+        let mut previous = 0;
+        if unsafe { SecKeychainGetUserInteractionAllowed(&mut previous) } != errSecSuccess
+            || unsafe { SecKeychainSetUserInteractionAllowed(0) } != errSecSuccess
+        {
+            return Err(PlatformError::SecureStoreUnavailable);
+        }
+        Ok(Self {
+            previous,
+            _guard: guard,
+        })
+    }
+}
+impl Drop for NoInteraction {
+    fn drop(&mut self) {
+        // Failure to restore leaves interaction disabled, never weakens access.
+        unsafe {
+            SecKeychainSetUserInteractionAllowed(self.previous);
+        }
+    }
 }
 
 pub struct NativeCredentialStore {
@@ -86,6 +124,7 @@ impl CredentialStore for NativeCredentialStore {
     }
 
     fn load(&self) -> Result<Option<SecretRecord>> {
+        let _interaction = NoInteraction::enter()?;
         let mut query = self.query(false);
         // SAFETY: static framework constants, retained CF values and valid output
         // pointer. The Copy result is released exactly once by its owned wrapper.
@@ -123,6 +162,7 @@ impl CredentialStore for NativeCredentialStore {
         if record.expose().len() > self.maximum_record_bytes() {
             return Err(PlatformError::TooLarge);
         }
+        let _interaction = NoInteraction::enter()?;
         let query = CFDictionary::from_CFType_pairs(&self.query(false));
         // Update in place. Never delete an existing record before writing its
         // replacement, and never redirect a failed write to a plaintext file.
@@ -157,6 +197,7 @@ impl CredentialStore for NativeCredentialStore {
     }
 
     fn delete(&self) -> Result<()> {
+        let _interaction = NoInteraction::enter()?;
         let query = CFDictionary::from_CFType_pairs(&self.query(false));
         let status = unsafe { SecItemDelete(query.as_concrete_TypeRef()) };
         if status == errSecSuccess || status == errSecItemNotFound {
@@ -180,6 +221,7 @@ mod tests {
     impl Drop for OwnedTestKeychain {
         fn drop(&mut self) {
             // Only the explicit ephemeral keychain created below is deleted.
+            let _interaction = NoInteraction::enter().unwrap();
             let status = unsafe { SecKeychainDelete(self.0.as_concrete_TypeRef()) };
             assert_eq!(status, errSecSuccess, "synthetic keychain cleanup failed");
         }
@@ -187,17 +229,50 @@ mod tests {
     #[test]
     fn isolated_keychain_updates_one_record_and_locked_failures_preserve_it() {
         let temporary = tempfile::tempdir().unwrap();
-        let mut keychain = OwnedTestKeychain(
-            CreateOptions::new()
-                .password("synthetic-test-password")
-                .prompt_user(false)
-                .create(temporary.path().join("synthetic.keychain"))
-                .unwrap(),
-        );
+        let path = temporary.path().join("synthetic.keychain");
+        let keychain = {
+            let _interaction = NoInteraction::enter().unwrap();
+            OwnedTestKeychain(
+                CreateOptions::new()
+                    .password("synthetic-test-password")
+                    .prompt_user(false)
+                    .create(&path)
+                    .unwrap(),
+            )
+        };
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "macos::tests::keychain_child", "--nocapture"])
+            .env("HORMUZ_SYNTHETIC_PLATFORM_KEYCHAIN", &path)
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success(), "synthetic Keychain worker failed");
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                let _ = child.wait();
+                panic!("synthetic Keychain worker exceeded its deadline");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        drop(keychain);
+    }
+
+    #[test]
+    fn keychain_child() {
+        let Some(path) = std::env::var_os("HORMUZ_SYNTHETIC_PLATFORM_KEYCHAIN") else {
+            return;
+        };
+        let mut keychain = SecKeychain::open(std::path::Path::new(&path)).unwrap();
         let store = NativeCredentialStore {
             service: "com.hormuz.synthetic.platform-test".into(),
-            keychain: Some(keychain.0.clone()),
+            keychain: Some(keychain.clone()),
         };
+        let interaction_before = SecKeychain::user_interaction_allowed().unwrap();
+        println!("synthetic_keychain_phase=roundtrip");
         assert!(store.load().unwrap().is_none());
         store
             .save(&SecretRecord::new(b"synthetic-first".to_vec()).unwrap())
@@ -210,7 +285,22 @@ mod tests {
             b"synthetic-replacement"
         );
         assert_eq!(
-            unsafe { SecKeychainLock(keychain.0.as_concrete_TypeRef()) },
+            SecKeychain::user_interaction_allowed().unwrap(),
+            interaction_before
+        );
+        assert_eq!(
+            unsafe { SecKeychainSetUserInteractionAllowed(0) },
+            errSecSuccess
+        );
+        assert!(store.load().unwrap().is_some());
+        assert!(!SecKeychain::user_interaction_allowed().unwrap());
+        assert_eq!(
+            unsafe { SecKeychainSetUserInteractionAllowed(u8::from(interaction_before)) },
+            errSecSuccess
+        );
+        println!("synthetic_keychain_phase=locked_failures");
+        assert_eq!(
+            unsafe { SecKeychainLock(keychain.as_concrete_TypeRef()) },
             errSecSuccess
         );
         assert!(matches!(
@@ -221,7 +311,8 @@ mod tests {
             store.save(&SecretRecord::new(b"synthetic-blocked".to_vec()).unwrap()),
             Err(PlatformError::SecureStoreUnavailable)
         );
-        keychain.0.unlock(Some("synthetic-test-password")).unwrap();
+        keychain.unlock(Some("synthetic-test-password")).unwrap();
+        println!("synthetic_keychain_phase=recovered");
         assert_eq!(
             store.load().unwrap().unwrap().expose(),
             b"synthetic-replacement"
@@ -229,5 +320,10 @@ mod tests {
         store.delete().unwrap();
         store.delete().unwrap();
         assert!(store.load().unwrap().is_none());
+        assert_eq!(
+            SecKeychain::user_interaction_allowed().unwrap(),
+            interaction_before
+        );
+        println!("synthetic_keychain_phase=cleanup");
     }
 }

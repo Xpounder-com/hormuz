@@ -20,7 +20,7 @@ erasure. Session format validation and pending-state transitions belong to #335.
 
 | Platform | Authoritative record | Bound and behavior |
 | --- | --- | --- |
-| macOS | Existing file Keychain generic-password service `com.hormuz.mac.session.v1`, account `active-connection-v1`, synchronization disabled | 32,767 bytes; update in place, add only if missing; per-query authentication UI is disabled so unavailable/locked records fail closed |
+| macOS | Existing file Keychain generic-password service `com.hormuz.mac.session.v1`, account `active-connection-v1`, synchronization disabled | 32,767 bytes; update in place, add only if missing; noninteractive native calls fail closed on unavailable/locked records |
 | Windows | Current-user Credential Manager generic target `Hormuz/session/v1/active-connection` | 2,560 bytes; native replacement; local-machine persistence means this user's record survives logons on this machine, not access for every machine user |
 | Linux | Deferred to #343 | No native credential backend or file fallback is supplied |
 
@@ -28,6 +28,10 @@ No second Rust credential namespace is introduced on Mac. The file Keychain
 preserves the existing app's behavior; it does not claim Data Protection,
 device binding, screen-lock protection or approval for a different executable.
 Signed-app integration must verify the app/helper access identity under #345.
+File-Keychain calls are serialized while the process interaction setting is
+temporarily disabled, then restore its exact prior value; per-query UI rejection
+is also requested. Native integration must route credential calls through this
+adapter instead of concurrently changing that process-wide setting elsewhere.
 
 Before a session operation, callers must check `maximum_record_bytes()`, validate
 their record, and hold the shared connection coordination guard through the
@@ -96,7 +100,9 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 The native-contract workflow runs the workspace on Windows, Linux and macOS.
 Mac tests create/delete an explicit ephemeral Keychain with a synthetic password
 and use only that Keychain. They verify replacement, locked-store read/write
-failure and preservation after unlock. Windows tests use a unique synthetic
+failure and preservation after unlock. The Mac credential operations run in a
+bounded child process with content-free phase markers; its parent retains
+ownership of temporary Keychain cleanup. Windows tests use a unique synthetic
 Credential Manager target, verify replacement/size failures and delete only
 that target. Neither test addresses the user's real Hormuz session.
 
