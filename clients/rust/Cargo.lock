@@ -297,6 +297,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "hormuz-client-session"
+version = "1.5.0-dev.1"
+dependencies = [
+ "base64 0.22.1",
+ "futures-executor",
+ "getrandom 0.4.3",
+ "hormuz-client-core",
+ "hormuz-client-platform",
+ "hormuz-client-transport",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "zeroize",
+]
+
+[[package]]
 name = "hormuz-client-transport"
 version = "1.5.0-dev.1"
 dependencies = [
@@ -1539,6 +1556,9 @@ name = "zeroize"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "zerotrie"

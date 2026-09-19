@@ -5,16 +5,56 @@ from __future__ import annotations
 import json
 import re
 import unittest
+from contextlib import nullcontext
+from datetime import datetime, timezone, timedelta
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from hormuz.contracts import ContractValidationError, validate_contract
 from hormuz.compaction_runtime import ContextRuntimeError, parse_context_preference
 from hormuz.session_client import SessionClientError, validate_session_gateway
+from hormuz.credential_store import StoredSession
+from hormuz.session_client import access_token
 
 FIXTURES = Path(__file__).parent / "fixtures" / "native_client" / "v1" / "gateway.json"
 
 
 class NativeClientContractTests(unittest.TestCase):
+    def test_shared_session_vectors_preserve_python_credential_and_refresh_thresholds(self) -> None:
+        fixture = json.loads(FIXTURES.with_name("sessions.json").read_text())
+        now = datetime.fromtimestamp(fixture["now"], timezone.utc)
+        record = fixture["record"]
+        for case in fixture["cases"]:
+            # Python CLI has its own v1 snake-case record with no pending state.
+            # Pending-state parity is deliberately Swift/Rust only.
+            if not case["python_applicable"]:
+                continue
+            with self.subTest(case=case["id"]):
+                session = StoredSession.from_dict({
+                    "version": 1, "gateway": record["profile"]["gateway"],
+                    "client": record["profile"]["client"],
+                    "access_token": record["accessToken"], "refresh_token": record["refreshToken"],
+                    "access_expires_at": (now + timedelta(seconds=case["access_remaining"])).isoformat(),
+                    "session_expires_at": (now + timedelta(seconds=case["session_remaining"])).isoformat(),
+                })
+                store = Mock()
+                store.get.return_value = session
+                response = json.loads(session.to_json())
+                response.update(access_token="hox_a_" + "b" * 43, refresh_token="hox_r_" + "b" * 43,
+                                access_expires_at=(now + timedelta(seconds=600)).isoformat())
+                with patch("hormuz.session_client.datetime") as clock, patch("hormuz.session_client.SessionGatewayClient") as gateway:
+                    clock.now.return_value = now
+                    gateway.return_value.post.return_value = (200, response)
+                    kwargs = dict(gateway=session.gateway, profile="synthetic", allow_insecure_http=False,
+                                  store=store, lock_factory=lambda _: nullcontext())
+                    if case["result"] == "credential":
+                        self.assertTrue(access_token(**kwargs).startswith("hox_a_"))
+                    else:
+                        with self.assertRaises(SessionClientError) as caught:
+                            access_token(**kwargs)
+                        self.assertEqual(caught.exception.code, "login_required")
+                    self.assertEqual(gateway.return_value.post.call_count, case["refreshes"])
+
     def test_profile_gateway_vectors_record_python_cli_differences(self) -> None:
         fixture = json.loads(FIXTURES.with_name("profiles.json").read_text())
         self.assertEqual(len(fixture["cases"]), 49)
