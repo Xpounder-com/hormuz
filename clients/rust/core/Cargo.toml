@@ -1,0 +1,12 @@
+[package]
+name = "hormuz-client-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Shared native Hormuz client contracts; no transport or credential storage."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
