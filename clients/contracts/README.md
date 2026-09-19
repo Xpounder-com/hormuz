@@ -175,3 +175,8 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 resolution. The native-contract CI workflow executes the Rust and Python checks
 on Windows, Linux and macOS and the Swift reference on macOS. These checks do
 not qualify a Windows/Linux shell, a native sign-in path or a release artifact.
+
+The separate unpublished [platform services library](../rust/platform/README.md)
+implements #333's native storage and coordination primitives for the planned
+v1.5.0 milestone. It uses the existing Mac credential identity and supplies
+native Windows credential/ACL adapters; session orchestration remains #335.
