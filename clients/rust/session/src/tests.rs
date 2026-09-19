@@ -946,6 +946,149 @@ fn snapshot_transport_safety_errors_preserve_specific_diagnosis_and_last_valid_r
 }
 
 #[test]
+fn cancelled_handoff_preserves_active_snapshot_before_lock_and_after_record_read() {
+    struct CancelOnNow {
+        inner: FakeClock,
+        cancel: Mutex<Option<Operation>>,
+    }
+    impl Clock for CancelOnNow {
+        fn now(&self) -> f64 {
+            if let Some(operation) = self.cancel.lock().unwrap().take() {
+                operation.cancel();
+            }
+            self.inner.now()
+        }
+        fn elapsed(&self) -> Duration {
+            self.inner.elapsed()
+        }
+        fn sleep(&self, duration: Duration) {
+            self.inner.sleep(duration)
+        }
+    }
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+    ]);
+    h.seed(&record());
+    let c = SessionController::new(
+        h.coordinator.clone(),
+        h.store.clone(),
+        h.transport.clone(),
+        CancelOnNow {
+            inner: h.clock.clone(),
+            cancel: Mutex::new(None),
+        },
+    );
+    c.refresh_snapshot(&profile(), &Operation::default())
+        .unwrap();
+    let prior = c.snapshot();
+    c.take_snapshot_change();
+    for before_lock in [true, false] {
+        let operation = Operation::default();
+        if before_lock {
+            operation.cancel();
+        } else {
+            *c.clock.cancel.lock().unwrap() = Some(operation.clone());
+        }
+        assert_eq!(
+            c.access_credential(&profile(), false, &operation)
+                .unwrap_err(),
+            ClientError::GatewayUnavailable
+        );
+        assert_eq!(h.store.state(), Some(SessionState::Active));
+        assert!(Arc::ptr_eq(&prior, &c.snapshot()));
+        assert!(c.take_snapshot_change().is_none());
+    }
+    assert!(c
+        .access_credential(&profile(), false, &Operation::default())
+        .is_ok());
+    h.done();
+}
+
+#[test]
+fn cancellation_after_refresh_intent_clears_snapshot_before_and_after_commit() {
+    for after_commit in [false, true] {
+        let operation = Operation::default();
+        let mut refresh = step("/v1/auth/refresh", 200, pair("b", NOW));
+        refresh.cancel = !after_commit;
+        let h = Harness::new(vec![
+            step("/v1/gateway/whoami", 200, identity()),
+            step("/v1/gateway/usage", 200, usage_reply()),
+            refresh,
+            revoked(),
+        ]);
+        let mut old = record();
+        old.session_expires = NOW - FOUNDATION_EPOCH + 43_200.0;
+        h.seed(&old);
+        let c = h.controller();
+        c.refresh_snapshot(&profile(), &Operation::default())
+            .unwrap();
+        if after_commit {
+            h.store.0.lock().unwrap().cancel_save = Some((3, operation.clone()));
+        }
+        assert_eq!(
+            c.access_credential(&profile(), true, &operation)
+                .unwrap_err(),
+            ClientError::GatewayUnavailable
+        );
+        assert_eq!(
+            h.store.state(),
+            Some(if after_commit {
+                SessionState::RevocationPending
+            } else {
+                SessionState::RefreshPending
+            })
+        );
+        assert!(c.snapshot().identity().is_none());
+        assert!(c.snapshot().total_tokens().is_none());
+        assert_eq!(
+            c.snapshot().reading().status(),
+            ReadingStatus::NeedsAuthentication
+        );
+        h.done();
+    }
+}
+
+#[test]
+fn missing_or_conflicting_allocation_basis_retains_prior_snapshot_as_stale() {
+    for value in [
+        None,
+        Some(json!("allocated_organization_cost")),
+        Some(Value::Null),
+    ] {
+        let mut usage = usage_reply();
+        if let Some(value) = value {
+            usage["allocation_basis"] = value;
+        } else {
+            usage.as_object_mut().unwrap().remove("allocation_basis");
+        }
+        let h = Harness::new(vec![
+            step("/v1/gateway/whoami", 200, identity()),
+            step("/v1/gateway/usage", 200, usage_reply()),
+            step("/v1/gateway/whoami", 200, identity()),
+            step("/v1/gateway/usage", 200, usage),
+        ]);
+        h.seed(&record());
+        let c = h.controller();
+        c.refresh_snapshot(&profile(), &Operation::default())
+            .unwrap();
+        let prior = c.snapshot();
+        h.clock.sleep(Duration::from_secs(1));
+        assert_eq!(
+            c.refresh_snapshot(&profile(), &Operation::default()),
+            Err(ClientError::InvalidResponse)
+        );
+        assert_eq!(c.snapshot().reading().status(), ReadingStatus::Stale);
+        assert_eq!(c.snapshot().total_tokens(), prior.total_tokens());
+        assert_eq!(
+            c.snapshot().reading().checked_at_epoch_seconds(),
+            prior.reading().checked_at_epoch_seconds()
+        );
+        h.done();
+    }
+}
+
+#[test]
 fn signout_during_usage_fetch_immediately_clears_snapshot_and_discards_the_late_reply() {
     struct FixedClock(SystemClock);
     impl Clock for FixedClock {

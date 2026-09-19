@@ -96,7 +96,8 @@ fetching identity and personal usage with one validated credential. The snapshot
 contains immutable identity, `UsageReading`, an explicit `current_actor` scope,
 and the last successful check time. Both responses and the current saved profile
 must pass validation before that time advances. Gateway vocabulary remains
-`configured_rate_card_estimate` and `gateway_captured_requests_only`; no local
+`configured_rate_card_estimate`, `direct_gateway_request` and
+`gateway_captured_requests_only`; no local
 relay traffic or invented organization-wide total enters the reading. The exact
 native `u64` token sum handles two valid i64 counters without signed overflow.
 
@@ -115,6 +116,7 @@ must process the next change to update what it displays.
 | Connection failure after success | `offline`, last valid same-session data/time |
 | Malformed, redirected or oversized response after success | `stale`, last valid same-session data/time |
 | Authentication loss, unsafe storage or identity mismatch | `needsAuthentication`, cleared display identity/usage/time |
+| Credential handoff cancelled before changing the session | Prior snapshot and state retained; no sign-in prompt |
 | Sign-out or different profile | Immediately cleared; late earlier work is discarded |
 
 An internal connection/attempt ticket rejects completions from another profile,
@@ -125,6 +127,8 @@ fallible request; a known local rotation updates that binding. Actor, team,
 organization or session changes under the same credential reject the response
 and remain rejected until the connection or credential changes. Tokens and the
 saved profile are never members of the serialized display snapshot.
+Cancellation after a durable refresh intent still clears the snapshot because
+the interrupted session requires recovery, even when the error is cancellation.
 
 Shared `snapshots.json` vectors distinguish zero/missing, offline/stale retention,
 repeated equivalent errors, authentication loss and recovery. Additional tests

@@ -16,13 +16,30 @@ pub(crate) fn personal_usage(bytes: &[u8]) -> Result<PersonalUsage, ClientError>
     struct Scope {
         #[serde(default = "current_actor")]
         scope: String,
+        allocation_basis: String,
     }
     let usage = PersonalUsage::from_json(bytes)?;
     let scope: Scope = serde_json::from_slice(bytes).map_err(|_| ClientError::InvalidResponse)?;
-    if scope.scope != "current_actor" {
+    if scope.scope != "current_actor" || scope.allocation_basis != "direct_gateway_request" {
         return Err(ClientError::InvalidResponse);
     }
     Ok(usage)
+}
+
+pub(crate) fn authentication_lost(error: ClientError) -> bool {
+    matches!(
+        error,
+        ClientError::LoginRequired
+            | ClientError::LoginRejected
+            | ClientError::LogoutPending
+            | ClientError::RefreshInterrupted
+            | ClientError::IdentityMismatch
+            | ClientError::InvalidProfile
+            | ClientError::ConfigurationChanged
+            | ClientError::SecureStoreUnavailable
+            | ClientError::StorageUnavailable
+            | ClientError::UnsafeStorage
+    )
 }
 
 #[derive(Clone, Serialize, PartialEq)]
@@ -197,19 +214,7 @@ impl Snapshots {
         if !state.matches(ticket) {
             return;
         }
-        if matches!(
-            error,
-            ClientError::LoginRequired
-                | ClientError::LoginRejected
-                | ClientError::LogoutPending
-                | ClientError::RefreshInterrupted
-                | ClientError::IdentityMismatch
-                | ClientError::InvalidProfile
-                | ClientError::ConfigurationChanged
-                | ClientError::SecureStoreUnavailable
-                | ClientError::StorageUnavailable
-                | ClientError::UnsafeStorage
-        ) {
+        if authentication_lost(error) {
             state.publish(UsageSnapshot::missing(ReadingStatus::NeedsAuthentication));
             return;
         }

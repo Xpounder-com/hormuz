@@ -265,10 +265,9 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
             self.check_enabled(operation)?;
             Ok(AccessCredential(record.access))
         })();
-        if result
-            .as_ref()
-            .is_err_and(|error| *error != ClientError::ProfileBusy)
-        {
+        if result.as_ref().is_err_and(|error| {
+            snapshot::authentication_lost(*error) || *error == ClientError::InvalidResponse
+        }) {
             self.snapshots
                 .invalidate(ReadingStatus::NeedsAuthentication);
         }
@@ -316,6 +315,22 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
         self.check_enabled(operation)?;
         record.state = SessionState::RefreshPending;
         self.save(&record)?;
+        let result = self.rotate(record, profile, operation);
+        if result.is_err() {
+            // Any failure after durable intent makes the old credential unsafe,
+            // including cancellation. Cancellation before intent does not.
+            self.snapshots
+                .invalidate(ReadingStatus::NeedsAuthentication);
+        }
+        result
+    }
+
+    fn rotate(
+        &self,
+        record: SessionRecord,
+        profile: &ConnectionProfile,
+        operation: &Operation,
+    ) -> Result<SessionRecord, ClientError> {
         // All failures, including NotSent, preserve the intent. No hidden replay.
         let reply = self
             .post(

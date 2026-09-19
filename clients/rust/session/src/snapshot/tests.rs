@@ -187,12 +187,17 @@ fn contradictory_scope_cost_basis_and_coverage_cannot_be_relabelled_as_personal(
         ("scope", Value::Null),
         ("cost_basis", json!("final_invoice")),
         ("coverage", json!("all_organization_activity")),
+        ("allocation_basis", json!("allocated_organization_cost")),
+        ("allocation_basis", Value::Null),
         ("month", json!("all_time")),
     ] {
         let mut raw = fixture()["usage"].clone();
         raw[field] = value;
         assert!(personal_usage(&serde_json::to_vec(&raw).unwrap()).is_err());
     }
+    let mut raw = fixture()["usage"].clone();
+    raw.as_object_mut().unwrap().remove("allocation_basis");
+    assert!(personal_usage(&serde_json::to_vec(&raw).unwrap()).is_err());
     let mut raw = fixture()["usage"].clone();
     raw["scope"] = json!("current_actor");
     assert!(personal_usage(&serde_json::to_vec(&raw).unwrap()).is_ok());
