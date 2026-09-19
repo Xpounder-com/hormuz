@@ -11,6 +11,10 @@ on:
       - "tests/fixtures/contracts/**"
       - "tests/test_native_client_contracts.py"
       - "hormuz/contracts.py"
+      - "hormuz/compaction_runtime.py"
+      - "hormuz/compaction_formats.py"
+      - "hormuz/session_client.py"
+      - "hormuz/credential_store.py"
       - "hormuz/_contract_schemas/**"
       - ".github/workflows/native-client-contracts.yml"
   push:
@@ -24,6 +28,10 @@ on:
       - "tests/fixtures/contracts/**"
       - "tests/test_native_client_contracts.py"
       - "hormuz/contracts.py"
+      - "hormuz/compaction_runtime.py"
+      - "hormuz/compaction_formats.py"
+      - "hormuz/session_client.py"
+      - "hormuz/credential_store.py"
       - "hormuz/_contract_schemas/**"
       - ".github/workflows/native-client-contracts.yml"
   workflow_dispatch:

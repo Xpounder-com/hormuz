@@ -1,7 +1,7 @@
-# Native client compatibility fixtures (v1, initial slice)
+# Native client compatibility fixtures (v1)
 
-This is the first implementation slice of [#330](https://github.com/Xpounder-com/hormuz/issues/330),
-targeting v1.4.0. The shared file is
+These are the contract foundations for [#330](https://github.com/Xpounder-com/hormuz/issues/330),
+targeting v1.4.0. The first shared file is
 [`tests/fixtures/native_client/v1/gateway.json`](../../tests/fixtures/native_client/v1/gateway.json).
 It contains synthetic input and expected results, not captured credentials or traffic.
 
@@ -71,16 +71,94 @@ port pass. New response fields, durable state, or adapters need their own schema
 and migration review. The initial crate is not linked into the existing app, so
 rollback removes development/test files without a data migration.
 
-Profiles, session transitions, freshness/scheduling, context settings, client
-status and the complete safe-error catalog remain open in #330 and its dependent
-issues. The three current Rust errors cover only this parser/identity slice.
+## Profiles, preferences and display state
+
+The second slice records source revision `68b0b978fabac90f0bc7c33228a5bd3c68c681ab`
+and adds these portable corpora. Fixtures contain synthetic values only.
+
+| File | Ownership and reference | Expected behavior |
+| --- | --- | --- |
+| `profiles.json` (49 cases) | Swift `ConnectionProfile`; Python `validate_session_gateway` owns only its CLI gateway string | Native validation, normalization, legacy defaults, round trips, explicit CLI/native differences |
+| `context-settings.json` (20 cases) | Swift `ContextOptimizationSettings`; Python `ContextPreferenceStore` | Missing means Off; only the two canonical schema-v1 byte strings are valid |
+| `status.json` | Swift `SessionState`, `ConnectionStatus`, `CompanionReadingStatus`, `ContextOptimizationStatus` | Pending sessions remain present; freshness and optimization codes retain their display meaning |
+| `errors.json` (22 cases) | Swift `ClientError` | Fixed messages and codes; Rust uses a platform-neutral credential-store name instead of Keychain |
+
+Python has no native profile or UI status model. Its consumer checks the shared
+gateway inputs against the existing CLI expectations, the setting bytes against
+the relay parser, and provenance/error-catalog drift. It does not impersonate a
+Swift state implementation. `parse_context_preference` is extracted from the
+existing Python file reader so format checks can run on every CI OS. The file
+reader retains its ownership, mode, regular-file and symlink checks.
+
+### Field ownership and bounds
+
+- A connection profile owns a UUID, gateway origin, organization, optional opaque
+  issuer identifier, supported AI client, approved model alias, explicit loopback
+  opt-in and setup kind. There are no credential members. UUID keys are lowercase;
+  persisted UUID text follows Swift's uppercase form. Organization is nonempty
+  and at most 200 UTF-8 bytes; issuer/gateway are at most 2048 bytes. Text rejects
+  control/format characters and outer whitespace. Model aliases are 1–128 ASCII
+  bytes matching `[A-Za-z0-9][A-Za-z0-9._:-]*`.
+- `issuer` may be missing, null or empty; all normalize to absent. Only a missing
+  `setup` defaults to `custom`; null/unknown setups and clients fail. The other
+  profile members are required. Unknown members are dropped, never copied into
+  output. Duplicate keys are outside the cross-language compatibility claim;
+  Rust rejects duplicate known fields. Profiles are bounded by 128 KiB.
+- Gateways require an HTTP(S) origin with no userinfo, query, fragment or path
+  beyond one optional trailing slash. An explicit port is 1–65535 and is retained,
+  including a default port. HTTP requires opt-in and the literal `127.0.0.1`,
+  `localhost` or `[::1]` host. Pilot setup is Codex over HTTPS with
+  `openai-primary`/`openai-secondary` and no loopback opt-in.
+- Rust uses the maintained [`url` parser](https://docs.rs/url/2.5.8/url/) and rejects
+  any rewrite of the input host beyond ASCII case. This intentionally narrows
+  Foundation: shorthand numeric addresses, percent-encoded hostnames, noncanonical
+  IPv6 and Unicode host spellings must be entered in canonical ASCII/IDNA form.
+  A parser rewrite can never turn an unapproved HTTP host into allowed loopback.
+  Unicode-category validation uses a pinned library; the corpus does not claim
+  identical classification of every newly assigned character across OS versions.
+- Context preferences are non-secret and at most 4096 bytes. The complete valid
+  contents are `{"enabled":false,"schema_version":1}` and
+  `{"enabled":true,"schema_version":1}`. Invalid bytes, duplicate/extra keys,
+  coercions, unsupported versions and noncanonical encodings fail with the fixed
+  settings error. Invalid is distinct from a missing file; no reader silently
+  repairs a file or treats invalid content as enabled. Storage adapters must
+  bound reads too; this byte parser does not establish filesystem safety.
+- `ConnectionStatus` is a credential-free display projection. Its optional
+  `SessionState` retains `active`, `refreshPending` and `revocationPending`.
+  `has_session` means a record exists, **not authorization to use credentials**.
+  Rust requires a profile for a session and disallows an expiry without a
+  session. Optional expiry/check times are finite, nonnegative Unix seconds;
+  native bridges own conversion to their platform date types.
+- `UsageReading` pairs an optional already-validated personal usage value with
+  its original check time. Usage and time must appear together; `current` requires
+  both. `stale`, `offline` and `needsAuthentication` can retain that pair or have
+  neither. Absent usage serializes as null, never fabricated zero totals. The
+  new constructor checks are Rust invariants; they do not change current Swift
+  runtime behavior. Display projections serialize for inspection but cannot be
+  deserialized around the validated constructors.
+- Session, reading, optimization and error codes reject unknown variants. Error
+  variants have no arbitrary string payload; public diagnostics cannot echo an
+  input body. Identity/usage retain the gateway-owned meaning and limits above.
+
+The Mac profile format has no schema-version field today. This slice preserves
+that legacy shape; it does not silently add a version to existing app files.
+The setting's existing schema version remains 1. The fixture corpus version is
+not a new HTTP or durable-state schema. Future durable Rust state needs an
+explicit versioned envelope and migration plan before an adapter writes it.
+
+Session transitions/credential custody (#333/#335), transport (#334), freshness
+thresholds and response ordering (#336), scheduling (#337), interaction reducers
+(#338) and OS integration remain in their dependent issues. These contracts do
+not start sign-in, refresh, polling, relay, tokenizers or a native shell. The Rust
+library is still unlinked from the shipping Mac app. Rollback needs no user-data
+migration; the Python parser extraction preserves the existing file contract.
 
 ## Run the reference checks
 
 From the repository root:
 
 ```sh
-python3 -m unittest -v tests.test_native_client_contracts tests.test_contracts
+python3 -m unittest -v tests.test_native_client_contracts tests.test_contracts tests.test_compaction_runtime
 swift test --package-path clients/macos --filter SharedContractTests
 ```
 

@@ -3,15 +3,72 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
 from hormuz.contracts import ContractValidationError, validate_contract
+from hormuz.compaction_runtime import ContextRuntimeError, parse_context_preference
+from hormuz.session_client import SessionClientError, validate_session_gateway
 
 FIXTURES = Path(__file__).parent / "fixtures" / "native_client" / "v1" / "gateway.json"
 
 
 class NativeClientContractTests(unittest.TestCase):
+    def test_profile_gateway_vectors_record_python_cli_differences(self) -> None:
+        fixture = json.loads(FIXTURES.with_name("profiles.json").read_text())
+        self.assertEqual(len(fixture["cases"]), 49)
+        for case in fixture["cases"]:
+            with self.subTest(case=case["id"]):
+                profile = case["input"]
+                try:
+                    actual = validate_session_gateway(
+                        profile["gateway"],
+                        allow_insecure_http=profile.get("allowLoopbackHTTP", False),
+                    )
+                except (SessionClientError, ValueError):
+                    actual = None
+                self.assertEqual(actual, case["python_gateway"])
+
+    def test_context_setting_bytes_match_the_existing_relay_parser(self) -> None:
+        fixture = json.loads(FIXTURES.with_name("context-settings.json").read_text())
+        self.assertEqual(len(fixture["cases"]), 20)
+        for case in fixture["cases"]:
+            with self.subTest(case=case["id"]):
+                raw = case["file_bytes"]
+                data = raw.encode("utf-8") if raw is not None else None
+                if case["expected_enabled"] is None:
+                    with self.assertRaises(ContextRuntimeError) as caught:
+                        parse_context_preference(data)
+                    self.assertEqual(caught.exception.code, "settings_invalid")
+                else:
+                    result = parse_context_preference(data)
+                    self.assertIs(result.enabled, case["expected_enabled"])
+                    self.assertEqual(result.schema_version, 1)
+        with self.assertRaises(ContextRuntimeError):
+            parse_context_preference(b"\xff")
+
+    def test_fixture_provenance_identifiers_and_complete_native_error_catalog(self) -> None:
+        for path in FIXTURES.parent.glob("*.json"):
+            fixture = json.loads(path.read_text(encoding="utf-8"))
+            schema_id = (
+                "hormuz.native-client-raw-number-fixtures"
+                if path.name == "raw-numbers.json"
+                else "hormuz.native-client-fixtures"
+            )
+            self.assertEqual(fixture["schema_id"], schema_id, path.name)
+            self.assertEqual(fixture["schema_version"], 1, path.name)
+            self.assertRegex(fixture["source_revision"], r"^[0-9a-f]{40}$")
+            cases = fixture.get("cases", [])
+            ids = [case.get("id", case.get("code")) for case in cases]
+            self.assertEqual(len(ids), len(set(ids)), path.name)
+        # Catalog additions or wording changes must update the shared expectations.
+        root = Path(__file__).resolve().parents[1]
+        swift = (root / "clients/macos/Sources/HormuzClientCore/ClientError.swift").read_text()
+        current = dict(re.findall(r'case \.(\w+): return "([^\"]*)"', swift))
+        recorded = json.loads(FIXTURES.with_name("errors.json").read_text())
+        self.assertEqual(current, {case["code"]: case["swift_message"] for case in recorded["cases"]})
+
     def test_raw_number_vectors_preserve_gateway_expectations(self) -> None:
         fixtures = json.loads(FIXTURES.with_name("raw-numbers.json").read_text())
         self.assertEqual(len(fixtures["cases"]), 10)

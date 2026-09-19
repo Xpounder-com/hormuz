@@ -2,7 +2,107 @@ import Foundation
 import XCTest
 @testable import HormuzClientCore
 
-final class SharedContractTests: XCTestCase {
+final class SharedContractTests: PrivateStorageTestCase {
+    private func fixture(_ name: String) throws -> [String: Any] {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/native_client/v1/\(name).json"))
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(fixture["schema_id"] as? String, "hormuz.native-client-fixtures")
+        XCTAssertEqual(fixture["schema_version"] as? Int, 1)
+        return fixture
+    }
+
+    func testSharedProfileValidationAndNormalization() throws {
+        let cases = try XCTUnwrap(fixture("profiles")["cases"] as? [[String: Any]])
+        XCTAssertEqual(cases.count, 49)
+        for item in cases {
+            let id = try XCTUnwrap(item["id"] as? String)
+            let valid = try XCTUnwrap(item["swift_valid"] as? Bool)
+            let input = try JSONSerialization.data(withJSONObject: XCTUnwrap(item["input"]))
+            var output: [String: Any]?
+            do {
+                let profile = try JSONDecoder().decode(ConnectionProfile.self, from: input)
+                let encoded = try JSONEncoder().encode(profile)
+                output = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+                XCTAssertEqual(try JSONDecoder().decode(ConnectionProfile.self, from: encoded), profile, id)
+                XCTAssertEqual(profile.key, profile.id.uuidString.lowercased(), id)
+            } catch { XCTAssertFalse(valid, "Existing Mac profile rejected \(id): \(error)") }
+            XCTAssertEqual(output != nil, valid, id)
+            if let output {
+                let expected = try XCTUnwrap(item["expected"] as? [String: Any])
+                XCTAssertEqual(output as NSDictionary, expected as NSDictionary, id)
+            }
+        }
+    }
+
+    func testSharedContextSettingBytesAgainstExistingPrivateFileReader() throws {
+        let cases = try XCTUnwrap(fixture("context-settings")["cases"] as? [[String: Any]])
+        XCTAssertEqual(cases.count, 20)
+        let profile = try profile()
+        let name = ContextOptimizationSettings.fileName(profile: profile)
+        for item in cases {
+            let id = try XCTUnwrap(item["id"] as? String)
+            let previous = try directory.read(name)
+            if let raw = item["file_bytes"] as? String {
+                try directory.write(Data(raw.utf8), to: name, expected: previous)
+            } else {
+                // Missing is the first fixture; exercise the actual missing-file path.
+                XCTAssertNil(previous, id)
+            }
+            var actual: Bool?
+            do {
+                actual = try ContextOptimizationSettings.load(profile: profile, directory: directory).enabled
+            } catch { XCTAssertEqual(error as? ClientError, .contextSettingsInvalid, id) }
+            XCTAssertEqual(actual, item["expected_enabled"] as? Bool, id)
+        }
+    }
+
+    func testSharedSessionFreshnessAndContextStatusMeaning() throws {
+        let fixture = try fixture("status")
+        for item in try XCTUnwrap(fixture["session_states"] as? [[String: Any]]) {
+            let state = try (item["code"] as? String).map {
+                try JSONDecoder().decode(SessionState.self, from: JSONEncoder().encode($0))
+            }
+            let status = ConnectionStatus(profile: try profile(), sessionState: state, expiresAt: nil)
+            XCTAssertEqual(status.hasSession, item["has_session"] as? Bool)
+            XCTAssertEqual(state?.rawValue, item["code"] as? String)
+        }
+        for code in try XCTUnwrap(fixture["rejected_session_states"] as? [String]) {
+            XCTAssertThrowsError(try JSONDecoder().decode(SessionState.self, from: JSONEncoder().encode(code)))
+        }
+        for item in try XCTUnwrap(fixture["reading_states"] as? [[String: Any]]) {
+            let code = try XCTUnwrap(item["code"] as? String)
+            let status: CompanionReadingStatus
+            switch code {
+            case "current": status = .current
+            case "stale": status = .stale
+            case "offline": status = .offline
+            case "needsAuthentication": status = .needsAuthentication
+            default: XCTFail("Unknown fixture status: \(code)"); continue
+            }
+            XCTAssertEqual(status.isStale, item["is_stale"] as? Bool, code)
+            XCTAssertEqual(status.isUnavailable, item["is_unavailable"] as? Bool, code)
+        }
+        for item in try XCTUnwrap(fixture["context_states"] as? [[String: Any]]) {
+            let state = try XCTUnwrap(ContextOptimizationStatus(rawValue: XCTUnwrap(item["code"] as? String)))
+            XCTAssertEqual(state.label, item["label"] as? String)
+        }
+        XCTAssertNil(ContextOptimizationStatus(rawValue: "unknown"))
+    }
+
+    func testSharedFixedErrorCatalog() throws {
+        let cases = try XCTUnwrap(fixture("errors")["cases"] as? [[String: Any]])
+        XCTAssertEqual(cases.count, 22)
+        for item in cases {
+            let code = try XCTUnwrap(item["code"] as? String)
+            let error = try XCTUnwrap(ClientError(rawValue: code))
+            XCTAssertEqual(error.errorDescription, item["swift_message"] as? String, code)
+            XCTAssertEqual(ClientError.message(for: error), item["swift_message"] as? String, code)
+        }
+        XCTAssertNil(ClientError(rawValue: "arbitrary server response"))
+    }
+
     func testRawJSONCountersPreserveExactIntegerValues() throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
