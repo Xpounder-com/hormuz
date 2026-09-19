@@ -79,10 +79,17 @@ verified TLS, request cancellation and no automatic replay after an ambiguous
 outcome. It is not loaded by the shipped app. The gateway and app version remain
 v1.2.0; a library test pass is not a connected-companion or release claim.
 
-The next #335 slice is the unpublished `1.5.0-dev.1`
+Issue #335 adds the unpublished `1.5.0-dev.1`
 [session controller](../clients/rust/session/README.md): bounded browser
 enrollment, serialized refresh, persisted recovery states and sign-out. Its
 Swift-compatible credential codec and shared transitions preserve the existing
-native record. #336 then builds authoritative snapshots on that coordinated
+native record. #336 builds authoritative snapshots on that coordinated
 session. These source milestones do not bump the shipping gateway/app version
 or rename historical v1.1 portfolio contracts.
+
+Issue #336 adds coordinated immutable usage snapshots to that same unpublished
+session library. Identity/profile/credential changes clear cached data, obsolete
+requests cannot publish, and a single change slot preserves explicit
+current/stale/offline/authentication states with authoritative personal labels.
+Scheduling and power behavior remain the next #337 scope; connected UI and native
+platform acceptance remain open.

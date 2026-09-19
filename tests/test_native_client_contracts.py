@@ -20,6 +20,15 @@ FIXTURES = Path(__file__).parent / "fixtures" / "native_client" / "v1" / "gatewa
 
 
 class NativeClientContractTests(unittest.TestCase):
+    def test_snapshot_examples_are_authoritative_gateway_contracts(self) -> None:
+        fixture = json.loads(FIXTURES.with_name("snapshots.json").read_text())
+        for name in ("identity", "usage", "zero"):
+            validate_contract(fixture[name])
+        self.assertEqual(fixture["zero"]["requests"], 0)
+        self.assertEqual(fixture["zero"]["input_tokens"], 0)
+        self.assertEqual(fixture["zero"]["cost_basis"], "configured_rate_card_estimate")
+        self.assertEqual(fixture["zero"]["coverage"], "gateway_captured_requests_only")
+
     def test_shared_session_vectors_preserve_python_credential_and_refresh_thresholds(self) -> None:
         fixture = json.loads(FIXTURES.with_name("sessions.json").read_text())
         now = datetime.fromtimestamp(fixture["now"], timezone.utc)

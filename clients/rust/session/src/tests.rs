@@ -790,3 +790,376 @@ fn real_transport_adapter_preserves_responses_and_cancels_active_requests() {
     });
     server.join().unwrap();
 }
+
+fn usage_reply() -> Value {
+    serde_json::from_str::<Value>(include_str!(
+        "../../../../tests/fixtures/native_client/v1/snapshots.json"
+    ))
+    .unwrap()["usage"]
+        .clone()
+}
+
+#[test]
+fn coordinated_snapshot_retains_valid_data_without_inventing_zero_or_advancing_failed_time() {
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+        step("/v1/gateway/whoami", 200, identity()),
+        offline("/v1/gateway/usage"),
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, json!({})),
+        step("/v1/gateway/whoami", 401, json!({})),
+    ]);
+    h.seed(&record());
+    let controller = h.controller();
+    controller.take_snapshot_change();
+    controller
+        .refresh_snapshot(&profile(), &Operation::default())
+        .unwrap();
+    let first = controller.snapshot();
+    assert!(first.identity().is_some());
+    assert_eq!(first.scope(), "current_actor");
+    assert!(controller.take_snapshot_change().is_some());
+    h.clock.sleep(Duration::from_secs(1));
+    assert!(controller
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert_eq!(
+        controller.snapshot().reading().status(),
+        ReadingStatus::Offline
+    );
+    assert!(controller.snapshot().reading().usage() == first.reading().usage());
+    assert_eq!(
+        controller.snapshot().reading().checked_at_epoch_seconds(),
+        first.reading().checked_at_epoch_seconds()
+    );
+    assert!(controller
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert_eq!(
+        controller.snapshot().reading().status(),
+        ReadingStatus::Stale
+    );
+    assert!(controller
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert_eq!(
+        controller.snapshot().reading().status(),
+        ReadingStatus::NeedsAuthentication
+    );
+    assert!(controller.snapshot().total_tokens().is_none());
+    h.done();
+}
+
+#[test]
+fn external_session_replacement_clears_cached_identity_before_network_failure() {
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+        offline("/v1/gateway/whoami"),
+    ]);
+    h.seed(&record());
+    let c = h.controller();
+    c.refresh_snapshot(&profile(), &Operation::default())
+        .unwrap();
+    let replacement = serde_json::from_value::<CredentialPair>(pair("b", NOW))
+        .unwrap()
+        .record(&profile(), NOW)
+        .unwrap();
+    h.seed(&replacement);
+    assert!(c
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert!(c.snapshot().identity().is_none());
+    assert!(c.snapshot().total_tokens().is_none());
+    h.done();
+}
+
+#[test]
+fn known_local_rotation_preserves_cache_but_failed_refresh_removes_usable_identity() {
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+        step("/v1/auth/refresh", 200, pair("b", NOW)),
+        offline("/v1/gateway/whoami"),
+        offline("/v1/auth/refresh"),
+    ]);
+    let mut old = record();
+    old.session_expires = NOW - FOUNDATION_EPOCH + 43_200.0;
+    h.seed(&old);
+    let c = h.controller();
+    c.refresh_snapshot(&profile(), &Operation::default())
+        .unwrap();
+    let total = c.snapshot().total_tokens();
+    c.access_credential(&profile(), true, &Operation::default())
+        .unwrap();
+    assert!(c
+        .refresh_snapshot(&profile(), &Operation::default())
+        .is_err());
+    assert_eq!(c.snapshot().total_tokens(), total);
+    assert!(c
+        .access_credential(&profile(), true, &Operation::default())
+        .is_err());
+    assert!(c.snapshot().identity().is_none());
+    assert_eq!(
+        c.snapshot().reading().status(),
+        ReadingStatus::NeedsAuthentication
+    );
+    h.done();
+}
+
+#[test]
+fn snapshot_transport_safety_errors_preserve_specific_diagnosis_and_last_valid_reading() {
+    for (kind, expected) in [
+        (ErrorKind::Redirect, ClientError::UnexpectedRedirect),
+        (ErrorKind::ResponseTooLarge, ClientError::ResponseTooLarge),
+        (ErrorKind::InvalidResponse, ClientError::InvalidResponse),
+    ] {
+        let failure = Step {
+            path: "/v1/gateway/usage",
+            result: Err(TransportError {
+                kind,
+                outcome: RequestOutcome::ResponseReceived,
+            }),
+            state: None,
+            cancel: false,
+        };
+        let h = Harness::new(vec![
+            step("/v1/gateway/whoami", 200, identity()),
+            step("/v1/gateway/usage", 200, usage_reply()),
+            step("/v1/gateway/whoami", 200, identity()),
+            failure,
+        ]);
+        h.seed(&record());
+        let c = h.controller();
+        c.refresh_snapshot(&profile(), &Operation::default())
+            .unwrap();
+        let prior = c.snapshot();
+        assert_eq!(
+            c.refresh_snapshot(&profile(), &Operation::default()),
+            Err(expected)
+        );
+        assert_eq!(c.snapshot().reading().status(), ReadingStatus::Stale);
+        assert_eq!(c.snapshot().total_tokens(), prior.total_tokens());
+        h.done();
+    }
+}
+
+#[test]
+fn cancelled_handoff_preserves_active_snapshot_before_lock_and_after_record_read() {
+    struct CancelOnNow {
+        inner: FakeClock,
+        cancel: Mutex<Option<Operation>>,
+    }
+    impl Clock for CancelOnNow {
+        fn now(&self) -> f64 {
+            if let Some(operation) = self.cancel.lock().unwrap().take() {
+                operation.cancel();
+            }
+            self.inner.now()
+        }
+        fn elapsed(&self) -> Duration {
+            self.inner.elapsed()
+        }
+        fn sleep(&self, duration: Duration) {
+            self.inner.sleep(duration)
+        }
+    }
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+    ]);
+    h.seed(&record());
+    let c = SessionController::new(
+        h.coordinator.clone(),
+        h.store.clone(),
+        h.transport.clone(),
+        CancelOnNow {
+            inner: h.clock.clone(),
+            cancel: Mutex::new(None),
+        },
+    );
+    c.refresh_snapshot(&profile(), &Operation::default())
+        .unwrap();
+    let prior = c.snapshot();
+    c.take_snapshot_change();
+    for before_lock in [true, false] {
+        let operation = Operation::default();
+        if before_lock {
+            operation.cancel();
+        } else {
+            *c.clock.cancel.lock().unwrap() = Some(operation.clone());
+        }
+        assert_eq!(
+            c.access_credential(&profile(), false, &operation)
+                .unwrap_err(),
+            ClientError::GatewayUnavailable
+        );
+        assert_eq!(h.store.state(), Some(SessionState::Active));
+        assert!(Arc::ptr_eq(&prior, &c.snapshot()));
+        assert!(c.take_snapshot_change().is_none());
+    }
+    assert!(c
+        .access_credential(&profile(), false, &Operation::default())
+        .is_ok());
+    h.done();
+}
+
+#[test]
+fn cancellation_after_refresh_intent_clears_snapshot_before_and_after_commit() {
+    for after_commit in [false, true] {
+        let operation = Operation::default();
+        let mut refresh = step("/v1/auth/refresh", 200, pair("b", NOW));
+        refresh.cancel = !after_commit;
+        let h = Harness::new(vec![
+            step("/v1/gateway/whoami", 200, identity()),
+            step("/v1/gateway/usage", 200, usage_reply()),
+            refresh,
+            revoked(),
+        ]);
+        let mut old = record();
+        old.session_expires = NOW - FOUNDATION_EPOCH + 43_200.0;
+        h.seed(&old);
+        let c = h.controller();
+        c.refresh_snapshot(&profile(), &Operation::default())
+            .unwrap();
+        if after_commit {
+            h.store.0.lock().unwrap().cancel_save = Some((3, operation.clone()));
+        }
+        assert_eq!(
+            c.access_credential(&profile(), true, &operation)
+                .unwrap_err(),
+            ClientError::GatewayUnavailable
+        );
+        assert_eq!(
+            h.store.state(),
+            Some(if after_commit {
+                SessionState::RevocationPending
+            } else {
+                SessionState::RefreshPending
+            })
+        );
+        assert!(c.snapshot().identity().is_none());
+        assert!(c.snapshot().total_tokens().is_none());
+        assert_eq!(
+            c.snapshot().reading().status(),
+            ReadingStatus::NeedsAuthentication
+        );
+        h.done();
+    }
+}
+
+#[test]
+fn missing_or_conflicting_allocation_basis_retains_prior_snapshot_as_stale() {
+    for value in [
+        None,
+        Some(json!("allocated_organization_cost")),
+        Some(Value::Null),
+    ] {
+        let mut usage = usage_reply();
+        if let Some(value) = value {
+            usage["allocation_basis"] = value;
+        } else {
+            usage.as_object_mut().unwrap().remove("allocation_basis");
+        }
+        let h = Harness::new(vec![
+            step("/v1/gateway/whoami", 200, identity()),
+            step("/v1/gateway/usage", 200, usage_reply()),
+            step("/v1/gateway/whoami", 200, identity()),
+            step("/v1/gateway/usage", 200, usage),
+        ]);
+        h.seed(&record());
+        let c = h.controller();
+        c.refresh_snapshot(&profile(), &Operation::default())
+            .unwrap();
+        let prior = c.snapshot();
+        h.clock.sleep(Duration::from_secs(1));
+        assert_eq!(
+            c.refresh_snapshot(&profile(), &Operation::default()),
+            Err(ClientError::InvalidResponse)
+        );
+        assert_eq!(c.snapshot().reading().status(), ReadingStatus::Stale);
+        assert_eq!(c.snapshot().total_tokens(), prior.total_tokens());
+        assert_eq!(
+            c.snapshot().reading().checked_at_epoch_seconds(),
+            prior.reading().checked_at_epoch_seconds()
+        );
+        h.done();
+    }
+}
+
+#[test]
+fn signout_during_usage_fetch_immediately_clears_snapshot_and_discards_the_late_reply() {
+    struct FixedClock(SystemClock);
+    impl Clock for FixedClock {
+        fn now(&self) -> f64 {
+            NOW
+        }
+        fn elapsed(&self) -> Duration {
+            self.0.elapsed()
+        }
+        fn sleep(&self, d: Duration) {
+            self.0.sleep(d)
+        }
+    }
+    struct BlockUsage {
+        inner: Transport,
+        started: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl SessionTransport for BlockUsage {
+        fn request(
+            &self,
+            p: &ConnectionProfile,
+            path: &str,
+            body: Option<&[u8]>,
+            access: Option<&str>,
+            op: &Operation,
+        ) -> Result<Reply, TransportError> {
+            let reply = self.inner.request(p, path, body, access, op);
+            if path == "/v1/gateway/usage" {
+                self.started.send(()).unwrap();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+            }
+            reply
+        }
+    }
+    let h = Harness::new(vec![
+        step("/v1/gateway/whoami", 200, identity()),
+        step("/v1/gateway/usage", 200, usage_reply()),
+        revoked(),
+    ]);
+    h.seed(&record());
+    let (started, received) = std::sync::mpsc::channel();
+    let (release, waiting) = std::sync::mpsc::channel();
+    let c = SessionController::new(
+        h.coordinator.clone(),
+        h.store.clone(),
+        BlockUsage {
+            inner: h.transport.clone(),
+            started,
+            release: Mutex::new(waiting),
+        },
+        FixedClock(SystemClock::default()),
+    );
+    std::thread::scope(|scope| {
+        let refresh = scope.spawn(|| c.refresh_snapshot(&profile(), &Operation::default()));
+        received.recv_timeout(Duration::from_secs(5)).unwrap();
+        let logout = scope.spawn(|| c.sign_out(&Operation::default()));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while c.snapshot().reading().status() != ReadingStatus::NeedsAuthentication {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        release.send(()).unwrap();
+        assert!(refresh.join().unwrap().is_err());
+        logout.join().unwrap().unwrap();
+    });
+    assert!(c.snapshot().total_tokens().is_none());
+    assert!(h.store.state().is_none());
+    h.done();
+}

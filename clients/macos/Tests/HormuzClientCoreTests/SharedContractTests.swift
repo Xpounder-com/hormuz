@@ -3,6 +3,23 @@ import XCTest
 @testable import HormuzClientCore
 
 final class SharedContractTests: PrivateStorageTestCase {
+    func testSnapshotInputsPreserveExistingIdentityUsageAndCostLabels() throws {
+        let inputs = try fixture("snapshots")
+        let profile = try JSONDecoder().decode(ConnectionProfile.self,
+            from: JSONSerialization.data(withJSONObject: XCTUnwrap(inputs["profile"])))
+        let identity = try GatewayJSON.decoder().decode(GatewayIdentity.self,
+            from: JSONSerialization.data(withJSONObject: XCTUnwrap(inputs["identity"])))
+        try identity.validate(for: profile)
+        for name in ["usage", "zero"] {
+            let usage = try GatewayJSON.decoder().decode(PersonalUsage.self,
+                from: JSONSerialization.data(withJSONObject: XCTUnwrap(inputs[name])))
+            try usage.validate()
+            XCTAssertEqual(usage.costBasis, "configured_rate_card_estimate")
+            XCTAssertEqual(usage.coverage, "gateway_captured_requests_only")
+            if name == "zero" { XCTAssertEqual(usage.requests, 0); XCTAssertEqual(usage.inputTokens, 0) }
+        }
+    }
+
     func testSharedCredentialRecordCodecAndSessionTransitions() async throws {
         let vectors = try fixture("sessions")
         let source = try XCTUnwrap(vectors["record"] as? [String: Any])
