@@ -113,7 +113,7 @@ must process the next change to update what it displays.
 | First load/offline with no successful response | `offline`, absent identity/usage/time |
 | Valid measured zero | `current`, real zero values and successful time |
 | Connection failure after success | `offline`, last valid same-session data/time |
-| Malformed usage after success | `stale`, last valid same-session data/time |
+| Malformed, redirected or oversized response after success | `stale`, last valid same-session data/time |
 | Authentication loss, unsafe storage or identity mismatch | `needsAuthentication`, cleared display identity/usage/time |
 | Sign-out or different profile | Immediately cleared; late earlier work is discarded |
 

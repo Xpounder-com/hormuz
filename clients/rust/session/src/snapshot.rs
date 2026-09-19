@@ -214,16 +214,20 @@ impl Snapshots {
             return;
         }
         let old = &state.snapshot;
-        let status =
-            if error == ClientError::InvalidResponse || error == ClientError::ResponseTooLarge {
-                if old.reading.usage().is_some() {
-                    ReadingStatus::Stale
-                } else {
-                    ReadingStatus::Offline
-                }
+        let status = if matches!(
+            error,
+            ClientError::InvalidResponse
+                | ClientError::ResponseTooLarge
+                | ClientError::UnexpectedRedirect
+        ) {
+            if old.reading.usage().is_some() {
+                ReadingStatus::Stale
             } else {
                 ReadingStatus::Offline
-            };
+            }
+        } else {
+            ReadingStatus::Offline
+        };
         let value = UsageSnapshot {
             scope: "current_actor",
             identity: old.identity.clone(),

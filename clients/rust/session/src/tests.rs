@@ -909,6 +909,43 @@ fn known_local_rotation_preserves_cache_but_failed_refresh_removes_usable_identi
 }
 
 #[test]
+fn snapshot_transport_safety_errors_preserve_specific_diagnosis_and_last_valid_reading() {
+    for (kind, expected) in [
+        (ErrorKind::Redirect, ClientError::UnexpectedRedirect),
+        (ErrorKind::ResponseTooLarge, ClientError::ResponseTooLarge),
+        (ErrorKind::InvalidResponse, ClientError::InvalidResponse),
+    ] {
+        let failure = Step {
+            path: "/v1/gateway/usage",
+            result: Err(TransportError {
+                kind,
+                outcome: RequestOutcome::ResponseReceived,
+            }),
+            state: None,
+            cancel: false,
+        };
+        let h = Harness::new(vec![
+            step("/v1/gateway/whoami", 200, identity()),
+            step("/v1/gateway/usage", 200, usage_reply()),
+            step("/v1/gateway/whoami", 200, identity()),
+            failure,
+        ]);
+        h.seed(&record());
+        let c = h.controller();
+        c.refresh_snapshot(&profile(), &Operation::default())
+            .unwrap();
+        let prior = c.snapshot();
+        assert_eq!(
+            c.refresh_snapshot(&profile(), &Operation::default()),
+            Err(expected)
+        );
+        assert_eq!(c.snapshot().reading().status(), ReadingStatus::Stale);
+        assert_eq!(c.snapshot().total_tokens(), prior.total_tokens());
+        h.done();
+    }
+}
+
+#[test]
 fn signout_during_usage_fetch_immediately_clears_snapshot_and_discards_the_late_reply() {
     struct FixedClock(SystemClock);
     impl Clock for FixedClock {

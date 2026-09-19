@@ -413,7 +413,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
                     Some(&record.access),
                     operation,
                 )
-                .map_err(|_| ClientError::GatewayUnavailable)?;
+                .map_err(transport_error)?;
             if reply.status == 401 {
                 return Err(ClientError::LoginRequired);
             }
