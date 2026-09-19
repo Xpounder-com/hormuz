@@ -75,6 +75,45 @@ jobs:
       - name: Lint shared Rust contracts
         working-directory: clients/rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build native Windows preview
+        if: runner.os == 'Windows'
+        working-directory: clients/rust
+        run: cargo build -p hormuz-windows --release --locked
+      - name: Exercise native Windows window lifecycle
+        if: runner.os == 'Windows'
+        working-directory: clients/rust
+        shell: pwsh
+        run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe
+      - name: Record Windows development artifact provenance
+        if: runner.os == 'Windows'
+        working-directory: clients/rust
+        shell: pwsh
+        env:
+          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $metadata = @{
+            schema_version = 1
+            artifact_kind = "unsigned_synthetic_preview"
+            source_commit = (git rev-parse HEAD).Trim()
+            proposed_head = $env:HORMUZ_PR_HEAD
+            target = "x86_64-pc-windows-msvc"
+            compiler = (rustc --version).Trim()
+            os = [Environment]::OSVersion.VersionString
+            sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            native_smoke = "passed"
+            manual_platform_acceptance = "pending"
+          }
+          $metadata | ConvertTo-Json | Set-Content target/release/windows-build.json
+      - name: Save Windows development preview
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-windows-preview-${{ github.sha }}
+          path: |
+            clients/rust/target/release/hormuz-windows.exe
+            clients/rust/target/release/windows-build.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Verify existing Swift expectations
         if: runner.os == 'macOS'
         run: swift test --package-path clients/macos --filter SharedContractTests
