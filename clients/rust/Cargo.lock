@@ -284,6 +284,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hormuz-client-platform"
+version = "1.5.0-dev.1"
+dependencies = [
+ "core-foundation",
+ "libc",
+ "security-framework",
+ "security-framework-sys",
+ "tempfile",
+ "windows-sys 0.61.2",
+ "zeroize",
+]
+
+[[package]]
 name = "hormuz-client-transport"
 version = "1.5.0-dev.1"
 dependencies = [
