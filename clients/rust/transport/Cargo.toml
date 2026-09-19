@@ -1,0 +1,22 @@
+[package]
+name = "hormuz-client-transport"
+version = "1.5.0-dev.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Bounded native gateway JSON transport, independent of session state."
+
+[dependencies]
+hormuz-client-core = { path = "../core" }
+reqwest = { version = "0.13.5", default-features = false, features = ["native-tls"] }
+native-tls = "0.2.18"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+futures-executor = "0.3"
+rcgen = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+time = "0.3"
