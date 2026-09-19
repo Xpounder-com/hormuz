@@ -1,0 +1,81 @@
+{
+  "schema_id": "hormuz.native-client-fixtures",
+  "schema_version": 1,
+  "source_revision": "68b0b978fabac90f0bc7c33228a5bd3c68c681ab",
+  "session_states": [
+    {
+      "code": null,
+      "has_session": false
+    },
+    {
+      "code": "active",
+      "has_session": true
+    },
+    {
+      "code": "refreshPending",
+      "has_session": true
+    },
+    {
+      "code": "revocationPending",
+      "has_session": true
+    }
+  ],
+  "rejected_session_states": [
+    "refresh_pending",
+    "revoked",
+    "unknown",
+    ""
+  ],
+  "reading_states": [
+    {
+      "code": "current",
+      "is_stale": false,
+      "is_unavailable": false
+    },
+    {
+      "code": "stale",
+      "is_stale": true,
+      "is_unavailable": false
+    },
+    {
+      "code": "offline",
+      "is_stale": false,
+      "is_unavailable": true
+    },
+    {
+      "code": "needsAuthentication",
+      "is_stale": false,
+      "is_unavailable": true
+    }
+  ],
+  "context_states": [
+    {
+      "code": "off",
+      "label": "Off"
+    },
+    {
+      "code": "ready",
+      "label": "Ready for eligible tool results"
+    },
+    {
+      "code": "resources_unavailable",
+      "label": "Tokenizer resources need setup"
+    },
+    {
+      "code": "unsupported_client",
+      "label": "This client version is not supported"
+    },
+    {
+      "code": "unsupported_history",
+      "label": "Current history will pass through unchanged"
+    },
+    {
+      "code": "gateway_incompatible",
+      "label": "Gateway upgrade required"
+    },
+    {
+      "code": "settings_invalid",
+      "label": "Local setting could not be verified"
+    }
+  ]
+}

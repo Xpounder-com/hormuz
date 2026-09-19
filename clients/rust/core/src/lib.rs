@@ -8,33 +8,21 @@
 
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::fmt;
 
 /// Matches the existing Mac transport bound; transport must also bound reads.
 pub const MAX_RESPONSE_BYTES: usize = 128 * 1024;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ClientError {
-    InvalidResponse,
-    IdentityMismatch,
-    ResponseTooLarge,
-}
+mod error;
+mod profile;
+mod settings;
+mod status;
 
-impl fmt::Display for ClientError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::InvalidResponse => {
-                "The gateway returned an invalid response. No credential was displayed."
-            }
-            Self::IdentityMismatch => {
-                "The returned identity does not match this team's client connection."
-            }
-            Self::ResponseTooLarge => "The gateway response exceeded the client safety limit.",
-        })
-    }
-}
-
-impl std::error::Error for ClientError {}
+pub use error::ClientError;
+pub use profile::{normalize_gateway, ConnectionProfile, GatewaySetup};
+pub use settings::{
+    ContextOptimizationPreference, ContextOptimizationStatus, MAX_CONTEXT_SETTINGS_BYTES,
+};
+pub use status::{ConnectionStatus, ReadingStatus, SessionState, UsageReading};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum AIClient {

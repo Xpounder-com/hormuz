@@ -10,3 +10,5 @@ description = "Shared native Hormuz client contracts; no transport or credential
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+url.workspace = true
+unicode-general-category.workspace = true
