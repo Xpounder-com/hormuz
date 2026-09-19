@@ -1,0 +1,72 @@
+name: Native client contracts
+
+on:
+  pull_request:
+    paths:
+      - "clients/rust/**"
+      - "clients/contracts/**"
+      - "clients/macos/Sources/HormuzClientCore/**"
+      - "clients/macos/Tests/HormuzClientCoreTests/SharedContractTests.swift"
+      - "tests/fixtures/native_client/**"
+      - "tests/fixtures/contracts/**"
+      - "tests/test_native_client_contracts.py"
+      - "hormuz/contracts.py"
+      - "hormuz/_contract_schemas/**"
+      - ".github/workflows/native-client-contracts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "clients/rust/**"
+      - "clients/contracts/**"
+      - "clients/macos/Sources/HormuzClientCore/**"
+      - "clients/macos/Tests/HormuzClientCoreTests/SharedContractTests.swift"
+      - "tests/fixtures/native_client/**"
+      - "tests/fixtures/contracts/**"
+      - "tests/test_native_client_contracts.py"
+      - "hormuz/contracts.py"
+      - "hormuz/_contract_schemas/**"
+      - ".github/workflows/native-client-contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-client-contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Shared contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Verify existing gateway expectations
+        run: python -m unittest -v tests.test_native_client_contracts
+      - name: Install pinned Rust toolchain
+        working-directory: clients/rust
+        run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt,clippy
+      - name: Check Rust formatting
+        working-directory: clients/rust
+        run: cargo fmt --all -- --check
+      - name: Verify shared Rust contracts
+        working-directory: clients/rust
+        run: cargo test --workspace --locked
+      - name: Lint shared Rust contracts
+        working-directory: clients/rust
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Verify existing Swift expectations
+        if: runner.os == 'macOS'
+        run: swift test --package-path clients/macos --filter SharedContractTests
