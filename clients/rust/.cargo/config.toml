@@ -1,0 +1,4 @@
+# Keep the native x64 preview runnable without a separately installed Visual C++
+# redistributable. Windows system DLLs remain dynamic; platform acceptance is separate.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

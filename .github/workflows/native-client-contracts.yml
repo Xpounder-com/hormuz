@@ -84,6 +84,25 @@ jobs:
         working-directory: clients/rust
         shell: pwsh
         run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe
+      - name: Check Windows runtime dependencies
+        if: runner.os == 'Windows'
+        working-directory: clients/rust
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $dumpbin = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe' | Select-Object -First 1
+          if (-not $dumpbin) { throw "MSVC dependency inspector is unavailable." }
+          $dependencies = & $dumpbin /DEPENDENTS target/release/hormuz-windows.exe
+          if ($LASTEXITCODE -ne 0) { throw "PE dependency inspection failed." }
+          $imports = @($dependencies | ForEach-Object {
+            if ($_ -match '^\s+([A-Za-z0-9_.-]+\.dll)\s*$') { $Matches[1].ToLowerInvariant() }
+          } | Sort-Object -Unique)
+          if ($imports.Count -eq 0) { throw "PE imports were not found." }
+          if ($imports | Where-Object { $_ -match '^(vcruntime|msvcp|concrt)' }) {
+            throw "Preview unexpectedly requires a Visual C++ redistributable."
+          }
+          $imports | Set-Content target/release/windows-imports.txt
+          $imports | ForEach-Object { Write-Output "windows_import=$_" }
       - name: Record Windows development artifact provenance
         if: runner.os == 'Windows'
         working-directory: clients/rust
@@ -101,6 +120,8 @@ jobs:
             os = [Environment]::OSVersion.VersionString
             sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()
             native_smoke = "passed"
+            static_msvc_crt = $true
+            direct_dll_imports = @(Get-Content target/release/windows-imports.txt)
             manual_platform_acceptance = "pending"
           }
           $metadata | ConvertTo-Json | Set-Content target/release/windows-build.json

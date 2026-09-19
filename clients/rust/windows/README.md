@@ -4,6 +4,9 @@ Development slice for [#331](https://github.com/Xpounder-com/hormuz/issues/331),
 planned v1.4.0, using the contracts from #330. This is an unsigned synthetic
 preview, not a connected client or an installer. Current build target:
 Windows 10/11 x64 (`x86_64-pc-windows-msvc`); Windows ARM64 is not qualified here.
+The workspace statically links the MSVC C runtime for this target. CI checks the
+PE imports so a developer machine's installed Visual C++ redistributable cannot
+silently become an undeclared runtime prerequisite.
 
 The process owns one Win32 top-level window, standard text/button controls and
 a notification-area icon. It can fold, hide and reopen. Close and Escape hide
