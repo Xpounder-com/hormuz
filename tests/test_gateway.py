@@ -617,11 +617,15 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertGreater(totals.cost_microusd, 0)
 
     def test_provider_redirects_never_send_credentials_to_another_origin(self) -> None:
-        second_origin_requests: list[tuple[str, bool]] = []
+        second_origin_requests: list[tuple[str, bool, bool]] = []
 
         class SecondOrigin(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802
-                second_origin_requests.append((self.command, bool(self.headers.get("Authorization"))))
+                second_origin_requests.append((
+                    self.command,
+                    bool(self.headers.get("Authorization")),
+                    bool(self.headers.get("X-Api-Key")),
+                ))
                 self.send_response(200)
                 self.send_header("Content-Length", "2")
                 self.end_headers()
@@ -635,28 +639,62 @@ class GatewayIntegrationTests(unittest.TestCase):
         second_origin = ThreadingHTTPServer(("127.0.0.1", 0), SecondOrigin)
         second_thread = threading.Thread(target=second_origin.serve_forever, daemon=True)
         second_thread.start()
+        expected_statuses: list[int] = []
         try:
             locations = (
                 f"http://127.0.0.1:{second_origin.server_port}/capture",
                 "http://[",
             )
-            for redirect_status in (301, 302, 303, 307, 308):
-                for location in locations:
-                    with self.subTest(status=redirect_status, malformed=location == "http://["):
-                        FakeProviderHandler.redirect_target = location
-                        status, headers, _ = self._post(
-                            "/v1/responses",
-                            {
-                                "model": "engineering-fast",
-                                "input": "synthetic redirect probe",
-                                "force_redirect_status": redirect_status,
-                            },
-                        )
-                        self.assertEqual(status, 502)
-                        self.assertEqual(headers["x-hormuz-error-code"], "gateway_upstream_redirect")
-                        self.assertNotIn("location", headers)
-                        self.assertEqual(second_origin_requests, [])
-                        self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
+            requests = (
+                ("/v1/responses", {"model": "engineering-fast", "input": "synthetic redirect probe"}),
+                ("/v1/messages", {
+                    "model": "claude-standard",
+                    "messages": [{"role": "user", "content": "synthetic redirect probe"}],
+                    "max_tokens": 8,
+                }),
+            )
+            for path, request_body in requests:
+                for redirect_status in (301, 302, 303, 307, 308):
+                    for location in locations:
+                        with self.subTest(path=path, status=redirect_status, malformed=location == "http://["):
+                            FakeProviderHandler.redirect_target = location
+                            status, headers, response_body = self._post(
+                                path,
+                                {**request_body, "force_redirect_status": redirect_status},
+                            )
+                            self.assertEqual(status, 502)
+                            self.assertEqual(headers["x-hormuz-error-code"], "gateway_upstream_redirect")
+                            self.assertNotIn("location", headers)
+                            self.assertNotIn(location.encode(), response_body)
+                            self.assertNotIn(OPENAI_KEY.encode(), response_body)
+                            self.assertNotIn(ANTHROPIC_KEY.encode(), response_body)
+                            self.assertEqual(second_origin_requests, [])
+                            expected_statuses.append(redirect_status)
+                            self.assertEqual(len(FakeProviderHandler.requests), len(expected_statuses))
+                            self.assertEqual(
+                                self.gateway.store.active_budget_reservations(),
+                                len(expected_statuses),
+                            )
+            self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+            with sqlite3.connect(self.gateway.store.path) as connection:
+                terminal_events = connection.execute(
+                    "SELECT state, reason_code, usage_event_id "
+                    "FROM gateway_request_attempt_events WHERE sequence = 2"
+                ).fetchall()
+                metrics = connection.execute(
+                    "SELECT provider_status, provider_bytes_read, downstream_bytes_sent "
+                    "FROM gateway_provider_attempt_metrics"
+                ).fetchall()
+                usage_count = connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0]
+            self.assertEqual(
+                terminal_events,
+                [("outcome_unknown", "provider_transport_ambiguous", None)] * len(expected_statuses),
+            )
+            self.assertEqual(
+                sorted(metrics),
+                sorted((status, 0, 0) for status in expected_statuses),
+            )
+            self.assertEqual(usage_count, 0)
         finally:
             FakeProviderHandler.redirect_target = None
             second_origin.shutdown()

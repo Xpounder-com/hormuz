@@ -1022,11 +1022,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if 300 <= status < 400:
             response.close()
             if account_usage and attempt is not None:
-                self.server.provider_reliability_store.finalize_request_attempt(
+                # A redirect can follow an accepted POST. Its status alone
+                # cannot establish whether provider work was billable, so
+                # retain the conservative hold without following Location.
+                self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
                     attempt=attempt,
                     organization_id=identity.organization_id,
-                    status="failed",
-                    cost_microusd=0,
+                    reason_code="provider_transport_ambiguous",
                     provider_metrics=self._provider_metrics(
                         started_ns=started_ns,
                         provider_status=status,
@@ -1036,9 +1038,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         downstream_bytes_sent=0,
                     ),
                 )
-                observation = getattr(self, "_impact_observations", {}).get(attempt.attempt_id)
-                if observation is not None and self.server.impact_recorder is not None:
-                    self.server.impact_recorder.submit(replace(observation, status="failed"))
             self._send_protocol_error(
                 protocol,
                 "Upstream provider redirect refused.",
