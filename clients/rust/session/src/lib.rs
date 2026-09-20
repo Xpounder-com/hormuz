@@ -1,9 +1,10 @@
 //! Session transactions for native workers, not the UI thread. No resident
-//! worker, scheduler, browser process, or network runtime is created here.
+//! worker, OS subscription, browser process, or network runtime is created here.
 #![forbid(unsafe_code)]
 
 mod io;
 mod record;
+mod scheduler;
 mod snapshot;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hormuz_client_core::{
@@ -15,6 +16,7 @@ use hormuz_client_platform::{
 pub use io::{Clock, NativeTransport, Operation, Reply, SessionTransport, SystemClock};
 pub use record::SessionRecord;
 use record::{timestamp, CredentialPair, FOUNDATION_EPOCH};
+pub use scheduler::{DashboardRefresh, DashboardVisibility, RefreshPolicy};
 use serde::Deserialize;
 pub use snapshot::UsageSnapshot;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -49,6 +51,7 @@ pub struct SessionController<C, S, T = NativeTransport, K = SystemClock> {
     disabled: AtomicBool,
     generation: AtomicU64,
     snapshots: snapshot::Snapshots,
+    refresh: std::sync::Arc<std::sync::Mutex<scheduler::RefreshState>>,
 }
 
 impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
@@ -63,6 +66,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
             disabled: AtomicBool::new(false),
             generation: AtomicU64::new(0),
             snapshots: snapshot::Snapshots::default(),
+            refresh: Default::default(),
         }
     }
 
@@ -378,6 +382,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
     pub fn sign_out(&self, operation: &Operation) -> Result<(), ClientError> {
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.disabled.store(true, Ordering::SeqCst);
+        self.set_dashboard_profile(None);
         self.snapshots
             .invalidate(ReadingStatus::NeedsAuthentication);
         let _guard = self.lock(operation)?;
@@ -402,22 +407,34 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
         self.snapshots.take_change()
     }
 
-    /// A relay completion can call this same refresh entry point. No local usage
-    /// is added and no scheduler or background polling loop is started here.
+    /// Immediate worker transaction. Native dashboards should instead use
+    /// `take_dashboard_refresh` so every view shares the same scheduling gate.
     pub fn refresh_snapshot(
         &self,
         profile: &ConnectionProfile,
         operation: &Operation,
     ) -> Result<(), ClientError> {
         let ticket = self.snapshots.begin(profile);
+        self.refresh_snapshot_with_ticket(profile, operation, &ticket)
+    }
+
+    fn refresh_snapshot_with_ticket(
+        &self,
+        profile: &ConnectionProfile,
+        operation: &Operation,
+        ticket: &snapshot::Ticket,
+    ) -> Result<(), ClientError> {
         let result = (|| {
+            if !self.snapshots.current(ticket) {
+                return Err(ClientError::ConfigurationChanged);
+            }
             let guard = self.lock(operation)?;
-            if !self.snapshots.current(&ticket) {
+            if !self.snapshots.current(ticket) {
                 return Err(ClientError::ConfigurationChanged);
             }
             let record = self.credential(&guard, profile, false, operation)?;
             let identity = self.identity(&record, operation)?;
-            self.snapshots.verify_identity(&ticket, &identity)?;
+            self.snapshots.verify_identity(ticket, &identity)?;
             self.check_enabled(operation)?;
             let reply = self
                 .transport
@@ -446,11 +463,16 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
             if ConnectionProfile::from_json(&bytes)? != *profile {
                 return Err(ClientError::IdentityMismatch);
             }
-            self.snapshots
-                .success(&ticket, identity, usage, self.clock.now())
+            self.snapshots.success(
+                ticket,
+                identity,
+                usage,
+                self.clock.now(),
+                self.clock.elapsed(),
+            )
         })();
         if let Err(error) = result {
-            self.snapshots.failure(&ticket, error);
+            self.snapshots.failure(ticket, error);
         }
         result
     }

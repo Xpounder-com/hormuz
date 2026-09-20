@@ -91,5 +91,12 @@ Issue #336 adds coordinated immutable usage snapshots to that same unpublished
 session library. Identity/profile/credential changes clear cached data, obsolete
 requests cannot publish, and a single change slot preserves explicit
 current/stale/offline/authentication states with authoritative personal labels.
-Scheduling and power behavior remain the next #337 scope; connected UI and native
-platform acceptance remain open.
+Issue #337 adds the shared event-driven scheduler to the same unpublished
+library: one outstanding dashboard job and one wake-up deadline, tunable
+45-second summary/7-second detail hypotheses, bounded completion debounce,
+offline backoff, age-based staleness and independent lock/sleep gates. Synthetic
+traces verify these library decisions and separate operation cancellation.
+**#337 remains open** for native-shell wiring and measured idle/locked/resume
+behavior. The existing Mac app and draft Windows shell do not consume this
+scheduler yet; connected UI, native power/footprint and release acceptance remain
+unproven. See the [scheduler integration contract](../clients/rust/session/README.md#central-dashboard-scheduler-337-source-checkpoint).

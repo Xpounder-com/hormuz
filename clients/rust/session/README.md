@@ -135,6 +135,100 @@ repeated equivalent errors, authentication loss and recovery. Additional tests
 cover late completions, credential/identity changes, exact integer limits,
 credential exclusion and a real concurrent sign-out during a blocked usage
 response. Swift and Python verify the shared inputs against their existing
-native/gateway validators. Age-based staleness, refresh coalescing, sleep/network
-events and relay-completion scheduling remain #337; callers may request a fresh
-snapshot without synthesizing accounting or creating another polling loop.
+native/gateway validators. The shared scheduler below adds age-based staleness,
+refresh coalescing and lifecycle inputs without synthesizing accounting.
+
+## Central dashboard scheduler (#337 source checkpoint)
+
+The controller owns one constant-size scheduler, one outstanding dashboard job
+and the existing one-slot snapshot-change delivery. Construction still creates
+no timer, event subscription, thread, async runtime, relay or render loop.
+All screens share this controller. Do not call the immediate `refresh_snapshot`
+transaction from individual views; route their dashboard polling through this
+scheduler. The Python gateway and existing native apps are unchanged.
+
+| Policy | Initial hypothesis |
+| --- | --- |
+| Visible summary refresh | 45 seconds |
+| Visible detail refresh | 7 seconds |
+| Current reading becomes stale | 60 seconds after last whole valid response |
+| Local-request completion debounce | 2 seconds quiet, at most 10 seconds during a continuous burst |
+| Failed-request retry | 5, 10, 20, 40, 80, 160, then at most 300 seconds |
+
+`RefreshPolicy::new` accepts tunable second-based intervals from 1 to 86400,
+rejecting zero, inverted summary/detail and inverted retry ranges. These defaults
+start within #337's 30–60/5–10-second measurement ranges. They are not a measured
+power saving or release budget. Failures retain exponential backoff across view
+changes and relay-completion events; a coalesced network-change hint can bring
+forward one retry. Only successful refresh resets the failure count.
+
+The future native adapter must follow this event-driven ownership contract:
+
+1. Restore/verify the session on a bounded worker, then call
+   `set_dashboard_profile(Some(profile))`. Call it again after explicit session
+   recovery; authentication failures disarm automatic refresh. Profile changes
+   clear the display and invalidate old work immediately. `sign_out` also
+   deactivates the scheduler before waiting for custody.
+2. Feed the aggregate `Hidden`, `Summary` or `Detail` visibility through
+   `set_dashboard_visibility`. Feed OS lifecycle events through
+   `dashboard_lifecycle`. Sleep and session lock are independent gates; both
+   must clear before polling resumes. Duplicate events have no polling effect.
+3. After each event, alarm, and worker completion, call
+   `take_dashboard_refresh()`. Move a returned non-cloneable job to the existing
+   bounded worker pool and call `run_dashboard_refresh(job)`. Until that job
+   completes or is dropped, no other dashboard job can be taken. A queued job
+   that reaches its worker after suspension does no network work.
+4. Calculate `next_dashboard_wakeup()`, then drain `take_snapshot_change()` on
+   the UI thread and redraw only for an emitted change. Replace the shell's
+   **single** alarm with that delay. `None` means disarm; do not poll the API
+   repeatedly. A zero delay means work is due. An alarm or deadline calculation
+   can only age the snapshot, without creating a network request; always drain
+   changes and rearm after processing.
+5. Feed `local_request_completed()` as a content-free signal. It retains one
+   coalesced pending refresh, including completions during an outstanding job.
+   No relay count, cost, token value, prompt or response enters the snapshot.
+
+Hidden, locked, sleeping and quit states return no wake-up deadline and dispatch
+no new polls. They do not cancel a transaction already running: it may have saved
+a credential-refresh intent and must finish its bounded commit or recovery.
+An explicit `job.cancellation()` handle belongs only to that dashboard operation.
+Cancellation after intent still requires session recovery; no automatic replay.
+Relay operations keep separate cancellation handles and lifetimes. Dropping a
+job before dispatch releases its slot with a retry delay starting at the next
+scheduler event, so even a long-queued discarded job cannot retry immediately.
+A worker must always
+report completion so the shell can rearm its alarm. Quit is terminal for that
+controller; helper shutdown remains the lifecycle owner's responsibility.
+
+Reopening or resuming with current data does not itself fetch; it schedules the
+next visible interval. Stale/missing data can fetch immediately, subject to any
+existing failure backoff. A pending relay-completion signal is an independent
+refresh reason. While suspended, age is reconciled on the next visible event
+without timer wake-ups. A current reading ages using the greater of monotonic
+and wall-clock elapsed time. Backward/invalid wall time or backward monotonic
+time expires it conservatively. It never becomes current again without a valid
+response, and age/failure never changes its successful timestamp or scope.
+
+Run `cargo test -p hormuz-client-session tests::scheduler --locked` for the
+deterministic scheduling traces and synthetic concurrency tests, in addition to
+the workspace verification above. Coverage includes duplicate views/events,
+overlapping sleep/lock gates, stale-only reopening, bounded debounce, capped
+backoff, network recovery, wall/monotonic clock changes, dropped/foreign jobs,
+immediate refresh supersession without false authentication suspension,
+profile/sign-out invalidation, persisted-refresh completion under suspension,
+and explicit cancellation after intent. A real loopback request proves separate
+operation cancellation; it is a buffered synthetic request, not a streaming
+relay or native-shell acceptance test.
+
+**#337 remains open.** The shipping Mac app and draft Windows shell do not yet
+consume this Rust scheduler or its lifecycle inputs. Before closure, link native
+shell wiring and measured release-build visible-idle, hidden, locked, sleeping,
+resume/network and active-relay traces, with exact commit, binary hash, OS,
+duration, request/wake-up/redraw counts and platform measurement commands. Verify
+one native alarm, no per-screen timers, no lock/sleep polling, stale-only reopen,
+and uninterrupted AI traffic on each claimed shell. Injected events and portable
+test passes do not establish OS event delivery, actual sleep behavior, native
+power use, UI responsiveness or an improved footprint. Connected Windows
+integration/acceptance remains #339–340; the Mac Rust bridge/integration remains
+#344–345. The product stays v1.2.0 and this library stays unpublished
+`1.5.0-dev.1`.
