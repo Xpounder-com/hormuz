@@ -515,6 +515,18 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     let worker_transport = transport.clone();
     let clock = TestClock::default();
     let worker_clock = clock.clone();
+    // Seed a saved account through the real controller and private profile file,
+    // then deny custody for the GUI's initial restore. No native user credential
+    // target is read or written by this synthetic test.
+    SessionController::new(
+        directory.clone(),
+        store.clone(),
+        transport.clone(),
+        clock.clone(),
+    )
+    .sign_in(&profile(), &Browser::default(), &Operation::default())
+    .unwrap();
+    store.locked.store(true, Ordering::SeqCst);
     let (finished, completion) = std::sync::mpsc::channel();
     let worker = thread::spawn(move || {
         let result = native::run_with_factory(
@@ -557,6 +569,16 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
         owner == unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() }
     });
     let cleanup = WindowCleanup(window);
+    until(|| text(window, 301).contains("credential store"));
+    assert!(text(window, 201).is_empty());
+    assert!(text(window, 202).is_empty());
+    store.locked.store(false, Ordering::SeqCst);
+    send(window, WM_COMMAND, 111);
+    until(|| text(window, 300).starts_with("Current"));
+    assert_eq!(text(window, 201), "https://gateway.example.test");
+    assert_eq!(text(window, 202), "org-a");
+    assert_eq!(text(window, 203), "openai-primary");
+    send(window, WM_COMMAND, 110);
     until(|| text(window, 301).contains("Enter your gateway"));
     assert_eq!(text(window, 302), "Your requests: —");
     for (id, value) in [

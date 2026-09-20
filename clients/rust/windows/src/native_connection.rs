@@ -188,7 +188,7 @@ pub unsafe fn update(app: &App) {
             SetWindowTextW(*control, wide(&text).as_ptr());
         }
         let inputs = app.inputs.get();
-        if !app.profile_loaded.get() && !view.phase.busy() && view.connection.is_some() {
+        if !app.profile_loaded.get() && !view.phase.busy() {
             if let Some(profile) = view.connection.as_ref().and_then(|s| s.profile()) {
                 for (index, text) in [
                     (1, profile.gateway()),
@@ -204,8 +204,8 @@ pub unsafe fn update(app: &App) {
                     usize::from(profile.client() == AIClient::ClaudeCode),
                     0,
                 );
+                app.profile_loaded.set(true);
             }
-            app.profile_loaded.set(true);
         }
         let editable = !view.has_session() && !view.phase.busy();
         for index in [1, 3, 5, 7, 9, 10] {
