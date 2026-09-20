@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 pub struct Options {
     pub smoke: bool,
+    pub preview: bool,
     pub state_directory: Option<PathBuf>,
 }
 
@@ -10,15 +11,15 @@ impl Options {
     pub fn parse(arguments: Vec<OsString>) -> Result<Self, ()> {
         let mut options = Self {
             smoke: false,
+            preview: false,
             state_directory: None,
         };
-        let mut preview = false;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             if argument == "--smoke-test" && !options.smoke {
                 options.smoke = true;
-            } else if argument == "--preview" && !preview {
-                preview = true;
+            } else if argument == "--preview" && !options.preview {
+                options.preview = true;
             } else if argument == "--state-directory" && options.state_directory.is_none() {
                 let path = PathBuf::from(arguments.next().ok_or(())?);
                 if !path.is_absolute() {
@@ -31,7 +32,7 @@ impl Options {
         }
         // Isolated test roots are explicit synthetic-preview inputs. Connected
         // credential coordination will always use the fixed native root.
-        if options.state_directory.is_some() && !(preview || options.smoke) {
+        if options.state_directory.is_some() && !(options.preview || options.smoke) {
             return Err(());
         }
         Ok(options)

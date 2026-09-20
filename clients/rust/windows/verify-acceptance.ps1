@@ -94,7 +94,8 @@ try {
     }
     $metadata = [ordered]@{
         schema_version = 1
-        artifact_kind = "unsigned_synthetic_preview"
+        artifact_kind = "unsigned_connected_development_candidate"
+        execution_mode = "synthetic_preview"
         source_commit = $sourceCommit
         proposed_head = $proposedHead
         artifact_sha256 = $artifactHash

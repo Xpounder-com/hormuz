@@ -319,15 +319,15 @@ class RepositoryGovernanceTests(unittest.TestCase):
 
     def test_windows_preview_steps_keep_their_named_platform_gates(self) -> None:
         names = (
-            "Build native Windows preview",
+            "Build native Windows development candidate",
             "Exercise native Windows window lifecycle",
             "Verify Windows accessibility and collect preview measurements",
             "Verify native Windows instance activation",
             "Reject invalid Windows acceptance targets and preserve evidence",
             "Check Windows runtime dependencies",
-            "Verify Windows preview repeat-build identity",
+            "Verify Windows candidate repeat-build identity",
             "Record Windows development artifact provenance",
-            "Save Windows development preview",
+            "Save Windows development candidate",
         )
         for name in names:
             marker = f"      - name: {name}\n        if: runner.os == 'Windows'\n"
@@ -354,7 +354,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
             self._copy_contract(root)
             workflow = root / ".github/workflows/native-client-contracts.yml"
             value = workflow.read_text(encoding="utf-8")
-            build = "      - name: Build native Windows preview\n"
+            build = "      - name: Build native Windows development candidate\n"
             shared = "      - name: Verify shared native Rust libraries\n"
             condition = "        if: runner.os == 'Windows'\n"
             self.assertIn(build + condition, value)
@@ -407,7 +407,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
             workflow = root / ".github/workflows/native-client-contracts.yml"
             value = workflow.read_text(encoding="utf-8")
             build = (
-                "      - name: Build native Windows preview\n"
+                "      - name: Build native Windows development candidate\n"
                 "        if: runner.os == 'Windows'\n"
                 "        working-directory: clients/rust\n"
                 "        run: cargo build -p hormuz-windows --release --locked\n"

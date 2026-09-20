@@ -1438,7 +1438,7 @@ def _validate_native_contract_workflow(
     """Keep one reusable native matrix, required by the calling CI aggregate."""
 
     windows_steps = {
-        "Build native Windows preview": (
+        "Build native Windows development candidate": (
             "        working-directory: clients/rust\n",
             "        run: cargo build -p hormuz-windows --release --locked\n",
         ),
@@ -1474,7 +1474,7 @@ def _validate_native_contract_workflow(
             '            throw "Preview unexpectedly requires a Visual C++ redistributable."\n',
             "          $imports | Set-Content target/release/windows-imports.txt\n",
         ),
-        "Verify Windows preview repeat-build identity": (
+        "Verify Windows candidate repeat-build identity": (
             "        working-directory: clients/rust\n",
             "        shell: pwsh\n",
             "        run: ./windows/verify-rebuild.ps1\n",
@@ -1483,7 +1483,7 @@ def _validate_native_contract_workflow(
             "        working-directory: clients/rust\n",
             "        shell: pwsh\n",
             "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
-            '            artifact_kind = "unsigned_synthetic_preview"\n',
+            '            artifact_kind = "unsigned_connected_development_candidate"\n',
             "            source_commit = (git rev-parse HEAD).Trim()\n",
             "            proposed_head = $env:HORMUZ_PR_HEAD\n",
             '            target = "x86_64-pc-windows-msvc"\n',
@@ -1500,9 +1500,9 @@ def _validate_native_contract_workflow(
             '            manual_platform_acceptance = "pending"\n',
             "          $metadata | ConvertTo-Json | Set-Content target/release/windows-build.json\n",
         ),
-        "Save Windows development preview": (
+        "Save Windows development candidate": (
             "        uses: actions/upload-artifact@",
-            "          name: native-windows-preview-${{ github.sha }}\n",
+            "          name: native-windows-candidate-${{ github.sha }}\n",
             "            clients/rust/target/release/hormuz-windows.exe\n",
             "            clients/rust/target/release/windows-build.json\n",
             "            clients/rust/target/release/windows-acceptance.json\n",
