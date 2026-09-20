@@ -24,6 +24,8 @@ The workload measures `compact_text` helper runtime for path-list, line-run,
 and search-line cases. It includes small, typical, large, empty, malformed,
 duplicate, and Unicode inputs, plus held-out correctness cases. A result on
 this helper does not establish a gateway or customer throughput improvement.
+The held-out JSON table is large enough to compact; a regression test proves
+that disabling JSON-table compaction changes its correctness fingerprint.
 The app's **Optimize** and **Super Optimize** controls differ in search depth;
 both use the same behavior and performance acceptance rules. Neither mode
 has a pricing, billing, or budget feature.

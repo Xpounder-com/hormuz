@@ -68,7 +68,14 @@ def heldout_cases() -> dict[str, tuple[str, str]]:
         "search_mixed": (
             "src/a.py:1:alpha\nsrc/a.py:2:beta\nsrc/b.py:3:gamma\n", "search_lines",
         ),
-        "json_table": ('[{"a":1,"b":"x"},{"a":2,"b":"y"}]', "json_table"),
+        "json_table": (
+            json.dumps(
+                [{"record_id": index, "status": "synthetic", "region": "local"}
+                 for index in range(24)],
+                separators=(",", ":"),
+            ),
+            "json_table",
+        ),
     }
 
 
