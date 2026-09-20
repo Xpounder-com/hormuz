@@ -46,7 +46,9 @@ It does retain the private single-instance listener. CI measures this explicit
 preview mode; those measurements do not establish connected idle footprint.
 
 The process owns one Win32 top-level window, standard text/button controls and
-a notification-area icon. It can fold, hide and reopen. Close and Escape hide
+a notification-area icon. It can fold, hide and reopen. Reopening now expands
+the panel and restores native button focus through the shared interaction
+policy, including after an explicit Fold. Close and Escape hide
 the window; the tray menu or the visible Exit button quits. If the tray API is
 unavailable, hiding minimizes to the taskbar so recovery and exit remain
 available. Explorer restart re-registers the icon and shows the window if that
@@ -59,8 +61,9 @@ names, keyboard navigation and accessibility providers. These are implementation
 choices, not a claim of completed UI Automation or physical-monitor acceptance.
 
 No embedded browser, relay, optimizer or tokenizer is initialized. There is no
-GUI refresh timer; the worker sleeps until a native event or the shared
-scheduler's single deadline. The synthetic smoke has a short-lived timer and
+GUI refresh timer; one-shot interaction deadlines run only while a fold is
+pending, and the worker sleeps until a native event or the shared scheduler's
+single deadline. The synthetic smoke has a short-lived timer and
 closes itself. Preview samples remain explicitly synthetic.
 The #339 integration retains a separate private application-instance lock.
 Repeated launches use a bounded, current-user/current-desktop-session named pipe
@@ -204,6 +207,51 @@ API references: [Microsoft notification-area guidance](https://learn.microsoft.c
 [per-monitor DPI messages](https://learn.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged),
 and the pinned `windows-sys` bindings. Native handles and GDI fonts stay on the
 GUI thread; callbacks borrow immutable Rust state with `Cell` for reentrancy.
+
+## Shared interaction integration checkpoint
+
+The #338 integration makes the shared reducer authoritative for the panel's
+expanded, explicitly folded and hidden presentation. Whole-panel pointer and
+keyboard-focus observations remain native, including child controls and owned
+combo/menu popups. Moving between children does not create a false panel exit.
+After pointer re-entry or reopening a folded panel, leaving both pointer and
+focus outside starts the shared 250 ms fold delay. Explicit Fold remains usable
+while its native button has focus. Escape and Close retain this development
+shell's Hide action; no metric-card or settings-page UI is introduced here.
+
+One posted GUI drain collects a bounded batch of at most 128 observations.
+The reducer orders native input before callbacks already collected in that
+batch, then the shell renders its final snapshot. Before draining, the adapter
+samples the current native hit target and focus because Win32 delivers posted
+messages before hardware input. This does not reorder future observations into
+an already committed turn. Rendering, positioning, DPI, focus assignment and
+accessibility providers stay in Win32; reducer focus requests are not evidence
+that focus was obtained.
+
+At most two token-bound timer slots exist. Each newly scheduled token receives
+a never-reused native timer ID. `WM_TIMER` captures that ID's token and stops
+the repeating Win32 timer before queuing completion; a cancelled/unknown ID
+cannot be relabelled as the latest timer. Early callbacks rearm the original
+token and deadline. Final-state reconciliation avoids arming a timer that was
+scheduled and cancelled within one batch. Hide and destruction invalidate
+queued callbacks and stop native timers. Timer/queue/clock failures terminate
+the owned window with a nonzero result rather than leave partially applied
+interaction state running. No periodic pointer polling or global input hook is
+installed.
+
+Portable adapter tests replay all 16 shared traces and cover early delivery,
+same-batch reopen/focus, stale native IDs, Hide, bounded queues and atomic timer
+identity exhaustion. A Windows-only test uses a real private message-window
+queue and `SetTimer`/`KillTimer` to verify native delivery, early rearming and a
+cancelled callback delivered after its replacement. Existing native connected
+controls, smoke and external UIA/keyboard checks verify expanded reopening.
+These are synthetic/CI checks. Physical hover travel, pointer geometry across
+displays, native menus, keyboard and screen-reader usability remain unqualified;
+the Windows metric-card/settings integration also remains outstanding. #338
+remains open.
+
+Timer/message contracts: [GetMessage ordering](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmessage)
+and [KillTimer cancellation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-killtimer).
 
 ## Connected integration evidence and remaining acceptance
 

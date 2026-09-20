@@ -603,14 +603,14 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     assert!(!text(window, 303).contains("synthetic"));
     assert!(!text(window, 301).contains("hox_"));
     send(window, WM_COMMAND, 101);
-    assert_eq!(unsafe { IsWindowVisible(GetDlgItem(window, 302)) }, 0);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 302)) == 0 });
     send(window, WM_CLOSE, 0);
     PrivateDirectory::open(&root)
         .unwrap()
         .request_reopen()
         .unwrap();
     until(|| unsafe { IsWindowVisible(window) != 0 && IsIconic(window) == 0 });
-    send(window, WM_COMMAND, 101);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 302)) != 0 });
     transport.mode.store(1, Ordering::SeqCst);
     clock.1.store(10, Ordering::SeqCst);
     send(window, WM_COMMAND, 111);

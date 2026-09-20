@@ -3,7 +3,9 @@
 `hormuz-client-interaction` is the unpublished `1.5.0-dev.1` source foundation
 for [#338](https://github.com/Xpounder-com/hormuz/issues/338). It is a pure Rust
 reducer around the existing Swift companion behavior. It does not change the
-shipping gateway or app version and is not linked into either native shell.
+shipping gateway or app version. The Windows development shell consumes its
+visibility, pointer/focus and timer policy; metric cards and settings navigation
+are not yet connected there. Swift production code remains independent.
 The Windows shell dependency #331 and native interaction acceptance remain open.
 
 ## State and ownership
@@ -93,6 +95,14 @@ Swift `showWidget`, it preserves an already-open card, including an unpinned
 card's still-current dismissal timer; it does not silently turn a hover into a
 pin. `ShowAndPin` and `OpenSettings` replace the card and cancel its old dismissal.
 
+`ToggleFold` is the explicit native Fold/Expand action. It closes content,
+cancels its timers and folds even while a visible widget button retains keyboard
+focus. A content-focus transfer requests widget focus without fabricating an
+observation. Expanding switches to always-visible mode. Pointer re-entry or
+`Reopen` ends an explicit collapse; after reopening, the ordinary fold delay
+applies only while both pointer and keyboard focus are outside. Hidden controls
+cannot reopen the widget with this toggle. No preference is persisted by it.
+
 The #339 lifecycle adapter can deliver `Reopen`/`Hide` while retaining ownership
 of single-instance IPC, activation, helpers and shutdown. The reducer has no
 process or session dependency. Keyboard and accessibility activation use the
@@ -127,8 +137,9 @@ and release qualification are separate gates.
 Fixture schema v1 versions the test corpus, not public IPC, an HTTP API or
 persisted state. Event serde support is for local fixture interchange, not an
 untrusted-command decoder. Existing expectations require an explicit
-compatibility decision before changing. This development crate is unlinked;
-rollback removes it and its tests without a user-data migration.
+compatibility decision before changing. The Windows integration is a development
+checkpoint; rollback restores the previous shell event adapter without a
+user-data migration.
 
 ## Verification
 
