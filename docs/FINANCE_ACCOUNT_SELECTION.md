@@ -69,6 +69,28 @@ RLS/audit enforcement and approval of the successor ACL are future work.
 Production migration, deployment, live provider access and final upgrade/recovery
 or release qualification are outside this checkpoint.
 
+## Internal registration request intake
+
+The next provider-free checkpoint adds a dormant parser in
+`hormuz.finance_account_registration` for the v8 operator registration
+request. It accepts at most 64 KiB of strict UTF-8 JSON with the
+exact nested metadata shape, bounded identifiers and integer versions. It
+rejects duplicate members, floating-point and nonfinite numbers, unknown or
+server-derived authority fields, and inconsistent state/reason/version pairs.
+It copies validated metadata into an immutable value and computes a canonical
+SHA-256 request digest that includes the authenticated tenant supplied by its
+future caller. Equivalent JSON formatting has the same digest; the same
+request for another tenant does not. Errors are the fixed `invalid_request`
+code and contain no file contents.
+
+This parser does not authenticate a principal or read a request file. The
+future `finance account bind` command must authenticate the tenant and confirm
+`portfolio_admin` authority before opening the file or looking up a binding.
+The parser is not connected to a CLI command, repository, gateway capture or
+provider. It creates no registration, receipt, audit event, sidecar or account
+ownership proof. The existing schemas and PostgreSQL ACL boundary are still
+unchanged; actual successor grants require separate approval.
+
 Provider-free regressions cover immutable references, selection isolation,
 ambiguity, invalid metadata, first-party origin checks, unchanged legacy config
 digests, mutation before selection and loopback gateway behavior during a
