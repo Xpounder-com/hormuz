@@ -59,6 +59,13 @@ jobs:
         env:
           HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json
+      - name: Verify native Windows instance activation
+        if: runner.os == 'Windows'
+        working-directory: clients/rust
+        shell: pwsh
+        env:
+          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./windows/verify-lifecycle.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-lifecycle.json
       - name: Reject invalid Windows acceptance targets and preserve evidence
         if: runner.os == 'Windows'
         working-directory: clients/rust
@@ -106,6 +113,8 @@ jobs:
             sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()
             native_smoke = "passed"
             external_ui_automation = "passed"
+            instance_lifecycle = "passed"
+            lifecycle_sha256 = (Get-FileHash target/release/windows-lifecycle.json -Algorithm SHA256).Hash.ToLowerInvariant()
             acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()
             repeat_build = "passed_same_runner_same_checkout"
             rebuild_sha256 = (Get-FileHash target/release/windows-rebuild.json -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -123,6 +132,7 @@ jobs:
             clients/rust/target/release/hormuz-windows.exe
             clients/rust/target/release/windows-build.json
             clients/rust/target/release/windows-acceptance.json
+            clients/rust/target/release/windows-lifecycle.json
             clients/rust/target/release/windows-rebuild.json
           if-no-files-found: error
           retention-days: 14

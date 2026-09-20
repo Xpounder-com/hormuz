@@ -1,10 +1,15 @@
 //! All Win32 ownership stays on the GUI thread. The shared core remains safe Rust.
 use super::placement::{place, scale, Rect};
 use hormuz_client_core::{ReadingStatus, UsageReading};
+use hormuz_client_platform::{ApplicationInstance, PrivateDirectory};
 use std::{
     cell::Cell,
     mem::size_of,
     ptr::{null, null_mut},
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    },
 };
 use windows_sys::Win32::{
     Foundation::*,
@@ -17,6 +22,7 @@ const CLASS: &str = "HormuzNativeCompanionPreview";
 const TITLE: &str = "Hormuz - synthetic preview";
 const STYLE: u32 = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
 const TRAY_CALLBACK: u32 = WM_APP + 1;
+const INSTANCE_REOPEN: u32 = WM_APP + 2;
 // NIN_KEYSELECT is a C header expression, not emitted by windows-sys metadata.
 const TRAY_KEY_SELECT: u32 = NIN_SELECT | NINF_KEY;
 const FOLD: usize = 101;
@@ -26,6 +32,7 @@ const EXIT: usize = 104;
 const SMOKE_TIMER: usize = 1;
 
 struct App {
+    activation: Arc<AtomicU8>, // idle, one pending notification, or shutting down
     folded: Cell<bool>,
     dpi: Cell<u32>,
     controls: Cell<[HWND; 8]>,
@@ -41,7 +48,7 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
 
-pub fn run(smoke: bool) -> i32 {
+pub fn run(smoke: bool, _directory: PrivateDirectory, owner: ApplicationInstance) -> i32 {
     // This shell has no authenticated data. A missing reading stays missing in
     // the core; the sample values below are separately and visibly synthetic.
     let Ok(reading) = UsageReading::new(ReadingStatus::NeedsAuthentication, None, None) else {
@@ -63,6 +70,7 @@ pub fn run(smoke: bool) -> i32 {
             return 1;
         }
         let app = Box::new(App {
+            activation: Arc::new(AtomicU8::new(0)),
             folded: Cell::new(false),
             dpi: Cell::new(96),
             controls: Cell::new([null_mut(); 8]),
@@ -144,6 +152,29 @@ pub fn run(smoke: bool) -> i32 {
             }
         }
         app.controls.set(controls);
+        let activation_window = hwnd as usize;
+        let activation = app.activation.clone();
+        let Ok(listener) = owner.listen_for_reopen(move || {
+            // At most one coalesced native notification is needed; the pipe
+            // worker never reads or mutates the GUI's App allocation.
+            match activation.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => {
+                    if PostMessageW(activation_window as HWND, INSTANCE_REOPEN, 0, 0) != 0 {
+                        true
+                    } else {
+                        let _ =
+                            activation.compare_exchange(1, 0, Ordering::SeqCst, Ordering::SeqCst);
+                        false
+                    }
+                }
+                Err(1) => true,
+                Err(_) => false,
+            }
+        }) else {
+            DestroyWindow(hwnd);
+            UnregisterClassW(class_name.as_ptr(), instance);
+            return 1;
+        };
         app.dpi.set(GetDpiForWindow(hwnd).max(96));
         app.tray_ready.set(add_tray(hwnd));
         reflow(hwnd, &app);
@@ -174,6 +205,7 @@ pub fn run(smoke: bool) -> i32 {
         if !app.font.get().is_null() {
             DeleteObject(app.font.get());
         }
+        drop(listener);
         UnregisterClassW(class_name.as_ptr(), instance);
         app.exit_code.get()
     }
@@ -456,6 +488,16 @@ unsafe extern "system" fn window_proc(
             return 0;
         }
         match message {
+            INSTANCE_REOPEN => {
+                if app
+                    .activation
+                    .compare_exchange(1, 0, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    show(hwnd, app);
+                }
+                0
+            }
             WM_CLOSE => {
                 hide(hwnd, app);
                 0
@@ -509,6 +551,7 @@ unsafe extern "system" fn window_proc(
                 0
             }
             WM_DESTROY => {
+                app.activation.store(2, Ordering::SeqCst);
                 KillTimer(hwnd, SMOKE_TIMER);
                 Shell_NotifyIconW(NIM_DELETE, &tray_data(hwnd));
                 PostQuitMessage(app.exit_code.get());

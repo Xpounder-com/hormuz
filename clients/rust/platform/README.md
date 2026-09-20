@@ -162,8 +162,24 @@ own process ownership mechanisms. Fake-supervisor tests prove controller policy,
 not orphan prevention after a real shell crash. No native supervisor is supplied
 by this checkpoint, so that crash containment and process cleanup remain open.
 
-No socket or named pipe is added, so there is no IPC peer/message surface to
-qualify in this slice. Native activation/reopen, opt-in login registration,
+On Windows, `ApplicationInstance::listen_for_reopen` consumes the application
+lease and retains it until its native named-pipe listener has stopped. The
+endpoint is derived from the retained private directory's kernel identity,
+current user and desktop session, so path aliases do not create another owner.
+`PrivateDirectory::request_reopen` performs a bounded handshake. The protected
+user-only DACL, local-only pipe mode, first-instance flag and both peers' native
+process user/session checks reject untrusted endpoints. The fixed v1 command
+and acknowledgement contain no private paths, credentials or general RPC data.
+It is not a boundary against a malicious process running as the same user in
+the same desktop session. The listener sleeps in an interruptible native accept;
+accepted reads/writes have one-second deadlines, with I/O cancellation drained
+before buffers are freed. The callback must be nonblocking and report whether
+the UI notification was admitted. The owning shell keeps at most one queued
+reopen notification. Listener Drop stops and joins the worker before releasing
+application ownership. Client startup retry is limited to three seconds.
+
+The Windows preview consumes this adapter and verifies competing real launches,
+reopen and owner crash recovery. Mac activation/IPC, opt-in login registration,
 trusted executable launch, helper readiness, real parent/helper crash recovery,
 actual sleep/resume, updater handoff and final cross-platform shell integration
 remain #339/#341/#345 acceptance. This work does not close #339, qualify a

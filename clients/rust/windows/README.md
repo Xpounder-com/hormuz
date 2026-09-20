@@ -1,7 +1,8 @@
 # Native Windows companion foundation
 
-Development slice for [#331](https://github.com/Xpounder-com/hormuz/issues/331),
-planned v1.4.0, using the contracts from #330. This is an unsigned synthetic
+The v1.4.0 foundation for [#331](https://github.com/Xpounder-com/hormuz/issues/331)
+now advances into #339 integration at unpublished `1.5.0-dev.1`, using the
+contracts from #330. The published product remains `1.2.0`. This is an unsigned synthetic
 preview, not a connected client or an installer. Current build target:
 Windows 10/11 x64 (`x86_64-pc-windows-msvc`); Windows ARM64 is not qualified here.
 The workspace statically links the MSVC C runtime for this target. CI checks the
@@ -25,8 +26,25 @@ No browser runtime, networking, credentials, relay, optimizer or tokenizers are
 initialized. There is no repeating timer in normal operation. The smoke mode has
 a short-lived timer and closes itself. Samples are marked synthetic in the title,
 subtitle and every metric. The shared core represents actual usage as absent.
-Single-instance enforcement and IPC belong to #339; repeated manual launches can
-currently create separate preview processes.
+The #339 integration retains a separate private application-instance lock.
+Repeated launches use a bounded, current-user/current-desktop-session named pipe
+to reopen the existing window, then exit. Failed activation never permits a
+second owner without a new successful kernel-lock acquisition. The resident
+listener has no idle polling loop and coalesces at most one pending UI notice.
+Its fixed v1 eight-byte command carries no arguments, credentials or content.
+The server rejects remote clients; both peers verify process user/session and
+the client verifies the protected user-only pipe ACL before sending anything.
+Only cooperating builds using this root/protocol participate; older preview
+executables without an instance lock must not be run alongside this candidate.
+
+The default root is the current user's native Local AppData known folder plus
+`HormuzNativeClient`; environment variables cannot change that root. Tests use
+`--preview --state-directory <absolute-new-private-directory>` or the smoke
+equivalent. Private storage is validated without repairing unsafe existing
+permissions. The process exits nonzero if ownership or activation cannot be
+established. A different desktop session cannot activate the owner's window.
+Opt-in login registration, real helper supervision and power/session-event
+integration remain downstream #339/#340/#341 work.
 
 ## Build and exercise on Windows
 
@@ -40,6 +58,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo build -p hormuz-windows --release --locked
 ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe
 ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json
+./windows/verify-lifecycle.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-lifecycle.json
 ./target/release/hormuz-windows.exe
 ```
 
@@ -53,6 +72,16 @@ Use the CI artifact's source commit, compiler, target and SHA-256 when reporting
 results. The CI release executable is development evidence only.
 The artifact includes `windows-rebuild.json`, with both hashes and the tested
 scope. Signing and distribution qualification remain separate.
+
+`verify-lifecycle.ps1` launches eight competing real executable instances after
+hiding the primary, verifies their successful handoff to the original HWND,
+kills only its owned primary, starts a replacement, checks explicit Exit and
+rejects an inherited-permission state root. Cleanup is verified before success
+evidence is written. `windows-lifecycle.json` is bound to source/executable hashes
+and pinned by the build manifest. Platform tests additionally reject malformed,
+oversized and stalled pipe requests, a different expected peer user, an invalid
+peer handle and a public endpoint before sending any command. They do not create
+another Windows account or prove physical keyboard/tray/sleep behavior.
 
 The bounded smoke runner starts a real native process, checks HWND/control
 creation, verifies actual window-height and child-visibility changes on fold and

@@ -128,6 +128,8 @@ mod private;
 /// let instance = ApplicationInstance {};
 /// ```
 pub use private::ApplicationInstance;
+#[cfg(windows)]
+pub use private::InstanceListener;
 pub use private::{PrivateDirectory, PrivateTransaction, MAX_PRIVATE_FILE_BYTES};
 
 pub mod lifecycle;

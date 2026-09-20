@@ -4,16 +4,25 @@
 #[cfg(windows)]
 mod native;
 #[cfg(any(windows, test))]
+mod options;
+#[cfg(any(windows, test))]
 mod placement;
+#[cfg(windows)]
+mod startup;
 
 #[cfg(windows)]
 fn main() {
-    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
-    let smoke = arguments.len() == 1 && arguments[0] == "--smoke-test";
-    if !arguments.is_empty() && !smoke {
+    let Ok(options) = options::Options::parse(std::env::args_os().skip(1).collect()) else {
         std::process::exit(2);
-    }
-    std::process::exit(native::run(smoke));
+    };
+    let code = match startup::begin(&options) {
+        Ok(startup::Startup::Reopened) => 0,
+        Ok(startup::Startup::Primary { directory, owner }) => {
+            native::run(options.smoke, directory, owner)
+        }
+        Err(_) => 1,
+    };
+    std::process::exit(code);
 }
 
 #[cfg(not(windows))]
