@@ -134,6 +134,27 @@ class _SelectedUpstream:
     finance: FinanceAccountCandidate | UnavailableFinance
 
 
+class _NoUpstreamRedirect(urllib.request.HTTPRedirectHandler):
+    """Reject 3xx before urllib parses an untrusted Location value."""
+
+    def http_error_302(self, request, response, code, message, headers):  # type: ignore[no-untyped-def]
+        # Returning None lets HTTPDefaultErrorHandler surface the original
+        # response as HTTPError; no second request is made or URL parsed.
+        return None
+
+    http_error_301 = http_error_302
+    http_error_303 = http_error_302
+    http_error_307 = http_error_302
+    http_error_308 = http_error_302
+
+
+_UPSTREAM_OPENER = urllib.request.build_opener(_NoUpstreamRedirect())
+
+
+def _open_upstream(request: urllib.request.Request, *, timeout: int):
+    return _UPSTREAM_OPENER.open(request, timeout=timeout)
+
+
 class _ProviderRehearsalResponse:
     """A zero-egress 429 used only after hosted rehearsal authorization."""
 
@@ -1035,7 +1056,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             ):
                 response = _ProviderRehearsalResponse()
             else:
-                response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
+                response = _open_upstream(request, timeout=self.server.config.upstream_timeout_seconds)
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
@@ -1063,6 +1084,32 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         response_headers_us = self._elapsed_us(started_ns)
         status = getattr(response, "status", response.getcode())
+        if 300 <= status < 400:
+            response.close()
+            if account_usage and attempt is not None:
+                # A redirect can follow an accepted POST. Its status alone
+                # cannot establish whether provider work was billable, so
+                # retain the conservative hold without following Location.
+                self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
+                    attempt=attempt,
+                    organization_id=identity.organization_id,
+                    reason_code="provider_transport_ambiguous",
+                    provider_metrics=self._provider_metrics(
+                        started_ns=started_ns,
+                        provider_status=status,
+                        response_headers_us=response_headers_us,
+                        first_body_byte_us=None,
+                        provider_bytes_read=0,
+                        downstream_bytes_sent=0,
+                    ),
+                )
+            self._send_protocol_error(
+                protocol,
+                "Upstream provider redirect refused.",
+                HTTPStatus.BAD_GATEWAY,
+                code="gateway_upstream_redirect",
+            )
+            return
         content_type = response.headers.get("Content-Type", "application/json")
         provider_request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
         reason = failover_reason(status)

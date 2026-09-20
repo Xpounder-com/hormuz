@@ -161,7 +161,7 @@ def select_finance_account(
     No rate card, model, request body, collection credential or provider lookup
     supplies identity. Even a candidate is still unverified: this function
     cannot check registration currency, revocation, scope, source versions or
-    the final network destination after redirects.
+    successful provider delivery.
     """
 
     if isinstance(identity, UnavailableFinance):

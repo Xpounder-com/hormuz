@@ -25,10 +25,15 @@ duplicates and unsupported transport produce fixed preflight reasons. These
 results do not deny inference. The configured base URL must use the exact
 first-party HTTPS origin and corresponding OpenAI or Anthropic profile before
 producing a candidate; compatible proxy protocols do not establish provider
-billing identity. This preflight checks configuration only. It does not verify
-the final network destination, including any redirects followed by the existing
-HTTP transport. Redirect handling is a separate transport security boundary.
-Anthropic coverage here is synthetic/offline only.
+billing identity. This preflight checks configuration only and does not verify
+successful provider delivery. Anthropic coverage here is synthetic/offline only.
+
+The gateway transport separately refuses redirects before following or parsing
+the `Location` value and returns `502 gateway_upstream_redirect`. An accounted
+attempt retains its conservative budget hold and records `outcome_unknown` with
+`provider_transport_ambiguous`; it produces no successful usage event. Selecting
+a finance candidate does not change that accounting behavior or prove that the
+original provider did no billable work.
 
 **A candidate is not a durable account binding.** No account fingerprint, source
 scope, current registration state or revocation status is resolved. Registered
