@@ -676,7 +676,7 @@ class GatewayIntegrationTests(unittest.TestCase):
                                 len(expected_statuses),
                             )
             self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
-            with sqlite3.connect(self.gateway.store.path) as connection:
+            with managed_sqlite_connection(self.gateway.store.path) as connection:
                 terminal_events = connection.execute(
                     "SELECT state, reason_code, usage_event_id "
                     "FROM gateway_request_attempt_events WHERE sequence = 2"
