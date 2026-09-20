@@ -216,11 +216,30 @@ emit_job_diagnostics() {
   fi
 }
 
+classify_gateway_log_error() {
+  local error_output=$1 first_line=""
+  # Read only a bounded prefix and emit a fixed label. The captured stderr and
+  # selected pod name must never become part of the CI diagnostic stream.
+  IFS= read -r -n 512 first_line <"${error_output}" || true
+  case "${first_line}" in
+    'Error from server (NotFound):'*) printf 'not_found\n' ;;
+    'Error from server (Forbidden):'*) printf 'forbidden\n' ;;
+    'Error from server (Timeout):'*|'error: context deadline exceeded'*) printf 'timeout\n' ;;
+    'Unable to connect to the server:'*|'error: unable to upgrade connection:'*)
+      case "${first_line}" in
+        *timeout*|*Timeout*|*'timed out'*|*'Timed out'*|*'deadline exceeded'*|*'Deadline exceeded'*) printf 'timeout\n' ;;
+        *) printf 'connection\n' ;;
+      esac
+      ;;
+    *) printf 'unknown\n' ;;
+  esac
+}
+
 capture_gateway_logs() {
   local checkpoint=$1
   [[ "${checkpoint}" =~ ^[a-z0-9-]+$ ]] || fail "gateway log checkpoint invalid"
   local output="${ARTIFACT_ROOT}/gateway-${checkpoint}.log"
-  local attempt pod pods pod_count error_output status disappeared
+  local attempt pod pods pod_count error_output error_class status disappeared
   # Keep partial logs from disappearing replicas in the same protected capture.
   : >"${output}"
   for attempt in 1 2 3; do
@@ -266,6 +285,10 @@ capture_gateway_logs() {
         disappeared=1
         break
       fi
+      # Diagnostic classification does not change the retry or failure policy.
+      error_class="$(classify_gateway_log_error "${error_output}")"
+      printf 'gateway_log_capture_error checkpoint=%s class=%s exit_status=%s\n' \
+        "${checkpoint}" "${error_class}" "${status}" >&2
       fail "gateway log capture failed: ${checkpoint} exit_status=${status}"
     done <"${pods}"
     [[ "${pod_count}" -gt 0 ]] || fail "gateway pod selection invalid: ${checkpoint}"

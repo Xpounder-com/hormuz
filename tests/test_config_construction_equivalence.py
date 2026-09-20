@@ -97,6 +97,12 @@ def _snapshot_sha256(config: GatewayConfig) -> str:
     assert isinstance(value, dict) and isinstance(value["fields"], dict)
     assert value["fields"].pop("portfolio_control") is None
     assert value["fields"].pop("attribution_control") is None
+    # Preserve every prior field's digest with the new metadata surface absent.
+    assert value["fields"].pop("finance_account_bindings") is None
+    for _, upstream in value["fields"]["upstreams"]["mapping"]:
+        assert upstream["fields"].pop("finance_identity") == {
+            "type": "UnavailableFinance", "fields": {"reason": "not_configured"},
+        }
     # The explicitly opt-in directory adds one default-false field. Keep every
     # preceding field's frozen digest, rather than replacing the baseline.
     assert value["fields"]["session_broker"]["fields"].pop("onboarding_enabled") is False

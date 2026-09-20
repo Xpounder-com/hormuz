@@ -679,7 +679,7 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
         self.assertFalse(json.loads(body)["contract"]["postgresql_durable"])
         self.assertEqual(self.gateway._connection_slots._initial_value, PROVIDER_MAX_CONNECTIONS)
         self.assertEqual(self.gateway._provider_slots._initial_value, PROVIDER_MAX_INFERENCE_CONNECTIONS)
-        with patch("hormuz.server.urllib.request.urlopen") as provider:
+        with patch("hormuz.server._open_upstream") as provider:
             self.assertEqual(self.request("POST", "/v1/responses", body={"model": "openai-primary"})[0], 401)
         provider.assert_not_called()
 
@@ -716,7 +716,7 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
                 acquired = self.gateway._provider_slots.acquire(blocking=False)
                 self.assertTrue(acquired)
                 held.append(acquired)
-            with patch("hormuz.server.urllib.request.urlopen") as provider:
+            with patch("hormuz.server._open_upstream") as provider:
                 status, _, body = self.request(
                     "POST",
                     "/v1/responses",
@@ -800,7 +800,7 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
             "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
         })
         limited = _ProviderResponse(429)
-        with patch("hormuz.server.urllib.request.urlopen", side_effect=[limited, success]) as provider:
+        with patch("hormuz.server._open_upstream", side_effect=[limited, success]) as provider:
             status, headers, body = self.request(
                 "POST", "/v1/responses",
                 body={"model": "openai-primary", "input": "synthetic provider-free request", "max_output_tokens": 8},
@@ -852,7 +852,7 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
             "model": "openai-secondary-model", "output": [],
             "usage": {"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
         })
-        with patch("hormuz.server.urllib.request.urlopen", return_value=success) as provider:
+        with patch("hormuz.server._open_upstream", return_value=success) as provider:
             status, headers, body = self.request(
                 "POST",
                 "/v1/responses",
@@ -871,7 +871,7 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
         provider.assert_called_once()
         self.assertEqual(json.loads(provider.call_args.args[0].data)["model"], "openai-secondary-model")
 
-        with patch("hormuz.server.urllib.request.urlopen") as provider:
+        with patch("hormuz.server._open_upstream") as provider:
             status, _, body = self.request(
                 "POST",
                 "/v1/responses",
@@ -895,7 +895,7 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
         response.headers["Content-Type"] = "text/event-stream"
         response._body = b'data: {"type":"response.output_text.delta","delta":"x"}\n\n'
         with (
-            patch("hormuz.server.urllib.request.urlopen", return_value=response) as provider,
+            patch("hormuz.server._open_upstream", return_value=response) as provider,
             patch(
                 "hormuz.server.GatewayRequestHandler._write_downstream_chunk",
                 side_effect=BrokenPipeError,
@@ -942,7 +942,7 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
             b'data: {"type":"response.completed","response":{"model":"openai-primary-model",'
             b'"usage":{"input_tokens":2,"output_tokens":1}}}\n\n'
         )
-        with patch("hormuz.server.urllib.request.urlopen", return_value=response) as provider:
+        with patch("hormuz.server._open_upstream", return_value=response) as provider:
             status, headers, body = self.request(
                 "POST",
                 "/v1/responses",
@@ -984,7 +984,7 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
             b'"usage":{"input_tokens":2,"output_tokens":1}}}\n\n'
         )
         with (
-            patch("hormuz.server.urllib.request.urlopen", return_value=response),
+            patch("hormuz.server._open_upstream", return_value=response),
             patch(
                 "hormuz.server.GatewayRequestHandler._write_downstream_chunk",
                 side_effect=BrokenPipeError,
@@ -1030,7 +1030,7 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
             b'"output_tokens":1}}}\n\n'
         )
         with (
-            patch("hormuz.server.urllib.request.urlopen", return_value=response),
+            patch("hormuz.server._open_upstream", return_value=response),
             patch(
                 "hormuz.server.GatewayRequestHandler._write_downstream_chunk",
                 side_effect=BrokenPipeError,
@@ -1097,7 +1097,7 @@ class HostedOpenAIProviderHTTPTests(HostedProviderHTTPTestCase):
     def test_anthropic_requests_cannot_egress_even_with_a_valid_member_session(self):
         directory_setup(self.gateway.session_broker.directory, self.config)
         _, pair = activate_member(self.gateway.session_broker.store, self.gateway.session_broker.directory)
-        with patch("hormuz.server.urllib.request.urlopen") as provider:
+        with patch("hormuz.server._open_upstream") as provider:
             status, _, _ = self.request(
                 "POST", "/v1/messages",
                 body={"model": "anthropic-primary", "max_tokens": 8,
