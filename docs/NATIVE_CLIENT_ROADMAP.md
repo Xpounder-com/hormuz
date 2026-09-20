@@ -118,3 +118,19 @@ bounded restart, client draining and quit/update behavior. **#339 remains open**
 for native activation/login registration, real helper supervision and crash
 containment, sleep/resume and shell integration. No IPC or native process
 adapter is supplied by this source checkpoint.
+
+## Windows integration checkpoint
+
+The unpublished Windows executable now implements #339 private single-instance
+activation and #340 connected sign-in, scoped usage and sign-out through the
+shared session controller. Native session/power/network events drive the shared
+scheduler, and shutdown joins credential work before releasing app ownership.
+The ordinary launch is connected; the explicit `--preview` mode remains
+synthetic and is the scope of the existing automated footprint measurements.
+
+See the [Windows development guide](../clients/rust/windows/README.md) for exact
+implementation and test boundaries. Source integration and synthetic CI do not
+complete #339/#340 or the outstanding v1.4.0 gates: login/helper adapters,
+authorized-account end-to-end proof, native desktop acceptance, connected
+measurements, signing and clean installation remain separate. The Windows
+package is `1.5.0-dev.1`; the published product remains v1.2.0.

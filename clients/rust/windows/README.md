@@ -1,13 +1,48 @@
-# Native Windows companion foundation
+# Native Windows connected development companion
 
 The v1.4.0 foundation for [#331](https://github.com/Xpounder-com/hormuz/issues/331)
-now advances into #339 integration at unpublished `1.5.0-dev.1`, using the
-contracts from #330. The published product remains `1.2.0`. This is an unsigned synthetic
-preview, not a connected client or an installer. Current build target:
-Windows 10/11 x64 (`x86_64-pc-windows-msvc`); Windows ARM64 is not qualified here.
-The workspace statically links the MSVC C runtime for this target. CI checks the
-PE imports so a developer machine's installed Visual C++ redistributable cannot
-silently become an undeclared runtime prerequisite.
+now integrates #339/#340 at unpublished `1.5.0-dev.1`. The published product
+remains `1.2.0`. This is an unsigned development executable, not a qualified
+installer. The build target is Windows 10/11 x64 (`x86_64-pc-windows-msvc`);
+Windows ARM64 is not qualified. The workspace statically links the MSVC C runtime
+and CI checks PE imports for an undeclared Visual C++ redistributable dependency.
+
+An ordinary launch opens the connected panel. Enter the team's HTTPS gateway
+origin, organization ID, approved model alias, optional issuer and AI client,
+then choose **Sign in**. The existing session controller validates the enrollment
+URL before opening the default browser; the browser completes identity-provider
+sign-in. No password, provider key or session token is entered into this panel.
+Saved profiles restore from private native storage. Credentials use the fixed
+current-user Credential Manager target and never fall back to plaintext files.
+Sign out before changing an active connection. **Retry connection** rechecks the
+saved state; **Sign out / cancel** cancels enrollment or revokes a saved session.
+A failed revocation remains pending and requires **Sign out** again. Retry never
+silently replays an interrupted credential rotation.
+
+The same shared controller verifies identity and displays only the current
+actor's authoritative gateway usage. Missing values remain dashes. Current,
+stale, offline and sign-in-required states are explicit; retained values keep
+the last successful response time. Costs are estimates covering gateway-captured
+requests. The panel does not infer organization-wide totals or local activity.
+There is no governed AI-client launch/relay yet; that remains #341.
+
+One owned worker performs credential and network transactions, with one pending
+command and one coalesced notification. Dashboard views share the scheduler;
+folded/expanded panels use summary/detail cadence, and hidden/minimized panels
+do no new polling. WTS session registration and the initial desktop state are
+established before enabling polling; unknown/locked/disconnected sessions pause
+it. Power and coalesced native IP-interface notifications feed the scheduler.
+An in-flight transaction is not cancelled just because a window is hidden or
+the desktop locks. Explicit sign-out/quit cancels it, preserves durable recovery
+states, and joins the worker before releasing app ownership. Windows Shell
+browser dispatch runs on the worker and can delay its completion independently
+of the bounded network transport; default-browser compatibility remains a native
+acceptance item.
+
+Use `--preview` for the original synthetic panel. Preview/smoke mode creates no
+session worker, network subscription, browser launch or credential-store access.
+It does retain the private single-instance listener. CI measures this explicit
+preview mode; those measurements do not establish connected idle footprint.
 
 The process owns one Win32 top-level window, standard text/button controls and
 a notification-area icon. It can fold, hide and reopen. Close and Escape hide
@@ -22,10 +57,10 @@ repositions on display/work-area changes. Per-monitor DPI-v2 awareness and
 names, keyboard navigation and accessibility providers. These are implementation
 choices, not a claim of completed UI Automation or physical-monitor acceptance.
 
-No browser runtime, networking, credentials, relay, optimizer or tokenizers are
-initialized. There is no repeating timer in normal operation. The smoke mode has
-a short-lived timer and closes itself. Samples are marked synthetic in the title,
-subtitle and every metric. The shared core represents actual usage as absent.
+No embedded browser, relay, optimizer or tokenizer is initialized. There is no
+GUI refresh timer; the worker sleeps until a native event or the shared
+scheduler's single deadline. The synthetic smoke has a short-lived timer and
+closes itself. Preview samples remain explicitly synthetic.
 The #339 integration retains a separate private application-instance lock.
 Repeated launches use a bounded, current-user/current-desktop-session named pipe
 to reopen the existing window, then exit. Failed activation never permits a
@@ -43,8 +78,8 @@ The default root is the current user's native Local AppData known folder plus
 equivalent. Private storage is validated without repairing unsafe existing
 permissions. The process exits nonzero if ownership or activation cannot be
 established. A different desktop session cannot activate the owner's window.
-Opt-in login registration, real helper supervision and power/session-event
-integration remain downstream #339/#340/#341 work.
+Opt-in login registration and real helper supervision remain #339/#341 work.
+Real power/network/desktop transitions still require native acceptance.
 
 ## Build and exercise on Windows
 
@@ -59,6 +94,7 @@ cargo build -p hormuz-windows --release --locked
 ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe
 ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json
 ./windows/verify-lifecycle.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-lifecycle.json
+./target/release/hormuz-windows.exe --preview
 ./target/release/hormuz-windows.exe
 ```
 
@@ -162,3 +198,33 @@ API references: [Microsoft notification-area guidance](https://learn.microsoft.c
 [per-monitor DPI messages](https://learn.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged),
 and the pinned `windows-sys` bindings. Native handles and GDI fonts stay on the
 GUI thread; callbacks borrow immutable Rust state with `Cell` for reentrancy.
+
+## Connected integration evidence and remaining acceptance
+
+Portable worker tests use the actual shared session controller with isolated
+synthetic custody/transport adapters. They cover enrollment and reconnect,
+locked-store refusal/recovery, actual session expiry, offline retention of the
+last success time, scope rejection, sign-out failure/retry, cancellation of a
+pending enrollment, late usage after sign-out, owned shutdown and hidden/locked/
+sleeping suppression. These do not prove a real account or locked native store.
+
+A Windows-only test drives the same connected native controls and worker using
+a real private directory/instance listener, a synthetic in-memory credential
+store and synthetic gateway/browser. It fills the form, signs in, observes
+scoped usage, folds/hides/reopens through the pipe, observes offline retention,
+signs out and verifies ownership release. It checks only its own process/window.
+Lifecycle state in that harness is synthetic. There is no shipping test CLI,
+credential-target override or plaintext credential fallback.
+
+The release executable retains the independent preview smoke, external UIA,
+100-cycle measurement, instance recovery and repeat-build gates. The build
+manifest identifies an unsigned connected development candidate, while the
+measurement manifest explicitly identifies `synthetic_preview` execution.
+
+Issues #331, #332, #339 and #340 remain open for their broader criteria. An
+actual authorized HTTPS gateway account, native Credential Manager denial,
+default-browser dispatch, real keyboard/screen-reader/tray interaction,
+monitor/taskbar/DPI transitions, sleep/network recovery, signed clean-machine
+installation and connected exact-artifact footprint remain unqualified. No
+Windows machine/license is available locally; CI is not a substitute for those
+gates. No release publication or expanded support claim is implied.

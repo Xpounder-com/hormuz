@@ -1,6 +1,19 @@
 //! All Win32 ownership stays on the GUI thread. The shared core remains safe Rust.
 use super::placement::{place, scale, Rect};
-use hormuz_client_core::{ReadingStatus, UsageReading};
+use crate::connection::{Connection, DesktopConnection};
+use crate::options::Options;
+use hormuz_client_platform::NativeCredentialStore;
+use hormuz_client_session::{NativeTransport, SystemClock};
+use std::cell::OnceCell;
+#[path = "native_connection.rs"]
+mod connected;
+type NativeConnection = Connection<
+    PrivateDirectory,
+    NativeCredentialStore,
+    NativeTransport,
+    SystemClock,
+    connected::Browser,
+>;
 use hormuz_client_platform::{ApplicationInstance, PrivateDirectory};
 use std::{
     cell::Cell,
@@ -23,6 +36,8 @@ const TITLE: &str = "Hormuz - synthetic preview";
 const STYLE: u32 = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
 const TRAY_CALLBACK: u32 = WM_APP + 1;
 const INSTANCE_REOPEN: u32 = WM_APP + 2;
+const CONNECTION_CHANGED: u32 = WM_APP + 3;
+const NETWORK_CHANGED: u32 = WM_APP + 4;
 // NIN_KEYSELECT is a C header expression, not emitted by windows-sys metadata.
 const TRAY_KEY_SELECT: u32 = NIN_SELECT | NINF_KEY;
 const FOLD: usize = 101;
@@ -32,6 +47,12 @@ const EXIT: usize = 104;
 const SMOKE_TIMER: usize = 1;
 
 struct App {
+    connection: OnceCell<Box<dyn DesktopConnection>>,
+    network: OnceCell<crate::network::NetworkEvents>,
+    inputs: Cell<[HWND; 13]>,
+    profile_loaded: Cell<bool>,
+    session_notifications: Cell<bool>,
+    preview: bool,
     activation: Arc<AtomicU8>, // idle, one pending notification, or shutting down
     folded: Cell<bool>,
     dpi: Cell<u32>,
@@ -48,13 +69,27 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
 
-pub fn run(smoke: bool, _directory: PrivateDirectory, owner: ApplicationInstance) -> i32 {
-    // This shell has no authenticated data. A missing reading stays missing in
-    // the core; the sample values below are separately and visibly synthetic.
-    let Ok(reading) = UsageReading::new(ReadingStatus::NeedsAuthentication, None, None) else {
-        return 1;
-    };
-    debug_assert!(reading.usage().is_none());
+pub fn run(options: Options, directory: PrivateDirectory, owner: ApplicationInstance) -> i32 {
+    run_with_factory(options, directory, owner, |directory, notify| {
+        let controller = hormuz_client_session::SessionController::new(
+            directory,
+            NativeCredentialStore::default(),
+            NativeTransport,
+            SystemClock::default(),
+        );
+        NativeConnection::start(controller, connected::Browser, notify)
+            .map(|connection| Box::new(connection) as Box<dyn DesktopConnection>)
+    })
+}
+pub(super) type Notifier = Box<dyn Fn() -> bool + Send + Sync>;
+pub(super) fn run_with_factory(
+    options: Options,
+    directory: PrivateDirectory,
+    owner: ApplicationInstance,
+    factory: impl FnOnce(PrivateDirectory, Notifier) -> std::io::Result<Box<dyn DesktopConnection>>,
+) -> i32 {
+    let smoke = options.smoke;
+    let preview = options.preview || smoke;
     // SAFETY: GUI initialization and every HWND below remain on this thread.
     // App outlives the window and every callback; Windows copies class/control strings.
     unsafe {
@@ -69,7 +104,13 @@ pub fn run(smoke: bool, _directory: PrivateDirectory, owner: ApplicationInstance
         if taskbar_message == 0 {
             return 1;
         }
-        let app = Box::new(App {
+        let mut app = Box::new(App {
+            connection: OnceCell::new(),
+            network: OnceCell::new(),
+            inputs: Cell::new([null_mut(); 13]),
+            profile_loaded: Cell::new(false),
+            session_notifications: Cell::new(false),
+            preview,
             activation: Arc::new(AtomicU8::new(0)),
             folded: Cell::new(false),
             dpi: Cell::new(96),
@@ -97,7 +138,7 @@ pub fn run(smoke: bool, _directory: PrivateDirectory, owner: ApplicationInstance
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
             class_name.as_ptr(),
-            wide(TITLE).as_ptr(),
+            wide(if preview { TITLE } else { "Hormuz companion" }).as_ptr(),
             STYLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -140,7 +181,7 @@ pub fn run(smoke: bool, _directory: PrivateDirectory, owner: ApplicationInstance
                 1,
                 1,
                 hwnd,
-                id as HMENU,
+                (if !preview && id == 0 { 300 + index } else { id }) as HMENU,
                 instance,
                 null(),
             );
@@ -152,6 +193,11 @@ pub fn run(smoke: bool, _directory: PrivateDirectory, owner: ApplicationInstance
             }
         }
         app.controls.set(controls);
+        if !preview && !connected::initialize(hwnd, &app, directory, factory) {
+            DestroyWindow(hwnd);
+            UnregisterClassW(class_name.as_ptr(), instance);
+            return 1;
+        }
         let activation_window = hwnd as usize;
         let activation = app.activation.clone();
         let Ok(listener) = owner.listen_for_reopen(move || {
@@ -180,7 +226,12 @@ pub fn run(smoke: bool, _directory: PrivateDirectory, owner: ApplicationInstance
         reflow(hwnd, &app);
         ShowWindow(hwnd, SW_SHOW);
         SetForegroundWindow(hwnd);
-        SetFocus(controls[5]);
+        SetFocus(if preview {
+            controls[5]
+        } else {
+            app.inputs.get()[1]
+        });
+        connected::visibility(hwnd, &app);
         if smoke && SetTimer(hwnd, SMOKE_TIMER, 300, None) == 0 {
             app.exit_code.set(1);
             DestroyWindow(hwnd);
@@ -205,6 +256,10 @@ pub fn run(smoke: bool, _directory: PrivateDirectory, owner: ApplicationInstance
         if !app.font.get().is_null() {
             DeleteObject(app.font.get());
         }
+        // Drain credential work before allowing another primary to acquire
+        // ownership. Workers never retain pointers to App or its controls.
+        drop(app.network.take());
+        drop(app.connection.take());
         drop(listener);
         UnregisterClassW(class_name.as_ptr(), instance);
         app.exit_code.get()
@@ -227,7 +282,7 @@ unsafe fn add_tray(hwnd: HWND) -> bool {
         data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
         data.uCallbackMessage = TRAY_CALLBACK;
         data.hIcon = LoadIconW(null_mut(), IDI_APPLICATION);
-        let tip = wide("Hormuz preview - open companion");
+        let tip = wide("Hormuz - open companion");
         data.szTip[..tip.len()].copy_from_slice(&tip);
         if data.hIcon.is_null() || Shell_NotifyIconW(NIM_ADD, &data) == 0 {
             return false;
@@ -247,6 +302,7 @@ unsafe fn show(hwnd: HWND, app: &App) {
         ShowWindow(hwnd, SW_RESTORE);
         SetForegroundWindow(hwnd);
         SetFocus(app.controls.get()[5]);
+        connected::visibility(hwnd, app);
     }
 }
 
@@ -261,6 +317,7 @@ unsafe fn hide(hwnd: HWND, app: &App) {
                 SW_MINIMIZE
             },
         );
+        connected::visibility(hwnd, app);
     }
 }
 
@@ -278,8 +335,21 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
         let mut outer = RECT {
             left: 0,
             top: 0,
-            right: scale(336, dpi),
-            bottom: scale(if app.folded.get() { 106 } else { 216 }, dpi),
+            right: scale(if app.preview { 336 } else { 432 }, dpi),
+            bottom: scale(
+                if app.preview {
+                    if app.folded.get() {
+                        106
+                    } else {
+                        216
+                    }
+                } else if app.folded.get() {
+                    168
+                } else {
+                    488
+                },
+                dpi,
+            ),
         };
         if AdjustWindowRectExForDpi(&mut outer, STYLE, 0, WS_EX_APPWINDOW, dpi) == 0 {
             return;
@@ -307,13 +377,17 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
         );
         let controls = app.controls.get();
         for (index, control) in controls.iter().take(5).enumerate() {
-            let y = [16, 40, 82, 106, 130][index];
+            let y = if app.preview {
+                [16, 40, 82, 106, 130][index]
+            } else {
+                [12, 36, 118, 142, 166][index]
+            };
             MoveWindow(
                 *control,
                 scale(16, dpi),
                 scale(y, dpi),
-                scale(304, dpi),
-                scale(22, dpi),
+                scale(if app.preview { 304 } else { 400 }, dpi),
+                scale(if !app.preview && index == 1 { 78 } else { 22 }, dpi),
                 1,
             );
             ShowWindow(
@@ -325,7 +399,17 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
                 },
             );
         }
-        let y = if app.folded.get() { 64 } else { 176 };
+        let y = if app.preview {
+            if app.folded.get() {
+                64
+            } else {
+                176
+            }
+        } else if app.folded.get() {
+            128
+        } else {
+            448
+        };
         for (index, control) in controls.iter().skip(5).enumerate() {
             MoveWindow(
                 *control,
@@ -340,6 +424,7 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             controls[5],
             wide(if app.folded.get() { "&Expand" } else { "&Fold" }).as_ptr(),
         );
+        connected::layout(app);
         let font = CreateFontW(
             -scale(14, dpi),
             0,
@@ -357,7 +442,11 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             wide("Segoe UI").as_ptr(),
         );
         if !font.is_null() {
-            for control in controls {
+            for control in controls
+                .into_iter()
+                .chain(app.inputs.get())
+                .filter(|h| !h.is_null())
+            {
                 SendMessageW(control, WM_SETFONT, font as usize, 1);
             }
             let previous = app.font.replace(font);
@@ -488,6 +577,31 @@ unsafe extern "system" fn window_proc(
             return 0;
         }
         match message {
+            NETWORK_CHANGED => {
+                if app.network.get().is_some_and(|events| events.take()) {
+                    if let Some(connection) = app.connection.get() {
+                        connection
+                            .lifecycle(hormuz_client_platform::LifecycleEvent::NetworkChanged);
+                    }
+                }
+                0
+            }
+            CONNECTION_CHANGED => {
+                connected::update(app);
+                0
+            }
+            WM_SHOWWINDOW | WM_SIZE => {
+                connected::visibility(hwnd, app);
+                DefWindowProcW(hwnd, message, wparam, lparam)
+            }
+            WM_WTSSESSION_CHANGE => {
+                connected::session_changed(app, wparam);
+                0
+            }
+            WM_POWERBROADCAST => {
+                connected::power_changed(app, wparam);
+                1
+            }
             INSTANCE_REOPEN => {
                 if app
                     .activation
@@ -504,9 +618,23 @@ unsafe extern "system" fn window_proc(
             }
             WM_COMMAND => {
                 match wparam & 0xffff {
+                    connected::SIGN_IN => connected::sign_in(app),
+                    connected::SIGN_OUT => {
+                        if let Some(connection) = app.connection.get() {
+                            connection.sign_out();
+                            connected::update(app);
+                        }
+                    }
+                    connected::RETRY => {
+                        if let Some(connection) = app.connection.get() {
+                            connection.retry();
+                            connected::update(app);
+                        }
+                    }
                     FOLD => {
                         app.folded.set(!app.folded.get());
                         reflow(hwnd, app);
+                        connected::visibility(hwnd, app);
                     }
                     HIDE | 2 => hide(hwnd, app), // IDCANCEL from dialog keyboard navigation.
                     SHOW => show(hwnd, app),
@@ -552,6 +680,7 @@ unsafe extern "system" fn window_proc(
             }
             WM_DESTROY => {
                 app.activation.store(2, Ordering::SeqCst);
+                connected::shutdown(hwnd, app);
                 KillTimer(hwnd, SMOKE_TIMER);
                 Shell_NotifyIconW(NIM_DELETE, &tray_data(hwnd));
                 PostQuitMessage(app.exit_code.get());

@@ -1,12 +1,18 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+#[cfg(any(windows, test))]
+mod connection;
 #[cfg(windows)]
 mod native;
+#[cfg(windows)]
+mod network;
 #[cfg(any(windows, test))]
 mod options;
 #[cfg(any(windows, test))]
 mod placement;
+#[cfg(any(windows, test))]
+mod presentation;
 #[cfg(windows)]
 mod startup;
 
@@ -18,7 +24,7 @@ fn main() {
     let code = match startup::begin(&options) {
         Ok(startup::Startup::Reopened) => 0,
         Ok(startup::Startup::Primary { directory, owner }) => {
-            native::run(options.smoke, directory, owner)
+            native::run(options, directory, owner)
         }
         Err(_) => 1,
     };
