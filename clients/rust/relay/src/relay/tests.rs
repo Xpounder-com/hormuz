@@ -258,16 +258,18 @@ fn enabled_transform_runs_once_before_egress_and_marks_only_changed_bytes() {
 }
 
 #[test]
-fn stopping_owns_the_listener_and_closes_its_port() {
+fn stopping_releases_relay_state() {
     let relay = LocalRelay::start(
         &profile("http://127.0.0.1:9", "claude-code"),
         credential(Arc::new(AtomicUsize::new(0))),
         Optimization::Off,
     )
     .unwrap();
-    let address = relay.address();
+    TcpStream::connect(relay.address()).unwrap();
+    let local_token = Arc::downgrade(&relay.token);
     drop(relay);
-    assert!(TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_err());
+    // A released ephemeral port can be reused by another parallel test.
+    assert!(local_token.upgrade().is_none());
 }
 
 #[test]
