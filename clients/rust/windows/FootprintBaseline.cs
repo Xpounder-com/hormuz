@@ -46,9 +46,15 @@ public static class FootprintBaseline
 {
     const int FoldId = 101, HideId = 102, ExitId = 104;
     const uint WmApp = 0x8000, NinSelect = 0x400;
+    const double MaximumSampleJitterSeconds = 1.5;
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct Rect { public int left, top, right, bottom; }
 
     [DllImport("user32.dll")]
     static extern IntPtr GetDlgItem(IntPtr window, int id);
+    [DllImport("user32.dll")]
+    static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")]
     static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")]
@@ -78,6 +84,14 @@ public static class FootprintBaseline
     static bool Hidden(IntPtr window)
     {
         return !IsWindowVisible(window) || IsIconic(window);
+    }
+
+    static int WindowHeight(IntPtr window)
+    {
+        Rect rect;
+        Require(GetWindowRect(window, out rect) && rect.bottom > rect.top,
+            "Owned preview window geometry is unavailable.");
+        return rect.bottom - rect.top;
     }
 
     static AutomationElement Button(IntPtr window, int id, string name)
@@ -156,7 +170,7 @@ public static class FootprintBaseline
         };
     }
 
-    static void RequireState(IntPtr window, string scenario)
+    static void RequireState(IntPtr window, string scenario, int expectedHeight)
     {
         if (scenario == "hidden")
             Require(Hidden(window), "Hidden preview became visible during the sample.");
@@ -164,7 +178,10 @@ public static class FootprintBaseline
         {
             Require(IsWindowVisible(window) && !IsIconic(window),
                 "Visible preview changed state during the sample.");
-            Button(window, FoldId, scenario == "folded" ? "Expand" : "Fold");
+            // GetWindowRect reads window-manager geometry without UI Automation
+            // property requests dispatching work to the measured process.
+            Require(WindowHeight(window) == expectedHeight,
+                "Preview geometry changed during the sample.");
         }
     }
 
@@ -196,6 +213,8 @@ public static class FootprintBaseline
             Button(window, FoldId, "Fold");
             Button(window, HideId, "Hide");
             Button(window, ExitId, "Exit");
+            int normalHeight = WindowHeight(window);
+            int expectedHeight = normalHeight;
 
             FootprintRun report = new FootprintRun {
                 scenario = scenario,
@@ -215,6 +234,9 @@ public static class FootprintBaseline
                 Invoke(Button(window, FoldId, "Fold"));
                 Wait(() => AutomationElement.FromHandle(GetDlgItem(window, FoldId)).Current.Name == "Expand",
                     "Preview did not fold.");
+                expectedHeight = WindowHeight(window);
+                Require(expectedHeight < normalHeight,
+                    "Folded preview did not become shorter.");
             }
             else if (scenario == "hidden")
             {
@@ -223,7 +245,7 @@ public static class FootprintBaseline
                 report.hidden_behavior = IsIconic(window)
                     ? "taskbar_minimized_fallback" : "tray_hidden";
             }
-            RequireState(window, scenario);
+            RequireState(window, scenario, expectedHeight);
             Thread.Sleep(warmupSeconds * 1000);
 
             int count = durationSeconds * 1000 / intervalMilliseconds + 1;
@@ -234,8 +256,21 @@ public static class FootprintBaseline
                 long due = (long)index * intervalMilliseconds;
                 long wait = due - clock.ElapsedMilliseconds;
                 if (wait > 0) Thread.Sleep((int)wait);
-                RequireState(window, scenario);
-                report.samples.Add(Sample(process, clock));
+                RequireState(window, scenario, expectedHeight);
+                FootprintSample sample = Sample(process, clock);
+                double requested = due / 1000.0;
+                Require(sample.elapsed_seconds >= requested &&
+                    sample.elapsed_seconds <= requested + MaximumSampleJitterSeconds,
+                    "Hosted runner missed the requested sampling deadline.");
+                if (report.samples.Count > 0)
+                {
+                    double gap = sample.elapsed_seconds -
+                        report.samples[report.samples.Count - 1].elapsed_seconds;
+                    Require(Math.Abs(gap - intervalMilliseconds / 1000.0) <=
+                        MaximumSampleJitterSeconds,
+                        "Hosted runner did not maintain the sampling cadence.");
+                }
+                report.samples.Add(sample);
             }
             report.observer_wall_seconds_sampling = clock.Elapsed.TotalSeconds;
             observer.Refresh();
@@ -266,6 +301,9 @@ public static class FootprintBaseline
                 "App CPU counter regressed during the sample.");
             report.app_cpu_percent_one_core =
                 100 * report.app_cpu_seconds_delta / report.sample_duration_seconds;
+
+            if (scenario != "hidden")
+                Button(window, FoldId, scenario == "folded" ? "Expand" : "Fold");
 
             if (Hidden(window))
             {

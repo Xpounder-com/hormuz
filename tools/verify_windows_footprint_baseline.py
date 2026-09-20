@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 SCENARIOS = ("visible", "folded", "hidden")
+MAX_SAMPLE_JITTER_SECONDS = 1.5
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 SAMPLE_KEYS = {
@@ -104,11 +105,18 @@ def verify_run(run: dict, scenario: str, repetition: int) -> dict:
     working: list[int] = []
     private: list[int] = []
     cpu: list[float] = []
-    for sample in samples:
+    for index, sample in enumerate(samples):
         require(isinstance(sample, dict), "Sample is not an object.")
         require(set(sample) == SAMPLE_KEYS,
                 "Sample schema includes missing or nonnumeric content fields.")
-        elapsed.append(number(sample.get("elapsed_seconds"), "sample elapsed"))
+        observed = number(sample.get("elapsed_seconds"), "sample elapsed")
+        requested = index * 5.0
+        require(requested <= observed <= requested + MAX_SAMPLE_JITTER_SECONDS,
+                "A sample missed its requested five-second deadline.")
+        if elapsed:
+            require(abs(observed - elapsed[-1] - 5.0) <= MAX_SAMPLE_JITTER_SECONDS,
+                    "The samples do not maintain a five-second cadence.")
+        elapsed.append(observed)
         require(sample.get("process_count") == 1, "Empty preview process tree changed.")
         working.append(integer(sample.get("working_set_bytes_sum"), "working set", minimum=1))
         private.append(integer(sample.get("private_bytes_sum"), "private bytes", minimum=1))

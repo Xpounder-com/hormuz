@@ -15,6 +15,9 @@ Each state runs in its own `windows-latest` job. Within that job, the
 starts three independent preview processes in separate private directories.
 For each process it waits 60 seconds after verifying the requested state,
 then records 61 samples at requested five-second intervals over five minutes.
+The observer and independent verifier reject a sample more than 1.5 seconds
+late or an adjacent gap more than 1.5 seconds from the requested cadence;
+overloaded runner recordings therefore do not count as this protocol.
 An independent Windows PowerShell 5.1
 [observer](../../../clients/rust/windows/FootprintBaseline.cs) verifies the
 owned synthetic window and numeric PID/parent process tree at every sample.
@@ -62,6 +65,9 @@ watchdog, WMI service and artifact-upload cost are outside those counters.
 The window-ready time is only an **upper bound** from process launch to the
 observer's first verified window: it includes PowerShell startup, UI Automation
 setup and polling, and does not establish cold start or rendered pixels.
+Fold state is verified with UI Automation before and after sampling. During
+sampling the observer checks window-manager visibility and geometry without
+repeated UI Automation property requests to the measured process.
 
 No verified per-process wake-up counter is available in this hosted-runner
 procedure, so the wake-up field is null with an explicit reason. A helper that
