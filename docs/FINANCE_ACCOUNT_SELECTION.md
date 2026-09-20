@@ -33,13 +33,21 @@ versions cannot yet be verified as current. Candidates are neither persisted nor
 used for financial matching, reports, allocation or repricing. Replacing a secret
 under unchanged metadata references remains undetectable by metadata alone.
 
-After ordinary authentication, routing and custody checks, the gateway selects
-one immutable upstream/metadata context before beginning the attempt. The same
-context reaches the pre-egress attempt boundary and forwarding. Same-protocol
-model failover retains this context alongside its already selected credential;
-it cannot pair a newly read host/reference with an earlier credential. A later
-client request selects afresh. This is not a hot-reload feature or evidence of
-atomic durable capture.
+At startup, the gateway copies one upstream configuration for credential
+resolution and freezes the resulting transport, metadata and already resolved
+credential mappings into one generation. Credential values remain separate from
+finance candidates and are excluded from the generation's diagnostic
+representation. The existing credential availability and custody checks remain
+in force.
+
+After ordinary authentication, routing and custody checks, each request reads
+that one generation and selects its immutable tenant-specific metadata context
+before beginning the attempt. The same context reaches the pre-egress attempt
+boundary and forwarding. Same-protocol model failover retains this context
+alongside its already selected credential. Replacing or mutating the original
+configuration/credential dictionaries cannot mix generations before selection
+or egress. Configuration changes require a server restart; no hot-reload API or
+atomic durable capture is implemented.
 
 Whole-file JSON, duplicate-member, nonfinite-number, size/depth and ordinary
 configuration rules remain in force. The two optional metadata surfaces are
@@ -55,7 +63,8 @@ or release qualification are outside this checkpoint.
 
 Provider-free regressions cover immutable references, selection isolation,
 ambiguity, invalid metadata, first-party origin checks, unchanged legacy config
-digests and loopback gateway behavior during a controlled configuration change.
+digests, mutation before selection and loopback gateway behavior during a
+controlled test-only publication of a complete replacement generation.
 The gateway regressions exercise initial and failover attempts with synthetic
 credentials and an owned loopback fake server. They do not prove live billing
 account ownership or financial reconciliation.

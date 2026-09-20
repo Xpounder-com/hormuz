@@ -941,14 +941,16 @@ class GatewayIntegrationTests(unittest.TestCase):
     def test_failover_preserves_transport_and_reference_context_with_existing_credential(self) -> None:
         from hormuz.finance_account_binding import parse_finance_identity
 
-        self._restart_gateway(self._config_with_failover())
-        identity = parse_finance_identity({
+        value = self._config_with_failover()
+        identity_value = {
             "upstream_reference_id": "primary", "upstream_reference_version": 1,
             "transport_profile": "openai.first-party.v1",
             "inference_credential_reference_id": "inference", "inference_credential_reference_version": 1,
-        })
-        original_upstream = replace(self.config.upstreams["openai"], finance_identity=identity)
-        self.config.upstreams["openai"] = original_upstream
+        }
+        value["upstreams"]["openai"]["finance_identity"] = identity_value
+        self._restart_gateway(value)
+        identity = parse_finance_identity(identity_value)
+        original_upstream = self.config.upstreams["openai"]
         original_begin = GatewayRequestHandler._begin_governed_attempt
         selections = []
 
@@ -956,11 +958,17 @@ class GatewayIntegrationTests(unittest.TestCase):
             selections.append(kwargs.get("selected_upstream"))
             attempt = original_begin(handler, **kwargs)
             if len(selections) == 1:
-                self.config.upstreams["openai"] = replace(
+                replacement = replace(
                     original_upstream, base_url=original_upstream.base_url + "/next",
                     finance_identity=replace(identity, inference_credential_reference_version=2),
                 )
-                self.gateway.upstream_credentials["openai"] = "synthetic-next-credential"
+                # Test-only publication of a whole generation. No production
+                # reload API is introduced; individual mutable inputs are ignored.
+                self.gateway._egress_configuration = replace(
+                    self.gateway._egress_configuration,
+                    upstreams={**self.config.upstreams, "openai": replacement},
+                    credentials={**self.gateway.upstream_credentials, "openai": "synthetic-next-credential"},
+                )
             return attempt
 
         with mock.patch.object(GatewayRequestHandler, "_begin_governed_attempt", replace_after_begin):
@@ -1073,6 +1081,73 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual((candidate.binding.organization_id, candidate.binding.binding_id),
                          ("tenant-a", "authenticated-account"))
         self.assertEqual(FakeProviderHandler.requests, [])
+
+    def test_startup_egress_snapshot_ignores_input_mutation_before_selection(self) -> None:
+        from hormuz.finance_account_binding import parse_finance_account_bindings
+
+        value = self._config(self.provider.server_port, _free_port())
+        value["identities"][0]["organization_id"] = "tenant-a"
+        value["upstreams"]["openai"].update(
+            base_url="https://api.openai.com",
+            finance_identity={
+                "upstream_reference_id": "primary", "upstream_reference_version": 1,
+                "transport_profile": "openai.first-party.v1",
+                "inference_credential_reference_id": "inference", "inference_credential_reference_version": 1,
+            },
+        )
+        mapping = {"organization_id": "tenant-a", "upstream_reference_id": "primary",
+                   "binding_id": "startup-account", "binding_version": 1}
+        value["finance_account_bindings"] = [mapping]
+        credentials = {"openai": OPENAI_KEY, "anthropic": ANTHROPIC_KEY}
+        with mock.patch("hormuz.server.resolve_upstream_credentials", return_value=credentials):
+            self._restart_gateway(value)
+        original_upstream = self.config.upstreams["openai"]
+        # These independently mutable inputs previously combined generations
+        # during selection. Mutation happens before any attempt/selection.
+        credentials["openai"] = "synthetic-replacement-credential"
+        self.config.upstreams["openai"] = replace(
+            original_upstream, base_url="https://api.openai.com/replacement",
+            finance_identity=replace(original_upstream.finance_identity, inference_credential_reference_version=2),
+        )
+        self.gateway.config = replace(self.config, finance_account_bindings=parse_finance_account_bindings([
+            dict(mapping, binding_id="replacement-account", binding_version=2),
+        ]))
+        original_begin = GatewayRequestHandler._begin_governed_attempt
+        selections = []
+
+        def observe(handler, **kwargs):
+            selections.append(kwargs["selected_upstream"])
+            return original_begin(handler, **kwargs)
+
+        payload = io.BytesIO(json.dumps({
+            "id": "synthetic-response", "model": "gpt-test-fast", "status": "completed",
+            "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+        }).encode())
+        response = mock.Mock(
+            status=200, headers={"Content-Type": "application/json"},
+            read=payload.read, read1=payload.read1, close=payload.close,
+        )
+        response.getcode.return_value = 200
+        with mock.patch("hormuz.server.urllib.request.urlopen", return_value=response) as urlopen, \
+             mock.patch.object(GatewayRequestHandler, "_begin_governed_attempt", observe):
+            status, _, body = self._post("/v1/responses", {"model": "engineering-fast", "input": "synthetic"})
+
+        self.assertEqual(status, 200, body)
+        urlopen.assert_called_once()
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.openai.com/v1/responses")
+        self.assertEqual(request.get_header("Authorization"), f"Bearer {OPENAI_KEY}")
+        selection = selections[0]
+        self.assertIs(selection.upstream, original_upstream)
+        self.assertEqual(selection.finance.identity.inference_credential_reference_version, 1)
+        self.assertEqual(selection.finance.binding.binding_id, "startup-account")
+        self.assertEqual(FakeProviderHandler.requests, [])
+        self.assertNotIn(OPENAI_KEY, repr(selection))
+        self.assertNotIn(OPENAI_KEY, repr(self.gateway._egress_configuration))
+        with self.assertRaises(TypeError):
+            self.gateway.upstream_credentials["openai"] = "mutation"
+        with self.assertRaises(TypeError):
+            self.gateway._egress_configuration.upstreams["openai"] = original_upstream
 
     def test_explicit_overload_can_fail_over_but_never_more_than_one_hop(self) -> None:
         self._restart_gateway(self._config_with_failover())
@@ -1235,7 +1310,8 @@ class GatewayIntegrationTests(unittest.TestCase):
             GatewayConfig.load(path)
 
     def test_missing_upstream_credential_fails_before_creating_an_attempt(self) -> None:
-        self.gateway.upstream_credentials["openai"] = ""
+        with mock.patch.dict(os.environ, {"TEST_OPENAI_KEY": ""}):
+            self._restart_gateway(self._config(self.provider.server_port, _free_port()))
         with mock.patch("hormuz.server.urllib.request.urlopen") as urlopen:
             status, headers, _ = self._post(
                 "/v1/responses",

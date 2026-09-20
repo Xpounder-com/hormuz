@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import hmac
 import http.client
 import ipaddress
@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from types import MappingProxyType
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Mapping
@@ -54,7 +55,12 @@ from .finance_attempts import (
     configured_rate_card_binding,
     estimate_configured_route,
 )
-from .finance_account_binding import FinanceAccountCandidate, UnavailableFinance, select_finance_account
+from .finance_account_binding import (
+    FinanceAccountBindings,
+    FinanceAccountCandidate,
+    UnavailableFinance,
+    select_finance_account,
+)
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
@@ -96,6 +102,24 @@ _ANTHROPIC_PROVIDER_STATE_FIELDS = frozenset({"container", "mcp_servers"})
 _OPENAI_INLINE_TOOL_TYPES = frozenset({"custom", "function"})
 _ANTHROPIC_INLINE_TOOL_TYPES = frozenset({"custom"})
 _INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
+
+
+@dataclass(frozen=True)
+class _EgressConfiguration:
+    """One startup generation, including already resolved server-only secrets.
+
+    Copy both mappings so callers cannot mutate an active generation. There is
+    no runtime reload API: a changed configuration requires a new server. The
+    credential mapping never belongs to finance metadata or diagnostic repr.
+    """
+
+    upstreams: Mapping[str, UpstreamConfig]
+    finance_account_bindings: FinanceAccountBindings | None
+    credentials: Mapping[str, str] = field(repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "upstreams", MappingProxyType(dict(self.upstreams)))
+        object.__setattr__(self, "credentials", MappingProxyType(dict(self.credentials)))
 
 
 @dataclass(frozen=True)
@@ -220,6 +244,10 @@ class GatewayServer(ThreadingHTTPServer):
 
     def __init__(self, config: GatewayConfig, *, environ: Mapping[str, str] | None = None):
         self.config = config
+        # The same copied upstream configuration drives credential resolution
+        # and every later transport/reference selection. GatewayConfig is frozen
+        # but its legacy upstream dictionary is not; do not retain that alias.
+        egress_config = replace(config, upstreams=dict(config.upstreams))
         self._accepting_requests = threading.Event()
         self.authenticator = Authenticator(config)
         self.session_broker: SessionBroker | None = None
@@ -305,10 +333,14 @@ class GatewayServer(ThreadingHTTPServer):
                 config,
                 connection_pool=self.postgres_pool,
             )
-            self.upstream_credentials = resolve_upstream_credentials(
-                config,
-                environ=environ,
-                selection_allowed=self._upstream_credential_selection_allowed,
+            self._egress_configuration = _EgressConfiguration(
+                upstreams=egress_config.upstreams,
+                finance_account_bindings=egress_config.finance_account_bindings,
+                credentials=resolve_upstream_credentials(
+                    egress_config,
+                    environ=environ,
+                    selection_allowed=self._upstream_credential_selection_allowed,
+                ),
             )
             protected_values = [
                 ("hormuz_identity_token", identity.token)
@@ -349,6 +381,12 @@ class GatewayServer(ThreadingHTTPServer):
                 settings.max_waiting,
                 settings.acquire_timeout_seconds,
             )
+
+    @property
+    def upstream_credentials(self) -> Mapping[str, str]:
+        """Read-only compatibility view for existing startup diagnostics."""
+
+        return self._egress_configuration.credentials
 
     def _upstream_credential_selection_allowed(self, protocol: str) -> bool:
         """Avoid loading a credential generation already restricted by custody.
@@ -884,7 +922,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 code="hormuz_storage_unavailable",
             )
             return
-        upstream_key = self.server.upstream_credentials.get(protocol, "")
+        egress = self.server._egress_configuration
+        upstream_key = egress.credentials.get(protocol, "")
         if not upstream_key:
             self._send_protocol_error(
                 protocol,
@@ -893,7 +932,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 code="gateway_upstream_not_configured",
             )
             return
-        upstream = self.server.config.upstreams[protocol]
+        upstream = egress.upstreams[protocol]
         selected_upstream = _SelectedUpstream(
             upstream=upstream,
             finance=select_finance_account(
@@ -901,7 +940,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 protocol=protocol,
                 base_url=upstream.base_url,
                 identity=upstream.finance_identity,
-                bindings=self.server.config.finance_account_bindings,
+                bindings=egress.finance_account_bindings,
             ),
         )
         attempt: RequestAttempt | None = None
