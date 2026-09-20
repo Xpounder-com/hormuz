@@ -1,0 +1,19 @@
+# Synthetic Linear lifecycle proposals
+
+`cases.json` is an offline, handcrafted scenario pack for [#313](https://github.com/Xpounder-com/hormuz/issues/313). Every ID and time is fixed and synthetic. No record came from a Linear workspace. The source snippets contain only a delivery ID, action, entity kind, object UUID, and (for the pending issue relationship cases) proposed parent UUID fields. They omit content, actors, credentials, and signatures.
+
+The [Linear webhook reference](https://linear.app/developers/webhooks), reviewed September 20, 2026, documents Initiative, Project, Cycle, and Issue data-change webhooks; generic `create`, `update`, and `remove` actions; `data`; and `updatedFrom` for changed properties. It does not establish this pack's exact per-entity field mapping, lifecycle state translation, source revision, or complete relationship set. [Projects](https://linear.app/docs/projects) can span teams, [initiatives](https://linear.app/docs/initiatives) can show a parent while a private child remains hidden, and [cycles](https://linear.app/docs/use-cycles) can move issues automatically. Those product behaviors are context, not webhook or authorization proof.
+
+| Case | Candidate record | Mapping expectation |
+| --- | --- | --- |
+| `initiative-create`, `project-create`, `cycle-create` | Administrator-only context | `proposed`: generic documented create action; source state, revision, time, and relationships stay unknown. |
+| `issue-create-in-project` | Context plus issue-only source observation | `mapping_pending`: project field, enrolled container, and distinct event identity need the #220/#214 checkpoint. |
+| `issue-project-cycle-change` | Partial issue context | `mapping_pending`: precise old/new fields and relationship completeness need the checkpoint. |
+| `project-remove` | Project context | `mapping_pending`: `remove` versus archive/deletion and supersession rules need the checkpoint. |
+| `reject-malformed-opaque-id`, `reject-content-bearing-normalized-field` | Invalid normalized variants | Must fail with fixed, content-free diagnostics. |
+
+The candidate `hormuz.linear-context-event` values are checked with the accepted context bundle and are descriptive, administrator-only records. A populated `source_authentication: verified_connector`, synthetic authority digest, delivery UUID, or commit sequence is a **shape fixture**, never evidence of a verified webhook, enrolled entity, or durable database commit. The only project in the synthetic source-observation binding is the first project UUID. The moved-to project and both cycles are outside that allowlist; a relation grants access to neither parent nor children. `unknown` and `partial` relationship coverage never mean a complete empty set, and no candidate supersedes history. Delivery UUIDs and receipt order never become source revisions. The generic action `createdAt` is retained in the trimmed source snippet but is not promoted to authoritative source-object time; candidate `event_at` and revision remain unknown. Lifecycle movement is observational, not evidence that AI caused an outcome.
+
+The frozen issue/PR outcome envelope and digest-pinned minimal/populated fixtures are untouched. The issue creation candidate uses the existing source-observation validator with a synthetic Linear project binding; parent objects never enter that envelope. These tests do not implement a normalizer, receiver, signature verification, typed authority, persistence, backfill, or live delivery. [#220](https://github.com/Xpounder-com/hormuz/issues/220), [#214](https://github.com/Xpounder-com/hormuz/issues/214), and [#225](https://github.com/Xpounder-com/hormuz/issues/225) retain their independent gates.
+
+Run `python -m unittest -v tests.test_linear_connector_fixtures` after the repository's `CONTRIBUTING.md` setup.

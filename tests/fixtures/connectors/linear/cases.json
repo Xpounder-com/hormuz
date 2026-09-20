@@ -1,0 +1,799 @@
+{
+  "schema_version": 1,
+  "fixture_kind": "synthetic_linear_lifecycle_proposals",
+  "synthetic_binding": {
+    "organization_id": "tenant-test",
+    "connector_id": "linear-test",
+    "provider": "linear",
+    "installation_id": null,
+    "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "external_object_ids": [
+      "22222222-2222-4222-8222-222222222222"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "initiative-create",
+      "entity_kind": "initiative",
+      "source_mapping": "proposed",
+      "source_documentation": [
+        {
+          "url": "https://linear.app/developers/webhooks",
+          "section": "Supported models; Data change events payload",
+          "reviewed_on": "2026-09-20"
+        }
+      ],
+      "source_input": {
+        "headers": {
+          "Linear-Delivery": "80000000-0000-4000-8000-000000000001"
+        },
+        "body": {
+          "action": "create",
+          "type": "Initiative",
+          "createdAt": "2026-09-20T12:00:00Z",
+          "organizationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "data": {
+            "id": "11111111-1111-4111-8111-111111111111"
+          }
+        }
+      },
+      "typed_identity": {
+        "kind": "initiative",
+        "id": "11111111-1111-4111-8111-111111111111"
+      },
+      "typed_relationships": [],
+      "candidate_targets": {
+        "context_event": {
+          "schema_id": "hormuz.linear-context-event",
+          "schema_version": 1,
+          "organization_id": "tenant-test",
+          "connector_id": "linear-test",
+          "context_event_id": "70000000-0000-4000-8000-000000000001",
+          "source_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "source_team_ids": null,
+          "object": {
+            "kind": "initiative",
+            "id": "11111111-1111-4111-8111-111111111111"
+          },
+          "capture_kind": "webhook",
+          "source_delivery_id": "80000000-0000-4000-8000-000000000001",
+          "authority_binding": {
+            "id": "synthetic-authority",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "normalizer": {
+            "id": "synthetic-normalizer",
+            "version": 1,
+            "content_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "credential_version": "synthetic-only",
+          "source_authentication": "verified_connector",
+          "lifecycle": "created",
+          "normalized_state": "unknown",
+          "relationships": [],
+          "relationship_coverage": "unknown",
+          "revision": {
+            "kind": "unknown",
+            "value": null
+          },
+          "ordering_state": "unknown",
+          "scope_state": "unmatched",
+          "binding": null,
+          "supersedes_context_event_id": null,
+          "event_at": null,
+          "observed_at": "2026-09-20T12:01:00Z",
+          "ingested_at": "2026-09-20T12:01:00Z",
+          "provenance_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "evidence_level": "descriptive",
+          "association_eligibility": "inconclusive",
+          "reader_role": "portfolio_admin",
+          "commit_sequence": 1
+        }
+      },
+      "mapping_notes": [
+        "Generic create action and Initiative model are documented; no lifecycle status, source revision, parent completeness, or authority is inferred."
+      ],
+      "open_question": null
+    },
+    {
+      "case_id": "project-create",
+      "entity_kind": "project",
+      "source_mapping": "proposed",
+      "source_documentation": [
+        {
+          "url": "https://linear.app/developers/webhooks",
+          "section": "Supported models; Data change events payload",
+          "reviewed_on": "2026-09-20"
+        },
+        {
+          "url": "https://linear.app/docs/projects",
+          "section": "Overview; Multi-team projects",
+          "reviewed_on": "2026-09-20"
+        }
+      ],
+      "source_input": {
+        "headers": {
+          "Linear-Delivery": "80000000-0000-4000-8000-000000000002"
+        },
+        "body": {
+          "action": "create",
+          "type": "Project",
+          "createdAt": "2026-09-20T12:00:00Z",
+          "organizationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "data": {
+            "id": "22222222-2222-4222-8222-222222222222"
+          }
+        }
+      },
+      "typed_identity": {
+        "kind": "project",
+        "id": "22222222-2222-4222-8222-222222222222"
+      },
+      "typed_relationships": [],
+      "candidate_targets": {
+        "context_event": {
+          "schema_id": "hormuz.linear-context-event",
+          "schema_version": 1,
+          "organization_id": "tenant-test",
+          "connector_id": "linear-test",
+          "context_event_id": "70000000-0000-4000-8000-000000000002",
+          "source_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "source_team_ids": null,
+          "object": {
+            "kind": "project",
+            "id": "22222222-2222-4222-8222-222222222222"
+          },
+          "capture_kind": "webhook",
+          "source_delivery_id": "80000000-0000-4000-8000-000000000002",
+          "authority_binding": {
+            "id": "synthetic-authority",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "normalizer": {
+            "id": "synthetic-normalizer",
+            "version": 1,
+            "content_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "credential_version": "synthetic-only",
+          "source_authentication": "verified_connector",
+          "lifecycle": "created",
+          "normalized_state": "unknown",
+          "relationships": [],
+          "relationship_coverage": "unknown",
+          "revision": {
+            "kind": "unknown",
+            "value": null
+          },
+          "ordering_state": "unknown",
+          "scope_state": "unmatched",
+          "binding": null,
+          "supersedes_context_event_id": null,
+          "event_at": null,
+          "observed_at": "2026-09-20T12:01:00Z",
+          "ingested_at": "2026-09-20T12:01:00Z",
+          "provenance_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "evidence_level": "descriptive",
+          "association_eligibility": "inconclusive",
+          "reader_role": "portfolio_admin",
+          "commit_sequence": 2
+        }
+      },
+      "mapping_notes": [
+        "Generic create action and Project model are documented. Multi-team membership is not authority for this fixture or its children."
+      ],
+      "open_question": null
+    },
+    {
+      "case_id": "cycle-create",
+      "entity_kind": "cycle",
+      "source_mapping": "proposed",
+      "source_documentation": [
+        {
+          "url": "https://linear.app/developers/webhooks",
+          "section": "Supported models; Data change events payload",
+          "reviewed_on": "2026-09-20"
+        },
+        {
+          "url": "https://linear.app/docs/use-cycles",
+          "section": "Overview; Cycle automations",
+          "reviewed_on": "2026-09-20"
+        }
+      ],
+      "source_input": {
+        "headers": {
+          "Linear-Delivery": "80000000-0000-4000-8000-000000000003"
+        },
+        "body": {
+          "action": "create",
+          "type": "Cycle",
+          "createdAt": "2026-09-20T12:00:00Z",
+          "organizationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "data": {
+            "id": "44444444-4444-4444-8444-444444444444"
+          }
+        }
+      },
+      "typed_identity": {
+        "kind": "cycle",
+        "id": "44444444-4444-4444-8444-444444444444"
+      },
+      "typed_relationships": [],
+      "candidate_targets": {
+        "context_event": {
+          "schema_id": "hormuz.linear-context-event",
+          "schema_version": 1,
+          "organization_id": "tenant-test",
+          "connector_id": "linear-test",
+          "context_event_id": "70000000-0000-4000-8000-000000000003",
+          "source_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "source_team_ids": null,
+          "object": {
+            "kind": "cycle",
+            "id": "44444444-4444-4444-8444-444444444444"
+          },
+          "capture_kind": "webhook",
+          "source_delivery_id": "80000000-0000-4000-8000-000000000003",
+          "authority_binding": {
+            "id": "synthetic-authority",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "normalizer": {
+            "id": "synthetic-normalizer",
+            "version": 1,
+            "content_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "credential_version": "synthetic-only",
+          "source_authentication": "verified_connector",
+          "lifecycle": "created",
+          "normalized_state": "unknown",
+          "relationships": [],
+          "relationship_coverage": "unknown",
+          "revision": {
+            "kind": "unknown",
+            "value": null
+          },
+          "ordering_state": "unknown",
+          "scope_state": "unmatched",
+          "binding": null,
+          "supersedes_context_event_id": null,
+          "event_at": null,
+          "observed_at": "2026-09-20T12:01:00Z",
+          "ingested_at": "2026-09-20T12:01:00Z",
+          "provenance_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "evidence_level": "descriptive",
+          "association_eligibility": "inconclusive",
+          "reader_role": "portfolio_admin",
+          "commit_sequence": 3
+        }
+      },
+      "mapping_notes": [
+        "Generic create action and Cycle model are documented. Cycle scheduling is not issue completion or source revision evidence."
+      ],
+      "open_question": null
+    },
+    {
+      "case_id": "issue-create-in-project",
+      "entity_kind": "issue",
+      "source_mapping": "mapping_pending",
+      "source_documentation": [
+        {
+          "url": "https://linear.app/developers/webhooks",
+          "section": "Supported models; Data change events payload",
+          "reviewed_on": "2026-09-20"
+        },
+        {
+          "url": "https://linear.app/docs/projects",
+          "section": "Add issues to a project",
+          "reviewed_on": "2026-09-20"
+        }
+      ],
+      "source_input": {
+        "headers": {
+          "Linear-Delivery": "80000000-0000-4000-8000-000000000004"
+        },
+        "body": {
+          "action": "create",
+          "type": "Issue",
+          "createdAt": "2026-09-20T12:00:00Z",
+          "organizationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "data": {
+            "id": "66666666-6666-4666-8666-666666666666",
+            "projectId": "22222222-2222-4222-8222-222222222222"
+          }
+        }
+      },
+      "typed_identity": {
+        "kind": "issue",
+        "id": "66666666-6666-4666-8666-666666666666"
+      },
+      "typed_relationships": [
+        {
+          "kind": "project_issue",
+          "parent": {
+            "kind": "project",
+            "id": "22222222-2222-4222-8222-222222222222"
+          }
+        }
+      ],
+      "candidate_targets": {
+        "context_event": {
+          "schema_id": "hormuz.linear-context-event",
+          "schema_version": 1,
+          "organization_id": "tenant-test",
+          "connector_id": "linear-test",
+          "context_event_id": "70000000-0000-4000-8000-000000000004",
+          "source_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "source_team_ids": null,
+          "object": {
+            "kind": "issue",
+            "id": "66666666-6666-4666-8666-666666666666"
+          },
+          "capture_kind": "webhook",
+          "source_delivery_id": "80000000-0000-4000-8000-000000000004",
+          "authority_binding": {
+            "id": "synthetic-authority",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "normalizer": {
+            "id": "synthetic-normalizer",
+            "version": 1,
+            "content_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "credential_version": "synthetic-only",
+          "source_authentication": "verified_connector",
+          "lifecycle": "created",
+          "normalized_state": "unknown",
+          "relationships": [
+            {
+              "kind": "project_issue",
+              "parent": {
+                "kind": "project",
+                "id": "22222222-2222-4222-8222-222222222222"
+              }
+            }
+          ],
+          "relationship_coverage": "partial",
+          "revision": {
+            "kind": "unknown",
+            "value": null
+          },
+          "ordering_state": "unknown",
+          "scope_state": "unmatched",
+          "binding": null,
+          "supersedes_context_event_id": null,
+          "event_at": null,
+          "observed_at": "2026-09-20T12:01:00Z",
+          "ingested_at": "2026-09-20T12:01:00Z",
+          "provenance_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "evidence_level": "descriptive",
+          "association_eligibility": "inconclusive",
+          "reader_role": "portfolio_admin",
+          "commit_sequence": 4
+        },
+        "source_observation": {
+          "schema_id": "hormuz.source-outcome-observation",
+          "schema_version": 1,
+          "source_event_id": "90000000-0000-4000-8000-000000000004",
+          "external_object_id": "66666666-6666-4666-8666-666666666666",
+          "container_id": "22222222-2222-4222-8222-222222222222",
+          "source_revision": null,
+          "ordering_domain": null,
+          "revision_order": null,
+          "object_type": "issue",
+          "event_type": "created",
+          "quality_state": "unknown",
+          "duration_ms": null,
+          "state": "observed",
+          "supersedes_source_event_id": null,
+          "reason_code": "observed",
+          "event_at": null
+        }
+      },
+      "mapping_notes": [
+        "The issue outcome is a structural candidate only; projectId and source_event_id extraction await the provider checkpoint.",
+        "A project reference in a synthetic payload does not authorize the project, issue, or parent context."
+      ],
+      "open_question": "Which authenticated Issue payload field and independently enrolled project binding justify the projectId-to-container projection and a distinct source_event_id?"
+    },
+    {
+      "case_id": "issue-project-cycle-change",
+      "entity_kind": "issue",
+      "source_mapping": "mapping_pending",
+      "source_documentation": [
+        {
+          "url": "https://linear.app/developers/webhooks",
+          "section": "Data change events payload; updatedFrom",
+          "reviewed_on": "2026-09-20"
+        },
+        {
+          "url": "https://linear.app/docs/projects",
+          "section": "Add issues to a project",
+          "reviewed_on": "2026-09-20"
+        },
+        {
+          "url": "https://linear.app/docs/use-cycles",
+          "section": "Issues rollover",
+          "reviewed_on": "2026-09-20"
+        }
+      ],
+      "source_input": {
+        "headers": {
+          "Linear-Delivery": "80000000-0000-4000-8000-000000000005"
+        },
+        "body": {
+          "action": "update",
+          "type": "Issue",
+          "createdAt": "2026-09-20T12:00:00Z",
+          "organizationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "data": {
+            "id": "66666666-6666-4666-8666-666666666666",
+            "projectId": "33333333-3333-4333-8333-333333333333",
+            "cycleId": "55555555-5555-4555-8555-555555555555"
+          },
+          "updatedFrom": {
+            "projectId": "22222222-2222-4222-8222-222222222222",
+            "cycleId": "44444444-4444-4444-8444-444444444444"
+          }
+        }
+      },
+      "typed_identity": {
+        "kind": "issue",
+        "id": "66666666-6666-4666-8666-666666666666"
+      },
+      "typed_relationships": [
+        {
+          "kind": "project_issue",
+          "parent": {
+            "kind": "project",
+            "id": "33333333-3333-4333-8333-333333333333"
+          }
+        },
+        {
+          "kind": "cycle_issue",
+          "parent": {
+            "kind": "cycle",
+            "id": "55555555-5555-4555-8555-555555555555"
+          }
+        }
+      ],
+      "candidate_targets": {
+        "context_event": {
+          "schema_id": "hormuz.linear-context-event",
+          "schema_version": 1,
+          "organization_id": "tenant-test",
+          "connector_id": "linear-test",
+          "context_event_id": "70000000-0000-4000-8000-000000000005",
+          "source_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "source_team_ids": null,
+          "object": {
+            "kind": "issue",
+            "id": "66666666-6666-4666-8666-666666666666"
+          },
+          "capture_kind": "webhook",
+          "source_delivery_id": "80000000-0000-4000-8000-000000000005",
+          "authority_binding": {
+            "id": "synthetic-authority",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "normalizer": {
+            "id": "synthetic-normalizer",
+            "version": 1,
+            "content_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "credential_version": "synthetic-only",
+          "source_authentication": "verified_connector",
+          "lifecycle": "updated",
+          "normalized_state": "unknown",
+          "relationships": [
+            {
+              "kind": "project_issue",
+              "parent": {
+                "kind": "project",
+                "id": "33333333-3333-4333-8333-333333333333"
+              }
+            },
+            {
+              "kind": "cycle_issue",
+              "parent": {
+                "kind": "cycle",
+                "id": "55555555-5555-4555-8555-555555555555"
+              }
+            }
+          ],
+          "relationship_coverage": "partial",
+          "revision": {
+            "kind": "unknown",
+            "value": null
+          },
+          "ordering_state": "unknown",
+          "scope_state": "unmatched",
+          "binding": null,
+          "supersedes_context_event_id": null,
+          "event_at": null,
+          "observed_at": "2026-09-20T12:01:00Z",
+          "ingested_at": "2026-09-20T12:01:00Z",
+          "provenance_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "evidence_level": "descriptive",
+          "association_eligibility": "inconclusive",
+          "reader_role": "portfolio_admin",
+          "commit_sequence": 5
+        }
+      },
+      "mapping_notes": [
+        "updatedFrom documents prior changed properties generally; these precise relationship keys and their transition semantics remain unverified.",
+        "Observed new parents are partial; old parents are not inferred removed, no supersession or access grant follows, and the new project is outside the synthetic allowlist."
+      ],
+      "open_question": "Do authenticated Issue update payloads expose comparable old/new projectId and cycleId values, and how is complete relationship coverage proven?"
+    },
+    {
+      "case_id": "project-remove",
+      "entity_kind": "project",
+      "source_mapping": "mapping_pending",
+      "source_documentation": [
+        {
+          "url": "https://linear.app/developers/webhooks",
+          "section": "Data change events payload",
+          "reviewed_on": "2026-09-20"
+        },
+        {
+          "url": "https://linear.app/docs/projects",
+          "section": "Delete a project",
+          "reviewed_on": "2026-09-20"
+        }
+      ],
+      "source_input": {
+        "headers": {
+          "Linear-Delivery": "80000000-0000-4000-8000-000000000006"
+        },
+        "body": {
+          "action": "remove",
+          "type": "Project",
+          "createdAt": "2026-09-20T12:00:00Z",
+          "organizationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "data": {
+            "id": "22222222-2222-4222-8222-222222222222"
+          }
+        }
+      },
+      "typed_identity": {
+        "kind": "project",
+        "id": "22222222-2222-4222-8222-222222222222"
+      },
+      "typed_relationships": [],
+      "candidate_targets": {
+        "context_event": {
+          "schema_id": "hormuz.linear-context-event",
+          "schema_version": 1,
+          "organization_id": "tenant-test",
+          "connector_id": "linear-test",
+          "context_event_id": "70000000-0000-4000-8000-000000000006",
+          "source_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "source_team_ids": null,
+          "object": {
+            "kind": "project",
+            "id": "22222222-2222-4222-8222-222222222222"
+          },
+          "capture_kind": "webhook",
+          "source_delivery_id": "80000000-0000-4000-8000-000000000006",
+          "authority_binding": {
+            "id": "synthetic-authority",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "normalizer": {
+            "id": "synthetic-normalizer",
+            "version": 1,
+            "content_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "credential_version": "synthetic-only",
+          "source_authentication": "verified_connector",
+          "lifecycle": "deleted",
+          "normalized_state": "unknown",
+          "relationships": [],
+          "relationship_coverage": "unknown",
+          "revision": {
+            "kind": "unknown",
+            "value": null
+          },
+          "ordering_state": "unknown",
+          "scope_state": "unmatched",
+          "binding": null,
+          "supersedes_context_event_id": null,
+          "event_at": null,
+          "observed_at": "2026-09-20T12:01:00Z",
+          "ingested_at": "2026-09-20T12:01:00Z",
+          "provenance_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "evidence_level": "descriptive",
+          "association_eligibility": "inconclusive",
+          "reader_role": "portfolio_admin",
+          "commit_sequence": 6
+        }
+      },
+      "mapping_notes": [
+        "remove is documented as a generic webhook action; deleted is only a contract candidate. No archival equivalence, complete empty relation set, tombstone, or supersession is asserted."
+      ],
+      "open_question": "Does Project remove mean archive, recoverable deletion, or permanent removal for the authenticated webhook, and when may it supersede a prior complete projection?"
+    },
+    {
+      "case_id": "reject-malformed-opaque-id",
+      "entity_kind": "issue",
+      "source_mapping": "reject",
+      "source_documentation": [
+        {
+          "url": "https://linear.app/developers/webhooks",
+          "section": "Supported models; Data change events payload",
+          "reviewed_on": "2026-09-20"
+        },
+        {
+          "url": "https://linear.app/docs/projects",
+          "section": "Add issues to a project",
+          "reviewed_on": "2026-09-20"
+        }
+      ],
+      "source_input": {
+        "headers": {
+          "Linear-Delivery": "80000000-0000-4000-8000-000000000004"
+        },
+        "body": {
+          "action": "create",
+          "type": "Issue",
+          "createdAt": "2026-09-20T12:00:00Z",
+          "organizationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "data": {
+            "id": "zzzzzzzz-zzzz-4zzz-8zzz-zzzzzzzzzzzz",
+            "projectId": "22222222-2222-4222-8222-222222222222"
+          }
+        }
+      },
+      "typed_identity": {
+        "kind": "issue",
+        "id": "zzzzzzzz-zzzz-4zzz-8zzz-zzzzzzzzzzzz"
+      },
+      "typed_relationships": [
+        {
+          "kind": "project_issue",
+          "parent": {
+            "kind": "project",
+            "id": "22222222-2222-4222-8222-222222222222"
+          }
+        }
+      ],
+      "candidate_targets": {
+        "context_event": {
+          "schema_id": "hormuz.linear-context-event",
+          "schema_version": 1,
+          "organization_id": "tenant-test",
+          "connector_id": "linear-test",
+          "context_event_id": "70000000-0000-4000-8000-000000000004",
+          "source_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "source_team_ids": null,
+          "object": {
+            "kind": "issue",
+            "id": "zzzzzzzz-zzzz-4zzz-8zzz-zzzzzzzzzzzz"
+          },
+          "capture_kind": "webhook",
+          "source_delivery_id": "80000000-0000-4000-8000-000000000004",
+          "authority_binding": {
+            "id": "synthetic-authority",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "normalizer": {
+            "id": "synthetic-normalizer",
+            "version": 1,
+            "content_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "credential_version": "synthetic-only",
+          "source_authentication": "verified_connector",
+          "lifecycle": "created",
+          "normalized_state": "unknown",
+          "relationships": [
+            {
+              "kind": "project_issue",
+              "parent": {
+                "kind": "project",
+                "id": "22222222-2222-4222-8222-222222222222"
+              }
+            }
+          ],
+          "relationship_coverage": "partial",
+          "revision": {
+            "kind": "unknown",
+            "value": null
+          },
+          "ordering_state": "unknown",
+          "scope_state": "unmatched",
+          "binding": null,
+          "supersedes_context_event_id": null,
+          "event_at": null,
+          "observed_at": "2026-09-20T12:01:00Z",
+          "ingested_at": "2026-09-20T12:01:00Z",
+          "provenance_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "evidence_level": "descriptive",
+          "association_eligibility": "inconclusive",
+          "reader_role": "portfolio_admin",
+          "commit_sequence": 4
+        }
+      },
+      "mapping_notes": [
+        "Negative normalized variant: the source-native object ID is not a UUID and must be refused without echoing it."
+      ],
+      "open_question": null
+    },
+    {
+      "case_id": "reject-content-bearing-normalized-field",
+      "entity_kind": "issue",
+      "source_mapping": "reject",
+      "source_documentation": [
+        {
+          "url": "https://linear.app/developers/webhooks",
+          "section": "Supported models; Data change events payload",
+          "reviewed_on": "2026-09-20"
+        },
+        {
+          "url": "https://linear.app/docs/projects",
+          "section": "Add issues to a project",
+          "reviewed_on": "2026-09-20"
+        }
+      ],
+      "source_input": {
+        "headers": {
+          "Linear-Delivery": "80000000-0000-4000-8000-000000000004"
+        },
+        "body": {
+          "action": "create",
+          "type": "Issue",
+          "createdAt": "2026-09-20T12:00:00Z",
+          "organizationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "data": {
+            "id": "66666666-6666-4666-8666-666666666666",
+            "projectId": "22222222-2222-4222-8222-222222222222"
+          }
+        }
+      },
+      "typed_identity": {
+        "kind": "issue",
+        "id": "66666666-6666-4666-8666-666666666666"
+      },
+      "typed_relationships": [
+        {
+          "kind": "project_issue",
+          "parent": {
+            "kind": "project",
+            "id": "22222222-2222-4222-8222-222222222222"
+          }
+        }
+      ],
+      "candidate_targets": {
+        "source_observation": {
+          "schema_id": "hormuz.source-outcome-observation",
+          "schema_version": 1,
+          "source_event_id": "90000000-0000-4000-8000-000000000004",
+          "external_object_id": "66666666-6666-4666-8666-666666666666",
+          "container_id": "22222222-2222-4222-8222-222222222222",
+          "source_revision": null,
+          "ordering_domain": null,
+          "revision_order": null,
+          "object_type": "issue",
+          "event_type": "created",
+          "quality_state": "unknown",
+          "duration_ms": null,
+          "state": "observed",
+          "supersedes_source_event_id": null,
+          "reason_code": "observed",
+          "event_at": null,
+          "title": "SYNTHETIC_DO_NOT_ECHO"
+        }
+      },
+      "mapping_notes": [
+        "Negative normalized variant: work content is not in the closed source-observation contract and must not appear in diagnostics."
+      ],
+      "open_question": null
+    }
+  ]
+}
