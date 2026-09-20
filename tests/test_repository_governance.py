@@ -257,6 +257,79 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_native_ci_dependency_cannot_skip_or_call_another_workflow(self) -> None:
+        mutations = (
+            ("needs.changes.outputs.classification != 'website_only'", "false"),
+            ("uses: ./.github/workflows/native-client-contracts.yml", "uses: ./.github/workflows/other.yml"),
+            ("    name: Native client contracts\n", "    name: Native client contracts\n    secrets: inherit\n"),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/ci.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertIn(original, value)
+                workflow.write_text(value.replace(original, replacement, 1), encoding="utf-8")
+                with self.assertRaisesRegex(RepositoryGovernanceError, "native CI dependency"):
+                    validate_repository_governance(root)
+
+    def test_ci_required_gate_cannot_omit_native_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/ci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            result = '            --result "native-contracts=$NATIVE_CONTRACTS_RESULT"\n'
+            self.assertIn(result, value)
+            workflow.write_text(value.replace(result, "", 1), encoding="utf-8")
+            with self.assertRaisesRegex(RepositoryGovernanceError, "strict CI required-check result set"):
+                validate_repository_governance(root)
+
+    def test_native_workflow_cannot_skip_platforms_tests_or_duplicate_triggers(self) -> None:
+        mutations = (
+            ("  workflow_call:\n", "  pull_request:\n"),
+            ("  workflow_dispatch:\n", "  workflow_dispatch:\n  push:\n"),
+            ("[ubuntu-latest, windows-latest, macos-15]", "[ubuntu-latest, macos-15]"),
+            ("      fail-fast: false", "      fail-fast: true"),
+            ("    timeout-minutes: 15\n", "    timeout-minutes: 15\n    if: false\n"),
+            ("      - name: Verify shared native Rust libraries\n", "      - name: Verify shared native Rust libraries\n        if: false\n"),
+            ("        run: cargo test --workspace --locked", "        run: cargo test --workspace --locked || true"),
+            ("      - name: Verify existing Swift expectations\n", "      - name: Verify existing Swift expectations\n        continue-on-error: true\n"),
+            ("native-client-contracts-${{ github.workflow }}-${{ github.ref }}", "ci-${{ github.workflow }}-${{ github.ref }}"),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/native-client-contracts.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertIn(original, value)
+                workflow.write_text(value.replace(original, replacement, 1), encoding="utf-8")
+                with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                    validate_repository_governance(root)
+
+    def test_native_workflow_cannot_be_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            (root / ".github/workflows/native-client-contracts.yml").unlink()
+            with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow is required"):
+                validate_repository_governance(root)
+
+    def test_unrelated_local_action_is_still_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/ci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace("      - name: Install Hormuz in editable mode\n", "      - name: Unreviewed action\n        uses: ./unreviewed-action\n      - name: Install Hormuz in editable mode\n", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RepositoryGovernanceError, "unpinned external Action"):
+                validate_repository_governance(root)
+
     def test_ci_required_gate_must_run_after_failures_and_skips(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

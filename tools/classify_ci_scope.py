@@ -20,6 +20,9 @@ SAFE_EXACT_PATHS = frozenset(
         "marketing/MEASUREMENT.md",
     }
 )
+NATIVE_DIRECTORY_PREFIXES = ("clients/rust/",)
+NATIVE_COMPANION_DOCS = frozenset({"docs/NATIVE_CLIENT_ROADMAP.md"})
+REDUCED_CLASSIFICATIONS = frozenset({"website_only", "native_only"})
 FULL_CLASSIFICATIONS = frozenset(
     {
         "full_changed_paths",
@@ -39,17 +42,23 @@ class ScopeDecision:
     changed_path_count: int
 
 
-def _is_safe_path(path: str) -> bool:
-    """Return true only for an explicitly safe repository-relative path."""
-
+def _is_repository_path(path: str) -> bool:
     if not path or path.startswith("/") or "\x00" in path:
         return False
     parts = path.split("/")
-    if any(part in {"", ".", ".."} for part in parts):
-        return False
+    return not any(part in {"", ".", ".."} for part in parts)
+
+
+def _is_safe_path(path: str) -> bool:
+    """Return true only for an explicitly safe public-site path."""
+
     if path in SAFE_EXACT_PATHS:
         return True
     return any(path.startswith(prefix) for prefix in SAFE_DIRECTORY_PREFIXES)
+
+
+def _is_native_path(path: str) -> bool:
+    return any(path.startswith(prefix) for prefix in NATIVE_DIRECTORY_PREFIXES)
 
 
 def classify_changed_paths(paths: Sequence[str]) -> ScopeDecision:
@@ -57,8 +66,14 @@ def classify_changed_paths(paths: Sequence[str]) -> ScopeDecision:
 
     if not paths:
         return ScopeDecision(True, "full_empty_diff", 0)
+    if not all(_is_repository_path(path) for path in paths):
+        return ScopeDecision(True, "full_changed_paths", len(paths))
     if all(_is_safe_path(path) for path in paths):
         return ScopeDecision(False, "website_only", len(paths))
+    if any(_is_native_path(path) for path in paths) and all(
+        _is_native_path(path) or path in NATIVE_COMPANION_DOCS for path in paths
+    ):
+        return ScopeDecision(False, "native_only", len(paths))
     return ScopeDecision(True, "full_changed_paths", len(paths))
 
 
@@ -96,7 +111,7 @@ def _changed_paths(root: Path, base_sha: str, head_sha: str) -> tuple[str, ...] 
 def determine_scope(
     *, event_name: str, base_sha: str, head_sha: str, repository_root: Path
 ) -> ScopeDecision:
-    """Run the full suite unless a pull-request diff is proven website-only."""
+    """Run the full suite unless a PR diff fits one complete reduced scope."""
 
     if event_name != "pull_request":
         return ScopeDecision(True, "full_non_pull_request", 0)
@@ -128,7 +143,7 @@ def _append_step_summary(path: Path, decision: ScopeDecision) -> None:
         summary.write(f"- Classification: `{decision.classification}`\n")
         summary.write(
             "- Infrastructure suite: "
-            f"`{'full' if decision.run_full else 'website-only reduced'}`\n"
+            f"`{'full' if decision.run_full else decision.classification + ' reduced'}`\n"
         )
         summary.write(f"- Changed paths detected: `{decision.changed_path_count}`\n")
 
