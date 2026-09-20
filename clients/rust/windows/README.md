@@ -212,8 +212,10 @@ GUI thread; callbacks borrow immutable Rust state with `Cell` for reentrancy.
 
 The #338 integration makes the shared reducer authoritative for the panel's
 expanded, explicitly folded and hidden presentation. Whole-panel pointer and
-keyboard-focus observations remain native, including child controls and owned
-combo/menu popups. Moving between children does not create a false panel exit.
+keyboard-focus observations remain native, including child controls. Moving
+between children does not create a false panel exit; a combo popup retains the
+panel's observed native focus. Popup pointer geometry remains a native acceptance
+item, and this adapter does not synthesize a shared outside-click event.
 After pointer re-entry or reopening a folded panel, leaving both pointer and
 focus outside starts the shared 250 ms fold delay. Explicit Fold remains usable
 while its native button has focus. Escape and Close retain this development
