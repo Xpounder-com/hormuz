@@ -238,6 +238,31 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             for values in attacked["samples_ns"].values()
         ))
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS RLIMIT_NPROC enforcement")
+    def test_candidate_import_cannot_fork_or_posix_spawn(self) -> None:
+        attack_root = self.candidate_source_with(
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\n"
+            "import os\nimport sys\n"
+            "try:\n    _fork_pid = os.fork()\n"
+            "except OSError:\n    _fork_blocked = True\n"
+            "else:\n"
+            "    if _fork_pid == 0:\n        os._exit(0)\n"
+            "    os.waitpid(_fork_pid, 0)\n    _fork_blocked = False\n"
+            "try:\n"
+            "    _spawn_pid = os.posix_spawn(sys.executable, "
+            "[sys.executable, '-c', 'pass'], {})\n"
+            "except OSError:\n    _spawn_blocked = True\n"
+            "else:\n"
+            "    os.waitpid(_spawn_pid, 0)\n    _spawn_blocked = False\n"
+            "if not (_fork_blocked and _spawn_blocked):\n"
+            "    raise RuntimeError('benchmark_child_process_cap_failed')\n",
+        )
+        self.assertEqual(
+            self.workload.evaluate(ROOT, "validate")["outputs"],
+            self.workload.evaluate(attack_root, "validate")["outputs"],
+        )
+
     def test_candidate_output_and_roundtrip_limits_fail_closed(self) -> None:
         oversized_root = self.candidate_source_with(
             "def compact_text(text: str, format: Format) -> str:\n",
