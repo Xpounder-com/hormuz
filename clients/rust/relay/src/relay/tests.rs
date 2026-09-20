@@ -1,5 +1,5 @@
 use super::*;
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -258,17 +258,29 @@ fn enabled_transform_runs_once_before_egress_and_marks_only_changed_bytes() {
 }
 
 #[test]
-fn stopping_releases_relay_state() {
+fn stopping_closes_the_connection_and_releases_relay_state() {
     let relay = LocalRelay::start(
         &profile("http://127.0.0.1:9", "claude-code"),
         credential(Arc::new(AtomicUsize::new(0))),
         Optimization::Off,
     )
     .unwrap();
-    TcpStream::connect(relay.address()).unwrap();
+    let mut connection = TcpStream::connect(relay.address()).unwrap();
+    connection
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
     let local_token = Arc::downgrade(&relay.token);
     drop(relay);
-    // A released ephemeral port can be reused by another parallel test.
+    // This connection belongs to the original listener even if its port is reused.
+    match connection.read(&mut [0]) {
+        Ok(0) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+            ) => {}
+        result => panic!("relay connection remained open after shutdown: {result:?}"),
+    }
     assert!(local_token.upgrade().is_none());
 }
 
