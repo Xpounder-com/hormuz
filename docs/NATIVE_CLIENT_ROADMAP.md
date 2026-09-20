@@ -109,9 +109,13 @@ Issue #338 adds an unpublished `1.5.0-dev.1`
 visibility, hover/pin, settings and observed keyboard-focus state. Shared traces
 cover ordered inputs, stale timer cancellation, dismissal and reopening; seven
 traces also exercise the existing Swift hover/navigation models. The shipping
-Swift sources remain unchanged. **#338 remains open** for native-shell wiring,
-hover/focus/outside-click/reopen and keyboard/screen-reader acceptance. This
-source checkpoint does not complete #331, native interaction or release gates.
+Swift sources remain unchanged. The Windows development shell now consumes the
+shared whole-panel visibility, pointer/focus and timer policy, including ordered
+Hide/Reopen, explicit Fold and stale native callback cancellation. Synthetic
+native timer/window tests and CI UI Automation exercise that integration.
+**#338 remains open** for native metric/detail-card and settings wiring, physical
+hover/focus/outside-click/reopen and keyboard/screen-reader acceptance. The
+checkpoint does not complete #331, native interaction or release gates.
 
 Issue #339 adds a separate native application-instance lease and worker-side
 [helper lifecycle policy](../clients/rust/platform/README.md#application-ownership-and-helper-lifecycle)
