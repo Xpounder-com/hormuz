@@ -281,7 +281,10 @@ fn stopping_closes_the_connection_and_releases_relay_state() {
     let state = relay.state_probe.upgrade().unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     while Arc::strong_count(&state) < 3 {
-        assert!(Instant::now() < deadline, "relay did not accept the connection");
+        assert!(
+            Instant::now() < deadline,
+            "relay did not accept the connection"
+        );
         thread::sleep(Duration::from_millis(1));
     }
     drop(state);
