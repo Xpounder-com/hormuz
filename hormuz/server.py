@@ -98,10 +98,17 @@ _INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
 
 
 class _NoUpstreamRedirect(urllib.request.HTTPRedirectHandler):
-    """Keep provider credentials and request content at the configured origin."""
+    """Reject 3xx before urllib parses an untrusted Location value."""
 
-    def redirect_request(self, request, file_pointer, code, message, headers, new_url):  # type: ignore[no-untyped-def]
+    def http_error_302(self, request, response, code, message, headers):  # type: ignore[no-untyped-def]
+        # Returning None lets HTTPDefaultErrorHandler surface the original
+        # response as HTTPError; no second request is made or URL parsed.
         return None
+
+    http_error_301 = http_error_302
+    http_error_303 = http_error_302
+    http_error_307 = http_error_302
+    http_error_308 = http_error_302
 
 
 _UPSTREAM_OPENER = urllib.request.build_opener(_NoUpstreamRedirect())

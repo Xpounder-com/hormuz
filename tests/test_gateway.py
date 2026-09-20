@@ -636,26 +636,32 @@ class GatewayIntegrationTests(unittest.TestCase):
         second_thread = threading.Thread(target=second_origin.serve_forever, daemon=True)
         second_thread.start()
         try:
-            FakeProviderHandler.redirect_target = f"http://127.0.0.1:{second_origin.server_port}/capture"
+            locations = (
+                f"http://127.0.0.1:{second_origin.server_port}/capture",
+                "http://[",
+            )
             for redirect_status in (301, 302, 303, 307, 308):
-                with self.subTest(status=redirect_status):
-                    status, headers, _ = self._post(
-                        "/v1/responses",
-                        {
-                            "model": "engineering-fast",
-                            "input": "synthetic redirect probe",
-                            "force_redirect_status": redirect_status,
-                        },
-                    )
-                    self.assertEqual(status, 502)
-                    self.assertEqual(headers["x-hormuz-error-code"], "gateway_upstream_redirect")
-                    self.assertNotIn("location", headers)
-                    self.assertEqual(second_origin_requests, [])
-                    self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
+                for location in locations:
+                    with self.subTest(status=redirect_status, malformed=location == "http://["):
+                        FakeProviderHandler.redirect_target = location
+                        status, headers, _ = self._post(
+                            "/v1/responses",
+                            {
+                                "model": "engineering-fast",
+                                "input": "synthetic redirect probe",
+                                "force_redirect_status": redirect_status,
+                            },
+                        )
+                        self.assertEqual(status, 502)
+                        self.assertEqual(headers["x-hormuz-error-code"], "gateway_upstream_redirect")
+                        self.assertNotIn("location", headers)
+                        self.assertEqual(second_origin_requests, [])
+                        self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
         finally:
             FakeProviderHandler.redirect_target = None
             second_origin.shutdown()
             second_origin.server_close()
+            second_thread.join(timeout=5)
 
     def test_openai_native_cache_write_cost_settles_usage_and_budget_consistently(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())

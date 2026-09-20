@@ -129,7 +129,7 @@ class PortfolioAPITests(unittest.TestCase):
             connection.close()
 
     def test_registry_api_create_show_replay_and_no_provider_egress(self):
-        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("unexpected provider call")):
+        with mock.patch("hormuz.server._open_upstream", side_effect=AssertionError("unexpected provider call")):
             request = json.dumps(create_request()).encode()
             status, created, headers = self.request("POST", body=request)
             self.assertEqual(status, 201)
@@ -140,7 +140,7 @@ class PortfolioAPITests(unittest.TestCase):
 
     def test_outcome_read_route_is_versioned_bounded_and_has_no_public_ingestion(self):
         from hormuz.portfolio_wire import OUTCOMES
-        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("unexpected-provider-egress")):
+        with mock.patch("hormuz.server._open_upstream", side_effect=AssertionError("unexpected-provider-egress")):
             status, page, headers = self.request(path=OUTCOMES)
             self.assertEqual((status, page["schema_id"], page["items"]), (200, "hormuz.work-outcome-page", []))
             self.assertEqual(headers["Cache-Control"], "no-store")
