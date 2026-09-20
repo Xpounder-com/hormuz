@@ -69,10 +69,10 @@ jobs:
       - name: Check Rust formatting
         working-directory: clients/rust
         run: cargo fmt --all -- --check
-      - name: Verify shared Rust contracts
+      - name: Verify shared native Rust libraries
         working-directory: clients/rust
         run: cargo test --workspace --locked
-      - name: Lint shared Rust contracts
+      - name: Lint shared Rust libraries
         working-directory: clients/rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build native Windows preview

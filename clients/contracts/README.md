@@ -175,3 +175,22 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 resolution. The native-contract CI workflow executes the Rust and Python checks
 on Windows, Linux and macOS and the Swift reference on macOS. These checks do
 not qualify a Windows/Linux shell, a native sign-in path or a release artifact.
+
+The separate unpublished [platform services library](../rust/platform/README.md)
+implements #333's native storage and coordination primitives for the planned
+v1.5.0 milestone. It uses the existing Mac credential identity and supplies
+native Windows credential/ACL adapters; session orchestration remains #335.
+## Session compatibility
+
+`sessions.json` adds the existing Swift credential record codec and executable
+credential-use transitions for #335. Swift and Rust round-trip Foundation dates
+and all three pending-state spellings. Python consumes only the explicitly
+marked active-session expiry/refresh vectors: its separate CLI record has no
+native pending-state field. The session controller's failure/crash tests live in
+`clients/rust/session`; this fixture does not migrate the shipping app.
+
+`snapshots.json` supplies gateway-valid identity/usage examples and ordered
+freshness/change-delivery vectors for #336. Rust executes the snapshot transitions;
+Swift/Python verify the inputs through their existing validators. New immutable
+native snapshots are in-memory display projections, not a new gateway wire or
+durable settings schema. Zero remains a measured value and missing remains absent.

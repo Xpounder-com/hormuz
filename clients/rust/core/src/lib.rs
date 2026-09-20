@@ -293,4 +293,13 @@ impl GatewayIdentity {
     pub fn organization_id(&self) -> &str {
         &self.organization_id
     }
+
+    /// Names and display labels may change; a retained snapshot cannot cross
+    /// the authenticated actor, organization, team or session boundary.
+    pub fn same_session(&self, other: &Self) -> bool {
+        self.actor_id == other.actor_id
+            && self.organization_id == other.organization_id
+            && self.team_id == other.team_id
+            && self.authentication_source == other.authentication_source
+    }
 }

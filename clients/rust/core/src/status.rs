@@ -70,7 +70,7 @@ impl ReadingStatus {
 
 /// Missing readings stay absent. A retained reading always carries its original
 /// check time. Scheduling, age thresholds and response ordering belong to #336/337.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, PartialEq)]
 pub struct UsageReading {
     status: ReadingStatus,
     usage: Option<PersonalUsage>,

@@ -68,7 +68,35 @@ different validation responsibilities; expected differences must be recorded
 rather than silently changing either implementation. See
 [the fixture contract](../clients/contracts/README.md).
 
-Connection profiles, session transitions, freshness, settings, client status,
-the complete safe-error catalog and native integrations remain subsequent #330
-or dependent-issue slices. The initial library is unpublished and is not loaded
-by the shipped app. The gateway and app version remain v1.2.0.
+Issue #330's contract inventory is now implemented: connection profiles, state
+codes, freshness representations, settings, client status and the complete safe
+error catalog have shared compatibility fixtures. Session transitions and native
+integration remain in their dependent issues.
+
+Issue #334 adds a separate unpublished `1.5.0-dev.1`
+[Rust transport](../clients/rust/transport/README.md) with one bounded runtime,
+verified TLS, request cancellation and no automatic replay after an ambiguous
+outcome. It is not loaded by the shipped app. The gateway and app version remain
+v1.2.0; a library test pass is not a connected-companion or release claim.
+
+Issue #335 adds the unpublished `1.5.0-dev.1`
+[session controller](../clients/rust/session/README.md): bounded browser
+enrollment, serialized refresh, persisted recovery states and sign-out. Its
+Swift-compatible credential codec and shared transitions preserve the existing
+native record. #336 builds authoritative snapshots on that coordinated
+session. These source milestones do not bump the shipping gateway/app version
+or rename historical v1.1 portfolio contracts.
+
+Issue #336 adds coordinated immutable usage snapshots to that same unpublished
+session library. Identity/profile/credential changes clear cached data, obsolete
+requests cannot publish, and a single change slot preserves explicit
+current/stale/offline/authentication states with authoritative personal labels.
+Issue #337 adds the shared event-driven scheduler to the same unpublished
+library: one outstanding dashboard job and one wake-up deadline, tunable
+45-second summary/7-second detail hypotheses, bounded completion debounce,
+offline backoff, age-based staleness and independent lock/sleep gates. Synthetic
+traces verify these library decisions and separate operation cancellation.
+**#337 remains open** for native-shell wiring and measured idle/locked/resume
+behavior. The existing Mac app and draft Windows shell do not consume this
+scheduler yet; connected UI, native power/footprint and release acceptance remain
+unproven. See the [scheduler integration contract](../clients/rust/session/README.md#central-dashboard-scheduler-337-source-checkpoint).
