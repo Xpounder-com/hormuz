@@ -2,6 +2,7 @@ use super::*;
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 fn profile(gateway: &str, client: &str) -> ConnectionProfile {
     ConnectionProfile::from_json(
@@ -277,6 +278,13 @@ fn stopping_closes_the_connection_and_releases_relay_state() {
     connection
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
+    let state = relay.state_probe.upgrade().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Arc::strong_count(&state) < 3 {
+        assert!(Instant::now() < deadline, "relay did not accept the connection");
+        thread::sleep(Duration::from_millis(1));
+    }
+    drop(state);
     let local_token = Arc::downgrade(&relay.token);
     drop(relay);
     // This connection belongs to the original listener even if its port is reused.
