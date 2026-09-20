@@ -346,11 +346,13 @@ dependencies = [
  "hyper",
  "hyper-util",
  "reqwest",
+ "rustix",
  "serde",
  "serde_json",
  "subtle",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

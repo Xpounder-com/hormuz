@@ -88,8 +88,15 @@ try {
         throw "Preview artifact changed during acceptance."
     }
     $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+    $keyboardChecks = @(
+        "sendinput_tab_shift_tab_focus_navigation",
+        "sendinput_space_enter_fold_expand",
+        "sendinput_escape_enter_hide_and_reopen_focus"
+    )
     if ($result.result -ne "passed" -or $result.completed_cycles -ne $Cycles -or
-        $result.samples.Count -ne (3 * $Repetitions * $SampleCount + 2)) {
+        $result.samples.Count -ne (3 * $Repetitions * $SampleCount + 2) -or
+        $result.keyboard_driver -ne "Win32 SendInput synthetic virtual-key events" -or
+        @($keyboardChecks | Where-Object { $result.checks -notcontains $_ }).Count -ne 0) {
         throw "Acceptance evidence is incomplete."
     }
     $metadata = [ordered]@{
@@ -103,13 +110,14 @@ try {
         os = [Environment]::OSVersion.VersionString
         architecture = $env:PROCESSOR_ARCHITECTURE
         logical_processors = [Environment]::ProcessorCount
-        measurement_tools = "UIAutomationClient, System.Diagnostics.Process, Win32 GetGuiResources, numeric Win32_Process topology"
+        measurement_tools = "UIAutomationClient, Win32 SendInput, System.Diagnostics.Process, Win32 GetGuiResources, numeric Win32_Process topology"
         evidence = $result
         limitations = @(
             "Short CI observations; no numerical regression budget or physical-footprint claim.",
             "Working set and private bytes are distinct counters; neither is total physical memory.",
             "No helpers were observed at sample times; short-lived processes between samples may be missed.",
-            "UIA SetFocus/InvokePattern do not prove physical keyboard input or screen-reader usability.",
+            "Win32 SendInput exercises synthetic keyboard events only on this CI desktop; physical keyboard and screen-reader usability remain unverified.",
+            "Foreground and focus were checked around keyboard input, but other desktop configurations are unqualified.",
             "Reopen uses a synthetic notification; actual tray activation remains pending.",
             "CPU counter precision and observer work can hide or perturb small changes.",
             "Observer CPU covers the worker measurement interval, excluding compilation, the watchdog and WMI service work.",
@@ -121,7 +129,7 @@ try {
     $staged = Join-Path $temporary "evidence.json"
     $metadata | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $staged -Encoding UTF8
     [IO.File]::Move($staged, $outputPath)
-    Write-Output "windows_ui_acceptance=passed cycles=$Cycles samples=$($result.samples.Count) manual_acceptance=pending"
+    Write-Output "windows_ui_acceptance=passed keyboard=sendinput_synthetic cycles=$Cycles samples=$($result.samples.Count) manual_acceptance=pending"
 } finally {
     $cleanupFailed = $false
     foreach ($ownedProcess in @($workerProcess, $preview)) {

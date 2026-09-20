@@ -7,12 +7,18 @@ use hormuz_client_relay::{
 use hormuz_client_session::{NativeTransport, Operation, SessionController, SystemClock};
 use serde::Deserialize;
 use std::ffi::OsStr;
+#[cfg(windows)]
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, ExitCode, Stdio};
+#[cfg(windows)]
+use std::process::{Child, Stdio};
+use std::process::{Command, ExitCode};
 use std::sync::Arc;
+#[cfg(windows)]
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(windows)]
+use std::time::Instant;
 use zeroize::Zeroizing;
 
 const TRANSFORM_BUDGET: Duration = Duration::from_secs(30);
@@ -126,6 +132,41 @@ struct PythonOptimizer {
     client: String,
     gateway: String,
 }
+
+#[cfg(target_os = "macos")]
+impl RequestOptimizer for PythonOptimizer {
+    fn prepare(&self, path: &str, original: &[u8]) -> Option<Vec<u8>> {
+        if !enabled(&self.directory, &self.key) {
+            return None;
+        }
+        let mut command = Command::new("python3");
+        command
+            .arg("-I")
+            .arg("-m")
+            .arg("hormuz.context_relay_bridge")
+            .arg("--client")
+            .arg(&self.client)
+            .arg("--path")
+            .arg(path)
+            .env_clear()
+            .envs(std::env::vars_os().filter(|(name, _)| python_environment(name)));
+        let output = Zeroizing::new(crate::helper_exchange::run(
+            &mut command,
+            self.gateway.as_bytes(),
+            original,
+            TRANSFORM_BUDGET,
+            MAX_TRANSFORM_BYTES as usize,
+        )?);
+        match output.first() {
+            Some(1) if output.len() > 1 => Some(output[1..].to_vec()),
+            _ => None,
+        }
+    }
+}
+
+// Windows retains the existing exchange until its native pipe cancellation
+// and helper ownership adapter can be verified independently.
+#[cfg(windows)]
 impl RequestOptimizer for PythonOptimizer {
     fn prepare(&self, path: &str, original: &[u8]) -> Option<Vec<u8>> {
         if !enabled(&self.directory, &self.key) {
@@ -262,7 +303,9 @@ fn preference_enabled(bytes: &[u8]) -> bool {
         && preference.enabled
 }
 
+#[cfg(windows)]
 struct OwnedTransform(Option<Child>);
+#[cfg(windows)]
 impl Drop for OwnedTransform {
     fn drop(&mut self) {
         if let Some(mut child) = self.0.take() {
