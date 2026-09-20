@@ -134,6 +134,9 @@ jobs:
             > "$RUNNER_TEMP/context-pack.json"
           CONTEXT_PACK_PATH="$RUNNER_TEMP/context-pack.json" "$RUNNER_TEMP/hormuz-wheel/bin/python" -c 'import json, os, pathlib; value = json.loads(pathlib.Path(os.environ["CONTEXT_PACK_PATH"]).read_text()); assert value["schema_version"] == "hormuz.context-pack.v1"; assert value["items"]'
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest discover -s experiments/context/tests -v
+      - name: Verify isolated on-demand relay bridge from the installed wheel
+        run: |
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -c 'import subprocess, sys; gateway = b"http://127.0.0.1:9"; frame = len(gateway).to_bytes(2, "big") + gateway + b"{}"; result = subprocess.run([sys.executable, "-I", "-m", "hormuz.context_relay_bridge", "--client", "codex", "--path", "/v1/responses"], input=frame, capture_output=True, timeout=10); assert (result.returncode, result.stdout) == (0, b"\x00")'
       - name: Verify finance values and SQLite finance/budget runtime from the installed core wheel
         run: |
           cd "$RUNNER_TEMP"

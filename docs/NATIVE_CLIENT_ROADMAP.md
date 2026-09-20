@@ -137,3 +137,11 @@ complete #339/#340 or the outstanding v1.4.0 gates: login/helper adapters,
 authorized-account end-to-end proof, native desktop acceptance, connected
 measurements, signing and clean installation remain separate. The Windows
 package is `1.5.0-dev.1`; the published product remains v1.2.0.
+
+Issue #341 adds the separate unpublished `1.6.0-dev.1`
+[governed relay](../clients/rust/relay/README.md). Its source tests exercise
+authenticated loopback forwarding, exact Off bytes, streamed responses,
+on-demand use of the existing Python optimizer and a fake client's listener
+lifetime. **#341 remains open** for native-shell integration, installed-client
+proof, descendant containment and platform quit/update acceptance. Neither
+the Windows panel nor shipping Mac app launches this Rust relay yet.
