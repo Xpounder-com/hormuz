@@ -100,9 +100,9 @@ pub(crate) fn run(
                 }
             }
         }
-        match receiver.recv_timeout(
-            POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
-        ) {
+        match receiver
+            .recv_timeout(POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())))
+        {
             Ok(PipeResult::Written(Ok(()))) => wrote = true,
             Ok(PipeResult::Read(Ok(bytes))) => output = Some(bytes),
             Ok(PipeResult::Written(Err(_)) | PipeResult::Read(Err(_))) => {
@@ -221,7 +221,19 @@ mod tests {
 
     #[test]
     fn oversized_output_fails_closed_and_stops_helper() {
-        assert!(exchange("overflow", b"body", Duration::from_secs(5), 16).is_none());
+        let temporary = tempfile::tempdir().unwrap();
+        let marker = temporary.path().join("running");
+        let started = Instant::now();
+        assert!(run(
+            &mut command("overflow", &marker),
+            b"origin",
+            b"body",
+            Duration::from_secs(5),
+            1024,
+        )
+        .is_none());
+        assert!(marker.exists(), "fake overflow helper did not start");
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[test]
@@ -325,7 +337,8 @@ mod tests {
             return;
         }
         if mode == "overflow" {
-            io::stdout().write_all(&[1; 32]).unwrap();
+            fs::write(marker, b"running").unwrap();
+            io::stdout().write_all(&[1; 2048]).unwrap();
             thread::sleep(Duration::from_secs(10));
             return;
         }

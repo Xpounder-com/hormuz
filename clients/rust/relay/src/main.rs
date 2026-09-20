@@ -6,10 +6,10 @@ mod helper_exchange;
 // The same suspended-start Job Object owner used for launched AI clients also
 // owns Windows optimizer helpers. Keep the native calls in one reviewed module.
 #[cfg(windows)]
+mod helper_exchange_windows;
+#[cfg(windows)]
 #[path = "process_scope.rs"]
 mod process_scope;
-#[cfg(windows)]
-mod helper_exchange_windows;
 
 #[cfg(any(target_os = "macos", windows))]
 mod native_cli;
