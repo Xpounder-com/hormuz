@@ -7,6 +7,8 @@ use hormuz_client_session::{NativeTransport, SystemClock};
 use std::cell::OnceCell;
 #[path = "native_connection.rs"]
 mod connected;
+#[path = "native_interaction.rs"]
+mod interactions;
 type NativeConnection = Connection<
     PrivateDirectory,
     NativeCredentialStore,
@@ -28,7 +30,10 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
     System::LibraryLoader::GetModuleHandleW,
-    UI::{HiDpi::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
+    UI::{
+        Controls::WM_MOUSELEAVE, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*,
+        WindowsAndMessaging::*,
+    },
 };
 
 const CLASS: &str = "HormuzNativeCompanionPreview";
@@ -54,7 +59,7 @@ struct App {
     session_notifications: Cell<bool>,
     preview: bool,
     activation: Arc<AtomicU8>, // idle, one pending notification, or shutting down
-    folded: Cell<bool>,
+    interaction: interactions::Controller,
     dpi: Cell<u32>,
     controls: Cell<[HWND; 8]>,
     font: Cell<HFONT>,
@@ -112,7 +117,7 @@ pub(super) fn run_with_factory(
             session_notifications: Cell::new(false),
             preview,
             activation: Arc::new(AtomicU8::new(0)),
-            folded: Cell::new(false),
+            interaction: interactions::Controller::new(),
             dpi: Cell::new(96),
             controls: Cell::new([null_mut(); 8]),
             font: Cell::new(null_mut()),
@@ -198,6 +203,12 @@ pub(super) fn run_with_factory(
             UnregisterClassW(class_name.as_ptr(), instance);
             return 1;
         }
+        if !interactions::initialize(hwnd, &app) {
+            app.exit_code.set(1);
+            DestroyWindow(hwnd);
+            UnregisterClassW(class_name.as_ptr(), instance);
+            return 1;
+        }
         let activation_window = hwnd as usize;
         let activation = app.activation.clone();
         let Ok(listener) = owner.listen_for_reopen(move || {
@@ -231,6 +242,7 @@ pub(super) fn run_with_factory(
         } else {
             app.inputs.get()[1]
         });
+        interactions::start(hwnd, &app);
         connected::visibility(hwnd, &app);
         if smoke && SetTimer(hwnd, SMOKE_TIMER, 300, None) == 0 {
             app.exit_code.set(1);
@@ -299,25 +311,14 @@ unsafe fn add_tray(hwnd: HWND) -> bool {
 unsafe fn show(hwnd: HWND, app: &App) {
     // SAFETY: Live GUI-thread windows, with Cell state safe across synchronous callbacks.
     unsafe {
-        ShowWindow(hwnd, SW_RESTORE);
-        SetForegroundWindow(hwnd);
-        SetFocus(app.controls.get()[5]);
-        connected::visibility(hwnd, app);
+        interactions::reopen(hwnd, app);
     }
 }
 
 unsafe fn hide(hwnd: HWND, app: &App) {
     // If Explorer cannot supply a tray entry, keep taskbar recovery available.
     unsafe {
-        ShowWindow(
-            hwnd,
-            if app.tray_ready.get() {
-                SW_HIDE
-            } else {
-                SW_MINIMIZE
-            },
-        );
-        connected::visibility(hwnd, app);
+        interactions::hide(hwnd, app);
     }
 }
 
@@ -338,12 +339,12 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             right: scale(if app.preview { 336 } else { 432 }, dpi),
             bottom: scale(
                 if app.preview {
-                    if app.folded.get() {
+                    if app.interaction.folded() {
                         106
                     } else {
                         216
                     }
-                } else if app.folded.get() {
+                } else if app.interaction.folded() {
                     168
                 } else {
                     488
@@ -392,7 +393,7 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             );
             ShowWindow(
                 *control,
-                if app.folded.get() && index >= 2 {
+                if app.interaction.folded() && index >= 2 {
                     SW_HIDE
                 } else {
                     SW_SHOW
@@ -400,12 +401,12 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             );
         }
         let y = if app.preview {
-            if app.folded.get() {
+            if app.interaction.folded() {
                 64
             } else {
                 176
             }
-        } else if app.folded.get() {
+        } else if app.interaction.folded() {
             128
         } else {
             448
@@ -422,7 +423,12 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
         }
         SetWindowTextW(
             controls[5],
-            wide(if app.folded.get() { "&Expand" } else { "&Fold" }).as_ptr(),
+            wide(if app.interaction.folded() {
+                "&Expand"
+            } else {
+                "&Fold"
+            })
+            .as_ptr(),
         );
         connected::layout(app);
         let font = CreateFontW(
@@ -506,6 +512,7 @@ unsafe fn smoke_step(hwnd: HWND, app: &App) {
                 let mut after: RECT = std::mem::zeroed();
                 let before_ok = GetWindowRect(hwnd, &mut before) != 0;
                 SendMessageW(hwnd, WM_COMMAND, FOLD, 0);
+                SendMessageW(hwnd, interactions::DRAIN, 0, 0);
                 visible
                     && before_ok
                     && GetWindowRect(hwnd, &mut after) != 0
@@ -515,6 +522,7 @@ unsafe fn smoke_step(hwnd: HWND, app: &App) {
             }
             1 => {
                 SendMessageW(hwnd, WM_CLOSE, 0, 0);
+                SendMessageW(hwnd, interactions::DRAIN, 0, 0);
                 if app.tray_ready.get() {
                     IsWindowVisible(hwnd) == 0
                 } else {
@@ -523,13 +531,19 @@ unsafe fn smoke_step(hwnd: HWND, app: &App) {
             }
             2 => {
                 SendMessageW(hwnd, TRAY_CALLBACK, 0, NIN_SELECT as isize);
-                IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0
+                SendMessageW(hwnd, interactions::DRAIN, 0, 0);
+                IsWindowVisible(hwnd) != 0
+                    && IsIconic(hwnd) == 0
+                    && IsWindowVisible(app.controls.get()[2]) != 0
             }
             _ => {
+                SendMessageW(hwnd, WM_COMMAND, FOLD, 0);
+                SendMessageW(hwnd, interactions::DRAIN, 0, 0);
                 let mut before: RECT = std::mem::zeroed();
                 let mut after: RECT = std::mem::zeroed();
                 let before_ok = GetWindowRect(hwnd, &mut before) != 0;
                 SendMessageW(hwnd, WM_COMMAND, FOLD, 0);
+                SendMessageW(hwnd, interactions::DRAIN, 0, 0);
                 let expanded = before_ok
                     && GetWindowRect(hwnd, &mut after) != 0
                     && after.bottom - after.top > before.bottom - before.top
@@ -577,6 +591,33 @@ unsafe extern "system" fn window_proc(
             return 0;
         }
         match message {
+            interactions::DRAIN => {
+                interactions::drain(hwnd, app);
+                0
+            }
+            WM_SETFOCUS | WM_KILLFOCUS => {
+                interactions::focus(
+                    hwnd,
+                    app,
+                    if message == WM_SETFOCUS {
+                        hwnd
+                    } else {
+                        wparam as HWND
+                    },
+                );
+                DefWindowProcW(hwnd, message, wparam, lparam)
+            }
+            WM_ACTIVATE => {
+                if wparam as u32 & 0xffff == WA_INACTIVE {
+                    interactions::focus(hwnd, app, null_mut());
+                    interactions::pointer(hwnd, app, hwnd, message);
+                }
+                DefWindowProcW(hwnd, message, wparam, lparam)
+            }
+            WM_MOUSEMOVE | WM_MOUSELEAVE | WM_NCMOUSEMOVE | WM_NCMOUSELEAVE => {
+                interactions::pointer(hwnd, app, hwnd, message);
+                DefWindowProcW(hwnd, message, wparam, lparam)
+            }
             NETWORK_CHANGED => {
                 if app.network.get().is_some_and(|events| events.take()) {
                     if let Some(connection) = app.connection.get() {
@@ -591,6 +632,14 @@ unsafe extern "system" fn window_proc(
                 0
             }
             WM_SHOWWINDOW | WM_SIZE => {
+                // WM_SHOWWINDOW precedes the actual visibility change. Its
+                // wParam is the observation; IsWindowVisible may still be old.
+                let visible = if message == WM_SHOWWINDOW {
+                    wparam != 0 && IsIconic(hwnd) == 0
+                } else {
+                    wparam != SIZE_MINIMIZED as usize && IsWindowVisible(hwnd) != 0
+                };
+                interactions::visibility(hwnd, app, visible);
                 connected::visibility(hwnd, app);
                 DefWindowProcW(hwnd, message, wparam, lparam)
             }
@@ -632,9 +681,7 @@ unsafe extern "system" fn window_proc(
                         }
                     }
                     FOLD => {
-                        app.folded.set(!app.folded.get());
-                        reflow(hwnd, app);
-                        connected::visibility(hwnd, app);
+                        interactions::toggle_fold(hwnd, app);
                     }
                     HIDE | 2 => hide(hwnd, app), // IDCANCEL from dialog keyboard navigation.
                     SHOW => show(hwnd, app),
@@ -678,8 +725,13 @@ unsafe extern "system" fn window_proc(
                 smoke_step(hwnd, app);
                 0
             }
+            WM_TIMER => {
+                interactions::timer(hwnd, app, wparam);
+                0
+            }
             WM_DESTROY => {
                 app.activation.store(2, Ordering::SeqCst);
+                interactions::stop(hwnd, app);
                 connected::shutdown(hwnd, app);
                 KillTimer(hwnd, SMOKE_TIMER);
                 Shell_NotifyIconW(NIM_DELETE, &tray_data(hwnd));
