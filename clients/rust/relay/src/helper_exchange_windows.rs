@@ -89,8 +89,6 @@ pub(crate) fn run(
     let mut wrote = false;
     let mut output = None;
     let mut failed = false;
-    #[cfg(test)]
-    let mut failure_phase = "none";
     while Instant::now() < deadline {
         if status.is_none() {
             match child.try_wait_status() {
@@ -98,56 +96,36 @@ pub(crate) fn run(
                 Ok(None) => {}
                 Err(_) => {
                     failed = true;
-                    #[cfg(test)]
-                    {
-                        failure_phase = "child_status";
-                    }
                     break;
                 }
             }
+        }
+        if status.is_some() && wrote && output.is_some() {
+            break;
+        }
+        if wrote && output.is_some() {
+            // Both producers have sent their one result, so channel closure
+            // is expected. Continue checking the direct helper's exit under
+            // the same deadline instead of treating closure as an I/O error.
+            thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())));
+            continue;
         }
         match receiver
             .recv_timeout(POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())))
         {
             Ok(PipeResult::Written(Ok(()))) => wrote = true,
             Ok(PipeResult::Read(Ok(bytes))) => output = Some(bytes),
-            Ok(PipeResult::Written(Err(_))) => {
+            Ok(PipeResult::Written(Err(_)) | PipeResult::Read(Err(_))) => {
                 failed = true;
-                #[cfg(test)]
-                {
-                    failure_phase = "writer";
-                }
-                break;
-            }
-            Ok(PipeResult::Read(Err(_))) => {
-                failed = true;
-                #[cfg(test)]
-                {
-                    failure_phase = "reader";
-                }
                 break;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 failed = true;
-                #[cfg(test)]
-                {
-                    failure_phase = "channel";
-                }
                 break;
             }
         }
-        if status.is_some() && wrote && output.is_some() {
-            break;
-        }
     }
-
-    #[cfg(test)]
-    eprintln!(
-        "synthetic exchange phase={failure_phase} failed={failed} exit={:?} wrote={wrote} output_len={:?}",
-        status.as_ref().map(ExitStatus::code),
-        output.as_ref().map(|bytes: &Zeroizing<Vec<u8>>| bytes.len()),
-    );
 
     // The job closes before any join. Its kernel lifetime rule stops children
     // that inherited the pipe ends, including after the direct helper exited.
