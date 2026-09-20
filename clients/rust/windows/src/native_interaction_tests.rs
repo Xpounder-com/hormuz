@@ -1,6 +1,33 @@
 use super::*;
 use std::{thread, time::Duration};
 
+#[test]
+fn native_visibility_observations_keep_hide_then_show_before_rendering() {
+    let controller = Controller::new();
+    assert_eq!(controller.observe_visibility(false), None);
+    controller.ready.set(true);
+    assert_eq!(controller.observe_visibility(true), None);
+    let mut bridge = Bridge::new();
+    bridge
+        .push(controller.observe_visibility(false).unwrap())
+        .unwrap();
+    bridge
+        .push(controller.observe_visibility(true).unwrap())
+        .unwrap();
+    assert_eq!(controller.rendered.get(), Visibility::Expanded);
+    assert_eq!(
+        bridge.flush(0).unwrap().snapshot.visibility,
+        Visibility::Expanded
+    );
+    assert_eq!(controller.observe_visibility(true), None);
+    controller.applying.set(true);
+    assert_eq!(controller.observe_visibility(false), None);
+    controller.applying.set(false);
+    assert_eq!(controller.observe_visibility(false), Some(Event::Hide));
+    controller.stopped.set(true);
+    assert_eq!(controller.observe_visibility(true), None);
+}
+
 struct OwnedWindow(HWND);
 impl Drop for OwnedWindow {
     fn drop(&mut self) {

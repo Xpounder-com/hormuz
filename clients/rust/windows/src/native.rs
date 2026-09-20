@@ -242,6 +242,7 @@ pub(super) fn run_with_factory(
         } else {
             app.inputs.get()[1]
         });
+        interactions::start(hwnd, &app);
         connected::visibility(hwnd, &app);
         if smoke && SetTimer(hwnd, SMOKE_TIMER, 300, None) == 0 {
             app.exit_code.set(1);
@@ -631,7 +632,14 @@ unsafe extern "system" fn window_proc(
                 0
             }
             WM_SHOWWINDOW | WM_SIZE => {
-                interactions::visibility(hwnd, app);
+                // WM_SHOWWINDOW precedes the actual visibility change. Its
+                // wParam is the observation; IsWindowVisible may still be old.
+                let visible = if message == WM_SHOWWINDOW {
+                    wparam != 0 && IsIconic(hwnd) == 0
+                } else {
+                    wparam != SIZE_MINIMIZED as usize && IsWindowVisible(hwnd) != 0
+                };
+                interactions::visibility(hwnd, app, visible);
                 connected::visibility(hwnd, app);
                 DefWindowProcW(hwnd, message, wparam, lparam)
             }

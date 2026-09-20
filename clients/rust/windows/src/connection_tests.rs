@@ -569,6 +569,7 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
         owner == unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() }
     });
     let cleanup = WindowCleanup(window);
+    until(|| unsafe { IsWindowVisible(window) != 0 && IsIconic(window) == 0 });
     until(|| text(window, 301).contains("credential store"));
     assert!(text(window, 201).is_empty());
     assert!(text(window, 202).is_empty());
@@ -602,6 +603,20 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     );
     assert!(!text(window, 303).contains("synthetic"));
     assert!(!text(window, 301).contains("hox_"));
+    // External native visibility notifications must agree with the reducer,
+    // including startup's hidden construction and later OS-driven restoration.
+    unsafe {
+        ShowWindow(window, SW_HIDE);
+    }
+    until(|| unsafe { IsWindowVisible(window) == 0 });
+    unsafe {
+        ShowWindow(window, SW_RESTORE);
+    }
+    until(|| unsafe {
+        IsWindowVisible(window) != 0
+            && IsIconic(window) == 0
+            && IsWindowVisible(GetDlgItem(window, 302)) != 0
+    });
     send(window, WM_COMMAND, 101);
     until(|| unsafe { IsWindowVisible(GetDlgItem(window, 302)) == 0 });
     send(window, WM_CLOSE, 0);

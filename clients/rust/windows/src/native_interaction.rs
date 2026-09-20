@@ -13,6 +13,7 @@ pub struct Controller {
     rendered: Cell<Visibility>,
     pointer_inside: Cell<bool>,
     focus_inside: Cell<bool>,
+    observed_visible: Cell<bool>,
     posted: Cell<bool>,
     activate: Cell<bool>,
     ready: Cell<bool>,
@@ -28,6 +29,7 @@ impl Controller {
             rendered: Cell::new(Visibility::Expanded),
             pointer_inside: Cell::new(false),
             focus_inside: Cell::new(false),
+            observed_visible: Cell::new(true),
             posted: Cell::new(false),
             activate: Cell::new(false),
             ready: Cell::new(false),
@@ -42,6 +44,17 @@ impl Controller {
 
     fn now_ms(&self) -> Option<u64> {
         self.began.elapsed().as_millis().try_into().ok()
+    }
+
+    fn observe_visibility(&self, visible: bool) -> Option<Event> {
+        if !self.ready.get() || self.applying.get() || self.stopped.get() {
+            return None;
+        }
+        (self.observed_visible.replace(visible) != visible).then_some(if visible {
+            Event::Reopen
+        } else {
+            Event::Hide
+        })
     }
 }
 
@@ -153,18 +166,25 @@ pub unsafe fn drain(hwnd: HWND, app: &App) {
     };
     // No RefCell borrow or mutable App reference crosses any reentrant Win32 call.
     let before = controller.rendered.replace(update.snapshot.visibility);
+    controller
+        .observed_visible
+        .set(update.snapshot.visibility != Visibility::Hidden);
     controller.applying.set(true);
     unsafe {
         if update.snapshot.visibility == Visibility::Hidden {
             controller.activate.set(false);
-            ShowWindow(
-                hwnd,
-                if app.tray_ready.get() {
-                    SW_HIDE
-                } else {
-                    SW_MINIMIZE
-                },
-            );
+            // An OS-driven minimize already satisfies hidden interaction state.
+            // Preserve its taskbar restoration route instead of hiding it again.
+            if IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0 {
+                ShowWindow(
+                    hwnd,
+                    if app.tray_ready.get() {
+                        SW_HIDE
+                    } else {
+                        SW_MINIMIZE
+                    },
+                );
+            }
             controller.pointer_inside.set(false);
             controller.focus_inside.set(false);
         } else {
@@ -209,17 +229,13 @@ pub unsafe fn drain(hwnd: HWND, app: &App) {
     }
 }
 
-pub unsafe fn visibility(hwnd: HWND, app: &App) {
-    let controller = &app.interaction;
-    if !controller.ready.get() || controller.applying.get() || controller.stopped.get() {
-        return;
-    }
-    let visible = unsafe { IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0 };
-    unsafe {
-        if !visible && controller.rendered.get() != Visibility::Hidden {
-            hide(hwnd, app);
-        } else if visible && controller.rendered.get() == Visibility::Hidden {
-            input(hwnd, app, Event::Reopen);
+pub unsafe fn visibility(hwnd: HWND, app: &App, visible: bool) {
+    if let Some(event) = app.interaction.observe_visibility(visible) {
+        unsafe {
+            if event == Event::Hide {
+                app.interaction.activate.set(false);
+            }
+            input(hwnd, app, event);
         }
     }
 }
@@ -329,8 +345,18 @@ pub unsafe fn initialize(hwnd: HWND, app: &App) -> bool {
             return false;
         }
     }
-    app.interaction.ready.set(true);
     true
+}
+
+pub unsafe fn start(hwnd: HWND, app: &App) {
+    // Initial layout happens before ShowWindow. Do not interpret that hidden
+    // construction state as a user's Hide, or lose a later Show in the batch.
+    app.interaction.ready.set(true);
+    unsafe {
+        visibility(hwnd, app, IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0);
+        focus(hwnd, app, GetFocus());
+        pointer(hwnd, app, hwnd, WM_NULL);
+    }
 }
 
 pub unsafe fn stop(hwnd: HWND, app: &App) {
