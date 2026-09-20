@@ -125,6 +125,14 @@ and exclusive output creation. It is pinned to this release: future versions
 need a new source review of preview/session behavior and a new artifact hash.
 It is not a general-purpose profiler or a release gate.
 
+On 2026-09-20, the replay collector was extended to schema v3 with Darwin
+`proc_pid_rusage` physical-footprint, wake-up and precise CPU counters plus
+observer CPU time. The three JSON files above remain unchanged schema-v1
+historical samples. The follow-up repeats were first recorded as schema v2
+and normalized to v3 after a Mach CPU tick unit correction. See the
+[follow-up collection](../native-client-baseline-2026-09-20/README.md) for the
+new method and repeated-run evidence.
+
 ## Complete #332
 
 Repeat each controlled scenario three times on each available platform. Include

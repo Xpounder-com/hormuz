@@ -1,0 +1,63 @@
+{
+  "schema_id": "hormuz.native-client-run-conditions",
+  "schema_version": 1,
+  "method": "pmset -g ps immediately before and after each run; power source is not continuously monitored",
+  "host": "Mac17,2 / Apple M5 / arm64 / macOS 26.2 (25C56) / 10 logical CPUs / 32 GiB RAM",
+  "display": "Internal 2704 x 1756 pixels, scaled 1352 x 878 at 120 Hz at start; display and thermal conditions not locked",
+  "runs": [
+    {
+      "scenario": "hidden",
+      "repeat": 1,
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "visible",
+      "repeat": 1,
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "folded",
+      "repeat": 1,
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "hidden",
+      "repeat": 2,
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "visible",
+      "repeat": 2,
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "folded",
+      "repeat": 2,
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "hidden",
+      "repeat": 3,
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "visible",
+      "repeat": 3,
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "folded",
+      "repeat": 3,
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    }
+  ]
+}
