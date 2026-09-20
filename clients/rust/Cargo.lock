@@ -284,6 +284,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hormuz-client-interaction"
+version = "1.5.0-dev.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hormuz-client-platform"
 version = "1.5.0-dev.1"
 dependencies = [

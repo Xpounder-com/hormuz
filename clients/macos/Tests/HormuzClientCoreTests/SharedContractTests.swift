@@ -3,6 +3,98 @@ import XCTest
 @testable import HormuzClientCore
 
 final class SharedContractTests: PrivateStorageTestCase {
+    /// Only the existing core hover/navigation projections are compared here.
+    /// Fold/visibility, callback token ordering, OS focus, hit testing, rendering
+    /// and accessibility still need native shell acceptance before #338 closes.
+    @MainActor
+    func testSharedInteractionTracesPreserveExistingHoverAndNavigation() async throws {
+        let vectors = try fixture("interactions")
+        let cases = try XCTUnwrap(vectors["cases"] as? [[String: Any]])
+            .filter { $0["swift_reference"] as? Bool == true }
+        XCTAssertEqual(cases.count, 6)
+        for item in cases {
+            let id = try XCTUnwrap(item["id"] as? String)
+            let hover = HoverCoordinator(dismissalDelayNanoseconds: 1_000_000)
+            let hub = EdgeHubNavigation()
+            defer { hover.dismiss() }
+            for (index, step) in try XCTUnwrap(item["steps"] as? [[String: Any]]).enumerated() {
+                let expected = try XCTUnwrap(step["expected"] as? [String: Any])
+                let events = try XCTUnwrap(step["events"] as? [[String: Any]])
+                // Same adapter ordering as the shared contract: native input
+                // first, then completion callbacks, preserving each order.
+                for isTimer in [false, true] {
+                    for event in events where (event["type"] as? String == "timer_fired") == isTimer {
+                        let kind = try XCTUnwrap(event["type"] as? String)
+                        switch kind {
+                        case "pointer_enter", "pointer_exit":
+                            let target = try XCTUnwrap(event["target"] as? [String: Any])
+                            let region = try XCTUnwrap(target["region"] as? String)
+                            let entered = kind == "pointer_enter"
+                            switch region {
+                            case "metric":
+                                let metric = try XCTUnwrap(CompanionMetricID(rawValue:
+                                    XCTUnwrap(target["metric"] as? String)))
+                                if entered {
+                                    if !hub.isOpen { hover.enterMetric(metric) }
+                                } else { hover.leaveMetric(metric) }
+                            case "details":
+                                entered ? hover.enterTooltip() : hover.leaveTooltip()
+                            case "widget", "settings_handle":
+                                break // Native presentation model; no core hover/navigation event.
+                            default:
+                                XCTFail("Unsupported Swift reference region: \(id)/\(region)")
+                            }
+                        case "toggle_pin", "show_and_pin":
+                            let metric = try XCTUnwrap(CompanionMetricID(rawValue:
+                                XCTUnwrap(event["metric"] as? String)))
+                            hub.close()
+                            if kind == "toggle_pin" { hover.togglePin(metric) }
+                            else { hover.showAndPin(metric) }
+                        case "open_settings":
+                            hover.dismiss()
+                            hub.open(try XCTUnwrap(EdgeHubPage(rawValue:
+                                XCTUnwrap(event["page"] as? String))))
+                        case "close_settings": hub.close()
+                        case "back": hub.back()
+                        case "escape":
+                            if hub.isOpen { hub.back() } else { hover.dismiss() }
+                        case "dismiss_details": hover.dismiss()
+                        case "outside_click", "hide":
+                            hover.dismiss()
+                            hub.close()
+                        case "reopen":
+                            break // Reopening alone does not change either existing core model.
+                        case "timer_fired":
+                            // Swift owns its Task timer; it has no injected token callback.
+                            // For due dismissal, await its actual publication, not a guessed
+                            // wall-clock deadline. Cancelled callbacks get a scheduling turn
+                            // after the configured delay and must preserve the expected card.
+                            if expected["selected_metric"] as? String == nil,
+                               hover.selectedMetric != nil {
+                                let dismissed = expectation(description: "\(id)/\(index) dismissed")
+                                let subscription = hover.$selectedMetric.dropFirst().sink { value in
+                                    if value == nil { dismissed.fulfill() }
+                                }
+                                await fulfillment(of: [dismissed], timeout: 1)
+                                subscription.cancel()
+                            } else {
+                                try await Task.sleep(nanoseconds: 20_000_000)
+                            }
+                        default:
+                            XCTFail("Unsupported Swift reference event: \(id)/\(kind)")
+                        }
+                    }
+                }
+                let label = "\(id) step \(index)"
+                XCTAssertEqual(hover.selectedMetric?.rawValue, expected["selected_metric"] as? String, label)
+                XCTAssertEqual(hover.pinnedMetric?.rawValue, expected["pinned_metric"] as? String, label)
+                XCTAssertEqual(hub.page?.rawValue, expected["settings_page"] as? String, label)
+                let pointer = try XCTUnwrap(expected["pointer"] as? [String: Any])
+                XCTAssertEqual(hover.isPointerInsideTooltip, pointer["region"] as? String == "details", label)
+            }
+        }
+    }
+
     func testSnapshotInputsPreserveExistingIdentityUsageAndCostLabels() throws {
         let inputs = try fixture("snapshots")
         let profile = try JSONDecoder().decode(ConnectionProfile.self,

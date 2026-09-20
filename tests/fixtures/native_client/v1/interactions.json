@@ -1,0 +1,3707 @@
+{
+  "schema_id": "hormuz.native-client-fixtures",
+  "schema_version": 1,
+  "source_revision": "9156a5571584d9d7d07d02f32e2bd36e04b1e16c",
+  "source_paths": [
+    "clients/macos/Sources/HormuzClientCore/Companion/HoverCoordinator.swift",
+    "clients/macos/Sources/HormuzClientCore/Companion/EdgeHubNavigation.swift",
+    "clients/macos/Sources/Hormuz/Stores/CompanionPresentationModel.swift",
+    "clients/macos/Sources/Hormuz/Windows/EdgePanelController.swift"
+  ],
+  "note": "Synthetic interaction traces. Rust verifies every state and effect. swift_reference cases compare existing HoverCoordinator and EdgeHubNavigation projections only; tagged timer callback injection, visibility/focus policy and native windows are not Swift parity claims. Fixture timestamps are monotonic milliseconds, not wall time.",
+  "cases": [
+    {
+      "id": "hover_to_card_travel",
+      "note": "The detail survives travel into its card; leaving the card dismisses after the existing 250 ms delay. Swift checks actual HoverCoordinator outcomes.",
+      "swift_reference": true,
+      "mode": "always",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 10,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 260
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 260
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 200,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "details"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "details"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            }
+          ]
+        },
+        {
+          "at_ms": 260,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "details"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 300,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "details"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 550
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 550
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 550,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 2
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "hover_switch_and_pin",
+      "note": "A stale exit or cancelled timer cannot replace a newer hover. Pinned content resists hover; explicit activation changes the pin.",
+      "swift_reference": true,
+      "mode": "always",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 10,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 260
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 260
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 20,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "tokens"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "tokens"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            }
+          ]
+        },
+        {
+          "at_ms": 30,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "tokens"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 260,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "tokens"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 300,
+          "events": [
+            {
+              "type": "toggle_pin",
+              "metric": "tokens"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": "tokens",
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "tokens"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 400,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "tokens"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": "tokens",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 401,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "requests"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": "tokens",
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "requests"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 402,
+          "events": [
+            {
+              "type": "toggle_pin",
+              "metric": "requests"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": "requests",
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "requests"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 403,
+          "events": [
+            {
+              "type": "toggle_pin",
+              "metric": "requests"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "requests"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "hide_reopen_rejects_old_timers",
+      "note": "Hide clears transient interaction state; callbacks from before hide cannot dismiss newly pinned details. Swift reference covers hover/navigation projections only.",
+      "swift_reference": true,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 10,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 260
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 260
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 20,
+          "events": [
+            {
+              "type": "hide"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "hidden",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            }
+          ]
+        },
+        {
+          "at_ms": 30,
+          "events": [
+            {
+              "type": "reopen"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 280
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 280
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 40,
+          "events": [
+            {
+              "type": "show_and_pin",
+              "metric": "requests"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": "requests",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 2
+            }
+          ]
+        },
+        {
+          "at_ms": 260,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": "requests",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 280,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 2
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": "requests",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 300,
+          "events": [
+            {
+              "type": "hide"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "hidden",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 310,
+          "events": [
+            {
+              "type": "reopen"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 560
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 560
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 560,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 3
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "settings_back_and_escape",
+      "note": "Escape follows the same review/client/home and setup/connection/home hierarchy as EdgeHubNavigation; closing a card allows idle folding.",
+      "swift_reference": true,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "open_settings",
+              "page": "review"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "review",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "request_focus",
+              "target": "settings"
+            }
+          ]
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "escape"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "client",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 2,
+          "events": [
+            {
+              "type": "back"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "home",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 3,
+          "events": [
+            {
+              "type": "escape"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 253
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 253
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 4,
+          "events": [
+            {
+              "type": "open_settings",
+              "page": "setup"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "setup",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            },
+            {
+              "type": "request_focus",
+              "target": "settings"
+            }
+          ]
+        },
+        {
+          "at_ms": 5,
+          "events": [
+            {
+              "type": "back"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "connection",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 6,
+          "events": [
+            {
+              "type": "back"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "home",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 7,
+          "events": [
+            {
+              "type": "close_settings"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 257
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 257
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 253,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 257
+              }
+            ]
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 257,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 2
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "outside_click_keeps_widget_open",
+      "note": "Outside click dismisses details or settings without immediately folding. A new pointer visit resumes ordinary idle folding. Swift checks only the dismissed core models.",
+      "swift_reference": true,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "show_and_pin",
+              "metric": "cost"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": "cost",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "outside_click"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": true,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 250,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 999
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": true,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 300,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "widget"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "widget"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 301,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "widget"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 551
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 551
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 551,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 600,
+          "events": [
+            {
+              "type": "open_settings",
+              "page": "appearance"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "appearance",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "request_focus",
+              "target": "settings"
+            }
+          ]
+        },
+        {
+          "at_ms": 601,
+          "events": [
+            {
+              "type": "outside_click"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": true,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "input_precedes_timer_at_same_time",
+      "note": "Equal-time batches prioritize observations over callbacks regardless of callback position; repeated reopen replaces an old fold deadline.",
+      "swift_reference": false,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "requests"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "requests"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "requests"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 251
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 251
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 251,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            },
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "details"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "details"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            }
+          ]
+        },
+        {
+          "at_ms": 252,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "details"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 502
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 502
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 502,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 2
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 752
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 752
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 752,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 3
+            },
+            {
+              "type": "reopen"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 4,
+                "kind": "fold",
+                "deadline_ms": 1002
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 3
+            },
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 4,
+                "kind": "fold",
+                "deadline_ms": 1002
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 1002,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 4
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "keyboard_focus_guards_details_and_widget",
+      "note": "Observed keyboard focus holds the corresponding surface open. Losing focus resumes delayed dismissal and folding.",
+      "swift_reference": false,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "tokens"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "tokens"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "tokens"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 251
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 251
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 251,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            },
+            {
+              "type": "focus_changed",
+              "target": "details"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "details",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            }
+          ]
+        },
+        {
+          "at_ms": 400,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": null
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 650
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 650
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 650,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 2
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 900
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 900
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 900,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 3
+            },
+            {
+              "type": "focus_changed",
+              "target": "widget"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "widget",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 3
+            }
+          ]
+        },
+        {
+          "at_ms": 901,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": null
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 4,
+                "kind": "fold",
+                "deadline_ms": 1151
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 4,
+                "kind": "fold",
+                "deadline_ms": 1151
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 1151,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 4
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "settings_focus_navigation",
+      "note": "Settings remains open through transient focus loss and keyboard traversal. Closing its last page requests native widget focus without pretending focus was granted.",
+      "swift_reference": false,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "open_settings",
+              "page": "setup"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "setup",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "request_focus",
+              "target": "settings"
+            }
+          ]
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": "settings"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "setup",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "settings",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 2,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": null
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "setup",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 500,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": "settings"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "setup",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "settings",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 502,
+          "events": [
+            {
+              "type": "escape"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "connection",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "settings",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 503,
+          "events": [
+            {
+              "type": "escape"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "home",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "settings",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 504,
+          "events": [
+            {
+              "type": "escape"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 754
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 754
+              }
+            },
+            {
+              "type": "request_focus",
+              "target": "widget"
+            }
+          ]
+        },
+        {
+          "at_ms": 505,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": "widget"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "widget",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            }
+          ]
+        },
+        {
+          "at_ms": 754,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "widget",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 755,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": null
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 1005
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 1005
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 1005,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 2
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "late_pointer_exits",
+      "note": "Native enter-before-exit delivery cannot clear the new pointer region; hovering the settings handle prevents idle folding.",
+      "swift_reference": false,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "details"
+              }
+            },
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "details"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 2,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "tokens"
+              }
+            },
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "details"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "tokens"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 3,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "tokens"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 4,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "settings_handle"
+              }
+            },
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "tokens"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "settings_handle"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 254
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 254
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 254,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "settings_handle"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 255,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "settings_handle"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 505
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 505
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 505,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 2
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "visibility_preference_and_hide",
+      "note": "Always-visible mode cancels idle folding. Visibility commands are in-memory only; native preference persistence belongs to the shell.",
+      "swift_reference": false,
+      "mode": "always",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "reopen"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "set_visibility_mode",
+              "mode": "fold"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 2,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "widget"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "widget"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 3,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "widget"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 253
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 253
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 4,
+          "events": [
+            {
+              "type": "set_visibility_mode",
+              "mode": "always"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            }
+          ]
+        },
+        {
+          "at_ms": 253,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 254,
+          "events": [
+            {
+              "type": "hide"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "hidden",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 255,
+          "events": [
+            {
+              "type": "reopen"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "early_unknown_duplicate_callbacks",
+      "note": "An early callback retains its original deadline; unknown and duplicate tokens cannot create or dismiss UI.",
+      "swift_reference": false,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "reopen"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 250
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 250
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 999
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 250
+              }
+            ]
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 249,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 250
+              }
+            ]
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 250,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 251,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 300,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 301,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 551
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 551
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 551,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 2
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 801
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 801
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 801,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 3
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "hidden_input_and_invalid_focus",
+      "note": "Hidden widgets reject late pointer/focus/click observations; same-batch Hide invalidates earlier focus requests.",
+      "swift_reference": false,
+      "mode": "fold",
+      "visible": false,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "widget"
+              }
+            },
+            {
+              "type": "toggle_pin",
+              "metric": "cost"
+            },
+            {
+              "type": "focus_changed",
+              "target": "widget"
+            },
+            {
+              "type": "escape"
+            },
+            {
+              "type": "outside_click"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "hidden",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "open_settings",
+              "page": "home"
+            },
+            {
+              "type": "hide"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "hidden",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 2,
+          "events": [
+            {
+              "type": "reopen"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 252
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 252
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 3,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": "settings"
+            },
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "details"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 252
+              }
+            ]
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 252,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "explicit_activation_reopens_and_switches_cards",
+      "note": "Menu, keyboard and accessibility activation use the same explicit actions. Hover cannot replace pins; opening settings clears details.",
+      "swift_reference": true,
+      "mode": "fold",
+      "visible": false,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "show_and_pin",
+              "metric": "tokens"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": "tokens",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "tokens",
+            "pinned_metric": "tokens",
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 2,
+          "events": [
+            {
+              "type": "toggle_pin",
+              "metric": "cost"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": "cost",
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 3,
+          "events": [
+            {
+              "type": "open_settings",
+              "page": "review"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "review",
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "request_focus",
+              "target": "settings"
+            }
+          ]
+        },
+        {
+          "at_ms": 4,
+          "events": [
+            {
+              "type": "show_and_pin",
+              "metric": "requests"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": "requests",
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 5,
+          "events": [
+            {
+              "type": "escape"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 6,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 256
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 256
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 256,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "hide_reopen_and_pin_in_one_turn",
+      "note": "Input order is stable within a batch, all earlier callbacks become stale, and a focus request for a card hidden in that batch is discarded.",
+      "swift_reference": false,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 251
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 251
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 2,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            },
+            {
+              "type": "hide"
+            },
+            {
+              "type": "reopen"
+            },
+            {
+              "type": "show_and_pin",
+              "metric": "requests"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": "requests",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            },
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "fold",
+                "deadline_ms": 252
+              }
+            },
+            {
+              "type": "cancel_timer",
+              "token": 2
+            }
+          ]
+        },
+        {
+          "at_ms": 3,
+          "events": [
+            {
+              "type": "open_settings",
+              "page": "home"
+            },
+            {
+              "type": "hide"
+            },
+            {
+              "type": "reopen"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 253
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 3,
+                "kind": "fold",
+                "deadline_ms": 253
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 253,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 3
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "folded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "dismiss_focused_card_restores_focus_intent",
+      "note": "Escape requests focus back to the widget; an outside click clears focus without requesting it back or stealing focus from another application.",
+      "swift_reference": false,
+      "mode": "fold",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "show_and_pin",
+              "metric": "requests"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": "requests",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": "details"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": "requests",
+            "pinned_metric": "requests",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "details",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 2,
+          "events": [
+            {
+              "type": "escape"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 252
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "fold",
+                "deadline_ms": 252
+              }
+            },
+            {
+              "type": "request_focus",
+              "target": "widget"
+            }
+          ]
+        },
+        {
+          "at_ms": 3,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": "widget"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "widget",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            }
+          ]
+        },
+        {
+          "at_ms": 4,
+          "events": [
+            {
+              "type": "hide"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "hidden",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 5,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": "widget"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "hidden",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 6,
+          "events": [
+            {
+              "type": "open_settings",
+              "page": "home"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "home",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "request_focus",
+              "target": "settings"
+            }
+          ]
+        },
+        {
+          "at_ms": 7,
+          "events": [
+            {
+              "type": "focus_changed",
+              "target": "settings"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": "home",
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": "settings",
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 8,
+          "events": [
+            {
+              "type": "outside_click"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "fold",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": true,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
+    }
+  ]
+}

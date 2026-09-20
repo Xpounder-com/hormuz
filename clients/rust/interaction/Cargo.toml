@@ -1,0 +1,14 @@
+[package]
+name = "hormuz-client-interaction"
+version = "1.5.0-dev.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Deterministic, window-independent companion interaction state."
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -194,3 +194,15 @@ freshness/change-delivery vectors for #336. Rust executes the snapshot transitio
 Swift/Python verify the inputs through their existing validators. New immutable
 native snapshots are in-memory display projections, not a new gateway wire or
 durable settings schema. Zero remains a measured value and missing remains absent.
+
+## Companion interaction traces
+
+`interactions.json` adds 15 synthetic event traces (122 steps) for #338. The
+unpublished [interaction library](../rust/interaction/README.md) checks every
+snapshot and timer/focus effect. Six marked traces also compare the existing
+Swift `HoverCoordinator` and `EdgeHubNavigation` projections without changing
+shipping Swift behavior. That comparison covers selected/pinned metric,
+pointer-inside-tooltip and settings page; it does not establish native window,
+visibility, OS focus, keyboard or screen-reader acceptance. Callback ordering
+and the broader focus policy are Rust foundation checks. #331 integration and
+#338 native acceptance remain open; the fixture is not a new durable or IPC schema.
