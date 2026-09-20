@@ -1,7 +1,7 @@
 use crate::{CredentialSource, LocalRelay, Optimization, RelayError};
 use hormuz_client_core::{AIClient, ConnectionProfile};
 use std::ffi::{OsStr, OsString};
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -84,45 +84,29 @@ fn first_version(text: &str) -> Option<&str> {
 }
 
 fn bounded_version_output(executable: &Path) -> Result<Vec<u8>, RelayError> {
+    // Files avoid an unbounded pipe join if a version command exits after a
+    // descendant inherits stdout or stderr. They carry only version text.
+    let mut stdout = tempfile::tempfile().map_err(|_| RelayError::UnsupportedClient)?;
+    let mut stderr = tempfile::tempfile().map_err(|_| RelayError::UnsupportedClient)?;
     let mut child = OwnedClient(Some(
         Command::new(executable)
             .arg("--version")
             .env_clear()
             .envs(std::env::vars_os().filter(|(name, _)| !blocked(name)))
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(Stdio::from(
+                stdout
+                    .try_clone()
+                    .map_err(|_| RelayError::UnsupportedClient)?,
+            ))
+            .stderr(Stdio::from(
+                stderr
+                    .try_clone()
+                    .map_err(|_| RelayError::UnsupportedClient)?,
+            ))
             .spawn()
             .map_err(|_| RelayError::UnsupportedClient)?,
     ));
-    let stdout = child
-        .0
-        .as_mut()
-        .unwrap()
-        .stdout
-        .take()
-        .ok_or(RelayError::UnsupportedClient)?;
-    let stderr = child
-        .0
-        .as_mut()
-        .unwrap()
-        .stderr
-        .take()
-        .ok_or(RelayError::UnsupportedClient)?;
-    let out = thread::spawn(move || {
-        let mut output = Vec::new();
-        stdout
-            .take(MAX_VERSION_OUTPUT + 1)
-            .read_to_end(&mut output)
-            .map(|_| output)
-    });
-    let err = thread::spawn(move || {
-        let mut output = Vec::new();
-        stderr
-            .take(MAX_VERSION_OUTPUT + 1)
-            .read_to_end(&mut output)
-            .map(|_| output)
-    });
     let deadline = Instant::now() + VERSION_BUDGET;
     let status = loop {
         if let Some(status) = child
@@ -137,22 +121,26 @@ fn bounded_version_output(executable: &Path) -> Result<Vec<u8>, RelayError> {
         }
         if Instant::now() >= deadline {
             drop(child);
-            let _ = out.join();
-            let _ = err.join();
             return Err(RelayError::UnsupportedClient);
         }
         thread::sleep(Duration::from_millis(10));
     };
-    let mut output = out
-        .join()
-        .map_err(|_| RelayError::UnsupportedClient)?
+    stdout
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| RelayError::UnsupportedClient)?;
+    stderr
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| RelayError::UnsupportedClient)?;
+    let mut output = Vec::new();
+    stdout
+        .take(MAX_VERSION_OUTPUT + 1)
+        .read_to_end(&mut output)
         .map_err(|_| RelayError::UnsupportedClient)?;
     output.push(b' ');
-    output.extend(
-        err.join()
-            .map_err(|_| RelayError::UnsupportedClient)?
-            .map_err(|_| RelayError::UnsupportedClient)?,
-    );
+    stderr
+        .take(MAX_VERSION_OUTPUT + 1)
+        .read_to_end(&mut output)
+        .map_err(|_| RelayError::UnsupportedClient)?;
     if !status.success() || output.len() > MAX_VERSION_OUTPUT as usize {
         return Err(RelayError::UnsupportedClient);
     }
@@ -386,6 +374,14 @@ mod tests {
             RelayError::UnsupportedClient
         );
         fake_client(&executable, "printf 'codex 0.146.0 (protocol 0.147.0)\\n'");
+        assert_eq!(
+            discover_in_path(AIClient::Codex, temporary.path().as_os_str()).unwrap_err(),
+            RelayError::UnsupportedClient
+        );
+        fake_client(
+            &executable,
+            &format!("printf 'codex 0.147.0{}'", "x".repeat(4096)),
+        );
         assert_eq!(
             discover_in_path(AIClient::Codex, temporary.path().as_os_str()).unwrap_err(),
             RelayError::UnsupportedClient
