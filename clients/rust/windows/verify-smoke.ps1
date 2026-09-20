@@ -7,7 +7,8 @@ $process = $null
 try {
     $stdoutPath = Join-Path $smokeDirectory "stdout.txt"
     $stderrPath = Join-Path $smokeDirectory "stderr.txt"
-    $process = Start-Process -FilePath $previewExecutable -ArgumentList "--smoke-test" -PassThru `
+    $stateDirectory = Join-Path $smokeDirectory "private"
+    $process = Start-Process -FilePath $previewExecutable -ArgumentList @("--smoke-test", "--state-directory", ('"' + $stateDirectory + '"')) -PassThru `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
     if (-not $process.WaitForExit(15000)) {
         $process.Kill()

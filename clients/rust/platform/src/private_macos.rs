@@ -30,12 +30,29 @@ pub struct PrivateTransaction {
     _lock: File,
 }
 
+impl Drop for PrivateTransaction {
+    fn drop(&mut self) {
+        // A concurrent fork must not extend this transaction's lifetime.
+        let _ = self._lock.unlock();
+    }
+}
+
 /// Exclusive application ownership, independent of connection refresh. Keep it
 /// alive until all owned workers and helpers have stopped. Never delete its
 /// sentinel: the kernel lock, not file existence or a PID, determines ownership.
 pub struct ApplicationInstance {
     _root: Arc<File>,
     _lock: File,
+}
+
+impl Drop for ApplicationInstance {
+    fn drop(&mut self) {
+        // A concurrent fork may temporarily inherit the open file description
+        // before CLOEXEC closes it. Explicitly release our lease, rather than
+        // waiting for every inherited descriptor to close. The guard is never
+        // cloned and its owner has already drained its workers/helpers.
+        let _ = self._lock.unlock();
+    }
 }
 
 fn validate(file: &File, directory: bool) -> Result<()> {

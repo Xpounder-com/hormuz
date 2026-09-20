@@ -15,6 +15,10 @@ use windows_sys::Win32::Security::*;
 use windows_sys::Win32::Storage::FileSystem::*;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
+#[path = "activation_windows.rs"]
+mod activation;
+pub use activation::InstanceListener;
+
 struct LocalAllocation(*mut c_void);
 impl Drop for LocalAllocation {
     fn drop(&mut self) {
@@ -42,8 +46,11 @@ impl UserSid {
         self.words.as_ptr().cast_mut().cast()
     }
     fn current() -> Result<Self> {
+        Self::of_process(unsafe { GetCurrentProcess() })
+    }
+    fn of_process(process: HANDLE) -> Result<Self> {
         let mut token = null_mut();
-        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
             return Err(PlatformError::Unavailable);
         }
         let token = unsafe { OwnedHandle::from_raw_handle(token) };
@@ -137,6 +144,10 @@ fn validate(file: &File, directory: bool, user: &UserSid) -> Result<()> {
     {
         return Err(PlatformError::UnsafeStorage);
     }
+    validate_security(handle, user)
+}
+
+fn validate_security(handle: HANDLE, user: &UserSid) -> Result<()> {
     let mut owner = null_mut();
     let mut dacl = null_mut();
     let mut raw = null_mut();

@@ -339,9 +339,10 @@ dependencies = [
 
 [[package]]
 name = "hormuz-windows"
-version = "1.4.0-dev.1"
+version = "1.5.0-dev.1"
 dependencies = [
  "hormuz-client-core",
+ "hormuz-client-platform",
  "windows-sys 0.61.2",
 ]
 

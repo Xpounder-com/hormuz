@@ -262,3 +262,56 @@ fn windows_instance_handle_prevents_sentinel_replacement() {
     drop(instance);
     directory.try_claim_instance().unwrap();
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn dropping_owner_releases_lease_even_while_a_fork_inherits_the_descriptor() {
+    let temporary = tempfile::tempdir().unwrap();
+    let directory = PrivateDirectory::open(&temporary.path().join("private")).unwrap();
+    let owner = directory.try_claim_instance().unwrap();
+    let refresh = directory.try_lock().unwrap();
+    let mut control = [0; 2];
+    assert_eq!(unsafe { libc::pipe(control.as_mut_ptr()) }, 0);
+    let child = unsafe { libc::fork() };
+    if child == 0 {
+        // After fork in a threaded test process, use only async-signal-safe
+        // syscalls. Retain the inherited lock without touching any Rust state.
+        unsafe {
+            libc::close(control[1]);
+            let mut byte = 0_u8;
+            libc::read(control[0], (&mut byte as *mut u8).cast(), 1);
+            libc::_exit(0);
+        }
+    }
+    if child < 0 {
+        unsafe {
+            libc::close(control[0]);
+            libc::close(control[1]);
+        }
+        panic!("synthetic fork failed");
+    }
+    unsafe {
+        libc::close(control[0]);
+    }
+    drop(owner);
+    drop(refresh);
+    let next_refresh = directory.try_lock();
+    let replacement = directory.try_claim_instance();
+    // Always release/reap the owned child before asserting the regression.
+    unsafe {
+        let byte = 0_u8;
+        libc::write(control[1], (&byte as *const u8).cast(), 1);
+        libc::close(control[1]);
+        let mut status = 0;
+        assert_eq!(libc::waitpid(child, &mut status, 0), child);
+        assert_eq!(status, 0);
+    }
+    assert!(
+        next_refresh.is_ok(),
+        "inherited descriptor retained refresh"
+    );
+    assert!(
+        replacement.is_ok(),
+        "inherited descriptor retained the lease"
+    );
+}

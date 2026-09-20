@@ -52,7 +52,8 @@ $workerProcess = $null
 $previousSettings = $env:HORMUZ_PREVIEW_ACCEPTANCE_CONFIG
 try {
     # The outer watchdog owns the preview even if a UI Automation provider hangs in the worker.
-    $preview = Start-Process -FilePath $previewExecutable -PassThru
+    $stateDirectory = Join-Path $temporary "private"
+    $preview = Start-Process -FilePath $previewExecutable -ArgumentList @("--preview", "--state-directory", ('"' + $stateDirectory + '"')) -PassThru
     $resultPath = Join-Path $temporary "result.json"
     $env:HORMUZ_PREVIEW_ACCEPTANCE_CONFIG = @{
         process_id = $preview.Id

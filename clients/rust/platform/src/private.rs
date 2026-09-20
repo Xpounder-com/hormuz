@@ -34,6 +34,8 @@ mod implementation {
         }
     }
 }
+#[cfg(windows)]
+pub use implementation::InstanceListener;
 pub use implementation::{ApplicationInstance, PrivateDirectory, PrivateTransaction};
 pub const MAX_PRIVATE_FILE_BYTES: usize = 1_048_576;
 
