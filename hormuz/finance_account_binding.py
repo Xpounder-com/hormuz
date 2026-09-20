@@ -156,11 +156,12 @@ def select_finance_account(
     identity: FinanceIdentity | UnavailableFinance,
     bindings: FinanceAccountBindings | None,
 ) -> FinanceAccountCandidate | UnavailableFinance:
-    """Select only for the server-authenticated tenant and actual transport.
+    """Select for the server-authenticated tenant and configured origin/profile.
 
     No rate card, model, request body, collection credential or provider lookup
     supplies identity. Even a candidate is still unverified: this function
-    cannot check registration currency, revocation, scope or source versions.
+    cannot check registration currency, revocation, scope, source versions or
+    the final network destination after redirects.
     """
 
     if isinstance(identity, UnavailableFinance):

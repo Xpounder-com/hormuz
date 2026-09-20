@@ -22,10 +22,13 @@ is no fallback to another tenant or registration.
 
 Absent metadata produces `not_configured`. Invalid metadata, missing mappings,
 duplicates and unsupported transport produce fixed preflight reasons. These
-results do not deny inference. The selected transport must use the exact
+results do not deny inference. The configured base URL must use the exact
 first-party HTTPS origin and corresponding OpenAI or Anthropic profile before
 producing a candidate; compatible proxy protocols do not establish provider
-billing identity. Anthropic coverage here is synthetic/offline only.
+billing identity. This preflight checks configuration only. It does not verify
+the final network destination, including any redirects followed by the existing
+HTTP transport. Redirect handling is a separate transport security boundary.
+Anthropic coverage here is synthetic/offline only.
 
 **A candidate is not a durable account binding.** No account fingerprint, source
 scope, current registration state or revocation status is resolved. Registered
