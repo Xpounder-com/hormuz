@@ -59,6 +59,7 @@ def _write_rotating_client_auth_helper(root: Path) -> tuple[Path, Path]:
 class FakeProviderHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     requests: list[dict[str, object]] = []
+    redirect_target: str | None = None
     lock = threading.Lock()
     delayed_stream_started = threading.Event()
     delayed_stream_release = threading.Event()
@@ -79,6 +80,14 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                     "body": body,
                 }
             )
+
+        if body.get("force_redirect_status") in (301, 302, 303, 307, 308):
+            assert self.redirect_target is not None
+            self.send_response(body["force_redirect_status"])
+            self.send_header("Location", self.redirect_target)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
 
         if body.get("force_rate_limit") is True:
             self._send_json(
@@ -552,6 +561,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         FakeProviderHandler.requests = []
+        FakeProviderHandler.redirect_target = None
         FakeProviderHandler.delayed_stream_started.clear()
         FakeProviderHandler.delayed_stream_release.clear()
         self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
@@ -605,6 +615,47 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.reasoning_tokens, 7)
         self.assertGreater(totals.cost_microusd, 0)
+
+    def test_provider_redirects_never_send_credentials_to_another_origin(self) -> None:
+        second_origin_requests: list[tuple[str, bool]] = []
+
+        class SecondOrigin(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                second_origin_requests.append((self.command, bool(self.headers.get("Authorization"))))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            do_POST = do_GET
+
+            def log_message(self, *_args: object) -> None:
+                return None
+
+        second_origin = ThreadingHTTPServer(("127.0.0.1", 0), SecondOrigin)
+        second_thread = threading.Thread(target=second_origin.serve_forever, daemon=True)
+        second_thread.start()
+        try:
+            FakeProviderHandler.redirect_target = f"http://127.0.0.1:{second_origin.server_port}/capture"
+            for redirect_status in (301, 302, 303, 307, 308):
+                with self.subTest(status=redirect_status):
+                    status, headers, _ = self._post(
+                        "/v1/responses",
+                        {
+                            "model": "engineering-fast",
+                            "input": "synthetic redirect probe",
+                            "force_redirect_status": redirect_status,
+                        },
+                    )
+                    self.assertEqual(status, 502)
+                    self.assertEqual(headers["x-hormuz-error-code"], "gateway_upstream_redirect")
+                    self.assertNotIn("location", headers)
+                    self.assertEqual(second_origin_requests, [])
+                    self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
+        finally:
+            FakeProviderHandler.redirect_target = None
+            second_origin.shutdown()
+            second_origin.server_close()
 
     def test_openai_native_cache_write_cost_settles_usage_and_budget_consistently(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())
@@ -1075,7 +1126,7 @@ class GatewayIntegrationTests(unittest.TestCase):
 
     def test_missing_upstream_credential_fails_before_creating_an_attempt(self) -> None:
         self.gateway.upstream_credentials["openai"] = ""
-        with mock.patch("hormuz.server.urllib.request.urlopen") as urlopen:
+        with mock.patch("hormuz.server._open_upstream") as urlopen:
             status, headers, _ = self._post(
                 "/v1/responses",
                 {"model": "engineering-fast", "input": "must-not-create-an-attempt"},
@@ -1095,7 +1146,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         before = len(FakeProviderHandler.requests)
         request_content = "must-not-enter-request-attempt-evidence"
         with mock.patch(
-            "hormuz.server.urllib.request.urlopen",
+            "hormuz.server._open_upstream",
             side_effect=urllib.error.URLError("provider-connection-interrupted"),
         ):
             status, headers, body = self._post(
@@ -1212,7 +1263,7 @@ class GatewayIntegrationTests(unittest.TestCase):
                 return None
 
         upstream_response = IncrementalJSONResponse()
-        with mock.patch("hormuz.server.urllib.request.urlopen", return_value=upstream_response):
+        with mock.patch("hormuz.server._open_upstream", return_value=upstream_response):
             status, _, body = self._post(
                 "/v1/responses",
                 {"model": "engineering-fast", "input": "incremental JSON response"},
@@ -1237,7 +1288,7 @@ class GatewayIntegrationTests(unittest.TestCase):
 
     def test_anthropic_attempt_reserves_the_most_expensive_input_partition(self) -> None:
         with mock.patch(
-            "hormuz.server.urllib.request.urlopen",
+            "hormuz.server._open_upstream",
             side_effect=urllib.error.URLError("provider-connection-interrupted"),
         ):
             status, _, _ = self._post(
@@ -1302,7 +1353,7 @@ class GatewayIntegrationTests(unittest.TestCase):
                 return None
 
         before = len(FakeProviderHandler.requests)
-        with mock.patch("hormuz.server.urllib.request.urlopen", return_value=InterruptedResponse()):
+        with mock.patch("hormuz.server._open_upstream", return_value=InterruptedResponse()):
             status, headers, body = self._post(
                 "/v1/responses",
                 {"model": "engineering-fast", "input": "interrupted provider response"},
@@ -1474,7 +1525,7 @@ class GatewayIntegrationTests(unittest.TestCase):
 
         upstream_response = CloseTrackedEventStream()
         with (
-            mock.patch("hormuz.server.urllib.request.urlopen", return_value=upstream_response),
+            mock.patch("hormuz.server._open_upstream", return_value=upstream_response),
             mock.patch(
                 "hormuz.server.GatewayRequestHandler._write_downstream_chunk",
                 side_effect=BrokenPipeError,

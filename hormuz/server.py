@@ -97,6 +97,20 @@ _ANTHROPIC_INLINE_TOOL_TYPES = frozenset({"custom"})
 _INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
 
 
+class _NoUpstreamRedirect(urllib.request.HTTPRedirectHandler):
+    """Keep provider credentials and request content at the configured origin."""
+
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):  # type: ignore[no-untyped-def]
+        return None
+
+
+_UPSTREAM_OPENER = urllib.request.build_opener(_NoUpstreamRedirect())
+
+
+def _open_upstream(request: urllib.request.Request, *, timeout: int):
+    return _UPSTREAM_OPENER.open(request, timeout=timeout)
+
+
 class _ProviderRehearsalResponse:
     """A zero-egress 429 used only after hosted rehearsal authorization."""
 
@@ -970,7 +984,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             ):
                 response = _ProviderRehearsalResponse()
             else:
-                response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
+                response = _open_upstream(request, timeout=self.server.config.upstream_timeout_seconds)
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
@@ -998,6 +1012,33 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         response_headers_us = self._elapsed_us(started_ns)
         status = getattr(response, "status", response.getcode())
+        if 300 <= status < 400:
+            response.close()
+            if account_usage and attempt is not None:
+                self.server.provider_reliability_store.finalize_request_attempt(
+                    attempt=attempt,
+                    organization_id=identity.organization_id,
+                    status="failed",
+                    cost_microusd=0,
+                    provider_metrics=self._provider_metrics(
+                        started_ns=started_ns,
+                        provider_status=status,
+                        response_headers_us=response_headers_us,
+                        first_body_byte_us=None,
+                        provider_bytes_read=0,
+                        downstream_bytes_sent=0,
+                    ),
+                )
+                observation = getattr(self, "_impact_observations", {}).get(attempt.attempt_id)
+                if observation is not None and self.server.impact_recorder is not None:
+                    self.server.impact_recorder.submit(replace(observation, status="failed"))
+            self._send_protocol_error(
+                protocol,
+                "Upstream provider redirect refused.",
+                HTTPStatus.BAD_GATEWAY,
+                code="gateway_upstream_redirect",
+            )
+            return
         content_type = response.headers.get("Content-Type", "application/json")
         provider_request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
         reason = failover_reason(status)
