@@ -413,7 +413,7 @@ class PostgresCustodyLifecycleTests(PostgresTestCase):
         try:
             with (
                 mock.patch.dict(os.environ, runtime_environment, clear=False),
-                mock.patch("hormuz.server.urllib.request.urlopen") as provider_egress,
+                mock.patch("hormuz.server._open_upstream") as provider_egress,
             ):
                 gateway = GatewayServer(runtime_config)
                 gateway_thread = serve_in_thread(gateway)
