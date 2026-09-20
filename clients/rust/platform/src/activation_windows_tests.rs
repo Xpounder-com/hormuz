@@ -124,6 +124,8 @@ fn client_rejects_a_public_endpoint_before_sending_a_command() {
         )
     })
     .unwrap();
+    let accepting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_accepting = accepting.clone();
     let server = thread::spawn(move || {
         let stop = event().unwrap();
         let ready = event().unwrap();
@@ -132,6 +134,11 @@ fn client_rejects_a_public_endpoint_before_sending_a_command() {
             ..Default::default()
         };
         let started = unsafe { ConnectNamedPipe(pipe.as_raw_handle(), &mut pending) };
+        // Publish only after issuing accept. A fast rejected client can close
+        // before a late ConnectNamedPipe, which reports ERROR_NO_DATA instead
+        // of establishing the read probe needed by this test. An atomic store
+        // cannot disturb this thread's Win32 last-error value.
+        server_accepting.store(true, Ordering::Release);
         let connected = (started == 0 && unsafe { GetLastError() } == ERROR_PIPE_CONNECTED)
             || complete(
                 pipe.as_raw_handle(),
@@ -145,6 +152,14 @@ fn client_rejects_a_public_endpoint_before_sending_a_command() {
         let mut request = [0; 8];
         assert!(read(pipe.as_raw_handle(), &mut request, stop.as_raw_handle()).is_err());
     });
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !accepting.load(Ordering::Acquire) {
+        assert!(
+            Instant::now() < deadline,
+            "test server did not issue accept"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
     assert!(directory.request_reopen().is_err());
     server.join().unwrap();
 }
