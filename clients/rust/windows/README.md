@@ -133,10 +133,15 @@ keyboard navigation, accessibility, monitor migration or the visual layout.
 Windows PowerShell UI Automation observer. It verifies the synthetic labels,
 button roles/names, exposed InvokePattern actions, programmatic keyboard focus,
 fold/expand geometry and metric visibility, hide, close/reopen, and clean Exit.
-It runs 100 fold/expand/hide/reopen cycles. Reopen deliberately uses the same
-synthetic notification as the smoke test; actual tray activation is still a
-manual check. UIA focus and invocation do not prove physical keyboard input or
-screen-reader usability. A failed/unavailable provider fails the check.
+It also injects Win32 `SendInput` keyboard events into the owned foreground
+preview and verifies Tab/Shift-Tab focus movement, Space/Enter activation,
+Escape hiding and focus after reopening. The check fails if the preview cannot
+become foreground or input does not produce the expected native state. It runs
+100 fold/expand/hide/reopen cycles. Reopen deliberately uses the same synthetic
+notification as the smoke test; actual tray activation is still a manual check.
+These synthetic events on a CI desktop do not prove physical keyboard use,
+screen-reader usability or behavior on other desktop configurations. A failed
+or unavailable provider fails the check.
 
 The observer samples visible, folded and hidden states three times each. Defaults
 are a two-second warm-up followed by six samples at requested one-second

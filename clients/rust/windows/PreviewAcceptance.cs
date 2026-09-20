@@ -24,7 +24,8 @@ public sealed class PreviewSample
 public sealed class PreviewAcceptanceResult
 {
     public string result = "passed";
-    public string interaction_driver = "UI Automation InvokePattern and SetFocus";
+    public string interaction_driver = "UI Automation InvokePattern/SetFocus and Win32 SendInput";
+    public string keyboard_driver = "Win32 SendInput synthetic virtual-key events";
     public string reopen_driver = "synthetic NIN_SELECT notification to the owned window";
     public string hidden_behavior;
     public int completed_cycles;
@@ -43,11 +44,46 @@ public static class PreviewAcceptance
     const uint WmApp = 0x8000;
     const uint NinSelect = 0x400;
     const uint WmClose = 0x10;
+    const uint KeyboardInputType = 1, KeyEventKeyUp = 2;
+    const ushort VkTab = 0x09, VkReturn = 0x0D, VkShift = 0x10;
+    const ushort VkEscape = 0x1B, VkSpace = 0x20;
     const int FoldId = 101, HideId = 102, ExitId = 104;
     const int TimeoutMilliseconds = 5000;
 
     [StructLayout(LayoutKind.Sequential)]
     struct Rect { public int Left, Top, Right, Bottom; }
+
+    // The Win32 INPUT union must include MOUSEINPUT so cbSize matches the OS
+    // structure on both 32-bit and 64-bit PowerShell processes.
+    [StructLayout(LayoutKind.Sequential)]
+    struct MouseInput
+    {
+        public int dx, dy;
+        public uint mouseData, flags, time;
+        public IntPtr extraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct KeyboardInput
+    {
+        public ushort virtualKey, scanCode;
+        public uint flags, time;
+        public IntPtr extraInfo;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    struct InputUnion
+    {
+        [FieldOffset(0)] public MouseInput mouse;
+        [FieldOffset(0)] public KeyboardInput keyboard;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct Input
+    {
+        public uint type;
+        public InputUnion data;
+    }
 
     [DllImport("user32.dll")]
     static extern IntPtr GetDlgItem(IntPtr window, int id);
@@ -65,6 +101,12 @@ public static class PreviewAcceptance
     static extern IntPtr SendMessageTimeout(
         IntPtr window, uint message, UIntPtr wparam, IntPtr lparam,
         uint flags, uint timeout, out UIntPtr result);
+    [DllImport("user32.dll")]
+    static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern uint SendInput(uint count, Input[] inputs, int size);
 
     static void Require(bool condition, string message)
     {
@@ -148,6 +190,94 @@ public static class PreviewAcceptance
     {
         Invoke(Button(window, HideId, "Hide"));
         Wait(() => Hidden(window), "UI Automation Hide did not hide or minimize the panel.");
+    }
+
+    static bool Focused(IntPtr control)
+    {
+        AutomationElement focused = AutomationElement.FocusedElement;
+        return focused != null && focused.Current.NativeWindowHandle == control.ToInt32();
+    }
+
+    static void RequireForeground(IntPtr window)
+    {
+        if (GetForegroundWindow() != window) SetForegroundWindow(window);
+        Wait(() => GetForegroundWindow() == window,
+            "Owned preview is not the foreground window; refusing to inject keyboard input.");
+    }
+
+    static Input KeyEvent(ushort virtualKey, bool release)
+    {
+        return new Input {
+            type = KeyboardInputType,
+            data = new InputUnion {
+                keyboard = new KeyboardInput {
+                    virtualKey = virtualKey,
+                    flags = release ? KeyEventKeyUp : 0
+                }
+            }
+        };
+    }
+
+    static void PressKey(IntPtr window, ushort virtualKey, bool shift)
+    {
+        Require(GetForegroundWindow() == window,
+            "Owned preview lost foreground focus before keyboard input.");
+        Input[] keys = shift
+            ? new[] { KeyEvent(VkShift, false), KeyEvent(virtualKey, false),
+                KeyEvent(virtualKey, true), KeyEvent(VkShift, true) }
+            : new[] { KeyEvent(virtualKey, false), KeyEvent(virtualKey, true) };
+        uint sent = SendInput((uint)keys.Length, keys, Marshal.SizeOf(typeof(Input)));
+        if (sent != keys.Length)
+        {
+            // A partial Shift+Tab must not leave the CI desktop with Shift held.
+            if (shift)
+            {
+                Input[] release = { KeyEvent(VkShift, true) };
+                SendInput(1, release, Marshal.SizeOf(typeof(Input)));
+            }
+            throw new InvalidOperationException("Win32 SendInput did not inject the complete key sequence.");
+        }
+    }
+
+    static void VerifyKeyboard(IntPtr window, PreviewAcceptanceResult report)
+    {
+        RequireForeground(window);
+        IntPtr fold = GetDlgItem(window, FoldId);
+        IntPtr hide = GetDlgItem(window, HideId);
+        Button(window, FoldId, "Fold").SetFocus();
+        Wait(() => Focused(fold), "Fold button could not receive keyboard focus.");
+
+        PressKey(window, VkTab, false);
+        Wait(() => Focused(hide), "Tab did not move focus from Fold to Hide.");
+        PressKey(window, VkTab, true);
+        Wait(() => Focused(fold), "Shift+Tab did not return focus to Fold.");
+        report.checks.Add("sendinput_tab_shift_tab_focus_navigation");
+
+        int fullHeight = Height(window);
+        PressKey(window, VkSpace, false);
+        Wait(() => AutomationElement.FromHandle(fold).Current.Name == "Expand",
+            "Space did not activate Fold.");
+        Require(Height(window) < fullHeight, "Space did not fold the native panel.");
+        int foldedHeight = Height(window);
+        PressKey(window, VkReturn, false);
+        Wait(() => AutomationElement.FromHandle(fold).Current.Name == "Fold",
+            "Enter did not activate Expand.");
+        Require(Height(window) > foldedHeight, "Enter did not expand the native panel.");
+        report.checks.Add("sendinput_space_enter_fold_expand");
+
+        PressKey(window, VkEscape, false);
+        Wait(() => Hidden(window), "Escape did not hide or minimize the panel.");
+        Reopen(window);
+        RequireForeground(window);
+        Wait(() => Focused(fold), "Synthetic reopen did not restore keyboard focus to Fold.");
+        PressKey(window, VkTab, false);
+        Wait(() => Focused(hide), "Tab after reopen did not focus Hide.");
+        PressKey(window, VkReturn, false);
+        Wait(() => Hidden(window), "Enter did not activate Hide.");
+        Reopen(window);
+        RequireForeground(window);
+        Wait(() => Focused(fold), "Second synthetic reopen did not restore keyboard focus.");
+        report.checks.Add("sendinput_escape_enter_hide_and_reopen_focus");
     }
 
     // Query numeric process topology only. Do not collect command lines, paths or owners.
@@ -277,6 +407,8 @@ public static class PreviewAcceptance
             report.hidden_behavior = IsIconic(window) ? "taskbar_minimized_fallback" : "tray_hidden";
             Reopen(window);
             report.checks.Add("close_retains_resident_process_and_synthetic_reopen_restores_focus");
+
+            VerifyKeyboard(window, report);
 
             for (int repetition = 1; repetition <= repetitions; repetition++)
             {
