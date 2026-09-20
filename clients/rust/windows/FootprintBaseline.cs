@@ -315,8 +315,10 @@ public static class FootprintBaseline
                     "Owned preview did not reopen.");
             }
             Invoke(Button(window, ExitId, "Exit"));
-            Require(process.WaitForExit(10000) && process.ExitCode == 0,
-                "Owned preview did not exit cleanly.");
+            // This handle came from GetProcessById, so .NET cannot supply its
+            // ExitCode. The parent retains Start-Process's launch handle and
+            // checks the owned preview's exit code before accepting the run.
+            Require(process.WaitForExit(10000), "Owned preview did not exit.");
             return report;
         }
     }
