@@ -1,10 +1,10 @@
-use crate::{CredentialSource, LocalRelay, Optimization, RelayError};
+use crate::{process_scope::OwnedClient, CredentialSource, LocalRelay, Optimization, RelayError};
 use hormuz_client_core::{AIClient, ConnectionProfile};
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -88,35 +88,29 @@ fn bounded_version_output(executable: &Path) -> Result<Vec<u8>, RelayError> {
     // descendant inherits stdout or stderr. They carry only version text.
     let mut stdout = tempfile::tempfile().map_err(|_| RelayError::UnsupportedClient)?;
     let mut stderr = tempfile::tempfile().map_err(|_| RelayError::UnsupportedClient)?;
-    let mut child = OwnedClient(Some(
-        Command::new(executable)
-            .arg("--version")
-            .env_clear()
-            .envs(std::env::vars_os().filter(|(name, _)| !blocked(name)))
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(
-                stdout
-                    .try_clone()
-                    .map_err(|_| RelayError::UnsupportedClient)?,
-            ))
-            .stderr(Stdio::from(
-                stderr
-                    .try_clone()
-                    .map_err(|_| RelayError::UnsupportedClient)?,
-            ))
-            .spawn()
-            .map_err(|_| RelayError::UnsupportedClient)?,
-    ));
+    let mut command = Command::new(executable);
+    command
+        .arg("--version")
+        .env_clear()
+        .envs(std::env::vars_os().filter(|(name, _)| !blocked(name)))
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(
+            stdout
+                .try_clone()
+                .map_err(|_| RelayError::UnsupportedClient)?,
+        ))
+        .stderr(Stdio::from(
+            stderr
+                .try_clone()
+                .map_err(|_| RelayError::UnsupportedClient)?,
+        ));
+    let mut child = OwnedClient::spawn(&mut command).map_err(|_| RelayError::UnsupportedClient)?;
     let deadline = Instant::now() + VERSION_BUDGET;
     let status = loop {
         if let Some(status) = child
-            .0
-            .as_mut()
-            .unwrap()
-            .try_wait()
+            .try_wait_status()
             .map_err(|_| RelayError::UnsupportedClient)?
         {
-            child.0 = None;
             break status;
         }
         if Instant::now() >= deadline {
@@ -242,13 +236,9 @@ impl LaunchPlan {
     /// Child environment and arguments exist only in this process and the
     /// launched client. No user-level AI client config/auth file is modified.
     pub(crate) fn spawn(self) -> Result<OwnedClient, RelayError> {
-        let child = Command::new(&self.executable)
-            .args(&self.args)
-            .env_clear()
-            .envs(self.environment)
-            .spawn()
-            .map_err(|_| RelayError::ClientLaunchFailed)?;
-        Ok(OwnedClient(Some(child)))
+        let mut command = Command::new(&self.executable);
+        command.args(&self.args).env_clear().envs(self.environment);
+        OwnedClient::spawn_interactive(&mut command).map_err(|_| RelayError::ClientLaunchFailed)
     }
 }
 
@@ -280,24 +270,8 @@ pub(crate) fn valid_local_credential(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
 }
 
-/// Owns and reaps the direct client. Closing the panel does not own or drop
-/// this handle; the dedicated launcher holds it through client exit.
-pub(crate) struct OwnedClient(Option<Child>);
-impl OwnedClient {
-    pub(crate) fn wait(&mut self) -> Result<i32, RelayError> {
-        let status = self
-            .0
-            .as_mut()
-            .ok_or(RelayError::ClientLaunchFailed)?
-            .wait()
-            .map_err(|_| RelayError::ClientLaunchFailed)?;
-        self.0 = None;
-        Ok(status.code().unwrap_or(1))
-    }
-}
-
 /// Discover the qualified client before opening a listener; own the listener
-/// and direct child together until the client exits. No relay remains idle.
+/// and client process scope together until the client exits. No relay remains idle.
 pub fn run_client(
     profile: &ConnectionProfile,
     credentials: Arc<dyn CredentialSource>,
@@ -321,15 +295,10 @@ fn run_with_executable(
         relay.local_credential(),
     )?;
     let mut client = plan.spawn()?;
-    client.wait()
-}
-impl Drop for OwnedClient {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.0.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
+    let status = client
+        .wait_status()
+        .map_err(|_| RelayError::ClientLaunchFailed)?;
+    Ok(status.code().unwrap_or(1))
 }
 
 #[cfg(test)]

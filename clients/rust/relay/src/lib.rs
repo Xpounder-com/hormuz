@@ -1,8 +1,11 @@
 //! On-demand governed client launch and relay. Constructing a plan opens no
 //! socket, reads no credential and starts no idle worker.
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 mod launch;
+// OS process-group and Job Object calls are confined to this module.
+#[allow(unsafe_code)]
+mod process_scope;
 mod relay;
 
 pub use launch::{discover_supported_client, run_client};

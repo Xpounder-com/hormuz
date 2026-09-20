@@ -345,12 +345,14 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",
  "subtle",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
