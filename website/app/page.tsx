@@ -12,7 +12,7 @@ import { ContextOptimizationPreview } from './components/ContextOptimizationPrev
 import { QuestionIndex } from './components/QuestionIndex';
 
 export const metadata = {
-  ...pageMetadata('Hormuz | AI Gateway for Codex & Claude Code', 'Open-source AI gateway for Codex and Claude Code. Track team AI spend, enforce budgets, and protect provider keys. Try the interactive demo or install free.', '/'),
+  ...pageMetadata('Hormuz | AI Gateway & AI Cost Management', 'Self-host an open-source AI gateway for Codex and Claude Code. Track estimated AI costs, enforce team budgets, and control model access.', '/'),
   verification: { google: 'qauQXsmCOtWfE0ar7muWwlqPmMfW5F7uaI28QGz30v4' },
 };
 
@@ -20,9 +20,9 @@ export default function Home() {
   return <div className="landing-home"><SiteHeader active="platform" /><main id="content" tabIndex={-1}>
     <section className="landing-hero customer-hero" id="top">
       <div className="customer-hero-grid"><div className="landing-hero-copy">
-        <p className="landing-eyebrow"><span className="mini-dot" /> OPEN-SOURCE AI CONTROL</p>
+        <p className="landing-eyebrow"><span className="mini-dot" /> AI COST MANAGEMENT</p>
         <h1>Spending $1M a year on AI?<br /><em>See what drives the bill.</em></h1>
-        <p className="landing-deck">Follow a team’s spend from the bill to the tokens. Try a budget or output cap, then see how to connect your own tools.</p>
+        <p className="landing-deck">Use an open-source AI gateway for Codex and Claude Code. Follow team spend to the tokens, try a budget or output cap, then connect your own tools.</p>
         <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/')}>Install free <span aria-hidden="true">↗</span></CampaignLink><a className="button landing-secondary" href="#spend">Try the $1M example <span aria-hidden="true">↓</span></a></div>
         <p className="landing-reassurance">Apache-2.0 · No card required · Your provider accounts</p>
       </div><SpendHookPreview /></div>
@@ -33,7 +33,7 @@ export default function Home() {
     <CompanionPreview />
     <ContextOptimizationPreview />
     <section className="landing-section" id="install"><div className="landing-heading"><p className="landing-eyebrow">YOUR FIRST GOVERNED REQUEST</p><h2>Start with your role.<br /><em>Then connect your tools.</em></h2><p>The Mac app connects to a gateway. The gateway applies your organization’s policies.</p></div><div className="install-paths"><article><p className="landing-eyebrow">JOIN AN EXISTING TEAM</p><h3>Get the Mac companion.</h3><p>Install Hormuz 1.2.0 on Apple Silicon, macOS 14+. Use your team’s gateway address and identity, review the client launcher, then see your own usage.</p><CampaignLink className="button landing-primary" href={sitePath('/docs/#mac')}>Install free for Mac ↗</CampaignLink></article><article><p className="landing-eyebrow">SET UP YOUR ORGANIZATION</p><h3>Run your own gateway.</h3><p>Install from source or a signed OCI image. Start with the provider-free demo, configure identities and provider accounts, and verify your first governed client request.</p><CampaignLink className="button landing-secondary" href={sitePath('/docs/#quickstart')}>Install the gateway →</CampaignLink></article></div><p className="after-grid">Using Ollama or another endpoint? <CampaignLink href={sitePath('/demo/#setup')}>Check your exact stack and its current compatibility status →</CampaignLink></p>
-    <p className="after-grid">Practical guides: <CampaignLink href={sitePath('/guides/team-ai-budgets/')}>Set team AI budgets</CampaignLink> · <CampaignLink href={sitePath('/guides/codex-claude-code-gateway/')}>Connect Codex and Claude Code</CampaignLink></p></section>
+    <p className="after-grid">Practical guides: <CampaignLink href={sitePath('/guides/team-ai-budgets/')}>Manage AI costs and team budgets</CampaignLink> · <CampaignLink href={sitePath('/guides/codex-claude-code-gateway/')}>Connect Codex and Claude Code</CampaignLink></p></section>
     <EnterprisePlans />
     <QuestionIndex compact />
     <section className="landing-final"><p className="landing-eyebrow">TRY IT WITH YOUR WORKFLOW</p><h2>Your tools.<br /><em>Your control.</em></h2><p>Install the open-source product free. Add a paid engagement when you want help bringing it to your team.</p><div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/')}>Install free ↗</CampaignLink><CampaignLink className="button landing-secondary" href={sitePath('/enterprise/')}>See plans →</CampaignLink></div></section>

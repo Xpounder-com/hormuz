@@ -4,6 +4,10 @@ Hormuz is a model-neutral enterprise AI gateway and policy control plane for emp
 
 This roadmap is evidence-gated. A milestone is not complete because code exists or a narrow test passes. Every closure needs an explicit scope, executable checks, package or deployment proof where relevant, and a truthful statement of what remains unproven.
 
+The additive native-companion program is tracked in [epic #329](https://github.com/Xpounder-com/hormuz/issues/329)
+and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md). Its version
+targets do not replace the v1.3.0 portfolio scope below or imply release publication.
+
 ## v1.3.0 portfolio-intelligence implementation order
 
 The accepted [portfolio-intelligence contract](PORTFOLIO_INTELLIGENCE.md) and

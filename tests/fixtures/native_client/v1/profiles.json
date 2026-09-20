@@ -1,0 +1,996 @@
+{
+  "schema_id": "hormuz.native-client-fixtures",
+  "schema_version": 1,
+  "source_revision": "68b0b978fabac90f0bc7c33228a5bd3c68c681ab",
+  "cases": [
+    {
+      "id": "custom_https",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "normalize_host_case_and_slash",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "HTTPS://GATEWAY.EXAMPLE.TEST/",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "HTTPS://GATEWAY.EXAMPLE.TEST",
+      "note": "Python preserves input host/scheme spelling; native clients lowercase them."
+    },
+    {
+      "id": "explicit_default_port",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test:443/",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test:443",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test:443",
+      "note": ""
+    },
+    {
+      "id": "explicit_nondefault_port",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test:8443/",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test:8443",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test:8443",
+      "note": ""
+    },
+    {
+      "id": "loopback_ipv4_opt_in",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "http://127.0.0.1:8787",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": true,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "http://127.0.0.1:8787",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": true,
+        "setup": "custom"
+      },
+      "python_gateway": "http://127.0.0.1:8787",
+      "note": ""
+    },
+    {
+      "id": "loopback_ipv6_opt_in",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "http://[::1]:8787/",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": true,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "http://[::1]:8787",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": true,
+        "setup": "custom"
+      },
+      "python_gateway": "http://[::1]:8787",
+      "note": ""
+    },
+    {
+      "id": "loopback_localhost_opt_in",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "http://LOCALHOST",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": true,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "http://localhost",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": true,
+        "setup": "custom"
+      },
+      "python_gateway": "http://LOCALHOST",
+      "note": "Python preserves host spelling."
+    },
+    {
+      "id": "loopback_without_opt_in",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "http://localhost",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": null,
+      "note": ""
+    },
+    {
+      "id": "remote_http_with_opt_in",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "http://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": true,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": null,
+      "note": ""
+    },
+    {
+      "id": "short_ipv4_http_not_loopback",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "http://127.1",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": true,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": null,
+      "note": ""
+    },
+    {
+      "id": "userinfo_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://user@gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": null,
+      "note": ""
+    },
+    {
+      "id": "empty_userinfo_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://@gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://@gateway.example.test",
+      "note": "Python accepts empty userinfo; the native contract rejects its presence."
+    },
+    {
+      "id": "query_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test?x=y",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": null,
+      "note": ""
+    },
+    {
+      "id": "empty_query_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test?",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test?",
+      "note": "Python accepts an empty query marker; the native contract rejects its presence."
+    },
+    {
+      "id": "fragment_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test#x",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": null,
+      "note": ""
+    },
+    {
+      "id": "path_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test/api",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": null,
+      "note": ""
+    },
+    {
+      "id": "multiple_slashes_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test///",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": "Python removes all trailing slashes; the native contract permits at most one."
+    },
+    {
+      "id": "backslash_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test\\evil",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test\\evil",
+      "note": "Python parses a backslash as part of the host; native clients reject it."
+    },
+    {
+      "id": "zero_port_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test:0",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test:0",
+      "note": "Python permits port zero; the native contract permits 1 through 65535."
+    },
+    {
+      "id": "oversized_port_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test:65536",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": null,
+      "note": ""
+    },
+    {
+      "id": "outer_whitespace_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": " https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": " https://gateway.example.test",
+      "note": "Python permits some leading whitespace; the native contract does not trim input."
+    },
+    {
+      "id": "control_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test\n",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": null,
+      "note": ""
+    },
+    {
+      "id": "shorthand_https_host_not_rewritten",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://127.1",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": false,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://127.1",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://127.1",
+      "note": "Foundation preserves this shorthand; Rust rejects host rewriting by the URL parser. Enter a canonical address."
+    },
+    {
+      "id": "legacy_missing_setup",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "null_setup_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": null
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "unknown_setup_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "future"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "claude_custom",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "claude-code",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "claude-code",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "unknown_client_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "future",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "pilot_primary",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "openai-primary",
+        "allowLoopbackHTTP": false,
+        "setup": "openai-pilot"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "openai-primary",
+        "allowLoopbackHTTP": false,
+        "setup": "openai-pilot"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "pilot_secondary",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "openai-secondary",
+        "allowLoopbackHTTP": false,
+        "setup": "openai-pilot"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "openai-secondary",
+        "allowLoopbackHTTP": false,
+        "setup": "openai-pilot"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "pilot_claude_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "claude-code",
+        "model": "openai-primary",
+        "allowLoopbackHTTP": false,
+        "setup": "openai-pilot"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "pilot_custom_model_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "openai-pilot"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "pilot_loopback_opt_in_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "openai-primary",
+        "allowLoopbackHTTP": true,
+        "setup": "openai-pilot"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "empty_org_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "padded_org_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a ",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "format_character_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org​a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "unicode_org_at_byte_limit",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "unicode_org_over_byte_limit",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "model_at_limit",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "model_over_limit",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "model_metacharacter_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "-model",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "issuer_optional_null",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom",
+        "issuer": null
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "issuer_empty_normalizes_absent",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom",
+        "issuer": ""
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "issuer_opaque_identifier",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom",
+        "issuer": "team-identity-provider"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom",
+        "issuer": "team-identity-provider"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "issuer_control_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom",
+        "issuer": "issuer\t"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "uuid_case_normalized",
+      "input": {
+        "id": "abcdefab-1234-5678-9abc-1234567890ab",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "invalid_uuid_rejected",
+      "input": {
+        "id": "../../other-profile",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "missing_loopback_flag_rejected",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "setup": "custom"
+      },
+      "swift_valid": false,
+      "rust_valid": false,
+      "expected": null,
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    },
+    {
+      "id": "unknown_fields_dropped",
+      "input": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom",
+        "future_display_option": true
+      },
+      "swift_valid": true,
+      "rust_valid": true,
+      "expected": {
+        "id": "ABCDEFAB-1234-5678-9ABC-1234567890AB",
+        "gateway": "https://gateway.example.test",
+        "organization": "org-a",
+        "client": "codex",
+        "model": "approved-alias",
+        "allowLoopbackHTTP": false,
+        "setup": "custom"
+      },
+      "python_gateway": "https://gateway.example.test",
+      "note": ""
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "schema_id": "hormuz.native-client-fixtures",
+  "schema_version": 1,
+  "source_revision": "df95f6a87ed3d91aab9f2070234755921fff064a",
+  "now": 1780000000,
+  "record": {
+    "profile": {
+      "id": "00000000-0000-0000-0000-000000000335",
+      "gateway": "https://gateway.example.test",
+      "organization": "org-a",
+      "client": "codex",
+      "model": "openai-primary",
+      "allowLoopbackHTTP": false,
+      "setup": "custom"
+    },
+    "accessToken": "hox_a_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "refreshToken": "hox_r_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "accessExpiresAt": 801693400.125,
+    "sessionExpiresAt": 801736000.125,
+    "state": "active"
+  },
+  "cases": [
+    {
+      "id": "active_61_seconds",
+      "state": "active",
+      "access_remaining": 61,
+      "session_remaining": 43200,
+      "result": "credential",
+      "refreshes": 0,
+      "python_applicable": true
+    },
+    {
+      "id": "active_60_seconds",
+      "state": "active",
+      "access_remaining": 60,
+      "session_remaining": 43200,
+      "result": "credential",
+      "refreshes": 1,
+      "python_applicable": true
+    },
+    {
+      "id": "expired_access",
+      "state": "active",
+      "access_remaining": -1,
+      "session_remaining": 43200,
+      "result": "credential",
+      "refreshes": 1,
+      "python_applicable": true
+    },
+    {
+      "id": "expired_session",
+      "state": "active",
+      "access_remaining": 0,
+      "session_remaining": 0,
+      "result": "loginRequired",
+      "refreshes": 0,
+      "python_applicable": true
+    },
+    {
+      "id": "ambiguous_refresh",
+      "state": "refreshPending",
+      "access_remaining": 600,
+      "session_remaining": 43200,
+      "result": "refreshInterrupted",
+      "refreshes": 0,
+      "python_applicable": false
+    },
+    {
+      "id": "pending_revocation",
+      "state": "revocationPending",
+      "access_remaining": 600,
+      "session_remaining": 43200,
+      "result": "logoutPending",
+      "refreshes": 0,
+      "python_applicable": false
+    }
+  ]
+}

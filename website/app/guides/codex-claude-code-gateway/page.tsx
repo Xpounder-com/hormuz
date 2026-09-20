@@ -67,7 +67,7 @@ export default function ClientGatewayGuide() {
           </tbody></table></div>
           <p>The <a href={sourcePath('docs/CLIENTS.md')}>maintained client reference ↗</a> contains the pinned versions and generated configuration examples. Use <a href={sourcePath('SUPPORT.md')}>support guidance ↗</a> for reproducible, sanitized error reports.</p>
         </section>
-        <section className="docs-next"><div><span>Next guide</span><h2>Set the limits for your team.</h2></div><CampaignLink className="button button-primary" href={sitePath('/guides/team-ai-budgets/')}>Set team AI budgets →</CampaignLink></section>
+        <section className="docs-next"><div><span>Next guide</span><h2>Understand costs and set team limits.</h2></div><CampaignLink className="button button-primary" href={sitePath('/guides/team-ai-budgets/')}>Manage AI costs and budgets →</CampaignLink></section>
       </article>
     </div>
   </PageFrame>;

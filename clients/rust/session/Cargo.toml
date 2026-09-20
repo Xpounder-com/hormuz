@@ -1,0 +1,24 @@
+[package]
+name = "hormuz-client-session"
+version = "1.5.0-dev.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Coordinated native enrollment, refresh and revocation."
+
+[dependencies]
+hormuz-client-core = { path = "../core" }
+hormuz-client-platform = { path = "../platform" }
+hormuz-client-transport = { path = "../transport" }
+serde.workspace = true
+serde_json.workspace = true
+zeroize = { version = "1.8", features = ["serde"] }
+time = { version = "0.3", features = ["parsing"] }
+getrandom = "0.4"
+base64 = "0.22"
+futures-executor = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+time = { version = "0.3", features = ["formatting"] }

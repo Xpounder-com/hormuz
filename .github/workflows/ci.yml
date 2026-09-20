@@ -896,7 +896,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up pinned Buildx and BuildKit
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: v0.36.1
           driver: docker-container
@@ -958,6 +958,12 @@ jobs:
             tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway \
             tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_refreshes_after_401_and_requires_explicit_request_retry
 
+  native-contracts:
+    name: Native client contracts
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.classification != 'website_only' }}
+    uses: ./.github/workflows/native-client-contracts.yml
+
   required:
     name: CI / required
     if: ${{ always() }}
@@ -977,6 +983,7 @@ jobs:
       - oci-supply-chain
       - oci-reproducibility
       - client-compatibility
+      - native-contracts
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -1003,6 +1010,7 @@ jobs:
           OCI_SUPPLY_CHAIN_RESULT: ${{ needs.oci-supply-chain.result }}
           OCI_REPRODUCIBILITY_RESULT: ${{ needs.oci-reproducibility.result }}
           CLIENT_COMPATIBILITY_RESULT: ${{ needs.client-compatibility.result }}
+          NATIVE_CONTRACTS_RESULT: ${{ needs.native-contracts.result }}
         run: |
           python3 tools/verify_ci_required.py \
             --scope-result "$SCOPE_RESULT" \
@@ -1021,4 +1029,5 @@ jobs:
             --result "disaster-recovery-reference=$DISASTER_RECOVERY_REFERENCE_RESULT" \
             --result "oci-supply-chain=$OCI_SUPPLY_CHAIN_RESULT" \
             --result "oci-reproducibility=$OCI_REPRODUCIBILITY_RESULT" \
-            --result "client-compatibility=$CLIENT_COMPATIBILITY_RESULT"
+            --result "client-compatibility=$CLIENT_COMPATIBILITY_RESULT" \
+            --result "native-contracts=$NATIVE_CONTRACTS_RESULT"

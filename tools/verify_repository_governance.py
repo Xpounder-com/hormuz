@@ -39,7 +39,9 @@ CI_JOB_NAMES = {
     "oci-supply-chain": "OCI supply-chain evidence",
     "oci-reproducibility": "OCI reproducibility",
     "client-compatibility": "Codex and Claude Code compatibility",
+    "native-contracts": "Native client contracts",
 }
+NATIVE_WORKFLOW_REFERENCE = "./.github/workflows/native-client-contracts.yml"
 CI_PATH_SCOPED_JOB_IDS = (
     "postgres-compatibility",
     "postgres-backup-restore",
@@ -1389,6 +1391,14 @@ def _validate_ci_workflow(
                 f"always-applicable CI job became path-scoped: {job_id}"
             )
 
+    if job_fields["native-contracts"] != {
+        "name": "Native client contracts",
+        "needs": "changes",
+        "if": "${{ !cancelled() && needs.changes.outputs.classification != 'website_only' }}",
+        "uses": NATIVE_WORKFLOW_REFERENCE,
+    }:
+        raise RepositoryGovernanceError("native CI dependency contract changed")
+
     required = job_blocks["required"]
     expected_needs = ("changes", *CI_JOB_NAMES)
     needs_match = re.search(
@@ -1409,6 +1419,7 @@ def _validate_ci_workflow(
         or "SCOPE_RESULT: ${{ needs.changes.result }}" not in required
         or "RUN_FULL: ${{ needs.changes.outputs.run_full }}" not in required
         or "CLASSIFICATION: ${{ needs.changes.outputs.classification }}" not in required
+        or "NATIVE_CONTRACTS_RESULT: ${{ needs.native-contracts.result }}" not in required
         or "persist-credentials: false" not in required
     ):
         raise RepositoryGovernanceError("strict CI required-check gate changed")
@@ -1416,6 +1427,129 @@ def _validate_ci_workflow(
         if required.count(f'--result "{job_id}=$') != 1:
             raise RepositoryGovernanceError(
                 f"strict CI required-check result set changed: {job_id}"
+            )
+
+
+def _validate_native_contract_workflow(
+    text: str,
+    job_blocks: dict[str, str],
+    job_fields: dict[str, dict[str, str]],
+) -> None:
+    """Keep one reusable native matrix, required by the calling CI aggregate."""
+
+    windows_steps = {
+        "Build native Windows development candidate": (
+            "        working-directory: clients/rust\n",
+            "        run: cargo build -p hormuz-windows --release --locked\n",
+        ),
+        "Exercise native Windows window lifecycle": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "        run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe\n",
+        ),
+        "Verify Windows accessibility and collect preview measurements": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
+            "        run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json\n",
+        ),
+        "Verify native Windows instance activation": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
+            "        run: ./windows/verify-lifecycle.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-lifecycle.json\n",
+        ),
+        "Reject invalid Windows acceptance targets and preserve evidence": (
+            "        working-directory: clients/rust\n",
+            "        shell: powershell\n",
+            "        run: ./windows/test-acceptance-failure.ps1\n",
+        ),
+        "Check Windows runtime dependencies": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "          $dependencies = & $dumpbin /DEPENDENTS target/release/hormuz-windows.exe\n",
+            '          if ($LASTEXITCODE -ne 0) { throw "PE dependency inspection failed." }\n',
+            '          if ($imports.Count -eq 0) { throw "PE imports were not found." }\n',
+            "          if ($imports | Where-Object { $_ -match '^(vcruntime|msvcp|concrt)' }) {\n",
+            '            throw "Preview unexpectedly requires a Visual C++ redistributable."\n',
+            "          $imports | Set-Content target/release/windows-imports.txt\n",
+        ),
+        "Verify Windows candidate repeat-build identity": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "        run: ./windows/verify-rebuild.ps1\n",
+        ),
+        "Record Windows development artifact provenance": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
+            '            artifact_kind = "unsigned_connected_development_candidate"\n',
+            "            source_commit = (git rev-parse HEAD).Trim()\n",
+            "            proposed_head = $env:HORMUZ_PR_HEAD\n",
+            '            target = "x86_64-pc-windows-msvc"\n',
+            "            sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()\n",
+            '            native_smoke = "passed"\n',
+            '            external_ui_automation = "passed"\n',
+            '            instance_lifecycle = "passed"\n',
+            "            lifecycle_sha256 = (Get-FileHash target/release/windows-lifecycle.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
+            "            acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
+            '            repeat_build = "passed_same_runner_same_checkout"\n',
+            "            rebuild_sha256 = (Get-FileHash target/release/windows-rebuild.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
+            "            static_msvc_crt = $true\n",
+            "            direct_dll_imports = @(Get-Content target/release/windows-imports.txt)\n",
+            '            manual_platform_acceptance = "pending"\n',
+            "          $metadata | ConvertTo-Json | Set-Content target/release/windows-build.json\n",
+        ),
+        "Save Windows development candidate": (
+            "        uses: actions/upload-artifact@",
+            "          name: native-windows-candidate-${{ github.sha }}\n",
+            "            clients/rust/target/release/hormuz-windows.exe\n",
+            "            clients/rust/target/release/windows-build.json\n",
+            "            clients/rust/target/release/windows-acceptance.json\n",
+            "            clients/rust/target/release/windows-lifecycle.json\n",
+            "            clients/rust/target/release/windows-rebuild.json\n",
+            "          if-no-files-found: error\n",
+        ),
+    }
+    if (
+        "on:\n  workflow_call:\n  workflow_dispatch:\n" not in text
+        or "pull_request:" in text
+        or "push:" in text
+        or "continue-on-error:" in text
+        or set(job_blocks) != {"contracts"}
+        or job_fields["contracts"].get("name") != "Shared contracts (${{ matrix.os }})"
+        or job_fields["contracts"].get("runs-on") != "${{ matrix.os }}"
+        or "if" in job_fields["contracts"]
+        or re.findall(r"^        if: (.+)$", text, re.MULTILINE)
+        != ["runner.os == 'Windows'"] * len(windows_steps) + ["runner.os == 'macOS'"]
+        or re.findall(r"^      - name: (.+)\n        if: (.+)$", text, re.MULTILINE)
+        != [(name, "runner.os == 'Windows'") for name in windows_steps]
+        + [("Verify existing Swift expectations", "runner.os == 'macOS'")]
+        or "      fail-fast: false\n" not in text
+        or "        os: [ubuntu-latest, windows-latest, macos-15]\n" not in text
+        or "group: native-client-contracts-${{ github.workflow }}-${{ github.ref }}" not in text
+        or "persist-credentials: false" not in text
+        or "        run: python -m unittest -v tests.test_native_client_contracts\n" not in text
+        or "        run: cargo fmt --all -- --check\n" not in text
+        or "        run: cargo test --workspace --locked\n" not in text
+        or "        run: cargo clippy --workspace --all-targets --locked -- -D warnings\n" not in text
+        or (
+            "      - name: Verify existing Swift expectations\n"
+            "        if: runner.os == 'macOS'\n"
+            "        run: swift test --package-path clients/macos --filter SharedContractTests\n"
+        ) not in text
+    ):
+        raise RepositoryGovernanceError("native contract workflow changed")
+    for name, markers in windows_steps.items():
+        try:
+            step = _workflow_named_step(text, name=name)
+        except RepositoryGovernanceError as exc:
+            raise RepositoryGovernanceError(
+                f"native contract workflow Windows step changed: {name}"
+            ) from exc
+        if any(marker not in step for marker in markers):
+            raise RepositoryGovernanceError(
+                f"native contract workflow Windows step changed: {name}"
             )
 
 
@@ -1429,6 +1563,7 @@ def _validate_workflows(
     contents_writers: list[tuple[str, str]] = []
     pages_writers: list[tuple[str, str]] = []
     pages_workflow_seen = False
+    native_workflow_seen = False
     candidate_freeze_seen = False
     candidate_job_bytes_valid = False
     candidate_workflow_bytes_valid = False
@@ -1488,6 +1623,9 @@ def _validate_workflows(
             )
         if path.name == "ci.yml":
             _validate_ci_workflow(text, job_blocks, job_fields)
+        if path.name == "native-client-contracts.yml":
+            _validate_native_contract_workflow(text, job_blocks, job_fields)
+            native_workflow_seen = True
         if path.name == "macos-distribution.yml":
             if any(
                 text.count(marker)
@@ -1783,7 +1921,10 @@ def _validate_workflows(
                 pages_writers.append((path.name, job_name))
         uses = ANY_ACTION_USE.findall(text)
         pinned = FULL_ACTION_USE.findall(text)
-        if len(uses) != len(pinned):
+        # This sole local call uses the same commit as the caller, whose exact
+        # dependency and called workflow are both validated above.
+        local_calls = uses.count(NATIVE_WORKFLOW_REFERENCE) if path.name == "ci.yml" else 0
+        if local_calls > 1 or len(uses) != len(pinned) + local_calls:
             raise RepositoryGovernanceError(
                 f"workflow contains an unpinned external Action: {path.name}"
             )
@@ -1810,6 +1951,8 @@ def _validate_workflows(
         raise RepositoryGovernanceError("candidate freeze workflow is required")
     if not pages_workflow_seen:
         raise RepositoryGovernanceError("Pages workflow is required")
+    if not native_workflow_seen:
+        raise RepositoryGovernanceError("native contract workflow is required")
     if contents_writers:
         raise RepositoryGovernanceError(
             "workflow-issued contents write is forbidden"
