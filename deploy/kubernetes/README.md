@@ -214,8 +214,14 @@ configuration and runtime Secret generation. The proof requires replacement
 traffic to remain active until two distinct ready replicas—including a new Pod
 UID—are observed, then requires every request to have succeeded. Gateway and
 preflight logs are captured and secret-scanned before each revision change or
-deletion and once more after replacement. The proof then removes the chart and
-cluster. It contacts no model provider or external IdP.
+deletion and once more after replacement. Log capture refreshes the selected Pod
+set for at most three attempts, retrying only the exact pod-NotFound error for a
+selected Pod. Partial logs and error streams stay in the protected temporary
+artifacts and are secret-scanned before retry or success. Other errors, an empty
+Pod set, secret-scan failures, and exhausted retries still fail the proof. These
+diagnostic retries do not retry provider requests or relax lifecycle assertions.
+The proof then removes the chart and cluster. It contacts no model provider or
+external IdP.
 
 Unexpected shell-command failures emit a bounded
 `kubernetes_reference_failure` marker with the function name, source line, and

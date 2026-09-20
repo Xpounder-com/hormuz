@@ -53,6 +53,34 @@ class ConfigurationInputTests(unittest.TestCase):
         self.assertEqual(config.listen.host, "127.0.0.1")
         self.assertIn("gpt-5.4-mini", config.model_routes)
 
+    def test_finance_metadata_does_not_relax_whole_file_json_guards(self) -> None:
+        for metadata, reason in (
+            ('{"binding_version":1,"binding_version":2}', "configuration_duplicate_member"),
+            ('{"binding_version":NaN}', "configuration_nonfinite_number"),
+            ('{"binding_version":1e1000}', "configuration_nonfinite_number"),
+        ):
+            value = json.dumps(self._valid_configuration())
+            payload = (value[:-1] + ',"finance_account_bindings":[' + metadata + "]}").encode()
+            with self.subTest(reason=reason):
+                self._assert_load_error(payload, reason, environ=_EnvironmentMustNotBeRead())
+
+    def test_finance_references_and_invalid_optional_fields_are_not_legacy_capabilities(self) -> None:
+        value = self._valid_configuration()
+        value["upstreams"]["openai"]["finance_identity"] = {  # type: ignore[index]
+            "upstream_reference_id": "context_injector",
+            "upstream_reference_version": 1,
+            "transport_profile": "openai.first-party.v1",
+            "inference_credential_reference_id": "context_retriever",
+            "inference_credential_reference_version": 1,
+        }
+        value["finance_account_bindings"] = [{"context_database": "invalid-optional-field"}]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            path.write_text(json.dumps(value))
+            config = GatewayConfig.load(path, environ=TEST_ENVIRONMENT)
+        self.assertTrue(config.finance_account_bindings.invalid)
+        self.assertEqual(config.upstreams["openai"].finance_identity.upstream_reference_id, "context_injector")
+
     def test_policy_validation_context_never_resolves_credentials(self) -> None:
         with mock.patch("hormuz._config_builder.os.environ", _EnvironmentMustNotBeRead()):
             context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")

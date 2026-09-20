@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
+import shlex
 import subprocess
+import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -97,6 +102,206 @@ class HelmRunnerDiagnosticsTests(unittest.TestCase):
             result.stderr,
             r"^kubernetes_reference_failure function=main line=\d+ exit_status=39\n$",
         )
+
+    def run_log_capture(
+        self, responses: list[dict[str, object]],
+    ) -> tuple[subprocess.CompletedProcess[str], list[list[str]], dict[str, str], str]:
+        with tempfile.TemporaryDirectory(prefix="hormuz gateway capture ") as temporary:
+            root = Path(temporary)
+            artifacts = root / "artifacts"
+            secrets = root / "secrets"
+            artifacts.mkdir()
+            secrets.mkdir()
+            (secrets / "credential").write_text("synthetic-capture-secret", encoding="utf-8")
+            (root / "responses.json").write_text(json.dumps(responses), encoding="utf-8")
+            fake = root / "kubectl.py"
+            fake.write_text(textwrap.dedent("""\
+                import json
+                import sys
+                from pathlib import Path
+
+                root = Path(sys.argv[1])
+                args = sys.argv[2:]
+                calls = root / "calls.jsonl"
+                previous = calls.read_text().splitlines() if calls.exists() else []
+                with calls.open("a") as stream:
+                    stream.write(json.dumps(args) + "\\n")
+                responses = json.loads((root / "responses.json").read_text())
+                if len(previous) >= len(responses):
+                    raise SystemExit("unexpected extra Kubernetes request")
+                response = responses[len(previous)]
+                command = response["command"]
+                flags = (
+                    ["--selector=app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway", "--output=name"]
+                    if command[0] == "get" else
+                    ["--all-containers=true", "--prefix=true", "--tail=-1"]
+                )
+                if args != ["--namespace", "hormuz-system", *command, *flags]:
+                    raise SystemExit("unexpected Kubernetes arguments")
+                sys.stdout.write(response.get("stdout", ""))
+                sys.stderr.write(response.get("stderr", ""))
+                raise SystemExit(response.get("status", 0))
+                """), encoding="utf-8")
+            body = "\n".join((
+                "umask 077",
+                f"ROOT={shlex.quote(str(ROOT))}",
+                f"ARTIFACT_ROOT={shlex.quote(str(artifacts))}",
+                f"SECRET_ROOT={shlex.quote(str(secrets))}",
+                f"python3() {{ {shlex.quote(sys.executable)} \"$@\"; }}",
+                f"kubectl() {{ python3 {shlex.quote(str(fake))} {shlex.quote(str(root))} \"$@\"; }}",
+                f"sleep() {{ printf '%s\\n' \"$1\" >>{shlex.quote(str(root / 'delays'))}; }}",
+                shell_function("fail"),
+                shell_function("capture_gateway_logs"),
+                "capture_gateway_logs synthetic-checkpoint",
+                "printf 'capture-complete\\n'",
+            ))
+            result = self.run_shell(body)
+            calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
+            captured = {path.name: path.read_text() for path in artifacts.iterdir()}
+            for path in artifacts.iterdir():
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            delays = (root / "delays").read_text() if (root / "delays").exists() else ""
+            return result, calls, captured, delays
+
+    @staticmethod
+    def pod_list(value: str, *, stderr: str = "", status: int = 0) -> dict[str, object]:
+        return {"command": ["get", "pods"], "stdout": value, "stderr": stderr, "status": status}
+
+    @staticmethod
+    def pod_logs(pod: str, value: str, *, stderr: str = "", status: int = 0) -> dict[str, object]:
+        return {"command": ["logs", f"pod/{pod}"], "stdout": value, "stderr": stderr, "status": status}
+
+    @staticmethod
+    def pod_missing(pod: str) -> str:
+        return f'Error from server (NotFound): pods "{pod}" not found\n'
+
+    def test_log_capture_refreshes_pods_and_preserves_partial_logs(self) -> None:
+        result, calls, captured, delays = self.run_log_capture([
+            self.pod_list("pod/stable\npod/retiring\n"),
+            self.pod_logs("stable", "stable first\n"),
+            self.pod_logs("retiring", "retiring partial\n", stderr=self.pod_missing("retiring"), status=1),
+            self.pod_list("pod/stable\npod/replacement\n"),
+            self.pod_logs("stable", "stable refreshed\n"),
+            self.pod_logs("replacement", "replacement final\n"),
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "capture-complete\n")
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(captured["gateway-synthetic-checkpoint.log"],
+                         "stable first\nretiring partial\nstable refreshed\nreplacement final\n")
+        self.assertEqual(captured["gateway-synthetic-checkpoint-1-retiring.stderr"], self.pod_missing("retiring"))
+        self.assertNotEqual(captured["gateway-synthetic-checkpoint-pods-1.txt"],
+                            captured["gateway-synthetic-checkpoint-pods-2.txt"])
+        self.assertEqual(delays, "1\n")
+        self.assertEqual(result.stderr, "gateway_log_capture_retry checkpoint=synthetic-checkpoint attempt=1\n")
+
+    def test_log_capture_allows_only_three_refreshed_attempts(self) -> None:
+        for succeeds in (False, True):
+            with self.subTest(succeeds=succeeds):
+                responses = []
+                for attempt in range(1, 4):
+                    pod = f"replica-{attempt}"
+                    missing = not (succeeds and attempt == 3)
+                    responses.extend([
+                        self.pod_list(f"pod/{pod}\n"),
+                        self.pod_logs(pod, f"partial-{attempt}\n",
+                                      stderr=self.pod_missing(pod) if missing else "",
+                                      status=1 if missing else 0),
+                    ])
+                result, calls, captured, delays = self.run_log_capture(responses)
+                self.assertEqual(len(calls), 6)
+                self.assertEqual(delays, "1\n1\n")
+                self.assertEqual(captured["gateway-synthetic-checkpoint.log"], "partial-1\npartial-2\npartial-3\n")
+                if succeeds:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("exhausted pod disappearance retries", result.stderr)
+
+    def test_log_capture_does_not_retry_unrelated_errors(self) -> None:
+        failures = (
+            (1, 'Error from server (Forbidden): pods "selected" is forbidden\n'),
+            (1, 'Error from server (NotFound): namespaces "hormuz-system" not found\n'),
+            (1, self.pod_missing("different-pod")),
+            (1, self.pod_missing("selected") + "unrelated API failure\n"),
+            (1, self.pod_missing("selected") + "\x00"),
+            (1, self.pod_missing("selected") + "\n"),
+            (1, "Unable to connect to the server: timeout\n"),
+            (2, self.pod_missing("selected")),
+        )
+        for status, error in failures:
+            with self.subTest(status=status, error=error):
+                result, calls, captured, delays = self.run_log_capture([
+                    self.pod_list("pod/selected\n"),
+                    self.pod_logs("selected", "partial output\n", stderr=error, status=status),
+                ])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(delays, "")
+                self.assertEqual(captured["gateway-synthetic-checkpoint.log"], "partial output\n")
+                self.assertIn("gateway log capture failed", result.stderr)
+                self.assertNotIn(error.strip(), result.stderr)
+
+    def test_log_capture_fails_closed_on_empty_or_invalid_selection(self) -> None:
+        for selection in ("", "\n", "\x00", "deployment/selected\n", "pod/../../escape\n"):
+            with self.subTest(selection=selection):
+                result, calls, _captured, delays = self.run_log_capture([self.pod_list(selection)])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(delays, "")
+                self.assertRegex(result.stderr, r"gateway pod selection (empty|invalid)")
+
+    def test_log_capture_fails_when_refreshed_selection_is_empty(self) -> None:
+        result, calls, captured, delays = self.run_log_capture([
+            self.pod_list("pod/retiring\n"),
+            self.pod_logs("retiring", "partial output\n", stderr=self.pod_missing("retiring"), status=1),
+            self.pod_list(""),
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(delays, "1\n")
+        self.assertEqual(captured["gateway-synthetic-checkpoint.log"], "partial output\n")
+        self.assertIn("gateway pod selection empty", result.stderr)
+
+    def test_log_capture_does_not_retry_selection_failure(self) -> None:
+        result, calls, _captured, delays = self.run_log_capture([
+            self.pod_list("pod/selected\n", stderr=self.pod_missing("selected"), status=1),
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(delays, "")
+        self.assertIn("gateway pod selection failed", result.stderr)
+
+    def test_log_capture_checks_last_pod_without_a_trailing_newline(self) -> None:
+        result, calls, _captured, delays = self.run_log_capture([
+            self.pod_list("pod/selected"), self.pod_logs("selected", "complete output\n"),
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(delays, "")
+
+    def test_log_capture_scans_partial_final_and_error_output(self) -> None:
+        secret = "synthetic-capture-secret"
+        scenarios = (
+            [self.pod_list("pod/selected\n"),
+             self.pod_logs("selected", secret, stderr=self.pod_missing("selected"), status=1)],
+            [self.pod_list("pod/selected\n"),
+             self.pod_logs("selected", "partial output\n", stderr=self.pod_missing("selected"), status=1),
+             self.pod_list("pod/replacement\n"), self.pod_logs("replacement", secret)],
+            [self.pod_list("pod/selected\n"),
+             self.pod_logs("selected", "partial output\n", stderr=secret, status=1)],
+            [self.pod_list(secret)],
+            [self.pod_list("pod/selected\n", stderr=secret, status=1)],
+        )
+        for responses in scenarios:
+            with self.subTest(responses=responses):
+                result, calls, _captured, _delays = self.run_log_capture(responses)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(len(calls), len(responses))
+                self.assertIn("failed secret non-disclosure", result.stderr)
+                self.assertNotIn(secret, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
