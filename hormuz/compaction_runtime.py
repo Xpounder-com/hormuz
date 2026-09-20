@@ -18,7 +18,7 @@ from .credential_store import CredentialStoreError, validate_profile
 
 SETTINGS_SCHEMA_VERSION = 1
 MAX_SETTINGS_BYTES = 4 * 1024
-TOKENIZER_VERSION = "0.12.0"
+TOKENIZER_VERSION = "0.14.0"
 ENCODING_URLS = {
     "cl100k_base": "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken",
     "o200k_base": "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken",
