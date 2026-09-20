@@ -3,6 +3,8 @@
 
 #[cfg(any(windows, test))]
 mod connection;
+#[cfg(any(windows, test))]
+mod interaction;
 #[cfg(windows)]
 mod native;
 #[cfg(windows)]

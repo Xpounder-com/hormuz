@@ -169,6 +169,8 @@ public static class PreviewAcceptance
         Wait(() => AutomationElement.FocusedElement != null &&
             new IntPtr(AutomationElement.FocusedElement.Current.NativeWindowHandle) == fold,
             "Reopened panel did not restore button focus.");
+        Wait(() => AutomationElement.FromHandle(fold).Current.Name == "Fold",
+            "Reopened panel did not expand through the shared interaction policy.");
     }
 
     static void Toggle(IntPtr window, string before, string after, bool shrinking)
@@ -418,7 +420,6 @@ public static class PreviewAcceptance
                 Hide(window);
                 Observe(process, window, report, "hidden", repetition, clock);
                 Reopen(window);
-                Toggle(window, "Expand", "Fold", false);
             }
 
             Thread.Sleep(warmupSeconds * 1000);

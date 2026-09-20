@@ -187,6 +187,64 @@ fn failed_batch_does_not_advance_clock_mutate_state_or_consume_tokens() {
 }
 
 #[test]
+fn explicit_fold_closes_focused_content_without_inventing_a_focus_observation() {
+    let mut state = Interaction::new(VisibilityMode::Always, true);
+    dispatch(
+        &mut state,
+        0,
+        &[
+            Event::OpenSettings {
+                page: SettingsPage::Connection,
+            },
+            Event::FocusChanged {
+                target: Some(FocusTarget::Settings),
+            },
+        ],
+    );
+    let effects = dispatch(&mut state, 1, &[Event::ToggleFold]);
+    assert_eq!(state.snapshot().visibility, Visibility::Folded);
+    assert_eq!(state.settings, None);
+    assert_eq!(state.focus, None);
+    assert_eq!(
+        effects,
+        [Effect::RequestFocus {
+            target: FocusTarget::Widget
+        }]
+    );
+    dispatch(
+        &mut state,
+        2,
+        &[Event::FocusChanged {
+            target: Some(FocusTarget::Widget),
+        }],
+    );
+    assert_eq!(state.snapshot().visibility, Visibility::Folded);
+    dispatch(&mut state, 3, &[Event::FocusChanged { target: None }]);
+    assert_eq!(state.snapshot().visibility, Visibility::Folded);
+    assert!(state.snapshot().pending_timers.is_empty());
+    dispatch(&mut state, 4, &[Event::Reopen]);
+    assert_eq!(state.snapshot().visibility, Visibility::Expanded);
+    assert_eq!(state.snapshot().pending_timers.len(), 1);
+}
+
+#[test]
+fn explicit_fold_cancels_a_due_detail_callback_and_hidden_toggles_stay_hidden() {
+    let mut state = Interaction::new(VisibilityMode::Always, true);
+    let target = PointerTarget::Metric {
+        metric: Metric::Cost,
+    };
+    dispatch(&mut state, 0, &[enter(target), exit(target)]);
+    let old = state.detail_timer.unwrap();
+    let effects = dispatch(&mut state, 250, &[fire(old), Event::ToggleFold]);
+    assert_eq!(state.snapshot().visibility, Visibility::Folded);
+    assert_eq!(state.selected, None);
+    assert!(state.snapshot().pending_timers.is_empty());
+    assert_eq!(effects, [Effect::CancelTimer { token: old.token }]);
+    dispatch(&mut state, 251, &[Event::Hide, Event::ToggleFold]);
+    assert_eq!(state.snapshot().visibility, Visibility::Hidden);
+}
+
+#[test]
 fn unrelated_events_do_not_postpone_pending_dismissal() {
     let mut state = Interaction::new(VisibilityMode::Fold, true);
     let target = PointerTarget::Metric {

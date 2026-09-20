@@ -122,6 +122,9 @@ pub enum Event {
     DismissDetails,
     OutsideClick,
     Escape,
+    /// Explicit native Fold/Expand control. Folding keeps widget-button focus;
+    /// a later pointer re-entry or Reopen resumes the ordinary expansion policy.
+    ToggleFold,
     Hide,
     /// Repeated application/tray activation keeps an already-open card intact.
     Reopen,
@@ -177,6 +180,7 @@ pub struct Interaction {
     mode: VisibilityMode,
     visible: bool,
     transient_expanded: bool,
+    explicitly_folded: bool,
     selected: Option<Metric>,
     pinned: Option<Metric>,
     // Swift togglePin cancels dismissal when unpinning, including activation
@@ -198,6 +202,7 @@ impl Interaction {
             mode,
             visible,
             transient_expanded: false,
+            explicitly_folded: false,
             selected: None,
             pinned: None,
             unpinned_waiting_for_leave: false,
@@ -215,6 +220,8 @@ impl Interaction {
     pub fn snapshot(&self) -> Snapshot {
         let visibility = if !self.visible {
             Visibility::Hidden
+        } else if self.explicitly_folded {
+            Visibility::Folded
         } else if self.mode == VisibilityMode::Always
             || self.transient_expanded
             || self.selected.is_some()
@@ -297,6 +304,7 @@ impl Interaction {
             Event::Hide => {
                 self.visible = false;
                 self.transient_expanded = false;
+                self.explicitly_folded = false;
                 self.keep_open = false;
                 self.settings = None;
                 self.clear_details();
@@ -307,6 +315,7 @@ impl Interaction {
             Event::SetVisibilityMode { mode } => {
                 self.mode = mode;
                 self.transient_expanded = false;
+                self.explicitly_folded = false;
                 self.keep_open = false;
             }
             Event::OpenSettings { page } => {
@@ -326,6 +335,24 @@ impl Interaction {
             }
             Event::TimerFired { token } => self.fire_timer(now_ms, token),
             _ if !self.visible => return Ok(()),
+            Event::ToggleFold => {
+                if self.snapshot().visibility == Visibility::Folded {
+                    self.mode = VisibilityMode::Always;
+                    self.explicitly_folded = false;
+                } else {
+                    self.mode = VisibilityMode::Fold;
+                    self.explicitly_folded = true;
+                    self.transient_expanded = false;
+                    self.keep_open = false;
+                    self.close_settings(effects);
+                    self.dismiss_details(effects);
+                    // These content surfaces disappear when explicitly folded.
+                    // The shell will report the next actual pointer location.
+                    if self.pointer != PointerTarget::Widget {
+                        self.pointer = PointerTarget::Outside;
+                    }
+                }
+            }
             Event::PointerEnter { target } => {
                 if !self.pointer_target_exists(target) {
                     return Ok(());
@@ -337,6 +364,7 @@ impl Interaction {
                         | PointerTarget::Metric { .. }
                         | PointerTarget::SettingsHandle
                 ) {
+                    self.explicitly_folded = false;
                     self.keep_open = false;
                     self.transient_expanded = true;
                 }
@@ -408,6 +436,7 @@ impl Interaction {
             effects.push(Effect::CancelTimer { token: timer.token });
         }
         self.visible = true;
+        self.explicitly_folded = false;
         self.transient_expanded = true;
         self.keep_open = false;
     }
@@ -502,6 +531,7 @@ impl Interaction {
             && self.focus != Some(FocusTarget::Details);
         let fold = self.visible
             && self.mode == VisibilityMode::Fold
+            && !self.explicitly_folded
             && self.transient_expanded
             && !self.keep_open
             && self.selected.is_none()
