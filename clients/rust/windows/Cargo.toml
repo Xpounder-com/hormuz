@@ -9,6 +9,7 @@ description = "Native Windows companion integration with explicitly synthetic pr
 
 [dependencies]
 hormuz-client-core = { path = "../core" }
+hormuz-client-interaction = { path = "../interaction" }
 hormuz-client-platform = { path = "../platform" }
 hormuz-client-session = { path = "../session" }
 serde_json.workspace = true

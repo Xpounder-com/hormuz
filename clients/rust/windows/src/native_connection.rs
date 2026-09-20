@@ -288,7 +288,14 @@ pub unsafe fn layout(app: &App) {
                 scale(height, dpi),
                 1,
             );
-            ShowWindow(handle, if app.folded.get() { SW_HIDE } else { SW_SHOW });
+            ShowWindow(
+                handle,
+                if app.interaction.folded() {
+                    SW_HIDE
+                } else {
+                    SW_SHOW
+                },
+            );
         }
     }
 }
@@ -296,7 +303,7 @@ pub unsafe fn visibility(hwnd: HWND, app: &App) {
     if let Some(connection) = app.connection.get() {
         let visibility = if unsafe { IsWindowVisible(hwnd) == 0 || IsIconic(hwnd) != 0 } {
             DashboardVisibility::Hidden
-        } else if app.folded.get() {
+        } else if app.interaction.folded() {
             DashboardVisibility::Summary
         } else {
             DashboardVisibility::Detail
