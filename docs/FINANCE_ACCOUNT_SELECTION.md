@@ -71,8 +71,9 @@ or release qualification are outside this checkpoint.
 
 ## Internal registration request intake
 
-The next provider-free checkpoint adds a dormant parser for the v8 operator
-registration request. It accepts at most 64 KiB of strict UTF-8 JSON with the
+The next provider-free checkpoint adds a dormant parser in
+`hormuz.finance_account_registration` for the v8 operator registration
+request. It accepts at most 64 KiB of strict UTF-8 JSON with the
 exact nested metadata shape, bounded identifiers and integer versions. It
 rejects duplicate members, floating-point and nonfinite numbers, unknown or
 server-derived authority fields, and inconsistent state/reason/version pairs.

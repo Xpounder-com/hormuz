@@ -10,7 +10,7 @@ import sqlite3
 import unittest
 from unittest import mock
 
-from hormuz.finance_account_binding import (
+from hormuz.finance_account_registration import (
     AccountBindingRequestError,
     parse_account_binding_registration_request,
 )
