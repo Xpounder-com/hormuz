@@ -266,13 +266,21 @@ fn stopping_closes_the_connection_and_releases_relay_state() {
     )
     .unwrap();
     let mut connection = TcpStream::connect(relay.address()).unwrap();
+    let mut byte = [0_u8; 1];
+    connection
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    assert!(matches!(
+        connection.read(&mut byte),
+        Err(error) if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock)
+    ));
     connection
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let local_token = Arc::downgrade(&relay.token);
     drop(relay);
     // This connection belongs to the original listener even if its port is reused.
-    match connection.read(&mut [0]) {
+    match connection.read(&mut byte) {
         Ok(0) => {}
         Err(error)
             if matches!(
