@@ -25,3 +25,9 @@ subtle = "2.6"
 tokio = { version = "1", features = ["net", "rt-multi-thread", "sync", "time", "io-util"] }
 tempfile = "3"
 zeroize = "1.8"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1", features = ["process"] }

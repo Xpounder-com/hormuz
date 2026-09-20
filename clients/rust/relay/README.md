@@ -38,6 +38,15 @@ helper; direct provider credentials and Python import overrides are not.
 The gateway origin and request body reach the helper only through bounded
 stdin, never through process arguments.
 
+On macOS, the optimizer exchange uses nonblocking owned pipe ends and one
+30-second deadline for input delivery, output collection and helper exit.
+It drains output while writing input, rejects excess output, and kills/reaps
+the direct helper on failure. A process retaining inherited pipe ends cannot
+extend the I/O deadline through a reader/writer thread join. Request and
+response bytes stay in memory. This is a #339 helper-lifetime and #341 relay
+checkpoint; both issues remain open. Windows retains its existing threaded
+optimizer exchange; bounded native pipe cancellation remains unverified there.
+
 This source checkpoint is not loaded by the Windows panel or shipping Mac app.
 The direct child is reaped, but a native process group/Windows job adapter for
 descendant cleanup remains to be implemented and tested. Native-shell panel,
@@ -50,3 +59,9 @@ From `clients/rust`, run `cargo test --workspace --locked` and
 unit tests cover local auth, Off bytes, streaming, optional transforms,
 oversized bodies, unavailable credentials and fake-client lifetime. The Python
 bridge is covered by `python -m unittest -v tests.test_context_relay_bridge`.
+Synthetic Unix pipe tests also cover partial and bidirectional I/O, retained
+pipe ends after direct-helper exit, a helper that never consumes stdin, output
+overflow and direct-child reaping. Linux runs those fixtures without enabling
+the unsupported native relay command. These tests do not prove descendant
+containment, abrupt launcher-death cleanup, real optimizer/provider sessions,
+or packaged native-shell lifecycle behavior.
