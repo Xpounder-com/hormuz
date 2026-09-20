@@ -13,15 +13,13 @@ The controller verifies that the stored profile matches and can supply a
 current access credential before launching a client. It discovers only Codex
 `0.147.0` or Claude Code `2.1.233`, supplies per-invocation local settings,
 removes direct-provider credentials from the child environment, and opens a
-fresh authenticated 127.0.0.1 relay. The relay exists only while the launched
-client is alive. On Windows, a kill-on-close Job Object owns launched clients
-and descendants; on macOS/Linux, a dedicated process group owns non-TTY
-launches and version checks. Those scopes stop descendants after normal exit,
-failure or explicit cancellation and reap the direct child. A Unix launch with
-an inherited terminal keeps the shell's existing process group so Ctrl-Z and
-background-to-foreground job control continue to work; only its direct child
-is reaped. A panel close must leave the launcher alive; a shell quit/update
-must coordinate its termination separately.
+fresh authenticated 127.0.0.1 relay. The relay exists only while the directly
+launched client is alive. On Windows, the launcher assigns a suspended client
+to a kill-on-close Job Object before resuming it. The job stops its descendants
+after normal exit, failure or explicit cancellation, and the direct child is
+reaped. Unix retains direct-child-only cleanup and shell job control. A panel
+close must leave the launcher alive; a shell quit/update must coordinate its
+termination separately.
 
 The relay admits the client's expected POST routes only. It checks Host,
 Origin, one local bearer/API-key credential, content length and a 25 MiB request
@@ -45,18 +43,16 @@ The gateway origin and request body reach the helper only through bounded
 stdin, never through process arguments.
 
 This source checkpoint is not loaded by the Windows panel or shipping Mac app.
-The direct child is reaped and descendants remaining in its process group/job
-are stopped. Unix TTY-launched descendants are not contained, and a Unix
-descendant that changes its process group or creates a new session can escape
-non-TTY group cleanup. Abrupt termination of the Unix launcher itself is not
-yet coordinated with child cleanup. Native-shell panel, quit/update and
-installed-client wiring, packaged optimizer interpreter, real Codex/Claude
-sessions, Windows accessibility and clean-machine acceptance remain open. No
-release or package version is changed.
+Windows Job Object descendant cleanup is covered by fake clients; Unix still
+reaps only the direct child, and descendants can remain after it exits or when
+the launcher is terminated. Unix process-tree containment, native-shell panel,
+quit/update and installed-client wiring, packaged optimizer interpreter, real
+Codex/Claude sessions, Windows accessibility and clean-machine acceptance
+remain open. No release or package version is changed.
 
 From `clients/rust`, run `cargo test --workspace --locked` and
 `cargo clippy --workspace --all-targets --locked -- -D warnings`. The relay
 unit tests cover local auth, Off bytes, streaming, optional transforms,
-oversized bodies, unavailable credentials and fake-client process-scope
-lifetime. The Python bridge is covered by
+oversized bodies, unavailable credentials and Windows fake-client job lifetime.
+The Python bridge is covered by
 `python -m unittest -v tests.test_context_relay_bridge`.

@@ -1,9 +1,13 @@
-use crate::{process_scope::OwnedClient, CredentialSource, LocalRelay, Optimization, RelayError};
+#[cfg(windows)]
+use crate::process_scope::OwnedClient;
+use crate::{CredentialSource, LocalRelay, Optimization, RelayError};
 use hormuz_client_core::{AIClient, ConnectionProfile};
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
+use std::process::Child;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -104,13 +108,30 @@ fn bounded_version_output(executable: &Path) -> Result<Vec<u8>, RelayError> {
                 .try_clone()
                 .map_err(|_| RelayError::UnsupportedClient)?,
         ));
+    #[cfg(windows)]
     let mut child = OwnedClient::spawn(&mut command).map_err(|_| RelayError::UnsupportedClient)?;
+    #[cfg(not(windows))]
+    let mut child = OwnedClient(Some(
+        command.spawn().map_err(|_| RelayError::UnsupportedClient)?,
+    ));
     let deadline = Instant::now() + VERSION_BUDGET;
     let status = loop {
-        if let Some(status) = child
+        #[cfg(windows)]
+        let next = child
             .try_wait_status()
-            .map_err(|_| RelayError::UnsupportedClient)?
-        {
+            .map_err(|_| RelayError::UnsupportedClient)?;
+        #[cfg(not(windows))]
+        let next = child
+            .0
+            .as_mut()
+            .unwrap()
+            .try_wait()
+            .map_err(|_| RelayError::UnsupportedClient)?;
+        if let Some(status) = next {
+            #[cfg(not(windows))]
+            {
+                child.0 = None;
+            }
             break status;
         }
         if Instant::now() >= deadline {
@@ -238,7 +259,17 @@ impl LaunchPlan {
     pub(crate) fn spawn(self) -> Result<OwnedClient, RelayError> {
         let mut command = Command::new(&self.executable);
         command.args(&self.args).env_clear().envs(self.environment);
-        OwnedClient::spawn_interactive(&mut command).map_err(|_| RelayError::ClientLaunchFailed)
+        #[cfg(windows)]
+        {
+            OwnedClient::spawn(&mut command).map_err(|_| RelayError::ClientLaunchFailed)
+        }
+        #[cfg(not(windows))]
+        {
+            let child = command
+                .spawn()
+                .map_err(|_| RelayError::ClientLaunchFailed)?;
+            Ok(OwnedClient(Some(child)))
+        }
     }
 }
 
@@ -270,8 +301,35 @@ pub(crate) fn valid_local_credential(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
 }
 
+/// Owns and reaps the direct client on Unix. The dedicated launcher holds
+/// this handle through client exit; closing the panel does not drop it.
+#[cfg(not(windows))]
+pub(crate) struct OwnedClient(Option<Child>);
+#[cfg(not(windows))]
+impl OwnedClient {
+    pub(crate) fn wait(&mut self) -> Result<i32, RelayError> {
+        let status = self
+            .0
+            .as_mut()
+            .ok_or(RelayError::ClientLaunchFailed)?
+            .wait()
+            .map_err(|_| RelayError::ClientLaunchFailed)?;
+        self.0 = None;
+        Ok(status.code().unwrap_or(1))
+    }
+}
+#[cfg(not(windows))]
+impl Drop for OwnedClient {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 /// Discover the qualified client before opening a listener; own the listener
-/// and client process scope together until the client exits. No relay remains idle.
+/// and direct child together until the client exits. No relay remains idle.
 pub fn run_client(
     profile: &ConnectionProfile,
     credentials: Arc<dyn CredentialSource>,
@@ -295,10 +353,17 @@ fn run_with_executable(
         relay.local_credential(),
     )?;
     let mut client = plan.spawn()?;
-    let status = client
-        .wait_status()
-        .map_err(|_| RelayError::ClientLaunchFailed)?;
-    Ok(status.code().unwrap_or(1))
+    #[cfg(windows)]
+    {
+        let status = client
+            .wait_status()
+            .map_err(|_| RelayError::ClientLaunchFailed)?;
+        Ok(status.code().unwrap_or(1))
+    }
+    #[cfg(not(windows))]
+    {
+        client.wait()
+    }
 }
 
 #[cfg(test)]
