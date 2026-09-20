@@ -59,19 +59,22 @@ baselines. Native keyboard/accessibility, focus, display, sleep/reopen and clean
 install/upgrade evidence are required for each declared platform. Compilation
 alone does not establish platform support or a measured footprint benefit.
 
-## First implementation slice
+## Implementation progress
 
-Issue #330 starts with identity and personal-usage validation in a small Rust
-crate and shared compatibility vectors consumed by Rust, the existing Swift
-models and the existing Python gateway validators. The gateway and client have
+Issue #330 establishes identity, personal usage, connection profiles, session
+and reading status, context preferences and the complete safe-error catalog in
+a small Rust crate. Compatibility vectors are consumed by Rust, the existing
+Swift models and the existing Python validators. The gateway and client have
 different validation responsibilities; expected differences must be recorded
 rather than silently changing either implementation. See
 [the fixture contract](../clients/contracts/README.md).
 
-Issue #330's contract inventory is now implemented: connection profiles, state
-codes, freshness representations, settings, client status and the complete safe
-error catalog have shared compatibility fixtures. Session transitions and native
-integration remain in their dependent issues.
+The #331 Windows preview is an explicitly synthetic native shell. Its CI
+process and UI Automation observations do not establish manual platform
+acceptance. The [#332 baseline checkpoint](evidence/native-client-baseline-2026-09-19/README.md)
+records verified historical artifact sizes and preliminary Mac preview
+measurements; #332 also records later short Windows CI observations.
+Complete platform measurements are still required before setting budgets.
 
 Issue #334 adds a separate unpublished `1.5.0-dev.1`
 [Rust transport](../clients/rust/transport/README.md) with one bounded runtime,
@@ -96,10 +99,10 @@ library: one outstanding dashboard job and one wake-up deadline, tunable
 45-second summary/7-second detail hypotheses, bounded completion debounce,
 offline backoff, age-based staleness and independent lock/sleep gates. Synthetic
 traces verify these library decisions and separate operation cancellation.
-**#337 remains open** for native-shell wiring and measured idle/locked/resume
-behavior. The existing Mac app and draft Windows shell do not consume this
-scheduler yet; connected UI, native power/footprint and release acceptance remain
-unproven. See the [scheduler integration contract](../clients/rust/session/README.md#central-dashboard-scheduler-337-source-checkpoint).
+**#337 remains open** for native-shell qualification and measured idle/locked/resume
+behavior. The existing Mac app does not consume this scheduler; the Windows
+development shell now wires it, but native power/footprint and release acceptance
+remain unproven. See the [scheduler integration contract](../clients/rust/session/README.md#central-dashboard-scheduler-337-source-checkpoint).
 
 Issue #338 adds an unpublished `1.5.0-dev.1`
 [interaction reducer](../clients/rust/interaction/README.md) with explicit
