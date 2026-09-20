@@ -5,6 +5,7 @@ use hormuz_client_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use zeroize::Zeroizing;
 
 pub(crate) fn personal_usage(bytes: &[u8]) -> Result<PersonalUsage, ClientError> {
@@ -86,6 +87,7 @@ struct State {
     attempt: Arc<()>,
     snapshot: Arc<UsageSnapshot>,
     change: Option<Arc<UsageSnapshot>>,
+    successful_elapsed: Option<Duration>,
 }
 impl State {
     fn matches(&self, ticket: &Ticket) -> bool {
@@ -113,6 +115,7 @@ impl Default for Snapshots {
             attempt: Arc::new(()),
             change: Some(snapshot.clone()),
             snapshot,
+            successful_elapsed: None,
         }))
     }
 }
@@ -122,6 +125,43 @@ impl Snapshots {
     }
     pub fn take_change(&self) -> Option<Arc<UsageSnapshot>> {
         self.0.lock().unwrap().change.take()
+    }
+    /// Age only a current reading. Wall-clock rollback/invalidity and monotonic
+    /// rollback expire it conservatively; neither clock can make old data new.
+    /// The successful response time and authoritative values never change here.
+    pub fn age(&self, clock: &impl crate::Clock, maximum_age: Duration) -> Option<Duration> {
+        let mut state = self.0.lock().unwrap();
+        let old = &state.snapshot;
+        if old.reading.status() != ReadingStatus::Current {
+            return None;
+        }
+        // Sample after acquiring the snapshot lock. A concurrent successful
+        // response must not appear to come from the future of an older sample.
+        let wall = clock.now();
+        let elapsed = clock.elapsed();
+        let checked = old
+            .reading
+            .checked_at_epoch_seconds()
+            .expect("current reading");
+        let remaining = state.successful_elapsed.and_then(|start| {
+            if !wall.is_finite() || wall < checked || elapsed < start {
+                return None;
+            }
+            let wall_age = Duration::try_from_secs_f64(wall - checked).ok()?;
+            let age = wall_age.max(elapsed - start);
+            maximum_age.checked_sub(age).filter(|v| !v.is_zero())
+        });
+        if remaining.is_none() {
+            let mut value = old.as_ref().clone();
+            value.reading = UsageReading::new(
+                ReadingStatus::Stale,
+                old.reading.usage().cloned(),
+                Some(checked),
+            )
+            .expect("retained valid reading");
+            state.publish(value);
+        }
+        remaining
     }
     pub fn begin(&self, profile: &ConnectionProfile) -> Ticket {
         let mut state = self.0.lock().unwrap();
@@ -197,10 +237,12 @@ impl Snapshots {
         identity: GatewayIdentity,
         usage: PersonalUsage,
         checked: f64,
+        elapsed: Duration,
     ) -> Result<(), ClientError> {
         let reading = UsageReading::new(ReadingStatus::Current, Some(usage), Some(checked))?;
         let mut state = self.0.lock().unwrap();
         if state.matches(ticket) {
+            state.successful_elapsed = Some(elapsed);
             state.publish(UsageSnapshot {
                 scope: "current_actor",
                 identity: Some(identity),

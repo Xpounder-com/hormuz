@@ -37,7 +37,13 @@ fn shared_freshness_vectors_preserve_last_success_and_emit_only_changes() {
                 "success" | "zero" => {
                     snapshots.verify_identity(&ticket, &identity()).unwrap();
                     snapshots
-                        .success(&ticket, identity(), usage(event == "zero"), time)
+                        .success(
+                            &ticket,
+                            identity(),
+                            usage(event == "zero"),
+                            time,
+                            Duration::ZERO,
+                        )
                         .unwrap();
                 }
                 "offline" => snapshots.failure(&ticket, ClientError::GatewayUnavailable),
@@ -88,33 +94,33 @@ fn late_success_and_failure_cannot_cross_attempt_signout_profile_or_cache_bounda
     let old = snapshots.begin(&profile());
     let current = snapshots.begin(&profile());
     snapshots
-        .success(&current, identity(), usage(true), 2.0)
+        .success(&current, identity(), usage(true), 2.0, Duration::ZERO)
         .unwrap();
     snapshots
-        .success(&old, identity(), usage(false), 1.0)
+        .success(&old, identity(), usage(false), 1.0, Duration::ZERO)
         .unwrap();
     snapshots.failure(&old, ClientError::LoginRequired);
     assert_eq!(snapshots.snapshot().total_tokens(), Some(0));
     snapshots.invalidate(ReadingStatus::NeedsAuthentication);
     snapshots
-        .success(&current, identity(), usage(false), 3.0)
+        .success(&current, identity(), usage(false), 3.0, Duration::ZERO)
         .unwrap();
     assert!(snapshots.snapshot().identity().is_none());
     let current = snapshots.begin(&profile());
     snapshots
-        .success(&current, identity(), usage(false), 4.0)
+        .success(&current, identity(), usage(false), 4.0, Duration::ZERO)
         .unwrap();
     let mut other = fixture()["profile"].clone();
     other["id"] = json!("00000000-0000-0000-0000-000000000336");
     snapshots.begin(&ConnectionProfile::from_json(&serde_json::to_vec(&other).unwrap()).unwrap());
     snapshots
-        .success(&current, identity(), usage(false), 5.0)
+        .success(&current, identity(), usage(false), 5.0, Duration::ZERO)
         .unwrap();
     assert!(snapshots.snapshot().reading().usage().is_none());
     let foreign = Snapshots::default();
     let ticket = foreign.begin(&profile());
     snapshots
-        .success(&ticket, identity(), usage(false), 6.0)
+        .success(&ticket, identity(), usage(false), 6.0, Duration::ZERO)
         .unwrap();
     assert!(snapshots.snapshot().reading().usage().is_none());
 }
@@ -126,7 +132,7 @@ fn changed_credential_or_identity_cannot_reuse_the_previous_persons_snapshot() {
     snapshots.bind_credential(&profile(), "synthetic-old");
     snapshots.verify_identity(&ticket, &identity()).unwrap();
     snapshots
-        .success(&ticket, identity(), usage(false), 1.0)
+        .success(&ticket, identity(), usage(false), 1.0, Duration::ZERO)
         .unwrap();
     let mut input = fixture()["identity"].clone();
     input["actor_id"] = json!("bob");
@@ -163,7 +169,9 @@ fn token_totals_are_exact_above_signed_integer_limit_and_snapshots_exclude_secre
     let value = PersonalUsage::from_json(&serde_json::to_vec(&raw).unwrap()).unwrap();
     let snapshots = Snapshots::default();
     let ticket = snapshots.begin(&profile());
-    snapshots.success(&ticket, identity(), value, 1.0).unwrap();
+    snapshots
+        .success(&ticket, identity(), value, 1.0, Duration::ZERO)
+        .unwrap();
     assert_eq!(snapshots.snapshot().total_tokens(), Some(u64::MAX - 1));
     let output = serde_json::to_string(snapshots.snapshot().as_ref()).unwrap();
     for forbidden in [

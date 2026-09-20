@@ -138,10 +138,10 @@ impl RefreshCoordinator for Coordinator {
 }
 
 #[derive(Clone, Default)]
-struct FakeClock(Arc<Mutex<Duration>>);
+struct FakeClock(Arc<Mutex<Duration>>, Arc<Mutex<f64>>);
 impl Clock for FakeClock {
     fn now(&self) -> f64 {
-        NOW + self.elapsed().as_secs_f64()
+        NOW + self.elapsed().as_secs_f64() + *self.1.lock().unwrap()
     }
     fn elapsed(&self) -> Duration {
         *self.0.lock().unwrap()
@@ -150,6 +150,8 @@ impl Clock for FakeClock {
         *self.0.lock().unwrap() += duration;
     }
 }
+
+mod scheduler;
 #[derive(Default)]
 struct Browser(Mutex<Vec<String>>);
 impl BrowserOpener for Browser {
