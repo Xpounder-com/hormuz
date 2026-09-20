@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +27,45 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         workload = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(workload)
         self.workload = workload
+
+    def candidate_source_with(self, original: str, replacement: str) -> Path:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        package = root / "hormuz"
+        package.mkdir()
+        for name in ("compaction.py", "compaction_formats.py"):
+            (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
+        source = package / "compaction.py"
+        content = source.read_text(encoding="utf-8")
+        self.assertEqual(content.count(original), 1)
+        source.write_text(content.replace(original, replacement, 1), encoding="utf-8")
+        return root
+
+    def test_exact_compaction_file_bypasses_candidate_package_export(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "hormuz"
+            package.mkdir()
+            for name in ("compaction.py", "compaction_formats.py"):
+                (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
+            (package / "decoy.py").write_text("# candidate decoy\n", encoding="utf-8")
+            (package / "__init__.py").write_text(
+                "from pathlib import Path\n"
+                "from types import SimpleNamespace\n"
+                "compaction = SimpleNamespace("
+                "__file__=str(Path(__file__).with_name('decoy.py')), "
+                "compact_text=lambda value, format_name: value)\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [sys.executable, str(WORKLOAD), "--root", str(root), "--action", "validate"],
+                capture_output=True, text=True, check=True,
+            )
+            result = json.loads(completed.stdout)
+            baseline = self.workload.evaluate(ROOT, "validate")
+            self.assertEqual(Path(result["source"]).resolve(), (package / "compaction.py").resolve())
+            self.assertEqual(result["outputs"], baseline["outputs"])
 
     def test_reference_workload_covers_primary_and_heldout_cases(self) -> None:
         workload = self.workload
@@ -59,24 +102,21 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
                 self.assertEqual(compaction.decode_text(compacted).text, value)
 
         baseline = self.workload.evaluate(ROOT, "heldout")
-        original_lines = compaction._compact_line_runs
-
-        def homogeneous_only(text: str) -> str:
-            if len(set(text.splitlines())) > 1:
-                return text
-            return original_lines(text)
-
-        with patch.object(compaction, "_compact_line_runs", side_effect=homogeneous_only):
-            disabled_mixed = self.workload.evaluate(ROOT, "heldout")
+        disabled_mixed_root = self.candidate_source_with(
+            "def _compact_line_runs(text: str) -> str:\n",
+            "def _compact_line_runs(text: str) -> str:\n"
+            "    if len(set(text.splitlines())) > 1:\n"
+            "        return text\n",
+        )
+        disabled_mixed = self.workload.evaluate(disabled_mixed_root, "heldout")
         self.assertNotEqual(baseline["outputs"]["lines_mixed"], disabled_mixed["outputs"]["lines_mixed"])
-
-        original_framed = compaction._compact_framed_lines
-
-        def no_framed_search(text: str, *, format: str) -> str:
-            return text if format == "search_lines" else original_framed(text, format=format)
-
-        with patch.object(compaction, "_compact_framed_lines", side_effect=no_framed_search):
-            disabled_framed = self.workload.evaluate(ROOT, "heldout")
+        disabled_framed_root = self.candidate_source_with(
+            'def _compact_framed_lines(text: str, *, format: Literal["search_lines", "path_list"]) -> str:\n',
+            'def _compact_framed_lines(text: str, *, format: Literal["search_lines", "path_list"]) -> str:\n'
+            '    if format == "search_lines":\n'
+            '        return text\n',
+        )
+        disabled_framed = self.workload.evaluate(disabled_framed_root, "heldout")
         self.assertNotEqual(baseline["outputs"]["search_framed"], disabled_framed["outputs"]["search_framed"])
 
     def test_heldout_json_table_detects_disabled_compaction(self) -> None:
@@ -87,8 +127,11 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         self.assertEqual(compaction.decode_text(compacted).text, value)
 
         baseline = self.workload.evaluate(ROOT, "heldout")
-        with patch.object(compaction, "_compact_json_table", side_effect=lambda text: text):
-            disabled = self.workload.evaluate(ROOT, "heldout")
+        disabled_root = self.candidate_source_with(
+            "def _compact_json_table(text: str) -> str:\n",
+            "def _compact_json_table(text: str) -> str:\n    return text\n",
+        )
+        disabled = self.workload.evaluate(disabled_root, "heldout")
         self.assertEqual(baseline["fixture_sha256"], disabled["fixture_sha256"])
         self.assertNotEqual(baseline["outputs"]["json_table"], disabled["outputs"]["json_table"])
 
@@ -99,19 +142,17 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             len(compaction.compact_text(value, format_name).encode("utf-8")),
             len(value.encode("utf-8")),
         )
-        seen: set[str] = set()
-        repeated: set[str] = set()
-        original = compaction.compact_text
-
-        def record_input(text: str, format_name: str) -> str:
-            if text in seen:
-                repeated.add(text)
-            seen.add(text)
-            return original(text, format_name)
-
-        with patch.object(compaction, "compact_text", side_effect=record_input):
-            benchmark = self.workload.evaluate(ROOT, "benchmark")
-        self.assertFalse(repeated)
+        for seed in (None, bytes.fromhex("ab" * 32)):
+            for name, (value, _) in measured.items():
+                if name in {"paths_empty", "paths_malformed_marker"}:
+                    continue
+                count = 20 + 17 * (40 if name.endswith("large") else 100)
+                variants = [
+                    self.workload.timed_variant(name, value, index, seed)
+                    for index in range(count)
+                ]
+                self.assertEqual(len(variants), len(set(variants)))
+        benchmark = self.workload.evaluate(ROOT, "benchmark")
         samples = benchmark["samples_ns"]
         self.assertEqual(set(samples), set(measured) - {"paths_empty", "paths_malformed_marker"})
         self.assertIn("json_typical", samples)
@@ -123,12 +164,13 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             len(benchmark["outputs"][name]["timed_sha256"]) == 64 for name in samples
         ))
 
-        def corrupt_one_timed_input(text: str, format_name: str) -> str:
-            result = original(text, format_name)
-            return result + "synthetic mutation" if "src/generated/000020/" in text else result
-
-        with patch.object(compaction, "compact_text", side_effect=corrupt_one_timed_input):
-            mutated = self.workload.evaluate(ROOT, "benchmark")
+        mutation_root = self.candidate_source_with(
+            "def compact_text(text: str, format: Format) -> str:\n",
+            "def compact_text(text: str, format: Format) -> str:\n"
+            '    if "src/generated/000020/" in text:\n'
+            '        return text + "synthetic mutation"\n',
+        )
+        mutated = self.workload.evaluate(mutation_root, "benchmark")
         self.assertEqual(
             benchmark["outputs"]["paths_typical"]["sha256"],
             mutated["outputs"]["paths_typical"]["sha256"],
@@ -137,6 +179,81 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             benchmark["outputs"]["paths_typical"]["timed_sha256"],
             mutated["outputs"]["paths_typical"]["timed_sha256"],
         )
+
+    def test_job_seed_changes_timed_inputs_but_preserves_comparability(self) -> None:
+        first_seed = bytes.fromhex("ab" * 32)
+        second_seed = bytes.fromhex("cd" * 32)
+        value, _ = self.workload.cases()["paths_typical"]
+        first_variant = self.workload.timed_variant("paths_typical", value, 20, first_seed)
+        self.assertNotIn(first_seed.hex(), first_variant)
+        self.assertNotEqual(
+            first_variant,
+            self.workload.timed_variant("paths_typical", value, 20, second_seed),
+        )
+        self.assertEqual(
+            first_variant,
+            self.workload.timed_variant("paths_typical", value, 20, first_seed),
+        )
+        first = self.workload.evaluate(ROOT, "benchmark", seed=first_seed)
+        repeat = self.workload.evaluate(ROOT, "benchmark", seed=first_seed)
+        changed = self.workload.evaluate(ROOT, "benchmark", seed=second_seed)
+        self.assertEqual(first["fixture_sha256"], repeat["fixture_sha256"])
+        self.assertEqual(first["fixture_sha256"], changed["fixture_sha256"])
+        self.assertEqual(first["outputs"], repeat["outputs"])
+        for name in first["samples_ns"]:
+            self.assertEqual(first["outputs"][name]["sha256"], changed["outputs"][name]["sha256"])
+            self.assertNotEqual(
+                first["outputs"][name]["timed_sha256"],
+                changed["outputs"][name]["timed_sha256"],
+            )
+
+    def test_seed_stdin_contract_is_bounded_and_not_reported(self) -> None:
+        seed = "ab" * 32
+        command = [sys.executable, str(WORKLOAD), "--root", str(ROOT), "--action", "benchmark", "--seed-stdin"]
+        completed = subprocess.run(command, input=seed + "\n", capture_output=True, text=True, check=True)
+        report = json.loads(completed.stdout)
+        self.assertNotIn(seed, completed.stdout)
+        self.assertNotIn("seed", report)
+        self.assertEqual(len(report["samples_ns"]), 10)
+        invalid = subprocess.run(command, input="not-a-seed\n", capture_output=True, text=True)
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertIn("benchmark_invalid_seed", invalid.stderr)
+        self.assertNotIn("not-a-seed", invalid.stderr)
+
+    def test_candidate_module_cannot_patch_parent_hashes_or_clock(self) -> None:
+        baseline = self.workload.evaluate(ROOT, "benchmark")
+        attack_root = self.candidate_source_with(
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\n"
+            "import hashlib\nimport time\n"
+            "hashlib.sha256 = lambda *args, **kwargs: type('FakeHash', (), "
+            "{'hexdigest': lambda self: '0' * 64, 'update': lambda self, value: None})()\n"
+            "time.perf_counter_ns = lambda: 0\n",
+        )
+        attacked = self.workload.evaluate(attack_root, "benchmark")
+        self.assertEqual(baseline["fixture_sha256"], attacked["fixture_sha256"])
+        self.assertEqual(baseline["outputs"], attacked["outputs"])
+        self.assertTrue(all(
+            all(math.isfinite(sample) and sample > 0 for sample in values)
+            for values in attacked["samples_ns"].values()
+        ))
+
+    def test_candidate_output_and_roundtrip_limits_fail_closed(self) -> None:
+        oversized_root = self.candidate_source_with(
+            "def compact_text(text: str, format: Format) -> str:\n",
+            "def compact_text(text: str, format: Format) -> str:\n"
+            '    return "x" * 70000\n',
+        )
+        with self.assertRaisesRegex(RuntimeError, "benchmark_child_invalid_outputs"):
+            self.workload.evaluate(oversized_root, "validate")
+        slow_root = self.candidate_source_with(
+            "def compact_text(text: str, format: Format) -> str:\n",
+            "def compact_text(text: str, format: Format) -> str:\n"
+            "    import time\n    time.sleep(2)\n",
+        )
+        with patch.object(self.workload, "_ROUNDTRIP_TIMEOUT_SECONDS", 0.2):
+            with self.assertRaisesRegex(RuntimeError, "benchmark_child_timeout"):
+                self.workload.evaluate(slow_root, "validate")
 
 
 if __name__ == "__main__":
