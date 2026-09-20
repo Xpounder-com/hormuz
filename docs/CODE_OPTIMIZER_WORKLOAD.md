@@ -29,7 +29,10 @@ shared modules. Before candidate import, the child sets a zero process-creation
 hard limit; a macOS probe confirms both `fork` and `posix_spawn` are denied.
 The private runner must still confine the child process and
 the candidate's access to files, subprocesses, and the network; that sandbox
-boundary needs separate review before adversarial qualification. Profile
+boundary needs separate review before adversarial qualification. The child
+inherits the runner's process group so outer timeout/cancellation cleanup can
+reach it, but an adversarial child could call `setsid`; private containment
+must cover forced parent death and such self-detachment. Profile
 hotspots are child-reported guidance, not an acceptance signal.
 
 For a private job, the trusted parent accepts `--seed-stdin`: one
