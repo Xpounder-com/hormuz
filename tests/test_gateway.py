@@ -1066,7 +1066,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         response.getcode.return_value = 200
         # First-party identity is exercised with the entire network boundary
         # replaced. Even an assertion failure cannot contact the provider.
-        with mock.patch("hormuz.server.urllib.request.urlopen", return_value=response) as urlopen, \
+        with mock.patch("hormuz.server._open_upstream", return_value=response) as open_upstream, \
              mock.patch.object(GatewayRequestHandler, "_begin_governed_attempt", observe):
             status, _, body = self._post("/v1/responses", {
                 "model": "engineering-fast", "input": "synthetic",
@@ -1074,8 +1074,8 @@ class GatewayIntegrationTests(unittest.TestCase):
             })
 
         self.assertEqual(status, 200, body)
-        urlopen.assert_called_once()
-        self.assertEqual(urlopen.call_args.args[0].full_url, "https://api.openai.com/v1/responses")
+        open_upstream.assert_called_once()
+        self.assertEqual(open_upstream.call_args.args[0].full_url, "https://api.openai.com/v1/responses")
         candidate = selections[0].finance
         self.assertIsInstance(candidate, FinanceAccountCandidate)
         self.assertEqual((candidate.binding.organization_id, candidate.binding.binding_id),
@@ -1128,13 +1128,13 @@ class GatewayIntegrationTests(unittest.TestCase):
             read=payload.read, read1=payload.read1, close=payload.close,
         )
         response.getcode.return_value = 200
-        with mock.patch("hormuz.server.urllib.request.urlopen", return_value=response) as urlopen, \
+        with mock.patch("hormuz.server._open_upstream", return_value=response) as open_upstream, \
              mock.patch.object(GatewayRequestHandler, "_begin_governed_attempt", observe):
             status, _, body = self._post("/v1/responses", {"model": "engineering-fast", "input": "synthetic"})
 
         self.assertEqual(status, 200, body)
-        urlopen.assert_called_once()
-        request = urlopen.call_args.args[0]
+        open_upstream.assert_called_once()
+        request = open_upstream.call_args.args[0]
         self.assertEqual(request.full_url, "https://api.openai.com/v1/responses")
         self.assertEqual(request.get_header("Authorization"), f"Bearer {OPENAI_KEY}")
         selection = selections[0]
