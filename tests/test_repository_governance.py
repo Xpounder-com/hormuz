@@ -321,6 +321,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
         names = (
             "Build native Windows preview",
             "Exercise native Windows window lifecycle",
+            "Verify Windows accessibility and collect preview measurements",
             "Check Windows runtime dependencies",
             "Record Windows development artifact provenance",
             "Save Windows development preview",
@@ -365,6 +366,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
         mutations = (
             ("run: cargo build -p hormuz-windows --release --locked", "run: cargo check -p hormuz-windows --locked"),
             ("run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe", "run: Write-Output passed"),
+            ("run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json", "run: Write-Output passed"),
             ("$dependencies = & $dumpbin /DEPENDENTS target/release/hormuz-windows.exe", "$dependencies = @('kernel32.dll')"),
             ('if ($LASTEXITCODE -ne 0) { throw "PE dependency inspection failed." }', 'Write-Output "Ignoring inspection status"'),
             ('if ($imports.Count -eq 0) { throw "PE imports were not found." }', 'Write-Output "Allowing empty imports"'),
@@ -373,6 +375,8 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ("sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()", 'sha256 = "unverified"'),
             ('manual_platform_acceptance = "pending"', 'manual_platform_acceptance = "passed"'),
             ("            clients/rust/target/release/windows-build.json\n", ""),
+            ("            clients/rust/target/release/windows-acceptance.json\n", ""),
+            ("acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()", 'acceptance_sha256 = "unverified"'),
             ("          if-no-files-found: error", "          if-no-files-found: warn"),
         )
         for original, replacement in mutations:

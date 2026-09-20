@@ -39,6 +39,7 @@ cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo build -p hormuz-windows --release --locked
 ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe
+./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json
 ./target/release/hormuz-windows.exe
 ```
 
@@ -53,6 +54,46 @@ expand, exercises close/hide and a synthesized tray callback, and checks exit.
 It reports whether the tray registered; a machine without Explorer exercises
 taskbar fallback. A synthesized callback does not prove an actual tray click,
 keyboard navigation, accessibility, monitor migration or the visual layout.
+
+## External accessibility and measurement check
+
+`verify-acceptance.ps1` starts an ordinary release preview and an independent
+Windows PowerShell UI Automation observer. It verifies the synthetic labels,
+button roles/names, exposed InvokePattern actions, programmatic keyboard focus,
+fold/expand geometry and metric visibility, hide, close/reopen, and clean Exit.
+It runs 100 fold/expand/hide/reopen cycles. Reopen deliberately uses the same
+synthetic notification as the smoke test; actual tray activation is still a
+manual check. UIA focus and invocation do not prove physical keyboard input or
+screen-reader usability. A failed/unavailable provider fails the check.
+
+The observer samples visible, folded and hidden states three times each. Defaults
+are a two-second warm-up followed by six samples at requested one-second
+intervals, plus settled samples before and after the interaction cycles. These
+are short CI observations, not the controlled five-minute baseline in #332.
+Actual elapsed times and cumulative CPU times are preserved in every sample.
+WMI process topology must show exactly the owned preview and no descendants at
+each observation; an observed helper causes failure instead of a root-only
+memory claim. Processes that start and exit between observations may be missed.
+
+The JSON records working set, private bytes, CPU time, process/handle counts,
+GDI/USER objects, observer CPU time, OS/architecture, and source/executable hashes.
+Working set and private bytes are different counters; neither represents total
+physical footprint. Before/after values are observations with no numerical
+regression budget. Startup, wake-ups, GPU, physical display changes, sign-in and
+active-client scenarios remain unmeasured. Host power, thermal and display
+conditions are uncontrolled. The observer reads only the owned preview's UI
+and numeric process topology; it does not collect other window text, command
+lines, process owners, credentials or screenshots.
+
+Parameters `-WarmupSeconds`, `-SampleCount`, `-IntervalMilliseconds`,
+`-Repetitions` and `-Cycles` support longer local observations. Existing output
+is never overwritten. A parent watchdog owns both processes and stops them if
+the provider hangs or the check fails. The success evidence is written only
+after the preview exits cleanly. CI stores it beside the executable and pins
+its SHA-256 in the build manifest. `manual_platform_acceptance` stays `pending`.
+
+API contracts: [Microsoft UI Automation InvokePattern](https://learn.microsoft.com/en-us/dotnet/api/system.windows.automation.invokepattern.invoke)
+and [Win32 GUI resource counters](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getguiresources).
 
 ## Manual acceptance still required
 

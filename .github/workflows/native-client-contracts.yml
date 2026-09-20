@@ -52,6 +52,13 @@ jobs:
         working-directory: clients/rust
         shell: pwsh
         run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe
+      - name: Verify Windows accessibility and collect preview measurements
+        if: runner.os == 'Windows'
+        working-directory: clients/rust
+        shell: pwsh
+        env:
+          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json
       - name: Check Windows runtime dependencies
         if: runner.os == 'Windows'
         working-directory: clients/rust
@@ -88,6 +95,8 @@ jobs:
             os = [Environment]::OSVersion.VersionString
             sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()
             native_smoke = "passed"
+            external_ui_automation = "passed"
+            acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()
             static_msvc_crt = $true
             direct_dll_imports = @(Get-Content target/release/windows-imports.txt)
             manual_platform_acceptance = "pending"
@@ -101,6 +110,7 @@ jobs:
           path: |
             clients/rust/target/release/hormuz-windows.exe
             clients/rust/target/release/windows-build.json
+            clients/rust/target/release/windows-acceptance.json
           if-no-files-found: error
           retention-days: 14
       - name: Verify existing Swift expectations

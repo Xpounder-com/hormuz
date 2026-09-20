@@ -1447,6 +1447,12 @@ def _validate_native_contract_workflow(
             "        shell: pwsh\n",
             "        run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe\n",
         ),
+        "Verify Windows accessibility and collect preview measurements": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
+            "        run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json\n",
+        ),
         "Check Windows runtime dependencies": (
             "        working-directory: clients/rust\n",
             "        shell: pwsh\n",
@@ -1467,6 +1473,8 @@ def _validate_native_contract_workflow(
             '            target = "x86_64-pc-windows-msvc"\n',
             "            sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()\n",
             '            native_smoke = "passed"\n',
+            '            external_ui_automation = "passed"\n',
+            "            acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
             "            static_msvc_crt = $true\n",
             "            direct_dll_imports = @(Get-Content target/release/windows-imports.txt)\n",
             '            manual_platform_acceptance = "pending"\n',
@@ -1477,6 +1485,7 @@ def _validate_native_contract_workflow(
             "          name: native-windows-preview-${{ github.sha }}\n",
             "            clients/rust/target/release/hormuz-windows.exe\n",
             "            clients/rust/target/release/windows-build.json\n",
+            "            clients/rust/target/release/windows-acceptance.json\n",
             "          if-no-files-found: error\n",
         ),
     }
