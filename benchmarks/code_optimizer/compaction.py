@@ -132,29 +132,35 @@ def timed_variant(name: str, value: str, ordinal: int, seed: bytes | None = None
     raise ValueError("unsupported_timed_case")
 
 
-def load_compaction(root: Path) -> ModuleType:
-    """Load the exact source file without executing a package export first."""
-    source = root / "hormuz/compaction.py"
+def _load_exact_source(root: Path, package_name: str, name: str) -> ModuleType:
+    """Compile source bytes directly; importlib's loader may trust a forged pyc."""
+    source = root / "hormuz" / f"{name}.py"
     if source.is_symlink() or not source.is_file():
         raise RuntimeError("benchmark_source_not_regular_file")
     expected = source.resolve(strict=True)
     if not expected.is_relative_to(root):
         raise RuntimeError("benchmark_source_outside_root")
-    package_name = f"_hormuz_optimizer_target_{next(_IMPORT_SEQUENCE)}"
-    package = ModuleType(package_name)
-    package.__path__ = [str(source.parent)]
-    package.__package__ = package_name
-    sys.modules[package_name] = package
-    spec = importlib.util.spec_from_file_location(f"{package_name}.compaction", expected)
+    spec = importlib.util.spec_from_file_location(f"{package_name}.{name}", expected)
     if spec is None or spec.loader is None:
         raise RuntimeError("benchmark_source_unloadable")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    exec(compile(expected.read_bytes(), str(expected), "exec", dont_inherit=True), module.__dict__)
     loaded_file = getattr(module, "__file__", None)
     if not isinstance(loaded_file, str) or Path(loaded_file).resolve(strict=True) != expected:
         raise RuntimeError("benchmark_imported_wrong_source")
     return module
+
+
+def load_compaction(root: Path) -> ModuleType:
+    """Load the exact compaction sources without candidate package exports."""
+    package_name = f"_hormuz_optimizer_target_{next(_IMPORT_SEQUENCE)}"
+    package = ModuleType(package_name)
+    package.__path__ = [str(root / "hormuz")]
+    package.__package__ = package_name
+    sys.modules[package_name] = package
+    _load_exact_source(root, package_name, "compaction_formats")
+    return _load_exact_source(root, package_name, "compaction")
 
 
 def _child_main(root: Path) -> int:
@@ -254,7 +260,10 @@ class CandidateProcess:
             try:
                 self.process.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                self.process.kill()
+                try:
+                    self.process.kill()
+                except ProcessLookupError:
+                    pass
                 self.process.wait(timeout=2)
         finally:
             self.process.stdout.close()

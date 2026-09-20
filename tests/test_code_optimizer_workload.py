@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import marshal
 import math
+import py_compile
 import subprocess
 import sys
 import tempfile
@@ -66,6 +68,39 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             baseline = self.workload.evaluate(ROOT, "validate")
             self.assertEqual(Path(result["source"]).resolve(), (package / "compaction.py").resolve())
             self.assertEqual(result["outputs"], baseline["outputs"])
+
+    def test_exact_source_bytes_bypass_forged_candidate_bytecode(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        package = root / "hormuz"
+        package.mkdir()
+        for name in ("compaction.py", "compaction_formats.py"):
+            (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
+        source = package / "compaction.py"
+        for name, fake_source in (
+            ("compaction", "def compact_text(text, format):\n    return text\n"),
+            ("compaction_formats", "raise RuntimeError('forged_helper_cache_executed')\n"),
+        ):
+            target = package / f"{name}.py"
+            cache = Path(importlib.util.cache_from_source(str(target)))
+            py_compile.compile(str(target), cfile=str(cache), doraise=True)
+            original_cache = cache.read_bytes()
+            cache.write_bytes(
+                original_cache[:16]
+                + marshal.dumps(compile(fake_source, str(target), "exec"))
+            )
+        # SourceFileLoader accepts this valid-header cache and runs the decoy.
+        spec = importlib.util.spec_from_file_location("forged_compaction_control", source)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        decoy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(decoy)
+        self.assertEqual(decoy.compact_text("sentinel", "path_list"), "sentinel")
+        self.assertEqual(
+            self.workload.evaluate(ROOT, "validate")["outputs"],
+            self.workload.evaluate(root, "validate")["outputs"],
+        )
 
     def test_reference_workload_covers_primary_and_heldout_cases(self) -> None:
         workload = self.workload
@@ -279,6 +314,12 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         with patch.object(self.workload, "_ROUNDTRIP_TIMEOUT_SECONDS", 0.2):
             with self.assertRaisesRegex(RuntimeError, "benchmark_child_timeout"):
                 self.workload.evaluate(slow_root, "validate")
+
+    def test_candidate_inherits_outer_worker_process_group(self) -> None:
+        import os
+
+        with self.workload.CandidateProcess(ROOT) as candidate:
+            self.assertEqual(os.getpgid(candidate.process.pid), os.getpgrp())
 
 
 if __name__ == "__main__":
