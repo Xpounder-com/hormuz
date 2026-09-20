@@ -1,0 +1,150 @@
+{
+  "schema_id": "hormuz.native-client-startup-sample",
+  "schema_version": 1,
+  "source_commit": "d854a5a453fcbe20cb3f4c1e261e146f2da93855",
+  "version": "1.2.0",
+  "executable_sha256": "2ece94a031a039d0e27c7ce873787f83f704045e44b0e63cedb71841b9bb3ecc",
+  "recorded_at_utc": "2026-09-20T18:07:08.701995+00:00",
+  "scenario_requested": "visible connected synthetic preview",
+  "method": "monotonic clock before LaunchServices open -n -g; poll owned process and numeric CoreGraphics on-screen panel geometry with alpha greater than zero",
+  "conditions": "Sequential launches on an active developer workstation; OS caches were not cleared; this is not a cold-start measurement.",
+  "trial_count": 10,
+  "trials": [
+    {
+      "process_seen_seconds": 0.1246,
+      "last_no_panel_seconds": 1.68,
+      "first_panel_seconds": 1.8377,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 1
+    },
+    {
+      "process_seen_seconds": 0.0882,
+      "last_no_panel_seconds": 0.358,
+      "first_panel_seconds": 0.4986,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 2
+    },
+    {
+      "process_seen_seconds": 0.0601,
+      "last_no_panel_seconds": 0.1979,
+      "first_panel_seconds": 0.3447,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 3
+    },
+    {
+      "process_seen_seconds": 0.0633,
+      "last_no_panel_seconds": 0.2017,
+      "first_panel_seconds": 0.3464,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 4
+    },
+    {
+      "process_seen_seconds": 0.0639,
+      "last_no_panel_seconds": 0.2118,
+      "first_panel_seconds": 0.3534,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 5
+    },
+    {
+      "process_seen_seconds": 0.0592,
+      "last_no_panel_seconds": 0.2054,
+      "first_panel_seconds": 0.3459,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 6
+    },
+    {
+      "process_seen_seconds": 0.061,
+      "last_no_panel_seconds": 0.3266,
+      "first_panel_seconds": 0.5062,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 7
+    },
+    {
+      "process_seen_seconds": 0.0577,
+      "last_no_panel_seconds": 0.3096,
+      "first_panel_seconds": 0.4476,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 8
+    },
+    {
+      "process_seen_seconds": 0.0584,
+      "last_no_panel_seconds": 0.1974,
+      "first_panel_seconds": 0.3439,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 9
+    },
+    {
+      "process_seen_seconds": 0.0588,
+      "last_no_panel_seconds": 0.3127,
+      "first_panel_seconds": 0.4541,
+      "owned_onscreen_windows": 2,
+      "panel_bounds": [
+        {
+          "width": 64,
+          "height": 360
+        }
+      ],
+      "trial": 10
+    }
+  ],
+  "limits": [
+    "The first nontransparent on-screen window with pinned panel-like geometry is an observable proxy, not a rendered-pixel or interaction-ready guarantee.",
+    "The first panel time is an upper bound at the probe's actual sampling cadence; the last negative probe, when present, is a lower bound.",
+    "LaunchServices, process discovery and the numeric WindowServer probe contribute observer overhead.",
+    "Cold boot, sign-in, real gateway and active-client startup remain unmeasured."
+  ]
+}
