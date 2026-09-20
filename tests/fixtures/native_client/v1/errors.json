@@ -1,0 +1,139 @@
+{
+  "schema_id": "hormuz.native-client-fixtures",
+  "schema_version": 1,
+  "source_revision": "68b0b978fabac90f0bc7c33228a5bd3c68c681ab",
+  "cases": [
+    {
+      "code": "invalidProfile",
+      "swift_message": "Enter an organization ID and approved model alias. Connection fields must not contain control characters.",
+      "native_message": "Enter an organization ID and approved model alias. Connection fields must not contain control characters.",
+      "note": ""
+    },
+    {
+      "code": "invalidGateway",
+      "swift_message": "Enter a gateway origin such as https://gateway.example.com, without a path or credentials.",
+      "native_message": "Enter a gateway origin such as https://gateway.example.com, without a path or credentials.",
+      "note": ""
+    },
+    {
+      "code": "insecureGateway",
+      "swift_message": "HTTPS is required. Local development may explicitly enable HTTP for loopback only.",
+      "native_message": "HTTPS is required. Local development may explicitly enable HTTP for loopback only.",
+      "note": ""
+    },
+    {
+      "code": "invalidResponse",
+      "swift_message": "The gateway returned an invalid response. No credential was displayed.",
+      "native_message": "The gateway returned an invalid response. No credential was displayed.",
+      "note": ""
+    },
+    {
+      "code": "gatewayUnavailable",
+      "swift_message": "The gateway could not be reached. Check its address and your connection.",
+      "native_message": "The gateway could not be reached. Check its address and your connection.",
+      "note": ""
+    },
+    {
+      "code": "unexpectedRedirect",
+      "swift_message": "The gateway redirected a credential request. Hormuz stopped without following it.",
+      "native_message": "The gateway redirected a credential request. Hormuz stopped without following it.",
+      "note": ""
+    },
+    {
+      "code": "responseTooLarge",
+      "swift_message": "The gateway response exceeded the client safety limit.",
+      "native_message": "The gateway response exceeded the client safety limit.",
+      "note": ""
+    },
+    {
+      "code": "loginRejected",
+      "swift_message": "The gateway rejected sign-in. Check the team, client, and identity-provider configuration.",
+      "native_message": "The gateway rejected sign-in. Check the team, client, and identity-provider configuration.",
+      "note": ""
+    },
+    {
+      "code": "loginTimedOut",
+      "swift_message": "Sign-in timed out. Start again from Hormuz.",
+      "native_message": "Sign-in timed out. Start again from Hormuz.",
+      "note": ""
+    },
+    {
+      "code": "loginRequired",
+      "swift_message": "Sign in to Hormuz to use this connection.",
+      "native_message": "Sign in to Hormuz to use this connection.",
+      "note": ""
+    },
+    {
+      "code": "alreadySignedIn",
+      "swift_message": "Sign out of the saved connection before changing its identity or client.",
+      "native_message": "Sign out of the saved connection before changing its identity or client.",
+      "note": ""
+    },
+    {
+      "code": "identityMismatch",
+      "swift_message": "The returned identity does not match this team's client connection.",
+      "native_message": "The returned identity does not match this team's client connection.",
+      "note": ""
+    },
+    {
+      "code": "refreshInterrupted",
+      "swift_message": "Credential refresh was interrupted. Sign out to revoke the session, then sign in again.",
+      "native_message": "Credential refresh was interrupted. Sign out to revoke the session, then sign in again.",
+      "note": ""
+    },
+    {
+      "code": "logoutPending",
+      "swift_message": "Local use is disabled, but server revocation is not confirmed. Retry sign out when the gateway is available.",
+      "native_message": "Local use is disabled, but server revocation is not confirmed. Retry sign out when the gateway is available.",
+      "note": ""
+    },
+    {
+      "code": "secureStoreUnavailable",
+      "swift_message": "Keychain is unavailable or access was denied. Hormuz will not save credentials to a file.",
+      "native_message": "The operating system credential store is unavailable or access was denied. Hormuz will not save credentials to a file.",
+      "note": "Platform-neutral credential-store name; each native adapter owns its platform label."
+    },
+    {
+      "code": "unsafeStorage",
+      "swift_message": "Hormuz storage has unsafe ownership, permissions, or a symbolic link. No file was changed.",
+      "native_message": "Hormuz storage has unsafe ownership, permissions, or a symbolic link. No file was changed.",
+      "note": ""
+    },
+    {
+      "code": "storageUnavailable",
+      "swift_message": "Hormuz could not read or save its local configuration.",
+      "native_message": "Hormuz could not read or save its local configuration.",
+      "note": ""
+    },
+    {
+      "code": "profileBusy",
+      "swift_message": "Another Hormuz process is updating this connection. Try again shortly.",
+      "native_message": "Another Hormuz process is updating this connection. Try again shortly.",
+      "note": ""
+    },
+    {
+      "code": "configurationChanged",
+      "swift_message": "The connector changed after preview. Review it again before saving.",
+      "native_message": "The connector changed after preview. Review it again before saving.",
+      "note": ""
+    },
+    {
+      "code": "invalidArguments",
+      "swift_message": "Unsupported helper arguments. Open Hormuz to configure the connection.",
+      "native_message": "Unsupported helper arguments. Open Hormuz to configure the connection.",
+      "note": ""
+    },
+    {
+      "code": "contextSettingsInvalid",
+      "swift_message": "The local context optimization setting could not be verified. Optimization remains off.",
+      "native_message": "The local context optimization setting could not be verified. Optimization remains off.",
+      "note": ""
+    },
+    {
+      "code": "contextHelperUnavailable",
+      "swift_message": "The local context optimization helper is unavailable. Save a new connector after reinstalling Hormuz.",
+      "native_message": "The local context optimization helper is unavailable. Save a new connector after reinstalling Hormuz.",
+      "note": ""
+    }
+  ]
+}

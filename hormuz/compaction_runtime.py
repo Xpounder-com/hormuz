@@ -41,6 +41,30 @@ class ContextPreference:
     schema_version: int = SETTINGS_SCHEMA_VERSION
 
 
+def parse_context_preference(data: bytes | None) -> ContextPreference:
+    """Decode the existing non-secret file contract without filesystem access."""
+    if data is None:
+        return ContextPreference()
+    if len(data) > MAX_SETTINGS_BYTES:
+        raise ContextRuntimeError("settings_invalid")
+    try:
+        value = strict_json_loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ContextRuntimeError("settings_invalid") from error
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema_version", "enabled"}
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] != SETTINGS_SCHEMA_VERSION
+        or not isinstance(value.get("enabled"), bool)
+    ):
+        raise ContextRuntimeError("settings_invalid")
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if data != canonical:
+        raise ContextRuntimeError("settings_invalid")
+    return ContextPreference(enabled=value["enabled"])
+
+
 def default_state_directory() -> Path:
     override = os.environ.get("HORMUZ_CLIENT_STATE_DIRECTORY")
     if override:
@@ -67,26 +91,11 @@ class ContextPreferenceStore:
         try:
             self.path.lstat()
         except FileNotFoundError:
-            return ContextPreference()
+            return parse_context_preference(None)
         except OSError as error:
             raise ContextRuntimeError("settings_invalid") from error
         data = self._read_regular(self.path, MAX_SETTINGS_BYTES)
-        try:
-            value = strict_json_loads(data.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError) as error:
-            raise ContextRuntimeError("settings_invalid") from error
-        if (
-            not isinstance(value, dict)
-            or set(value) != {"schema_version", "enabled"}
-            or type(value.get("schema_version")) is not int
-            or value["schema_version"] != SETTINGS_SCHEMA_VERSION
-            or not isinstance(value.get("enabled"), bool)
-        ):
-            raise ContextRuntimeError("settings_invalid")
-        canonical = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        if data != canonical:
-            raise ContextRuntimeError("settings_invalid")
-        return ContextPreference(enabled=value["enabled"])
+        return parse_context_preference(data)
 
     def save(self, enabled: bool) -> ContextPreference:
         if not isinstance(enabled, bool):

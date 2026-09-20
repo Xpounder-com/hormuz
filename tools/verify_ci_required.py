@@ -9,9 +9,9 @@ import sys
 from collections.abc import Sequence
 
 if __package__:
-    from .classify_ci_scope import FULL_CLASSIFICATIONS
+    from .classify_ci_scope import FULL_CLASSIFICATIONS, REDUCED_CLASSIFICATIONS
 else:
-    from classify_ci_scope import FULL_CLASSIFICATIONS
+    from classify_ci_scope import FULL_CLASSIFICATIONS, REDUCED_CLASSIFICATIONS
 
 ALWAYS_REQUIRED_JOB_IDS = (
     "test",
@@ -31,7 +31,9 @@ PATH_SCOPED_JOB_IDS = (
     "oci-supply-chain",
     "oci-reproducibility",
 )
-EXPECTED_JOB_IDS = frozenset(ALWAYS_REQUIRED_JOB_IDS + PATH_SCOPED_JOB_IDS)
+EXPECTED_JOB_IDS = frozenset(
+    (*ALWAYS_REQUIRED_JOB_IDS, *PATH_SCOPED_JOB_IDS, "native-contracts")
+)
 
 
 class CIRequiredError(ValueError):
@@ -64,8 +66,8 @@ def validate_required_results(
     if run_full not in {"true", "false"}:
         raise CIRequiredError("CI scope output is missing or invalid")
     if run_full == "false":
-        if classification != "website_only":
-            raise CIRequiredError("reduced CI lacks the website-only classification")
+        if classification not in REDUCED_CLASSIFICATIONS:
+            raise CIRequiredError("reduced CI lacks an allowlisted classification")
     elif classification not in FULL_CLASSIFICATIONS:
         raise CIRequiredError("full CI classification is missing or invalid")
 
@@ -81,6 +83,10 @@ def validate_required_results(
                 "path-scoped CI job had an unexpected result: "
                 f"{job_id}={results[job_id]}"
             )
+
+    expected_native_result = "skipped" if classification == "website_only" else "success"
+    if results["native-contracts"] != expected_native_result:
+        raise CIRequiredError("native contract CI job had an unexpected result")
 
     return {
         "classification": classification,

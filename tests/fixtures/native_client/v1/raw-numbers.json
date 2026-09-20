@@ -1,0 +1,67 @@
+{
+  "schema_id": "hormuz.native-client-raw-number-fixtures",
+  "schema_version": 1,
+  "source_revision": "117d53b42dfe0a2e8cc65f4d0c856936163f1604",
+  "cases": [
+    {
+      "id": "large_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":9007199254740993,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": "9007199254740993",
+      "gateway_valid": true
+    },
+    {
+      "id": "large_decimal_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":9007199254740993.0,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": "9007199254740993",
+      "gateway_valid": false
+    },
+    {
+      "id": "large_exponent_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":9007199254740993e0,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": "9007199254740993",
+      "gateway_valid": false
+    },
+    {
+      "id": "large_scaled_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":9.007199254740993e15,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": "9007199254740993",
+      "gateway_valid": false
+    },
+    {
+      "id": "large_shifted_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":90071992547409930e-1,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": "9007199254740993",
+      "gateway_valid": false
+    },
+    {
+      "id": "maximum_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":9223372036854775807,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": "9223372036854775807",
+      "gateway_valid": true
+    },
+    {
+      "id": "overflow_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":9223372036854775808,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": null,
+      "gateway_valid": true
+    },
+    {
+      "id": "negative_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":-1.0,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": null,
+      "gateway_valid": false
+    },
+    {
+      "id": "small_decimal_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":3.0,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": "3",
+      "gateway_valid": false
+    },
+    {
+      "id": "small_exponent_integer",
+      "response_json": "{\"schema_id\":\"hormuz.gateway-usage-summary\",\"schema_version\":1,\"month\":\"current\",\"requests\":3e0,\"denied_requests\":1,\"rate_limited_requests\":0,\"input_tokens\":120,\"output_tokens\":30,\"cache_read_tokens\":20,\"cache_write_tokens\":0,\"reasoning_tokens\":7,\"cost_usd\":0.00012,\"cost_basis\":\"configured_rate_card_estimate\",\"allocation_basis\":\"direct_gateway_request\",\"coverage\":\"gateway_captured_requests_only\",\"redactions\":1,\"secret_events\":1,\"secret_detections\":1,\"secret_denied_requests\":0}",
+      "expected_requests": "3",
+      "gateway_valid": false
+    }
+  ]
+}

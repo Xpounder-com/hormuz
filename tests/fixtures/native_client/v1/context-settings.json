@@ -1,0 +1,107 @@
+{
+  "schema_id": "hormuz.native-client-fixtures",
+  "schema_version": 1,
+  "source_revision": "68b0b978fabac90f0bc7c33228a5bd3c68c681ab",
+  "cases": [
+    {
+      "id": "missing_is_off",
+      "file_bytes": null,
+      "expected_enabled": false
+    },
+    {
+      "id": "canonical_off",
+      "file_bytes": "{\"enabled\":false,\"schema_version\":1}",
+      "expected_enabled": false
+    },
+    {
+      "id": "canonical_on",
+      "file_bytes": "{\"enabled\":true,\"schema_version\":1}",
+      "expected_enabled": true
+    },
+    {
+      "id": "empty",
+      "file_bytes": "",
+      "expected_enabled": null
+    },
+    {
+      "id": "null",
+      "file_bytes": "null",
+      "expected_enabled": null
+    },
+    {
+      "id": "array",
+      "file_bytes": "[]",
+      "expected_enabled": null
+    },
+    {
+      "id": "future_version",
+      "file_bytes": "{\"enabled\":true,\"schema_version\":2}",
+      "expected_enabled": null
+    },
+    {
+      "id": "float_version",
+      "file_bytes": "{\"enabled\":true,\"schema_version\":1.0}",
+      "expected_enabled": null
+    },
+    {
+      "id": "bool_version",
+      "file_bytes": "{\"enabled\":true,\"schema_version\":true}",
+      "expected_enabled": null
+    },
+    {
+      "id": "numeric_enabled",
+      "file_bytes": "{\"enabled\":1,\"schema_version\":1}",
+      "expected_enabled": null
+    },
+    {
+      "id": "string_enabled",
+      "file_bytes": "{\"enabled\":\"true\",\"schema_version\":1}",
+      "expected_enabled": null
+    },
+    {
+      "id": "missing_enabled",
+      "file_bytes": "{\"schema_version\":1}",
+      "expected_enabled": null
+    },
+    {
+      "id": "missing_version",
+      "file_bytes": "{\"enabled\":true}",
+      "expected_enabled": null
+    },
+    {
+      "id": "unknown_field",
+      "file_bytes": "{\"enabled\":true,\"extra\":false,\"schema_version\":1}",
+      "expected_enabled": null
+    },
+    {
+      "id": "duplicate_key",
+      "file_bytes": "{\"enabled\":false,\"enabled\":true,\"schema_version\":1}",
+      "expected_enabled": null
+    },
+    {
+      "id": "escaped_key",
+      "file_bytes": "{\"enabl\\u0065d\":true,\"schema_version\":1}",
+      "expected_enabled": null
+    },
+    {
+      "id": "unsorted_keys",
+      "file_bytes": "{\"schema_version\":1,\"enabled\":true}",
+      "expected_enabled": null
+    },
+    {
+      "id": "whitespace",
+      "file_bytes": "{ \"enabled\":true,\"schema_version\":1}",
+      "expected_enabled": null
+    },
+    {
+      "id": "newline",
+      "file_bytes": "{\"enabled\":true,\"schema_version\":1}\n",
+      "expected_enabled": null
+    },
+    {
+      "id": "oversized",
+      "file_bytes": "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ",
+      "expected_enabled": null
+    }
+  ]
+}
