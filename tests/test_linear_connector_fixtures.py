@@ -123,7 +123,8 @@ class LinearConnectorFixtureTests(unittest.TestCase):
         context = case["candidate_targets"]["context_event"]
         self.assertEqual(case["source_mapping"], "mapping_pending")
         self.assertEqual(case["source_input"]["body"]["action"], "remove")
-        self.assertEqual(context["lifecycle"], "deleted")
+        # A schema-valid lifecycle shape is not an accepted remove/archive mapping.
+        self.assertTrue(case["open_question"])
         self.assertEqual(context["normalized_state"], "unknown")
         self.assertEqual(context["relationship_coverage"], "unknown")
         self.assertIsNone(context["supersedes_context_event_id"])

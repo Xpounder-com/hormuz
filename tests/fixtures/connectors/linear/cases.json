@@ -615,7 +615,7 @@
         }
       },
       "mapping_notes": [
-        "remove is documented as a generic webhook action; deleted is only a contract candidate. No archival equivalence, complete empty relation set, tombstone, or supersession is asserted."
+        "The context lifecycle enum has no unknown member. deleted is solely one schema-valid shape candidate, not a proposed interpretation of Linear remove. No archival equivalence, complete empty relation set, tombstone, or supersession is asserted."
       ],
       "open_question": "Does Project remove mean archive, recoverable deletion, or permanent removal for the authenticated webhook, and when may it supersede a prior complete projection?"
     },
