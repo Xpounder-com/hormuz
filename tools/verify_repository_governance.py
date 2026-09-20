@@ -39,7 +39,9 @@ CI_JOB_NAMES = {
     "oci-supply-chain": "OCI supply-chain evidence",
     "oci-reproducibility": "OCI reproducibility",
     "client-compatibility": "Codex and Claude Code compatibility",
+    "native-contracts": "Native client contracts",
 }
+NATIVE_WORKFLOW_REFERENCE = "./.github/workflows/native-client-contracts.yml"
 CI_PATH_SCOPED_JOB_IDS = (
     "postgres-compatibility",
     "postgres-backup-restore",
@@ -1389,6 +1391,14 @@ def _validate_ci_workflow(
                 f"always-applicable CI job became path-scoped: {job_id}"
             )
 
+    if job_fields["native-contracts"] != {
+        "name": "Native client contracts",
+        "needs": "changes",
+        "if": "${{ !cancelled() && needs.changes.outputs.classification != 'website_only' }}",
+        "uses": NATIVE_WORKFLOW_REFERENCE,
+    }:
+        raise RepositoryGovernanceError("native CI dependency contract changed")
+
     required = job_blocks["required"]
     expected_needs = ("changes", *CI_JOB_NAMES)
     needs_match = re.search(
@@ -1409,6 +1419,7 @@ def _validate_ci_workflow(
         or "SCOPE_RESULT: ${{ needs.changes.result }}" not in required
         or "RUN_FULL: ${{ needs.changes.outputs.run_full }}" not in required
         or "CLASSIFICATION: ${{ needs.changes.outputs.classification }}" not in required
+        or "NATIVE_CONTRACTS_RESULT: ${{ needs.native-contracts.result }}" not in required
         or "persist-credentials: false" not in required
     ):
         raise RepositoryGovernanceError("strict CI required-check gate changed")
@@ -1417,6 +1428,40 @@ def _validate_ci_workflow(
             raise RepositoryGovernanceError(
                 f"strict CI required-check result set changed: {job_id}"
             )
+
+
+def _validate_native_contract_workflow(
+    text: str,
+    job_blocks: dict[str, str],
+    job_fields: dict[str, dict[str, str]],
+) -> None:
+    """Keep one reusable native matrix, required by the calling CI aggregate."""
+
+    if (
+        "on:\n  workflow_call:\n  workflow_dispatch:\n" not in text
+        or "pull_request:" in text
+        or "push:" in text
+        or "continue-on-error:" in text
+        or set(job_blocks) != {"contracts"}
+        or job_fields["contracts"].get("name") != "Shared contracts (${{ matrix.os }})"
+        or job_fields["contracts"].get("runs-on") != "${{ matrix.os }}"
+        or "if" in job_fields["contracts"]
+        or re.findall(r"^        if: (.+)$", text, re.MULTILINE) != ["runner.os == 'macOS'"]
+        or "      fail-fast: false\n" not in text
+        or "        os: [ubuntu-latest, windows-latest, macos-15]\n" not in text
+        or "group: native-client-contracts-${{ github.workflow }}-${{ github.ref }}" not in text
+        or "persist-credentials: false" not in text
+        or "        run: python -m unittest -v tests.test_native_client_contracts\n" not in text
+        or "        run: cargo fmt --all -- --check\n" not in text
+        or "        run: cargo test --workspace --locked\n" not in text
+        or "        run: cargo clippy --workspace --all-targets --locked -- -D warnings\n" not in text
+        or (
+            "      - name: Verify existing Swift expectations\n"
+            "        if: runner.os == 'macOS'\n"
+            "        run: swift test --package-path clients/macos --filter SharedContractTests\n"
+        ) not in text
+    ):
+        raise RepositoryGovernanceError("native contract workflow changed")
 
 
 def _validate_workflows(
@@ -1429,6 +1474,7 @@ def _validate_workflows(
     contents_writers: list[tuple[str, str]] = []
     pages_writers: list[tuple[str, str]] = []
     pages_workflow_seen = False
+    native_workflow_seen = False
     candidate_freeze_seen = False
     candidate_job_bytes_valid = False
     candidate_workflow_bytes_valid = False
@@ -1488,6 +1534,9 @@ def _validate_workflows(
             )
         if path.name == "ci.yml":
             _validate_ci_workflow(text, job_blocks, job_fields)
+        if path.name == "native-client-contracts.yml":
+            _validate_native_contract_workflow(text, job_blocks, job_fields)
+            native_workflow_seen = True
         if path.name == "macos-distribution.yml":
             if any(
                 text.count(marker)
@@ -1783,7 +1832,10 @@ def _validate_workflows(
                 pages_writers.append((path.name, job_name))
         uses = ANY_ACTION_USE.findall(text)
         pinned = FULL_ACTION_USE.findall(text)
-        if len(uses) != len(pinned):
+        # This sole local call uses the same commit as the caller, whose exact
+        # dependency and called workflow are both validated above.
+        local_calls = uses.count(NATIVE_WORKFLOW_REFERENCE) if path.name == "ci.yml" else 0
+        if local_calls > 1 or len(uses) != len(pinned) + local_calls:
             raise RepositoryGovernanceError(
                 f"workflow contains an unpinned external Action: {path.name}"
             )
@@ -1810,6 +1862,8 @@ def _validate_workflows(
         raise RepositoryGovernanceError("candidate freeze workflow is required")
     if not pages_workflow_seen:
         raise RepositoryGovernanceError("Pages workflow is required")
+    if not native_workflow_seen:
+        raise RepositoryGovernanceError("native contract workflow is required")
     if contents_writers:
         raise RepositoryGovernanceError(
             "workflow-issued contents write is forbidden"
