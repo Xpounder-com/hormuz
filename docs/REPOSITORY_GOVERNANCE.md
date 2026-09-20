@@ -62,7 +62,13 @@ controls:
    stable release-blocking checks from the GitHub Actions app: `CI / required`,
    `Native Mac client and loopback contract`, and `Website checks`. The first
    aggregates every logical job in `.github/workflows/ci.yml` and rejects
-   failed, canceled, missing, or unexpected skipped results.
+   failed, canceled, missing, or unexpected skipped results. It also requires
+   the reusable Windows/macOS/Linux native contract matrix for Rust-only PRs
+   and all full CI runs. Only the explicit website-only scope may skip that
+   matrix. Both reduced PR scopes may skip the eight infrastructure jobs;
+   pushes to `main`, manual qualification, mixed changes, and changes to CI
+   machinery always run the full suite. The scopes are documented in
+   [VERIFICATION.md](VERIFICATION.md#automated-publication-gate).
 3. Only an organization administrator may create a `v*` tag.
 4. After creation, neither a `v*` nor a `candidate-v1.0.0-*` tag can be updated,
    force-moved, or deleted. The immutability ruleset has no bypass actor.
