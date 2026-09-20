@@ -100,3 +100,12 @@ traces verify these library decisions and separate operation cancellation.
 behavior. The existing Mac app and draft Windows shell do not consume this
 scheduler yet; connected UI, native power/footprint and release acceptance remain
 unproven. See the [scheduler integration contract](../clients/rust/session/README.md#central-dashboard-scheduler-337-source-checkpoint).
+
+Issue #338 adds an unpublished `1.5.0-dev.1`
+[interaction reducer](../clients/rust/interaction/README.md) with explicit
+visibility, hover/pin, settings and observed keyboard-focus state. Shared traces
+cover ordered inputs, stale timer cancellation, dismissal and reopening; six
+traces also exercise the existing Swift hover/navigation models. The shipping
+Swift sources remain unchanged. **#338 remains open** for native-shell wiring,
+hover/focus/outside-click/reopen and keyboard/screen-reader acceptance. This
+source checkpoint does not complete #331, native interaction or release gates.
