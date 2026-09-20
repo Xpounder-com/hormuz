@@ -151,7 +151,7 @@ impl PrivateDirectory {
     pub fn try_lock(&self) -> Result<PrivateTransaction> {
         Ok(PrivateTransaction {
             root: self.root.clone(),
-            _lock: self.lock_file("connection.lock", || {})?,
+            _lock: self.lock_file("connection.lock", false, || {})?,
         })
     }
 
@@ -166,7 +166,7 @@ impl PrivateDirectory {
         &self,
         after_lock: impl FnOnce(),
     ) -> Result<ApplicationInstance> {
-        let file = self.lock_file("instance.lock", after_lock)?;
+        let file = self.lock_file("instance.lock", true, after_lock)?;
         if file
             .metadata()
             .map_err(|_| PlatformError::Unavailable)?
@@ -181,7 +181,7 @@ impl PrivateDirectory {
         })
     }
 
-    fn lock_file(&self, name: &str, after_lock: impl FnOnce()) -> Result<File> {
+    fn lock_file(&self, name: &str, empty: bool, after_lock: impl FnOnce()) -> Result<File> {
         validate(&self.root, true)?;
         let name = CString::new(name).unwrap();
         // Concurrent first creation has been observed to return ENOENT on
@@ -192,6 +192,17 @@ impl PrivateDirectory {
             Some(file) => file,
             None => open_at(&self.root, &name, libc::O_RDWR)?.ok_or(PlatformError::Unavailable)?,
         };
+        // Reject malformed sentinels before contention can mask their shape.
+        // Instance acquisition checks again after taking the kernel lock.
+        if empty
+            && file
+                .metadata()
+                .map_err(|_| PlatformError::Unavailable)?
+                .len()
+                != 0
+        {
+            return Err(PlatformError::UnsafeStorage);
+        }
         file.try_lock().map_err(|error| match error {
             std::fs::TryLockError::WouldBlock => PlatformError::Busy,
             std::fs::TryLockError::Error(_) => PlatformError::Unavailable,

@@ -397,14 +397,14 @@ impl PrivateDirectory {
     pub fn try_lock(&self) -> Result<PrivateTransaction> {
         Ok(PrivateTransaction {
             root: self.root.clone(),
-            _lock: self.lock_file("connection.lock")?,
+            _lock: self.lock_file("connection.lock", false)?,
         })
     }
 
     /// Every shell startup path must use this same root. A busy lease requires
     /// native activation/reopen of the existing shell; this sends no IPC.
     pub fn try_claim_instance(&self) -> Result<ApplicationInstance> {
-        let file = self.lock_file("instance.lock")?;
+        let file = self.lock_file("instance.lock", true)?;
         if file
             .metadata()
             .map_err(|_| PlatformError::Unavailable)?
@@ -419,7 +419,7 @@ impl PrivateDirectory {
         })
     }
 
-    fn lock_file(&self, name: &str) -> Result<File> {
+    fn lock_file(&self, name: &str, empty: bool) -> Result<File> {
         let file = open(
             &self.root,
             name,
@@ -428,6 +428,15 @@ impl PrivateDirectory {
             FILE_SHARE_READ | FILE_SHARE_WRITE,
         )?
         .ok_or(PlatformError::Unavailable)?;
+        if empty
+            && file
+                .metadata()
+                .map_err(|_| PlatformError::Unavailable)?
+                .len()
+                != 0
+        {
+            return Err(PlatformError::UnsafeStorage);
+        }
         file.try_lock().map_err(|error| match error {
             std::fs::TryLockError::WouldBlock => PlatformError::Busy,
             std::fs::TryLockError::Error(_) => PlatformError::Unavailable,

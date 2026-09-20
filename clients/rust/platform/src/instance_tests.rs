@@ -130,10 +130,12 @@ fn instance_sentinel_rejects_nonempty_files_hardlinks_and_directories() {
                 std::fs::hard_link(&sentinel, temporary.path().join("other-link")).unwrap();
             }
         }
-        assert!(matches!(
-            directory.try_claim_instance(),
-            Err(PlatformError::UnsafeStorage)
-        ));
+        let result = directory.try_claim_instance();
+        assert!(
+            matches!(result, Err(PlatformError::UnsafeStorage)),
+            "synthetic {name} sentinel returned {:?}",
+            result.err()
+        );
         assert!(
             sentinel.exists(),
             "unsafe sentinels are never repaired or deleted"
@@ -159,6 +161,32 @@ fn mac_removed_directory_exhausts_creation_recovery_without_claiming_or_recreati
         Err(PlatformError::Unavailable)
     ));
     assert!(!path.exists());
+}
+
+#[test]
+fn malformed_sentinel_is_rejected_before_a_held_kernel_lock_masks_it() {
+    let temporary = tempfile::tempdir().unwrap();
+    let path = temporary.path().join("private");
+    let directory = PrivateDirectory::open(&path).unwrap();
+    directory
+        .try_lock()
+        .unwrap()
+        .write("unowned-sentinel", b"preserve", None)
+        .unwrap();
+    let sentinel = path.join("instance.lock");
+    std::fs::rename(path.join("unowned-sentinel"), &sentinel).unwrap();
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&sentinel)
+        .unwrap();
+    held.try_lock().unwrap();
+    assert!(matches!(
+        directory.try_claim_instance(),
+        Err(PlatformError::UnsafeStorage)
+    ));
+    drop(held);
+    assert_eq!(std::fs::read(sentinel).unwrap(), b"preserve");
 }
 
 #[cfg(target_os = "macos")]
