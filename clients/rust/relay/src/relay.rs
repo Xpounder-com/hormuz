@@ -191,6 +191,9 @@ fn run(
         loop {
             tokio::select! {
                 _ = &mut stopped => break,
+                completed = tasks.join_next(), if !tasks.is_empty() => {
+                    let _ = completed;
+                }
                 accepted = listener.accept() => {
                     let Ok((socket, peer)) = accepted else { break; };
                     if !peer.ip().is_loopback() { continue; }
@@ -314,7 +317,12 @@ async fn exchange(
     let mut body = request.into_body();
     let mut optimized = false;
     let mut upstream_length = length;
-    let upstream_body = if length <= MAX_OPTIMIZER_BYTES
+    let optimizable = matches!(
+        path.as_str(),
+        "/v1/responses" | "/v1/responses/compact" | "/v1/messages"
+    );
+    let upstream_body = if optimizable
+        && length <= MAX_OPTIMIZER_BYTES
         && matches!(&state.optimization, Optimization::OnDemand(_))
     {
         let mut collected = Vec::with_capacity(length);

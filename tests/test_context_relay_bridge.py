@@ -18,6 +18,10 @@ class BridgeTests(unittest.TestCase):
                 context_relay_bridge.transform(b"{}", "/v1/messages", "codex", "http://127.0.0.1:9"),
                 (b"{}", False),
             )
+            self.assertEqual(
+                context_relay_bridge.transform(b"{}", "/v1/messages/count_tokens", "claude-code", "http://127.0.0.1:9"),
+                (b"{}", False),
+            )
             probe.assert_not_called()
 
     def test_compatible_gateway_uses_existing_lossless_optimizer(self) -> None:

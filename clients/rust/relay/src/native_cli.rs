@@ -225,6 +225,7 @@ fn python_environment(name: &OsStr) -> bool {
             | "LANG"
             | "LC_ALL"
             | "SSL_CERT_FILE"
+            | "HORMUZ_CONTEXT_TOKENIZER_CACHE"
     )
 }
 
@@ -287,5 +288,14 @@ mod tests {
         ] {
             assert!(!preference_enabled(value));
         }
+    }
+
+    #[test]
+    fn helper_preserves_only_approved_runtime_configuration() {
+        assert!(python_environment(OsStr::new(
+            "HORMUZ_CONTEXT_TOKENIZER_CACHE"
+        )));
+        assert!(!python_environment(OsStr::new("OPENAI_API_KEY")));
+        assert!(!python_environment(OsStr::new("PYTHONPATH")));
     }
 }

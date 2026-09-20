@@ -32,6 +32,9 @@ selected `python3` (or `python.exe`) installation as an installed Hormuz wheel;
 `-I` intentionally excludes imports from the current working directory. If the
 helper, gateway capability or tokenizer resources are unavailable, the relay
 forwards the exact original body once. No Python process runs while idle.
+Claude token-count requests remain governed but bypass the optimizer entirely.
+The configured `HORMUZ_CONTEXT_TOKENIZER_CACHE` path is retained for the
+helper; direct provider credentials and Python import overrides are not.
 The gateway origin and request body reach the helper only through bounded
 stdin, never through process arguments.
 

@@ -26,7 +26,7 @@ class _PreferenceStore:
 def transform(body: bytes, path: str, client: str, gateway: str) -> tuple[bytes, bool]:
     routes = {
         "codex": {"/v1/responses", "/v1/responses/compact"},
-        "claude-code": {"/v1/messages", "/v1/messages/count_tokens"},
+        "claude-code": {"/v1/messages"},
     }
     if path not in routes.get(client, ()) or len(body) > MAX_REQUEST_BYTES:
         return body, False

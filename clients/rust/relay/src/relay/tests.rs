@@ -176,6 +176,34 @@ impl RequestOptimizer for Change {
     }
 }
 
+struct CountOptimizationCalls(Arc<AtomicUsize>);
+impl RequestOptimizer for CountOptimizationCalls {
+    fn prepare(&self, _path: &str, _original: &[u8]) -> Option<Vec<u8>> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        None
+    }
+}
+
+#[test]
+fn claude_token_count_requests_bypass_the_optimizer() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let relay = LocalRelay::start(
+        &profile("http://127.0.0.1:9", "claude-code"),
+        Arc::new(|| Err(RelayError::CredentialUnavailable)),
+        Optimization::OnDemand(Arc::new(CountOptimizationCalls(calls.clone()))),
+    )
+    .unwrap();
+    assert!(call(
+        &relay,
+        "/v1/messages/count_tokens",
+        b"{}",
+        "",
+        relay.local_credential()
+    )
+    .starts_with("HTTP/1.1 503"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
 #[test]
 fn enabled_transform_runs_once_before_egress_and_marks_only_changed_bytes() {
     let gateway = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
