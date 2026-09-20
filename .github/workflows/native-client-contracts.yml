@@ -59,6 +59,11 @@ jobs:
         env:
           HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json
+      - name: Reject invalid Windows acceptance targets and preserve evidence
+        if: runner.os == 'Windows'
+        working-directory: clients/rust
+        shell: powershell
+        run: ./windows/test-acceptance-failure.ps1
       - name: Check Windows runtime dependencies
         if: runner.os == 'Windows'
         working-directory: clients/rust

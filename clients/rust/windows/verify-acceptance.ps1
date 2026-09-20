@@ -110,6 +110,7 @@ try {
             "UIA SetFocus/InvokePattern do not prove physical keyboard input or screen-reader usability.",
             "Reopen uses a synthetic notification; actual tray activation remains pending.",
             "CPU counter precision and observer work can hide or perturb small changes.",
+            "Observer CPU covers the worker measurement interval, excluding compilation, the watchdog and WMI service work.",
             "Startup, wake-ups, GPU, display migration, sign-in and active-client scenarios remain unmeasured.",
             "Host power, thermal state and display configuration are uncontrolled."
         )
@@ -120,12 +121,22 @@ try {
     [IO.File]::Move($staged, $outputPath)
     Write-Output "windows_ui_acceptance=passed cycles=$Cycles samples=$($result.samples.Count) manual_acceptance=pending"
 } finally {
+    $cleanupFailed = $false
     foreach ($ownedProcess in @($workerProcess, $preview)) {
         if ($null -ne $ownedProcess) {
-            if (-not $ownedProcess.HasExited) { $ownedProcess.Kill(); $ownedProcess.WaitForExit() }
-            $ownedProcess.Dispose()
+            try {
+                if (-not $ownedProcess.HasExited) {
+                    $ownedProcess.Kill()
+                    if (-not $ownedProcess.WaitForExit(5000)) { $cleanupFailed = $true }
+                }
+            } catch {
+                $cleanupFailed = $true
+            } finally {
+                $ownedProcess.Dispose()
+            }
         }
     }
     $env:HORMUZ_PREVIEW_ACCEPTANCE_CONFIG = $previousSettings
     Remove-Item -LiteralPath $temporary -Recurse -Force
+    if ($cleanupFailed) { throw "An owned acceptance process could not be stopped within the cleanup deadline." }
 }

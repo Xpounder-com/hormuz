@@ -77,6 +77,8 @@ memory claim. Processes that start and exit between observations may be missed.
 
 The JSON records working set, private bytes, CPU time, process/handle counts,
 GDI/USER objects, observer CPU time, OS/architecture, and source/executable hashes.
+Observer CPU covers only the worker measurement interval, excluding compilation,
+the watchdog and WMI service work.
 Working set and private bytes are different counters; neither represents total
 physical footprint. Before/after values are observations with no numerical
 regression budget. Startup, wake-ups, GPU, physical display changes, sign-in and
@@ -91,6 +93,9 @@ is never overwritten. A parent watchdog owns both processes and stops them if
 the provider hangs or the check fails. The success evidence is written only
 after the preview exits cleanly. CI stores it beside the executable and pins
 its SHA-256 in the build manifest. `manual_platform_acceptance` stays `pending`.
+The Windows failure-path regression launches an owned, inert program without a
+preview window, requires rejection and process cleanup, and verifies that an
+existing evidence file is preserved before any new target is launched.
 
 API contracts: [Microsoft UI Automation InvokePattern](https://learn.microsoft.com/en-us/dotnet/api/system.windows.automation.invokepattern.invoke)
 and [Win32 GUI resource counters](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getguiresources).

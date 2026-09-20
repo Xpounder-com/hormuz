@@ -1453,6 +1453,11 @@ def _validate_native_contract_workflow(
             "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
             "        run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json\n",
         ),
+        "Reject invalid Windows acceptance targets and preserve evidence": (
+            "        working-directory: clients/rust\n",
+            "        shell: powershell\n",
+            "        run: ./windows/test-acceptance-failure.ps1\n",
+        ),
         "Check Windows runtime dependencies": (
             "        working-directory: clients/rust\n",
             "        shell: pwsh\n",
