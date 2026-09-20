@@ -26,7 +26,7 @@ impl fmt::Display for PlatformError {
         f.write_str(match self {
             Self::Unavailable => "Local storage is unavailable.",
             Self::UnsafeStorage => "Local storage did not pass its safety checks.",
-            Self::Busy => "Another client operation holds the connection lock.",
+            Self::Busy => "Another client operation holds the required local lock.",
             Self::Changed => "Local configuration changed before it could be saved.",
             Self::TooLarge => "The record exceeds the native storage limit.",
             Self::SecureStoreUnavailable => "The secure credential store is unavailable.",
@@ -76,12 +76,20 @@ pub trait BrowserOpener {
     fn open_authentication_url(&self, url: &str) -> Result<()>;
 }
 
+/// A uniquely owned child, never an arbitrary PID. Native implementations must
+/// bound all calls, reap a confirmed exit, and provide non-detaching Drop and
+/// parent-death cleanup. A failed stop keeps ownership with the caller. Native
+/// process groups/Windows job objects and executable trust remain shell work.
 pub trait SupervisedProcess {
+    /// False means the child has exited and has been reaped.
     fn is_running(&mut self) -> Result<bool>;
+    /// Ok means the owned child has exited and has been reaped.
     fn terminate_and_wait(&mut self) -> Result<()>;
 }
 
 /// Launch policy, binary identity and environment allowlists belong to #339/#341.
+/// Err must leave no untracked child. A successful child has the lifetime
+/// guarantees in SupervisedProcess, including when its owner crashes.
 pub trait ProcessSupervisor {
     type Child: SupervisedProcess;
     fn launch(&self, executable: &Path, arguments: &[String]) -> Result<Self::Child>;
@@ -112,7 +120,17 @@ mod windows;
 pub use windows::NativeCredentialStore;
 
 mod private;
+/// Native application ownership can only be acquired through a private
+/// directory. It cannot be forged, including on unsupported platforms.
+///
+/// ```compile_fail
+/// use hormuz_client_platform::ApplicationInstance;
+/// let instance = ApplicationInstance {};
+/// ```
+pub use private::ApplicationInstance;
 pub use private::{PrivateDirectory, PrivateTransaction, MAX_PRIVATE_FILE_BYTES};
+
+pub mod lifecycle;
 
 pub trait PrivateFiles {
     fn read(&self, name: &str) -> Result<Option<Vec<u8>>>;
@@ -140,3 +158,6 @@ impl RefreshCoordinator for PrivateDirectory {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, any(target_os = "macos", windows)))]
+mod instance_tests;
