@@ -24,7 +24,8 @@ actor's authoritative gateway usage. Missing values remain dashes. Current,
 stale, offline and sign-in-required states are explicit; retained values keep
 the last successful response time. Costs are estimates covering gateway-captured
 requests. The panel does not infer organization-wide totals or local activity.
-There is no governed AI-client launch/relay yet; that remains #341.
+The separate unpublished v1.6 Rust relay is a #341 source checkpoint. This
+v1.5 Windows panel does not launch or supervise it yet.
 
 One owned worker performs credential and network transactions, with one pending
 command and one coalesced notification. Dashboard views share the scheduler;
