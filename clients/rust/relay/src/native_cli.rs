@@ -7,18 +7,10 @@ use hormuz_client_relay::{
 use hormuz_client_session::{NativeTransport, Operation, SessionController, SystemClock};
 use serde::Deserialize;
 use std::ffi::OsStr;
-#[cfg(windows)]
-use std::io::{Read, Write};
 use std::path::PathBuf;
-#[cfg(windows)]
-use std::process::{Child, Stdio};
 use std::process::{Command, ExitCode};
 use std::sync::Arc;
-#[cfg(windows)]
-use std::thread;
 use std::time::Duration;
-#[cfg(windows)]
-use std::time::Instant;
 use zeroize::Zeroizing;
 
 const TRANSFORM_BUDGET: Duration = Duration::from_secs(30);
@@ -164,84 +156,33 @@ impl RequestOptimizer for PythonOptimizer {
     }
 }
 
-// Windows retains the existing exchange until its native pipe cancellation
-// and helper ownership adapter can be verified independently.
 #[cfg(windows)]
 impl RequestOptimizer for PythonOptimizer {
     fn prepare(&self, path: &str, original: &[u8]) -> Option<Vec<u8>> {
         if !enabled(&self.directory, &self.key) {
             return None;
         }
-        if original.len() > MAX_TRANSFORM_BYTES as usize {
-            return None;
-        }
-        let program = if cfg!(windows) {
-            "python.exe"
-        } else {
-            "python3"
-        };
-        let mut child = OwnedTransform(Some(
-            Command::new(program)
-                .arg("-I")
-                .arg("-m")
-                .arg("hormuz.context_relay_bridge")
-                .arg("--client")
-                .arg(&self.client)
-                .arg("--path")
-                .arg(path)
-                .env_clear()
-                .envs(std::env::vars_os().filter(|(name, _)| python_environment(name)))
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-                .ok()?,
-        ));
-        let mut stdin = child.0.as_mut()?.stdin.take()?;
-        let stdout = child.0.as_mut()?.stdout.take()?;
-        let body = Zeroizing::new(original.to_vec());
-        let gateway = Zeroizing::new(self.gateway.as_bytes().to_vec());
-        let length = u16::try_from(gateway.len()).ok()?.to_be_bytes();
-        let writer = thread::spawn(move || {
-            stdin.write_all(&length)?;
-            stdin.write_all(&gateway)?;
-            stdin.write_all(&body)
-        });
-        let reader = thread::spawn(move || {
-            let mut output = Vec::new();
-            stdout
-                .take(MAX_TRANSFORM_BYTES + 2)
-                .read_to_end(&mut output)
-                .map(|_| output)
-        });
-        let deadline = Instant::now() + TRANSFORM_BUDGET;
-        let status = loop {
-            match child.0.as_mut()?.try_wait() {
-                Ok(Some(status)) => {
-                    child.0 = None;
-                    break status;
-                }
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-                _ => {
-                    drop(child);
-                    let _ = writer.join();
-                    let _ = reader.join();
-                    return None;
-                }
-            }
-        };
-        let wrote = writer.join().ok()?.is_ok();
-        let output = reader.join().ok()?.ok()?;
-        if !status.success()
-            || !wrote
-            || output.is_empty()
-            || output.len() > MAX_TRANSFORM_BYTES as usize + 1
-        {
-            return None;
-        }
-        match output[0] {
-            0 if output.len() == 1 => None,
-            1 if output.len() > 1 => Some(output[1..].to_vec()),
+        let mut command = Command::new("python.exe");
+        command
+            .arg("-I")
+            .arg("-m")
+            .arg("hormuz.context_relay_bridge")
+            .arg("--client")
+            .arg(&self.client)
+            .arg("--path")
+            .arg(path)
+            .env_clear()
+            .envs(std::env::vars_os().filter(|(name, _)| python_environment(name)));
+        let output = Zeroizing::new(crate::helper_exchange_windows::run(
+            &mut command,
+            self.gateway.as_bytes(),
+            original,
+            TRANSFORM_BUDGET,
+            MAX_TRANSFORM_BYTES as usize,
+        )?);
+        match output.first() {
+            Some(0) if output.len() == 1 => None,
+            Some(1) if output.len() > 1 => Some(output[1..].to_vec()),
             _ => None,
         }
     }
@@ -301,18 +242,6 @@ fn preference_enabled(bytes: &[u8]) -> bool {
             )
             .as_bytes()
         && preference.enabled
-}
-
-#[cfg(windows)]
-struct OwnedTransform(Option<Child>);
-#[cfg(windows)]
-impl Drop for OwnedTransform {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.0.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
 }
 
 #[cfg(test)]

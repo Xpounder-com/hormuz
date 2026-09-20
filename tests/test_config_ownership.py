@@ -15,6 +15,7 @@ import hormuz._config_policy as config_policy
 import hormuz._config_routing as config_routing
 import hormuz._config_values as config_values
 import hormuz.config as config
+import hormuz.finance_account_binding as finance_account_binding
 
 
 class ConfigurationOwnershipTests(unittest.TestCase):
@@ -117,6 +118,21 @@ class ConfigurationOwnershipTests(unittest.TestCase):
             config_values,
         ):
             self.assertIn(module.__name__.removeprefix("hormuz."), source)
+
+    def test_finance_metadata_has_no_storage_credentials_or_io_dependencies(self) -> None:
+        source = Path(finance_account_binding.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        imports = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        } | {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        self.assertEqual(imports, {"__future__", "dataclasses", "re", "urllib.parse"})
 
 
 if __name__ == "__main__":
