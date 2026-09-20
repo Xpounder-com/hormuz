@@ -197,9 +197,9 @@ durable settings schema. Zero remains a measured value and missing remains absen
 
 ## Companion interaction traces
 
-`interactions.json` adds 15 synthetic event traces (122 steps) for #338. The
+`interactions.json` adds 16 synthetic event traces (130 steps) for #338. The
 unpublished [interaction library](../rust/interaction/README.md) checks every
-snapshot and timer/focus effect. Six marked traces also compare the existing
+snapshot and timer/focus effect. Seven marked traces also compare the existing
 Swift `HoverCoordinator` and `EdgeHubNavigation` projections without changing
 shipping Swift behavior. That comparison covers selected/pinned metric,
 pointer-inside-tooltip and settings page; it does not establish native window,

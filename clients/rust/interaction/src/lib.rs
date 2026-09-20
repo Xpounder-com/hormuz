@@ -179,6 +179,9 @@ pub struct Interaction {
     transient_expanded: bool,
     selected: Option<Metric>,
     pinned: Option<Metric>,
+    // Swift togglePin cancels dismissal when unpinning, including activation
+    // while the pointer is outside. A later metric/card leave resumes dismissal.
+    unpinned_waiting_for_leave: bool,
     settings: Option<SettingsPage>,
     pointer: PointerTarget,
     focus: Option<FocusTarget>,
@@ -197,6 +200,7 @@ impl Interaction {
             transient_expanded: false,
             selected: None,
             pinned: None,
+            unpinned_waiting_for_leave: false,
             settings: None,
             pointer: PointerTarget::Outside,
             focus: None,
@@ -318,6 +322,7 @@ impl Interaction {
                 self.close_settings(effects);
                 self.selected = Some(metric);
                 self.pinned = Some(metric);
+                self.unpinned_waiting_for_leave = false;
             }
             Event::TimerFired { token } => self.fire_timer(now_ms, token),
             _ if !self.visible => return Ok(()),
@@ -338,10 +343,20 @@ impl Interaction {
                 if let PointerTarget::Metric { metric } = target {
                     if self.pinned.is_none() && self.settings.is_none() {
                         self.selected = Some(metric);
+                        self.unpinned_waiting_for_leave = false;
                     }
                 }
             }
             Event::PointerExit { target } => {
+                // A leave for the selected metric/card resumes Swift's hover
+                // dismissal even if another region's enter arrived first.
+                // The current pointer region still independently prevents
+                // dismissal while inside the card or a newly hovered metric.
+                if target == PointerTarget::Details
+                    || matches!(target, PointerTarget::Metric { metric } if self.selected == Some(metric))
+                {
+                    self.unpinned_waiting_for_leave = false;
+                }
                 if self.pointer == target {
                     self.pointer = PointerTarget::Outside;
                 }
@@ -351,6 +366,7 @@ impl Interaction {
                 self.close_settings(effects);
                 self.selected = Some(metric);
                 self.pinned = (self.pinned != Some(metric)).then_some(metric);
+                self.unpinned_waiting_for_leave = self.pinned.is_none();
             }
             Event::CloseSettings => self.close_settings(effects),
             Event::Back => self.back(effects),
@@ -415,6 +431,7 @@ impl Interaction {
     fn clear_details(&mut self) {
         self.selected = None;
         self.pinned = None;
+        self.unpinned_waiting_for_leave = false;
         if self.pointer == PointerTarget::Details {
             self.pointer = PointerTarget::Outside;
         }
@@ -479,6 +496,7 @@ impl Interaction {
         let dismiss_details = self.visible
             && self.selected.is_some()
             && self.pinned.is_none()
+            && !self.unpinned_waiting_for_leave
             && self.pointer != PointerTarget::Details
             && !matches!(self.pointer, PointerTarget::Metric { .. })
             && self.focus != Some(FocusTarget::Details);

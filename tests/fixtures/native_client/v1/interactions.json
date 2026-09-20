@@ -3702,6 +3702,249 @@
           "effects": []
         }
       ]
+    },
+    {
+      "id": "unpin_outside_waits_for_a_later_pointer_leave",
+      "note": "Keyboard/menu/accessibility unpin with the pointer outside cancels dismissal and retains the selected card until a later metric/card leave, matching Swift togglePin. A cancelled callback in the unpin batch cannot dismiss the card.",
+      "swift_reference": true,
+      "mode": "always",
+      "visible": true,
+      "steps": [
+        {
+          "at_ms": 0,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "metric",
+              "metric": "cost"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 1,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "metric",
+                "metric": "cost"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 251
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 1,
+                "kind": "dismiss_details",
+                "deadline_ms": 251
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 2,
+          "events": [
+            {
+              "type": "toggle_pin",
+              "metric": "cost"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": "cost",
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": [
+            {
+              "type": "cancel_timer",
+              "token": 1
+            }
+          ]
+        },
+        {
+          "at_ms": 251,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            },
+            {
+              "type": "toggle_pin",
+              "metric": "cost"
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 600,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 1
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 700,
+          "events": [
+            {
+              "type": "pointer_enter",
+              "target": {
+                "region": "details"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "details"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        },
+        {
+          "at_ms": 701,
+          "events": [
+            {
+              "type": "pointer_exit",
+              "target": {
+                "region": "details"
+              }
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": "cost",
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": [
+              {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 951
+              }
+            ]
+          },
+          "effects": [
+            {
+              "type": "schedule_timer",
+              "timer": {
+                "token": 2,
+                "kind": "dismiss_details",
+                "deadline_ms": 951
+              }
+            }
+          ]
+        },
+        {
+          "at_ms": 951,
+          "events": [
+            {
+              "type": "timer_fired",
+              "token": 2
+            }
+          ],
+          "expected": {
+            "visibility_mode": "always",
+            "visibility": "expanded",
+            "selected_metric": null,
+            "pinned_metric": null,
+            "settings_page": null,
+            "pointer": {
+              "region": "outside"
+            },
+            "keyboard_focus": null,
+            "keep_open_after_outside_click": false,
+            "pending_timers": []
+          },
+          "effects": []
+        }
+      ]
     }
   ]
 }

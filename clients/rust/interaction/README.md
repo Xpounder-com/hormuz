@@ -75,6 +75,11 @@ its card before dismissal. A late exit for the previous region cannot overwrite
 the newly entered region. An outside click dismisses either card and keeps the
 widget expanded until the next pointer visit or visibility command.
 
+Unpinning cancels dismissal and keeps the selected card until a later leave of
+that metric or its card, including when keyboard/menu/accessibility activation
+occurs with the pointer already outside. A cancelled callback in the same batch
+cannot override that activation. Entering a metric resumes ordinary hover policy.
+
 Escape/back follows `review → client → home → closed` and
 `setup → connection → home → closed`. Escape without settings dismisses details.
 Closing a focused card requests native focus back to the widget. Outside click
@@ -98,13 +103,13 @@ interaction policy.
 ## Shared evidence and limits
 
 [`interactions.json`](../../../../tests/fixtures/native_client/v1/interactions.json)
-contains 15 synthetic traces with 122 steps, full expected snapshots and ordered
+contains 16 synthetic traces with 130 steps, full expected snapshots and ordered
 effects. The reference revision and four Swift source paths are recorded in the
 fixture. Rust executes every trace, plus focused tests for equal-time ordering,
 failed-batch rollback, focus requests, stale exits and 13,824 adversarial
 three-event sequences with interleaved timer delivery.
 
-Six traces also run through the **existing** Swift `HoverCoordinator` and
+Seven traces also run through the **existing** Swift `HoverCoordinator` and
 `EdgeHubNavigation`, in `SharedContractTests`. They compare selected/pinned
 metric, pointer-inside-tooltip and settings page after each step. For due
 dismissal, the test awaits the actual Swift publication using a shortened timer;

@@ -267,6 +267,89 @@ fn replacing_settings_with_pinned_details_discards_unfulfilled_settings_focus_re
 }
 
 #[test]
+fn unpin_outside_waits_for_a_selected_metric_or_card_leave() {
+    let mut state = Interaction::new(VisibilityMode::Fold, true);
+    dispatch(
+        &mut state,
+        0,
+        &[Event::ShowAndPin {
+            metric: Metric::Cost,
+        }],
+    );
+    let effects = dispatch(
+        &mut state,
+        1,
+        &[Event::TogglePin {
+            metric: Metric::Cost,
+        }],
+    );
+    assert!(effects.is_empty());
+    assert_eq!(state.selected, Some(Metric::Cost));
+    assert_eq!(state.pinned, None);
+    assert!(state.detail_timer.is_none());
+    dispatch(
+        &mut state,
+        500,
+        &[
+            Event::FocusChanged { target: None },
+            exit(PointerTarget::Metric {
+                metric: Metric::Tokens,
+            }),
+            Event::TimerFired {
+                token: TimerToken(999),
+            },
+        ],
+    );
+    assert!(state.detail_timer.is_none());
+    assert_eq!(state.selected, Some(Metric::Cost));
+    // Match Swift leaveMetric's selected-metric guard. Native region delivery
+    // order need not leave the current pointer recorded over that metric.
+    dispatch(
+        &mut state,
+        501,
+        &[exit(PointerTarget::Metric {
+            metric: Metric::Cost,
+        })],
+    );
+    let timer = state.detail_timer.unwrap();
+    assert_eq!(timer.deadline_ms, 751);
+    dispatch(&mut state, 751, &[fire(timer)]);
+    assert_eq!(state.selected, None);
+    assert_eq!(state.snapshot().visibility, Visibility::Expanded);
+    assert_eq!(state.fold_timer.unwrap().deadline_ms, 1001);
+}
+
+#[test]
+fn pin_then_unpin_at_deadline_cancels_callback_without_scheduling_a_replacement() {
+    let mut state = Interaction::new(VisibilityMode::Always, true);
+    let target = PointerTarget::Metric {
+        metric: Metric::Cost,
+    };
+    dispatch(&mut state, 0, &[enter(target)]);
+    dispatch(&mut state, 1, &[exit(target)]);
+    let timer = state.detail_timer.unwrap();
+    let effects = dispatch(
+        &mut state,
+        251,
+        &[
+            fire(timer),
+            Event::TogglePin {
+                metric: Metric::Cost,
+            },
+            Event::TogglePin {
+                metric: Metric::Cost,
+            },
+        ],
+    );
+    assert_eq!(effects, [Effect::CancelTimer { token: timer.token }]);
+    assert_eq!(state.selected, Some(Metric::Cost));
+    assert_eq!(state.pinned, None);
+    assert!(state.detail_timer.is_none());
+    dispatch(&mut state, 1000, &[fire(timer)]);
+    assert_eq!(state.selected, Some(Metric::Cost));
+}
+
+#[test]
 fn short_adversarial_traces_keep_ui_and_timer_invariants() {
     let events = [
         enter(PointerTarget::Widget),
@@ -323,6 +406,10 @@ fn short_adversarial_traces_keep_ui_and_timer_invariants() {
                     batch.extend(state.snapshot().pending_timers.into_iter().map(fire));
                     dispatch(&mut state, index as u64 * 300, &batch);
                     assert!(state.pinned.is_none() || state.pinned == state.selected);
+                    assert!(
+                        !state.unpinned_waiting_for_leave
+                            || (state.selected.is_some() && state.pinned.is_none())
+                    );
                     assert!(state.settings.is_none() || state.selected.is_none());
                     assert!(state
                         .focus

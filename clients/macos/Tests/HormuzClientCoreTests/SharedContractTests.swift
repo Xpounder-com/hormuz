@@ -11,7 +11,7 @@ final class SharedContractTests: PrivateStorageTestCase {
         let vectors = try fixture("interactions")
         let cases = try XCTUnwrap(vectors["cases"] as? [[String: Any]])
             .filter { $0["swift_reference"] as? Bool == true }
-        XCTAssertEqual(cases.count, 6)
+        XCTAssertEqual(cases.count, 7)
         for item in cases {
             let id = try XCTUnwrap(item["id"] as? String)
             let hover = HoverCoordinator(dismissalDelayNanoseconds: 1_000_000)
