@@ -38,6 +38,16 @@ pub struct ApplicationInstance {
     _lock: File,
 }
 
+impl Drop for ApplicationInstance {
+    fn drop(&mut self) {
+        // A concurrent fork may temporarily inherit the open file description
+        // before CLOEXEC closes it. Explicitly release our lease, rather than
+        // waiting for every inherited descriptor to close. The guard is never
+        // cloned and its owner has already drained its workers/helpers.
+        let _ = self._lock.unlock();
+    }
+}
+
 fn validate(file: &File, directory: bool) -> Result<()> {
     let meta = file.metadata().map_err(|_| PlatformError::UnsafeStorage)?;
     if meta.uid() != unsafe { libc::getuid() }
