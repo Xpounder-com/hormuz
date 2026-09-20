@@ -69,7 +69,7 @@ impl RefreshPolicy {
 struct Flight {
     id: Arc<()>,
     generation: Arc<()>,
-    started: Duration,
+    abandoned: bool,
 }
 struct Debounce {
     first: Duration,
@@ -126,6 +126,18 @@ impl RefreshState {
         }
         self.last_now = now;
     }
+    fn reconcile_dropped(&mut self, now: Duration) {
+        if let Some(id) = self
+            .flight
+            .as_ref()
+            .filter(|f| f.abandoned)
+            .map(|f| f.id.clone())
+        {
+            // Drop has no clock or I/O. Start the delay at the next observed
+            // event, never at the possibly long-past dispatch time.
+            self.finish(&id, now, Err(ClientError::GatewayUnavailable), false);
+        }
+    }
     fn due(&mut self, now: Duration, fresh: bool) -> Duration {
         if self.reopened {
             self.regular = Some(if fresh {
@@ -159,7 +171,13 @@ impl RefreshState {
         // Relay completions and view changes must not defeat offline backoff.
         self.retry.map_or(due, |retry| due.max(retry))
     }
-    fn finish(&mut self, id: &Arc<()>, now: Duration, result: Result<(), ClientError>) {
+    fn finish(
+        &mut self,
+        id: &Arc<()>,
+        now: Duration,
+        result: Result<(), ClientError>,
+        needs_authentication: bool,
+    ) {
         let Some(flight) = self.flight.as_ref().filter(|f| Arc::ptr_eq(&f.id, id)) else {
             return;
         };
@@ -176,7 +194,7 @@ impl RefreshState {
                 self.retry = None;
                 self.regular = Some(now.saturating_add(self.interval()));
             }
-            Err(error) if snapshot::authentication_lost(error) => {
+            Err(_) if needs_authentication => {
                 self.authentication_blocked = true;
                 self.retry = None;
                 self.dirty = None;
@@ -215,9 +233,12 @@ impl DashboardRefresh {
 impl Drop for DashboardRefresh {
     fn drop(&mut self) {
         let mut state = self.scheduler.lock().unwrap();
-        if let Some(flight) = &state.flight {
-            let started = flight.started.max(state.last_now);
-            state.finish(&self.id, started, Err(ClientError::GatewayUnavailable));
+        if let Some(flight) = state
+            .flight
+            .as_mut()
+            .filter(|f| Arc::ptr_eq(&f.id, &self.id))
+        {
+            flight.abandoned = true;
         }
     }
 }
@@ -296,6 +317,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
         let mut state = self.refresh.lock().unwrap();
         let now = self.clock.elapsed();
         state.observe_time(now);
+        state.reconcile_dropped(now);
         if state.profile.is_some() && !state.quit && !state.authentication_blocked {
             match &mut state.dirty {
                 Some(dirty) => dirty.last = now,
@@ -322,6 +344,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
 
     fn dashboard_plan(&self, state: &mut RefreshState, now: Duration) -> Option<Duration> {
         state.observe_time(now);
+        state.reconcile_dropped(now);
         if !state.enabled() {
             return None;
         }
@@ -357,7 +380,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
         state.flight = Some(Flight {
             id: id.clone(),
             generation: state.generation.clone(),
-            started: now,
+            abandoned: false,
         });
         state.dirty = None;
         Some(DashboardRefresh {
@@ -383,10 +406,11 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
         } else {
             Err(ClientError::GatewayUnavailable)
         };
-        self.refresh
-            .lock()
-            .unwrap()
-            .finish(&job.id, self.clock.elapsed(), result);
+        let mut state = self.refresh.lock().unwrap();
+        let needs_authentication =
+            self.snapshot().reading().status() == ReadingStatus::NeedsAuthentication;
+        state.finish(&job.id, self.clock.elapsed(), result, needs_authentication);
+        drop(state);
         result
     }
 }

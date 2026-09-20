@@ -194,7 +194,9 @@ a credential-refresh intent and must finish its bounded commit or recovery.
 An explicit `job.cancellation()` handle belongs only to that dashboard operation.
 Cancellation after intent still requires session recovery; no automatic replay.
 Relay operations keep separate cancellation handles and lifetimes. Dropping a
-job before dispatch releases its slot with a retry delay; a worker must always
+job before dispatch releases its slot with a retry delay starting at the next
+scheduler event, so even a long-queued discarded job cannot retry immediately.
+A worker must always
 report completion so the shell can rearm its alarm. Quit is terminal for that
 controller; helper shutdown remains the lifecycle owner's responsibility.
 
@@ -212,6 +214,7 @@ deterministic scheduling traces and synthetic concurrency tests, in addition to
 the workspace verification above. Coverage includes duplicate views/events,
 overlapping sleep/lock gates, stale-only reopening, bounded debounce, capped
 backoff, network recovery, wall/monotonic clock changes, dropped/foreign jobs,
+immediate refresh supersession without false authentication suspension,
 profile/sign-out invalidation, persisted-refresh completion under suspension,
 and explicit cancellation after intent. A real loopback request proves separate
 operation cancellation; it is a buffered synthetic request, not a streaming

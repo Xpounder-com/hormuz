@@ -343,6 +343,41 @@ fn explicit_cancellation_and_dropped_or_foreign_jobs_release_only_their_slot() {
 }
 
 #[test]
+fn a_job_discarded_after_a_long_queue_wait_gets_a_new_retry_delay() {
+    let (h, c) = setup(success());
+    c.set_dashboard_visibility(DashboardVisibility::Summary);
+    let queued = c.take_dashboard_refresh().unwrap();
+    h.clock.sleep(seconds(30));
+    drop(queued);
+    assert_eq!(c.next_dashboard_wakeup(), Some(seconds(5)));
+    h.clock.sleep(seconds(4));
+    assert_eq!(c.next_dashboard_wakeup(), Some(seconds(1)));
+    assert!(c.take_dashboard_refresh().is_none());
+    h.clock.sleep(seconds(1));
+    run(&c).unwrap();
+    h.done();
+}
+
+#[test]
+fn an_immediate_refresh_superseding_a_scheduled_job_does_not_block_authentication() {
+    let (h, c) = setup([success(), success()].into_iter().flatten().collect());
+    c.set_dashboard_visibility(DashboardVisibility::Summary);
+    let queued = c.take_dashboard_refresh().unwrap();
+    c.refresh_snapshot(&profile(), &Operation::default())
+        .unwrap();
+    assert_eq!(
+        c.run_dashboard_refresh(queued),
+        Err(ClientError::ConfigurationChanged)
+    );
+    assert_eq!(c.snapshot().reading().status(), ReadingStatus::Current);
+    assert_eq!(c.next_dashboard_wakeup(), Some(seconds(5)));
+    h.clock.sleep(seconds(5));
+    run(&c).unwrap();
+    assert_eq!(c.next_dashboard_wakeup(), Some(seconds(45)));
+    h.done();
+}
+
+#[test]
 fn policy_is_tunable_but_cannot_create_zero_or_unbounded_intervals() {
     for values in [
         [0, 7, 60, 2, 5, 300],
