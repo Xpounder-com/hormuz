@@ -108,7 +108,7 @@ where
             .spawn(move || {
                 loop {
                     let mut state = events.state.lock().unwrap();
-                    if state.quitting {
+                    if state.quitting && !matches!(state.command, Some(Command::SignOut)) {
                         break;
                     }
                     let epoch = state.epoch;
@@ -269,8 +269,13 @@ impl<C, S, T, K, B> Drop for Connection<C, S, T, K, B> {
             let mut state = self.shared.state.lock().unwrap();
             state.quitting = true;
             state.epoch += 1;
-            if let Some(operation) = &state.operation {
-                operation.cancel();
+            // An accepted sign-out must reach durable revocation intent even
+            // if Exit follows immediately. Earlier work was already cancelled
+            // by sign_out(); do not cancel the revocation that replaces it.
+            if state.view.phase != Phase::SigningOut {
+                if let Some(operation) = &state.operation {
+                    operation.cancel();
+                }
             }
             self.shared.wake.notify_one();
         }

@@ -606,3 +606,16 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
         .try_claim_instance()
         .is_ok());
 }
+
+#[test]
+fn immediately_quitting_after_sign_out_still_drains_revocation() {
+    let store = Store::default();
+    let connection = start(store.clone(), Transport::default(), TestClock::default());
+    sign_in(&connection);
+    connection.sign_out();
+    drop(connection);
+    assert!(
+        store.load().unwrap().is_none(),
+        "accepted sign-out was discarded by quit"
+    );
+}
