@@ -61,7 +61,7 @@ fn exchange(
     nonblocking(&stdin)?;
     nonblocking(&stdout)?;
     let mut stdin = Some(stdin);
-    let mut written = 0;
+    let mut written = 0_usize;
     let mut output = Zeroizing::new(Vec::new());
     let mut buffer = Zeroizing::new([0_u8; CHUNK_BYTES]);
     let mut eof = false;
@@ -158,8 +158,8 @@ mod tests {
     fn assert_reaped(pid: u32) {
         let pid = Pid::from_raw(pid.try_into().unwrap()).unwrap();
         assert_eq!(
-            waitpid(Some(pid), WaitOptions::NOHANG),
-            Err(rustix::io::Errno::CHILD),
+            waitpid(Some(pid), WaitOptions::NOHANG).unwrap_err(),
+            rustix::io::Errno::CHILD,
             "the direct helper must already have been reaped"
         );
     }
