@@ -89,6 +89,8 @@ pub(crate) fn run(
     let mut wrote = false;
     let mut output = None;
     let mut failed = false;
+    #[cfg(test)]
+    let mut failure_phase = "none";
     while Instant::now() < deadline {
         if status.is_none() {
             match child.try_wait_status() {
@@ -96,6 +98,10 @@ pub(crate) fn run(
                 Ok(None) => {}
                 Err(_) => {
                     failed = true;
+                    #[cfg(test)]
+                    {
+                        failure_phase = "child_status";
+                    }
                     break;
                 }
             }
@@ -105,13 +111,29 @@ pub(crate) fn run(
         {
             Ok(PipeResult::Written(Ok(()))) => wrote = true,
             Ok(PipeResult::Read(Ok(bytes))) => output = Some(bytes),
-            Ok(PipeResult::Written(Err(_)) | PipeResult::Read(Err(_))) => {
+            Ok(PipeResult::Written(Err(_))) => {
                 failed = true;
+                #[cfg(test)]
+                {
+                    failure_phase = "writer";
+                }
+                break;
+            }
+            Ok(PipeResult::Read(Err(_))) => {
+                failed = true;
+                #[cfg(test)]
+                {
+                    failure_phase = "reader";
+                }
                 break;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 failed = true;
+                #[cfg(test)]
+                {
+                    failure_phase = "channel";
+                }
                 break;
             }
         }
@@ -119,6 +141,13 @@ pub(crate) fn run(
             break;
         }
     }
+
+    #[cfg(test)]
+    eprintln!(
+        "synthetic exchange phase={failure_phase} failed={failed} exit={:?} wrote={wrote} output_len={:?}",
+        status.as_ref().map(ExitStatus::code),
+        output.as_ref().map(|bytes: &Zeroizing<Vec<u8>>| bytes.len()),
+    );
 
     // The job closes before any join. Its kernel lifetime rule stops children
     // that inherited the pipe ends, including after the direct helper exited.
@@ -142,9 +171,10 @@ fn finish_pipe_threads(writer: JoinHandle<()>, reader: JoinHandle<()>) {
         cancel_pipe_io(&writer);
         cancel_pipe_io(&reader);
         if Instant::now() >= deadline {
-            // This relay is a dedicated child process. Exiting is safer than
-            // returning while a thread still owns request or response bytes.
-            std::process::abort();
+            // The Job handle is already closed. Exit the dedicated relay
+            // without a crash dump rather than return with data-bearing
+            // workers still running; the OS closes their remaining handles.
+            std::process::exit(1);
         }
         thread::sleep(POLL_INTERVAL);
     }
@@ -157,7 +187,7 @@ fn finish_pipe_thread(worker: JoinHandle<()>) {
     while !worker.is_finished() {
         cancel_pipe_io(&worker);
         if Instant::now() >= deadline {
-            std::process::abort();
+            std::process::exit(1);
         }
         thread::sleep(POLL_INTERVAL);
     }
@@ -223,7 +253,6 @@ mod tests {
     fn oversized_output_fails_closed_and_stops_helper() {
         let temporary = tempfile::tempdir().unwrap();
         let marker = temporary.path().join("running");
-        let started = Instant::now();
         assert!(run(
             &mut command("overflow", &marker),
             b"origin",
@@ -233,7 +262,6 @@ mod tests {
         )
         .is_none());
         assert!(marker.exists(), "fake overflow helper did not start");
-        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[test]

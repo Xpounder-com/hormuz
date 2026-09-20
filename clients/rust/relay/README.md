@@ -51,8 +51,9 @@ extend the I/O deadline through a reader/writer thread join.
 On Windows, the optimizer helper starts suspended and is assigned to its own
 kill-on-close Job Object before running. The exchange reads and writes pipes
 concurrently under one 30-second deadline. It closes the job before joining
-the workers, requests cancellation of pending synchronous pipe I/O, and aborts
-the dedicated relay if workers cannot finish within a further two seconds;
+the workers, requests cancellation of pending synchronous pipe I/O, and exits
+the dedicated relay without a crash dump if workers cannot finish within a
+further two seconds;
 it cannot return while threads still hold request or response bytes. Synthetic
 Windows tests exercise inherited pipe ends, blocked I/O, oversized output and
 bidirectional exchange. Process creation and kernel termination are not covered
