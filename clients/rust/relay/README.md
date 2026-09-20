@@ -32,6 +32,8 @@ selected `python3` (or `python.exe`) installation as an installed Hormuz wheel;
 `-I` intentionally excludes imports from the current working directory. If the
 helper, gateway capability or tokenizer resources are unavailable, the relay
 forwards the exact original body once. No Python process runs while idle.
+The gateway origin and request body reach the helper only through bounded
+stdin, never through process arguments.
 
 This source checkpoint is not loaded by the Windows panel or shipping Mac app.
 The direct child is reaped, but a native process group/Windows job adapter for

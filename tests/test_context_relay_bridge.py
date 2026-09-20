@@ -41,16 +41,22 @@ class BridgeTests(unittest.TestCase):
     def test_subprocess_protocol_fails_open_to_exact_request_without_gateway_support(self) -> None:
         command = [
             sys.executable, "-m", "hormuz.context_relay_bridge", "--client", "codex",
-            "--gateway", "http://127.0.0.1:9", "--path", "/v1/responses",
+            "--path", "/v1/responses",
         ]
         original = b'{ "input" : [] }\n'
-        result = subprocess.run(command, input=original, capture_output=True, timeout=10, check=False)
+        gateway = b"http://127.0.0.1:9"
+        frame = len(gateway).to_bytes(2, "big") + gateway
+        result = subprocess.run(command, input=frame + original, capture_output=True, timeout=10, check=False)
         self.assertEqual((result.returncode, result.stdout), (0, b"\x00"))
         oversized = subprocess.run(
-            command, input=b"x" * (MAX_REQUEST_BYTES + 1), capture_output=True,
+            command, input=frame + b"x" * (MAX_REQUEST_BYTES + 1), capture_output=True,
             timeout=10, check=False,
         )
         self.assertEqual((oversized.returncode, oversized.stdout), (2, b""))
+        truncated = subprocess.run(
+            command, input=b"\x00\x14short", capture_output=True, timeout=10, check=False,
+        )
+        self.assertEqual((truncated.returncode, truncated.stdout), (2, b""))
 
 
 if __name__ == "__main__":

@@ -146,8 +146,6 @@ impl RequestOptimizer for PythonOptimizer {
                 .arg("hormuz.context_relay_bridge")
                 .arg("--client")
                 .arg(&self.client)
-                .arg("--gateway")
-                .arg(&self.gateway)
                 .arg("--path")
                 .arg(path)
                 .env_clear()
@@ -161,7 +159,13 @@ impl RequestOptimizer for PythonOptimizer {
         let mut stdin = child.0.as_mut()?.stdin.take()?;
         let stdout = child.0.as_mut()?.stdout.take()?;
         let body = Zeroizing::new(original.to_vec());
-        let writer = thread::spawn(move || stdin.write_all(&body));
+        let gateway = Zeroizing::new(self.gateway.as_bytes().to_vec());
+        let length = u16::try_from(gateway.len()).ok()?.to_be_bytes();
+        let writer = thread::spawn(move || {
+            stdin.write_all(&length)?;
+            stdin.write_all(&gateway)?;
+            stdin.write_all(&body)
+        });
         let reader = thread::spawn(move || {
             let mut output = Vec::new();
             stdout
