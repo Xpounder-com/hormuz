@@ -11,11 +11,17 @@ mod implementation {
     use std::path::Path;
     pub struct PrivateDirectory;
     pub struct PrivateTransaction;
+    pub struct ApplicationInstance {
+        _private: (),
+    }
     impl PrivateDirectory {
         pub fn open(_root: &Path) -> Result<Self> {
             Err(PlatformError::Unsupported)
         }
         pub fn try_lock(&self) -> Result<PrivateTransaction> {
+            Err(PlatformError::Unsupported)
+        }
+        pub fn try_claim_instance(&self) -> Result<ApplicationInstance> {
             Err(PlatformError::Unsupported)
         }
     }
@@ -28,7 +34,9 @@ mod implementation {
         }
     }
 }
-pub use implementation::{PrivateDirectory, PrivateTransaction};
+#[cfg(windows)]
+pub use implementation::InstanceListener;
+pub use implementation::{ApplicationInstance, PrivateDirectory, PrivateTransaction};
 pub const MAX_PRIVATE_FILE_BYTES: usize = 1_048_576;
 
 #[cfg(any(target_os = "macos", windows))]
@@ -39,6 +47,7 @@ fn validate_name(name: &str) -> crate::Result<()> {
         || name == ".."
         || name.to_ascii_lowercase().starts_with(".write-")
         || name.eq_ignore_ascii_case("connection.lock")
+        || name.eq_ignore_ascii_case("instance.lock")
         || name.ends_with(['.', ' '])
         || !name
             .bytes()

@@ -1,0 +1,6 @@
+# Keep the native x64 preview runnable without a separately installed Visual C++
+# redistributable. Windows system DLLs remain dynamic; platform acceptance is separate.
+[target.x86_64-pc-windows-msvc]
+# Replace wall-clock PE timestamps with content-derived values. Incremental
+# linking is incompatible with deterministic link output.
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/Brepro", "-C", "link-arg=/INCREMENTAL:NO"]

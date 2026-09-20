@@ -1,10 +1,12 @@
 # Native platform services
 
 This unpublished `1.5.0-dev.1` library implements the custody, private-file and
-coordination foundations of [#333](https://github.com/Xpounder-com/hormuz/issues/333).
-It also defines the browser, supervised-process and lifecycle-event interfaces
-for their owning shell/scheduler issues. Those interfaces start no browser,
-process, event subscription, timer, network runtime or tokenizer.
+coordination foundations of [#333](https://github.com/Xpounder-com/hormuz/issues/333),
+plus application ownership and worker-side helper lifecycle policy for a bounded
+slice of [#339](https://github.com/Xpounder-com/hormuz/issues/339). It defines the
+browser, supervised-process and lifecycle-event interfaces for their owning
+native integrations. Constructing these types starts no browser, process, event
+subscription, timer, network runtime or tokenizer.
 
 The shipping Mac app and Python gateway do not load this library. Their versions,
 credential records and configuration are unchanged. A native library test is
@@ -65,7 +67,8 @@ The `PrivateFiles` interface is available only through the retained transaction.
   counts. A held root handle prevents directory replacement; the lock handle
   disallows deletion. Read-only attributes are never treated as privacy.
 - Portable names are bounded to 128 ASCII bytes and exclude separators, streams,
-  Windows devices and reserved lock/staging names, including case aliases. Files
+  Windows devices and reserved `connection.lock`, `instance.lock` and staging
+  names, including case aliases. Files
   are bounded while reading and writing at 1 MiB. They are non-executable.
 - Writes use a private exclusive staging file, flush its bytes, then use a
   native atomic exchange/replacement. The displaced content is compared with the
@@ -88,9 +91,99 @@ The `PrivateFiles` interface is available only through the retained transaction.
 All native APIs are synchronous worker operations. Errors are fixed variants
 and fixed display messages; they contain no paths, SIDs, OS diagnostics or data.
 `BrowserOpener`, `ProcessSupervisor`, `SupervisedProcess` and `LifecycleEvents`
-are interfaces only. Browser validation/launch, binary/environment policy,
-process termination and event coalescing are implemented and verified in the
-corresponding later shell/lifecycle issues.
+still require native implementations. Browser validation/launch, signed binary
+and environment policy, process groups/job objects, bounded termination and
+native event delivery remain work for the owning shell issues.
+
+## Application ownership and helper lifecycle
+
+`PrivateDirectory::try_claim_instance()` takes a separate, nonblocking kernel
+lock on the fixed private `instance.lock`. `ApplicationInstance` retains that
+lock and the directory until dropped. The sentinel must be an empty regular
+file with the same owner, mode/ACL, no-follow and single-hard-link checks as
+private configuration. Mac also checks that the opened and current sentinel
+identities match after acquisition; Windows denies deletion/replacement while
+its handle is open. Unsafe or nonempty sentinels fail without repair or removal.
+If Mac's concurrent first creation returns `ENOENT`, acquisition makes one
+attempt to open the existing winner's sentinel and still takes the kernel lock;
+an absent sentinel remains `Unavailable`. Other unsafe failures are not retried.
+Dropping the guard or process death releases ownership; an existing empty file
+does not mean an instance is running. The sentinel is never deleted on exit.
+
+Every manual, login-start and reopen path must choose the same shell-provided
+application-data root. A second process receives `Busy` and must use the native
+shell's activation/reopen path without creating a helper owner. The long-lived
+application lock is independent of `connection.lock`: app/helper refresh
+transactions remain available while the application is resident. Linux still
+returns `Unsupported`; no ordinary-file fallback is introduced.
+
+`lifecycle::HelperLifecycle` owns an application guard and at most one
+`ProcessSupervisor::Child`. `tick` runs on a bounded worker; the shell supplies
+monotonic elapsed time and schedules the next worker turn. It provides these
+source policies:
+
+- `close_panel` and `reopen` emit only `Hide` and `Reopen` intents for #338/native
+  presentation. They do not stop clients, launch a helper or reset retry state.
+- Explicit helper demand starts one child. A successful launch reserves its
+  handle until confirmed exit/termination. Failed liveness or stop operations
+  retain ownership, so they cannot lead to a duplicate launch or a false
+  ready-to-exit result. `HelperStatus::Owned` describes that retained handle;
+  it does not claim service readiness, healthy authentication or connectivity.
+- Each admitted client gets a noncloneable `ClientLease`, held until that client
+  exits. Counts are bounded at 1,024. Removing demand cannot stop a helper while
+  any accepted clients remain. The shell must verify readiness before admission
+  and roll back the lease if its subsequent client launch fails.
+- Quit and update immediately stop admissions and drain existing clients. Only
+  after the final lease drops and the helper is confirmed stopped does the
+  controller report `ReadyToExit`. A quit request cancels a pending update.
+  Explicit `force_quit` may stop the owned helper while clients still exist;
+  it becomes a quit and never authorizes a forced update. It does not kill
+  external client processes. Panel close alone never initiates this sequence.
+- Sleep and session lock independently pause admissions and new/recovery
+  launches. They preserve already-owned helpers and client leases; waking or
+  unlocking cannot create a duplicate. Network hints belong to the session
+  scheduler and have no helper-launch effect here.
+- Launch failure and confirmed unexpected exit use bounded exponential delay.
+  The default budget is three attempts including initial launch; successful
+  short launches and reopen/wake/network events do not reset it. The shell can
+  offer an explicit retry after exhaustion. No request or authentication retry
+  is performed by this controller.
+
+`HelperCommand` rejects relative/NUL-containing/oversized command inputs and
+redacts debug output. This is structural validation only; the native supervisor
+must enforce executable identity, allowed operational arguments and environment
+policy. Neither credentials nor request/response bodies belong in arguments.
+Snapshots expose only phase, booleans, counts and monotonic retry timing.
+
+Shutdown failures retain the child and instance guard for retry. Controller drop
+attempts cleanup and drops the child before releasing the guard. Native child
+adapters must guarantee non-detaching drop and parent-death cleanup using their
+own process ownership mechanisms. Fake-supervisor tests prove controller policy,
+not orphan prevention after a real shell crash. No native supervisor is supplied
+by this checkpoint, so that crash containment and process cleanup remain open.
+
+On Windows, `ApplicationInstance::listen_for_reopen` consumes the application
+lease and retains it until its native named-pipe listener has stopped. The
+endpoint is derived from the retained private directory's kernel identity,
+current user and desktop session, so path aliases do not create another owner.
+`PrivateDirectory::request_reopen` performs a bounded handshake. The protected
+user-only DACL, local-only pipe mode, first-instance flag and both peers' native
+process user/session checks reject untrusted endpoints. The fixed v1 command
+and acknowledgement contain no private paths, credentials or general RPC data.
+It is not a boundary against a malicious process running as the same user in
+the same desktop session. The listener sleeps in an interruptible native accept;
+accepted reads/writes have one-second deadlines, with I/O cancellation drained
+before buffers are freed. The callback must be nonblocking and report whether
+the UI notification was admitted. The owning shell keeps at most one queued
+reopen notification. Listener Drop stops and joins the worker before releasing
+application ownership. Client startup retry is limited to three seconds.
+
+The Windows preview consumes this adapter and verifies competing real launches,
+reopen and owner crash recovery. Mac activation/IPC, opt-in login registration,
+trusted executable launch, helper readiness, real parent/helper crash recovery,
+actual sleep/resume, updater handoff and final cross-platform shell integration
+remain #339/#341/#345 acceptance. This work does not close #339, qualify a
+shipping application, or complete the unreleased v1.4 gates.
 
 ## Native verification
 
@@ -119,3 +212,20 @@ Synthetic marker/debug checks protect diagnostics. Linux tests explicitly
 verify `Unsupported` without creating an ordinary-file fallback; Linux storage
 acceptance remains in #343. Windows type-checking on a Mac is supplementary and
 never substitutes for native Windows execution.
+
+Application tests race competing startups, deny a second process while permitting
+refresh, and recover after a child exits without destructors. Negative tests
+cover malformed/nonempty sentinels, hard links, mode/ACL/reparse rejection and
+Mac sentinel replacement. Portable fake-supervisor tests exercise bounded
+commands and client counts, concurrent client lease release, panel-close
+behavior, drain/force-quit/update distinctions, uncertain helper operations,
+exhausted crash recovery and independent sleep/lock gates. Native Windows and
+Linux runtime results come from their own CI runners; the local Mac suite is
+not a substitute.
+
+On macOS, application and refresh guards explicitly unlock before closing. This
+prevents an unrelated concurrent fork from temporarily retaining a released
+lease through an inherited open file description. The fork regression keeps a
+child alive across both guard drops, verifies reacquisition and reaps that child.
+Crash recovery still depends on kernel ownership; no sentinel is deleted and no
+live lease is stolen.

@@ -69,10 +69,11 @@ different validation responsibilities; expected differences must be recorded
 rather than silently changing either implementation. See
 [the fixture contract](../clients/contracts/README.md).
 
-The #331 Windows preview is an explicitly synthetic native shell. Its draft
-build and process smoke do not establish connected-client behavior or manual
-platform acceptance. The [#332 baseline checkpoint](evidence/native-client-baseline-2026-09-19/README.md)
-records verified artifact sizes and preliminary Mac preview measurements.
+The #331 Windows preview is an explicitly synthetic native shell. Its CI
+process and UI Automation observations do not establish manual platform
+acceptance. The [#332 baseline checkpoint](evidence/native-client-baseline-2026-09-19/README.md)
+records verified historical artifact sizes and preliminary Mac preview
+measurements; #332 also records later short Windows CI observations.
 Complete platform measurements are still required before setting budgets.
 
 Issue #334 adds a separate unpublished `1.5.0-dev.1`
@@ -98,7 +99,41 @@ library: one outstanding dashboard job and one wake-up deadline, tunable
 45-second summary/7-second detail hypotheses, bounded completion debounce,
 offline backoff, age-based staleness and independent lock/sleep gates. Synthetic
 traces verify these library decisions and separate operation cancellation.
-**#337 remains open** for native-shell wiring and measured idle/locked/resume
-behavior. The existing Mac app and draft Windows shell do not consume this
-scheduler yet; connected UI, native power/footprint and release acceptance remain
-unproven. See the [scheduler integration contract](../clients/rust/session/README.md#central-dashboard-scheduler-337-source-checkpoint).
+**#337 remains open** for native-shell qualification and measured idle/locked/resume
+behavior. The existing Mac app does not consume this scheduler; the Windows
+development shell now wires it, but native power/footprint and release acceptance
+remain unproven. See the [scheduler integration contract](../clients/rust/session/README.md#central-dashboard-scheduler-337-source-checkpoint).
+
+Issue #338 adds an unpublished `1.5.0-dev.1`
+[interaction reducer](../clients/rust/interaction/README.md) with explicit
+visibility, hover/pin, settings and observed keyboard-focus state. Shared traces
+cover ordered inputs, stale timer cancellation, dismissal and reopening; seven
+traces also exercise the existing Swift hover/navigation models. The shipping
+Swift sources remain unchanged. **#338 remains open** for native-shell wiring,
+hover/focus/outside-click/reopen and keyboard/screen-reader acceptance. This
+source checkpoint does not complete #331, native interaction or release gates.
+
+Issue #339 adds a separate native application-instance lease and worker-side
+[helper lifecycle policy](../clients/rust/platform/README.md#application-ownership-and-helper-lifecycle)
+to the unpublished platform library. Kernel-lock tests cover competing startup,
+crash recovery and refresh-lock independence; deterministic helper tests cover
+bounded restart, client draining and quit/update behavior. **#339 remains open**
+for native activation/login registration, real helper supervision and crash
+containment, sleep/resume and shell integration. No IPC or native process
+adapter is supplied by this source checkpoint.
+
+## Windows integration checkpoint
+
+The unpublished Windows executable now implements #339 private single-instance
+activation and #340 connected sign-in, scoped usage and sign-out through the
+shared session controller. Native session/power/network events drive the shared
+scheduler, and shutdown joins credential work before releasing app ownership.
+The ordinary launch is connected; the explicit `--preview` mode remains
+synthetic and is the scope of the existing automated footprint measurements.
+
+See the [Windows development guide](../clients/rust/windows/README.md) for exact
+implementation and test boundaries. Source integration and synthetic CI do not
+complete #339/#340 or the outstanding v1.4.0 gates: login/helper adapters,
+authorized-account end-to-end proof, native desktop acceptance, connected
+measurements, signing and clean installation remain separate. The Windows
+package is `1.5.0-dev.1`; the published product remains v1.2.0.

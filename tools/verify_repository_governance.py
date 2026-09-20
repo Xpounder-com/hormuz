@@ -1437,6 +1437,80 @@ def _validate_native_contract_workflow(
 ) -> None:
     """Keep one reusable native matrix, required by the calling CI aggregate."""
 
+    windows_steps = {
+        "Build native Windows development candidate": (
+            "        working-directory: clients/rust\n",
+            "        run: cargo build -p hormuz-windows --release --locked\n",
+        ),
+        "Exercise native Windows window lifecycle": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "        run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe\n",
+        ),
+        "Verify Windows accessibility and collect preview measurements": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
+            "        run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json\n",
+        ),
+        "Verify native Windows instance activation": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
+            "        run: ./windows/verify-lifecycle.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-lifecycle.json\n",
+        ),
+        "Reject invalid Windows acceptance targets and preserve evidence": (
+            "        working-directory: clients/rust\n",
+            "        shell: powershell\n",
+            "        run: ./windows/test-acceptance-failure.ps1\n",
+        ),
+        "Check Windows runtime dependencies": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "          $dependencies = & $dumpbin /DEPENDENTS target/release/hormuz-windows.exe\n",
+            '          if ($LASTEXITCODE -ne 0) { throw "PE dependency inspection failed." }\n',
+            '          if ($imports.Count -eq 0) { throw "PE imports were not found." }\n',
+            "          if ($imports | Where-Object { $_ -match '^(vcruntime|msvcp|concrt)' }) {\n",
+            '            throw "Preview unexpectedly requires a Visual C++ redistributable."\n',
+            "          $imports | Set-Content target/release/windows-imports.txt\n",
+        ),
+        "Verify Windows candidate repeat-build identity": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "        run: ./windows/verify-rebuild.ps1\n",
+        ),
+        "Record Windows development artifact provenance": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
+            '            artifact_kind = "unsigned_connected_development_candidate"\n',
+            "            source_commit = (git rev-parse HEAD).Trim()\n",
+            "            proposed_head = $env:HORMUZ_PR_HEAD\n",
+            '            target = "x86_64-pc-windows-msvc"\n',
+            "            sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()\n",
+            '            native_smoke = "passed"\n',
+            '            external_ui_automation = "passed"\n',
+            '            instance_lifecycle = "passed"\n',
+            "            lifecycle_sha256 = (Get-FileHash target/release/windows-lifecycle.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
+            "            acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
+            '            repeat_build = "passed_same_runner_same_checkout"\n',
+            "            rebuild_sha256 = (Get-FileHash target/release/windows-rebuild.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
+            "            static_msvc_crt = $true\n",
+            "            direct_dll_imports = @(Get-Content target/release/windows-imports.txt)\n",
+            '            manual_platform_acceptance = "pending"\n',
+            "          $metadata | ConvertTo-Json | Set-Content target/release/windows-build.json\n",
+        ),
+        "Save Windows development candidate": (
+            "        uses: actions/upload-artifact@",
+            "          name: native-windows-candidate-${{ github.sha }}\n",
+            "            clients/rust/target/release/hormuz-windows.exe\n",
+            "            clients/rust/target/release/windows-build.json\n",
+            "            clients/rust/target/release/windows-acceptance.json\n",
+            "            clients/rust/target/release/windows-lifecycle.json\n",
+            "            clients/rust/target/release/windows-rebuild.json\n",
+            "          if-no-files-found: error\n",
+        ),
+    }
     if (
         "on:\n  workflow_call:\n  workflow_dispatch:\n" not in text
         or "pull_request:" in text
@@ -1446,7 +1520,11 @@ def _validate_native_contract_workflow(
         or job_fields["contracts"].get("name") != "Shared contracts (${{ matrix.os }})"
         or job_fields["contracts"].get("runs-on") != "${{ matrix.os }}"
         or "if" in job_fields["contracts"]
-        or re.findall(r"^        if: (.+)$", text, re.MULTILINE) != ["runner.os == 'macOS'"]
+        or re.findall(r"^        if: (.+)$", text, re.MULTILINE)
+        != ["runner.os == 'Windows'"] * len(windows_steps) + ["runner.os == 'macOS'"]
+        or re.findall(r"^      - name: (.+)\n        if: (.+)$", text, re.MULTILINE)
+        != [(name, "runner.os == 'Windows'") for name in windows_steps]
+        + [("Verify existing Swift expectations", "runner.os == 'macOS'")]
         or "      fail-fast: false\n" not in text
         or "        os: [ubuntu-latest, windows-latest, macos-15]\n" not in text
         or "group: native-client-contracts-${{ github.workflow }}-${{ github.ref }}" not in text
@@ -1462,6 +1540,17 @@ def _validate_native_contract_workflow(
         ) not in text
     ):
         raise RepositoryGovernanceError("native contract workflow changed")
+    for name, markers in windows_steps.items():
+        try:
+            step = _workflow_named_step(text, name=name)
+        except RepositoryGovernanceError as exc:
+            raise RepositoryGovernanceError(
+                f"native contract workflow Windows step changed: {name}"
+            ) from exc
+        if any(marker not in step for marker in markers):
+            raise RepositoryGovernanceError(
+                f"native contract workflow Windows step changed: {name}"
+            )
 
 
 def _validate_workflows(

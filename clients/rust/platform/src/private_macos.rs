@@ -30,6 +30,31 @@ pub struct PrivateTransaction {
     _lock: File,
 }
 
+impl Drop for PrivateTransaction {
+    fn drop(&mut self) {
+        // A concurrent fork must not extend this transaction's lifetime.
+        let _ = self._lock.unlock();
+    }
+}
+
+/// Exclusive application ownership, independent of connection refresh. Keep it
+/// alive until all owned workers and helpers have stopped. Never delete its
+/// sentinel: the kernel lock, not file existence or a PID, determines ownership.
+pub struct ApplicationInstance {
+    _root: Arc<File>,
+    _lock: File,
+}
+
+impl Drop for ApplicationInstance {
+    fn drop(&mut self) {
+        // A concurrent fork may temporarily inherit the open file description
+        // before CLOEXEC closes it. Explicitly release our lease, rather than
+        // waiting for every inherited descriptor to close. The guard is never
+        // cloned and its owner has already drained its workers/helpers.
+        let _ = self._lock.unlock();
+    }
+}
+
 fn validate(file: &File, directory: bool) -> Result<()> {
     let meta = file.metadata().map_err(|_| PlatformError::UnsafeStorage)?;
     if meta.uid() != unsafe { libc::getuid() }
@@ -141,14 +166,65 @@ impl PrivateDirectory {
     /// Nonblocking interprocess coordination. The caller owns retry/deadline
     /// policy; a retained guard keeps the kernel lock across asynchronous work.
     pub fn try_lock(&self) -> Result<PrivateTransaction> {
+        Ok(PrivateTransaction {
+            root: self.root.clone(),
+            _lock: self.lock_file("connection.lock", false, || {})?,
+        })
+    }
+
+    /// The native shell must use the same root for every startup entry point.
+    /// Busy means activate/reopen the existing shell; it does not permit a
+    /// second helper owner. This method sends no interprocess messages.
+    pub fn try_claim_instance(&self) -> Result<ApplicationInstance> {
+        self.claim_instance_with_hook(|| {})
+    }
+
+    pub(crate) fn claim_instance_with_hook(
+        &self,
+        after_lock: impl FnOnce(),
+    ) -> Result<ApplicationInstance> {
+        let file = self.lock_file("instance.lock", true, after_lock)?;
+        if file
+            .metadata()
+            .map_err(|_| PlatformError::Unavailable)?
+            .len()
+            != 0
+        {
+            return Err(PlatformError::UnsafeStorage);
+        }
+        Ok(ApplicationInstance {
+            _root: self.root.clone(),
+            _lock: file,
+        })
+    }
+
+    fn lock_file(&self, name: &str, empty: bool, after_lock: impl FnOnce()) -> Result<File> {
         validate(&self.root, true)?;
-        let name = CString::new("connection.lock").unwrap();
-        let file = open_at(&self.root, &name, libc::O_RDWR | libc::O_CREAT)?
-            .ok_or(PlatformError::Unavailable)?;
+        let name = CString::new(name).unwrap();
+        // Concurrent first creation has been observed to return ENOENT on
+        // macOS even through a retained directory descriptor. Make one bounded
+        // attempt to open the winner's existing sentinel. Never infer Busy,
+        // retry an unsafe object, or spin on a held kernel lock.
+        let file = match open_at(&self.root, &name, libc::O_RDWR | libc::O_CREAT)? {
+            Some(file) => file,
+            None => open_at(&self.root, &name, libc::O_RDWR)?.ok_or(PlatformError::Unavailable)?,
+        };
+        // Reject malformed sentinels before contention can mask their shape.
+        // Instance acquisition checks again after taking the kernel lock.
+        if empty
+            && file
+                .metadata()
+                .map_err(|_| PlatformError::Unavailable)?
+                .len()
+                != 0
+        {
+            return Err(PlatformError::UnsafeStorage);
+        }
         file.try_lock().map_err(|error| match error {
             std::fs::TryLockError::WouldBlock => PlatformError::Busy,
             std::fs::TryLockError::Error(_) => PlatformError::Unavailable,
         })?;
+        after_lock();
         let current =
             open_at(&self.root, &name, libc::O_RDONLY)?.ok_or(PlatformError::UnsafeStorage)?;
         let a = file.metadata().map_err(|_| PlatformError::Unavailable)?;
@@ -156,10 +232,7 @@ impl PrivateDirectory {
         if a.ino() != b.ino() || a.dev() != b.dev() {
             return Err(PlatformError::UnsafeStorage);
         }
-        Ok(PrivateTransaction {
-            root: self.root.clone(),
-            _lock: file,
-        })
+        Ok(file)
     }
 }
 

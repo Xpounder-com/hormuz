@@ -3,7 +3,7 @@
 Partial evidence for [#332](https://github.com/Xpounder-com/hormuz/issues/332),
 planned for v1.4.0. These measurements do not qualify a release or set regression
 budgets. The Mac artifact is the complete released v1.2.0 arm64 app; the Windows
-artifact is an unsigned x64 synthetic shell from draft
+artifact is an unsigned x64 synthetic shell from an earlier CI build for
 [#350](https://github.com/Xpounder-com/hormuz/pull/350). Their different feature
 sets and architectures prevent a performance comparison.
 
@@ -24,7 +24,7 @@ static pass; subsequent Mac preview samples are described below.
 | Mac bundled context backend | 10,072,976 |
 | Mac resources, including tokenizer data | 5,432,484 |
 | Mac signature and bundle metadata | 8,284 |
-| Windows synthetic preview executable | 248,320 |
+| Earlier #350 Windows synthetic preview executable | 248,320 |
 
 Logical file sizes come from regular-file `st_size`, not APFS allocation or
 runtime memory. Mac imports were inspected with `otool -L`. The GUI imports
@@ -41,6 +41,9 @@ the MSVC runtime and imports only Windows system DLLs. Artifact retention is
 14 days; the source, hash and numeric record remain here after download expiry.
 The native Windows CI smoke passed with a registered tray icon. The Windows
 binary was not run on this Mac and its runtime footprint is unmeasured.
+The later [merged-main #350 artifact and short CI runtime observations](https://github.com/Xpounder-com/hormuz/issues/332)
+are recorded separately in #332; they do not change this historical artifact's
+source, hash or byte count.
 
 ## Preliminary Mac idle samples
 
@@ -132,8 +135,10 @@ native profiling tools. Measure launch-to-visible separately over repeated
 cold and warm starts. Exercise at least 100 fold/hide/reopen cycles, then
 measure settled growth. Record observer overhead and missing metrics.
 
-Startup latency, wake-ups, GPU activity, sign-in/active-client scenarios,
-repeated-interaction growth and Windows process metrics are still unmeasured.
+Startup latency, wake-ups, GPU activity and sign-in/active-client scenarios
+remain unmeasured here. #332 separately records short Windows CI process
+observations and 100 synthetic interaction cycles; controlled longer baselines,
+physical interaction growth and connected workload measurements remain open.
 Display/keyboard/tray/UI Automation acceptance remains #331. Numerical budgets
 remain unset until those baselines justify them. Missing measurements are not
 zeros; this checkpoint leaves #332 open.
