@@ -222,3 +222,10 @@ behavior, drain/force-quit/update distinctions, uncertain helper operations,
 exhausted crash recovery and independent sleep/lock gates. Native Windows and
 Linux runtime results come from their own CI runners; the local Mac suite is
 not a substitute.
+
+On macOS, application and refresh guards explicitly unlock before closing. This
+prevents an unrelated concurrent fork from temporarily retaining a released
+lease through an inherited open file description. The fork regression keeps a
+child alive across both guard drops, verifies reacquisition and reaps that child.
+Crash recovery still depends on kernel ownership; no sentinel is deleted and no
+live lease is stolen.

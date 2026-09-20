@@ -30,6 +30,13 @@ pub struct PrivateTransaction {
     _lock: File,
 }
 
+impl Drop for PrivateTransaction {
+    fn drop(&mut self) {
+        // A concurrent fork must not extend this transaction's lifetime.
+        let _ = self._lock.unlock();
+    }
+}
+
 /// Exclusive application ownership, independent of connection refresh. Keep it
 /// alive until all owned workers and helpers have stopped. Never delete its
 /// sentinel: the kernel lock, not file existence or a PID, determines ownership.

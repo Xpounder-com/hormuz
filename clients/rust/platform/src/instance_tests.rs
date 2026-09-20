@@ -269,6 +269,7 @@ fn dropping_owner_releases_lease_even_while_a_fork_inherits_the_descriptor() {
     let temporary = tempfile::tempdir().unwrap();
     let directory = PrivateDirectory::open(&temporary.path().join("private")).unwrap();
     let owner = directory.try_claim_instance().unwrap();
+    let refresh = directory.try_lock().unwrap();
     let mut control = [0; 2];
     assert_eq!(unsafe { libc::pipe(control.as_mut_ptr()) }, 0);
     let child = unsafe { libc::fork() };
@@ -293,6 +294,8 @@ fn dropping_owner_releases_lease_even_while_a_fork_inherits_the_descriptor() {
         libc::close(control[0]);
     }
     drop(owner);
+    drop(refresh);
+    let next_refresh = directory.try_lock();
     let replacement = directory.try_claim_instance();
     // Always release/reap the owned child before asserting the regression.
     unsafe {
@@ -303,6 +306,10 @@ fn dropping_owner_releases_lease_even_while_a_fork_inherits_the_descriptor() {
         assert_eq!(libc::waitpid(child, &mut status, 0), child);
         assert_eq!(status, 0);
     }
+    assert!(
+        next_refresh.is_ok(),
+        "inherited descriptor retained refresh"
+    );
     assert!(
         replacement.is_ok(),
         "inherited descriptor retained the lease"
