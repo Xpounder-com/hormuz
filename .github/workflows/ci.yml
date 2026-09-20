@@ -147,6 +147,8 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_rate_cards.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_selection.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_finance.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_budget_schema.py -v
@@ -172,7 +174,7 @@ jobs:
             tests.test_finance_native_attempt_transition_plan tests.test_finance_native_attempt_packaging \
             tests.test_finance_collection_transition_plan tests.test_finance_collection_runtime_plan \
             tests.test_finance_collection_packaging tests.test_finance_collection_postgres_runtime_plan \
-            tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight \
+            tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
             tests.test_portfolio_wire_contract
       - name: Verify the resolved license boundary for every declared extra
         run: |
@@ -392,7 +394,7 @@ jobs:
             tests.test_finance_native_attempt_transition_plan tests.test_finance_native_attempt_packaging \
             tests.test_finance_collection_transition_plan tests.test_finance_collection_runtime_plan \
             tests.test_finance_collection_packaging tests.test_finance_collection_postgres_runtime_plan \
-            tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight \
+            tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
             tests.test_portfolio_wire_contract
       - name: Prove PostgreSQL migration and repository compatibility
         env:

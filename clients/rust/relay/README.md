@@ -46,10 +46,20 @@ On macOS, the optimizer exchange uses nonblocking owned pipe ends and one
 30-second deadline for input delivery, output collection and helper exit.
 It drains output while writing input, rejects excess output, and kills/reaps
 the direct helper on failure. A process retaining inherited pipe ends cannot
-extend the I/O deadline through a reader/writer thread join. Request and
-response bytes stay in memory. This is a #339 helper-lifetime and #341 relay
-checkpoint; both issues remain open. Windows retains its existing threaded
-optimizer exchange; bounded native pipe cancellation remains unverified there.
+extend the I/O deadline through a reader/writer thread join.
+
+On Windows, the optimizer helper starts suspended and is assigned to its own
+kill-on-close Job Object before running. The exchange reads and writes pipes
+concurrently under one 30-second deadline. It closes the job before joining
+the workers, requests cancellation of pending synchronous pipe I/O, and exits
+the dedicated relay without a crash dump if workers cannot finish within a
+further two seconds;
+it cannot return while threads still hold request or response bytes. Synthetic
+Windows tests exercise inherited pipe ends, blocked I/O, oversized output and
+bidirectional exchange. Process creation and kernel termination are not covered
+by a hard elapsed-time guarantee. Request and response bytes stay in memory.
+This is a #339 helper-lifetime and #341 relay checkpoint; both issues remain
+open.
 
 This source checkpoint is not loaded by the Windows panel or shipping Mac app.
 Windows Job Object descendant cleanup is covered by fake clients; Unix still
@@ -71,6 +81,8 @@ The Python bridge is covered by
 Synthetic Unix pipe tests also cover partial and bidirectional I/O, retained
 pipe ends after direct-helper exit, a helper that never consumes stdin, output
 overflow and direct-child reaping. Linux runs those fixtures without enabling
-the unsupported native relay command. These tests do not prove descendant
-containment, abrupt launcher-death cleanup, real optimizer/provider sessions,
-or packaged native-shell lifecycle behavior.
+the unsupported native relay command. Windows fake-helper tests cover Job
+Object containment and pipe-worker completion without an installed optimizer
+or provider. These tests do not prove Unix descendant containment, abrupt
+launcher-death cleanup, real optimizer/provider sessions, or packaged
+native-shell lifecycle behavior.

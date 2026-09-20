@@ -151,6 +151,7 @@ class HelmRunnerDiagnosticsTests(unittest.TestCase):
                 f"kubectl() {{ python3 {shlex.quote(str(fake))} {shlex.quote(str(root))} \"$@\"; }}",
                 f"sleep() {{ printf '%s\\n' \"$1\" >>{shlex.quote(str(root / 'delays'))}; }}",
                 shell_function("fail"),
+                shell_function("classify_gateway_log_error"),
                 shell_function("capture_gateway_logs"),
                 "capture_gateway_logs synthetic-checkpoint",
                 "printf 'capture-complete\\n'",
@@ -243,6 +244,36 @@ class HelmRunnerDiagnosticsTests(unittest.TestCase):
                 self.assertIn("gateway log capture failed", result.stderr)
                 self.assertNotIn(error.strip(), result.stderr)
 
+    def test_log_capture_reports_only_allowlisted_error_classes(self) -> None:
+        sensitive = "synthetic-sensitive-pod /private/tmp/synthetic-sensitive-path"
+        scenarios = (
+            (1, self.pod_missing("different-pod") + sensitive, "not_found"),
+            (1, f'Error from server (Forbidden): {sensitive}\n', "forbidden"),
+            (1, f'Unable to connect to the server: timeout {sensitive}\n', "timeout"),
+            (1, f'error: unable to upgrade connection: {sensitive}\n', "connection"),
+            (1, f'unrecognized error: {sensitive}\n', "unknown"),
+            (2, self.pod_missing("selected"), "not_found"),
+        )
+        for status, error, expected in scenarios:
+            with self.subTest(status=status, expected=expected):
+                result, calls, _captured, delays = self.run_log_capture([
+                    self.pod_list("pod/selected\n"),
+                    self.pod_logs("selected", "partial output\n", stderr=error, status=status),
+                ])
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(delays, "")
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(
+                    result.stderr,
+                    f"gateway_log_capture_error checkpoint=synthetic-checkpoint "
+                    f"class={expected} exit_status={status}\n"
+                    f"Kubernetes reference proof failed: gateway log capture failed: "
+                    f"synthetic-checkpoint exit_status={status}\n",
+                )
+                self.assertNotIn(sensitive, result.stderr)
+                self.assertNotIn("selected", result.stderr)
+
     def test_log_capture_fails_closed_on_empty_or_invalid_selection(self) -> None:
         for selection in ("", "\n", "\x00", "deployment/selected\n", "pod/../../escape\n"):
             with self.subTest(selection=selection):
@@ -301,6 +332,7 @@ class HelmRunnerDiagnosticsTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(len(calls), len(responses))
                 self.assertIn("failed secret non-disclosure", result.stderr)
+                self.assertNotIn("gateway_log_capture_error", result.stderr)
                 self.assertNotIn(secret, result.stdout + result.stderr)
 
 
