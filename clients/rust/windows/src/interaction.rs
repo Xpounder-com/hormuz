@@ -1,10 +1,23 @@
 //! Bounded GUI-turn queue and one-shot timer identities, without native handles.
 use hormuz_client_interaction::{
-    Effect, Event, FocusTarget, Interaction, InteractionError, Snapshot, Timer, VisibilityMode,
+    Effect, Event, FocusTarget, Interaction, InteractionError, SettingsPage, Snapshot, Timer,
+    VisibilityMode,
 };
 
 const MAX_EVENTS: usize = 128;
 const FIRST_TIMER_ID: usize = 1024; // Separate from the shell's smoke timer.
+
+#[derive(Clone, Copy, Debug)]
+pub enum Command {
+    Settings,
+    Escape,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Queued {
+    Event(Event),
+    Command(Command),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -35,7 +48,7 @@ pub struct Update {
 #[derive(Clone)]
 pub struct Bridge {
     state: Interaction,
-    events: Vec<Event>,
+    events: Vec<Queued>,
     timers: Vec<NativeTimer>,
     next_id: usize,
 }
@@ -51,6 +64,14 @@ impl Bridge {
     }
 
     pub fn push(&mut self, event: Event) -> Result<(), Error> {
+        self.queue(Queued::Event(event))
+    }
+
+    pub fn command(&mut self, command: Command) -> Result<(), Error> {
+        self.queue(Queued::Command(command))
+    }
+
+    fn queue(&mut self, event: Queued) -> Result<(), Error> {
         if self.events.len() == MAX_EVENTS {
             return Err(Error::QueueFull);
         }
@@ -79,9 +100,43 @@ impl Bridge {
     /// Shared policy orders input before callbacks and publishes one snapshot.
     pub fn flush(&mut self, now_ms: u64) -> Result<Update, Error> {
         let mut next = self.clone();
+        // Commands resolve against preceding inputs in this turn, not the last
+        // rendered HWND state. Ignore callbacks here: the shared reducer gives
+        // every input priority over callbacks in the same batch. Projection
+        // stays private; only the final shared batch can publish effects.
+        let mut projected = next.state.clone();
+        let mut events = Vec::with_capacity(next.events.len());
+        for queued in &next.events {
+            let event = match *queued {
+                Queued::Event(event) => event,
+                Queued::Command(Command::Settings) => {
+                    if projected.snapshot().settings_page.is_some() {
+                        Event::Back
+                    } else {
+                        Event::OpenSettings {
+                            page: SettingsPage::Home,
+                        }
+                    }
+                }
+                Queued::Command(Command::Escape) => {
+                    let snapshot = projected.snapshot();
+                    if snapshot.settings_page.is_some() || snapshot.selected_metric.is_some() {
+                        Event::Escape
+                    } else {
+                        Event::Hide
+                    }
+                }
+            };
+            if !matches!(event, Event::TimerFired { .. }) {
+                projected
+                    .dispatch_batch(now_ms, &[event])
+                    .map_err(Error::Reducer)?;
+            }
+            events.push(event);
+        }
         let effects = next
             .state
-            .dispatch_batch(now_ms, &next.events)
+            .dispatch_batch(now_ms, &events)
             .map_err(Error::Reducer)?;
         let snapshot = next.state.snapshot();
         let mut actions = Vec::new();

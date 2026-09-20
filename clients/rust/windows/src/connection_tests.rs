@@ -454,6 +454,7 @@ fn session_expiry_and_store_lock_clear_previously_visible_usage() {
 fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     use crate::{native, options::Options};
     use hormuz_client_platform::PrivateDirectory;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_ESCAPE, VK_TAB};
     use windows_sys::Win32::{Foundation::*, UI::WindowsAndMessaging::*};
     fn wide(text: &str) -> Vec<u16> {
         text.encode_utf16().chain(Some(0)).collect()
@@ -486,6 +487,28 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
             0,
             "native test command timed out"
         );
+    }
+    fn focus(window: HWND) -> HWND {
+        unsafe {
+            let mut info = GUITHREADINFO {
+                cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                ..std::mem::zeroed()
+            };
+            assert_ne!(
+                GetGUIThreadInfo(
+                    GetWindowThreadProcessId(window, std::ptr::null_mut()),
+                    &mut info
+                ),
+                0
+            );
+            info.hwndFocus
+        }
+    }
+    fn key(control: HWND, key: u16) {
+        unsafe {
+            assert_ne!(PostMessageW(control, WM_KEYDOWN, key as usize, 1), 0);
+            assert_ne!(PostMessageW(control, WM_KEYUP, key as usize, 0xc0000001), 0);
+        }
     }
     fn until(mut condition: impl FnMut() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(8);
@@ -570,6 +593,12 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     });
     let cleanup = WindowCleanup(window);
     until(|| unsafe { IsWindowVisible(window) != 0 && IsIconic(window) == 0 });
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 201)) != 0 });
+    assert_eq!(
+        text(window, 112),
+        "&Back",
+        "startup must retain connection-form access"
+    );
     until(|| text(window, 301).contains("credential store"));
     assert!(text(window, 201).is_empty());
     assert!(text(window, 202).is_empty());
@@ -582,6 +611,45 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     send(window, WM_COMMAND, 110);
     until(|| text(window, 301).contains("Enter your gateway"));
     assert_eq!(text(window, 302), "Your requests: —");
+    // Back and Escape navigate the actual native form before the shell hides.
+    // Focus moves through native edit/combo controls; no synthetic shared focus
+    // observation substitutes for the GUI thread's real focus owner here.
+    send(window, WM_COMMAND, 112);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 201)) == 0 });
+    assert_eq!(text(window, 112), "&Settings");
+    assert_ne!(unsafe { IsWindowVisible(GetDlgItem(window, 302)) }, 0);
+    send(window, WM_COMMAND, 112);
+    until(|| focus(window) == unsafe { GetDlgItem(window, 201) });
+    for next in [202, 203, 204, 205] {
+        key(focus(window), VK_TAB);
+        until(|| focus(window) == unsafe { GetDlgItem(window, next) });
+        assert_ne!(unsafe { IsWindowVisible(GetDlgItem(window, 201)) }, 0);
+    }
+    let combo = unsafe { GetDlgItem(window, 205) };
+    send(combo, CB_SHOWDROPDOWN, 1);
+    until(|| unsafe { SendMessageW(combo, CB_GETDROPPEDSTATE, 0, 0) != 0 });
+    key(combo, VK_ESCAPE);
+    until(|| unsafe { SendMessageW(combo, CB_GETDROPPEDSTATE, 0, 0) == 0 });
+    assert_ne!(unsafe { IsWindowVisible(GetDlgItem(window, 201)) }, 0);
+    key(focus(window), VK_ESCAPE);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 201)) == 0 }
+        && focus(window) == unsafe { GetDlgItem(window, 112) });
+    assert_ne!(unsafe { IsWindowVisible(window) }, 0);
+    key(focus(window), VK_ESCAPE);
+    until(|| unsafe { IsWindowVisible(window) == 0 || IsIconic(window) != 0 });
+    PrivateDirectory::open(&root)
+        .unwrap()
+        .request_reopen()
+        .unwrap();
+    until(|| unsafe {
+        IsWindowVisible(window) != 0
+            && IsIconic(window) == 0
+            && IsWindowVisible(GetDlgItem(window, 302)) != 0
+    });
+    assert_eq!(unsafe { IsWindowVisible(GetDlgItem(window, 201)) }, 0);
+    send(window, WM_COMMAND, 112);
+    until(|| focus(window) == unsafe { GetDlgItem(window, 201) });
+    println!("native_connection_settings=passed startup=visible keyboard=posted_messages combo_escape=local back_escape_reopen=passed");
     for (id, value) in [
         (201, "https://gateway.example.test"),
         (202, "org-a"),
@@ -626,6 +694,8 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
         .unwrap();
     until(|| unsafe { IsWindowVisible(window) != 0 && IsIconic(window) == 0 });
     until(|| unsafe { IsWindowVisible(GetDlgItem(window, 302)) != 0 });
+    send(window, WM_COMMAND, 112);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 201)) != 0 });
     transport.mode.store(1, Ordering::SeqCst);
     clock.1.store(10, Ordering::SeqCst);
     send(window, WM_COMMAND, 111);
