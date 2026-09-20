@@ -317,6 +317,109 @@ class RepositoryGovernanceTests(unittest.TestCase):
             with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow is required"):
                 validate_repository_governance(root)
 
+    def test_windows_preview_steps_keep_their_named_platform_gates(self) -> None:
+        names = (
+            "Build native Windows preview",
+            "Exercise native Windows window lifecycle",
+            "Verify Windows accessibility and collect preview measurements",
+            "Reject invalid Windows acceptance targets and preserve evidence",
+            "Check Windows runtime dependencies",
+            "Verify Windows preview repeat-build identity",
+            "Record Windows development artifact provenance",
+            "Save Windows development preview",
+        )
+        for name in names:
+            marker = f"      - name: {name}\n        if: runner.os == 'Windows'\n"
+            replacements = (
+                f"      - name: {name}\n",
+                f"      - name: {name}\n        if: false\n",
+                f"      - name: {name}\n        if: runner.os == 'macOS'\n",
+                "      - name: Unreviewed replacement\n        if: runner.os == 'Windows'\n",
+            )
+            for replacement in replacements:
+                with self.subTest(name=name, replacement=replacement), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    self._copy_contract(root)
+                    workflow = root / ".github/workflows/native-client-contracts.yml"
+                    value = workflow.read_text(encoding="utf-8")
+                    self.assertEqual(value.count(marker), 1)
+                    workflow.write_text(value.replace(marker, replacement, 1), encoding="utf-8")
+                    with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                        validate_repository_governance(root)
+
+    def test_windows_gate_cannot_move_to_shared_rust_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/native-client-contracts.yml"
+            value = workflow.read_text(encoding="utf-8")
+            build = "      - name: Build native Windows preview\n"
+            shared = "      - name: Verify shared native Rust libraries\n"
+            condition = "        if: runner.os == 'Windows'\n"
+            self.assertIn(build + condition, value)
+            self.assertIn(shared, value)
+            value = value.replace(build + condition, build, 1)
+            value = value.replace(shared, shared + condition, 1)
+            workflow.write_text(value, encoding="utf-8")
+            with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                validate_repository_governance(root)
+
+    def test_windows_preview_checks_and_provenance_cannot_be_removed(self) -> None:
+        mutations = (
+            ("run: cargo build -p hormuz-windows --release --locked", "run: cargo check -p hormuz-windows --locked"),
+            ("run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe", "run: Write-Output passed"),
+            ("run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json", "run: Write-Output passed"),
+            ("run: ./windows/test-acceptance-failure.ps1", "run: Write-Output passed"),
+            ("run: ./windows/verify-rebuild.ps1", "run: Write-Output passed"),
+            ("$dependencies = & $dumpbin /DEPENDENTS target/release/hormuz-windows.exe", "$dependencies = @('kernel32.dll')"),
+            ('if ($LASTEXITCODE -ne 0) { throw "PE dependency inspection failed." }', 'Write-Output "Ignoring inspection status"'),
+            ('if ($imports.Count -eq 0) { throw "PE imports were not found." }', 'Write-Output "Allowing empty imports"'),
+            ("if ($imports | Where-Object { $_ -match '^(vcruntime|msvcp|concrt)' }) {", "if ($false) {"),
+            ("source_commit = (git rev-parse HEAD).Trim()", 'source_commit = "unverified"'),
+            ("sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()", 'sha256 = "unverified"'),
+            ('manual_platform_acceptance = "pending"', 'manual_platform_acceptance = "passed"'),
+            ("            clients/rust/target/release/windows-build.json\n", ""),
+            ("            clients/rust/target/release/windows-acceptance.json\n", ""),
+            ("            clients/rust/target/release/windows-rebuild.json\n", ""),
+            ("rebuild_sha256 = (Get-FileHash target/release/windows-rebuild.json -Algorithm SHA256).Hash.ToLowerInvariant()", 'rebuild_sha256 = "unverified"'),
+            ("acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()", 'acceptance_sha256 = "unverified"'),
+            ("          if-no-files-found: error", "          if-no-files-found: warn"),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/native-client-contracts.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertEqual(value.count(original), 1)
+                workflow.write_text(value.replace(original, replacement, 1), encoding="utf-8")
+                with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                    validate_repository_governance(root)
+
+    def test_windows_build_must_precede_native_smoke(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/native-client-contracts.yml"
+            value = workflow.read_text(encoding="utf-8")
+            build = (
+                "      - name: Build native Windows preview\n"
+                "        if: runner.os == 'Windows'\n"
+                "        working-directory: clients/rust\n"
+                "        run: cargo build -p hormuz-windows --release --locked\n"
+            )
+            smoke = (
+                "      - name: Exercise native Windows window lifecycle\n"
+                "        if: runner.os == 'Windows'\n"
+                "        working-directory: clients/rust\n"
+                "        shell: pwsh\n"
+                "        run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe\n"
+            )
+            self.assertIn(build + smoke, value)
+            workflow.write_text(value.replace(build + smoke, smoke + build, 1), encoding="utf-8")
+            with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                validate_repository_governance(root)
+
     def test_unrelated_local_action_is_still_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
