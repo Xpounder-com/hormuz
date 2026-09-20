@@ -1,46 +1,14 @@
 name: Native client contracts
 
 on:
-  pull_request:
-    paths:
-      - "clients/rust/**"
-      - "clients/contracts/**"
-      - "clients/macos/Sources/HormuzClientCore/**"
-      - "clients/macos/Tests/HormuzClientCoreTests/SharedContractTests.swift"
-      - "tests/fixtures/native_client/**"
-      - "tests/fixtures/contracts/**"
-      - "tests/test_native_client_contracts.py"
-      - "hormuz/contracts.py"
-      - "hormuz/compaction_runtime.py"
-      - "hormuz/compaction_formats.py"
-      - "hormuz/session_client.py"
-      - "hormuz/credential_store.py"
-      - "hormuz/_contract_schemas/**"
-      - ".github/workflows/native-client-contracts.yml"
-  push:
-    branches: [main]
-    paths:
-      - "clients/rust/**"
-      - "clients/contracts/**"
-      - "clients/macos/Sources/HormuzClientCore/**"
-      - "clients/macos/Tests/HormuzClientCoreTests/SharedContractTests.swift"
-      - "tests/fixtures/native_client/**"
-      - "tests/fixtures/contracts/**"
-      - "tests/test_native_client_contracts.py"
-      - "hormuz/contracts.py"
-      - "hormuz/compaction_runtime.py"
-      - "hormuz/compaction_formats.py"
-      - "hormuz/session_client.py"
-      - "hormuz/credential_store.py"
-      - "hormuz/_contract_schemas/**"
-      - ".github/workflows/native-client-contracts.yml"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: native-client-contracts-${{ github.ref }}
+  group: native-client-contracts-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
