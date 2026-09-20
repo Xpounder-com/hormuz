@@ -1,0 +1,160 @@
+name: Windows synthetic footprint baseline
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/windows-footprint-baseline.yml
+      - clients/rust/windows/FootprintBaseline.cs
+      - clients/rust/windows/collect-footprint-baseline.ps1
+      - tools/verify_windows_footprint_baseline.py
+      - docs/evidence/native-client-windows-baseline-2026-09-20/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/windows-footprint-baseline.yml
+      - clients/rust/windows/FootprintBaseline.cs
+      - clients/rust/windows/collect-footprint-baseline.ps1
+      - tools/verify_windows_footprint_baseline.py
+      - docs/evidence/native-client-windows-baseline-2026-09-20/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-footprint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build one pinned Windows executable
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        working-directory: clients/rust
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Build native Windows development candidate
+        working-directory: clients/rust
+        run: cargo build -p hormuz-windows --release --locked
+      - name: Verify same-runner executable rebuild identity
+        working-directory: clients/rust
+        shell: pwsh
+        run: ./windows/verify-rebuild.ps1
+      - name: Record pinned executable provenance
+        working-directory: clients/rust
+        shell: pwsh
+        env:
+          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $metadata = [ordered]@{
+            schema_id = 'hormuz.windows.synthetic-footprint-build'
+            schema_version = 1
+            artifact_kind = 'unsigned_connected_development_candidate'
+            source_commit = (git rev-parse HEAD).Trim()
+            proposed_head = $env:HORMUZ_PR_HEAD
+            compiler = (rustc --version).Trim()
+            target = 'x86_64-pc-windows-msvc'
+            executable_sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            executable_bytes = (Get-Item target/release/hormuz-windows.exe).Length
+            repeat_build = 'passed_same_runner_same_checkout'
+            rebuild_sha256 = (Get-FileHash target/release/windows-rebuild.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          $metadata | ConvertTo-Json | Set-Content target/release/windows-footprint-build.json -Encoding UTF8
+      - name: Save the sole measured executable
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: synthetic-windows-footprint-executable-${{ github.sha }}
+          path: |
+            clients/rust/target/release/hormuz-windows.exe
+            clients/rust/target/release/windows-footprint-build.json
+            clients/rust/target/release/windows-rebuild.json
+          if-no-files-found: error
+          retention-days: 14
+
+  baseline:
+    name: Synthetic ${{ matrix.scenario }} (3 x 5 minutes)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [visible, folded, hidden]
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the sole measured executable
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: synthetic-windows-footprint-executable-${{ github.sha }}
+          path: clients/rust/target/release
+      - name: Collect three independent synthetic preview recordings
+        working-directory: clients/rust
+        shell: pwsh
+        env:
+          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          ./windows/collect-footprint-baseline.ps1 `
+            -Executable ./target/release/hormuz-windows.exe `
+            -BuildManifest ./target/release/windows-footprint-build.json `
+            -Output ./target/release/windows-footprint-${{ matrix.scenario }}.json `
+            -Scenario ${{ matrix.scenario }} `
+            -WarmupSeconds 60 -DurationSeconds 300 `
+            -IntervalMilliseconds 5000 -Repetitions 3
+      - name: Bind evidence to the downloaded executable
+        working-directory: clients/rust
+        shell: pwsh
+        run: |
+          $report = Get-Content target/release/windows-footprint-${{ matrix.scenario }}.json -Raw | ConvertFrom-Json
+          $hash = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($report.result -ne 'passed' -or -not $report.complete_three_run_protocol -or
+              $report.run_count -ne 3 -or $report.sample_count_per_run -ne 61 -or
+              $report.executable_sha256 -ne $hash) {
+            throw 'Synthetic footprint evidence is incomplete or differs from the downloaded build.'
+          }
+          $evidenceHash = (Get-FileHash target/release/windows-footprint-${{ matrix.scenario }}.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Output "windows_footprint_evidence_sha256=$evidenceHash"
+      - name: Save content-free Windows footprint evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: synthetic-windows-footprint-${{ matrix.scenario }}-${{ github.sha }}
+          path: clients/rust/target/release/windows-footprint-${{ matrix.scenario }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+  verify:
+    name: Verify all nine runs share the pinned executable
+    needs: baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the independent evidence verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download build and all three scenario artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: synthetic-windows-footprint-*-${{ github.sha }}
+          path: footprint-evidence
+      - name: Verify numeric evidence and exact executable identity
+        run: >-
+          python3 tools/verify_windows_footprint_baseline.py
+          --artifacts footprint-evidence
+          --source-sha "${{ github.sha }}"
+          --proposed-head "${{ github.event.pull_request.head.sha || github.sha }}"
+          --output windows-footprint-verification.json
+      - name: Save content-free verification summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: synthetic-windows-footprint-verification-${{ github.sha }}
+          path: windows-footprint-verification.json
+          if-no-files-found: error
+          retention-days: 14
