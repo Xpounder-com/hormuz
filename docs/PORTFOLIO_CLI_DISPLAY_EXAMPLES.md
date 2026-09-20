@@ -47,7 +47,7 @@ Cost basis: configured_rate_card_estimate (gateway estimate)
 Committed: unknown
 Pending reservation: unknown
 Uncertain reservation: unknown
-Remaining: unknown (missing_evidence)
+Remaining balance (derived): unknown (missing_evidence)
 Observation: not_available; unknown; missing_evidence
 Forecast: not available (missing_evidence)
 Coverage: included unknown/unknown; priced unknown/unknown (missing_evidence)
@@ -69,7 +69,7 @@ Cost basis: configured_rate_card_estimate (gateway estimate)
 Committed: USD 10
 Pending reservation: USD 1
 Uncertain reservation: USD 1
-Remaining: USD 108 (known)
+Remaining balance (derived): USD 108 (known)
 Observation: configured_rate_card_estimate; USD 10; known
 Rate card: rate-card-test v1
 Rate card digest:
@@ -156,10 +156,13 @@ Rate card: example-id v1
 Association rule: example-id v1
 ```
 
-The first report has no supported financial observation or forecast. The
-increase report's committed, reservation, remaining, and projected amounts are
-configured-rate estimates, not provider-final cost. The minimal scorecard has
-explicit zero denominators with **unknown ratios** and remains inconclusive.
+The first report has no supported financial observation or forecast. In the
+increase report, committed and projected costs use configured-rate estimates;
+pending and uncertain reservations are holds under that basis. The remaining
+balance is derived from the plan amount less those obligations. It is not an
+independently observed cash balance or provider-final cost. The minimal
+scorecard has explicit zero denominators with **unknown ratios** and remains
+inconclusive.
 The populated scorecard is only a synthetic, associated-evidence example; its
 metric names and `eligible` fixture state do not establish causal improvement
 or a universal model winner. #223 remains the owner for actual role-scoped

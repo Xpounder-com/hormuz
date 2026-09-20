@@ -146,7 +146,7 @@ def _budget_case(case: dict[str, object]) -> str:
         _line("Committed", _money(enforcement["committed_amount"], currency)),
         _line("Pending reservation", _money(enforcement["pending_reservation_amount"], currency)),
         _line("Uncertain reservation", _money(enforcement["uncertain_reservation_amount"], currency)),
-        _line("Remaining", f"{_money(enforcement['remaining_amount'], currency)} "
+        _line("Remaining balance (derived)", f"{_money(enforcement['remaining_amount'], currency)} "
               f"({enforcement['reason_code']})"),
     ))
     for observation in report["financial_observations"]:
