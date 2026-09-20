@@ -68,6 +68,8 @@ pub struct LocalRelay {
     token: Arc<Zeroizing<String>>,
     shutdown: Option<oneshot::Sender<()>>,
     worker: Option<JoinHandle<()>>,
+    #[cfg(test)]
+    state_probe: std::sync::Weak<State>,
 }
 impl std::fmt::Debug for LocalRelay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -102,6 +104,8 @@ impl LocalRelay {
             credentials,
             optimization,
         });
+        #[cfg(test)]
+        let state_probe = Arc::downgrade(&state);
         let (shutdown, stopped) = oneshot::channel();
         let (ready, accepted) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -118,6 +122,8 @@ impl LocalRelay {
             token,
             shutdown: Some(shutdown),
             worker: Some(worker),
+            #[cfg(test)]
+            state_probe,
         })
     }
     pub fn address(&self) -> SocketAddr {

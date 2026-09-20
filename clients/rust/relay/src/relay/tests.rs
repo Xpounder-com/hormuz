@@ -1,7 +1,8 @@
 use super::*;
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 fn profile(gateway: &str, client: &str) -> ConnectionProfile {
     ConnectionProfile::from_json(
@@ -258,16 +259,41 @@ fn enabled_transform_runs_once_before_egress_and_marks_only_changed_bytes() {
 }
 
 #[test]
-fn stopping_owns_the_listener_and_closes_its_port() {
+fn stopping_closes_the_connection_and_releases_relay_state() {
     let relay = LocalRelay::start(
         &profile("http://127.0.0.1:9", "claude-code"),
         credential(Arc::new(AtomicUsize::new(0))),
         Optimization::Off,
     )
     .unwrap();
-    let address = relay.address();
+    let mut connection = TcpStream::connect(relay.address()).unwrap();
+    let state = relay.state_probe.upgrade().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Arc::strong_count(&state) < 3 {
+        assert!(
+            Instant::now() < deadline,
+            "relay did not accept the connection"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    drop(state);
+    let local_token = Arc::downgrade(&relay.token);
     drop(relay);
-    assert!(TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_err());
+    // This connection belongs to the original listener even if its port is reused.
+    connection
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut byte = [0_u8; 1];
+    match connection.read(&mut byte) {
+        Ok(0) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+            ) => {}
+        result => panic!("relay connection remained open after shutdown: {result:?}"),
+    }
+    assert!(local_token.upgrade().is_none());
 }
 
 #[test]
