@@ -40,7 +40,7 @@ fi
 mkdir -p "$HORMUZ_CONTEXT_OUTPUT"
 HORMUZ_CONTEXT_OUTPUT="$(cd "$HORMUZ_CONTEXT_OUTPUT" && pwd)"
 export PYINSTALLER_CONFIG_DIR="$HORMUZ_CONTEXT_OUTPUT/pyinstaller-config"
-"$HORMUZ_CONTEXT_PYTHON" -c 'import PyInstaller, tiktoken; assert tiktoken.__version__ == "0.12.0"'
+"$HORMUZ_CONTEXT_PYTHON" -c 'import PyInstaller, tiktoken; from hormuz.compaction_runtime import TOKENIZER_VERSION; assert tiktoken.__version__ == TOKENIZER_VERSION'
 HORMUZ_CONTEXT_IDENTIFIER="$HORMUZ_CONTEXT_BUNDLE_ID.context-helper.${HORMUZ_CONTEXT_ARCH//_/-}"
 HORMUZ_CONTEXT_BUILD_ARGS=(
   --clean \
