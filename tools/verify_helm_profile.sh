@@ -220,12 +220,63 @@ capture_gateway_logs() {
   local checkpoint=$1
   [[ "${checkpoint}" =~ ^[a-z0-9-]+$ ]] || fail "gateway log checkpoint invalid"
   local output="${ARTIFACT_ROOT}/gateway-${checkpoint}.log"
-  kubectl --namespace hormuz-system logs \
-    --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
-    --all-containers=true --prefix=true --tail=-1 >"${output}"
-  python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
-    --artifact "${output}" --secret-root "${SECRET_ROOT}" >/dev/null \
-    || fail "gateway logs failed secret non-disclosure: ${checkpoint}"
+  local attempt pod pods pod_count error_output status disappeared
+  # Keep partial logs from disappearing replicas in the same protected capture.
+  : >"${output}"
+  for attempt in 1 2 3; do
+    pods="${ARTIFACT_ROOT}/gateway-${checkpoint}-pods-${attempt}.txt"
+    error_output="${ARTIFACT_ROOT}/gateway-${checkpoint}-selection-${attempt}.stderr"
+    if kubectl --namespace hormuz-system get pods \
+      --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
+      --output=name >"${pods}" 2>"${error_output}"; then
+      status=0
+    else
+      status=$?
+    fi
+    python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
+      --artifact "${pods}" --artifact "${error_output}" \
+      --secret-root "${SECRET_ROOT}" >/dev/null \
+      || fail "gateway pod selection failed secret non-disclosure: ${checkpoint}"
+    [[ "${status}" -eq 0 ]] \
+      || fail "gateway pod selection failed: ${checkpoint} exit_status=${status}"
+    [[ -s "${pods}" ]] || fail "gateway pod selection empty: ${checkpoint}"
+    disappeared=0
+    pod_count=0
+    while IFS= read -r pod || [[ -n "${pod}" ]]; do
+      [[ "${pod}" =~ ^pod/[a-z0-9]([-a-z0-9.]*[a-z0-9])?$ ]] \
+        || fail "gateway pod selection invalid: ${checkpoint}"
+      pod_count=$((pod_count + 1))
+      error_output="${ARTIFACT_ROOT}/gateway-${checkpoint}-${attempt}-${pod#pod/}.stderr"
+      if kubectl --namespace hormuz-system logs "${pod}" \
+        --all-containers=true --prefix=true --tail=-1 >>"${output}" 2>"${error_output}"; then
+        status=0
+      else
+        status=$?
+      fi
+      # Scan before classifying any failure: a failed fetch may contain secrets.
+      python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
+        --artifact "${output}" --artifact "${error_output}" \
+        --secret-root "${SECRET_ROOT}" >/dev/null \
+        || fail "gateway logs failed secret non-disclosure: ${checkpoint}"
+      if [[ "${status}" -eq 0 ]]; then
+        continue
+      fi
+      if [[ "${status}" -eq 1 ]] && cmp -s "${error_output}" \
+        <(printf 'Error from server (NotFound): pods "%s" not found\n' "${pod#pod/}"); then
+        disappeared=1
+        break
+      fi
+      fail "gateway log capture failed: ${checkpoint} exit_status=${status}"
+    done <"${pods}"
+    [[ "${pod_count}" -gt 0 ]] || fail "gateway pod selection invalid: ${checkpoint}"
+    [[ "${disappeared}" -eq 0 ]] && return
+    if [[ "${attempt}" -lt 3 ]]; then
+      printf 'gateway_log_capture_retry checkpoint=%s attempt=%s\n' \
+        "${checkpoint}" "${attempt}" >&2
+      sleep 1
+    fi
+  done
+  fail "gateway log capture exhausted pod disappearance retries: ${checkpoint}"
 }
 
 wait_for_job_log_marker() {
