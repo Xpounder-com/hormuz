@@ -77,12 +77,13 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "audit_chain",
         "portfolio_control",
         "attribution_control",
+        "finance_account_bindings",
     }
 )
 _LISTEN_FIELDS = frozenset({"host", "port"})
 _INGRESS_FIELDS = frozenset({"mode", "trusted_proxy_cidrs", "credential_env"})
 _UPSTREAM_FIELDS = frozenset(
-    {"base_url", "api_key_env", "api_key_envelope", "allow_response_storage", "allow_background"}
+    {"base_url", "api_key_env", "api_key_envelope", "allow_response_storage", "allow_background", "finance_identity"}
 )
 _IDENTITY_FIELDS = frozenset(
     {
@@ -300,16 +301,24 @@ def _validate_configuration_structure(raw: object) -> None:
 
 
 def _reject_deprecated_context_configuration(raw: dict[str, Any]) -> None:
-    pending: list[Any] = [raw]
+    pending: list[tuple[Any, tuple[str, ...]]] = [(raw, ())]
     while pending:
-        value = pending.pop()
+        value, path = pending.pop()
+        # These two optional surfaces contain opaque metadata, not capability
+        # declarations. Invalid metadata is classified by its domain parser.
+        # Whole-file JSON and structural guards have already run.
+        if path == ("finance_account_bindings",) or path in {
+            ("upstreams", "openai", "finance_identity"),
+            ("upstreams", "anthropic", "finance_identity"),
+        }:
+            continue
         if isinstance(value, dict):
             for key, nested in value.items():
                 if key in _DEPRECATED_CONTEXT_CONFIGURATION_KEYS:
                     raise ConfigurationInputError(_CONTEXT_EXPERIMENT_MOVED_MESSAGE)
-                pending.append(nested)
+                pending.append((nested, (*path, key)))
         elif isinstance(value, list):
-            pending.extend(value)
+            pending.extend((nested, (*path, "[]")) for nested in value)
         elif isinstance(value, str) and value in _DEPRECATED_CONTEXT_CAPABILITIES:
             raise ConfigurationInputError(_CONTEXT_EXPERIMENT_MOVED_MESSAGE)
 
@@ -323,6 +332,10 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
     upstreams = _schema_required_object(raw, "upstreams", frozenset({"openai", "anthropic"}))
     for value in upstreams.values():
         _schema_object(value, _UPSTREAM_FIELDS)
+
+    # Optional finance metadata is classified by its domain parser. Malformed
+    # metadata cannot add an inference denial; whole-file JSON/size/depth and
+    # unknown fields outside these two optional surfaces still fail normally.
 
     for value in _schema_optional_array(raw, "identities"):
         _schema_object(value, _IDENTITY_FIELDS)
