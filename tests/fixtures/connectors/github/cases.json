@@ -1,0 +1,556 @@
+{
+  "fixture_pack": "github-outcome-proposals-v1",
+  "reviewed_on": "2026-09-20",
+  "source_document": "https://docs.github.com/en/webhooks/webhook-events-and-payloads",
+  "synthetic_server_binding": {
+    "organization_id": "synthetic-org",
+    "connector_id": "synthetic-github",
+    "provider": "github",
+    "installation_id": "123",
+    "workspace_id": null,
+    "external_object_ids": [
+      "456"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "pr-opened",
+      "provider_event": "pull_request",
+      "provider_action": "opened",
+      "source_document": "https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request",
+      "reviewed_on": "2026-09-20",
+      "input": {
+        "headers": {
+          "X-GitHub-Event": "pull_request",
+          "X-GitHub-Delivery": "10000000-0000-4000-8000-000000000001"
+        },
+        "body": {
+          "action": "opened",
+          "installation": {
+            "id": 123
+          },
+          "repository": {
+            "id": 456
+          },
+          "number": 7,
+          "pull_request": {
+            "id": 1001,
+            "state": "open",
+            "merged": false,
+            "created_at": "2026-09-01T10:00:00Z",
+            "updated_at": "2026-09-01T10:00:00Z",
+            "head": {
+              "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        }
+      },
+      "field_mapping": {
+        "schema_id": "Fixed source-neutral observation identity; not supplied by GitHub.",
+        "schema_version": "Fixed source-neutral v1; not supplied by GitHub.",
+        "source_event_id": "Proposed per-delivery observation slot, distinct from the delivery GUID; #219 must accept verified delivery identity and derivation.",
+        "external_object_id": "Proposed decimal pull_request.id=1001; number=7 is not the work-object ID.",
+        "container_id": "Candidate repository.id after the server-owned installation/repository binding matches; body-supplied IDs grant no tenant or scope authority.",
+        "source_revision": "Unknown: head and merge commit SHAs are revisions of code, not a verified order of PR events.",
+        "ordering_domain": "Null while no monotonic GitHub source ordering domain has been accepted.",
+        "revision_order": "Null while no monotonic GitHub source ordering value has been accepted.",
+        "object_type": "Candidate pull_request for a verified PR event or association.",
+        "event_type": "Proposed opened to created; no claim that work was accepted or completed.",
+        "quality_state": "Unknown; repository activity does not establish AI causality or employee quality.",
+        "duration_ms": "Null; this minimal event supplies no approved duration.",
+        "state": "Observed only if a future adapter accepts the event; not an evaluation result.",
+        "supersedes_source_event_id": "Null; no authenticated correction or supersession relationship is present.",
+        "reason_code": "Observed only if a future adapter accepts the event; no correction is asserted.",
+        "event_at": "Proposed pull_request.created_at, once payload bytes and source ownership are authenticated."
+      },
+      "expectation": {
+        "kind": "mapping_pending",
+        "candidate_observation": {
+          "proposal_only": true,
+          "observation": {
+            "schema_id": "hormuz.source-outcome-observation",
+            "schema_version": 1,
+            "source_event_id": "10000000-0000-4000-8000-000000000001:0",
+            "external_object_id": "1001",
+            "container_id": "456",
+            "source_revision": null,
+            "ordering_domain": null,
+            "revision_order": null,
+            "object_type": "pull_request",
+            "event_type": "created",
+            "quality_state": "unknown",
+            "duration_ms": null,
+            "state": "observed",
+            "supersedes_source_event_id": null,
+            "reason_code": "observed",
+            "event_at": "2026-09-01T10:00:00Z"
+          }
+        },
+        "decisions_needed": [
+          "Accept the exact pull_request/opened allowlist and verified X-GitHub-Delivery-to-source-event identity rule in #219."
+        ]
+      }
+    },
+    {
+      "case_id": "pr-closed-merged",
+      "provider_event": "pull_request",
+      "provider_action": "closed",
+      "source_document": "https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request",
+      "reviewed_on": "2026-09-20",
+      "input": {
+        "headers": {
+          "X-GitHub-Event": "pull_request",
+          "X-GitHub-Delivery": "10000000-0000-4000-8000-000000000002"
+        },
+        "body": {
+          "action": "closed",
+          "installation": {
+            "id": 123
+          },
+          "repository": {
+            "id": 456
+          },
+          "number": 8,
+          "pull_request": {
+            "id": 1002,
+            "state": "closed",
+            "merged": true,
+            "closed_at": "2026-09-02T11:00:00Z",
+            "merged_at": "2026-09-02T10:59:59Z",
+            "updated_at": "2026-09-02T11:00:00Z",
+            "head": {
+              "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc"
+          }
+        }
+      },
+      "field_mapping": {
+        "schema_id": "Fixed source-neutral observation identity; not supplied by GitHub.",
+        "schema_version": "Fixed source-neutral v1; not supplied by GitHub.",
+        "source_event_id": "Proposed per-delivery observation slot, distinct from the delivery GUID; #219 must accept verified delivery identity and derivation.",
+        "external_object_id": "Proposed decimal pull_request.id=1002; number=8 and merge_commit_sha are separate identities.",
+        "container_id": "Candidate repository.id after the server-owned installation/repository binding matches; body-supplied IDs grant no tenant or scope authority.",
+        "source_revision": "Unknown: head and merge commit SHAs are revisions of code, not a verified order of PR events.",
+        "ordering_domain": "Null while no monotonic GitHub source ordering domain has been accepted.",
+        "revision_order": "Null while no monotonic GitHub source ordering value has been accepted.",
+        "object_type": "Candidate pull_request for a verified PR event or association.",
+        "event_type": "Proposed closed with merged=true and merged_at present to completed, not accepted quality.",
+        "quality_state": "Unknown; repository activity does not establish AI causality or employee quality.",
+        "duration_ms": "Null; this minimal event supplies no approved duration.",
+        "state": "Observed only if a future adapter accepts the event; not an evaluation result.",
+        "supersedes_source_event_id": "Null; no authenticated correction or supersession relationship is present.",
+        "reason_code": "Observed only if a future adapter accepts the event; no correction is asserted.",
+        "event_at": "Proposed pull_request.merged_at; closed_at and updated_at have different meanings."
+      },
+      "expectation": {
+        "kind": "mapping_pending",
+        "candidate_observation": {
+          "proposal_only": true,
+          "observation": {
+            "schema_id": "hormuz.source-outcome-observation",
+            "schema_version": 1,
+            "source_event_id": "10000000-0000-4000-8000-000000000002:0",
+            "external_object_id": "1002",
+            "container_id": "456",
+            "source_revision": null,
+            "ordering_domain": null,
+            "revision_order": null,
+            "object_type": "pull_request",
+            "event_type": "completed",
+            "quality_state": "unknown",
+            "duration_ms": null,
+            "state": "observed",
+            "supersedes_source_event_id": null,
+            "reason_code": "observed",
+            "event_at": "2026-09-02T10:59:59Z"
+          }
+        },
+        "decisions_needed": [
+          "Accept the exact pull_request/closed+merged condition and verified X-GitHub-Delivery-to-source-event identity rule in #219."
+        ]
+      }
+    },
+    {
+      "case_id": "pr-closed-unmerged",
+      "provider_event": "pull_request",
+      "provider_action": "closed",
+      "source_document": "https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request",
+      "reviewed_on": "2026-09-20",
+      "input": {
+        "headers": {
+          "X-GitHub-Event": "pull_request",
+          "X-GitHub-Delivery": "10000000-0000-4000-8000-000000000003"
+        },
+        "body": {
+          "action": "closed",
+          "installation": {
+            "id": 123
+          },
+          "repository": {
+            "id": 456
+          },
+          "number": 9,
+          "pull_request": {
+            "id": 1003,
+            "state": "closed",
+            "merged": false,
+            "closed_at": "2026-09-03T12:00:00Z",
+            "merged_at": null,
+            "updated_at": "2026-09-03T12:00:00Z",
+            "head": {
+              "sha": "dddddddddddddddddddddddddddddddddddddddd"
+            }
+          }
+        }
+      },
+      "field_mapping": {
+        "schema_id": "Fixed source-neutral observation identity; not supplied by GitHub.",
+        "schema_version": "Fixed source-neutral v1; not supplied by GitHub.",
+        "source_event_id": "Proposed per-delivery observation slot, distinct from the delivery GUID; #219 must accept verified delivery identity and derivation.",
+        "external_object_id": "pull_request.id=1003 is a possible work-object ID only after source verification.",
+        "container_id": "Candidate repository.id after the server-owned installation/repository binding matches; body-supplied IDs grant no tenant or scope authority.",
+        "source_revision": "Unknown: head and merge commit SHAs are revisions of code, not a verified order of PR events.",
+        "ordering_domain": "Null while no monotonic GitHub source ordering domain has been accepted.",
+        "revision_order": "Null while no monotonic GitHub source ordering value has been accepted.",
+        "object_type": "Candidate pull_request for a verified PR event or association.",
+        "event_type": "Pending: closed without merge may mean canceled, unsupported, or later reopened; no event_type chosen.",
+        "quality_state": "Unknown; repository activity does not establish AI causality or employee quality.",
+        "duration_ms": "Null; this minimal event supplies no approved duration.",
+        "state": "Observed only if a future adapter accepts the event; not an evaluation result.",
+        "supersedes_source_event_id": "Null; no authenticated correction or supersession relationship is present.",
+        "reason_code": "Observed only if a future adapter accepts the event; no correction is asserted.",
+        "event_at": "closed_at is present, but time mapping waits on the event-meaning decision."
+      },
+      "expectation": {
+        "kind": "mapping_pending",
+        "decisions_needed": [
+          "Choose an allowlisted meaning for closed without merge and how a later reopened PR relates to it.",
+          "Accept a verified delivery/event identity and source-order policy before normalization."
+        ],
+        "candidate_observation": null
+      }
+    },
+    {
+      "case_id": "review-submitted",
+      "provider_event": "pull_request_review",
+      "provider_action": "submitted",
+      "source_document": "https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review",
+      "reviewed_on": "2026-09-20",
+      "input": {
+        "headers": {
+          "X-GitHub-Event": "pull_request_review",
+          "X-GitHub-Delivery": "10000000-0000-4000-8000-000000000004"
+        },
+        "body": {
+          "action": "submitted",
+          "installation": {
+            "id": 123
+          },
+          "repository": {
+            "id": 456
+          },
+          "pull_request": {
+            "id": 1004,
+            "number": 10,
+            "head": {
+              "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          },
+          "review": {
+            "id": 2001,
+            "state": "approved",
+            "submitted_at": "2026-09-04T13:00:00Z"
+          }
+        }
+      },
+      "field_mapping": {
+        "schema_id": "Fixed source-neutral observation identity; not supplied by GitHub.",
+        "schema_version": "Fixed source-neutral v1; not supplied by GitHub.",
+        "source_event_id": "Proposed per-delivery observation slot, distinct from the delivery GUID; #219 must accept verified delivery identity and derivation.",
+        "external_object_id": "pull_request.id=1004 is distinct from review.id=2001; PR association must be verified.",
+        "container_id": "Candidate repository.id after the server-owned installation/repository binding matches; body-supplied IDs grant no tenant or scope authority.",
+        "source_revision": "Unknown: head and merge commit SHAs are revisions of code, not a verified order of PR events.",
+        "ordering_domain": "Null while no monotonic GitHub source ordering domain has been accepted.",
+        "revision_order": "Null while no monotonic GitHub source ordering value has been accepted.",
+        "object_type": "Candidate pull_request for a verified PR event or association.",
+        "event_type": "Pending: a submitted approved review is feedback, not proof the PR or AI-produced work was accepted.",
+        "quality_state": "Pending: review.state=approved cannot be promoted to employee/model quality without #219 semantics.",
+        "duration_ms": "Null; this minimal event supplies no approved duration.",
+        "state": "Observed only if a future adapter accepts the event; not an evaluation result.",
+        "supersedes_source_event_id": "Null; no authenticated correction or supersession relationship is present.",
+        "reason_code": "Observed only if a future adapter accepts the event; no correction is asserted.",
+        "event_at": "review.submitted_at is a possible review time only if a review observation is allowed."
+      },
+      "expectation": {
+        "kind": "mapping_pending",
+        "decisions_needed": [
+          "Decide which submitted review states, if any, create source-neutral observations and what they mean.",
+          "Verify review-to-PR association, delivery identity, and correction/dismissal behavior."
+        ],
+        "candidate_observation": null
+      }
+    },
+    {
+      "case_id": "check-run-success",
+      "provider_event": "check_run",
+      "provider_action": "completed",
+      "source_document": "https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_run",
+      "reviewed_on": "2026-09-20",
+      "input": {
+        "headers": {
+          "X-GitHub-Event": "check_run",
+          "X-GitHub-Delivery": "10000000-0000-4000-8000-000000000005"
+        },
+        "body": {
+          "action": "completed",
+          "installation": {
+            "id": 123
+          },
+          "repository": {
+            "id": 456
+          },
+          "check_run": {
+            "id": 3001,
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "ffffffffffffffffffffffffffffffffffffffff",
+            "completed_at": "2026-09-05T14:00:00Z",
+            "pull_requests": [
+              {
+                "id": 1005,
+                "number": 11
+              }
+            ]
+          }
+        }
+      },
+      "field_mapping": {
+        "schema_id": "Fixed source-neutral observation identity; not supplied by GitHub.",
+        "schema_version": "Fixed source-neutral v1; not supplied by GitHub.",
+        "source_event_id": "Proposed per-delivery observation slot, distinct from the delivery GUID; #219 must accept verified delivery identity and derivation.",
+        "external_object_id": "check_run.id=3001 is not a PR ID; pull_requests[0].id=1005 is only an association candidate.",
+        "container_id": "Candidate repository.id after the server-owned installation/repository binding matches; body-supplied IDs grant no tenant or scope authority.",
+        "source_revision": "Unknown: head and merge commit SHAs are revisions of code, not a verified order of PR events.",
+        "ordering_domain": "Null while no monotonic GitHub source ordering domain has been accepted.",
+        "revision_order": "Null while no monotonic GitHub source ordering value has been accepted.",
+        "object_type": "Pending verified PR association; check_run itself is not a supported work-object type.",
+        "event_type": "Pending: success is a CI conclusion, never accepted work or AI causality.",
+        "quality_state": "Pending: conclusion=success must not imply accepted or high-quality work.",
+        "duration_ms": "Null; this minimal event supplies no approved duration.",
+        "state": "Observed only if a future adapter accepts the event; not an evaluation result.",
+        "supersedes_source_event_id": "Null; no authenticated correction or supersession relationship is present.",
+        "reason_code": "Observed only if a future adapter accepts the event; no correction is asserted.",
+        "event_at": "check_run.completed_at is a possible CI observation time if an association is approved."
+      },
+      "expectation": {
+        "kind": "mapping_pending",
+        "decisions_needed": [
+          "Define the check_run conclusion allowlist and whether CI results are separate descriptive observations.",
+          "Verify a single PR association and handle ambiguous, stale, or empty pull_requests arrays.",
+          "Accept verified delivery identity and source-order behavior for reruns."
+        ],
+        "candidate_observation": null
+      }
+    },
+    {
+      "case_id": "check-run-failure",
+      "provider_event": "check_run",
+      "provider_action": "completed",
+      "source_document": "https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_run",
+      "reviewed_on": "2026-09-20",
+      "input": {
+        "headers": {
+          "X-GitHub-Event": "check_run",
+          "X-GitHub-Delivery": "10000000-0000-4000-8000-000000000006"
+        },
+        "body": {
+          "action": "completed",
+          "installation": {
+            "id": 123
+          },
+          "repository": {
+            "id": 456
+          },
+          "check_run": {
+            "id": 3002,
+            "status": "completed",
+            "conclusion": "failure",
+            "head_sha": "3333333333333333333333333333333333333333",
+            "completed_at": "2026-09-06T15:00:00Z",
+            "pull_requests": []
+          }
+        }
+      },
+      "field_mapping": {
+        "schema_id": "Fixed source-neutral observation identity; not supplied by GitHub.",
+        "schema_version": "Fixed source-neutral v1; not supplied by GitHub.",
+        "source_event_id": "Proposed per-delivery observation slot, distinct from the delivery GUID; #219 must accept verified delivery identity and derivation.",
+        "external_object_id": "check_run.id=3002 is not a work-object ID; no PR ID appears in the empty pull_requests array.",
+        "container_id": "Candidate repository.id after the server-owned installation/repository binding matches; body-supplied IDs grant no tenant or scope authority.",
+        "source_revision": "Unknown: head and merge commit SHAs are revisions of code, not a verified order of PR events.",
+        "ordering_domain": "Null while no monotonic GitHub source ordering domain has been accepted.",
+        "revision_order": "Null while no monotonic GitHub source ordering value has been accepted.",
+        "object_type": "Pending: no verified PR association; do not invent a pull_request work object.",
+        "event_type": "Pending: CI failure is not a defect attribution or an employee/model quality verdict.",
+        "quality_state": "Pending: conclusion=failure alone cannot become rejected or defect quality.",
+        "duration_ms": "Null; this minimal event supplies no approved duration.",
+        "state": "Observed only if a future adapter accepts the event; not an evaluation result.",
+        "supersedes_source_event_id": "Null; no authenticated correction or supersession relationship is present.",
+        "reason_code": "Observed only if a future adapter accepts the event; no correction is asserted.",
+        "event_at": "check_run.completed_at is source time only if a future mapping is accepted."
+      },
+      "expectation": {
+        "kind": "mapping_pending",
+        "decisions_needed": [
+          "Decide whether unassociated completed checks create delivery-level coverage or no observation.",
+          "Define safe PR association, conclusion, rerun, delivery identity, and source-order rules."
+        ],
+        "candidate_observation": null
+      }
+    },
+    {
+      "case_id": "pr-opened-missing-object-id",
+      "provider_event": "pull_request",
+      "provider_action": "opened",
+      "source_document": "https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request",
+      "reviewed_on": "2026-09-20",
+      "input": {
+        "headers": {
+          "X-GitHub-Event": "pull_request",
+          "X-GitHub-Delivery": "10000000-0000-4000-8000-000000000007"
+        },
+        "body": {
+          "action": "opened",
+          "installation": {
+            "id": 123
+          },
+          "repository": {
+            "id": 456
+          },
+          "number": 12,
+          "pull_request": {
+            "state": "open",
+            "merged": false,
+            "created_at": "2026-09-07T16:00:00Z",
+            "head": {
+              "sha": "1111111111111111111111111111111111111111"
+            }
+          }
+        }
+      },
+      "field_mapping": {
+        "schema_id": "Fixed source-neutral observation identity; not supplied by GitHub.",
+        "schema_version": "Fixed source-neutral v1; not supplied by GitHub.",
+        "source_event_id": "Proposed per-delivery observation slot, distinct from the delivery GUID; #219 must accept verified delivery identity and derivation.",
+        "external_object_id": "Missing pull_request.id; null proposed work-object ID must fail the closed contract.",
+        "container_id": "Candidate repository.id after the server-owned installation/repository binding matches; body-supplied IDs grant no tenant or scope authority.",
+        "source_revision": "Unknown: head and merge commit SHAs are revisions of code, not a verified order of PR events.",
+        "ordering_domain": "Null while no monotonic GitHub source ordering domain has been accepted.",
+        "revision_order": "Null while no monotonic GitHub source ordering value has been accepted.",
+        "object_type": "Candidate pull_request for a verified PR event or association.",
+        "event_type": "Opened-to-created remains only a candidate; this malformed input is not normalizable.",
+        "quality_state": "Unknown; repository activity does not establish AI causality or employee quality.",
+        "duration_ms": "Null; this minimal event supplies no approved duration.",
+        "state": "Observed only if a future adapter accepts the event; not an evaluation result.",
+        "supersedes_source_event_id": "Null; no authenticated correction or supersession relationship is present.",
+        "reason_code": "Observed only if a future adapter accepts the event; no correction is asserted.",
+        "event_at": "created_at exists but cannot rescue a missing work-object identity."
+      },
+      "expectation": {
+        "kind": "invalid_projection",
+        "invalid_observation": {
+          "schema_id": "hormuz.source-outcome-observation",
+          "schema_version": 1,
+          "source_event_id": "10000000-0000-4000-8000-000000000007:0",
+          "external_object_id": null,
+          "container_id": "456",
+          "source_revision": null,
+          "ordering_domain": null,
+          "revision_order": null,
+          "object_type": "pull_request",
+          "event_type": "created",
+          "quality_state": "unknown",
+          "duration_ms": null,
+          "state": "observed",
+          "supersedes_source_event_id": null,
+          "reason_code": "observed",
+          "event_at": "2026-09-07T16:00:00Z"
+        },
+        "expected_error": "invalid_request"
+      }
+    },
+    {
+      "case_id": "pr-opened-invalid-object-id-type",
+      "provider_event": "pull_request",
+      "provider_action": "opened",
+      "source_document": "https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request",
+      "reviewed_on": "2026-09-20",
+      "input": {
+        "headers": {
+          "X-GitHub-Event": "pull_request",
+          "X-GitHub-Delivery": "10000000-0000-4000-8000-000000000008"
+        },
+        "body": {
+          "action": "opened",
+          "installation": {
+            "id": 123
+          },
+          "repository": {
+            "id": 456
+          },
+          "number": 13,
+          "pull_request": {
+            "id": true,
+            "state": "open",
+            "merged": false,
+            "created_at": "2026-09-08T17:00:00Z",
+            "head": {
+              "sha": "2222222222222222222222222222222222222222"
+            }
+          }
+        }
+      },
+      "field_mapping": {
+        "schema_id": "Fixed source-neutral observation identity; not supplied by GitHub.",
+        "schema_version": "Fixed source-neutral v1; not supplied by GitHub.",
+        "source_event_id": "Proposed per-delivery observation slot, distinct from the delivery GUID; #219 must accept verified delivery identity and derivation.",
+        "external_object_id": "Boolean pull_request.id is not a numeric GitHub work-object ID; forwarding it must fail.",
+        "container_id": "Candidate repository.id after the server-owned installation/repository binding matches; body-supplied IDs grant no tenant or scope authority.",
+        "source_revision": "Unknown: head and merge commit SHAs are revisions of code, not a verified order of PR events.",
+        "ordering_domain": "Null while no monotonic GitHub source ordering domain has been accepted.",
+        "revision_order": "Null while no monotonic GitHub source ordering value has been accepted.",
+        "object_type": "Candidate pull_request for a verified PR event or association.",
+        "event_type": "Opened-to-created remains only a candidate; this malformed input is not normalizable.",
+        "quality_state": "Unknown; repository activity does not establish AI causality or employee quality.",
+        "duration_ms": "Null; this minimal event supplies no approved duration.",
+        "state": "Observed only if a future adapter accepts the event; not an evaluation result.",
+        "supersedes_source_event_id": "Null; no authenticated correction or supersession relationship is present.",
+        "reason_code": "Observed only if a future adapter accepts the event; no correction is asserted.",
+        "event_at": "created_at exists but cannot rescue an invalid work-object ID type."
+      },
+      "expectation": {
+        "kind": "invalid_projection",
+        "invalid_observation": {
+          "schema_id": "hormuz.source-outcome-observation",
+          "schema_version": 1,
+          "source_event_id": "10000000-0000-4000-8000-000000000008:0",
+          "external_object_id": true,
+          "container_id": "456",
+          "source_revision": null,
+          "ordering_domain": null,
+          "revision_order": null,
+          "object_type": "pull_request",
+          "event_type": "created",
+          "quality_state": "unknown",
+          "duration_ms": null,
+          "state": "observed",
+          "supersedes_source_event_id": null,
+          "reason_code": "observed",
+          "event_at": "2026-09-08T17:00:00Z"
+        },
+        "expected_error": "invalid_request"
+      }
+    }
+  ]
+}
