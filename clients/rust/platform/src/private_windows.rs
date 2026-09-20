@@ -202,6 +202,13 @@ pub struct PrivateTransaction {
     _lock: File,
 }
 
+/// Exclusive application ownership. Retains the private directory and an
+/// undeletable sentinel handle until the shell has stopped its owned helpers.
+pub struct ApplicationInstance {
+    _root: Arc<Root>,
+    _lock: File,
+}
+
 fn open(
     root: &Root,
     name: &str,
@@ -388,22 +395,53 @@ impl PrivateDirectory {
         })
     }
     pub fn try_lock(&self) -> Result<PrivateTransaction> {
+        Ok(PrivateTransaction {
+            root: self.root.clone(),
+            _lock: self.lock_file("connection.lock", false)?,
+        })
+    }
+
+    /// Every shell startup path must use this same root. A busy lease requires
+    /// native activation/reopen of the existing shell; this sends no IPC.
+    pub fn try_claim_instance(&self) -> Result<ApplicationInstance> {
+        let file = self.lock_file("instance.lock", true)?;
+        if file
+            .metadata()
+            .map_err(|_| PlatformError::Unavailable)?
+            .len()
+            != 0
+        {
+            return Err(PlatformError::UnsafeStorage);
+        }
+        Ok(ApplicationInstance {
+            _root: self.root.clone(),
+            _lock: file,
+        })
+    }
+
+    fn lock_file(&self, name: &str, empty: bool) -> Result<File> {
         let file = open(
             &self.root,
-            "connection.lock",
+            name,
             GENERIC_READ | GENERIC_WRITE,
             OPEN_ALWAYS,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
         )?
         .ok_or(PlatformError::Unavailable)?;
+        if empty
+            && file
+                .metadata()
+                .map_err(|_| PlatformError::Unavailable)?
+                .len()
+                != 0
+        {
+            return Err(PlatformError::UnsafeStorage);
+        }
         file.try_lock().map_err(|error| match error {
             std::fs::TryLockError::WouldBlock => PlatformError::Busy,
             std::fs::TryLockError::Error(_) => PlatformError::Unavailable,
         })?;
-        Ok(PrivateTransaction {
-            root: self.root.clone(),
-            _lock: file,
-        })
+        Ok(file)
     }
 }
 
@@ -582,6 +620,34 @@ mod tests {
                 )
             },
             0
+        );
+    }
+
+    #[test]
+    fn instance_sentinel_rejects_public_acls_and_reparse_points() {
+        let temporary = tempfile::tempdir().unwrap();
+        let directory = PrivateDirectory::open(&temporary.path().join("private")).unwrap();
+        let sentinel = directory.root.path.join("instance.lock");
+        drop(directory.try_claim_instance().unwrap());
+        grant_world_read(&directory, &sentinel);
+        assert!(matches!(
+            directory.try_claim_instance(),
+            Err(PlatformError::UnsafeStorage)
+        ));
+        std::fs::remove_file(&sentinel).unwrap();
+        directory
+            .try_lock()
+            .unwrap()
+            .write("unowned", b"preserve", None)
+            .unwrap();
+        std::os::windows::fs::symlink_file(directory.root.path.join("unowned"), &sentinel).unwrap();
+        assert!(matches!(
+            directory.try_claim_instance(),
+            Err(PlatformError::UnsafeStorage)
+        ));
+        assert_eq!(
+            std::fs::read(directory.root.path.join("unowned")).unwrap(),
+            b"preserve"
         );
     }
 

@@ -105,6 +105,8 @@ mod native {
             "a:b",
             "connection.lock",
             "Connection.Lock",
+            "instance.lock",
+            "Instance.Lock",
             ".write-unowned",
             ".WRITE-unowned",
             "CON",
