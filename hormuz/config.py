@@ -16,6 +16,7 @@ from ._config_input import (
 from .custody_lifecycle import CustodyLifecycleConfig
 from .portfolio_config import PortfolioConfig
 from .attribution_config import AttributionConfig
+from .finance_account_binding import FinanceAccountBindings, FinanceIdentity, UnavailableFinance
 
 
 class ConfigError(ValueError):
@@ -76,6 +77,7 @@ class UpstreamConfig:
     api_key_envelope_path: Path | None = None
     allow_response_storage: bool = False
     allow_background: bool = False
+    finance_identity: FinanceIdentity | UnavailableFinance = UnavailableFinance("not_configured")
 
 
 @dataclass(frozen=True)
@@ -451,6 +453,7 @@ class GatewayConfig:
     audit_chain: AuditChainConfig | None = None
     portfolio_control: PortfolioConfig | None = None
     attribution_control: AttributionConfig | None = None
+    finance_account_bindings: FinanceAccountBindings | None = None
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":

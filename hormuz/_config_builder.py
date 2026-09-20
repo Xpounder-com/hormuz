@@ -32,6 +32,7 @@ from ._config_routing import build_model_route_domain, build_upstream_domain
 from ._config_values import _integer
 from .portfolio_config import build_portfolio_config
 from .attribution_config import build_attribution_config
+from .finance_account_binding import parse_finance_account_bindings
 from ._config_session import build_session_broker, resolve_session_credentials, validate_session_references
 from .config import (
     ConfigError,
@@ -213,6 +214,10 @@ def _build_gateway_config(
         attribution_control=build_attribution_config(
             raw.get("attribution_control"),
             (*static_identities, *identities_by_subject.values()),
+        ),
+        finance_account_bindings=(
+            parse_finance_account_bindings(raw["finance_account_bindings"])
+            if "finance_account_bindings" in raw else None
         ),
         key_custody=key_custody,
         audit_anchor=external_custody_domain.audit_anchor,

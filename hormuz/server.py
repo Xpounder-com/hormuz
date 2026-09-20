@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import hmac
 import http.client
 import ipaddress
@@ -54,6 +54,7 @@ from .finance_attempts import (
     configured_rate_card_binding,
     estimate_configured_route,
 )
+from .finance_account_binding import FinanceAccountCandidate, UnavailableFinance, select_finance_account
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
@@ -95,6 +96,18 @@ _ANTHROPIC_PROVIDER_STATE_FIELDS = frozenset({"container", "mcp_servers"})
 _OPENAI_INLINE_TOOL_TYPES = frozenset({"custom", "function"})
 _ANTHROPIC_INLINE_TOOL_TYPES = frozenset({"custom"})
 _INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
+
+
+@dataclass(frozen=True)
+class _SelectedUpstream:
+    """One immutable transport/metadata choice; contains no credential value.
+
+    Finance candidates are not passed to persistence in this source checkpoint.
+    Future capture must validate each new attempt in its existing transaction.
+    """
+
+    upstream: UpstreamConfig
+    finance: FinanceAccountCandidate | UnavailableFinance
 
 
 class _ProviderRehearsalResponse:
@@ -880,6 +893,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 code="gateway_upstream_not_configured",
             )
             return
+        upstream = self.server.config.upstreams[protocol]
+        selected_upstream = _SelectedUpstream(
+            upstream=upstream,
+            finance=select_finance_account(
+                organization_id=identity.organization_id,
+                protocol=protocol,
+                base_url=upstream.base_url,
+                identity=upstream.finance_identity,
+                bindings=self.server.config.finance_account_bindings,
+            ),
+        )
         attempt: RequestAttempt | None = None
         if account_usage:
             try:
@@ -895,6 +919,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     output_field=output_field,
                     body=body,
                     admission=admission,
+                    selected_upstream=selected_upstream,
                 )
             except ReservationDenied as error:
                 self._deny_budget_reservation(
@@ -928,6 +953,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             redaction_rules=redaction.rules,
             attempt=attempt,
             upstream_key=upstream_key,
+            selected_upstream=selected_upstream,
             reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
             failover_decision=failover_decision,
             failover_applied_reason=None,
@@ -950,14 +976,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         redaction_rules: tuple[str, ...],
         attempt: RequestAttempt | None,
         upstream_key: str,
+        selected_upstream: _SelectedUpstream,
         reservation_ttl_seconds: int,
         failover_decision: PolicyDecision | None,
         failover_applied_reason: str | None,
     ) -> None:
         route = decision.route
         assert route is not None
-        upstream = self.server.config.upstreams[protocol]
-        request_url = self._upstream_url(upstream)
+        request_url = self._upstream_url(selected_upstream.upstream)
         headers = self._upstream_headers(protocol, upstream_key)
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
 
@@ -1057,6 +1083,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     output_field=output_field,
                     body=failover_body,
                     admission=admission,
+                    selected_upstream=selected_upstream,
                     provider_failover=ProviderFailoverContext(
                         original_attempt_id=attempt.attempt_id,
                         trigger_status=status,
@@ -1101,6 +1128,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 redaction_rules=redaction_rules,
                 attempt=failover_attempt,
                 upstream_key=upstream_key,
+                selected_upstream=selected_upstream,
                 reservation_ttl_seconds=reservation_ttl_seconds,
                 failover_decision=None,
                 failover_applied_reason=reason,
@@ -1341,8 +1369,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         output_field: str,
         body: bytes,
         admission: Admission | None,
+        selected_upstream: _SelectedUpstream,
         provider_failover: ProviderFailoverContext | None = None,
     ) -> RequestAttempt:
+        # Carry the exact context used by _forward to this pre-egress boundary.
+        # Registration/source validation and atomic capture are a later schema
+        # checkpoint; a configured candidate must not become durable evidence here.
         route = decision.route
         assert route is not None
         # Absence is not a zero-token ceiling: without either a request or
