@@ -1,3 +1,5 @@
+> **Template tip (remove before submitting):** See the [fictional documentation-only PR example](../docs/CONTRIBUTOR_PR_EXAMPLE.md). Use `Closes #...` only when this PR completes the issue; use `Refs #...` for a partial slice.
+
 ## Outcome
 
 <!-- Link one issue and state the one verifiable outcome delivered. -->
