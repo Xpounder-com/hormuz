@@ -39,10 +39,13 @@ reuse one job seed across baseline, candidate, and confirmation benchmarks so
 their timed-output fingerprints remain comparable. Without the flag, the
 reference workload uses deterministic variants for local offline checks.
 
-The workload measures batched `compact_text` round-trip runtime, including
-serialization and pipe transport, for path-list, line-run,
-search-line, and JSON-table cases. It includes small, typical, large, empty,
-malformed, duplicate, and Unicode inputs, plus held-out correctness cases.
+The workload times each batch from the parent's first pipe write through its
+full response-frame read. That interval includes pipe transport and the
+child's JSON decoding, compaction calls, and JSON encoding. Parent request
+encoding, response parsing, and output hashing happen outside the timed
+interval. Path-list, line-run, search-line, and JSON-table cases include
+small, typical, large, empty, malformed, duplicate, and Unicode inputs, plus
+held-out correctness cases.
 Empty and malformed inputs are checked for behavior but excluded from timing.
 Every timed invocation gets a distinct, structurally equivalent input, and the
 timed outputs are fingerprinted alongside the canonical outputs. This prevents
