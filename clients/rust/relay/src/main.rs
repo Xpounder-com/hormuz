@@ -1,3 +1,8 @@
+// Linux compiles this module only for the synthetic Unix pipe tests. The
+// executable still requires a supported native secure store below.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+mod helper_exchange;
+
 #[cfg(any(target_os = "macos", windows))]
 mod native_cli;
 
