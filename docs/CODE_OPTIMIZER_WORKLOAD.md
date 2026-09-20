@@ -7,6 +7,11 @@ to Hormuz to receive PR events and publish review checks. The app controller,
 webhook secret, private key, job queue, model adapter, and candidate runner do
 not live in this source tree or in the Hormuz gateway runtime.
 
+This checkpoint covers local validation with synthetic inputs. Live model
+candidate generation and transmission of repository source or profiling data
+to a model service require separate explicit authorization. GitHub App
+registration, installation, and operational qualification are separate work.
+
 This repository contains the reference synthetic compaction workload at
 `benchmarks/code_optimizer/compaction.py` and a test that keeps its cases
 executable against the current Hormuz source. The app carries a trusted copy
