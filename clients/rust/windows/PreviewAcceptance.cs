@@ -167,7 +167,7 @@ public static class PreviewAcceptance
         Wait(() => IsWindowVisible(window) && !IsIconic(window), "Panel did not reopen.");
         IntPtr fold = GetDlgItem(window, FoldId);
         Wait(() => AutomationElement.FocusedElement != null &&
-            AutomationElement.FocusedElement.Current.NativeWindowHandle == fold.ToInt32(),
+            new IntPtr(AutomationElement.FocusedElement.Current.NativeWindowHandle) == fold,
             "Reopened panel did not restore button focus.");
     }
 
@@ -195,7 +195,7 @@ public static class PreviewAcceptance
     static bool Focused(IntPtr control)
     {
         AutomationElement focused = AutomationElement.FocusedElement;
-        return focused != null && focused.Current.NativeWindowHandle == control.ToInt32();
+        return focused != null && new IntPtr(focused.Current.NativeWindowHandle) == control;
     }
 
     static void RequireForeground(IntPtr window)
