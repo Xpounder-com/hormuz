@@ -100,3 +100,12 @@ traces verify these library decisions and separate operation cancellation.
 behavior. The existing Mac app and draft Windows shell do not consume this
 scheduler yet; connected UI, native power/footprint and release acceptance remain
 unproven. See the [scheduler integration contract](../clients/rust/session/README.md#central-dashboard-scheduler-337-source-checkpoint).
+
+Issue #339 adds a separate native application-instance lease and worker-side
+[helper lifecycle policy](../clients/rust/platform/README.md#application-ownership-and-helper-lifecycle)
+to the unpublished platform library. Kernel-lock tests cover competing startup,
+crash recovery and refresh-lock independence; deterministic helper tests cover
+bounded restart, client draining and quit/update behavior. **#339 remains open**
+for native activation/login registration, real helper supervision and crash
+containment, sleep/resume and shell integration. No IPC or native process
+adapter is supplied by this source checkpoint.
