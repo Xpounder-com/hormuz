@@ -161,6 +161,9 @@ def _child_main(root: Path) -> int:
     """Run candidate code only in this disposable, sandbox-inheriting process."""
     root = root.resolve(strict=True)
     sys.path.insert(0, str(root))
+    # In the macOS pilot this hard cap also blocks detached grandchildren.
+    # A rootless Linux container supplies its own process limit as well.
+    resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
     compaction = load_compaction(root)
     for raw in iter(lambda: sys.stdin.buffer.readline(_MAX_FRAME_BYTES + 1), b""):
         if len(raw) > _MAX_FRAME_BYTES or not raw.endswith(b"\n"):

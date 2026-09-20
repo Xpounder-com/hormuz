@@ -25,7 +25,9 @@ time, and hashes the returned outputs. A persistent child loads the exact
 `hormuz/compaction.py` source file, bypassing candidate package exports. It
 receives bounded requests over stdin and returns bounded responses over
 stdout. Candidate Python cannot patch the parent's clocks or hashes through
-shared modules. The private runner must still confine the child process and
+shared modules. Before candidate import, the child sets a zero process-creation
+hard limit; a macOS probe confirms both `fork` and `posix_spawn` are denied.
+The private runner must still confine the child process and
 the candidate's access to files, subprocesses, and the network; that sandbox
 boundary needs separate review before adversarial qualification. Profile
 hotspots are child-reported guidance, not an acceptance signal.
