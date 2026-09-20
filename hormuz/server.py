@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 import hmac
 import http.client
 import ipaddress
@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from types import MappingProxyType
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Mapping
@@ -54,6 +55,12 @@ from .finance_attempts import (
     configured_rate_card_binding,
     estimate_configured_route,
 )
+from .finance_account_binding import (
+    FinanceAccountBindings,
+    FinanceAccountCandidate,
+    UnavailableFinance,
+    select_finance_account,
+)
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
@@ -95,6 +102,57 @@ _ANTHROPIC_PROVIDER_STATE_FIELDS = frozenset({"container", "mcp_servers"})
 _OPENAI_INLINE_TOOL_TYPES = frozenset({"custom", "function"})
 _ANTHROPIC_INLINE_TOOL_TYPES = frozenset({"custom"})
 _INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
+
+
+@dataclass(frozen=True)
+class _EgressConfiguration:
+    """One startup generation, including already resolved server-only secrets.
+
+    Copy both mappings so callers cannot mutate an active generation. There is
+    no runtime reload API: a changed configuration requires a new server. The
+    credential mapping never belongs to finance metadata or diagnostic repr.
+    """
+
+    upstreams: Mapping[str, UpstreamConfig]
+    finance_account_bindings: FinanceAccountBindings | None
+    credentials: Mapping[str, str] = field(repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "upstreams", MappingProxyType(dict(self.upstreams)))
+        object.__setattr__(self, "credentials", MappingProxyType(dict(self.credentials)))
+
+
+@dataclass(frozen=True)
+class _SelectedUpstream:
+    """One immutable transport/metadata choice; contains no credential value.
+
+    Finance candidates are not passed to persistence in this source checkpoint.
+    Future capture must validate each new attempt in its existing transaction.
+    """
+
+    upstream: UpstreamConfig
+    finance: FinanceAccountCandidate | UnavailableFinance
+
+
+class _NoUpstreamRedirect(urllib.request.HTTPRedirectHandler):
+    """Reject 3xx before urllib parses an untrusted Location value."""
+
+    def http_error_302(self, request, response, code, message, headers):  # type: ignore[no-untyped-def]
+        # Returning None lets HTTPDefaultErrorHandler surface the original
+        # response as HTTPError; no second request is made or URL parsed.
+        return None
+
+    http_error_301 = http_error_302
+    http_error_303 = http_error_302
+    http_error_307 = http_error_302
+    http_error_308 = http_error_302
+
+
+_UPSTREAM_OPENER = urllib.request.build_opener(_NoUpstreamRedirect())
+
+
+def _open_upstream(request: urllib.request.Request, *, timeout: int):
+    return _UPSTREAM_OPENER.open(request, timeout=timeout)
 
 
 class _ProviderRehearsalResponse:
@@ -207,6 +265,10 @@ class GatewayServer(ThreadingHTTPServer):
 
     def __init__(self, config: GatewayConfig, *, environ: Mapping[str, str] | None = None):
         self.config = config
+        # The same copied upstream configuration drives credential resolution
+        # and every later transport/reference selection. GatewayConfig is frozen
+        # but its legacy upstream dictionary is not; do not retain that alias.
+        egress_config = replace(config, upstreams=dict(config.upstreams))
         self._accepting_requests = threading.Event()
         self.authenticator = Authenticator(config)
         self.session_broker: SessionBroker | None = None
@@ -292,10 +354,14 @@ class GatewayServer(ThreadingHTTPServer):
                 config,
                 connection_pool=self.postgres_pool,
             )
-            self.upstream_credentials = resolve_upstream_credentials(
-                config,
-                environ=environ,
-                selection_allowed=self._upstream_credential_selection_allowed,
+            self._egress_configuration = _EgressConfiguration(
+                upstreams=egress_config.upstreams,
+                finance_account_bindings=egress_config.finance_account_bindings,
+                credentials=resolve_upstream_credentials(
+                    egress_config,
+                    environ=environ,
+                    selection_allowed=self._upstream_credential_selection_allowed,
+                ),
             )
             protected_values = [
                 ("hormuz_identity_token", identity.token)
@@ -336,6 +402,12 @@ class GatewayServer(ThreadingHTTPServer):
                 settings.max_waiting,
                 settings.acquire_timeout_seconds,
             )
+
+    @property
+    def upstream_credentials(self) -> Mapping[str, str]:
+        """Read-only compatibility view for existing startup diagnostics."""
+
+        return self._egress_configuration.credentials
 
     def _upstream_credential_selection_allowed(self, protocol: str) -> bool:
         """Avoid loading a credential generation already restricted by custody.
@@ -871,7 +943,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 code="hormuz_storage_unavailable",
             )
             return
-        upstream_key = self.server.upstream_credentials.get(protocol, "")
+        egress = self.server._egress_configuration
+        upstream_key = egress.credentials.get(protocol, "")
         if not upstream_key:
             self._send_protocol_error(
                 protocol,
@@ -880,6 +953,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 code="gateway_upstream_not_configured",
             )
             return
+        upstream = egress.upstreams[protocol]
+        selected_upstream = _SelectedUpstream(
+            upstream=upstream,
+            finance=select_finance_account(
+                organization_id=identity.organization_id,
+                protocol=protocol,
+                base_url=upstream.base_url,
+                identity=upstream.finance_identity,
+                bindings=egress.finance_account_bindings,
+            ),
+        )
         attempt: RequestAttempt | None = None
         if account_usage:
             try:
@@ -895,6 +979,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     output_field=output_field,
                     body=body,
                     admission=admission,
+                    selected_upstream=selected_upstream,
                 )
             except ReservationDenied as error:
                 self._deny_budget_reservation(
@@ -928,6 +1013,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             redaction_rules=redaction.rules,
             attempt=attempt,
             upstream_key=upstream_key,
+            selected_upstream=selected_upstream,
             reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
             failover_decision=failover_decision,
             failover_applied_reason=None,
@@ -950,14 +1036,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         redaction_rules: tuple[str, ...],
         attempt: RequestAttempt | None,
         upstream_key: str,
+        selected_upstream: _SelectedUpstream,
         reservation_ttl_seconds: int,
         failover_decision: PolicyDecision | None,
         failover_applied_reason: str | None,
     ) -> None:
         route = decision.route
         assert route is not None
-        upstream = self.server.config.upstreams[protocol]
-        request_url = self._upstream_url(upstream)
+        request_url = self._upstream_url(selected_upstream.upstream)
         headers = self._upstream_headers(protocol, upstream_key)
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
 
@@ -970,7 +1056,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             ):
                 response = _ProviderRehearsalResponse()
             else:
-                response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
+                response = _open_upstream(request, timeout=self.server.config.upstream_timeout_seconds)
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
@@ -998,6 +1084,32 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         response_headers_us = self._elapsed_us(started_ns)
         status = getattr(response, "status", response.getcode())
+        if 300 <= status < 400:
+            response.close()
+            if account_usage and attempt is not None:
+                # A redirect can follow an accepted POST. Its status alone
+                # cannot establish whether provider work was billable, so
+                # retain the conservative hold without following Location.
+                self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
+                    attempt=attempt,
+                    organization_id=identity.organization_id,
+                    reason_code="provider_transport_ambiguous",
+                    provider_metrics=self._provider_metrics(
+                        started_ns=started_ns,
+                        provider_status=status,
+                        response_headers_us=response_headers_us,
+                        first_body_byte_us=None,
+                        provider_bytes_read=0,
+                        downstream_bytes_sent=0,
+                    ),
+                )
+            self._send_protocol_error(
+                protocol,
+                "Upstream provider redirect refused.",
+                HTTPStatus.BAD_GATEWAY,
+                code="gateway_upstream_redirect",
+            )
+            return
         content_type = response.headers.get("Content-Type", "application/json")
         provider_request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
         reason = failover_reason(status)
@@ -1057,6 +1169,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     output_field=output_field,
                     body=failover_body,
                     admission=admission,
+                    selected_upstream=selected_upstream,
                     provider_failover=ProviderFailoverContext(
                         original_attempt_id=attempt.attempt_id,
                         trigger_status=status,
@@ -1101,6 +1214,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 redaction_rules=redaction_rules,
                 attempt=failover_attempt,
                 upstream_key=upstream_key,
+                selected_upstream=selected_upstream,
                 reservation_ttl_seconds=reservation_ttl_seconds,
                 failover_decision=None,
                 failover_applied_reason=reason,
@@ -1341,8 +1455,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         output_field: str,
         body: bytes,
         admission: Admission | None,
+        selected_upstream: _SelectedUpstream,
         provider_failover: ProviderFailoverContext | None = None,
     ) -> RequestAttempt:
+        # Carry the exact context used by _forward to this pre-egress boundary.
+        # Registration/source validation and atomic capture are a later schema
+        # checkpoint; a configured candidate must not become durable evidence here.
         route = decision.route
         assert route is not None
         # Absence is not a zero-token ceiling: without either a request or

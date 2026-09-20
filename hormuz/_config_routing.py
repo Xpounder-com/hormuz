@@ -17,6 +17,7 @@ from ._config_values import (
 )
 from .config import ConfigError, KeyCustodyConfig, ModelRoute, UpstreamConfig
 from .custody import KEY_PURPOSE_PROVIDER_CREDENTIAL
+from .finance_account_binding import UnavailableFinance, parse_finance_identity
 
 
 def build_upstream_domain(
@@ -40,6 +41,7 @@ def build_upstream_domain(
                 "api_key_envelope",
                 "allow_response_storage",
                 "allow_background",
+                "finance_identity",
             }
         )
         if unsupported_upstream_fields:
@@ -81,6 +83,10 @@ def build_upstream_domain(
             allow_background=_boolean(
                 item.get("allow_background", False),
                 f"upstreams.{protocol}.allow_background",
+            ),
+            finance_identity=(
+                parse_finance_identity(item["finance_identity"])
+                if "finance_identity" in item else UnavailableFinance("not_configured")
             ),
         )
     return upstreams
