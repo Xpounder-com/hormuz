@@ -43,10 +43,16 @@ cargo build -p hormuz-windows --release --locked
 ./target/release/hormuz-windows.exe
 ```
 
-The toolchain and lockfile fix dependency resolution; this is a repeatable build
-procedure, not a bit-for-bit reproducibility, signing or distribution claim.
+The toolchain and lockfile fix dependency resolution. MSVC `/Brepro` and
+`/INCREMENTAL:NO` remove wall-clock linker metadata; CI cleans and rebuilds the
+preview package, then requires the executable's SHA-256 to remain identical.
+This checks repeat-build identity in the same checkout/runner with cached
+dependencies; different paths, SDKs, linkers and machines remain unqualified.
+See [Microsoft BuildXL's linker determinism flag](https://github.com/microsoft/BuildXL/blob/main/Public/Sdk/Experimental/Msvc/Native/Tools/Link/Link.dsc).
 Use the CI artifact's source commit, compiler, target and SHA-256 when reporting
 results. The CI release executable is development evidence only.
+The artifact includes `windows-rebuild.json`, with both hashes and the tested
+scope. Signing and distribution qualification remain separate.
 
 The bounded smoke runner starts a real native process, checks HWND/control
 creation, verifies actual window-height and child-visibility changes on fold and

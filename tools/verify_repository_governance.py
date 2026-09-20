@@ -1468,6 +1468,11 @@ def _validate_native_contract_workflow(
             '            throw "Preview unexpectedly requires a Visual C++ redistributable."\n',
             "          $imports | Set-Content target/release/windows-imports.txt\n",
         ),
+        "Verify Windows preview repeat-build identity": (
+            "        working-directory: clients/rust\n",
+            "        shell: pwsh\n",
+            "        run: ./windows/verify-rebuild.ps1\n",
+        ),
         "Record Windows development artifact provenance": (
             "        working-directory: clients/rust\n",
             "        shell: pwsh\n",
@@ -1480,6 +1485,8 @@ def _validate_native_contract_workflow(
             '            native_smoke = "passed"\n',
             '            external_ui_automation = "passed"\n',
             "            acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
+            '            repeat_build = "passed_same_runner_same_checkout"\n',
+            "            rebuild_sha256 = (Get-FileHash target/release/windows-rebuild.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
             "            static_msvc_crt = $true\n",
             "            direct_dll_imports = @(Get-Content target/release/windows-imports.txt)\n",
             '            manual_platform_acceptance = "pending"\n',
@@ -1491,6 +1498,7 @@ def _validate_native_contract_workflow(
             "            clients/rust/target/release/hormuz-windows.exe\n",
             "            clients/rust/target/release/windows-build.json\n",
             "            clients/rust/target/release/windows-acceptance.json\n",
+            "            clients/rust/target/release/windows-rebuild.json\n",
             "          if-no-files-found: error\n",
         ),
     }

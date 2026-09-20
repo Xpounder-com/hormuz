@@ -324,6 +324,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
             "Verify Windows accessibility and collect preview measurements",
             "Reject invalid Windows acceptance targets and preserve evidence",
             "Check Windows runtime dependencies",
+            "Verify Windows preview repeat-build identity",
             "Record Windows development artifact provenance",
             "Save Windows development preview",
         )
@@ -369,6 +370,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ("run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe", "run: Write-Output passed"),
             ("run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json", "run: Write-Output passed"),
             ("run: ./windows/test-acceptance-failure.ps1", "run: Write-Output passed"),
+            ("run: ./windows/verify-rebuild.ps1", "run: Write-Output passed"),
             ("$dependencies = & $dumpbin /DEPENDENTS target/release/hormuz-windows.exe", "$dependencies = @('kernel32.dll')"),
             ('if ($LASTEXITCODE -ne 0) { throw "PE dependency inspection failed." }', 'Write-Output "Ignoring inspection status"'),
             ('if ($imports.Count -eq 0) { throw "PE imports were not found." }', 'Write-Output "Allowing empty imports"'),
@@ -378,6 +380,8 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ('manual_platform_acceptance = "pending"', 'manual_platform_acceptance = "passed"'),
             ("            clients/rust/target/release/windows-build.json\n", ""),
             ("            clients/rust/target/release/windows-acceptance.json\n", ""),
+            ("            clients/rust/target/release/windows-rebuild.json\n", ""),
+            ("rebuild_sha256 = (Get-FileHash target/release/windows-rebuild.json -Algorithm SHA256).Hash.ToLowerInvariant()", 'rebuild_sha256 = "unverified"'),
             ("acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()", 'acceptance_sha256 = "unverified"'),
             ("          if-no-files-found: error", "          if-no-files-found: warn"),
         )
