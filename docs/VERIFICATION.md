@@ -670,22 +670,46 @@ GitHub Actions runs independent gates without provider credentials:
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
 
 For pull requests only, a conservative classifier may omit the eight expensive
-PostgreSQL, Kubernetes, HA, disaster-recovery, and OCI jobs when every changed
-path is under `website/**` or is exactly
-`marketing/COMMERCIAL_SETUP.md` or `marketing/MEASUREMENT.md`. The Python
-matrix, package, Render, Compose, pinned-client, and website checks still run.
-Any other path, a mixed change, an empty or unreadable diff, a push to `main`,
-or a manual qualification runs the complete suite. Renames are evaluated as
-both deletion and addition so moving a core file into an allowlisted directory
-cannot take the reduced path.
+PostgreSQL, Kubernetes, HA, disaster-recovery, and OCI jobs for either of two
+explicit scopes:
+
+- `website_only`: every path is under `website/**` or is exactly
+  `marketing/COMMERCIAL_SETUP.md` or `marketing/MEASUREMENT.md`.
+- `native_only`: at least one path is under `clients/rust/**`, and every other
+  path is also under that directory or is exactly `docs/NATIVE_CLIENT_ROADMAP.md`.
+  The roadmap alone does not qualify. Shared contracts, gateway code and schemas,
+  shared fixtures, Swift/Windows shell changes, and CI machinery are excluded.
+
+The Python matrix, package, Render, Compose, pinned-client, and website checks
+still run in both reduced scopes. Rust-only PRs also require the existing native
+contract matrix on Windows, macOS, and Linux, including Python contract tests,
+Rust tests/formatting/Clippy, and the Swift shared-contract tests on macOS.
+The same native matrix now runs in every full CI run. Its reusable workflow
+is called once from `ci.yml` at the caller's commit and remains available for
+manual dispatch; it has no separate PR or push trigger to duplicate those jobs.
+
+Any other path, a mixture of website and native changes, an empty or unreadable
+diff, a push to `main`, or a manual qualification runs the complete suite.
+Renames are evaluated as both deletion and addition so moving a core file into
+an allowlisted directory cannot take the reduced path. Release qualification
+retains its existing full gates.
 
 The `CI / required` aggregate runs after every CI job. In full mode it requires
-every job to succeed. In the reduced mode it requires every always-applicable
-job to succeed and every one of the eight path-scoped jobs to be skipped. A
+every job, including the native matrix, to succeed. In either reduced mode it
+requires every always-applicable job to succeed and every one of the eight
+infrastructure jobs to be skipped. Native contracts must succeed for
+`native_only` and be skipped for `website_only`. A
 failed or canceled job, a missing result, an inconsistent classification, or an
 unexpected skip blocks the aggregate. `Website checks` and `Native Mac client
 and loopback contract` remain separate required checks because they are owned
 by separate workflows.
+
+Run the classifier and aggregate regression tests with
+`python -m unittest -v tests.test_ci_scope tests.test_repository_governance`.
+These include malformed and mixed paths, full main/manual qualification,
+missing or failed native results, platform omission, duplicate workflow triggers,
+and unexpected skips. Actual PR latency improvement must be measured after the
+workflow change is merged; this CI change itself selects full validation.
 
 The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA and the scanner image to an immutable digest, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
 
