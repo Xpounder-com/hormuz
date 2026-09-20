@@ -3,7 +3,7 @@
 
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus};
 
 /// Closing the panel does not own or drop this handle. The dedicated launcher
 /// keeps it until client exit; dropping it cancels the supervised job.
@@ -48,11 +48,23 @@ impl OwnedClient {
         })
     }
 
+    // This source is compiled by both the relay library and its native command.
+    #[allow(dead_code)]
     pub(crate) fn wait_status(&mut self) -> io::Result<ExitStatus> {
         let status = self.child_mut()?.wait()?;
         self.stop_scope()?;
         self.child = None;
         Ok(status)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn take_stdin(&mut self) -> Option<ChildStdin> {
+        self.child.as_mut()?.stdin.take()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn take_stdout(&mut self) -> Option<ChildStdout> {
+        self.child.as_mut()?.stdout.take()
     }
 
     pub(crate) fn try_wait_status(&mut self) -> io::Result<Option<ExitStatus>> {
