@@ -300,6 +300,9 @@ mod tests {
         assert!(!marker.exists());
     }
 
+    // The descendant deliberately outlives its direct parent so the owning
+    // Job Object, rather than this fake helper, must stop it.
+    #[allow(clippy::zombie_processes)]
     #[test]
     fn worker() {
         let Ok(mode) = std::env::var("HORMUZ_WINDOWS_EXCHANGE_MODE") else {
