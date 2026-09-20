@@ -104,8 +104,17 @@ unproven. See the [scheduler integration contract](../clients/rust/session/READM
 Issue #338 adds an unpublished `1.5.0-dev.1`
 [interaction reducer](../clients/rust/interaction/README.md) with explicit
 visibility, hover/pin, settings and observed keyboard-focus state. Shared traces
-cover ordered inputs, stale timer cancellation, dismissal and reopening; six
+cover ordered inputs, stale timer cancellation, dismissal and reopening; seven
 traces also exercise the existing Swift hover/navigation models. The shipping
 Swift sources remain unchanged. **#338 remains open** for native-shell wiring,
 hover/focus/outside-click/reopen and keyboard/screen-reader acceptance. This
 source checkpoint does not complete #331, native interaction or release gates.
+
+Issue #339 adds a separate native application-instance lease and worker-side
+[helper lifecycle policy](../clients/rust/platform/README.md#application-ownership-and-helper-lifecycle)
+to the unpublished platform library. Kernel-lock tests cover competing startup,
+crash recovery and refresh-lock independence; deterministic helper tests cover
+bounded restart, client draining and quit/update behavior. **#339 remains open**
+for native activation/login registration, real helper supervision and crash
+containment, sleep/resume and shell integration. No IPC or native process
+adapter is supplied by this source checkpoint.
