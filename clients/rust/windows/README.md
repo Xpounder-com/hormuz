@@ -211,15 +211,23 @@ GUI thread; callbacks borrow immutable Rust state with `Cell` for reentrancy.
 ## Shared interaction integration checkpoint
 
 The #338 integration makes the shared reducer authoritative for the panel's
-expanded, explicitly folded and hidden presentation. Whole-panel pointer and
-keyboard-focus observations remain native, including child controls. Moving
-between children does not create a false panel exit; a combo popup retains the
-panel's observed native focus. Popup pointer geometry remains a native acceptance
-item, and this adapter does not synthesize a shared outside-click event.
+expanded, explicitly folded and hidden presentation. The connected companion's
+existing connection form is the root Settings surface (`SettingsPage::Home`).
+It opens at startup to preserve access to sign-in. Back returns to the compact
+usage summary; Settings opens the form and requests native focus on its first
+enabled edit or action. Escape first lets an open native combo cancel its list,
+then returns from Settings, then hides the summary. Close still hides the shell.
+Other settings pages and metric-detail cards are not implemented.
+
+Pointer and keyboard-focus observations remain native. Form controls map to
+the shared Settings region, including descendants and the exact item/list HWNDs
+reported by the form's own combo. Moving between children does not create a
+false settings exit, and an unrelated popup never becomes part of the form.
+Popup pointer geometry remains a physical acceptance item, and this adapter does
+not synthesize a shared outside-click event.
 After pointer re-entry or reopening a folded panel, leaving both pointer and
 focus outside starts the shared 250 ms fold delay. Explicit Fold remains usable
-while its native button has focus. Escape and Close retain this development
-shell's Hide action; no metric-card or settings-page UI is introduced here.
+while its native button has focus and closes any open settings surface.
 
 One posted GUI drain collects a bounded batch of at most 128 observations.
 The reducer orders native input before callbacks already collected in that
@@ -229,6 +237,10 @@ messages before hardware input. This does not reorder future observations into
 an already committed turn. Rendering, positioning, DPI, focus assignment and
 accessibility providers stay in Win32; reducer focus requests are not evidence
 that focus was obtained.
+Settings/Back and Escape commands resolve against earlier inputs in the same
+turn, so Open followed by Escape cannot accidentally hide the panel based on
+stale rendered state. Their private projection publishes no effects; queue,
+clock and timer failures roll back the whole batch.
 
 At most two token-bound timer slots exist. Each newly scheduled token receives
 a never-reused native timer ID. `WM_TIMER` captures that ID's token and stops
@@ -247,13 +259,22 @@ identity exhaustion. A Windows-only test uses a real private message-window
 queue and `SetTimer`/`KillTimer` to verify native delivery, early rearming and a
 cancelled callback delivered after its replacement. Existing native connected
 controls, smoke and external UIA/keyboard checks verify expanded reopening.
+Additional portable sequences cover settings commands, same-turn cancellation,
+keyboard traversal and projection rollback. The native connected-window test
+posts synthetic keyboard messages through the real Win32 message loop and reads
+the GUI thread's actual focus. It exercises startup form visibility, Tab through
+edits and the combo, popup-first Escape, Back/summary/Hide/Reopen and sign-in/out.
+The isolated native probe verifies owned combo-list/descendant classification
+and rejects unrelated or closed-form handles.
 These are synthetic/CI checks. Physical hover travel, pointer geometry across
 displays, native menus, keyboard and screen-reader usability remain unqualified;
-the Windows metric-card/settings integration also remains outstanding. #338
-remains open.
+metric-detail and remaining settings-page integration also remain outstanding.
+#338 remains open. The preview/footprint measurement scripts are unchanged.
 
 Timer/message contracts: [GetMessage ordering](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmessage)
 and [KillTimer cancellation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-killtimer).
+Native combo cancellation follows the control's
+[default message handling](https://learn.microsoft.com/en-us/windows/win32/controls/combo-box-features#default-combo-box-behavior).
 
 ## Connected integration evidence and remaining acceptance
 

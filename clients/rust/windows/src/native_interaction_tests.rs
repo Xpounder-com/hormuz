@@ -120,6 +120,56 @@ fn native_timer_child() {
         return;
     }
     let window = window();
+    // Real combo popup/child handles belong to this settings form even when
+    // they are not descendants of the root. An unrelated HWND never does.
+    let combo = OwnedWindow(unsafe {
+        CreateWindowExW(
+            0,
+            wide("COMBOBOX").as_ptr(),
+            wide("").as_ptr(),
+            WS_CHILD | CBS_DROPDOWNLIST as u32,
+            0,
+            0,
+            100,
+            100,
+            window.0,
+            null_mut(),
+            GetModuleHandleW(null()),
+            null(),
+        )
+    });
+    assert!(!combo.0.is_null());
+    let descendant = OwnedWindow(unsafe {
+        CreateWindowExW(
+            0,
+            wide("STATIC").as_ptr(),
+            wide("Synthetic child").as_ptr(),
+            WS_CHILD,
+            0,
+            0,
+            1,
+            1,
+            combo.0,
+            null_mut(),
+            GetModuleHandleW(null()),
+            null(),
+        )
+    });
+    assert!(!descendant.0.is_null());
+    let mut controls = [null_mut(); 13];
+    controls[9] = combo.0;
+    let parts = unsafe { combo_parts(combo.0) };
+    assert!(
+        !parts[1].is_null(),
+        "native combo must expose its own list HWND"
+    );
+    for target in [combo.0, descendant.0, parts[1]] {
+        assert!(unsafe { form_contains(controls, true, target) });
+        assert!(!unsafe { form_contains(controls, false, target) });
+    }
+    assert!(!unsafe { form_contains(controls, true, window.0) });
+    assert!(!unsafe { form_contains(controls, true, null_mut()) });
+    println!("native_settings_regions=passed combo_popup_and_descendants=owned");
     let mut bridge = Bridge::new();
     bridge.push(Event::ToggleFold).unwrap();
     bridge.push(Event::Reopen).unwrap();
