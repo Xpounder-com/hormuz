@@ -73,6 +73,12 @@ $runs = New-Object System.Collections.Generic.List[object]
 $previousSettings = $env:HORMUZ_FOOTPRINT_CONFIG
 try {
     for ($repetition = 1; $repetition -le $Repetitions; $repetition++) {
+        # Every measured preview starts with the same environment. The worker
+        # configuration belongs only to its separately launched observer.
+        Remove-Item Env:\HORMUZ_FOOTPRINT_CONFIG -ErrorAction SilentlyContinue
+        if (Test-Path Env:\HORMUZ_FOOTPRINT_CONFIG) {
+            throw "Observer-only configuration would leak into the measured preview."
+        }
         $temporary = Join-Path ([IO.Path]::GetTempPath()) ("hormuz-windows-footprint-" + [guid]::NewGuid())
         [IO.Directory]::CreateDirectory($temporary) | Out-Null
         $preview = $null
@@ -101,6 +107,7 @@ try {
                 -ArgumentList @("-NoProfile", "-NonInteractive", "-MTA", "-File", ('"' + $PSCommandPath + '"'),
                     "-Worker", "-Executable", "unused", "-Output", "unused") `
                 -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            Remove-Item Env:\HORMUZ_FOOTPRINT_CONFIG -ErrorAction SilentlyContinue
             $timeoutSeconds = 90 + $WarmupSeconds + $DurationSeconds
             if (-not $workerProcess.WaitForExit([int]($timeoutSeconds * 1000))) {
                 throw "Bounded footprint observer timed out."
