@@ -38,6 +38,14 @@ def cases() -> dict[str, tuple[str, str]]:
         "paths_malformed_marker": (
             '{"format":"hormuz-path-list-v1","suffixes":[', "path_list",
         ),
+        "json_typical": (
+            json.dumps(
+                [{"item_id": index, "status": "active", "region": "local"}
+                 for index in range(48)],
+                separators=(",", ":"),
+            ),
+            "json_table",
+        ),
         "lines_small": ("INFO heartbeat\n" * 16, "line_runs"),
         "lines_typical": ("INFO heartbeat\n" * 120, "line_runs"),
         "lines_large": ("INFO heartbeat\n" * 300, "line_runs"),
@@ -65,8 +73,19 @@ def heldout_cases() -> dict[str, tuple[str, str]]:
         ),
         "crlf_paths": ("src/a.py\r\nsrc/b.py\r\n", "path_list"),
         "malformed_envelope": ('{"format":"hormuz-path-list-v1","suffixes":[]}', "path_list"),
+        "lines_mixed": (
+            "OK\n" * 80 + "ERROR permission denied\n" + "OK\n" * 40,
+            "line_runs",
+        ),
         "search_mixed": (
             "src/a.py:1:alpha\nsrc/a.py:2:beta\nsrc/b.py:3:gamma\n", "search_lines",
+        ),
+        "search_framed": (
+            "Output:\n" + "".join(
+                f"src/request.py:{index}:value: {index}\n"
+                for index in range(1, 140)
+            ) + "Notice: results complete",
+            "search_lines",
         ),
         "json_table": (
             json.dumps(
@@ -77,6 +96,22 @@ def heldout_cases() -> dict[str, tuple[str, str]]:
             "json_table",
         ),
     }
+
+
+def timed_variant(name: str, value: str, ordinal: int) -> str:
+    """Keep each timed input structurally equivalent and content-distinct."""
+    marker = f"{ordinal:06d}"
+    if name in {"paths_small", "paths_typical", "paths_large"}:
+        return value.replace("src/generated/", f"src/generated/{marker}/")
+    if name == "paths_duplicate_unicode":
+        return value.replace("src/résumé/", f"src/résumé/{marker}/")
+    if name == "json_typical":
+        return value.replace('"region":"local"', f'"region":"{marker}"')
+    if name in {"lines_small", "lines_typical", "lines_large"}:
+        return value.replace("INFO heartbeat", f"INFO heartbeat {marker}")
+    if name in {"search_typical", "search_large"}:
+        return value.replace("src/service/request.py:", f"src/service/{marker}/request.py:")
+    raise ValueError("unsupported_timed_case")
 
 
 def evaluate(root: Path, action: str) -> dict[str, object]:
@@ -125,17 +160,30 @@ def evaluate(root: Path, action: str) -> dict[str, object]:
     if action != "benchmark":
         raise ValueError("unknown_benchmark_action")
     measurements: dict[str, list[float]] = {}
+    # Empty and malformed inputs remain correctness fixtures. They cannot be
+    # varied without changing the behavior under test, so they are not timed.
     for name, (value, format_name) in selected.items():
+        if name in {"paths_empty", "paths_malformed_marker"}:
+            continue
+        ordinal = 0
         for _ in range(20):
-            compaction.compact_text(value, format_name)
+            compaction.compact_text(timed_variant(name, value, ordinal), format_name)
+            ordinal += 1
         loops = 40 if name.endswith("large") else 100
         samples: list[float] = []
+        timed_outputs = hashlib.sha256()
         for _ in range(17):
+            inputs = [timed_variant(name, value, ordinal + index) for index in range(loops)]
+            ordinal += loops
             started = time.perf_counter_ns()
-            for _ in range(loops):
-                compaction.compact_text(value, format_name)
+            results = [compaction.compact_text(item, format_name) for item in inputs]
             samples.append((time.perf_counter_ns() - started) / loops)
+            for result in results:
+                encoded = result.encode("utf-8")
+                timed_outputs.update(len(encoded).to_bytes(4, "big"))
+                timed_outputs.update(encoded)
         measurements[name] = samples
+        outputs[name]["timed_sha256"] = timed_outputs.hexdigest()
     return {
         "source": str(imported),
         "fixture_sha256": fixture_sha256,

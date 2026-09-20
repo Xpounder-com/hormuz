@@ -21,11 +21,16 @@ cross-repository hash check with `HORMUZ_CODE_OPTIMIZER_TEST_REPO` pointing at
 a local Hormuz checkout.
 
 The workload measures `compact_text` helper runtime for path-list, line-run,
-and search-line cases. It includes small, typical, large, empty, malformed,
-duplicate, and Unicode inputs, plus held-out correctness cases. A result on
+search-line, and JSON-table cases. It includes small, typical, large, empty,
+malformed, duplicate, and Unicode inputs, plus held-out correctness cases.
+Empty and malformed inputs are checked for behavior but excluded from timing.
+Every timed call gets a distinct, structurally equivalent input, and the
+timed outputs are fingerprinted alongside the canonical outputs. This prevents
+repeated-input cache hits from masquerading as a runtime gain. A result on
 this helper does not establish a gateway or customer throughput improvement.
-The held-out JSON table is large enough to compact; a regression test proves
-that disabling JSON-table compaction changes its correctness fingerprint.
+Held-out mixed line runs, framed search output, and a separate JSON table
+must each compact and round-trip; mutation regressions prove that disabling
+those paths changes their held-out correctness fingerprints.
 The app's **Optimize** and **Super Optimize** controls differ in search depth;
 both use the same behavior and performance acceptance rules. Neither mode
 has a pricing, billing, or budget feature.
