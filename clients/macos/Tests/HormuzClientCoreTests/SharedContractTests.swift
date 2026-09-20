@@ -3,6 +3,58 @@ import XCTest
 @testable import HormuzClientCore
 
 final class SharedContractTests: PrivateStorageTestCase {
+    func testSnapshotInputsPreserveExistingIdentityUsageAndCostLabels() throws {
+        let inputs = try fixture("snapshots")
+        let profile = try JSONDecoder().decode(ConnectionProfile.self,
+            from: JSONSerialization.data(withJSONObject: XCTUnwrap(inputs["profile"])))
+        let identity = try GatewayJSON.decoder().decode(GatewayIdentity.self,
+            from: JSONSerialization.data(withJSONObject: XCTUnwrap(inputs["identity"])))
+        try identity.validate(for: profile)
+        for name in ["usage", "zero"] {
+            let usage = try GatewayJSON.decoder().decode(PersonalUsage.self,
+                from: JSONSerialization.data(withJSONObject: XCTUnwrap(inputs[name])))
+            try usage.validate()
+            XCTAssertEqual(usage.costBasis, "configured_rate_card_estimate")
+            XCTAssertEqual(usage.coverage, "gateway_captured_requests_only")
+            if name == "zero" { XCTAssertEqual(usage.requests, 0); XCTAssertEqual(usage.inputTokens, 0) }
+        }
+    }
+
+    func testSharedCredentialRecordCodecAndSessionTransitions() async throws {
+        let vectors = try fixture("sessions")
+        let source = try XCTUnwrap(vectors["record"] as? [String: Any])
+        let sourceData = try JSONSerialization.data(withJSONObject: source)
+        let original = try JSONDecoder().decode(SessionRecord.self, from: sourceData)
+        let encoded = try JSONEncoder().encode(original)
+        let roundTrip = try JSONDecoder().decode(SessionRecord.self, from: encoded)
+        XCTAssertEqual(roundTrip.accessExpiresAt, original.accessExpiresAt)
+        XCTAssertEqual(roundTrip.sessionExpiresAt, original.sessionExpiresAt)
+        XCTAssertEqual(roundTrip.profile, original.profile)
+        let output = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(output as NSDictionary, source as NSDictionary)
+        for item in try XCTUnwrap(vectors["cases"] as? [[String: Any]]) {
+            let id = try XCTUnwrap(item["id"] as? String)
+            let clock = TestClock(), store = MemorySessions()
+            let transport = FixtureTransport(clock: clock)
+            let state = try XCTUnwrap(SessionState(rawValue: XCTUnwrap(item["state"] as? String)))
+            let saved = try SessionRecord(profile: original.profile, accessToken: original.accessToken,
+                refreshToken: original.refreshToken,
+                accessExpiresAt: clock.now().addingTimeInterval(XCTUnwrap(item["access_remaining"] as? Double)),
+                sessionExpiresAt: clock.now().addingTimeInterval(XCTUnwrap(item["session_remaining"] as? Double)), state: state)
+            try store.save(saved)
+            try directory.saveProfile(saved.profile)
+            let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+            do {
+                _ = try await controller.accessCredential(profileID: saved.profile.id)
+                XCTAssertEqual(item["result"] as? String, "credential", id)
+            } catch {
+                XCTAssertEqual((error as? ClientError)?.rawValue, item["result"] as? String, id)
+            }
+            let counts = await transport.counts()
+            XCTAssertEqual(counts.0, item["refreshes"] as? Int, id)
+        }
+    }
+
     private func fixture(_ name: String) throws -> [String: Any] {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
