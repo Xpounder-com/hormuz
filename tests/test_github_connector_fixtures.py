@@ -15,8 +15,8 @@ from hormuz.portfolio_wire import PortfolioError
 FIXTURE = Path(__file__).resolve().parent / "fixtures/connectors/github/cases.json"
 SOURCE_DOCUMENT = "https://docs.github.com/en/webhooks/webhook-events-and-payloads"
 INVENTORY = {
-    "pr-opened": ("pull_request", "opened", "candidate_observation"),
-    "pr-closed-merged": ("pull_request", "closed", "candidate_observation"),
+    "pr-opened": ("pull_request", "opened", "mapping_pending"),
+    "pr-closed-merged": ("pull_request", "closed", "mapping_pending"),
     "pr-closed-unmerged": ("pull_request", "closed", "mapping_pending"),
     "review-submitted": ("pull_request_review", "submitted", "mapping_pending"),
     "check-run-success": ("check_run", "completed", "mapping_pending"),
@@ -98,6 +98,7 @@ class GitHubConnectorFixtureTests(unittest.TestCase):
                         self.assertNotIn(pr["id"], numeric_ids)
                         numeric_ids.add(pr["id"])
                 self.assertRegex(sha, r"^[0-9a-f]{40}$")
+                self.assertNotEqual(sha, "0" * 40)
                 revisions.add(sha)
                 if "review" in body:
                     self.assertNotIn(body["review"]["id"], numeric_ids)
@@ -112,9 +113,11 @@ class GitHubConnectorFixtureTests(unittest.TestCase):
             with self.subTest(case=case_id):
                 case = self.cases[case_id]
                 expectation = case["expectation"]
-                self.assertIs(expectation["proposal_only"], True)
+                self.assertEqual(expectation["kind"], "mapping_pending")
                 self.assertTrue(expectation["decisions_needed"])
-                projected = expectation["observation"]
+                candidate = expectation["candidate_observation"]
+                self.assertIs(candidate["proposal_only"], True)
+                projected = candidate["observation"]
                 self.assertEqual(asdict(observation_from_mapping(projected, self.binding)), projected)
                 self.assertEqual(projected["external_object_id"], str(case["input"]["body"]["pull_request"]["id"]))
                 self.assertEqual(projected["container_id"], str(case["input"]["body"]["repository"]["id"]))
@@ -136,7 +139,8 @@ class GitHubConnectorFixtureTests(unittest.TestCase):
         for case_id in ("pr-closed-unmerged", "review-submitted", "check-run-success", "check-run-failure"):
             with self.subTest(case=case_id):
                 expectation = self.cases[case_id]["expectation"]
-                self.assertIsNone(expectation["observation"])
+                self.assertEqual(expectation["kind"], "mapping_pending")
+                self.assertIsNone(expectation["candidate_observation"])
                 self.assertTrue(expectation["decisions_needed"])
         self.assertIs(self.cases["pr-closed-unmerged"]["input"]["body"]["pull_request"]["merged"], False)
         self.assertEqual(self.cases["review-submitted"]["input"]["body"]["review"]["state"], "approved")

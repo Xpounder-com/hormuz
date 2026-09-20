@@ -10,8 +10,8 @@ locators, credentials, work content, or copied live payloads.
 
 | Case | Expectation |
 | --- | --- |
-| PR opened | Proposed `created` observation |
-| PR closed and merged | Proposed `completed` observation |
+| PR opened | `mapping_pending`; proposed `created` observation |
+| PR closed and merged | `mapping_pending`; proposed `completed` observation |
 | PR closed without merge | `mapping_pending` (closure meaning and reopening) |
 | Submitted PR review | `mapping_pending` (review meaning and PR association) |
 | Completed successful check run | `mapping_pending` (CI meaning and PR association) |
@@ -19,8 +19,10 @@ locators, credentials, work content, or copied live payloads.
 | PR opened without an object ID | Invalid projected observation |
 | PR opened with a boolean object ID | Invalid projected observation |
 
-The two candidate observations are **proposals conditional on a future verified
-delivery**. Their source-event IDs illustrate a distinct per-delivery slot,
+All six real-event expectations remain **`mapping_pending`** until #219 accepts
+their delivery and event mappings. The two nested candidate observations are
+**proposals conditional on a future verified delivery**. Their source-event IDs
+illustrate a distinct per-delivery slot,
 but #219 must decide and prove delivery identity, event/action allowlists,
 source ordering, and exact mappings. The fixture's `synthetic_server_binding`
 is test-owned configuration, separate from each event body. Neither an

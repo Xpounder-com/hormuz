@@ -64,25 +64,27 @@
         "event_at": "Proposed pull_request.created_at, once payload bytes and source ownership are authenticated."
       },
       "expectation": {
-        "kind": "candidate_observation",
-        "proposal_only": true,
-        "observation": {
-          "schema_id": "hormuz.source-outcome-observation",
-          "schema_version": 1,
-          "source_event_id": "10000000-0000-4000-8000-000000000001:0",
-          "external_object_id": "1001",
-          "container_id": "456",
-          "source_revision": null,
-          "ordering_domain": null,
-          "revision_order": null,
-          "object_type": "pull_request",
-          "event_type": "created",
-          "quality_state": "unknown",
-          "duration_ms": null,
-          "state": "observed",
-          "supersedes_source_event_id": null,
-          "reason_code": "observed",
-          "event_at": "2026-09-01T10:00:00Z"
+        "kind": "mapping_pending",
+        "candidate_observation": {
+          "proposal_only": true,
+          "observation": {
+            "schema_id": "hormuz.source-outcome-observation",
+            "schema_version": 1,
+            "source_event_id": "10000000-0000-4000-8000-000000000001:0",
+            "external_object_id": "1001",
+            "container_id": "456",
+            "source_revision": null,
+            "ordering_domain": null,
+            "revision_order": null,
+            "object_type": "pull_request",
+            "event_type": "created",
+            "quality_state": "unknown",
+            "duration_ms": null,
+            "state": "observed",
+            "supersedes_source_event_id": null,
+            "reason_code": "observed",
+            "event_at": "2026-09-01T10:00:00Z"
+          }
         },
         "decisions_needed": [
           "Accept the exact pull_request/opened allowlist and verified X-GitHub-Delivery-to-source-event identity rule in #219."
@@ -142,25 +144,27 @@
         "event_at": "Proposed pull_request.merged_at; closed_at and updated_at have different meanings."
       },
       "expectation": {
-        "kind": "candidate_observation",
-        "proposal_only": true,
-        "observation": {
-          "schema_id": "hormuz.source-outcome-observation",
-          "schema_version": 1,
-          "source_event_id": "10000000-0000-4000-8000-000000000002:0",
-          "external_object_id": "1002",
-          "container_id": "456",
-          "source_revision": null,
-          "ordering_domain": null,
-          "revision_order": null,
-          "object_type": "pull_request",
-          "event_type": "completed",
-          "quality_state": "unknown",
-          "duration_ms": null,
-          "state": "observed",
-          "supersedes_source_event_id": null,
-          "reason_code": "observed",
-          "event_at": "2026-09-02T10:59:59Z"
+        "kind": "mapping_pending",
+        "candidate_observation": {
+          "proposal_only": true,
+          "observation": {
+            "schema_id": "hormuz.source-outcome-observation",
+            "schema_version": 1,
+            "source_event_id": "10000000-0000-4000-8000-000000000002:0",
+            "external_object_id": "1002",
+            "container_id": "456",
+            "source_revision": null,
+            "ordering_domain": null,
+            "revision_order": null,
+            "object_type": "pull_request",
+            "event_type": "completed",
+            "quality_state": "unknown",
+            "duration_ms": null,
+            "state": "observed",
+            "supersedes_source_event_id": null,
+            "reason_code": "observed",
+            "event_at": "2026-09-02T10:59:59Z"
+          }
         },
         "decisions_needed": [
           "Accept the exact pull_request/closed+merged condition and verified X-GitHub-Delivery-to-source-event identity rule in #219."
@@ -220,11 +224,11 @@
       },
       "expectation": {
         "kind": "mapping_pending",
-        "observation": null,
         "decisions_needed": [
           "Choose an allowlisted meaning for closed without merge and how a later reopened PR relates to it.",
           "Accept a verified delivery/event identity and source-order policy before normalization."
-        ]
+        ],
+        "candidate_observation": null
       }
     },
     {
@@ -280,11 +284,11 @@
       },
       "expectation": {
         "kind": "mapping_pending",
-        "observation": null,
         "decisions_needed": [
           "Decide which submitted review states, if any, create source-neutral observations and what they mean.",
           "Verify review-to-PR association, delivery identity, and correction/dismissal behavior."
-        ]
+        ],
+        "candidate_observation": null
       }
     },
     {
@@ -341,12 +345,12 @@
       },
       "expectation": {
         "kind": "mapping_pending",
-        "observation": null,
         "decisions_needed": [
           "Define the check_run conclusion allowlist and whether CI results are separate descriptive observations.",
           "Verify a single PR association and handle ambiguous, stale, or empty pull_requests arrays.",
           "Accept verified delivery identity and source-order behavior for reruns."
-        ]
+        ],
+        "candidate_observation": null
       }
     },
     {
@@ -372,7 +376,7 @@
             "id": 3002,
             "status": "completed",
             "conclusion": "failure",
-            "head_sha": "0000000000000000000000000000000000000000",
+            "head_sha": "3333333333333333333333333333333333333333",
             "completed_at": "2026-09-06T15:00:00Z",
             "pull_requests": []
           }
@@ -398,11 +402,11 @@
       },
       "expectation": {
         "kind": "mapping_pending",
-        "observation": null,
         "decisions_needed": [
           "Decide whether unassociated completed checks create delivery-level coverage or no observation.",
           "Define safe PR association, conclusion, rerun, delivery identity, and source-order rules."
-        ]
+        ],
+        "candidate_observation": null
       }
     },
     {
