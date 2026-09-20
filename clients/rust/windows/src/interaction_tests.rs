@@ -208,3 +208,130 @@ fn every_shared_trace_keeps_its_snapshot_through_the_native_queue_and_timer_brid
     }
     assert_eq!(steps, 130);
 }
+
+#[test]
+fn settings_and_escape_commands_resolve_against_this_turn_instead_of_rendered_state() {
+    for (commands, visible, settings) in [
+        (
+            vec![Command::Settings, Command::Escape],
+            Visibility::Expanded,
+            false,
+        ),
+        (
+            vec![Command::Settings, Command::Escape, Command::Escape],
+            Visibility::Hidden,
+            false,
+        ),
+        (
+            vec![Command::Escape, Command::Settings],
+            Visibility::Expanded,
+            true,
+        ),
+        (
+            vec![Command::Settings, Command::Settings],
+            Visibility::Expanded,
+            false,
+        ),
+    ] {
+        let mut bridge = Bridge::new();
+        for command in commands {
+            bridge.command(command).unwrap();
+        }
+        let update = bridge.flush(0).unwrap();
+        assert_eq!(update.snapshot.visibility, visible);
+        assert_eq!(update.snapshot.settings_page.is_some(), settings);
+        assert_eq!(update.focus, settings.then_some(FocusTarget::Settings));
+        assert!(update.timers.is_empty());
+    }
+}
+
+#[test]
+fn opening_settings_cancels_a_delivered_fold_and_keyboard_traversal_keeps_it_open() {
+    let (mut bridge, id) = fold_timer();
+    bridge.timer_fired(id).unwrap();
+    bridge.command(Command::Settings).unwrap();
+    let update = bridge.flush(250).unwrap();
+    assert_eq!(update.snapshot.settings_page, Some(SettingsPage::Home));
+    assert_eq!(update.snapshot.visibility, Visibility::Expanded);
+    assert_eq!(update.focus, Some(FocusTarget::Settings));
+    assert_eq!(update.timers, [TimerAction::Cancel { id }]);
+    assert!(update.snapshot.pending_timers.is_empty());
+    for target in [
+        Some(FocusTarget::Settings),
+        None,
+        Some(FocusTarget::Settings),
+    ] {
+        bridge.push(Event::FocusChanged { target }).unwrap();
+    }
+    let update = bridge.flush(1000).unwrap();
+    assert_eq!(update.snapshot.keyboard_focus, Some(FocusTarget::Settings));
+    assert!(update.snapshot.pending_timers.is_empty());
+    assert!(!bridge.timer_fired(id).unwrap());
+    bridge.command(Command::Escape).unwrap();
+    let update = bridge.flush(1001).unwrap();
+    assert_eq!(update.snapshot.settings_page, None);
+    assert_eq!(update.focus, Some(FocusTarget::Widget));
+    bridge
+        .push(Event::FocusChanged {
+            target: Some(FocusTarget::Widget),
+        })
+        .unwrap();
+    let update = bridge.flush(1002).unwrap();
+    assert_eq!(update.snapshot.visibility, Visibility::Expanded);
+    assert!(update.snapshot.pending_timers.is_empty());
+}
+
+#[test]
+fn native_commands_share_back_navigation_and_do_not_hide_visible_details() {
+    let mut bridge = Bridge::new();
+    bridge
+        .push(Event::OpenSettings {
+            page: SettingsPage::Connection,
+        })
+        .unwrap();
+    bridge.command(Command::Settings).unwrap();
+    let update = bridge.flush(0).unwrap();
+    assert_eq!(update.snapshot.settings_page, Some(SettingsPage::Home));
+    bridge
+        .push(Event::ShowAndPin {
+            metric: hormuz_client_interaction::Metric::Tokens,
+        })
+        .unwrap();
+    bridge.command(Command::Escape).unwrap();
+    let update = bridge.flush(1).unwrap();
+    assert_eq!(update.snapshot.visibility, Visibility::Expanded);
+    assert_eq!(update.snapshot.settings_page, None);
+    assert_eq!(update.snapshot.selected_metric, None);
+    bridge.push(Event::Hide).unwrap();
+    bridge.command(Command::Settings).unwrap();
+    bridge.push(Event::Hide).unwrap();
+    let update = bridge.flush(2).unwrap();
+    assert_eq!(update.snapshot.visibility, Visibility::Hidden);
+    assert_eq!(update.snapshot.settings_page, None);
+    assert_eq!(update.focus, None);
+}
+
+#[test]
+fn command_projection_failure_rolls_back_state_queue_and_clock_atomically() {
+    let (mut bridge, _) = fold_timer();
+    bridge.command(Command::Settings).unwrap();
+    bridge.flush(1).unwrap();
+    bridge.command(Command::Settings).unwrap();
+    let before = bridge.state.snapshot();
+    assert!(matches!(bridge.flush(u64::MAX), Err(Error::Reducer(_))));
+    assert_eq!(bridge.state.snapshot(), before);
+    assert_eq!(bridge.events.len(), 1);
+    assert!(bridge.timers.is_empty());
+    assert_eq!(bridge.flush(2).unwrap().snapshot.settings_page, None);
+
+    let mut bridge = Bridge::new();
+    for _ in 0..MAX_EVENTS {
+        bridge.command(Command::Settings).unwrap();
+    }
+    assert_eq!(bridge.command(Command::Escape), Err(Error::QueueFull));
+    let update = bridge.flush(0).unwrap();
+    assert_eq!(update.snapshot.visibility, Visibility::Expanded);
+    assert_eq!(update.snapshot.settings_page, None);
+    assert_eq!(update.focus, None);
+    assert!(update.timers.is_empty());
+}

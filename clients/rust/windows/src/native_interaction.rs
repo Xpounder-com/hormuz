@@ -1,8 +1,9 @@
 //! GUI-thread observations and one-shot Win32 timers for the shared reducer.
 use super::*;
-use crate::interaction::{Bridge, TimerAction};
-use hormuz_client_interaction::{Event, FocusTarget, PointerTarget, Visibility};
+use crate::interaction::{Bridge, Command, TimerAction};
+use hormuz_client_interaction::{Event, FocusTarget, PointerTarget, SettingsPage, Visibility};
 use std::{cell::RefCell, time::Instant};
+use windows_sys::Win32::UI::Controls::{GetComboBoxInfo, COMBOBOXINFO};
 
 pub const DRAIN: u32 = WM_APP + 5;
 const SUBCLASS: usize = 338;
@@ -11,8 +12,9 @@ pub struct Controller {
     bridge: RefCell<Bridge>,
     began: Instant,
     rendered: Cell<Visibility>,
-    pointer_inside: Cell<bool>,
-    focus_inside: Cell<bool>,
+    rendered_settings: Cell<bool>,
+    pointer: Cell<PointerTarget>,
+    focus: Cell<Option<FocusTarget>>,
     observed_visible: Cell<bool>,
     posted: Cell<bool>,
     activate: Cell<bool>,
@@ -27,8 +29,9 @@ impl Controller {
             bridge: RefCell::new(Bridge::new()),
             began: Instant::now(),
             rendered: Cell::new(Visibility::Expanded),
-            pointer_inside: Cell::new(false),
-            focus_inside: Cell::new(false),
+            rendered_settings: Cell::new(false),
+            pointer: Cell::new(PointerTarget::Outside),
+            focus: Cell::new(None),
             observed_visible: Cell::new(true),
             posted: Cell::new(false),
             activate: Cell::new(false),
@@ -40,6 +43,10 @@ impl Controller {
 
     pub fn folded(&self) -> bool {
         self.rendered.get() == Visibility::Folded
+    }
+
+    pub fn settings_open(&self) -> bool {
+        self.rendered_settings.get()
     }
 
     fn now_ms(&self) -> Option<u64> {
@@ -111,6 +118,39 @@ pub unsafe fn toggle_fold(hwnd: HWND, app: &App) {
     }
 }
 
+unsafe fn command(hwnd: HWND, app: &App, command: Command) {
+    if app.interaction.stopped.get() {
+        return;
+    }
+    unsafe {
+        focus(hwnd, app, GetFocus());
+        pointer(hwnd, app, hwnd, WM_NULL);
+        if app.interaction.stopped.get() {
+            return;
+        }
+        let result = app.interaction.bridge.borrow_mut().command(command);
+        if result.is_err() {
+            fail(hwnd, app);
+        } else {
+            post(hwnd, app);
+        }
+    }
+}
+
+pub unsafe fn settings(hwnd: HWND, app: &App) {
+    if !app.preview {
+        unsafe { command(hwnd, app, Command::Settings) }
+    }
+}
+
+pub unsafe fn escape(hwnd: HWND, app: &App) {
+    unsafe {
+        if !connected::escape_popup(app) {
+            command(hwnd, app, Command::Escape);
+        }
+    }
+}
+
 pub unsafe fn timer(hwnd: HWND, app: &App, id: usize) {
     if app.interaction.stopped.get() {
         return;
@@ -166,6 +206,8 @@ pub unsafe fn drain(hwnd: HWND, app: &App) {
     };
     // No RefCell borrow or mutable App reference crosses any reentrant Win32 call.
     let before = controller.rendered.replace(update.snapshot.visibility);
+    let settings = update.snapshot.settings_page.is_some();
+    let before_settings = controller.rendered_settings.replace(settings);
     controller
         .observed_visible
         .set(update.snapshot.visibility != Visibility::Hidden);
@@ -185,23 +227,32 @@ pub unsafe fn drain(hwnd: HWND, app: &App) {
                     },
                 );
             }
-            controller.pointer_inside.set(false);
-            controller.focus_inside.set(false);
+            controller.pointer.set(PointerTarget::Outside);
+            controller.focus.set(None);
         } else {
-            if before != update.snapshot.visibility {
+            if before != update.snapshot.visibility || before_settings != settings {
                 reflow(hwnd, app);
             }
-            if controller.activate.replace(false) {
+            let activate = controller.activate.replace(false);
+            if activate || update.focus == Some(FocusTarget::Settings) {
                 ShowWindow(hwnd, SW_RESTORE);
                 SetForegroundWindow(hwnd);
-                SetFocus(app.controls.get()[5]);
             }
-            if update.focus == Some(FocusTarget::Widget)
+            if update.focus == Some(FocusTarget::Settings) {
+                SetFocus(connected::settings_focus(app));
+            } else if activate
+                || update.focus == Some(FocusTarget::Widget)
                 || (!GetFocus().is_null()
                     && IsChild(hwnd, GetFocus()) != 0
                     && IsWindowVisible(GetFocus()) == 0)
             {
-                SetFocus(app.controls.get()[5]);
+                SetFocus(
+                    if !activate && before_settings && !settings && !controller.folded() {
+                        app.settings_button.get()
+                    } else {
+                        app.controls.get()[5]
+                    },
+                );
             }
         }
         if controller.stopped.get() {
@@ -226,6 +277,9 @@ pub unsafe fn drain(hwnd: HWND, app: &App) {
         controller.applying.set(false);
         connected::visibility(hwnd, app);
         focus(hwnd, app, GetFocus());
+        if before_settings != settings && !controller.folded() {
+            pointer(hwnd, app, hwnd, WM_NULL);
+        }
     }
 }
 
@@ -240,6 +294,31 @@ pub unsafe fn visibility(hwnd: HWND, app: &App, visible: bool) {
     }
 }
 
+unsafe fn combo_parts(combo: HWND) -> [HWND; 2] {
+    let mut info = COMBOBOXINFO {
+        cbSize: size_of::<COMBOBOXINFO>() as u32,
+        ..unsafe { std::mem::zeroed() }
+    };
+    if !combo.is_null() && unsafe { GetComboBoxInfo(combo, &mut info) } != 0 {
+        [info.hwndItem, info.hwndList]
+    } else {
+        [null_mut(); 2]
+    }
+}
+
+unsafe fn form_contains(inputs: [HWND; 13], open: bool, target: HWND) -> bool {
+    // A combo's list can be an owned popup rather than a child of the root.
+    // Only include the exact native handles reported by our own combo control.
+    !target.is_null()
+        && open
+        && inputs
+            .into_iter()
+            .chain(unsafe { combo_parts(inputs[9]) })
+            .any(|control| {
+                !control.is_null() && unsafe { control == target || IsChild(control, target) != 0 }
+            })
+}
+
 pub unsafe fn focus(hwnd: HWND, app: &App, target: HWND) {
     let controller = &app.interaction;
     if !controller.ready.get()
@@ -252,17 +331,21 @@ pub unsafe fn focus(hwnd: HWND, app: &App, target: HWND) {
         && unsafe {
             let foreground = GetForegroundWindow();
             (foreground == hwnd || GetAncestor(foreground, GA_ROOTOWNER) == hwnd)
-                && (target == hwnd || IsChild(hwnd, target) != 0)
+                && (target == hwnd
+                    || IsChild(hwnd, target) != 0
+                    || form_contains(app.inputs.get(), controller.settings_open(), target))
+                && IsWindowVisible(target) != 0
         };
-    if controller.focus_inside.replace(inside) != inside {
+    let region = inside.then(|| {
+        if unsafe { form_contains(app.inputs.get(), controller.settings_open(), target) } {
+            FocusTarget::Settings
+        } else {
+            FocusTarget::Widget
+        }
+    });
+    if controller.focus.replace(region) != region {
         unsafe {
-            input(
-                hwnd,
-                app,
-                Event::FocusChanged {
-                    target: inside.then_some(FocusTarget::Widget),
-                },
-            );
+            input(hwnd, app, Event::FocusChanged { target: region });
         }
     }
 }
@@ -281,7 +364,8 @@ pub unsafe fn pointer(hwnd: HWND, app: &App, _source: HWND, _message: u32) {
             return;
         }
         let target = WindowFromPoint(point);
-        let inside = !target.is_null() && (target == hwnd || IsChild(hwnd, target) != 0);
+        let in_form = form_contains(app.inputs.get(), controller.settings_open(), target);
+        let inside = !target.is_null() && (target == hwnd || IsChild(hwnd, target) != 0 || in_form);
         if inside {
             // Sampling can observe entry before WM_MOUSEMOVE arrives. Arm the
             // actual child/root now so leaving without another move is observed.
@@ -315,20 +399,23 @@ pub unsafe fn pointer(hwnd: HWND, app: &App, _source: HWND, _message: u32) {
                 return;
             }
         }
-        if controller.pointer_inside.replace(inside) != inside {
-            input(
-                hwnd,
-                app,
-                if inside {
-                    Event::PointerEnter {
-                        target: PointerTarget::Widget,
-                    }
-                } else {
-                    Event::PointerExit {
-                        target: PointerTarget::Widget,
-                    }
-                },
-            );
+        let region = if !inside {
+            PointerTarget::Outside
+        } else if in_form {
+            PointerTarget::Settings
+        } else if target == app.settings_button.get() {
+            PointerTarget::SettingsHandle
+        } else {
+            PointerTarget::Widget
+        };
+        let before = controller.pointer.replace(region);
+        if before != region {
+            if before != PointerTarget::Outside {
+                input(hwnd, app, Event::PointerExit { target: before });
+            }
+            if region != PointerTarget::Outside {
+                input(hwnd, app, Event::PointerEnter { target: region });
+            }
         }
     }
 }
@@ -339,6 +426,8 @@ pub unsafe fn initialize(hwnd: HWND, app: &App) -> bool {
         .get()
         .into_iter()
         .chain(app.inputs.get())
+        .chain([app.settings_button.get()])
+        .chain(unsafe { combo_parts(app.inputs.get()[9]) })
         .filter(|h| !h.is_null())
     {
         if unsafe { SetWindowSubclass(control, Some(control_proc), SUBCLASS, hwnd as usize) } == 0 {
@@ -353,6 +442,15 @@ pub unsafe fn start(hwnd: HWND, app: &App) {
     // construction state as a user's Hide, or lose a later Show in the batch.
     app.interaction.ready.set(true);
     unsafe {
+        if !app.preview {
+            input(
+                hwnd,
+                app,
+                Event::OpenSettings {
+                    page: SettingsPage::Home,
+                },
+            );
+        }
         visibility(hwnd, app, IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0);
         focus(hwnd, app, GetFocus());
         pointer(hwnd, app, hwnd, WM_NULL);

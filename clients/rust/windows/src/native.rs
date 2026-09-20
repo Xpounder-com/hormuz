@@ -55,6 +55,7 @@ struct App {
     connection: OnceCell<Box<dyn DesktopConnection>>,
     network: OnceCell<crate::network::NetworkEvents>,
     inputs: Cell<[HWND; 13]>,
+    settings_button: Cell<HWND>,
     profile_loaded: Cell<bool>,
     session_notifications: Cell<bool>,
     preview: bool,
@@ -113,6 +114,7 @@ pub(super) fn run_with_factory(
             connection: OnceCell::new(),
             network: OnceCell::new(),
             inputs: Cell::new([null_mut(); 13]),
+            settings_button: Cell::new(null_mut()),
             profile_loaded: Cell::new(false),
             session_notifications: Cell::new(false),
             preview,
@@ -240,7 +242,7 @@ pub(super) fn run_with_factory(
         SetFocus(if preview {
             controls[5]
         } else {
-            app.inputs.get()[1]
+            app.settings_button.get()
         });
         interactions::start(hwnd, &app);
         connected::visibility(hwnd, &app);
@@ -259,7 +261,7 @@ pub(super) fn run_with_factory(
                 break;
             }
             if message.message == WM_KEYDOWN && message.wParam == VK_ESCAPE as usize {
-                hide(hwnd, &app);
+                interactions::escape(hwnd, &app);
             } else if IsDialogMessageW(hwnd, &message) == 0 {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
@@ -346,6 +348,8 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
                     }
                 } else if app.interaction.folded() {
                     168
+                } else if !app.interaction.settings_open() {
+                    248
                 } else {
                     488
                 },
@@ -408,6 +412,8 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             }
         } else if app.interaction.folded() {
             128
+        } else if !app.interaction.settings_open() {
+            208
         } else {
             448
         };
@@ -430,7 +436,7 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             })
             .as_ptr(),
         );
-        connected::layout(app);
+        connected::layout(app, y);
         let font = CreateFontW(
             -scale(14, dpi),
             0,
@@ -451,6 +457,7 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             for control in controls
                 .into_iter()
                 .chain(app.inputs.get())
+                .chain([app.settings_button.get()])
                 .filter(|h| !h.is_null())
             {
                 SendMessageW(control, WM_SETFONT, font as usize, 1);
@@ -683,7 +690,9 @@ unsafe extern "system" fn window_proc(
                     FOLD => {
                         interactions::toggle_fold(hwnd, app);
                     }
-                    HIDE | 2 => hide(hwnd, app), // IDCANCEL from dialog keyboard navigation.
+                    connected::SETTINGS => interactions::settings(hwnd, app),
+                    HIDE => hide(hwnd, app),
+                    2 => interactions::escape(hwnd, app), // IDCANCEL from dialog navigation.
                     SHOW => show(hwnd, app),
                     EXIT => {
                         DestroyWindow(hwnd);

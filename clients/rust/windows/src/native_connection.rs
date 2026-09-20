@@ -10,6 +10,7 @@ use windows_sys::Win32::UI::Controls::EM_SETLIMITTEXT;
 pub const SIGN_IN: usize = 109;
 pub const SIGN_OUT: usize = 110;
 pub const RETRY: usize = 111;
+pub const SETTINGS: usize = 112;
 
 pub struct Browser;
 impl BrowserOpener for Browser {
@@ -84,6 +85,24 @@ pub unsafe fn initialize(
     factory: impl FnOnce(PrivateDirectory, Notifier) -> std::io::Result<Box<dyn DesktopConnection>>,
 ) -> bool {
     unsafe {
+        let button = CreateWindowExW(
+            0,
+            wide("BUTTON").as_ptr(),
+            wide("&Settings").as_ptr(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON as u32,
+            0,
+            0,
+            1,
+            1,
+            hwnd,
+            SETTINGS as HMENU,
+            GetModuleHandleW(null()),
+            null(),
+        );
+        if button.is_null() {
+            return false;
+        }
+        app.settings_button.set(button);
         let definitions = [
             ("STATIC", "&Gateway (HTTPS)", 0),
             ("EDIT", "", 201),
@@ -263,12 +282,28 @@ pub unsafe fn sign_in(app: &App) {
         }
     }
 }
-pub unsafe fn layout(app: &App) {
+pub unsafe fn layout(app: &App, button_y: i32) {
     if app.preview {
         return;
     }
     unsafe {
         let dpi = app.dpi.get();
+        let settings = app.interaction.settings_open() && !app.interaction.folded();
+        MoveWindow(
+            app.settings_button.get(),
+            scale(328, dpi),
+            scale(button_y, dpi),
+            scale(88, dpi),
+            scale(28, dpi),
+            1,
+        );
+        SetWindowTextW(
+            app.settings_button.get(),
+            wide(if settings { "&Back" } else { "&Settings" }).as_ptr(),
+        );
+        if !settings {
+            SendMessageW(app.inputs.get()[9], CB_SHOWDROPDOWN, 0, 0);
+        }
         for (index, handle) in app.inputs.get().into_iter().enumerate() {
             let (x, y, width, height) = if index < 10 {
                 (
@@ -288,16 +323,31 @@ pub unsafe fn layout(app: &App) {
                 scale(height, dpi),
                 1,
             );
-            ShowWindow(
-                handle,
-                if app.interaction.folded() {
-                    SW_HIDE
-                } else {
-                    SW_SHOW
-                },
-            );
+            ShowWindow(handle, if settings { SW_SHOW } else { SW_HIDE });
         }
     }
+}
+
+pub unsafe fn settings_focus(app: &App) -> HWND {
+    // A restored session can disable all profile edits. Focus an actual enabled
+    // form action then; while checking, leave focus on the Settings/Back button.
+    let inputs = app.inputs.get();
+    [1, 3, 5, 7, 9, 10, 11, 12]
+        .into_iter()
+        .map(|index| inputs[index])
+        .find(|handle| unsafe { IsWindowVisible(*handle) != 0 && IsWindowEnabled(*handle) != 0 })
+        .unwrap_or(app.settings_button.get())
+}
+
+pub unsafe fn escape_popup(app: &App) -> bool {
+    let combo = app.inputs.get()[9];
+    if combo.is_null() || unsafe { SendMessageW(combo, CB_GETDROPPEDSTATE, 0, 0) } == 0 {
+        return false;
+    }
+    // Let the native combo cancel its own pending selection before Escape can
+    // navigate the settings surface. No shared page state models this popup.
+    unsafe { SendMessageW(combo, WM_KEYDOWN, VK_ESCAPE as usize, 1) };
+    true
 }
 pub unsafe fn visibility(hwnd: HWND, app: &App) {
     if let Some(connection) = app.connection.get() {
