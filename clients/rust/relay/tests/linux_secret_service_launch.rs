@@ -194,6 +194,7 @@ fn wait_wrapper(guard: &mut UnitGuard, log: &Path) {
 }
 
 #[test]
+#[ignore = "requires isolated Secret Service user manager"]
 fn isolated_secret_service_launch_forwards_once_and_tears_down() {
     if std::env::var(OPT_IN).as_deref() != Ok("1") {
         eprintln!("host-only Secret Service launch test skipped: isolated user opt-in missing");

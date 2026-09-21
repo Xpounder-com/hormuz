@@ -100,7 +100,8 @@ binary. It requires an empty Hormuz credential namespace, saves and later
 deletes a synthetic session, then runs this executable through the user-service
 wrapper with a fake client and gateway. The fixture verifies one Off request,
 credential custody, listener closure and an inactive service after client exit.
-Without that isolated account, ordinary CI skips the host test. Installed-client
+Ordinary CI records this host test as ignored; the opt-in marker and dedicated
+user guard remain required when running it with `--ignored`. Installed-client
 traffic, desktop Secret Service behavior beyond this synthetic account,
 native-shell lifecycle wiring and clean-install proof remain open. Issue #341
 remains open; this source checkpoint does not qualify Linux support.
