@@ -14,6 +14,9 @@ const SERVICE: &str = "com.hormuz.client.session.v1";
 const ACCOUNT: &str = "active-connection-v1";
 const LABEL: &str = "Hormuz active connection";
 const MAX_RECORD_BYTES: usize = 32_767;
+const AES_BLOCK_BYTES: usize = 16;
+const MAX_ENCRYPTED_RECORD_BYTES: usize = 32_768;
+const MAX_DH_PUBLIC_KEY_BYTES: usize = 128;
 const METHOD_BUDGET: Duration = Duration::from_secs(5);
 const OPERATION_BUDGET: Duration = Duration::from_secs(10);
 
@@ -75,6 +78,34 @@ fn no_prompt(path: &OwnedObjectPath) -> BackendResult<()> {
 fn created_without_prompt(item: &OwnedObjectPath, prompt: &OwnedObjectPath) -> BackendResult<()> {
     no_prompt(prompt)?;
     if item.as_str() == "/" {
+        Err(BackendError::InvalidRecord)
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_server_public_key(bytes: &[u8]) -> BackendResult<()> {
+    if bytes.is_empty() || bytes.len() > MAX_DH_PUBLIC_KEY_BYTES {
+        Err(BackendError::InvalidRecord)
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_encrypted_reply(
+    expected_session: &str,
+    returned_session: &str,
+    content_type: oo7::ContentType,
+    parameters: &[u8],
+    ciphertext: &[u8],
+) -> BackendResult<()> {
+    if returned_session != expected_session
+        || content_type != oo7::ContentType::Blob
+        || parameters.len() != AES_BLOCK_BYTES
+        || ciphertext.is_empty()
+        || ciphertext.len() > MAX_ENCRYPTED_RECORD_BYTES
+        || !ciphertext.len().is_multiple_of(AES_BLOCK_BYTES)
+    {
         Err(BackendError::InvalidRecord)
     } else {
         Ok(())
@@ -146,6 +177,7 @@ impl EncryptedService {
             .await
             .map_err(unavailable)?;
         let server_key = server_key.ok_or(BackendError::Unavailable)?;
+        validate_server_public_key(server_key.as_ref())?;
         let key = Key::generate_aes_key(&private_key, &server_key).map_err(unavailable)?;
         Ok(Self {
             service,
@@ -245,16 +277,16 @@ impl SecretServiceBackend {
         let Some(item) = service.selected_item(&collection).await? else {
             return Ok(None);
         };
-        let secret = item
-            .secret(&service.session)
-            .await
-            .map_err(unavailable)?
-            .decrypt(Some(&service.key))
-            .map_err(unavailable)?;
-        if secret.content_type() != oo7::ContentType::Blob
-            || secret.as_bytes().is_empty()
-            || secret.as_bytes().len() > MAX_RECORD_BYTES
-        {
+        let encrypted = item.secret(&service.session).await.map_err(unavailable)?;
+        validate_encrypted_reply(
+            service.session.inner().path().as_str(),
+            encrypted.session().inner().path().as_str(),
+            encrypted.content_type(),
+            encrypted.parameters(),
+            encrypted.value(),
+        )?;
+        let secret = encrypted.decrypt(Some(&service.key)).map_err(unavailable)?;
+        if secret.as_bytes().is_empty() || secret.as_bytes().len() > MAX_RECORD_BYTES {
             return Err(BackendError::InvalidRecord);
         }
         SecretRecord::new(secret.as_bytes().to_vec())
@@ -463,6 +495,80 @@ mod tests {
                 &path("/org/freedesktop/secrets/prompt/1")
             ),
             Err(BackendError::PromptRequired)
+        );
+    }
+
+    #[test]
+    fn malformed_encrypted_replies_are_rejected_before_decryption() {
+        let session = "/org/freedesktop/secrets/session/1";
+        assert_eq!(
+            validate_encrypted_reply(session, session, oo7::ContentType::Blob, &[0; 16], &[0; 16]),
+            Ok(())
+        );
+        assert_eq!(
+            validate_encrypted_reply(
+                session,
+                "/org/freedesktop/secrets/session/2",
+                oo7::ContentType::Blob,
+                &[0; 16],
+                &[0; 16]
+            ),
+            Err(BackendError::InvalidRecord)
+        );
+        assert_eq!(
+            validate_encrypted_reply(session, session, oo7::ContentType::Text, &[0; 16], &[0; 16]),
+            Err(BackendError::InvalidRecord)
+        );
+        for parameters in [&[0; 15][..], &[0; 17][..]] {
+            assert_eq!(
+                validate_encrypted_reply(
+                    session,
+                    session,
+                    oo7::ContentType::Blob,
+                    parameters,
+                    &[0; 16]
+                ),
+                Err(BackendError::InvalidRecord)
+            );
+        }
+        for ciphertext in [&[][..], &[0; 15][..], &[0; 17][..], &[0; 32_784][..]] {
+            assert_eq!(
+                validate_encrypted_reply(
+                    session,
+                    session,
+                    oo7::ContentType::Blob,
+                    &[0; 16],
+                    ciphertext
+                ),
+                Err(BackendError::InvalidRecord)
+            );
+        }
+        assert_eq!(
+            validate_encrypted_reply(
+                session,
+                session,
+                oo7::ContentType::Blob,
+                &[0; 16],
+                &[0; MAX_ENCRYPTED_RECORD_BYTES]
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn server_public_key_is_nonempty_and_bounded() {
+        assert_eq!(validate_server_public_key(&[1]), Ok(()));
+        assert_eq!(
+            validate_server_public_key(&[1; MAX_DH_PUBLIC_KEY_BYTES]),
+            Ok(())
+        );
+        assert_eq!(
+            validate_server_public_key(&[]),
+            Err(BackendError::InvalidRecord)
+        );
+        assert_eq!(
+            validate_server_public_key(&[1; MAX_DH_PUBLIC_KEY_BYTES + 1]),
+            Err(BackendError::InvalidRecord)
         );
     }
 
