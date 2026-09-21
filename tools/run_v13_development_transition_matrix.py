@@ -182,6 +182,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         source_root = args.source_root.resolve(strict=True)
+        commit = subprocess.run(["git", "-C", str(source_root), "rev-parse", "HEAD"],
+                                capture_output=True, text=True, check=True).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", str(source_root), "status", "--porcelain", "--untracked-files=all"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if dirty:
+            raise MatrixRefusal("candidate_checkout_dirty")
         for name in ("v1_python", "v12_python"):
             executable = getattr(args, name)
             if not executable.is_file() or not os.access(executable, os.X_OK):
@@ -203,14 +211,8 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["HORMUZ_TEST_ACCOUNT_BINDING_PYTHON"] = str(args.v12_python.absolute())
         os.environ["HORMUZ_TEST_ACCOUNT_BINDING_SOURCE"] = str(args.v12_source.resolve())
         result = run_cases(source_root, postgres=args.postgres)
-        commit = subprocess.run(["git", "-C", str(source_root), "rev-parse", "HEAD"],
-                                capture_output=True, text=True, check=True).stdout.strip()
-        dirty = subprocess.run(
-            ["git", "-C", str(source_root), "status", "--porcelain", "--untracked-files=all"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
         print(json.dumps({"status": "passed", "checkpoint": "development-only",
-                          "source_head": commit, "source_tree_clean": not bool(dirty),
+                          "source_head": commit, "source_tree_clean": True,
                           "candidate_wheel_sha256": sha256(args.candidate_wheel),
                           "v1_archive_sha256": V1_ARCHIVE_SHA256,
                           "v12_source_sha256": V12_SOURCE_SHA256,

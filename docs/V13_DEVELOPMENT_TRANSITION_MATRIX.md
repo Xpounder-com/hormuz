@@ -22,9 +22,9 @@ candidate `hormuz/` runtime file in the source tree and wheel; the wheel run
 also compares the installed runtime before running any case. It refuses missing
 published artifacts, digest mismatches,
 missing tests and all skipped cases. The source and wheel executions must each
-report nine SQLite cases, zero skips and the same wheel digest. The output
-records whether the checkout is clean; a dirty tree's `source_head` is context,
-not an exact source binding. Prepare all four release files and four isolated
+report nine SQLite cases, zero skips and the same wheel digest. The runner
+requires a clean checkout; its `source_head` is development context, not
+final-candidate acceptance. Prepare all four release files and four isolated
 interpreters from the repository root:
 
 ```console

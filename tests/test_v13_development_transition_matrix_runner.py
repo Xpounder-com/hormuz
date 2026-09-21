@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import io
+import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -83,6 +87,30 @@ class DevelopmentTransitionMatrixRunnerTests(unittest.TestCase):
             venv.symlink_to(base)
             self.assertEqual(venv.absolute(), venv)
             self.assertNotEqual(venv.resolve(), venv)
+
+    def test_dirty_source_refuses_before_loading_predecessors_or_cases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(("git", "init", "-q", str(root)), check=True)
+            subprocess.run(("git", "-C", str(root), "config", "user.name", "Matrix test"), check=True)
+            subprocess.run(("git", "-C", str(root), "config", "user.email", "matrix@example.invalid"), check=True)
+            (root / "README.md").write_text("clean\n", encoding="utf-8")
+            subprocess.run(("git", "-C", str(root), "add", "README.md"), check=True)
+            subprocess.run(("git", "-C", str(root), "commit", "-qm", "baseline"), check=True)
+            (root / "untracked.txt").write_text("dirty\n", encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                status = matrix.main([
+                    "--mode", "source", "--source-root", str(root),
+                    "--candidate-wheel", "missing.whl",
+                    "--v1-archive", "missing-v1.tar.gz", "--v1-manifest", "missing.json",
+                    "--v1-python", "missing-v1-python", "--v12-source", "missing-v12.tar.gz",
+                    "--v12-wheel", "missing-v12.whl", "--v12-python", "missing-v12-python",
+                ])
+            self.assertEqual(status, 1)
+            self.assertEqual(json.loads(output.getvalue()), {
+                "status": "refused", "reason": "candidate_checkout_dirty",
+            })
 
 
 if __name__ == "__main__":
