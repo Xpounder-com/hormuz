@@ -28,15 +28,27 @@ class CandidateArtifactTests(unittest.TestCase):
             for path in candidate.REQUIRED_SOURCE_KIT
         }
         self.files.update({
+            "MANIFEST.in": (
+                b"include SECURITY.md SUPPORT.md config.example.json\n"
+                b"recursive-include docs *.md\n"
+            ),
             "pyproject.toml": (
                 b'[project]\nname = "hormuz"\nversion = "1.3.0"\n'
-                b'description = "Test gateway"\nlicense = "Apache-2.0"\nrequires-python = ">=3.11"\n'
+                b'description = "Test gateway"\nreadme = "README.md"\n'
+                b'license = "Apache-2.0"\nlicense-files = ["LICENSE"]\n'
+                b'requires-python = ">=3.11"\n'
+                b'authors = [{name = "NeuralInt"}]\n'
+                b'classifiers = ["Topic :: Security", "Environment :: Console"]\n'
                 b'dependencies = ["PyJWT[crypto]>=2.13,<3"]\n'
                 b'[project.optional-dependencies]\npostgres = ["psycopg[binary]>=3.3.4,<3.4"]\n'
                 b'[project.scripts]\nhormuz = "hormuz.cli:main"\n'
             ),
             "README.md": b"# Test gateway\n",
             "LICENSE": b"Synthetic license\n",
+            "SECURITY.md": b"# Synthetic security\n",
+            "SUPPORT.md": b"# Synthetic support\n",
+            "config.example.json": b"{}\n",
+            "docs/additional-guide.md": b"# Included through MANIFEST\n",
             "hormuz/__init__.py": b'__version__ = "1.3.0"\n',
             "hormuz/cli.py": b"def main():\n    return 0\n",
             "docs/example-wire-v1.json": b"{}\n",
@@ -74,7 +86,9 @@ class CandidateArtifactTests(unittest.TestCase):
     def _metadata() -> bytes:
         return (
             b"Metadata-Version: 2.4\nName: hormuz\nVersion: 1.3.0\n"
-            b"Summary: Test gateway\nLicense-Expression: Apache-2.0\n"
+            b"Summary: Test gateway\nAuthor: NeuralInt\n"
+            b"License-Expression: Apache-2.0\n"
+            b"Classifier: Topic :: Security\nClassifier: Environment :: Console\n"
             b"Requires-Python: >=3.11\nDescription-Content-Type: text/markdown\n"
             b"License-File: LICENSE\nRequires-Dist: PyJWT[crypto]<3,>=2.13\n"
             b"Provides-Extra: postgres\n"
@@ -176,6 +190,15 @@ class CandidateArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_source_git_bytes_mismatch"):
             candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
 
+    def test_every_committed_manifest_include_is_required(self) -> None:
+        for name in ("SECURITY.md", "SUPPORT.md", "config.example.json", "docs/additional-guide.md"):
+            with self.subTest(name=name):
+                self._build_source(omitted={name})
+                with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_source_git_bytes_mismatch"):
+                    candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+        self._build_source()
+        self.assertEqual(candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)["candidate_commit"], self.commit)
+
     def test_untracked_runtime_and_stale_metadata_fail(self) -> None:
         self._build_source(edits={"hormuz/untracked.py": b"pass\n"})
         with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_source_untracked_file"):
@@ -223,6 +246,21 @@ class CandidateArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_source_metadata_semantics_mismatch"):
             candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
 
+    def test_author_and_classifiers_cannot_drift_together_in_source_and_wheel(self) -> None:
+        for changed in (
+            self._metadata().replace(b"Author: NeuralInt", b"Author: Other"),
+            self._metadata().replace(b"Classifier: Topic :: Security\n", b""),
+            self._metadata().replace(b"Summary: Test gateway", b"Summary: Test gateway\nAuthor-email: other@example.invalid"),
+        ):
+            with self.subTest(changed=hashlib.sha256(changed).hexdigest()[:8]):
+                self._build_source(edits={
+                    "PKG-INFO": changed,
+                    "hormuz.egg-info/PKG-INFO": changed,
+                })
+                self._build_wheel(edits={"hormuz-1.3.0.dist-info/METADATA": changed})
+                with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_source_metadata_semantics_mismatch"):
+                    candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+
     def test_archive_file_directory_collision_fails_before_extraction(self) -> None:
         self._build_source(colliding_first=("docs", b"file blocks docs directory\n"))
         with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_source_file_directory_collision"):
@@ -244,6 +282,58 @@ class CandidateArtifactTests(unittest.TestCase):
         self._build_wheel(bad_record=True)
         with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_wheel_record_digest_mismatch"):
             candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+
+    def test_wheel_version_and_file_directory_collisions_fail(self) -> None:
+        self._build_wheel(edits={"hormuz-1.3.0.dist-info/METADATA/child": b"uninstallable\n"})
+        with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_wheel_file_directory_collision"):
+            candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+        for wheel_header in (
+            b"Generator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+            b"Wheel-Version: 999.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        ):
+            with self.subTest(wheel_header=wheel_header[:25]):
+                self._build_wheel(edits={"hormuz-1.3.0.dist-info/WHEEL": wheel_header})
+                with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_wheel_tag_mismatch"):
+                    candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+
+    def test_returned_digests_identify_the_validated_snapshots(self) -> None:
+        original_source = hashlib.sha256(self.source.read_bytes()).hexdigest()
+        original_wheel = hashlib.sha256(self.wheel.read_bytes()).hexdigest()
+        selected = candidate._wheel_selected
+
+        def replace_paths_after_validation(*args, **kwargs):
+            result = selected(*args, **kwargs)
+            self.source.write_bytes(b"replaced source after validation")
+            self.wheel.write_bytes(b"replaced wheel after validation")
+            return result
+
+        with patch.object(candidate, "_wheel_selected", replace_paths_after_validation):
+            result = candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+        self.assertEqual(result["source_sha256"], original_source)
+        self.assertEqual(result["wheel_sha256"], original_wheel)
+        self.assertNotEqual(hashlib.sha256(self.source.read_bytes()).hexdigest(), original_source)
+        self.assertNotEqual(hashlib.sha256(self.wheel.read_bytes()).hexdigest(), original_wheel)
+
+    def test_archive_member_size_and_total_bounds_fail_closed(self) -> None:
+        source_payload = self.source.read_bytes()
+        with patch.object(candidate, "MAX_SOURCE_MEMBERS", 2):
+            with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_source_member_bounds"):
+                candidate._source_files(source_payload)
+        with patch.object(candidate, "MAX_SOURCE_TOTAL_BYTES", 8):
+            with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_source_total_bounds"):
+                candidate._source_files(source_payload)
+        with patch.object(candidate, "MAX_SOURCE_ARCHIVE_BYTES", 8):
+            with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_source_archive_bounds"):
+                candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+        with patch.object(candidate, "MAX_WHEEL_MEMBERS", 2):
+            with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_wheel_member_bounds"):
+                candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+        with patch.object(candidate, "MAX_WHEEL_TOTAL_BYTES", 8):
+            with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_wheel_total_bounds"):
+                candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+        with patch.object(candidate, "MAX_WHEEL_ARCHIVE_BYTES", 8):
+            with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_wheel_archive_bounds"):
+                candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
 
     def test_encrypted_or_runtime_error_wheel_returns_fixed_failure(self) -> None:
         data = bytearray(self.wheel.read_bytes())

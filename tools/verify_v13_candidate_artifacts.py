@@ -14,6 +14,7 @@ from collections import Counter
 import configparser
 import csv
 from email.parser import Parser
+from fnmatch import fnmatchcase
 import hashlib
 import io
 import json
@@ -28,6 +29,12 @@ import zipfile
 VERSION = "1.3.0"
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 MAX_SOURCE_FILE_BYTES = 16 * 1024 * 1024
+MAX_SOURCE_ARCHIVE_BYTES = 64 * 1024 * 1024
+MAX_SOURCE_TOTAL_BYTES = 64 * 1024 * 1024
+MAX_SOURCE_MEMBERS = 4096
+MAX_WHEEL_ARCHIVE_BYTES = 32 * 1024 * 1024
+MAX_WHEEL_TOTAL_BYTES = 64 * 1024 * 1024
+MAX_WHEEL_MEMBERS = 4096
 GENERATED_SOURCE_FILES = frozenset({
     "PKG-INFO",
     "setup.cfg",
@@ -113,7 +120,16 @@ def _read_tar(archive: tarfile.TarFile, prefix: str) -> dict[str, bytes]:
     result: dict[str, bytes] = {}
     seen: set[str] = set()
     implied_directories: set[str] = set()
-    for member in archive.getmembers():
+    total_bytes = 0
+    for ordinal, member in enumerate(archive, 1):
+        if ordinal > MAX_SOURCE_MEMBERS:
+            raise CandidateArtifactError("candidate_source_member_bounds")
+        if member.size < 0 or member.size > MAX_SOURCE_FILE_BYTES:
+            raise CandidateArtifactError("candidate_source_file_bounds")
+        if member.isfile():
+            total_bytes += member.size
+            if total_bytes > MAX_SOURCE_TOTAL_BYTES:
+                raise CandidateArtifactError("candidate_source_total_bounds")
         raw_name = member.name
         name = raw_name.rstrip("/")
         if name == prefix.rstrip("/") and member.isdir() and raw_name in {name, name + "/"}:
@@ -136,8 +152,6 @@ def _read_tar(archive: tarfile.TarFile, prefix: str) -> dict[str, bytes]:
         implied_directories.update(parents)
         if member.isdir():
             continue
-        if member.size > MAX_SOURCE_FILE_BYTES:
-            raise CandidateArtifactError("candidate_source_file_bounds")
         source = archive.extractfile(member)
         if source is None:
             raise CandidateArtifactError("candidate_source_file_invalid")
@@ -160,7 +174,43 @@ def _git_archive_files(root: Path, commit: str, paths: set[str]) -> dict[str, by
     return result
 
 
-def _git_files(root: Path, commit: str) -> tuple[dict[str, bytes], set[str]]:
+def _manifest_expected(raw: bytes, names: set[str]) -> set[str]:
+    expected: set[str] = set()
+    pruned: set[str] = set()
+    for line in _utf8(raw, "candidate_manifest_invalid").splitlines():
+        parts = line.split("#", 1)[0].split()
+        if not parts:
+            continue
+        command, *values = parts
+        if command == "include" and values:
+            for path in values:
+                if not _safe_path(path) or path not in names:
+                    raise CandidateArtifactError("candidate_manifest_declared_file_missing")
+                expected.add(path)
+        elif command == "recursive-include" and len(values) >= 2:
+            directory, *patterns = values
+            if not _safe_path(directory) or any("/" in pattern or "\\" in pattern for pattern in patterns):
+                raise CandidateArtifactError("candidate_manifest_invalid")
+            expected.update(
+                path for path in names
+                if path.startswith(directory + "/")
+                and any(fnmatchcase(path.rsplit("/", 1)[-1], pattern) for pattern in patterns)
+            )
+        elif command == "prune" and values:
+            for directory in values:
+                if not _safe_path(directory):
+                    raise CandidateArtifactError("candidate_manifest_invalid")
+                pruned.add(directory)
+        else:
+            # A new setuptools manifest directive needs a reviewed verifier
+            # update; silently ignoring one can omit committed source files.
+            raise CandidateArtifactError("candidate_manifest_unsupported_directive")
+    return {path for path in expected if not any(
+        path == directory or path.startswith(directory + "/") for directory in pruned
+    )}
+
+
+def _git_files(root: Path, commit: str) -> tuple[dict[str, bytes], set[str], set[str]]:
     if COMMIT.fullmatch(commit) is None:
         raise CandidateArtifactError("candidate_commit_invalid")
     if _git(root, "rev-parse", "HEAD").decode("ascii").strip() != commit:
@@ -168,10 +218,13 @@ def _git_files(root: Path, commit: str) -> tuple[dict[str, bytes], set[str]]:
     if _git(root, "status", "--porcelain", "--untracked-files=no"):
         raise CandidateArtifactError("candidate_checkout_dirty")
     names = set(_git(root, "ls-tree", "-r", "--name-only", "-z", commit).decode("utf-8").split("\0")) - {""}
-    selected = {path for path in names if _selected(path)}
+    if "MANIFEST.in" not in names:
+        raise CandidateArtifactError("candidate_git_source_kit_incomplete")
+    manifest = _git_archive_files(root, commit, {"MANIFEST.in"})["MANIFEST.in"]
+    selected = {path for path in names if _selected(path)} | _manifest_expected(manifest, names)
     if not REQUIRED_SOURCE_KIT <= selected:
         raise CandidateArtifactError("candidate_git_source_kit_incomplete")
-    return _git_archive_files(root, commit, selected), names
+    return _git_archive_files(root, commit, selected), names, selected
 
 
 def _package_version(pyproject: bytes, init: bytes) -> str:
@@ -196,9 +249,9 @@ def _package_version(pyproject: bytes, init: bytes) -> str:
     return version
 
 
-def _source_files(path: Path) -> dict[str, bytes]:
+def _source_files(payload: bytes) -> dict[str, bytes]:
     try:
-        with tarfile.open(path, mode="r:gz") as archive:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
             return _read_tar(archive, f"hormuz-{VERSION}/")
     except (OSError, tarfile.TarError) as error:
         raise CandidateArtifactError("candidate_source_invalid") from error
@@ -272,12 +325,35 @@ def _check_package_metadata(raw: bytes, project: dict[str, object], readme: byte
     except UnicodeError as error:
         raise CandidateArtifactError("candidate_readme_invalid") from error
     optional = project.get("optional-dependencies", {})
+    authors = project.get("authors", [])
+    classifiers = project.get("classifiers", [])
+    if (not isinstance(authors, list) or len(authors) > 1
+            or any(not isinstance(author, dict) or set(author) != {"name"}
+                   or not isinstance(author["name"], str) or not author["name"]
+                   for author in authors)
+            or not isinstance(classifiers, list)
+            or not all(isinstance(item, str) for item in classifiers)):
+        raise CandidateArtifactError("candidate_project_metadata_unsupported")
+    expected_author = [authors[0]["name"]] if authors else []
+    allowed_headers = {
+        "Metadata-Version", "Name", "Version", "Summary", "Author",
+        "License-Expression", "Classifier", "Requires-Python",
+        "Description-Content-Type", "License-File", "Requires-Dist",
+        "Provides-Extra", "Dynamic",
+    }
     if (
-        metadata.get_all("Summary") != [project.get("description")]
+        set(metadata.keys()) - allowed_headers
+        or metadata.get_all("Metadata-Version") != ["2.4"]
+        or metadata.get_all("Summary") != [project.get("description")]
         or metadata.get_all("License-Expression") != [project.get("license")]
+        or project.get("readme") != "README.md"
+        or project.get("license-files") != ["LICENSE"]
+        or metadata.get_all("Author", []) != expected_author
+        or metadata.get_all("Classifier", []) != classifiers
         or metadata.get_all("Requires-Python") != [project.get("requires-python")]
         or metadata.get_all("Description-Content-Type") != ["text/markdown"]
         or metadata.get_all("License-File") != ["LICENSE"]
+        or metadata.get_all("Dynamic", []) not in ([], ["license-file"])
         or metadata.get_payload() != description
         or not isinstance(optional, dict)
         or sorted(metadata.get_all("Provides-Extra", [])) != sorted(optional)
@@ -347,34 +423,53 @@ def _check_wheel_record(archive: zipfile.ZipFile, names: set[str], dist_info: st
 
 
 def _wheel_selected(
-    path: Path, runtime: set[str], scripts: dict[str, str],
+    payload: bytes, runtime: set[str], scripts: dict[str, str],
     source_metadata: bytes, license_bytes: bytes, source_entry_points: bytes,
 ) -> dict[str, bytes]:
-    if path.name != f"hormuz-{VERSION}-py3-none-any.whl" or not path.is_file():
-        raise CandidateArtifactError("candidate_wheel_missing_or_misnamed")
     dist_info = f"hormuz-{VERSION}.dist-info/"
     result: dict[str, bytes] = {}
     try:
-        with zipfile.ZipFile(path) as archive:
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_WHEEL_MEMBERS:
+                raise CandidateArtifactError("candidate_wheel_member_bounds")
             seen: set[str] = set()
-            for member in archive.infolist():
-                name = member.filename.rstrip("/")
-                if not _safe_path(name):
+            files: set[str] = set()
+            directories: set[str] = set()
+            implied_directories: set[str] = set()
+            total_bytes = 0
+            for member in members:
+                raw_name = member.filename
+                name = raw_name.rstrip("/")
+                if (raw_name not in {name, name + "/"} or not _safe_path(name)
+                        or name in seen):
                     raise CandidateArtifactError("candidate_wheel_path_invalid")
                 if member.flag_bits & 1:
                     raise CandidateArtifactError("candidate_wheel_encrypted_entry")
-                if member.is_dir():
-                    continue
-                if name in seen:
-                    raise CandidateArtifactError("candidate_wheel_duplicate_file")
-                seen.add(name)
-                if not (name.startswith("hormuz/") or name.startswith(dist_info)):
+                if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise CandidateArtifactError("candidate_wheel_member_type_invalid")
+                if not (name == "hormuz" or name.startswith("hormuz/")
+                        or name == dist_info.rstrip("/") or name.startswith(dist_info)):
                     raise CandidateArtifactError("candidate_wheel_extra_top_level_file")
+                if not member.is_dir() and name in {"hormuz", dist_info.rstrip("/")}:
+                    raise CandidateArtifactError("candidate_wheel_file_directory_collision")
+                parents = {"/".join(name.split("/")[:n]) for n in range(1, len(name.split("/")))}
+                if parents & files or (not member.is_dir() and name in implied_directories | directories):
+                    raise CandidateArtifactError("candidate_wheel_file_directory_collision")
+                seen.add(name)
+                implied_directories.update(parents)
+                if member.is_dir():
+                    directories.add(name)
+                    continue
+                if raw_name != name or member.file_size > MAX_SOURCE_FILE_BYTES:
+                    raise CandidateArtifactError("candidate_wheel_file_bounds")
+                total_bytes += member.file_size
+                if total_bytes > MAX_WHEEL_TOTAL_BYTES:
+                    raise CandidateArtifactError("candidate_wheel_total_bounds")
+                files.add(name)
                 if name.startswith("hormuz/"):
                     if name not in runtime:
                         raise CandidateArtifactError("candidate_wheel_extra_runtime_file")
-                    if member.file_size > MAX_SOURCE_FILE_BYTES:
-                        raise CandidateArtifactError("candidate_wheel_runtime_file_invalid")
                     result[name] = archive.read(member)
             if set(result) != runtime:
                 raise CandidateArtifactError("candidate_wheel_runtime_inventory_mismatch")
@@ -387,40 +482,46 @@ def _wheel_selected(
             if archive.read(f"{dist_info}top_level.txt") != b"hormuz\n":
                 raise CandidateArtifactError("candidate_wheel_top_level_mismatch")
             wheel_metadata = Parser().parsestr(archive.read(f"{dist_info}WHEEL").decode("utf-8"))
-            if (wheel_metadata.get_all("Tag") != ["py3-none-any"]
+            if (wheel_metadata.get_all("Wheel-Version") != ["1.0"]
+                    or wheel_metadata.get_all("Tag") != ["py3-none-any"]
                     or wheel_metadata.get_all("Root-Is-Purelib") != ["true"]):
                 raise CandidateArtifactError("candidate_wheel_tag_mismatch")
             wheel_entry_points = archive.read(f"{dist_info}entry_points.txt")
             _check_entry_points(wheel_entry_points, scripts)
             if wheel_entry_points != source_entry_points:
                 raise CandidateArtifactError("candidate_wheel_entry_points_mismatch")
-            _check_wheel_record(archive, seen, dist_info)
+            _check_wheel_record(archive, files, dist_info)
     except (OSError, zipfile.BadZipFile, KeyError, UnicodeError, configparser.Error, RuntimeError) as error:
         raise CandidateArtifactError("candidate_wheel_invalid") from error
     return result
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _bounded_artifact(path: Path, maximum: int, reason: str) -> bytes:
+    try:
+        with path.open("rb") as source:
+            payload = source.read(maximum + 1)
+    except OSError as error:
+        raise CandidateArtifactError(reason) from error
+    if len(payload) > maximum:
+        raise CandidateArtifactError(reason)
+    return payload
 
 
 def verify_candidate(root: Path, commit: str, source: Path, wheel: Path) -> dict[str, object]:
-    git_files, git_names = _git_files(root, commit)
+    git_files, git_names, expected_source = _git_files(root, commit)
     _package_version(git_files["pyproject.toml"], git_files["hormuz/__init__.py"])
     if source.name != f"hormuz-{VERSION}.tar.gz" or not source.is_file():
         raise CandidateArtifactError("candidate_source_missing_or_misnamed")
-    source_files = _source_files(source)
-    selected = set(git_files)
-    if not selected <= source_files.keys():
+    source_payload = _bounded_artifact(source, MAX_SOURCE_ARCHIVE_BYTES, "candidate_source_archive_bounds")
+    source_files = _source_files(source_payload)
+    if not expected_source <= source_files.keys():
         raise CandidateArtifactError("candidate_source_git_bytes_mismatch")
     unexpected = set(source_files) - git_names - GENERATED_SOURCE_FILES
     if unexpected:
         raise CandidateArtifactError("candidate_source_untracked_file")
     tracked_source = set(source_files) & git_names
+    if tracked_source != expected_source:
+        raise CandidateArtifactError("candidate_source_inventory_mismatch")
     committed_source = _git_archive_files(root, commit, tracked_source)
     if any(source_files[path] != committed_source[path] for path in tracked_source):
         raise CandidateArtifactError("candidate_source_git_bytes_mismatch")
@@ -440,8 +541,11 @@ def verify_candidate(root: Path, commit: str, source: Path, wheel: Path) -> dict
     _check_package_metadata(source_metadata, project, git_files["README.md"])
     _check_egg_info(source_files, project, scripts)
     runtime = {path for path in git_files if path.startswith("hormuz/")}
+    if wheel.name != f"hormuz-{VERSION}-py3-none-any.whl" or not wheel.is_file():
+        raise CandidateArtifactError("candidate_wheel_missing_or_misnamed")
+    wheel_payload = _bounded_artifact(wheel, MAX_WHEEL_ARCHIVE_BYTES, "candidate_wheel_archive_bounds")
     wheel_files = _wheel_selected(
-        wheel, runtime, scripts, source_metadata, git_files["LICENSE"],
+        wheel_payload, runtime, scripts, source_metadata, git_files["LICENSE"],
         source_files["hormuz.egg-info/entry_points.txt"],
     )
     if wheel_files != {path: git_files[path] for path in runtime}:
@@ -451,10 +555,10 @@ def verify_candidate(root: Path, commit: str, source: Path, wheel: Path) -> dict
         "schema_version": 1,
         "candidate_commit": commit,
         "candidate_version": VERSION,
-        "source_sha256": _file_sha256(source),
-        "wheel_sha256": _file_sha256(wheel),
+        "source_sha256": hashlib.sha256(source_payload).hexdigest(),
+        "wheel_sha256": hashlib.sha256(wheel_payload).hexdigest(),
         "runtime_files_verified": len(runtime),
-        "source_kit_files_verified": len(selected) - len(runtime),
+        "source_kit_files_verified": len(expected_source) - len(runtime),
         "source_files_verified": len(tracked_source),
         "proof_scope": "git_source_archive_and_wheel_runtime_identity_only",
         "final_candidate_accepted": False,

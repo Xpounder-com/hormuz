@@ -19,15 +19,18 @@ python tools/verify_v13_candidate_artifacts.py \
 
 The verifier requires `1.3.0` in committed package metadata and in the built
 source and wheel, and requires a clean tracked checkout. It compares every
-tracked source-archive file with the exact
-Git commit, including `README.md`, `LICENSE`, runtime SQL and wire files, and
-the transition guides, plans, tests and verifiers. Required files cannot be
-omitted. Untracked source files, archive path collisions, and changed generated
-`setup.cfg` or `hormuz.egg-info` metadata fail. The source and wheel dependency
-declarations must match the committed `pyproject.toml`; wheel metadata and
-the CLI entry point must match the source. The wheel must have a complete,
-digest-consistent `RECORD` and no encrypted entries. The output is
-content-free: exact commit, artifact SHA-256 digests, counts and bounded scope.
+tracked source-archive file with the exact Git commit, including every file
+declared by the committed `MANIFEST.in`, `README.md`, `LICENSE`, runtime SQL and
+wire files, and transition guides, plans, tests and verifiers. Required files
+cannot be omitted. Untracked source files, archive path collisions, excess
+members or bytes, and changed generated `setup.cfg` or `hormuz.egg-info`
+metadata fail. The source and wheel dependency, author, classifier and other
+declared metadata must match the committed `pyproject.toml`; wheel metadata and
+the CLI entry point must match the source. The wheel must have a supported
+`Wheel-Version`, a complete digest-consistent `RECORD`, no file/directory
+collisions, and no encrypted entries. The output is content-free: exact commit,
+SHA-256 digests of the same bounded archive bytes that were validated, counts
+and scope.
 Unsupported dependency syntax fails closed until the verifier is reviewed and
 updated.
 
