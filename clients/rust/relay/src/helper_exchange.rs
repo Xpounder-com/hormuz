@@ -1,9 +1,9 @@
-//! Bounded macOS optimizer stdio. Only the parent's owned pipe ends become
+//! Bounded Unix optimizer stdio. Only the parent's owned pipe ends become
 //! nonblocking; the helper keeps ordinary stdin/stdout. No content is written
 //! to temporary files, and no I/O thread can outlive the exchange.
 #![forbid(unsafe_code)]
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use hormuz_client_relay::OptimizerCancellation;
 use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
 use std::io::{self, Read, Write};
@@ -16,7 +16,7 @@ use zeroize::Zeroizing;
 const CHUNK_BYTES: usize = 8192;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(super) fn run(
     command: &mut Command,
     gateway: &[u8],
