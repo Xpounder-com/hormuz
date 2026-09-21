@@ -1,9 +1,14 @@
 //! On-demand governed client launch and relay. Constructing a plan opens no
 //! socket, reads no credential and starts no idle worker.
-#![cfg_attr(not(windows), forbid(unsafe_code))]
-#![cfg_attr(windows, deny(unsafe_code))]
+#![cfg_attr(not(any(target_os = "linux", windows)), forbid(unsafe_code))]
+#![cfg_attr(any(target_os = "linux", windows), deny(unsafe_code))]
 
 mod launch;
+// Linux's parent-death signal requires one pre-exec syscall. Keep the unsafe
+// fork-side hook in this reviewed module; the rest of the crate remains safe.
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+mod process_scope_linux;
 // The Windows Job Object calls are confined to this module.
 #[cfg(windows)]
 #[allow(unsafe_code)]
