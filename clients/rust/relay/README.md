@@ -174,8 +174,8 @@ The Python bridge is covered by
 `python -m unittest -v tests.test_context_relay_bridge`.
 Synthetic Unix pipe tests also cover partial and bidirectional I/O, retained
 pipe ends after direct-helper exit, a helper that never consumes stdin, output
-overflow and direct-child reaping. Linux runs those fixtures without enabling
-the unsupported native relay command. Windows fake-helper tests cover Job
+overflow and direct-child reaping. Linux runs those fixtures alongside the
+guarded Off-only native relay command. Windows fake-helper tests cover Job
 Object containment, cancellation and pipe-worker completion without an
 installed optimizer or provider. These tests do not prove cancellation of an
 arbitrary non-cooperative in-process optimizer, Unix client or optimizer-helper
@@ -183,4 +183,5 @@ descendant containment; the separate Linux user-service fixture above runs only
 with a real manager. These tests also do not prove macOS abrupt launcher-death
 cleanup, real optimizer/provider sessions, or packaged native-shell lifecycle
 behavior. The Linux parent-death tests cover a direct synthetic client only;
-Linux's native executable still fails closed without a secure-store adapter.
+the Linux executable now uses Secret Service after user-service preflight, but
+credential-backed user-manager launch remains unverified.
