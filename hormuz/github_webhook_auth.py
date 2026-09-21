@@ -23,26 +23,32 @@ from .portfolio_wire import PortfolioError, validate
 
 _SIGNATURE = re.compile(r"sha256=[0-9a-f]{64}\Z")
 _NUMERIC_ID = re.compile(r"[1-9][0-9]{0,19}\Z")
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
 
 
 def _signature_header(headers: Mapping[str, str]) -> str:
     if not isinstance(headers, Mapping) or len(headers) > 64:
         raise PortfolioError("invalid_request")
-    seen: set[str] = set()
     signature = None
     total = 0
+    count = 0
     for name, value in headers.items():
-        if (type(name) is not str or type(value) is not str or not name.isascii() or
-                len(name) > 128 or len(value) > 2048):
+        count += 1
+        if (count > 64 or type(name) is not str or type(value) is not str or
+                len(name) > 128 or _HEADER_NAME.fullmatch(name) is None or
+                len(value) > 2048 or any(ord(char) < 32 and char != "\t" or
+                                         ord(char) == 127 for char in value)):
             raise PortfolioError("invalid_request")
         normalized = name.lower()
-        if normalized in seen:
-            raise PortfolioError("invalid_request")
-        seen.add(normalized)
-        total += len(name) + len(value)
+        try:
+            total += len(name) + len(value.encode("utf-8"))
+        except UnicodeError:
+            raise PortfolioError("invalid_request") from None
         if total > 8192:
             raise PortfolioError("invalid_request")
         if normalized == "x-hub-signature-256":
+            if signature is not None:
+                raise PortfolioError("invalid_request")
             signature = value
     if signature is None or _SIGNATURE.fullmatch(signature) is None:
         raise PortfolioError("unauthenticated")

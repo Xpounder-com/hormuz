@@ -98,6 +98,14 @@ class GitHubWebhookAuthTests(unittest.TestCase):
             "X-Hub-Signature-256": signed(self.raw)["X-Hub-Signature-256"],
             "x-hub-signature-256": signed(self.raw)["X-Hub-Signature-256"],
         }, self.raw))
+        ordinary_duplicates = signed(self.raw, **{
+            "Forwarded": "for=127.0.0.1", "forwarded": "for=127.0.0.2",
+        })
+        self.assertEqual(self.auth.authenticate(ordinary_duplicates, self.raw), first)
+        self.fail_code("invalid_request", lambda: self.auth.authenticate(
+            signed(self.raw, **{"X-Proxy": "bad\r\nheader"}), self.raw))
+        self.fail_code("invalid_request", lambda: self.auth.authenticate(
+            signed(self.raw, **{"Bad Header": "value"}), self.raw))
         self.fail_code("unauthenticated", lambda: self.auth.authenticate(
             {"X-Hub-Signature-256": signed(self.raw)["X-Hub-Signature-256"].upper()}, self.raw))
 
