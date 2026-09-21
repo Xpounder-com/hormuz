@@ -150,7 +150,11 @@ optimizer cancellation and a fake client's listener lifetime. **#341 remains
 open** for native-shell integration, installed-client proof, descendant
 containment and platform quit/update acceptance. Neither the Windows panel nor
 shipping Mac app launches this Rust relay yet.
-The Linux library has a fail-closed source guard for a transient user systemd
-service and a host-conditional detached-descendant fixture. It needs a real
-user-manager run, native Linux secure-store integration, and shell lifecycle
-wiring before Linux descendant containment or support can be accepted.
+The Linux terminal command now uses the native Secret Service adapter with
+optimization Off. It verifies transient user-service supervision before
+private-state or credential access, then rechecks before client discovery.
+Synthetic session, client and gateway tests cover fail-closed preflight and
+governed Off forwarding; the detached-descendant fixture remains conditional
+on a real user manager. Real installed-client traffic, Secret Service desktop
+behavior, native-shell quit/update wiring and clean-install proof remain open
+before Linux descendant containment or support can be accepted.

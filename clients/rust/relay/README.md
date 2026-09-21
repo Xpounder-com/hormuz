@@ -1,9 +1,9 @@
 # Governed client relay (#341 source checkpoint)
 
 `hormuz-client-relay` is an unpublished `1.6.0-dev.1` executable and library.
-It uses the shared native session controller and the existing Mac Keychain or
-Windows Credential Manager record. A native shell can launch it with the active
-profile UUID and its existing private state directory:
+It uses the shared native session controller with the existing Mac Keychain,
+Windows Credential Manager, or Linux Secret Service record. A native shell can
+launch it with the active profile UUID and its existing private state directory:
 
 ```text
 hormuz-client-relay --profile <uuid> --state-directory <absolute-private-root>
@@ -30,9 +30,11 @@ launcher alive; a shell quit/update must coordinate its termination separately.
 
 ### Linux user-service containment source checkpoint
 
-Linux library client discovery now fails before a version probe or relay starts
-unless this launcher is the main PID of an active, transient **user systemd
-service**. The guard verifies the kernel cgroup membership against the live
+The Linux terminal command first verifies its on-demand user service **before**
+opening private state or contacting Secret Service. Client discovery repeats
+the verification before a version probe or relay starts. Both checks require
+this launcher to be the main PID of an active, transient **user systemd
+service**. The guard verifies kernel cgroup membership against the live
 service's `ControlGroup`, `MainPID`, `ExitType=main`,
 `RemainAfterExit=no`, `Restart=no`, `KillMode=control-group`, and `KillSignal=SIGKILL`
 properties. It does not trust an environment flag.
@@ -54,7 +56,17 @@ the caller's `PATH` by variable name for session-local client discovery. The
 `PATH` value and relay credentials are not added to the command line; relay
 credentials are resolved inside the launcher. The literal-argument switch
 requires systemd 254 or newer and fails closed when unavailable. This source
-path is not wired to a native Linux shell yet.
+path is not wired to a resident native Linux shell yet.
+
+On Linux, the command opens the validated private directory and uses the
+Secret Service default collection through `NativeCredentialStore`. It rejects
+missing or locked credentials, pending or lifetime-expired sessions, and
+profile mismatches before starting a relay listener. It always uses
+`Optimization::Off`; no Python optimizer or tokenizer is launched by this Linux
+command. Off still forwards through the authenticated, bounded governed relay
+and never automatically replays an uncertain upstream POST. The optional
+on-demand Python optimizer path below currently applies to macOS and Windows
+only.
 
 The launcher, version probe, client and normal descendants inherit the service
 cgroup on fork, even if a descendant double-forks or calls `setsid`. systemd
@@ -75,10 +87,13 @@ and empty/removed cgroup while passing spoofed bus variables to the wrapper
 and launcher. On CI without that manager it reports a host-only
 skip; ordinary Rust tests still check the fail-closed property parser. Run
 `cargo test -p hormuz-client-relay --locked linux_service` on an Ubuntu 24.04
-user session for host evidence. The executable still exits
-`native_secure_store_unavailable` on Linux; the Linux credential adapter,
-native-shell wiring, real supported-client traffic, and clean-install proof
-remain open. Issue #341 remains open; this checkpoint does not qualify Linux
+user session for host evidence. Linux binary tests inject a synthetic session,
+preflight, request client and gateway: failed preflight touches no private state,
+custody or egress; invalid sessions stop before listener creation; a valid
+session forwards one Off request. They use no real keyring or provider. A real
+credential-backed user-manager launch, installed-client traffic, Secret Service
+desktop behavior, native-shell lifecycle wiring and clean-install proof remain
+open. Issue #341 remains open; this source checkpoint does not qualify Linux
 support.
 
 The relay admits the client's expected POST routes only. It checks Host,
@@ -159,8 +174,8 @@ The Python bridge is covered by
 `python -m unittest -v tests.test_context_relay_bridge`.
 Synthetic Unix pipe tests also cover partial and bidirectional I/O, retained
 pipe ends after direct-helper exit, a helper that never consumes stdin, output
-overflow and direct-child reaping. Linux runs those fixtures without enabling
-the unsupported native relay command. Windows fake-helper tests cover Job
+overflow and direct-child reaping. Linux runs those fixtures alongside the
+guarded Off-only native relay command. Windows fake-helper tests cover Job
 Object containment, cancellation and pipe-worker completion without an
 installed optimizer or provider. These tests do not prove cancellation of an
 arbitrary non-cooperative in-process optimizer, Unix client or optimizer-helper
@@ -168,4 +183,5 @@ descendant containment; the separate Linux user-service fixture above runs only
 with a real manager. These tests also do not prove macOS abrupt launcher-death
 cleanup, real optimizer/provider sessions, or packaged native-shell lifecycle
 behavior. The Linux parent-death tests cover a direct synthetic client only;
-Linux's native executable still fails closed without a secure-store adapter.
+the Linux executable now uses Secret Service after user-service preflight, but
+credential-backed user-manager launch remains unverified.
