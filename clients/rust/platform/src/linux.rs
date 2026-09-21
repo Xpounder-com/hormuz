@@ -17,6 +17,7 @@ const MAX_RECORD_BYTES: usize = 32_767;
 const AES_BLOCK_BYTES: usize = 16;
 const MAX_ENCRYPTED_RECORD_BYTES: usize = 32_768;
 const MAX_DH_PUBLIC_KEY_BYTES: usize = 128;
+const GENERIC_SECRET_SCHEMA: &str = "org.freedesktop.Secret.Generic";
 const METHOD_BUDGET: Duration = Duration::from_secs(5);
 const OPERATION_BUDGET: Duration = Duration::from_secs(10);
 
@@ -45,10 +46,20 @@ fn attributes() -> HashMap<&'static str, &'static str> {
 }
 
 fn exact_attributes(actual: &HashMap<String, String>) -> bool {
-    actual.len() == 3
-        && actual.get("application").map(String::as_str) == Some(APPLICATION)
+    let owned = actual.get("application").map(String::as_str) == Some(APPLICATION)
         && actual.get("service").map(String::as_str) == Some(SERVICE)
-        && actual.get("account").map(String::as_str) == Some(ACCOUNT)
+        && actual.get("account").map(String::as_str) == Some(ACCOUNT);
+    owned
+        && match actual.len() {
+            3 => true,
+            // GNOME Keyring persists generic items with this one schema marker.
+            // Continue rejecting every other provider-added or foreign field.
+            4 => {
+                actual.get(oo7::XDG_SCHEMA_ATTRIBUTE).map(String::as_str)
+                    == Some(GENERIC_SECRET_SCHEMA)
+            }
+            _ => false,
+        }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,7 +111,13 @@ fn validate_encrypted_reply(
     ciphertext: &[u8],
 ) -> BackendResult<()> {
     if returned_session != expected_session
-        || content_type != oo7::ContentType::Blob
+        // GNOME Keyring normalizes stored blob labels to text/plain while
+        // preserving the encrypted bytes. oo7 models the only accepted wire
+        // labels as Text and Blob; unknown labels fail during deserialization.
+        || !matches!(
+            content_type,
+            oo7::ContentType::Blob | oo7::ContentType::Text
+        )
         || parameters.len() != AES_BLOCK_BYTES
         || ciphertext.is_empty()
         || ciphertext.len() > MAX_ENCRYPTED_RECORD_BYTES
@@ -515,10 +532,6 @@ mod tests {
             ),
             Err(BackendError::InvalidRecord)
         );
-        assert_eq!(
-            validate_encrypted_reply(session, session, oo7::ContentType::Text, &[0; 16], &[0; 16]),
-            Err(BackendError::InvalidRecord)
-        );
         for parameters in [&[0; 15][..], &[0; 17][..]] {
             assert_eq!(
                 validate_encrypted_reply(
@@ -553,6 +566,25 @@ mod tests {
             ),
             Ok(())
         );
+    }
+
+    #[test]
+    fn gnome_normalized_blob_metadata_is_accepted_without_other_relaxation() {
+        let session = "/org/freedesktop/secrets/session/1";
+        assert_eq!(
+            validate_encrypted_reply(session, session, oo7::ContentType::Text, &[0; 16], &[0; 16]),
+            Ok(())
+        );
+        let normalized = HashMap::from([
+            ("application".into(), APPLICATION.into()),
+            ("service".into(), SERVICE.into()),
+            ("account".into(), ACCOUNT.into()),
+            (
+                oo7::XDG_SCHEMA_ATTRIBUTE.into(),
+                GENERIC_SECRET_SCHEMA.into(),
+            ),
+        ]);
+        assert!(exact_attributes(&normalized));
     }
 
     #[test]
@@ -730,6 +762,12 @@ mod tests {
             ("account".into(), ACCOUNT.into()),
         ]);
         assert!(exact_attributes(&expected));
+        let mut wrong_schema = expected.clone();
+        wrong_schema.insert(
+            oo7::XDG_SCHEMA_ATTRIBUTE.into(),
+            "org.gnome.keyring.Note".into(),
+        );
+        assert!(!exact_attributes(&wrong_schema));
         let mut additional = expected.clone();
         additional.insert("other".into(), "value".into());
         assert!(!exact_attributes(&additional));

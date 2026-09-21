@@ -45,7 +45,12 @@ It ignores `DBUS_SESSION_BUS_ADDRESS` and connects only to the socket at
 effective and saved UIDs, an owned non-symlink 0700 runtime directory, and an
 owned socket.
 Search results must contain at most one unlocked item with exactly the owned
-attributes. Creating and deleting accept only the `/` no-prompt path; any
+attributes, allowing only GNOME Keyring's persisted
+`xdg:schema=org.freedesktop.Secret.Generic` marker as a fourth field. Encrypted
+replies accept only Secret Service blob or text content labels because GNOME
+Keyring normalizes blob labels to text while preserving the encrypted bytes;
+the session binding, IV and ciphertext shape, decrypted length and owned bytes
+remain validated. Creating and deleting accept only the `/` no-prompt path; any
 provider request for user interaction is `SecureStoreUnavailable`. Initial
 creation asks the service to atomically replace an exact-attribute race and then
 requires one item at the returned path. Both initial and replacement saves use
