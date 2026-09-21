@@ -21,8 +21,9 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+num-bigint-dig = "0.9"
 oo7 = { version = "=0.6.0", default-features = false, features = ["tokio", "native_crypto", "unstable"] }
-tokio = { version = "=1.48.0", default-features = false, features = ["rt", "time"] }
+tokio = { version = "1.48", default-features = false, features = ["rt", "time"] }
 zbus = { version = "=5.19.0", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]

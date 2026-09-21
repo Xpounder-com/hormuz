@@ -1,5 +1,7 @@
 use crate::{CredentialStore, PlatformError, Result, SecretRecord};
+use num_bigint_dig::BigUint;
 use oo7::dbus::api::{Collection, DBusSecret, Item, Properties, Service, Session};
+use oo7::dbus::Algorithm;
 use oo7::{Key, Secret};
 use std::collections::HashMap;
 use std::future::Future;
@@ -7,7 +9,7 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use zbus::zvariant::OwnedObjectPath;
+use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 const APPLICATION: &str = "com.hormuz.client";
 const SERVICE: &str = "com.hormuz.client.session.v1";
@@ -16,8 +18,20 @@ const LABEL: &str = "Hormuz active connection";
 const MAX_RECORD_BYTES: usize = 32_767;
 const AES_BLOCK_BYTES: usize = 16;
 const MAX_ENCRYPTED_RECORD_BYTES: usize = 32_768;
-const MAX_DH_PUBLIC_KEY_BYTES: usize = 128;
+// RFC 2409's 1024-bit Second Oakley Group, required by Secret Service's
+// dh-ietf1024-sha256-aes128-cbc-pkcs7 algorithm.
+const RFC2409_GROUP2_PRIME: [u8; 128] = [
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC9, 0x0F, 0xDA, 0xA2, 0x21, 0x68, 0xC2, 0x34,
+    0xC4, 0xC6, 0x62, 0x8B, 0x80, 0xDC, 0x1C, 0xD1, 0x29, 0x02, 0x4E, 0x08, 0x8A, 0x67, 0xCC, 0x74,
+    0x02, 0x0B, 0xBE, 0xA6, 0x3B, 0x13, 0x9B, 0x22, 0x51, 0x4A, 0x08, 0x79, 0x8E, 0x34, 0x04, 0xDD,
+    0xEF, 0x95, 0x19, 0xB3, 0xCD, 0x3A, 0x43, 0x1B, 0x30, 0x2B, 0x0A, 0x6D, 0xF2, 0x5F, 0x14, 0x37,
+    0x4F, 0xE1, 0x35, 0x6D, 0x6D, 0x51, 0xC2, 0x45, 0xE4, 0x85, 0xB5, 0x76, 0x62, 0x5E, 0x7E, 0xC6,
+    0xF4, 0x4C, 0x42, 0xE9, 0xA6, 0x37, 0xED, 0x6B, 0x0B, 0xFF, 0x5C, 0xB6, 0xF4, 0x06, 0xB7, 0xED,
+    0xEE, 0x38, 0x6B, 0xFB, 0x5A, 0x89, 0x9F, 0xA5, 0xAE, 0x9F, 0x24, 0x11, 0x7C, 0x4B, 0x1F, 0xE6,
+    0x49, 0x28, 0x66, 0x51, 0xEC, 0xE6, 0x53, 0x81, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+];
 const GENERIC_SECRET_SCHEMA: &str = "org.freedesktop.Secret.Generic";
+const SESSION_PATH_PREFIX: &str = "/org/freedesktop/secrets/session/";
 const METHOD_BUDGET: Duration = Duration::from_secs(5);
 const OPERATION_BUDGET: Duration = Duration::from_secs(10);
 
@@ -96,11 +110,34 @@ fn created_without_prompt(item: &OwnedObjectPath, prompt: &OwnedObjectPath) -> B
 }
 
 fn validate_server_public_key(bytes: &[u8]) -> BackendResult<()> {
-    if bytes.is_empty() || bytes.len() > MAX_DH_PUBLIC_KEY_BYTES {
-        Err(BackendError::InvalidRecord)
-    } else {
-        Ok(())
+    if bytes.is_empty() || bytes.len() > RFC2409_GROUP2_PRIME.len() {
+        return Err(BackendError::InvalidRecord);
     }
+
+    let public_key = BigUint::from_bytes_be(bytes);
+    let prime = BigUint::from_bytes_be(&RFC2409_GROUP2_PRIME);
+    let one = BigUint::from(1_u8);
+    let prime_minus_one = &prime - &one;
+    // RFC 2785 section 3.1: reject degenerate/out-of-range keys and require
+    // membership in q's prime-order subgroup before computing the shared key.
+    if public_key <= one || public_key >= prime_minus_one {
+        return Err(BackendError::InvalidRecord);
+    }
+    let subgroup_order = (&prime - BigUint::from(1_u8)) >> 1;
+    if public_key.modpow(&subgroup_order, &prime) != BigUint::from(1_u8) {
+        return Err(BackendError::InvalidRecord);
+    }
+    Ok(())
+}
+
+fn validate_session_path(path: &OwnedObjectPath) -> BackendResult<()> {
+    let Some(identifier) = path.as_str().strip_prefix(SESSION_PATH_PREFIX) else {
+        return Err(BackendError::InvalidRecord);
+    };
+    if identifier.is_empty() || identifier.contains('/') {
+        return Err(BackendError::InvalidRecord);
+    }
+    Ok(())
 }
 
 fn validate_encrypted_reply(
@@ -189,13 +226,25 @@ impl EncryptedService {
         let service = Service::new(&connection).await.map_err(unavailable)?;
         let private_key = Key::generate_private_key().map_err(unavailable)?;
         let public_key = Key::generate_public_key(&private_key).map_err(unavailable)?;
-        let (server_key, session) = service
-            .open_session(Some(public_key))
+        // Use the raw method so the provider-controlled path can be validated
+        // before constructing a Session proxy.
+        let public_key: Value<'_> = public_key.into();
+        let reply = service
+            .inner()
+            .call_method("OpenSession", &(&Algorithm::Encrypted, public_key))
             .await
             .map_err(unavailable)?;
-        let server_key = server_key.ok_or(BackendError::Unavailable)?;
+        let (server_key, session_path) = reply
+            .body()
+            .deserialize::<(OwnedValue, OwnedObjectPath)>()
+            .map_err(unavailable)?;
+        validate_session_path(&session_path)?;
+        let server_key = Key::try_from(server_key).map_err(unavailable)?;
         validate_server_public_key(server_key.as_ref())?;
         let key = Key::generate_aes_key(&private_key, &server_key).map_err(unavailable)?;
+        let session = Session::new(service.inner().connection(), session_path)
+            .await
+            .map_err(unavailable)?;
         Ok(Self {
             service,
             session: Arc::new(session),
@@ -588,20 +637,48 @@ mod tests {
     }
 
     #[test]
-    fn server_public_key_is_nonempty_and_bounded() {
-        assert_eq!(validate_server_public_key(&[1]), Ok(()));
+    fn server_public_key_requires_group_bounds_and_subgroup_membership() {
+        assert_eq!(validate_server_public_key(&[2]), Ok(()));
+        assert_eq!(validate_server_public_key(&[4]), Ok(()));
+        for invalid in [&[][..], &[0][..], &[1][..]] {
+            assert_eq!(
+                validate_server_public_key(invalid),
+                Err(BackendError::InvalidRecord)
+            );
+        }
+
+        let prime = BigUint::from_bytes_be(&RFC2409_GROUP2_PRIME);
+        let prime_minus_two = &prime - BigUint::from(2_u8);
+        let prime_minus_one = &prime - BigUint::from(1_u8);
+        for invalid in [prime_minus_two, prime_minus_one, prime] {
+            assert_eq!(
+                validate_server_public_key(&invalid.to_bytes_be()),
+                Err(BackendError::InvalidRecord)
+            );
+        }
         assert_eq!(
-            validate_server_public_key(&[1; MAX_DH_PUBLIC_KEY_BYTES]),
+            validate_server_public_key(&[2; RFC2409_GROUP2_PRIME.len() + 1]),
+            Err(BackendError::InvalidRecord)
+        );
+    }
+
+    #[test]
+    fn session_path_must_be_a_complete_specified_session_object() {
+        assert_eq!(
+            validate_session_path(&path("/org/freedesktop/secrets/session/s1")),
             Ok(())
         );
-        assert_eq!(
-            validate_server_public_key(&[]),
-            Err(BackendError::InvalidRecord)
-        );
-        assert_eq!(
-            validate_server_public_key(&[1; MAX_DH_PUBLIC_KEY_BYTES + 1]),
-            Err(BackendError::InvalidRecord)
-        );
+        for invalid in [
+            "/",
+            "/org/freedesktop/secrets/session",
+            "/org/freedesktop/secrets/session/s1/nested",
+            "/org/freedesktop/secrets/collection/login",
+        ] {
+            assert_eq!(
+                validate_session_path(&path(invalid)),
+                Err(BackendError::InvalidRecord)
+            );
+        }
     }
 
     #[test]

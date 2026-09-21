@@ -44,6 +44,11 @@ It ignores `DBUS_SESSION_BUS_ADDRESS` and connects only to the socket at
 `/run/user/<effective-uid>/bus` after verifying non-root matching real,
 effective and saved UIDs, an owned non-symlink 0700 runtime directory, and an
 owned socket.
+Encrypted session negotiation accepts only the specified
+`/org/freedesktop/secrets/session/<id>` path shape before constructing a
+session proxy. The service's public key must be a nondegenerate member of the
+prime-order subgroup of RFC 2409's 1024-bit Second Oakley Group before shared
+key derivation.
 Search results must contain at most one unlocked item with exactly the owned
 attributes, allowing only GNOME Keyring's persisted
 `xdg:schema=org.freedesktop.Secret.Generic` marker as a fourth field. Encrypted

@@ -570,6 +570,7 @@ version = "1.5.0-dev.1"
 dependencies = [
  "core-foundation",
  "libc",
+ "num-bigint-dig",
  "oo7",
  "security-framework",
  "security-framework-sys",
