@@ -24,12 +24,15 @@ The trusted benchmark parent generates fixtures, measures batched round-trip
 time, and hashes the returned outputs. A persistent child loads the exact
 `hormuz/compaction.py` source file, bypassing candidate package exports. It
 receives bounded requests over stdin and returns bounded responses over
-stdout. Candidate Python cannot patch the parent's clocks or hashes through
-shared modules. Before candidate import, the child sets a zero process-creation
-hard limit; a macOS probe confirms both `fork` and `posix_spawn` are denied.
-The private runner must still confine the child process and
-the candidate's access to files, subprocesses, and the network; that sandbox
-boundary needs separate review before adversarial qualification. The child
+stdout. Its synthetic package path supports relative imports without adding
+the candidate root to Python's absolute import path, where forged bytecode
+could shadow a standard-library module. Candidate Python cannot patch the
+parent's clocks or hashes through shared modules. Before candidate import,
+the child sets a zero process-creation hard limit; a macOS probe confirms
+both `fork` and `posix_spawn` are denied. The private runner must still
+confine the child process and the candidate's access to files, subprocesses,
+and the network. That sandbox boundary needs separate review before
+adversarial qualification. The child
 inherits the runner's process group so outer timeout/cancellation cleanup can
 reach it, but an adversarial child could call `setsid`; private containment
 must cover forced parent death and such self-detachment. Profile

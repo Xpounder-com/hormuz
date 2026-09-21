@@ -102,6 +102,37 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             self.workload.evaluate(root, "validate")["outputs"],
         )
 
+    def test_candidate_root_cannot_shadow_absolute_import_with_bytecode(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        package = root / "hormuz"
+        package.mkdir()
+        for name in ("compaction.py", "compaction_formats.py"):
+            (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
+        marker = root / "forged_typing_ran"
+        fake_source = root / "typing.py"
+        fake_source.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker)!r}).write_text('executed')\n",
+            encoding="utf-8",
+        )
+        py_compile.compile(str(fake_source), cfile=str(root / "typing.pyc"), doraise=True)
+        fake_source.unlink()
+        control = subprocess.run(
+            [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); "
+             "sys.modules.pop('typing', None); import typing", str(root)],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertEqual(control.returncode, 0)
+        self.assertTrue(marker.is_file())
+        marker.unlink()
+        self.assertEqual(
+            self.workload.evaluate(ROOT, "validate")["outputs"],
+            self.workload.evaluate(root, "validate")["outputs"],
+        )
+        self.assertFalse(marker.exists())
+
     def test_reference_workload_covers_primary_and_heldout_cases(self) -> None:
         workload = self.workload
         measured = workload.cases()
