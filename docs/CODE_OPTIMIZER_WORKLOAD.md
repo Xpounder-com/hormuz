@@ -29,6 +29,9 @@ child mode. `validate`, `heldout`, `profile`, and `benchmark` load exact
 `hormuz/compaction.py` and `hormuz/compaction_formats.py` source bytes from
 that same checkout, bypassing package exports and bytecode caches. The CLI is
 for a trusted maintainer checkout and does not confine adversarial code.
+Its JSON report identifies the local source path, and profile output may name
+source files. Keep raw local reports in the trusted workspace; publish only
+content-free counts and digests.
 The private Worker must independently protect its trusted fixture copy,
 isolate candidate code, verify exact candidate source, bound its protocol,
 and clean up the candidate on every outcome. This public reference does not
