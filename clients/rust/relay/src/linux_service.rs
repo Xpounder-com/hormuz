@@ -104,7 +104,7 @@ fn show_unit(unit: &str) -> io::Result<String> {
             "--no-pager",
             "show",
             unit,
-            "--property=ControlGroup,MainPID,ExitType,KillMode,KillSignal,Transient,ActiveState",
+            "--property=ControlGroup,MainPID,ExitType,RemainAfterExit,KillMode,KillSignal,Transient,ActiveState",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout.try_clone()?))
@@ -155,6 +155,7 @@ fn valid_service(output: &str, path: &str, pid: u32) -> bool {
     property(output, "ControlGroup") == Some(path)
         && property(output, "MainPID").and_then(|value| value.parse::<u32>().ok()) == Some(pid)
         && property(output, "ExitType") == Some("main")
+        && property(output, "RemainAfterExit") == Some("no")
         && property(output, "KillMode") == Some("control-group")
         && matches!(property(output, "KillSignal"), Some("9" | "SIGKILL"))
         && property(output, "Transient") == Some("yes")
@@ -165,7 +166,7 @@ fn valid_service(output: &str, path: &str, pid: u32) -> bool {
 mod tests {
     use super::*;
 
-    const GOOD: &str = "ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service\nMainPID=123\nExitType=main\nKillMode=control-group\nKillSignal=9\nTransient=yes\nActiveState=active\n";
+    const GOOD: &str = "ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service\nMainPID=123\nExitType=main\nRemainAfterExit=no\nKillMode=control-group\nKillSignal=9\nTransient=yes\nActiveState=active\n";
     const PATH: &str =
         "/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service";
 
@@ -185,6 +186,7 @@ mod tests {
         assert!(!valid_service(GOOD, PATH, 124));
         for (old, new) in [
             ("ExitType=main", "ExitType=cgroup"),
+            ("RemainAfterExit=no", "RemainAfterExit=yes"),
             ("KillMode=control-group", "KillMode=process"),
             ("KillSignal=9", "KillSignal=15"),
             ("Transient=yes", "Transient=no"),
@@ -197,7 +199,22 @@ mod tests {
             PATH,
             123
         ));
+        assert!(!valid_service(
+            &GOOD.replace("RemainAfterExit=no\n", ""),
+            PATH,
+            123
+        ));
         assert!(!valid_service(GOOD, "/another.service", 123));
+    }
+
+    #[test]
+    fn wrapper_declares_the_literal_path_and_lifetime_contract() {
+        let wrapper = include_str!("../run-in-user-service.sh");
+        assert!(wrapper.contains("/usr/bin/systemd-run --help"));
+        assert!(wrapper.contains("--expand-environment=no"));
+        assert!(wrapper.contains("--setenv=PATH"));
+        assert!(!wrapper.contains("--setenv=PATH="));
+        assert!(wrapper.contains("--property=RemainAfterExit=no"));
     }
 
     #[test]
@@ -223,6 +240,8 @@ mod host_tests {
     const STAGE: &str = "HORMUZ_SERVICE_TEST_STAGE";
     const ROOT: &str = "HORMUZ_SERVICE_TEST_ROOT";
     const MODE: &str = "HORMUZ_SERVICE_TEST_MODE";
+    const EXPECTED_PATH: &str = "HORMUZ_SERVICE_TEST_EXPECTED_PATH";
+    const LITERAL: &str = "HORMUZ_SERVICE_TEST_LITERAL";
 
     fn fixture(stage: &str, root: &Path, mode: &str) -> Command {
         let mut command = Command::new(std::env::current_exe().unwrap());
@@ -244,6 +263,16 @@ mod host_tests {
             thread::sleep(Duration::from_millis(10));
         }
         require_user_service().unwrap();
+        assert_eq!(
+            std::env::var("PATH").unwrap(),
+            std::env::var(EXPECTED_PATH).unwrap(),
+            "wrapper did not preserve the caller session PATH"
+        );
+        assert_eq!(
+            std::env::var(LITERAL).unwrap(),
+            "${HOME}",
+            "systemd expanded an already-formed command argument"
+        );
         fs::write(root.join("launcher-pid"), std::process::id().to_string()).unwrap();
         assert!(fixture("direct", root, mode)
             .spawn()
@@ -370,6 +399,7 @@ mod host_tests {
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("run-in-user-service.sh");
         let log = fs::File::create(root.join("service.log")).unwrap();
         let spoofed_bus = format!("unix:path={}", root.join("spoofed-bus").display());
+        let session_path = format!("{}:/session/${{HOME}}/bin", root.join("bin").display());
         let mut command = Command::new(script);
         command
             .arg(token)
@@ -379,10 +409,13 @@ mod host_tests {
             .arg(format!("{STAGE}=launcher"))
             .arg(format!("{ROOT}={}", root.display()))
             .arg(format!("{MODE}={mode}"))
+            .arg(format!("{EXPECTED_PATH}={session_path}"))
+            .arg(format!("{LITERAL}=${{HOME}}"))
             .arg(std::env::current_exe().unwrap())
             .args(["--exact", TEST_NAME, "--nocapture"])
             .env("DBUS_SESSION_BUS_ADDRESS", spoofed_bus.as_str())
             .env("XDG_RUNTIME_DIR", root)
+            .env("PATH", session_path)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::from(log));
@@ -474,6 +507,21 @@ mod host_tests {
             || canonical_user_bus().is_err()
         {
             eprintln!("host-only cgroup test skipped: a real Linux user manager is unavailable");
+            return;
+        }
+        let required_options = Command::new("/usr/bin/systemd-run")
+            .arg("--help")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .is_some_and(|help| {
+                help.contains("--setenv=") && help.contains("--expand-environment=")
+            });
+        if !required_options {
+            eprintln!(
+                "host-only cgroup test skipped: systemd-run lacks literal argv or PATH forwarding"
+            );
             return;
         }
         let manager = systemctl_command().and_then(|mut command| {

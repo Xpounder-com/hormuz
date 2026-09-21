@@ -33,8 +33,9 @@ launcher alive; a shell quit/update must coordinate its termination separately.
 Linux library client discovery now fails before a version probe or relay starts
 unless this launcher is the main PID of an active, transient **user systemd
 service**. The guard verifies the kernel cgroup membership against the live
-service's `ControlGroup`, `MainPID`, `ExitType=main`, `KillMode=control-group`,
-and `KillSignal=SIGKILL` properties. It does not trust an environment flag.
+service's `ControlGroup`, `MainPID`, `ExitType=main`,
+`RemainAfterExit=no`, `KillMode=control-group`, and `KillSignal=SIGKILL`
+properties. It does not trust an environment flag.
 The lookup uses the owned socket at `/run/user/<effective-uid>/bus`, with a
 private 0700 runtime directory and non-root matching real/effective UID,
 rather than a caller-supplied D-Bus address.
@@ -42,14 +43,20 @@ On a host with a user manager, `run-in-user-service.sh` starts a single
 invocation with those properties. The caller chooses a unique token and owns
 `hormuz-relay-<token>.service`; an explicit quit/update must stop that unit.
 The wrapper selects a PTY for interactive input and pipes otherwise. It passes
-only the relay executable and its existing invocation arguments to systemd;
-relay credentials are resolved inside the launcher and are not command-line
-arguments. This source path is not wired to a native Linux shell yet.
+only the relay executable and its existing invocation arguments to systemd,
+disables systemd environment expansion for that already-formed argv, and copies
+the caller's `PATH` by variable name for session-local client discovery. The
+`PATH` value and relay credentials are not added to the command line; relay
+credentials are resolved inside the launcher. The literal-argument switch
+requires systemd 254 or newer and fails closed when unavailable. This source
+path is not wired to a native Linux shell yet.
 
 The launcher, version probe, client and normal descendants inherit the service
 cgroup on fork, even if a descendant double-forks or calls `setsid`. systemd
 stops the whole group after its main launcher exits, is killed, or the unit is
-explicitly stopped. A scope unit does not have that main-process lifetime.
+explicitly stopped. The live unit must report `RemainAfterExit=no` so main
+process exit enters that stop path. A scope unit does not have that
+main-process lifetime.
 The direct-child parent-death guard remains defense in depth. A same-UID
 process that can deliberately migrate itself out of the user manager's cgroup
 tree is outside this ordinary-client lifetime guarantee; stronger isolation

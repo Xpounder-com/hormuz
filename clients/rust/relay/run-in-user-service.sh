@@ -18,6 +18,26 @@ case "$1" in
     /*) ;;
     *) echo 'relay executable must be absolute' >&2; exit 2 ;;
 esac
+if [ -z "${PATH-}" ]; then
+    echo 'relay user service requires the caller session PATH' >&2
+    exit 2
+fi
+
+# Fail closed on older systemd-run versions rather than silently changing the
+# service environment or expanding an already-formed relay argv.
+if ! systemd_run_help=$(/usr/bin/systemd-run --help 2>/dev/null); then
+    echo 'could not inspect systemd-run capabilities' >&2
+    exit 2
+fi
+case "$systemd_run_help" in
+    *'--setenv='*) ;;
+    *) echo 'systemd-run does not support explicit environment forwarding' >&2; exit 2 ;;
+esac
+case "$systemd_run_help" in
+    *'--expand-environment='*) ;;
+    *) echo 'systemd-run does not support literal relay arguments' >&2; exit 2 ;;
+esac
+unset systemd_run_help
 
 # Resolve the local per-UID user bus independently of caller-controlled
 # DBUS_SESSION_BUS_ADDRESS and XDG_RUNTIME_DIR. The Rust guard verifies the
@@ -33,9 +53,12 @@ export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
 
 exec /usr/bin/systemd-run \
     --user --wait --collect --quiet --same-dir --pty --pipe \
+    --expand-environment=no \
+    --setenv=PATH \
     --unit="hormuz-relay-$unit_token.service" \
     --service-type=exec \
     --property=ExitType=main \
+    --property=RemainAfterExit=no \
     --property=KillMode=control-group \
     --property=KillSignal=SIGKILL \
     -- "$@"
