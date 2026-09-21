@@ -3,6 +3,7 @@
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timedelta, timezone
 import io
 import json
 import os
@@ -14,7 +15,7 @@ from unittest import mock
 
 from hormuz.config import UsageStorageConfig
 from hormuz.finance_collection_repository import create_finance_collection_repository
-from hormuz.finance_collection import FinanceCollectionError
+from hormuz.finance_collection import CollectionQuery, FinanceCollectionError, normalize_collection_pages
 from hormuz.portfolio_config import PortfolioPrincipal
 from hormuz.postgres import PostgresStorageError, postgres_transaction
 from hormuz._finance_collection_schema import TABLE_DDL
@@ -25,10 +26,12 @@ if __package__:
     from ._postgres_fixture import PostgresTestCase
     from ._portfolio_fixture import registry_config
     from . import test_finance_collection_runtime as collection
+    from .test_finance_attempt_runtime import begin, complete_estimate, complete_observation
 else:
     from _postgres_fixture import PostgresTestCase
     from _portfolio_fixture import registry_config
     import test_finance_collection_runtime as collection
+    from test_finance_attempt_runtime import begin, complete_estimate, complete_observation
 
 
 @unittest.skipUnless(os.environ.get("HORMUZ_TEST_POSTGRES_DSN"), "requires disposable PostgreSQL")
@@ -205,6 +208,65 @@ class PostgresFinanceCollectionRuntimeTests(PostgresTestCase):
             self.assertEqual(invoke(), first)
         dependencies.fetch_pages.assert_not_called()
         dependencies.resolve_credentials.assert_not_called()
+
+    def test_admin_report_reads_cost_and_terminal_sidecar_through_restricted_role(self):
+        self.bind(binding_id="source-a")
+        midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        start = (midnight - timedelta(days=1)).isoformat().replace("+00:00", "Z")
+        middle = midnight.isoformat().replace("+00:00", "Z")
+        end = (midnight + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+        profile = "openai.organization-costs.v1"
+        query = CollectionQuery("acme", "source-a", 1, profile, start, middle, "1d", 1)
+        normalized = normalize_collection_pages(
+            query,
+            (collection.openai_page([
+                collection.openai_bucket(start, middle, [collection.openai_cost()]),
+            ]),),
+            fingerprint_key=collection.KEY,
+            fingerprint_key_version=1,
+        )
+        prepared = self.repository.prepare_collection(
+            collection.ADMIN, query, idempotency_key="report-cost", evidence_origin="customer_file",
+        )
+        receipt = self.repository.publish_collection(collection.ADMIN, prepared, normalized)
+        attempt = begin(self.store)
+        self.store._finalize_request_attempt_with_provider_metrics(
+            attempt=attempt,
+            organization_id="acme",
+            status="succeeded",
+            input_tokens=10,
+            output_tokens=4,
+            cache_read_tokens=2,
+            cost_microusd=35,
+            provider_metrics=None,
+            finance_observation=complete_observation(),
+            configured_estimate=complete_estimate(),
+        )
+        args = build_parser().parse_args([
+            "finance", "report", "source-a", "1", profile, start, end,
+            "--currency", "USD", "--as-of-commit-sequence", str(receipt.commit_sequence),
+        ])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            status = finance_commands.run(
+                self.config, args,
+                environ={
+                    "HORMUZ_PORTFOLIO_TOKEN": "synthetic-registry-admin-token",
+                    "HORMUZ_POSTGRES_DSN": self.runtime_dsn,
+                },
+            )
+        self.assertEqual((status, stderr.getvalue()), (0, ""))
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(report["preview"]["provider_cost"]["known_subtotal"], "1.25")
+        self.assertEqual(report["preview"]["gateway_estimate"]["known_subtotal"], "0.000035")
+        self.assertEqual(report["preview"]["gateway_estimate"]["attempt_count"], 1)
+        self.assertEqual(report["terminal_attempts_missing_sidecar_count"], 0)
+        self.assertEqual(report["selected_snapshot_provenance"], [{
+            "snapshot_id": receipt.snapshot_id,
+            "evidence_origin": "customer_file",
+            "scope_provenance": "customer_supplied_scope_unverified",
+        }])
+        self.assertIsNone(report["preview"]["signed_variance"])
 
     def test_authorization_precedes_connection_and_revocation_rolls_back(self):
         viewer = PortfolioPrincipal("acme", "finance", ("finance_viewer",))
