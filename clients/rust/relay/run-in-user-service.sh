@@ -59,6 +59,7 @@ exec /usr/bin/systemd-run \
     --service-type=exec \
     --property=ExitType=main \
     --property=RemainAfterExit=no \
+    --property=Restart=no \
     --property=KillMode=control-group \
     --property=KillSignal=SIGKILL \
     -- "$@"

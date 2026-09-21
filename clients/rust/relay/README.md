@@ -34,7 +34,7 @@ Linux library client discovery now fails before a version probe or relay starts
 unless this launcher is the main PID of an active, transient **user systemd
 service**. The guard verifies the kernel cgroup membership against the live
 service's `ControlGroup`, `MainPID`, `ExitType=main`,
-`RemainAfterExit=no`, `KillMode=control-group`, and `KillSignal=SIGKILL`
+`RemainAfterExit=no`, `Restart=no`, `KillMode=control-group`, and `KillSignal=SIGKILL`
 properties. It does not trust an environment flag.
 An otherwise exact unit may remain in `ActiveState=activating` briefly after
 exec; production verification retries only that state within one three-second

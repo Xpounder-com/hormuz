@@ -173,7 +173,7 @@ where
             "--no-pager",
             "show",
             unit,
-            "--property=ControlGroup,MainPID,ExitType,RemainAfterExit,KillMode,KillSignal,Transient,ActiveState",
+            "--property=ControlGroup,MainPID,ExitType,RemainAfterExit,Restart,KillMode,KillSignal,Transient,ActiveState",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout.try_clone()?))
@@ -240,6 +240,7 @@ fn service_state(output: &str, path: &str, pid: u32) -> ServiceState {
         && property(output, "MainPID").and_then(|value| value.parse::<u32>().ok()) == Some(pid)
         && property(output, "ExitType") == Some("main")
         && property(output, "RemainAfterExit") == Some("no")
+        && property(output, "Restart") == Some("no")
         && property(output, "KillMode") == Some("control-group")
         && matches!(property(output, "KillSignal"), Some("9" | "SIGKILL"))
         && property(output, "Transient") == Some("yes");
@@ -290,7 +291,7 @@ mod tests {
     use std::cell::Cell;
     use std::io::Cursor;
 
-    const GOOD: &str = "ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service\nMainPID=123\nExitType=main\nRemainAfterExit=no\nKillMode=control-group\nKillSignal=9\nTransient=yes\nActiveState=active\n";
+    const GOOD: &str = "ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service\nMainPID=123\nExitType=main\nRemainAfterExit=no\nRestart=no\nKillMode=control-group\nKillSignal=9\nTransient=yes\nActiveState=active\n";
     const PATH: &str =
         "/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service";
 
@@ -311,6 +312,9 @@ mod tests {
         for (old, new) in [
             ("ExitType=main", "ExitType=cgroup"),
             ("RemainAfterExit=no", "RemainAfterExit=yes"),
+            ("Restart=no", "Restart=yes"),
+            ("Restart=no", "Restart=always"),
+            ("Restart=no", "Restart=on-failure"),
             ("KillMode=control-group", "KillMode=process"),
             ("KillSignal=9", "KillSignal=15"),
             ("Transient=yes", "Transient=no"),
@@ -327,6 +331,14 @@ mod tests {
         );
         assert_eq!(
             service_state(&GOOD.replace("RemainAfterExit=no\n", ""), PATH, 123),
+            ServiceState::Invalid
+        );
+        assert_eq!(
+            service_state(&GOOD.replace("Restart=no\n", ""), PATH, 123),
+            ServiceState::Invalid
+        );
+        assert_eq!(
+            service_state(&format!("{GOOD}Restart=no\n"), PATH, 123),
             ServiceState::Invalid
         );
         assert_eq!(
@@ -457,6 +469,7 @@ mod tests {
         assert!(wrapper.contains("--setenv=PATH"));
         assert!(!wrapper.contains("--setenv=PATH="));
         assert!(wrapper.contains("--property=RemainAfterExit=no"));
+        assert!(wrapper.contains("--property=Restart=no"));
     }
 
     #[test]
@@ -501,6 +514,13 @@ mod host_tests {
 
     fn launcher(root: &Path, mode: &str) {
         require_user_service().unwrap();
+        let membership = fs::read_to_string("/proc/self/cgroup").unwrap();
+        let path = unified_path(&membership).unwrap();
+        let unit = service_unit(path).unwrap();
+        let expires_at = Instant::now() + SERVICE_BUDGET;
+        let mut deadline = Deadline::new(expires_at, Instant::now);
+        let properties = show_unit(unit, &mut deadline).unwrap();
+        assert_eq!(property(&properties, "Restart"), Some("no"));
         assert_eq!(
             std::env::var("PATH").unwrap(),
             std::env::var(EXPECTED_PATH).unwrap(),
