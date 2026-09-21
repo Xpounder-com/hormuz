@@ -103,6 +103,12 @@ download_github_release_and_verify() {
   local output=$4
   local expected=$5
   local attempt
+  if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
+    download_and_verify \
+      "https://github.com/${repository}/releases/download/${tag}/${asset}" \
+      "${output}" "${expected}"
+    return 0
+  fi
   for attempt in 1 2 3; do
     rm -f -- "${output}"
     if gh release download "${tag}" --repo "${repository}" \
@@ -626,7 +632,9 @@ host_arch="$(uname -m)"
   || fail "the v1 proof requires native AMD64"
 command -v docker >/dev/null 2>&1 || fail "Docker is unavailable"
 command -v curl >/dev/null 2>&1 || fail "curl is unavailable"
-command -v gh >/dev/null 2>&1 || fail "GitHub CLI is unavailable"
+if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
+  command -v gh >/dev/null 2>&1 || fail "GitHub CLI is unavailable"
+fi
 command -v openssl >/dev/null 2>&1 || fail "OpenSSL is unavailable"
 command -v python3 >/dev/null 2>&1 || fail "Python 3 is unavailable"
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is unavailable"

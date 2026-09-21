@@ -91,6 +91,12 @@ download_github_release_and_verify() {
   local output=$4
   local expected=$5
   local attempt
+  if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
+    download_and_verify \
+      "https://github.com/${repository}/releases/download/${tag}/${asset}" \
+      "${output}" "${expected}"
+    return 0
+  fi
   for attempt in 1 2 3; do
     rm -f -- "${output}"
     if gh release download "${tag}" --repo "${repository}" \
@@ -675,9 +681,12 @@ wait_for_synchronous_durability() {
 [[ "$(uname -s)" == "Linux" ]] || fail "the reference proof requires Linux"
 [[ "$(uname -m)" == "x86_64" || "$(uname -m)" == "amd64" ]] \
   || fail "the reference proof requires native AMD64"
-for command in docker curl gh grep openssl python3 sha256sum timeout; do
+for command in docker curl grep openssl python3 sha256sum timeout; do
   command -v "${command}" >/dev/null 2>&1 || fail "${command} is unavailable"
 done
+if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
+  command -v gh >/dev/null 2>&1 || fail "gh is unavailable"
+fi
 docker_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
 [[ "${docker_platform}" == "linux/x86_64" || "${docker_platform}" == "linux/amd64" ]] \
   || fail "the Docker daemon is not native linux/amd64"

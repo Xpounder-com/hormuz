@@ -26,7 +26,7 @@ def shell_function(source: str, name: str) -> str:
 
 class GitHubReleaseAssetDownloadTests(unittest.TestCase):
     def run_download(
-        self, runner: Path, *, mode: str, expected: str
+        self, runner: Path, *, mode: str, expected: str, authenticated: bool = True
     ) -> tuple[subprocess.CompletedProcess[str], list[list[str]], str]:
         with tempfile.TemporaryDirectory(prefix="hormuz release asset ") as temporary:
             root = Path(temporary)
@@ -47,6 +47,16 @@ class GitHubReleaseAssetDownloadTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_gh.chmod(0o700)
+            fake_curl = root / "curl"
+            fake_curl.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "output = Path(sys.argv[sys.argv.index('--output') + 1])\n"
+                "output.write_bytes(b'pinned kind release asset\\n')\n",
+                encoding="utf-8",
+            )
+            fake_curl.chmod(0o700)
             fake_sha256sum = root / "sha256sum"
             fake_sha256sum.write_text(
                 "#!/usr/bin/env python3\n"
@@ -67,6 +77,7 @@ class GitHubReleaseAssetDownloadTests(unittest.TestCase):
                     "set -Eeuo pipefail",
                     "fail() { printf 'failed: %s\\n' \"$1\" >&2; exit 73; }",
                     "sleep() { :; }",
+                    shell_function(source, "download_and_verify"),
                     shell_function(source, "download_github_release_and_verify"),
                     "download_github_release_and_verify kubernetes-sigs/kind v0.32.0 "
                     f"kind-linux-amd64 {shlex.quote(str(output))} {expected}",
@@ -84,9 +95,11 @@ class GitHubReleaseAssetDownloadTests(unittest.TestCase):
                     "PATH": f"{root}:{os.environ['PATH']}",
                     "TEST_GH_CALLS": str(calls_path),
                     "TEST_GH_MODE": mode,
+                    "GH_TOKEN": "mock-token" if authenticated else "",
+                    "GITHUB_TOKEN": "",
                 },
             )
-            calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+            calls = [json.loads(line) for line in calls_path.read_text().splitlines()] if calls_path.exists() else []
             content = output.read_text() if output.exists() else ""
             return result, calls, content
 
@@ -137,6 +150,24 @@ class GitHubReleaseAssetDownloadTests(unittest.TestCase):
                 self.assertEqual(len(calls), 3)
                 self.assertEqual(content, "")
                 self.assertIn("GitHub release asset download failed", result.stderr)
+
+    def test_clean_machine_falls_back_to_public_curl_with_checksum(self) -> None:
+        digest = hashlib.sha256(PAYLOAD).hexdigest()
+        wrong_digest = hashlib.sha256(b"different release asset").hexdigest()
+        for runner in RUNNERS:
+            with self.subTest(runner=runner.name):
+                result, calls, content = self.run_download(
+                    runner, mode="fail", expected=digest, authenticated=False
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(calls, [])
+                self.assertEqual(content.encode(), PAYLOAD)
+                rejected, calls, _ = self.run_download(
+                    runner, mode="fail", expected=wrong_digest, authenticated=False
+                )
+                self.assertEqual(rejected.returncode, 73)
+                self.assertEqual(calls, [])
+                self.assertIn("download checksum mismatch", rejected.stderr)
 
 
 if __name__ == "__main__":
