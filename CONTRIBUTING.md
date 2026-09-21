@@ -71,7 +71,11 @@ change still does not prove.
 
 ## Pull-request review
 
-Complete the pull-request template. A reviewer should be able to determine:
+Complete the pull-request template. For a small documentation change, see the
+[fictional worked example](docs/CONTRIBUTOR_PR_EXAMPLE.md). Use `Closes #...`
+only when the PR completes that issue; a partial slice should use a
+non-closing `Refs #...` reference to its parent. A reviewer should be able to
+determine:
 
 - the one outcome being delivered;
 - the evidence that proves it;
