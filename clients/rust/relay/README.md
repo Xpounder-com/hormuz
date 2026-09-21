@@ -151,7 +151,8 @@ the unsupported native relay command. Windows fake-helper tests cover Job
 Object containment, cancellation and pipe-worker completion without an
 installed optimizer or provider. These tests do not prove cancellation of an
 arbitrary non-cooperative in-process optimizer, Unix client or optimizer-helper
-descendant containment, macOS abrupt launcher-death cleanup, real
-optimizer/provider sessions, or packaged native-shell lifecycle behavior. The
-Linux parent-death tests cover a direct synthetic client only; Linux's native
-executable still fails closed without a secure-store adapter.
+descendant containment; the separate Linux user-service fixture above runs only
+with a real manager. These tests also do not prove macOS abrupt launcher-death
+cleanup, real optimizer/provider sessions, or packaged native-shell lifecycle
+behavior. The Linux parent-death tests cover a direct synthetic client only;
+Linux's native executable still fails closed without a secure-store adapter.

@@ -257,6 +257,10 @@ mod host_tests {
         panic!("synthetic launcher was not stopped before its fixture deadline");
     }
 
+    // This stage must exit without waiting for the grandchild: otherwise the
+    // fixture would not prove service cleanup after a double fork. The test's
+    // unique user service owns the orphan, and the host reaps it on exit.
+    #[allow(clippy::zombie_processes)]
     fn direct(root: &Path, mode: &str) {
         // util-linux setsid makes the grandchild independent of its parent's
         // process group and session. It still inherits the cgroup at fork.
