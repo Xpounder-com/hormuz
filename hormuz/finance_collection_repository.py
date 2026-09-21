@@ -151,6 +151,25 @@ class CurrentCollectionView:
     observations: tuple[Mapping[str, object], ...]
 
 
+@dataclass(frozen=True)
+class SelectedCollectionSnapshot:
+    snapshot_id: str
+    content_digest: str
+    commit_sequence: int
+
+
+@dataclass(frozen=True)
+class AsOfCollectionView:
+    organization_id: str
+    binding_id: str
+    binding_version: int
+    collection_profile: str
+    as_of_commit_sequence: int
+    selected_snapshots: tuple[SelectedCollectionSnapshot, ...]
+    coverage: tuple[Mapping[str, object], ...]
+    observations: tuple[Mapping[str, object], ...]
+
+
 class FinanceCollectionRepository:
     """Own collection state while rechecking configured tenant authority."""
 
@@ -783,91 +802,197 @@ class FinanceCollectionRepository:
         """Select coverage first, including authoritative empty refreshes."""
 
         self._authorize(principal)
-        if (
-            not _safe_id(binding_id)
-            or type(binding_version) is not int
-            or not isinstance(collection_profile, str)
-            or collection_profile not in PROFILE_SPECS
-        ):
-            raise FinanceCollectionError("invalid_request")
+        _validate_collection_selection(binding_id, binding_version, collection_profile)
         start_at, end_at = _selection_bounds(start_at, end_at)
         with self._transaction(principal) as sql:
-            coverage_rows = sql.execute(
-                f"WITH ranked AS ("
-                f"SELECT coverage.*, snapshot.commit_sequence, "
-                f"ROW_NUMBER() OVER (PARTITION BY coverage.bucket_start_at, coverage.bucket_end_at "
-                f"ORDER BY snapshot.commit_sequence DESC) AS selection_rank "
-                f"FROM {COVERAGE_TABLE} coverage JOIN {SNAPSHOT_TABLE} snapshot "
-                f"ON snapshot.organization_id=coverage.organization_id "
-                f"AND snapshot.snapshot_id=coverage.snapshot_id "
-                f"WHERE snapshot.organization_id=? AND snapshot.binding_id=? "
-                f"AND snapshot.binding_version=? AND snapshot.collection_profile=? "
-                f"AND coverage.bucket_start_at>=? AND coverage.bucket_end_at<=?) "
-                f"SELECT * FROM ranked WHERE selection_rank=1 "
-                f"ORDER BY bucket_start_at,bucket_end_at",
-                (
-                    principal.organization_id,
-                    binding_id,
-                    binding_version,
-                    collection_profile,
-                    start_at,
-                    end_at,
-                ),
-            ).fetchall()
-            coverage = tuple(
-                {
-                    "bucket_start_at": row["bucket_start_at"],
-                    "bucket_end_at": row["bucket_end_at"],
-                    "coverage_state": row["coverage_state"],
-                    "observation_count": int(row["observation_count"]),
-                    "snapshot_id": row["snapshot_id"],
-                    "commit_sequence": int(row["commit_sequence"]),
-                }
-                for row in coverage_rows
+            coverage, observations, _ = _select_collection_observations(
+                sql,
+                organization_id=principal.organization_id,
+                binding_id=binding_id,
+                binding_version=binding_version,
+                collection_profile=collection_profile,
+                start_at=start_at,
+                end_at=end_at,
             )
-            table = USAGE_TABLE if PROFILE_SPECS[collection_profile].source_kind == "usage" else COST_TABLE
-            observations: list[Mapping[str, object]] = []
-            for selected in coverage:
-                if selected["coverage_state"] == "no_observation":
-                    continue
-                rows = sql.execute(
-                    f"SELECT * FROM {table} WHERE organization_id=? "
-                    "AND snapshot_id=? AND bucket_start_at=? AND bucket_end_at=? "
-                    "ORDER BY observation_digest",
-                    (
-                        principal.organization_id,
-                        selected["snapshot_id"],
-                        selected["bucket_start_at"],
-                        selected["bucket_end_at"],
-                    ),
-                ).fetchall()
-                if len(rows) != selected["observation_count"]:
-                    raise FinanceCollectionError("unavailable")
-                for row in rows:
-                    observation = {
-                        key: value
-                        for key, value in dict(row).items()
-                        if key not in {"organization_id", "observation_id"}
-                    }
-                    for field in ("batch", "provider_final", "invoice_final"):
-                        if field not in observation:
-                            continue
-                        value = observation[field]
-                        if value is None or type(value) is bool:
-                            continue
-                        if type(value) is int and value in {0, 1}:
-                            observation[field] = bool(value)
-                            continue
-                        raise FinanceCollectionError("unavailable")
-                    observations.append(observation)
             return CurrentCollectionView(
                 principal.organization_id,
                 binding_id,
                 binding_version,
                 collection_profile,
                 coverage,
-                tuple(observations),
+                observations,
             )
+
+    def observations_as_of(
+        self,
+        principal: PortfolioPrincipal,
+        *,
+        binding_id: str,
+        binding_version: int,
+        collection_profile: str,
+        start_at: str,
+        end_at: str,
+        as_of_commit_sequence: int | None = None,
+    ) -> AsOfCollectionView:
+        """Pin a tenant-wide publication cutoff and replay exact bucket selection.
+
+        A caller must retain the returned cutoff when it needs the same view
+        after later collection publishes. The cutoff is not provider authority.
+        """
+
+        self._authorize(principal)
+        _validate_collection_selection(binding_id, binding_version, collection_profile)
+        start_at, end_at = _selection_bounds(start_at, end_at)
+        if as_of_commit_sequence is not None and (
+            type(as_of_commit_sequence) is not int
+            or not 0 <= as_of_commit_sequence <= 9_223_372_036_854_775_807
+        ):
+            raise FinanceCollectionError("invalid_request")
+        with self._transaction(principal) as sql:
+            maximum = sql.one(
+                f"SELECT COALESCE(MAX(commit_sequence),0) AS sequence "
+                f"FROM {SNAPSHOT_TABLE} WHERE organization_id=?",
+                (principal.organization_id,),
+            )["sequence"]
+            if type(maximum) is not int or not 0 <= maximum <= 9_223_372_036_854_775_807:
+                raise FinanceCollectionError("unavailable")
+            cutoff = maximum if as_of_commit_sequence is None else as_of_commit_sequence
+            if cutoff > maximum:
+                raise FinanceCollectionError("invalid_request")
+            coverage, observations, snapshots = _select_collection_observations(
+                sql,
+                organization_id=principal.organization_id,
+                binding_id=binding_id,
+                binding_version=binding_version,
+                collection_profile=collection_profile,
+                start_at=start_at,
+                end_at=end_at,
+                as_of_commit_sequence=cutoff,
+            )
+            return AsOfCollectionView(
+                principal.organization_id,
+                binding_id,
+                binding_version,
+                collection_profile,
+                cutoff,
+                snapshots,
+                coverage,
+                observations,
+            )
+
+
+def _validate_collection_selection(
+    binding_id: str, binding_version: int, collection_profile: str,
+) -> None:
+    if (
+        not _safe_id(binding_id)
+        or type(binding_version) is not int
+        or not isinstance(collection_profile, str)
+        or collection_profile not in PROFILE_SPECS
+    ):
+        raise FinanceCollectionError("invalid_request")
+
+
+def _select_collection_observations(
+    sql: Any,
+    *,
+    organization_id: str,
+    binding_id: str,
+    binding_version: int,
+    collection_profile: str,
+    start_at: str,
+    end_at: str,
+    as_of_commit_sequence: int | None = None,
+) -> tuple[
+    tuple[Mapping[str, object], ...],
+    tuple[Mapping[str, object], ...],
+    tuple[SelectedCollectionSnapshot, ...],
+]:
+    cutoff_clause = "" if as_of_commit_sequence is None else "AND snapshot.commit_sequence<=? "
+    parameters: tuple[object, ...] = (
+        organization_id,
+        binding_id,
+        binding_version,
+        collection_profile,
+        start_at,
+        end_at,
+    )
+    if as_of_commit_sequence is not None:
+        parameters += (as_of_commit_sequence,)
+    coverage_rows = sql.execute(
+        f"WITH ranked AS ("
+        f"SELECT coverage.*, snapshot.commit_sequence, snapshot.content_digest, "
+        f"ROW_NUMBER() OVER (PARTITION BY coverage.bucket_start_at, coverage.bucket_end_at "
+        f"ORDER BY snapshot.commit_sequence DESC) AS selection_rank "
+        f"FROM {COVERAGE_TABLE} coverage JOIN {SNAPSHOT_TABLE} snapshot "
+        f"ON snapshot.organization_id=coverage.organization_id "
+        f"AND snapshot.snapshot_id=coverage.snapshot_id "
+        f"WHERE snapshot.organization_id=? AND snapshot.binding_id=? "
+        f"AND snapshot.binding_version=? AND snapshot.collection_profile=? "
+        f"AND coverage.bucket_start_at>=? AND coverage.bucket_end_at<=? "
+        f"{cutoff_clause}) "
+        f"SELECT * FROM ranked WHERE selection_rank=1 "
+        f"ORDER BY bucket_start_at,bucket_end_at",
+        parameters,
+    ).fetchall()
+    coverage = tuple(
+        {
+            "bucket_start_at": row["bucket_start_at"],
+            "bucket_end_at": row["bucket_end_at"],
+            "coverage_state": row["coverage_state"],
+            "observation_count": int(row["observation_count"]),
+            "snapshot_id": row["snapshot_id"],
+            "commit_sequence": int(row["commit_sequence"]),
+        }
+        for row in coverage_rows
+    )
+    selected_snapshots = tuple(sorted(
+        {
+            str(row["snapshot_id"]): SelectedCollectionSnapshot(
+                str(row["snapshot_id"]),
+                str(row["content_digest"]),
+                int(row["commit_sequence"]),
+            )
+            for row in coverage_rows
+        }.values(),
+        key=lambda selected: (selected.commit_sequence, selected.snapshot_id),
+    ))
+    table = USAGE_TABLE if PROFILE_SPECS[collection_profile].source_kind == "usage" else COST_TABLE
+    observations: list[Mapping[str, object]] = []
+    for selected in coverage:
+        if selected["coverage_state"] == "no_observation":
+            continue
+        rows = sql.execute(
+            f"SELECT * FROM {table} WHERE organization_id=? "
+            "AND snapshot_id=? AND bucket_start_at=? AND bucket_end_at=? "
+            "ORDER BY observation_digest",
+            (
+                organization_id,
+                selected["snapshot_id"],
+                selected["bucket_start_at"],
+                selected["bucket_end_at"],
+            ),
+        ).fetchall()
+        if len(rows) != selected["observation_count"]:
+            raise FinanceCollectionError("unavailable")
+        for row in rows:
+            observation = {
+                key: value
+                for key, value in dict(row).items()
+                if key not in {"organization_id", "observation_id"}
+            }
+            for field in ("batch", "provider_final", "invoice_final"):
+                if field not in observation:
+                    continue
+                value = observation[field]
+                if value is None or type(value) is bool:
+                    continue
+                if type(value) is int and value in {0, 1}:
+                    observation[field] = bool(value)
+                    continue
+                raise FinanceCollectionError("unavailable")
+            observations.append(observation)
+    return coverage, tuple(observations), selected_snapshots
 
 
 def create_finance_collection_repository(

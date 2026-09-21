@@ -8,6 +8,7 @@ Run against the named predecessor; a later runtime may intentionally differ.
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import fields
 from datetime import datetime, timezone
 import hashlib
@@ -49,9 +50,15 @@ def require(condition: bool, code: str) -> None:
         raise RuntimeError(code)
 
 
-def probe() -> dict:
+def probe(*, current_runtime: bool = False) -> dict:
+    source_hashes = {
+        relative: hashlib.sha256((ROOT / relative).read_bytes()).hexdigest()
+        for relative in SOURCE_SHA256
+    }
     for relative, expected in SOURCE_SHA256.items():
-        require(hashlib.sha256((ROOT / relative).read_bytes()).hexdigest() == expected,
+        if current_runtime and relative == "hormuz/finance_collection_repository.py":
+            continue
+        require(source_hashes[relative] == expected,
                 "reconciliation_scope_probe_predecessor_changed")
     route_arguments = {
         "alias": "synthetic-route", "protocol": "openai",
@@ -112,8 +119,12 @@ def probe() -> dict:
     require(selection_parameters == {
         "self", "principal", "binding_id", "binding_version", "collection_profile", "start_at", "end_at",
     }, "collection_selection_boundary_changed")
+    if current_runtime:
+        as_of_parameters = set(inspect.signature(FinanceCollectionRepository.observations_as_of).parameters)
+        require(as_of_parameters == selection_parameters | {"as_of_commit_sequence"},
+                "collection_as_of_boundary_changed")
 
-    return {
+    result = {
         "status": "decision_preflight_gap_reproduced",
         "baseline_commit": "c877f49da8baf6a837924f33f06494964cd7118b",
         "baseline_binding": "seven_relevant_source_files_sha256_not_full_distribution_proof",
@@ -131,7 +142,27 @@ def probe() -> dict:
         "reconciliation_implemented": False,
         "preflight_accepted": False,
     }
+    if current_runtime:
+        result["status"] = "current_runtime_scope_gap_observed"
+        result.pop("baseline_commit")
+        result["historical_baseline_commit"] = "c877f49da8baf6a837924f33f06494964cd7118b"
+        result.pop("baseline_binding")
+        result["source_binding"] = (
+            "six_unchanged_predecessor_source_hashes_and_current_collection_repository_semantics"
+        )
+        result["current_runtime_checked"] = True
+        result["current_collection_repository_sha256"] = source_hashes[
+            "hormuz/finance_collection_repository.py"
+        ]
+        result["checks"]["as_of_collection_selector_has_explicit_cutoff"] = True
+    return result
 
 
 if __name__ == "__main__":
-    print(json.dumps(probe(), sort_keys=True))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--current-runtime", action="store_true",
+        help="Run current-runtime gap checks without claiming the historical repository hash",
+    )
+    args = parser.parse_args()
+    print(json.dumps(probe(current_runtime=args.current_runtime), sort_keys=True))
