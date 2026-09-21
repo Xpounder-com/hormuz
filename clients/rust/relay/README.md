@@ -35,6 +35,8 @@ unless this launcher is the main PID of an active, transient **user systemd
 service**. The guard verifies the kernel cgroup membership against the live
 service's `ControlGroup`, `MainPID`, `ExitType=main`, `KillMode=control-group`,
 and `KillSignal=SIGKILL` properties. It does not trust an environment flag.
+The lookup uses the owned socket at `/run/user/<effective-uid>/bus`, with a
+private runtime directory, rather than a caller-supplied D-Bus address.
 On a host with a user manager, `run-in-user-service.sh` starts a single
 invocation with those properties. The caller chooses a unique token and owns
 `hormuz-relay-<token>.service`; an explicit quit/update must stop that unit.
@@ -62,7 +64,8 @@ skip; ordinary Rust tests still check the fail-closed property parser. Run
 user session for host evidence. The executable still exits
 `native_secure_store_unavailable` on Linux; the Linux credential adapter,
 native-shell wiring, real supported-client traffic, and clean-install proof
-remain open. This checkpoint cannot close #341 or qualify Linux support.
+remain open. Issue #341 remains open; this checkpoint does not qualify Linux
+support.
 
 The relay admits the client's expected POST routes only. It checks Host,
 Origin, one local bearer/API-key credential, content length and a 25 MiB request
@@ -122,9 +125,10 @@ this checkpoint does not claim that broader guarantee.
 This source checkpoint is not loaded by the Windows panel or shipping Mac app.
 Windows Job Object descendant cleanup is covered by fake clients. Linux has
 synthetic direct-client launcher-death, pre-exec race and normal-exit tests,
-but neither Unix platform contains descendants after fork, including an
-alternate-process-group grandchild. Unix process-tree containment, native-shell
-panel and quit/update wiring, packaged optimizer interpreter, real
+plus a host-conditional user-service test for a detached grandchild. macOS
+still has direct-child-only cleanup; Linux's new cgroup path needs real user
+manager and shell-wiring acceptance. Native-shell panel and quit/update wiring,
+packaged optimizer interpreter, real
 Codex/Claude sessions, Windows accessibility and clean-machine acceptance
 remain open. The blocked-optimizer shutdown fixture proves that cancellation
 stops first-party work before gateway egress; it does not establish a general

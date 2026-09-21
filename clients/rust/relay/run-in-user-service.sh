@@ -19,6 +19,14 @@ case "$1" in
     *) echo 'relay executable must be absolute' >&2; exit 2 ;;
 esac
 
+# Resolve the local per-UID user bus independently of caller-controlled
+# DBUS_SESSION_BUS_ADDRESS and XDG_RUNTIME_DIR. The Rust guard verifies the
+# bus socket, service properties, and current MainPID before any client launch.
+uid=$(/usr/bin/id -u)
+XDG_RUNTIME_DIR="/run/user/$uid"
+DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
+
 exec /usr/bin/systemd-run \
     --user --wait --collect --quiet --same-dir --pty --pipe \
     --unit="hormuz-relay-$unit_token.service" \

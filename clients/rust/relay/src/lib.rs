@@ -5,6 +5,7 @@
 
 mod launch;
 #[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
 mod linux_service;
 // Linux's parent-death signal requires one pre-exec syscall. Keep the unsafe
 // fork-side hook in this reviewed module; the rest of the crate remains safe.
