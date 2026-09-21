@@ -16,7 +16,9 @@ mod process_scope;
 mod relay;
 
 pub use launch::{discover_supported_client, run_client};
-pub use relay::{CredentialSource, LocalRelay, Optimization, RequestOptimizer};
+pub use relay::{
+    CredentialSource, LocalRelay, Optimization, OptimizerCancellation, RequestOptimizer,
+};
 
 use std::fmt;
 

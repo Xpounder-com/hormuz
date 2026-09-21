@@ -170,7 +170,13 @@ fn off_uses_governed_auth_and_streams_first_event_without_waiting_for_completion
 
 struct Change(Arc<AtomicUsize>);
 impl RequestOptimizer for Change {
-    fn prepare(&self, _path: &str, original: &[u8]) -> Option<Vec<u8>> {
+    fn prepare(
+        &self,
+        _path: &str,
+        original: &[u8],
+        cancellation: &OptimizerCancellation,
+    ) -> Option<Vec<u8>> {
+        assert!(!cancellation.is_cancelled());
         self.0.fetch_add(1, Ordering::SeqCst);
         assert_eq!(original, b"{\"input\":[1]}");
         Some(b"{\"input\":[]}".to_vec())
@@ -179,7 +185,13 @@ impl RequestOptimizer for Change {
 
 struct CountOptimizationCalls(Arc<AtomicUsize>);
 impl RequestOptimizer for CountOptimizationCalls {
-    fn prepare(&self, _path: &str, _original: &[u8]) -> Option<Vec<u8>> {
+    fn prepare(
+        &self,
+        _path: &str,
+        _original: &[u8],
+        cancellation: &OptimizerCancellation,
+    ) -> Option<Vec<u8>> {
+        assert!(!cancellation.is_cancelled());
         self.0.fetch_add(1, Ordering::SeqCst);
         None
     }
@@ -242,20 +254,129 @@ fn enabled_transform_runs_once_before_egress_and_marks_only_changed_bytes() {
         Optimization::OnDemand(Arc::new(Change(count.clone()))),
     )
     .unwrap();
-    assert!(call(
+    let response = call(
         &relay,
         "/v1/responses",
         b"{\"input\":[1]}",
         "",
-        relay.local_credential()
-    )
-    .starts_with("HTTP/1.1 200"));
+        relay.local_credential(),
+    );
+    assert!(response.starts_with("HTTP/1.1 200"));
+    assert!(
+        response.ends_with("2\r\n{}\r\n0\r\n\r\n") || response.ends_with("\r\n\r\n{}"),
+        "normal optimized response did not contain the complete gateway body: {response:?}"
+    );
     let (headers, body) = upstream.join().unwrap();
     assert_eq!(body, b"{\"input\":[]}");
     assert!(headers
         .to_ascii_lowercase()
         .contains("x-hormuz-context-format: structural-v1"));
     assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+struct BlockingOptimizer {
+    started: Arc<AtomicUsize>,
+    finished: Arc<AtomicUsize>,
+}
+impl RequestOptimizer for BlockingOptimizer {
+    fn prepare(
+        &self,
+        _path: &str,
+        _original: &[u8],
+        cancellation: &OptimizerCancellation,
+    ) -> Option<Vec<u8>> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        while !cancellation.is_cancelled() {
+            thread::sleep(Duration::from_millis(1));
+        }
+        self.finished.fetch_add(1, Ordering::SeqCst);
+        None
+    }
+}
+
+#[test]
+fn optimizer_registry_rejects_work_after_shutdown() {
+    let jobs = Arc::new(OptimizerJobs::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    jobs.cancel();
+    assert!(jobs
+        .spawn(
+            Arc::new(CountOptimizationCalls(calls.clone())),
+            "/v1/responses".to_owned(),
+            b"{}".to_vec(),
+        )
+        .is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(jobs.active_count(), 0);
+}
+
+#[test]
+fn shutdown_cancels_running_and_prevents_queued_optimizer_prepare_without_egress() {
+    const REQUESTS: usize = 8;
+    let gateway = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    gateway.set_nonblocking(true).unwrap();
+    let address = gateway.local_addr().unwrap();
+    let started = Arc::new(AtomicUsize::new(0));
+    let finished = Arc::new(AtomicUsize::new(0));
+    let relay = LocalRelay::start(
+        &profile(&format!("http://{address}"), "codex"),
+        credential(Arc::new(AtomicUsize::new(0))),
+        Optimization::OnDemand(Arc::new(BlockingOptimizer {
+            started: started.clone(),
+            finished: finished.clone(),
+        })),
+    )
+    .unwrap();
+    let relay_address = relay.address();
+    let token = relay.local_credential().to_owned();
+    let clients = (0..REQUESTS)
+        .map(|_| {
+            let token = token.clone();
+            thread::spawn(move || {
+                let mut stream = TcpStream::connect(relay_address).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                write!(
+                    stream,
+                    "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {token}\r\nContent-Length: 2\r\nContent-Type: application/json\r\n\r\n{{}}",
+                    relay_address.port(),
+                )
+                .unwrap();
+                let mut response = Vec::new();
+                let _ = stream.read_to_end(&mut response);
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let jobs = relay.optimizer_jobs.clone();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while jobs.active_count() != REQUESTS {
+        assert!(
+            Instant::now() < deadline,
+            "not all optimizer jobs registered before shutdown: {}",
+            jobs.active_count()
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    while started.load(Ordering::SeqCst) != 2 {
+        assert!(
+            Instant::now() < deadline,
+            "the two blocking-pool workers did not start"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    let shutdown_started = Instant::now();
+    drop(relay);
+    assert!(shutdown_started.elapsed() < Duration::from_secs(2));
+    for client in clients {
+        client.join().unwrap();
+    }
+    assert_eq!(started.load(Ordering::SeqCst), 2);
+    assert_eq!(finished.load(Ordering::SeqCst), 2);
+    assert_eq!(jobs.active_count(), 0);
+    assert!(matches!(gateway.accept(), Err(error) if error.kind() == ErrorKind::WouldBlock));
 }
 
 #[test]

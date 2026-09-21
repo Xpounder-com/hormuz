@@ -10,17 +10,21 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use std::{
+    collections::HashMap,
     convert::Infallible,
     io,
     net::{Ipv4Addr, SocketAddr, TcpListener},
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex,
+    },
     thread::{self, JoinHandle},
     time::Duration,
 };
 use subtle::ConstantTimeEq;
 use tokio::{
     sync::{oneshot, Semaphore},
-    task::JoinSet,
+    task::{AbortHandle, JoinSet},
 };
 use zeroize::Zeroizing;
 
@@ -44,14 +48,139 @@ where
     }
 }
 
+/// Sticky relay-owner cancellation for one optimizer lifetime. First-party
+/// optimizers must poll this signal and return promptly. Rust cannot forcibly
+/// stop an arbitrary in-process implementation that ignores this contract.
+#[derive(Clone)]
+pub struct OptimizerCancellation(Arc<AtomicBool>);
+impl OptimizerCancellation {
+    fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+    fn cancel(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
 /// Optional pre-egress optimization of a request of at most one MiB. A failed
-/// transform returns None and forwards the exact original bytes once.
+/// transform returns None and forwards the exact original bytes once. A
+/// cancelled transform must return without starting new external work.
 pub trait RequestOptimizer: Send + Sync + 'static {
-    fn prepare(&self, path: &str, original: &[u8]) -> Option<Vec<u8>>;
+    fn prepare(
+        &self,
+        path: &str,
+        original: &[u8],
+        cancellation: &OptimizerCancellation,
+    ) -> Option<Vec<u8>>;
 }
 pub enum Optimization {
     Off,
     OnDemand(Arc<dyn RequestOptimizer>),
+}
+
+struct OptimizerJobState {
+    closed: bool,
+    next_id: u64,
+    active: HashMap<u64, AbortHandle>,
+}
+
+struct OptimizerJobs {
+    cancellation: OptimizerCancellation,
+    state: Mutex<OptimizerJobState>,
+}
+impl OptimizerJobs {
+    fn new() -> Self {
+        Self {
+            cancellation: OptimizerCancellation::new(),
+            state: Mutex::new(OptimizerJobState {
+                closed: false,
+                next_id: 0,
+                active: HashMap::new(),
+            }),
+        }
+    }
+
+    /// Holding the registry lock across spawn and handle attachment closes the
+    /// register-versus-shutdown race. Completion can run immediately, but its
+    /// guard waits for the handle to become visible before removing it.
+    fn spawn(
+        self: &Arc<Self>,
+        optimizer: Arc<dyn RequestOptimizer>,
+        path: String,
+        input: Vec<u8>,
+    ) -> Option<tokio::task::JoinHandle<Option<Vec<u8>>>> {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if state.closed {
+            return None;
+        }
+        let id = state.next_id;
+        state.next_id = state.next_id.checked_add(1)?;
+        let jobs = self.clone();
+        let cancellation = self.cancellation.clone();
+        let worker = tokio::task::spawn_blocking(move || {
+            let _completion = OptimizerJobCompletion { jobs, id };
+            if cancellation.is_cancelled() {
+                return None;
+            }
+            optimizer.prepare(&path, &input, &cancellation)
+        });
+        debug_assert!(state.active.insert(id, worker.abort_handle()).is_none());
+        Some(worker)
+    }
+
+    fn cancel(&self) {
+        // Publish cancellation before waiting for the registry lock so a job
+        // already starting under that lock cannot miss the shutdown signal.
+        self.cancellation.cancel();
+        let workers = {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.closed = true;
+            state
+                .active
+                .drain()
+                .map(|(_, worker)| worker)
+                .collect::<Vec<_>>()
+        };
+        // Tokio can stop blocking work that has not started. A running
+        // first-party optimizer exits through the cooperative signal above.
+        for worker in workers {
+            worker.abort();
+        }
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
+    }
+
+    fn complete(&self, id: u64) {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .remove(&id);
+    }
+
+    #[cfg(test)]
+    fn active_count(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .len()
+    }
+}
+
+struct OptimizerJobCompletion {
+    jobs: Arc<OptimizerJobs>,
+    id: u64,
+}
+impl Drop for OptimizerJobCompletion {
+    fn drop(&mut self) {
+        self.jobs.complete(self.id);
+    }
 }
 
 struct State {
@@ -60,12 +189,14 @@ struct State {
     local_token: Arc<Zeroizing<String>>,
     credentials: Arc<dyn CredentialSource>,
     optimization: Optimization,
+    optimizer_jobs: Arc<OptimizerJobs>,
 }
 
 /// The listener/runtime exist only while a launched client owns this value.
 pub struct LocalRelay {
     address: SocketAddr,
     token: Arc<Zeroizing<String>>,
+    optimizer_jobs: Arc<OptimizerJobs>,
     shutdown: Option<oneshot::Sender<()>>,
     worker: Option<JoinHandle<()>>,
     #[cfg(test)]
@@ -97,12 +228,14 @@ impl LocalRelay {
             URL_SAFE_NO_PAD.encode(random.as_ref())
         )));
         debug_assert!(valid_local_credential(&token));
+        let optimizer_jobs = Arc::new(OptimizerJobs::new());
         let state = Arc::new(State {
             gateway: profile.gateway().to_owned(),
             client: profile.client(),
             local_token: token.clone(),
             credentials,
             optimization,
+            optimizer_jobs: optimizer_jobs.clone(),
         });
         #[cfg(test)]
         let state_probe = Arc::downgrade(&state);
@@ -113,6 +246,7 @@ impl LocalRelay {
             .spawn(move || run(listener, state, stopped, ready))
             .map_err(|_| RelayError::RelayUnavailable)?;
         if !matches!(accepted.recv_timeout(Duration::from_secs(5)), Ok(Ok(()))) {
+            optimizer_jobs.cancel();
             let _ = shutdown.send(());
             let _ = worker.join();
             return Err(RelayError::RelayUnavailable);
@@ -120,6 +254,7 @@ impl LocalRelay {
         Ok(Self {
             address,
             token,
+            optimizer_jobs,
             shutdown: Some(shutdown),
             worker: Some(worker),
             #[cfg(test)]
@@ -139,6 +274,7 @@ impl LocalRelay {
 }
 impl Drop for LocalRelay {
     fn drop(&mut self) {
+        self.optimizer_jobs.cancel();
         if let Some(sender) = self.shutdown.take() {
             let _ = sender.send(());
         }
@@ -222,12 +358,17 @@ fn run(
                 }
             }
         }
+        // The accept loop can also stop on a listener failure while its
+        // LocalRelay owner is still alive. Close optimizer registration and
+        // signal running first-party work on every exit path before request
+        // tasks are aborted.
+        state.optimizer_jobs.cancel();
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
     });
-    // A cancelled connection can have a blocking credential lookup or Python
-    // transform in flight. Give the latter its full 30-second kill/reap budget
-    // before the owner reports that its helper has stopped.
+    // A cancelled connection can still have a bounded credential lookup in
+    // flight. First-party optimizer work has already received the relay-owner
+    // cancellation signal, while this timeout remains a final process bound.
     runtime.shutdown_timeout(Duration::from_secs(35));
 }
 
@@ -351,9 +492,10 @@ async fn exchange(
             let input = collected.clone();
             let optimizer = optimizer.clone();
             let path = path.to_owned();
-            if let Ok(Some(changed)) =
-                tokio::task::spawn_blocking(move || optimizer.prepare(&path, &input)).await
-            {
+            let Some(worker) = state.optimizer_jobs.spawn(optimizer, path, input) else {
+                return error(StatusCode::SERVICE_UNAVAILABLE, "local_unavailable");
+            };
+            if let Ok(Some(changed)) = worker.await {
                 if changed != collected && changed.len() <= MAX_OPTIMIZER_BYTES {
                     collected = changed;
                     optimized = true;
@@ -398,6 +540,9 @@ async fn exchange(
         });
         reqwest::Body::wrap_stream(stream)
     };
+    if state.optimizer_jobs.is_cancelled() {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "local_unavailable");
+    }
     let credentials = state.credentials.clone();
     let credential =
         match tokio::task::spawn_blocking(move || credentials.access_credential()).await {
@@ -409,6 +554,9 @@ async fn exchange(
                 )
             }
         };
+    if state.optimizer_jobs.is_cancelled() {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "local_unavailable");
+    }
     let url = format!("{}{}", state.gateway, path_query);
     let Ok(url) = reqwest::Url::parse(&url) else {
         return error(StatusCode::BAD_GATEWAY, "gateway_unavailable");

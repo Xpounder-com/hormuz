@@ -2,7 +2,7 @@
 //! content is printed, passed on the process command line, or persisted here.
 use hormuz_client_platform::{NativeCredentialStore, PrivateDirectory};
 use hormuz_client_relay::{
-    run_client, CredentialSource, Optimization, RelayError, RequestOptimizer,
+    run_client, CredentialSource, Optimization, OptimizerCancellation, RelayError, RequestOptimizer,
 };
 use hormuz_client_session::{NativeTransport, Operation, SessionController, SystemClock};
 use serde::Deserialize;
@@ -127,8 +127,13 @@ struct PythonOptimizer {
 
 #[cfg(target_os = "macos")]
 impl RequestOptimizer for PythonOptimizer {
-    fn prepare(&self, path: &str, original: &[u8]) -> Option<Vec<u8>> {
-        if !enabled(&self.directory, &self.key) {
+    fn prepare(
+        &self,
+        path: &str,
+        original: &[u8],
+        cancellation: &OptimizerCancellation,
+    ) -> Option<Vec<u8>> {
+        if cancellation.is_cancelled() || !enabled(&self.directory, &self.key) {
             return None;
         }
         let mut command = Command::new("python3");
@@ -148,6 +153,7 @@ impl RequestOptimizer for PythonOptimizer {
             original,
             TRANSFORM_BUDGET,
             MAX_TRANSFORM_BYTES as usize,
+            cancellation,
         )?);
         match output.first() {
             Some(1) if output.len() > 1 => Some(output[1..].to_vec()),
@@ -158,8 +164,13 @@ impl RequestOptimizer for PythonOptimizer {
 
 #[cfg(windows)]
 impl RequestOptimizer for PythonOptimizer {
-    fn prepare(&self, path: &str, original: &[u8]) -> Option<Vec<u8>> {
-        if !enabled(&self.directory, &self.key) {
+    fn prepare(
+        &self,
+        path: &str,
+        original: &[u8],
+        cancellation: &OptimizerCancellation,
+    ) -> Option<Vec<u8>> {
+        if cancellation.is_cancelled() || !enabled(&self.directory, &self.key) {
             return None;
         }
         let mut command = Command::new("python.exe");
@@ -179,6 +190,7 @@ impl RequestOptimizer for PythonOptimizer {
             original,
             TRANSFORM_BUDGET,
             MAX_TRANSFORM_BYTES as usize,
+            cancellation,
         )?);
         match output.first() {
             Some(0) if output.len() == 1 => None,
