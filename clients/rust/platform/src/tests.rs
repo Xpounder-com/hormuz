@@ -19,7 +19,7 @@ fn secret_records_and_errors_have_content_free_debug_output() {
     }
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 #[test]
 fn unsupported_platform_never_falls_back_to_ordinary_files() {
     let temporary = tempfile::tempdir().unwrap();
@@ -31,7 +31,7 @@ fn unsupported_platform_never_falls_back_to_ordinary_files() {
     assert!(!path.exists());
 }
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 mod native {
     use super::*;
     use std::time::{Duration, Instant};

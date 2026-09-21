@@ -5,7 +5,10 @@ mod implementation;
 #[cfg(windows)]
 #[path = "private_windows.rs"]
 mod implementation;
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(target_os = "linux")]
+#[path = "private_linux.rs"]
+mod implementation;
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 mod implementation {
     use crate::{PlatformError, Result};
     use std::path::Path;
@@ -39,7 +42,7 @@ pub use implementation::InstanceListener;
 pub use implementation::{ApplicationInstance, PrivateDirectory, PrivateTransaction};
 pub const MAX_PRIVATE_FILE_BYTES: usize = 1_048_576;
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 fn validate_name(name: &str) -> crate::Result<()> {
     if name.is_empty()
         || name.len() > 128
