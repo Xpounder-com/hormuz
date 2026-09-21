@@ -23,6 +23,10 @@ esac
 # DBUS_SESSION_BUS_ADDRESS and XDG_RUNTIME_DIR. The Rust guard verifies the
 # bus socket, service properties, and current MainPID before any client launch.
 uid=$(/usr/bin/id -u)
+if [ "$uid" = 0 ]; then
+    echo 'relay user service requires a non-root login user' >&2
+    exit 2
+fi
 XDG_RUNTIME_DIR="/run/user/$uid"
 DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS

@@ -36,7 +36,8 @@ service**. The guard verifies the kernel cgroup membership against the live
 service's `ControlGroup`, `MainPID`, `ExitType=main`, `KillMode=control-group`,
 and `KillSignal=SIGKILL` properties. It does not trust an environment flag.
 The lookup uses the owned socket at `/run/user/<effective-uid>/bus`, with a
-private runtime directory, rather than a caller-supplied D-Bus address.
+private 0700 runtime directory and non-root matching real/effective UID,
+rather than a caller-supplied D-Bus address.
 On a host with a user manager, `run-in-user-service.sh` starts a single
 invocation with those properties. The caller chooses a unique token and owns
 `hormuz-relay-<token>.service`; an explicit quit/update must stop that unit.

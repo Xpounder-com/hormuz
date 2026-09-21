@@ -61,7 +61,7 @@ fn user_runtime_directory(uid: u32) -> PathBuf {
 fn canonical_user_bus() -> io::Result<(PathBuf, PathBuf)> {
     // SAFETY: these calls only read the current process credentials.
     let (real_uid, effective_uid) = unsafe { (libc::getuid(), libc::geteuid()) };
-    if real_uid != effective_uid {
+    if effective_uid == 0 || real_uid != effective_uid {
         return Err(unavailable());
     }
     let directory = user_runtime_directory(effective_uid);
@@ -69,7 +69,7 @@ fn canonical_user_bus() -> io::Result<(PathBuf, PathBuf)> {
     if !metadata.is_dir()
         || metadata.file_type().is_symlink()
         || metadata.uid() != effective_uid
-        || metadata.mode() & 0o777 != 0o700
+        || metadata.mode() & 0o7777 != 0o700
     {
         return Err(unavailable());
     }
@@ -98,7 +98,10 @@ fn show_unit(unit: &str) -> io::Result<String> {
         ])
         .env_clear()
         .env("XDG_RUNTIME_DIR", runtime)
-        .env("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={}", bus.display()))
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={}", bus.display()),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout.try_clone()?))
         .stderr(Stdio::null());
@@ -195,7 +198,10 @@ mod tests {
 
     #[test]
     fn user_bus_path_does_not_follow_caller_environment() {
-        assert_eq!(user_runtime_directory(1000), PathBuf::from("/run/user/1000"));
+        assert_eq!(
+            user_runtime_directory(1000),
+            PathBuf::from("/run/user/1000")
+        );
     }
 }
 
