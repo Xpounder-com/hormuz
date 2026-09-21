@@ -9,7 +9,7 @@ use hormuz_client_platform::{
     CredentialStore, NativeCredentialStore, PrivateDirectory, SecretRecord,
 };
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -91,6 +91,8 @@ if "OPENAI_API_KEY" in os.environ or "CLAUDE_CODE_OAUTH_TOKEN" in os.environ:
     raise SystemExit("unrelated provider credential name reached fake client")
 if os.environ.get("ANTHROPIC_API_KEY") != "":
     raise SystemExit("Claude API key was not replaced with an empty value")
+if os.environ.get("PYTHONOPTIMIZE") != "1":
+    raise SystemExit("fixture did not exercise optimized Python")
 connection = http.client.HTTPConnection(origin.hostname, origin.port, timeout=5)
 body = b'{"messages":[]}'
 connection.request("POST", "/v1/messages", body, {
@@ -189,6 +191,50 @@ impl Drop for SecretGuard<'_> {
     }
 }
 
+struct ManagerEnvironmentGuard;
+impl ManagerEnvironmentGuard {
+    fn seed() -> Self {
+        let prior = user_systemctl(&["show-environment"]);
+        assert!(prior.status.success());
+        let prior = String::from_utf8(prior.stdout).unwrap();
+        for name in [
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "PYTHONOPTIMIZE",
+        ] {
+            assert!(
+                !prior
+                    .lines()
+                    .any(|line| line.starts_with(&format!("{name}="))),
+                "disposable user manager must not already hold {name}"
+            );
+        }
+        let guard = Self;
+        assert!(user_systemctl(&[
+            "set-environment",
+            "OPENAI_API_KEY=synthetic-openai-must-not-reach-client",
+            "ANTHROPIC_API_KEY=synthetic-anthropic-must-not-reach-client",
+            "CLAUDE_CODE_OAUTH_TOKEN=synthetic-oauth-must-not-reach-client",
+            "PYTHONOPTIMIZE=1",
+        ])
+        .status
+        .success());
+        guard
+    }
+}
+impl Drop for ManagerEnvironmentGuard {
+    fn drop(&mut self) {
+        let _ = user_systemctl(&[
+            "unset-environment",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "PYTHONOPTIMIZE",
+        ]);
+    }
+}
+
 struct UnitGuard {
     unit: String,
     wrapper: Child,
@@ -222,10 +268,10 @@ fn wait_wrapper(guard: &mut UnitGuard, log: &Path) {
 #[test]
 #[ignore = "requires isolated Secret Service user manager"]
 fn isolated_secret_service_launch_forwards_once_and_tears_down() {
-    if std::env::var(OPT_IN).as_deref() != Ok("1") {
-        eprintln!("host-only Secret Service launch test skipped: isolated user opt-in missing");
-        return;
-    }
+    assert!(
+        std::env::var(OPT_IN).as_deref() == Ok("1"),
+        "explicit host test requires {OPT_IN}=1"
+    );
     require_isolated_user();
     let store = NativeCredentialStore::default();
     assert!(
@@ -286,6 +332,30 @@ fn isolated_secret_service_launch_forwards_once_and_tears_down() {
     let report = root.path().join("relay-port");
     let path =
         std::env::join_paths([bin.as_path(), Path::new("/usr/bin"), Path::new("/bin")]).unwrap();
+    let _manager_environment = ManagerEnvironmentGuard::seed();
+    let probe_token = format!("secret-env-probe-{}-{nonce}", std::process::id());
+    let probe_log_path = root.path().join("environment-probe.log");
+    let probe_log = File::create(&probe_log_path).unwrap();
+    let probe = Command::new(&wrapper)
+        .arg(&probe_token)
+        .args([
+            "/bin/sh",
+            "-c",
+            "set -eu; test \"${OPENAI_API_KEY-}\" = synthetic-openai-must-not-reach-client; test \"${ANTHROPIC_API_KEY-}\" = synthetic-anthropic-must-not-reach-client; test \"${CLAUDE_CODE_OAUTH_TOKEN-}\" = synthetic-oauth-must-not-reach-client; test \"${PYTHONOPTIMIZE-}\" = 1",
+        ])
+        .current_dir(root.path())
+        .env("PATH", &path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(probe_log))
+        .spawn()
+        .unwrap();
+    let mut probe_guard = UnitGuard {
+        unit: format!("hormuz-relay-{probe_token}.service"),
+        wrapper: probe,
+    };
+    wait_wrapper(&mut probe_guard, &probe_log_path);
+    drop(probe_guard);
     let child = Command::new(wrapper)
         .arg(token)
         .arg(env!("CARGO_BIN_EXE_hormuz-client-relay"))
@@ -293,15 +363,6 @@ fn isolated_secret_service_launch_forwards_once_and_tears_down() {
         .arg(&directory)
         .current_dir(root.path())
         .env("PATH", path)
-        .env("OPENAI_API_KEY", "synthetic-openai-must-not-reach-client")
-        .env(
-            "ANTHROPIC_API_KEY",
-            "synthetic-anthropic-must-not-reach-client",
-        )
-        .env(
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            "synthetic-oauth-must-not-reach-client",
-        )
         .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/spoofed-bus")
         .env("XDG_RUNTIME_DIR", root.path())
         .stdin(Stdio::null())
@@ -317,14 +378,6 @@ fn isolated_secret_service_launch_forwards_once_and_tears_down() {
     gateway.join().unwrap();
     let port: u16 = fs::read_to_string(report).unwrap().parse().unwrap();
     let relay_address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while TcpStream::connect_timeout(&relay_address, Duration::from_millis(100)).is_ok() {
-        assert!(
-            Instant::now() < deadline,
-            "relay listener survived client exit"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
     let status = user_systemctl(&["show", &guard.unit, "--property=ActiveState"]);
     if status.status.success() {
         assert_eq!(
@@ -339,6 +392,11 @@ fn isolated_secret_service_launch_forwards_once_and_tears_down() {
             String::from_utf8_lossy(&status.stderr)
         );
     }
+    // Probe once after service completion. Repeated undrained connections can
+    // saturate an orphaned listener's backlog and falsely imply closure.
+    let error = TcpStream::connect_timeout(&relay_address, Duration::from_millis(250))
+        .expect_err("relay listener survived client exit");
+    assert_eq!(error.kind(), ErrorKind::ConnectionRefused);
     store.delete().unwrap();
     assert!(store.load().unwrap().is_none());
 }

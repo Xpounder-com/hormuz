@@ -99,11 +99,13 @@ user manager and an unlocked default Secret Service collection; set
 binary. It requires an empty Hormuz credential namespace, saves and later
 deletes a synthetic session, then runs this executable through the user-service
 wrapper with a fake client and gateway. The fixture verifies one Off request,
-credential custody with synthetic inherited-key sentinels, listener closure,
-and an inactive or collected service after client exit.
+credential custody after a separate transient service confirms synthetic
+inherited-key sentinels in the disposable user manager, a refused listener
+connection, and an inactive or collected service after client exit.
 Ordinary CI records this host test as ignored; the opt-in marker and dedicated
-user guard remain required when running it with `--ignored`. Installed-client
-traffic, desktop Secret Service behavior beyond this synthetic account,
+user guard remain required when running it with `--ignored`, and an attempted
+explicit run without the marker fails. Installed-client traffic and desktop
+Secret Service behavior beyond this synthetic account,
 native-shell lifecycle wiring and clean-install proof remain open. Issue #341
 remains open; this source checkpoint does not qualify Linux support.
 
