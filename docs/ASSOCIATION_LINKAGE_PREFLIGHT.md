@@ -15,13 +15,14 @@ revision. The planned `hormuz.run-outcome-association-event` contains both
 identities, but it is a *result*, not evidence that supplies the missing link.
 
 For example, if two governed attempts share use case U and one accepted pull
-request is bound to U, organization, scope, and time-window equality leaves
-two candidates. Even one candidate would establish only coincident scope and
-time. Neither situation justifies an `associated` record. The evaluator must
-retain the candidate denominator and emit `ambiguous` for multiple eligible
-candidates or `unmatched` when no accepted linkage exists. It must never use
-prompt text, code, file paths, actor identity, or a current mutable binding to
-guess the missing edge.
+request is bound to U, organization, scope, and time-window equality suggests
+two possible runs, but neither is an eligible association candidate. Even a
+sole run would establish only coincident scope and time. Without an accepted
+explicit link, the eligible candidate count is zero and the decision is
+`unmatched`. Two eligible, conflicting explicit links produce `ambiguous`.
+The evaluator must retain scope-only observations in coverage without
+promoting them to eligible links. It must never use prompt text, code, file
+paths, actor identity, or a current mutable binding to guess the missing edge.
 
 ## Proposed additive source of the edge
 
