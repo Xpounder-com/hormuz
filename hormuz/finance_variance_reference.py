@@ -256,7 +256,10 @@ def calculate_reference_variance(
             absolute_text = decimal_text(abs(signed))
     except (FinanceValueError, DecimalException):
         raise FinanceVarianceReferenceError("finance_reference_invalid") from None
-    if len(set(provider_keys)) != len(provider_keys) or len(set(attempt_ids)) != len(attempt_ids):
+    if (
+        len({digest for _, digest in provider_keys}) != len(provider_keys)
+        or len(set(attempt_ids)) != len(attempt_ids)
+    ):
         raise FinanceVarianceReferenceError("finance_reference_invalid")
     relative = None if estimate_subtotal.is_zero() else ExactRelativeVariance(
         signed_text, decimal_text(abs(estimate_subtotal)),

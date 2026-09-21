@@ -171,6 +171,11 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
                 calculate(gateway_coverage=coverage, gateway_rows=())
             self.assertEqual(caught.exception.code, "finance_grain_not_comparable")
 
+    def test_republished_observation_digest_cannot_be_counted_twice(self):
+        with self.assertRaises(FinanceVarianceReferenceError) as caught:
+            calculate(provider_rows=(provider("1"), ProviderCostRow("snapshot-b", "d" * 64, "1")))
+        self.assertEqual(caught.exception.code, "finance_reference_invalid")
+
     def test_duplicate_attempts_invalid_estimates_and_unbounded_sums_fail_closed(self):
         cases = (
             {"gateway_rows": (estimate("1"), estimate("1"))},

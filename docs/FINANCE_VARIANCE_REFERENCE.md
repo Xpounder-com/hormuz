@@ -18,7 +18,8 @@ cannot represent team, actor, application or model allocation. Exact coordinate
 equality and caller-asserted complete provider and gateway coverage are checked
 before amounts are read.
 An empty/missing/partial/stale provider bucket is not zero. Duplicate provider
-observations or gateway attempts are rejected. The collection profile must be
+observation digests are rejected even across different snapshot IDs, as are
+duplicate gateway attempts. The collection profile must be
 an existing cost profile for the selected provider; an equal pair of usage or
 cross-provider profiles is not cost-comparable.
 
