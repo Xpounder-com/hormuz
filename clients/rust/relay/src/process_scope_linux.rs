@@ -84,15 +84,24 @@ mod tests {
 
     fn fixture_command(stage: &str, ready: &Path) -> Command {
         let mut command = Command::new(std::env::current_exe().unwrap());
+        let output = fs::File::create(ready.with_extension(format!("{stage}.log"))).unwrap();
         command
             .args(["--exact", TEST_NAME, "--nocapture"])
             .env_clear()
             .env(STAGE, stage)
             .env(READY, ready)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(Stdio::from(output.try_clone().unwrap()))
+            .stderr(Stdio::from(output));
         command
+    }
+
+    fn fixture_log(ready: &Path, stage: &str) -> String {
+        fs::read_to_string(ready.with_extension(format!("{stage}.log")))
+            .unwrap_or_default()
+            .chars()
+            .take(2048)
+            .collect()
     }
 
     struct Supervisor(Child);
@@ -154,7 +163,14 @@ mod tests {
         let mut supervisor = Supervisor(fixture_command("supervisor", &ready).spawn().unwrap());
         let (address, child_pid, group) =
             wait_for_ready(&ready, Instant::now() + Duration::from_secs(5))
-                .expect("synthetic client did not open its listener");
+                .unwrap_or_else(|| {
+                    panic!(
+                        "synthetic client did not open its listener; supervisor={:?}; supervisor log={}; client log={}",
+                        supervisor.0.try_wait().unwrap(),
+                        fixture_log(&ready, "supervisor"),
+                        fixture_log(&ready, "client")
+                    )
+                });
         assert_eq!(
             group, child_pid,
             "fixture did not enter its own process group"
