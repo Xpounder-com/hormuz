@@ -39,6 +39,18 @@ numeric subtotals. It does not emit native usage payload JSON, credentials,
 provider account identifiers, prompt or response content, or raw provider
 line items.
 
+This draft command does **not** commit a metadata-only query audit before
+delivering a successful privileged read. The verified audit sources above prove
+the provenance of stored finance evidence, not who queried this report. Issue
+[#223](https://github.com/Xpounder-com/hormuz/issues/223) requires query class,
+bounded scope, and result-count metadata for every privileged read. The
+existing finance collection reads share this gap. The current rate-card read
+audit is bound to an exact card/version and cannot represent this report's
+query metadata; the v2 gateway audit chain accepts a finite source-event union
+that does not include read queries. A durable, commit-before-delivery read-audit
+contract and SQLite/PostgreSQL proof are required before this CLI is release
+qualified. This draft adds no substitute log-based audit claim.
+
 The preview keeps the selected provider cost aggregate and the original gateway
 configured-rate estimate in different fields with different cost-basis labels.
 It pins the collection cutoff, selected snapshot IDs/digests, observation keys,
@@ -74,7 +86,8 @@ team, actor, or application attribution, independent bypass evidence, approved
 allocation, threshold policy, or invoice fact. Those requirements, the actual
 account binding and comparable period
 contract, PostgreSQL transition/recovery, live OpenAI finance evidence, #214,
-and #225 remain open before #8 or v1.3.0 can close.
+[#223](https://github.com/Xpounder-com/hormuz/issues/223), and #225 remain
+open before #8 or v1.3.0 can close.
 
 Focused verification:
 
