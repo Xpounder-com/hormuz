@@ -27,9 +27,11 @@ from hormuz.store import UsageStore
 if __package__:
     from ._portfolio_fixture import registry_config
     from ._postgres_fixture import PostgresTestCase
+    from ._sqlite import managed_sqlite_connection
 else:
     from _portfolio_fixture import registry_config
     from _postgres_fixture import PostgresTestCase
+    from _sqlite import managed_sqlite_connection
 
 
 ADMIN = PortfolioPrincipal("acme", "alice", ("portfolio_admin",))
@@ -179,7 +181,7 @@ class SQLiteRegistrationStoreTests(unittest.TestCase):
             connection.close()
 
     def rows(self, table=REGISTRATION_TABLE, *, path=None):
-        with sqlite3.connect(path or self.config.database_path) as connection:
+        with managed_sqlite_connection(path or self.config.database_path) as connection:
             return connection.execute(f"SELECT * FROM {table} ORDER BY 1,2,3").fetchall()
 
     def test_create_replay_replace_and_stale_cas(self):
@@ -290,7 +292,7 @@ class SQLiteRegistrationStoreTests(unittest.TestCase):
     def test_old_backup_restores_separately_and_forward_pair_retains_successor(self):
         first, _ = self.append()
         restored = self.root / "restored.sqlite3"
-        with sqlite3.connect(self.config.database_path) as source, sqlite3.connect(restored) as target:
+        with managed_sqlite_connection(self.config.database_path) as source, managed_sqlite_connection(restored) as target:
             source.backup(target)
         second, _ = self.append(request(expected=1, source_digest=self.source.content_digest),
                                 config_version=2)
@@ -405,7 +407,7 @@ class AccountBindingACLProposalTests(unittest.TestCase):
     def test_registration_witness_tracks_planned_column_names_only(self):
         root = Path(__file__).resolve().parents[1]
         plan = json.loads((root / "docs/finance-transition-plan-v8.json").read_text())
-        with sqlite3.connect(":memory:") as connection:
+        with managed_sqlite_connection(":memory:") as connection:
             connection.execute(REGISTRATION_WITNESS)
             actual = [row[1] for row in connection.execute(f"PRAGMA table_info({REGISTRATION_TABLE})")]
         self.assertEqual(
