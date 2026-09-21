@@ -18,13 +18,18 @@ python tools/verify_v13_candidate_artifacts.py \
 ```
 
 The verifier requires `1.3.0` in committed package metadata and in the built
-source and wheel. It compares every committed `hormuz/` runtime file with both
-artifacts, including SQL migrations and bundled wire/secret files. It also
-compares the transition guides, plans, contract/wire JSON, transition tests,
-verifiers and frozen v1.0.0 contract manifest with the source archive. Missing,
-extra or changed selected files fail. The wheel must have the committed CLI
-entry point and a complete, digest-consistent `RECORD`. The output is
+source and wheel, and requires a clean tracked checkout. It compares every
+tracked source-archive file with the exact
+Git commit, including `README.md`, `LICENSE`, runtime SQL and wire files, and
+the transition guides, plans, tests and verifiers. Required files cannot be
+omitted. Untracked source files, archive path collisions, and changed generated
+`setup.cfg` or `hormuz.egg-info` metadata fail. The source and wheel dependency
+declarations must match the committed `pyproject.toml`; wheel metadata and
+the CLI entry point must match the source. The wheel must have a complete,
+digest-consistent `RECORD` and no encrypted entries. The output is
 content-free: exact commit, artifact SHA-256 digests, counts and bounded scope.
+Unsupported dependency syntax fails closed until the verifier is reviewed and
+updated.
 
 The current package version is `1.2.0`, so this command correctly fails with
 `candidate_version_mismatch` today. A passing future result establishes only

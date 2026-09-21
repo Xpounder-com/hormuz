@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import ast
 import base64
+from collections import Counter
 import configparser
 import csv
 from email.parser import Parser
@@ -26,11 +27,24 @@ import zipfile
 
 VERSION = "1.3.0"
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
-MAX_SELECTED_FILE_BYTES = 16 * 1024 * 1024
+MAX_SOURCE_FILE_BYTES = 16 * 1024 * 1024
+GENERATED_SOURCE_FILES = frozenset({
+    "PKG-INFO",
+    "setup.cfg",
+    "hormuz.egg-info/PKG-INFO",
+    "hormuz.egg-info/SOURCES.txt",
+    "hormuz.egg-info/dependency_links.txt",
+    "hormuz.egg-info/entry_points.txt",
+    "hormuz.egg-info/requires.txt",
+    "hormuz.egg-info/top_level.txt",
+})
+GENERATED_SETUP_CFG = b"[egg_info]\ntag_build = \ntag_date = 0\n\n"
 REQUIRED_SOURCE_KIT = frozenset({
     "MANIFEST.in",
     "pyproject.toml",
     "hormuz/__init__.py",
+    "README.md",
+    "LICENSE",
     "docs/V13_CANDIDATE_ARTIFACT_PREFLIGHT.md",
     "docs/REGISTRY_TRANSITION.md",
     "docs/ATTRIBUTION_TRANSITION.md",
@@ -45,6 +59,7 @@ REQUIRED_SOURCE_KIT = frozenset({
     "docs/finance-transition-plan-v8.json",
     "tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json",
     "tests/test_v13_candidate_artifacts.py",
+    "tools/verify_finance_account_binding_preflight.py",
     "tools/verify_v13_candidate_artifacts.py",
 })
 
@@ -87,57 +102,76 @@ def _safe_path(name: str) -> bool:
     )
 
 
-def _read_selected_tar(archive: tarfile.TarFile, prefix: str, selected: set[str]) -> dict[str, bytes]:
+def _utf8(raw: bytes, reason: str) -> str:
+    try:
+        return raw.decode("utf-8")
+    except UnicodeError as error:
+        raise CandidateArtifactError(reason) from error
+
+
+def _read_tar(archive: tarfile.TarFile, prefix: str) -> dict[str, bytes]:
     result: dict[str, bytes] = {}
     seen: set[str] = set()
+    implied_directories: set[str] = set()
     for member in archive.getmembers():
-        name = member.name.rstrip("/")
-        if name == prefix.rstrip("/") and member.isdir():
+        raw_name = member.name
+        name = raw_name.rstrip("/")
+        if name == prefix.rstrip("/") and member.isdir() and raw_name in {name, name + "/"}:
             continue
-        if not _safe_path(name) or not name.startswith(prefix):
+        if raw_name not in {name, name + "/"} or not _safe_path(name) or not name.startswith(prefix):
             raise CandidateArtifactError("candidate_source_path_invalid")
         relative = name[len(prefix):]
         if not relative or not _safe_path(relative):
             raise CandidateArtifactError("candidate_source_path_invalid")
+        if relative in seen:
+            raise CandidateArtifactError("candidate_source_duplicate_member")
+        parents = {"/".join(relative.split("/")[:n]) for n in range(1, len(relative.split("/")))}
+        if parents & result.keys() or (member.isfile() and relative in implied_directories):
+            raise CandidateArtifactError("candidate_source_file_directory_collision")
+        if not (member.isdir() or member.isfile()):
+            raise CandidateArtifactError("candidate_source_member_type_invalid")
+        if member.isfile() and raw_name != name:
+            raise CandidateArtifactError("candidate_source_path_invalid")
+        seen.add(relative)
+        implied_directories.update(parents)
         if member.isdir():
             continue
-        if relative in seen:
-            raise CandidateArtifactError("candidate_source_duplicate_file")
-        seen.add(relative)
-        if relative not in selected:
-            if _selected(relative):
-                raise CandidateArtifactError("candidate_source_extra_selected_file")
-            continue
-        if not member.isfile() or member.size > MAX_SELECTED_FILE_BYTES:
-            raise CandidateArtifactError("candidate_source_selected_file_invalid")
+        if member.size > MAX_SOURCE_FILE_BYTES:
+            raise CandidateArtifactError("candidate_source_file_bounds")
         source = archive.extractfile(member)
         if source is None:
-            raise CandidateArtifactError("candidate_source_selected_file_invalid")
+            raise CandidateArtifactError("candidate_source_file_invalid")
         with source:
-            result[relative] = source.read(MAX_SELECTED_FILE_BYTES + 1)
+            result[relative] = source.read(MAX_SOURCE_FILE_BYTES + 1)
         if len(result[relative]) != member.size:
-            raise CandidateArtifactError("candidate_source_selected_file_invalid")
+            raise CandidateArtifactError("candidate_source_file_invalid")
     return result
 
 
-def _git_files(root: Path, commit: str) -> dict[str, bytes]:
+def _git_archive_files(root: Path, commit: str, paths: set[str]) -> dict[str, bytes]:
+    try:
+        payload = _git(root, "archive", "--format=tar", commit, *sorted(paths))
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
+            result = _read_tar(archive, "")
+    except (tarfile.TarError, UnicodeError) as error:
+        raise CandidateArtifactError("candidate_git_archive_invalid") from error
+    if set(result) != paths:
+        raise CandidateArtifactError("candidate_git_archive_incomplete")
+    return result
+
+
+def _git_files(root: Path, commit: str) -> tuple[dict[str, bytes], set[str]]:
     if COMMIT.fullmatch(commit) is None:
         raise CandidateArtifactError("candidate_commit_invalid")
     if _git(root, "rev-parse", "HEAD").decode("ascii").strip() != commit:
         raise CandidateArtifactError("candidate_commit_not_head")
-    names = _git(root, "ls-tree", "-r", "--name-only", "-z", commit).decode("utf-8").split("\0")
-    selected = sorted(path for path in names if path and _selected(path))
-    if not REQUIRED_SOURCE_KIT <= set(selected) or "hormuz/__init__.py" not in selected:
+    if _git(root, "status", "--porcelain", "--untracked-files=no"):
+        raise CandidateArtifactError("candidate_checkout_dirty")
+    names = set(_git(root, "ls-tree", "-r", "--name-only", "-z", commit).decode("utf-8").split("\0")) - {""}
+    selected = {path for path in names if _selected(path)}
+    if not REQUIRED_SOURCE_KIT <= selected:
         raise CandidateArtifactError("candidate_git_source_kit_incomplete")
-    try:
-        payload = _git(root, "archive", "--format=tar", commit, *selected)
-        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
-            result = _read_selected_tar(archive, "", set(selected))
-    except (tarfile.TarError, UnicodeError) as error:
-        raise CandidateArtifactError("candidate_git_archive_invalid") from error
-    if set(result) != set(selected):
-        raise CandidateArtifactError("candidate_git_archive_incomplete")
-    return result
+    return _git_archive_files(root, commit, selected), names
 
 
 def _package_version(pyproject: bytes, init: bytes) -> str:
@@ -162,21 +196,132 @@ def _package_version(pyproject: bytes, init: bytes) -> str:
     return version
 
 
-def _source_selected(path: Path, selected: set[str]) -> dict[str, bytes]:
+def _source_files(path: Path) -> dict[str, bytes]:
     try:
         with tarfile.open(path, mode="r:gz") as archive:
-            return _read_selected_tar(archive, f"hormuz-{VERSION}/", selected)
+            return _read_tar(archive, f"hormuz-{VERSION}/")
     except (OSError, tarfile.TarError) as error:
         raise CandidateArtifactError("candidate_source_invalid") from error
 
 
-def _check_metadata(raw: bytes, *, label: str) -> None:
+def _check_metadata(raw: bytes, *, label: str):
     try:
         metadata = Parser().parsestr(raw.decode("utf-8"))
     except UnicodeError as error:
         raise CandidateArtifactError(f"candidate_{label}_metadata_invalid") from error
     if metadata.get_all("Name") != ["hormuz"] or metadata.get_all("Version") != [VERSION]:
         raise CandidateArtifactError(f"candidate_{label}_metadata_version_mismatch")
+    return metadata
+
+
+def _requirement(value: str) -> tuple[str, tuple[str, ...], tuple[tuple[str, str], ...]]:
+    compact = value.replace(" ", "")
+    match = re.fullmatch(r"([A-Za-z][A-Za-z0-9_.-]*)(?:\[([A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)*)\])?(.*)", compact)
+    if match is None:
+        raise CandidateArtifactError("candidate_requirement_invalid")
+    name = re.sub(r"[-_.]+", "-", match.group(1)).lower()
+    extras = tuple(sorted(re.sub(r"[-_.]+", "-", extra).lower() for extra in (match.group(2) or "").split(",") if extra))
+    raw_specs = match.group(3)
+    specifications: list[tuple[str, str]] = []
+    for raw_spec in raw_specs.split(",") if raw_specs else ():
+        spec = re.fullmatch(r"(===|==|~=|!=|<=|>=|<|>)([A-Za-z0-9.*+!_-]+)", raw_spec)
+        if spec is None:
+            raise CandidateArtifactError("candidate_requirement_invalid")
+        specifications.append((spec.group(1), spec.group(2)))
+    if len(specifications) != len(set(specifications)) or len(extras) != len(set(extras)):
+        raise CandidateArtifactError("candidate_requirement_invalid")
+    return name, extras, tuple(sorted(specifications))
+
+
+def _expected_requirements(project: dict[str, object]) -> Counter[tuple[object, ...]]:
+    dependencies = project.get("dependencies", [])
+    optional = project.get("optional-dependencies", {})
+    if not isinstance(dependencies, list) or not isinstance(optional, dict):
+        raise CandidateArtifactError("candidate_project_dependencies_invalid")
+    expected: Counter[tuple[object, ...]] = Counter()
+    for extra, values in [(None, dependencies), *optional.items()]:
+        if extra is not None and (not isinstance(extra, str) or re.fullmatch(r"[a-z0-9-]+", extra) is None):
+            raise CandidateArtifactError("candidate_project_dependencies_invalid")
+        if not isinstance(values, list) or not all(isinstance(value, str) and ";" not in value for value in values):
+            raise CandidateArtifactError("candidate_project_dependencies_invalid")
+        for value in values:
+            expected[(*_requirement(value), extra)] += 1
+    return expected
+
+
+def _metadata_requirements(metadata) -> Counter[tuple[object, ...]]:
+    actual: Counter[tuple[object, ...]] = Counter()
+    for raw in metadata.get_all("Requires-Dist", []):
+        parts = raw.split(";")
+        if len(parts) > 2:
+            raise CandidateArtifactError("candidate_metadata_dependencies_mismatch")
+        extra = None
+        if len(parts) == 2:
+            marker = re.fullmatch(r'\s*extra\s*==\s*"([a-z0-9-]+)"\s*', parts[1])
+            if marker is None:
+                raise CandidateArtifactError("candidate_metadata_dependencies_mismatch")
+            extra = marker.group(1)
+        actual[(*_requirement(parts[0].strip()), extra)] += 1
+    return actual
+
+
+def _check_package_metadata(raw: bytes, project: dict[str, object], readme: bytes) -> None:
+    metadata = _check_metadata(raw, label="source")
+    try:
+        description = readme.decode("utf-8")
+    except UnicodeError as error:
+        raise CandidateArtifactError("candidate_readme_invalid") from error
+    optional = project.get("optional-dependencies", {})
+    if (
+        metadata.get_all("Summary") != [project.get("description")]
+        or metadata.get_all("License-Expression") != [project.get("license")]
+        or metadata.get_all("Requires-Python") != [project.get("requires-python")]
+        or metadata.get_all("Description-Content-Type") != ["text/markdown"]
+        or metadata.get_all("License-File") != ["LICENSE"]
+        or metadata.get_payload() != description
+        or not isinstance(optional, dict)
+        or sorted(metadata.get_all("Provides-Extra", [])) != sorted(optional)
+        or _metadata_requirements(metadata) != _expected_requirements(project)
+    ):
+        raise CandidateArtifactError("candidate_source_metadata_semantics_mismatch")
+
+
+def _check_entry_points(raw: bytes, scripts: dict[str, str]) -> None:
+    try:
+        entries = configparser.ConfigParser(interpolation=None)
+        entries.read_string(raw.decode("utf-8"))
+    except (UnicodeError, configparser.Error) as error:
+        raise CandidateArtifactError("candidate_entry_points_invalid") from error
+    if set(entries.sections()) != {"console_scripts"} or dict(entries["console_scripts"]) != scripts:
+        raise CandidateArtifactError("candidate_entry_points_mismatch")
+
+
+def _check_egg_info(source_files: dict[str, bytes], project: dict[str, object], scripts: dict[str, str]) -> None:
+    if not GENERATED_SOURCE_FILES <= source_files.keys():
+        raise CandidateArtifactError("candidate_source_generated_files_missing")
+    if source_files["setup.cfg"] != GENERATED_SETUP_CFG:
+        raise CandidateArtifactError("candidate_source_setup_cfg_mismatch")
+    if source_files["hormuz.egg-info/PKG-INFO"] != source_files["PKG-INFO"]:
+        raise CandidateArtifactError("candidate_source_egg_metadata_mismatch")
+    if source_files["hormuz.egg-info/dependency_links.txt"] != b"\n" or source_files["hormuz.egg-info/top_level.txt"] != b"hormuz\n":
+        raise CandidateArtifactError("candidate_source_egg_identity_mismatch")
+    _check_entry_points(source_files["hormuz.egg-info/entry_points.txt"], scripts)
+    sources = _utf8(source_files["hormuz.egg-info/SOURCES.txt"], "candidate_source_manifest_invalid").splitlines()
+    if len(sources) != len(set(sources)) or set(sources) != set(source_files) - {"PKG-INFO", "setup.cfg"}:
+        raise CandidateArtifactError("candidate_source_manifest_mismatch")
+    actual: Counter[tuple[object, ...]] = Counter()
+    extra = None
+    for line in _utf8(source_files["hormuz.egg-info/requires.txt"], "candidate_source_egg_requirements_invalid").splitlines():
+        if not line:
+            continue
+        if line.startswith("["):
+            if re.fullmatch(r"\[([a-z0-9-]+)\]", line) is None:
+                raise CandidateArtifactError("candidate_source_egg_requirements_invalid")
+            extra = line[1:-1]
+        else:
+            actual[(*_requirement(line), extra)] += 1
+    if actual != _expected_requirements(project):
+        raise CandidateArtifactError("candidate_source_egg_requirements_mismatch")
 
 
 def _check_wheel_record(archive: zipfile.ZipFile, names: set[str], dist_info: str) -> None:
@@ -201,7 +346,10 @@ def _check_wheel_record(archive: zipfile.ZipFile, names: set[str], dist_info: st
             raise CandidateArtifactError("candidate_wheel_record_digest_mismatch")
 
 
-def _wheel_selected(path: Path, runtime: set[str], scripts: dict[str, str]) -> dict[str, bytes]:
+def _wheel_selected(
+    path: Path, runtime: set[str], scripts: dict[str, str],
+    source_metadata: bytes, license_bytes: bytes, source_entry_points: bytes,
+) -> dict[str, bytes]:
     if path.name != f"hormuz-{VERSION}-py3-none-any.whl" or not path.is_file():
         raise CandidateArtifactError("candidate_wheel_missing_or_misnamed")
     dist_info = f"hormuz-{VERSION}.dist-info/"
@@ -213,6 +361,8 @@ def _wheel_selected(path: Path, runtime: set[str], scripts: dict[str, str]) -> d
                 name = member.filename.rstrip("/")
                 if not _safe_path(name):
                     raise CandidateArtifactError("candidate_wheel_path_invalid")
+                if member.flag_bits & 1:
+                    raise CandidateArtifactError("candidate_wheel_encrypted_entry")
                 if member.is_dir():
                     continue
                 if name in seen:
@@ -223,22 +373,29 @@ def _wheel_selected(path: Path, runtime: set[str], scripts: dict[str, str]) -> d
                 if name.startswith("hormuz/"):
                     if name not in runtime:
                         raise CandidateArtifactError("candidate_wheel_extra_runtime_file")
-                    if member.file_size > MAX_SELECTED_FILE_BYTES:
+                    if member.file_size > MAX_SOURCE_FILE_BYTES:
                         raise CandidateArtifactError("candidate_wheel_runtime_file_invalid")
                     result[name] = archive.read(member)
             if set(result) != runtime:
                 raise CandidateArtifactError("candidate_wheel_runtime_inventory_mismatch")
-            _check_metadata(archive.read(f"{dist_info}METADATA"), label="wheel")
+            wheel_metadata = archive.read(f"{dist_info}METADATA")
+            _check_metadata(wheel_metadata, label="wheel")
+            if wheel_metadata != source_metadata:
+                raise CandidateArtifactError("candidate_wheel_source_metadata_mismatch")
+            if archive.read(f"{dist_info}licenses/LICENSE") != license_bytes:
+                raise CandidateArtifactError("candidate_wheel_license_mismatch")
+            if archive.read(f"{dist_info}top_level.txt") != b"hormuz\n":
+                raise CandidateArtifactError("candidate_wheel_top_level_mismatch")
             wheel_metadata = Parser().parsestr(archive.read(f"{dist_info}WHEEL").decode("utf-8"))
             if (wheel_metadata.get_all("Tag") != ["py3-none-any"]
                     or wheel_metadata.get_all("Root-Is-Purelib") != ["true"]):
                 raise CandidateArtifactError("candidate_wheel_tag_mismatch")
-            entries = configparser.ConfigParser(interpolation=None)
-            entries.read_string(archive.read(f"{dist_info}entry_points.txt").decode("utf-8"))
-            if set(entries.sections()) != {"console_scripts"} or dict(entries["console_scripts"]) != scripts:
+            wheel_entry_points = archive.read(f"{dist_info}entry_points.txt")
+            _check_entry_points(wheel_entry_points, scripts)
+            if wheel_entry_points != source_entry_points:
                 raise CandidateArtifactError("candidate_wheel_entry_points_mismatch")
             _check_wheel_record(archive, seen, dist_info)
-    except (OSError, zipfile.BadZipFile, KeyError, UnicodeError, configparser.Error) as error:
+    except (OSError, zipfile.BadZipFile, KeyError, UnicodeError, configparser.Error, RuntimeError) as error:
         raise CandidateArtifactError("candidate_wheel_invalid") from error
     return result
 
@@ -252,26 +409,41 @@ def _file_sha256(path: Path) -> str:
 
 
 def verify_candidate(root: Path, commit: str, source: Path, wheel: Path) -> dict[str, object]:
-    git_files = _git_files(root, commit)
+    git_files, git_names = _git_files(root, commit)
     _package_version(git_files["pyproject.toml"], git_files["hormuz/__init__.py"])
     if source.name != f"hormuz-{VERSION}.tar.gz" or not source.is_file():
         raise CandidateArtifactError("candidate_source_missing_or_misnamed")
+    source_files = _source_files(source)
     selected = set(git_files)
-    source_files = _source_selected(source, selected | {"PKG-INFO"})
+    if not selected <= source_files.keys():
+        raise CandidateArtifactError("candidate_source_git_bytes_mismatch")
+    unexpected = set(source_files) - git_names - GENERATED_SOURCE_FILES
+    if unexpected:
+        raise CandidateArtifactError("candidate_source_untracked_file")
+    tracked_source = set(source_files) & git_names
+    committed_source = _git_archive_files(root, commit, tracked_source)
+    if any(source_files[path] != committed_source[path] for path in tracked_source):
+        raise CandidateArtifactError("candidate_source_git_bytes_mismatch")
     try:
-        _check_metadata(source_files.pop("PKG-INFO"), label="source")
+        project = tomllib.loads(git_files["pyproject.toml"].decode("utf-8"))["project"]
+        scripts = project["scripts"]
+    except (ValueError, KeyError, TypeError, UnicodeError) as error:
+        raise CandidateArtifactError("candidate_project_unreadable") from error
+    if not isinstance(project, dict) or not isinstance(scripts, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in scripts.items()
+    ):
+        raise CandidateArtifactError("candidate_scripts_invalid")
+    try:
+        source_metadata = source_files["PKG-INFO"]
     except KeyError as error:
         raise CandidateArtifactError("candidate_source_metadata_missing") from error
-    if source_files != git_files:
-        raise CandidateArtifactError("candidate_source_git_bytes_mismatch")
+    _check_package_metadata(source_metadata, project, git_files["README.md"])
+    _check_egg_info(source_files, project, scripts)
     runtime = {path for path in git_files if path.startswith("hormuz/")}
-    try:
-        scripts = tomllib.loads(git_files["pyproject.toml"].decode("utf-8"))["project"]["scripts"]
-    except (ValueError, KeyError, TypeError, UnicodeError) as error:
-        raise CandidateArtifactError("candidate_scripts_unreadable") from error
-    if not isinstance(scripts, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in scripts.items()):
-        raise CandidateArtifactError("candidate_scripts_invalid")
-    wheel_files = _wheel_selected(wheel, runtime, scripts)
+    wheel_files = _wheel_selected(
+        wheel, runtime, scripts, source_metadata, git_files["LICENSE"],
+        source_files["hormuz.egg-info/entry_points.txt"],
+    )
     if wheel_files != {path: git_files[path] for path in runtime}:
         raise CandidateArtifactError("candidate_wheel_git_bytes_mismatch")
     return {
@@ -283,7 +455,8 @@ def verify_candidate(root: Path, commit: str, source: Path, wheel: Path) -> dict
         "wheel_sha256": _file_sha256(wheel),
         "runtime_files_verified": len(runtime),
         "source_kit_files_verified": len(selected) - len(runtime),
-        "proof_scope": "git_runtime_and_transition_kit_source_wheel_byte_identity_only",
+        "source_files_verified": len(tracked_source),
+        "proof_scope": "git_source_archive_and_wheel_runtime_identity_only",
         "final_candidate_accepted": False,
     }
 
@@ -302,6 +475,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except OSError:
         print(json.dumps({"status": "failed", "reason_code": "candidate_io_error"}, sort_keys=True))
+        return 1
+    except UnicodeError:
+        print(json.dumps({"status": "failed", "reason_code": "candidate_encoding_invalid"}, sort_keys=True))
         return 1
     print(json.dumps(summary, sort_keys=True))
     return 0
