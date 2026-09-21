@@ -155,6 +155,10 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_selection.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_registration_request.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_registration_store.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_finance.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_budget_schema.py -v
@@ -184,6 +188,7 @@ jobs:
             tests.test_finance_collection_transition_plan tests.test_finance_collection_runtime_plan \
             tests.test_finance_collection_packaging tests.test_finance_collection_postgres_runtime_plan \
             tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
+            tests.test_finance_account_registration_request tests.test_finance_account_registration_store \
             tests.test_finance_variance_reference tests.test_finance_reconciliation_coverage \
             tests.test_scorecard_evidence_reference \
             tests.test_linear_connector_preflight tests.test_linear_connector_fixtures \
@@ -424,6 +429,7 @@ jobs:
             tests.test_finance_collection_transition_plan tests.test_finance_collection_runtime_plan \
             tests.test_finance_collection_packaging tests.test_finance_collection_postgres_runtime_plan \
             tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
+            tests.test_finance_account_registration_request tests.test_finance_account_registration_store \
             tests.test_finance_variance_reference tests.test_finance_reconciliation_coverage \
             tests.test_scorecard_evidence_reference \
             tests.test_github_connector_preflight tests.test_github_connector_fixtures \
@@ -503,6 +509,8 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_postgres_finance_collection_runtime_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_binding_transition_preflight.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_registration_store.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_outcome_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \

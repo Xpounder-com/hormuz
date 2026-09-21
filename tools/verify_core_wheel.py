@@ -244,6 +244,16 @@ REQUIRED_FINANCE_COLLECTION_RUNTIME_SDIST_PATHS = (
     "tests/test_finance_collection_cli.py",
     "tests/test_finance_collection_runtime_plan.py",
 )
+REQUIRED_FINANCE_ACCOUNT_REGISTRATION_WHEEL_PATHS = (
+    "hormuz/finance_account_registration.py",
+    "hormuz/finance_account_registration_store.py",
+)
+REQUIRED_FINANCE_ACCOUNT_REGISTRATION_SDIST_PATHS = (
+    *REQUIRED_FINANCE_ACCOUNT_REGISTRATION_WHEEL_PATHS,
+    "docs/finance-account-binding-acl-proposal.sql",
+    "tests/test_finance_account_registration_request.py",
+    "tests/test_finance_account_registration_store.py",
+)
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
     "docs/work-budget-reports-wire-v1.json",
@@ -412,6 +422,18 @@ def main(argv: list[str] | None = None) -> int:
     _assert_finance_native_attempt_preflight_sdist_boundary(sdist)
     _assert_finance_collection_preflight_sdist_boundary(sdist)
     _assert_finance_collection_runtime_sdist_boundary(sdist)
+    _assert_required_archive_paths(
+        wheel,
+        _wheel_members,
+        REQUIRED_FINANCE_ACCOUNT_REGISTRATION_WHEEL_PATHS,
+        "Finance account registration wheel",
+    )
+    _assert_required_archive_paths(
+        sdist,
+        _sdist_members,
+        REQUIRED_FINANCE_ACCOUNT_REGISTRATION_SDIST_PATHS,
+        "Finance account registration source kit",
+    )
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)
     _assert_budget_runtime_sdist_boundary(sdist)

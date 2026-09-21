@@ -47,6 +47,13 @@ _CONTENT_COLUMNS = tuple(name for name in _ROW_COLUMNS if name not in {
     "content_digest", "request_digest", "binding_event_id", "registered_by",
     "registered_at", "evidence_json",
 })
+_INTEGER_COLUMNS = frozenset({
+    "version", "upstream_reference_version", "inference_credential_reference_version",
+    "source_binding_version", "fingerprint_key_version",
+})
+_TEXT_COLUMNS = frozenset(_ROW_COLUMNS) - _INTEGER_COLUMNS - {
+    "previous_version", "evidence_json",
+}
 
 
 class AccountBindingStorageError(ValueError):
@@ -95,6 +102,14 @@ def _receipt_from_row(row: Mapping[str, object]) -> AccountBindingRegistrationRe
     try:
         if set(row) != set(_ROW_COLUMNS):
             raise ValueError
+        if (
+            any(type(row[name]) is not int for name in _INTEGER_COLUMNS)
+            or any(type(row[name]) is not str for name in _TEXT_COLUMNS)
+            or (row["previous_version"] is not None
+                and type(row["previous_version"]) is not int)
+            or type(row["evidence_json"]) is not str
+        ):
+            raise ValueError
         event = json.loads(str(row["evidence_json"]))
         if (
             not isinstance(event, dict)
@@ -105,7 +120,10 @@ def _receipt_from_row(row: Mapping[str, object]) -> AccountBindingRegistrationRe
             or type(event.get("schema_version")) is not int
             or event["schema_version"] != 1
             or _canonical(event) != row["evidence_json"]
-            or any(event[name] != row[name] for name in _ROW_COLUMNS if name != "evidence_json")
+            or any(
+                type(event[name]) is not type(row[name]) or event[name] != row[name]
+                for name in _ROW_COLUMNS if name != "evidence_json"
+            )
             or _digest({name: row[name] for name in _CONTENT_COLUMNS}) != row["content_digest"]
         ):
             raise ValueError

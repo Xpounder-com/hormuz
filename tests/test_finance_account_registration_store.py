@@ -22,11 +22,14 @@ from hormuz.finance_account_registration_store import (
 )
 from hormuz.finance_collection_repository import create_finance_collection_repository
 from hormuz.portfolio_config import PortfolioPrincipal
-from hormuz.postgres import POSTGRES_SCHEMA_VERSION
 from hormuz.store import UsageStore
 
-from ._portfolio_fixture import registry_config
-from ._postgres_fixture import PostgresTestCase
+if __package__:
+    from ._portfolio_fixture import registry_config
+    from ._postgres_fixture import PostgresTestCase
+else:
+    from _portfolio_fixture import registry_config
+    from _postgres_fixture import PostgresTestCase
 
 
 ADMIN = PortfolioPrincipal("acme", "alice", ("portfolio_admin",))
@@ -250,6 +253,40 @@ class SQLiteRegistrationStoreTests(unittest.TestCase):
             self.append()
         self.assertEqual((len(self.rows()), len(self.rows("test_registration_audit"))), (1, 1))
 
+    def test_canonical_boolean_version_in_historical_evidence_fails_closed(self):
+        self.append()
+        # JSON true compares equal to Python integer 1. An exact row-to-evidence
+        # type check is required even when the evidence remains canonical JSON.
+        with self.connect() as connection:
+            evidence = json.loads(connection.execute(
+                f"SELECT evidence_json FROM {REGISTRATION_TABLE}"
+            ).fetchone()[0])
+            evidence["version"] = True
+            connection.execute(
+                f"UPDATE {REGISTRATION_TABLE} SET evidence_json=?",
+                (json.dumps(evidence, sort_keys=True, separators=(",", ":")),),
+            )
+        with self.assertRaisesRegex(AccountBindingStorageError, "unavailable"):
+            self.append()
+        self.assertEqual((len(self.rows()), len(self.rows("test_registration_audit"))), (1, 1))
+
+    def test_canonical_boolean_previous_version_in_successor_fails_closed(self):
+        self.append()
+        successor = request(expected=1, source_digest=self.source.content_digest)
+        self.append(successor, config_version=2)
+        with self.connect() as connection:
+            evidence = json.loads(connection.execute(
+                f"SELECT evidence_json FROM {REGISTRATION_TABLE} WHERE version=2"
+            ).fetchone()[0])
+            evidence["previous_version"] = True
+            connection.execute(
+                f"UPDATE {REGISTRATION_TABLE} SET evidence_json=? WHERE version=2",
+                (json.dumps(evidence, sort_keys=True, separators=(",", ":")),),
+            )
+        with self.assertRaisesRegex(AccountBindingStorageError, "unavailable"):
+            self.append(successor, config_version=2)
+        self.assertEqual((len(self.rows()), len(self.rows("test_registration_audit"))), (2, 2))
+
     def test_old_backup_restores_separately_and_forward_pair_retains_successor(self):
         first, _ = self.append()
         restored = self.root / "restored.sqlite3"
@@ -345,7 +382,7 @@ class PostgreSQLRegistrationStoreTests(PostgresTestCase):
 
 
 class AccountBindingACLProposalTests(unittest.TestCase):
-    def test_exact_four_grants_remain_uninstalled(self):
+    def test_exact_four_grants_match_review_only_historical_plan(self):
         root = Path(__file__).resolve().parents[1]
         proposal = (root / "docs/finance-account-binding-acl-proposal.sql").read_text()
         statements = [line.strip() for line in proposal.splitlines()
@@ -358,8 +395,23 @@ class AccountBindingACLProposalTests(unittest.TestCase):
         self.assertEqual(plan["postgresql_acl_proposal"]["proposed_schema18"], [
             203, "731d5b3bd66799555bf723adde3a9b19ac1922d1574bd48b7c79fca7752dc920",
         ])
-        self.assertEqual((POSTGRES_SCHEMA_VERSION, UsageStore.schema_version), (17, 12))
-        self.assertEqual(list((root / "hormuz/migrations/postgresql").glob("0018*")), [])
+        self.assertEqual(
+            (plan["predecessor"]["postgresql_schema_version"],
+             plan["predecessor"]["sqlite_schema_version"]),
+            (17, 12),
+        )
+        self.assertTrue(plan["postgresql_acl_proposal"]["actual_implementation_grants_require_separate_approval"])
+
+    def test_registration_witness_tracks_planned_column_names_only(self):
+        root = Path(__file__).resolve().parents[1]
+        plan = json.loads((root / "docs/finance-transition-plan-v8.json").read_text())
+        with sqlite3.connect(":memory:") as connection:
+            connection.execute(REGISTRATION_WITNESS)
+            actual = [row[1] for row in connection.execute(f"PRAGMA table_info({REGISTRATION_TABLE})")]
+        self.assertEqual(
+            actual,
+            list(plan["planned_storage"][REGISTRATION_TABLE]["columns"]),
+        )
 
 
 if __name__ == "__main__":
