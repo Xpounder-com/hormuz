@@ -86,13 +86,10 @@ fn systemctl_command() -> io::Result<Command> {
     // untrusted PATH. Only the canonical per-UID bus is used.
     let (runtime, bus) = canonical_user_bus()?;
     let mut command = Command::new("/usr/bin/systemctl");
-    command
-        .env_clear()
-        .env("XDG_RUNTIME_DIR", runtime)
-        .env(
-            "DBUS_SESSION_BUS_ADDRESS",
-            format!("unix:path={}", bus.display()),
-        );
+    command.env_clear().env("XDG_RUNTIME_DIR", runtime).env(
+        "DBUS_SESSION_BUS_ADDRESS",
+        format!("unix:path={}", bus.display()),
+    );
     Ok(command)
 }
 
