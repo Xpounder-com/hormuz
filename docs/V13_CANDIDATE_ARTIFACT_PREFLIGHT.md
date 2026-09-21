@@ -28,7 +28,9 @@ metadata fail. The source and wheel dependency, author, classifier and other
 declared metadata must match the committed `pyproject.toml`; wheel metadata and
 the CLI entry point must match the source. The wheel must have a supported
 `Wheel-Version`, a complete digest-consistent `RECORD`, no file/directory
-collisions, and no encrypted entries. The output is content-free: exact commit,
+collisions, no non-regular members, exactly the six generated `.dist-info`
+files from the pinned build backend, and no encrypted entries. The output is
+content-free: exact commit,
 SHA-256 digests of the same bounded archive bytes that were validated, counts
 and scope.
 Unsupported dependency syntax fails closed until the verifier is reviewed and

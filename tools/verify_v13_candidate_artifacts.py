@@ -427,6 +427,12 @@ def _wheel_selected(
     source_metadata: bytes, license_bytes: bytes, source_entry_points: bytes,
 ) -> dict[str, bytes]:
     dist_info = f"hormuz-{VERSION}.dist-info/"
+    expected_metadata = {
+        f"{dist_info}{name}" for name in (
+            "METADATA", "WHEEL", "entry_points.txt", "top_level.txt",
+            "licenses/LICENSE", "RECORD",
+        )
+    }
     result: dict[str, bytes] = {}
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
@@ -446,7 +452,8 @@ def _wheel_selected(
                     raise CandidateArtifactError("candidate_wheel_path_invalid")
                 if member.flag_bits & 1:
                     raise CandidateArtifactError("candidate_wheel_encrypted_entry")
-                if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                member_type = (member.external_attr >> 16) & 0o170000
+                if member_type not in ((0, 0o040000) if member.is_dir() else (0, 0o100000)):
                     raise CandidateArtifactError("candidate_wheel_member_type_invalid")
                 if not (name == "hormuz" or name.startswith("hormuz/")
                         or name == dist_info.rstrip("/") or name.startswith(dist_info)):
@@ -473,6 +480,8 @@ def _wheel_selected(
                     result[name] = archive.read(member)
             if set(result) != runtime:
                 raise CandidateArtifactError("candidate_wheel_runtime_inventory_mismatch")
+            if files - runtime != expected_metadata:
+                raise CandidateArtifactError("candidate_wheel_metadata_inventory_mismatch")
             wheel_metadata = archive.read(f"{dist_info}METADATA")
             _check_metadata(wheel_metadata, label="wheel")
             if wheel_metadata != source_metadata:

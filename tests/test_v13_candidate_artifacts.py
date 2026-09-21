@@ -126,7 +126,10 @@ class CandidateArtifactTests(unittest.TestCase):
                 if name not in omitted:
                     self._tar_member(archive, f"hormuz-1.3.0/{name}", payload)
 
-    def _build_wheel(self, *, edits: dict[str, bytes] | None = None, bad_record: bool = False) -> None:
+    def _build_wheel(
+        self, *, edits: dict[str, bytes] | None = None, bad_record: bool = False,
+        file_modes: dict[str, int] | None = None,
+    ) -> None:
         files = {name: payload for name, payload in self.files.items() if name.startswith("hormuz/")}
         files.update({
             "hormuz-1.3.0.dist-info/METADATA": self._metadata(),
@@ -148,7 +151,13 @@ class CandidateArtifactTests(unittest.TestCase):
         files[record_name] = record.getvalue().encode("utf-8")
         with zipfile.ZipFile(self.wheel, "w") as archive:
             for name, payload in files.items():
-                archive.writestr(name, payload)
+                if file_modes and name in file_modes:
+                    info = zipfile.ZipInfo(name)
+                    info.create_system = 3
+                    info.external_attr = (file_modes[name] | 0o644) << 16
+                    archive.writestr(info, payload)
+                else:
+                    archive.writestr(name, payload)
 
     def test_exact_git_source_and_wheel_bytes_have_only_static_scope(self) -> None:
         result = candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
@@ -295,6 +304,17 @@ class CandidateArtifactTests(unittest.TestCase):
                 self._build_wheel(edits={"hormuz-1.3.0.dist-info/WHEEL": wheel_header})
                 with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_wheel_tag_mismatch"):
                     candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+
+    def test_wheel_nonregular_members_and_unbound_metadata_fail(self) -> None:
+        metadata = "hormuz-1.3.0.dist-info/METADATA"
+        for mode in (0o010000, 0o020000, 0o040000, 0o060000, 0o120000):
+            with self.subTest(mode=oct(mode)):
+                self._build_wheel(file_modes={metadata: mode})
+                with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_wheel_member_type_invalid"):
+                    candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
+        self._build_wheel(edits={"hormuz-1.3.0.dist-info/unknown.json": b"{}\n"})
+        with self.assertRaisesRegex(candidate.CandidateArtifactError, "candidate_wheel_metadata_inventory_mismatch"):
+            candidate.verify_candidate(self.root, self.commit, self.source, self.wheel)
 
     def test_returned_digests_identify_the_validated_snapshots(self) -> None:
         original_source = hashlib.sha256(self.source.read_bytes()).hexdigest()
