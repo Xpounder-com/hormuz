@@ -212,6 +212,9 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
         for changed in (
             {"period_end_at": original.period_start_at},
             {"period_start_at": "2026-09-01T00:00:00+00:00"},
+            {"period_start_at": "2026-09-01T00:00:00.1Z"},
+            {"period_start_at": "2026-09-01T00:00:00.000000Z"},
+            {"period_end_at": "2026-10-03T00:00:00Z"},
             {"scope_kind": "projects", "scope_fingerprints": ()},
             {"fingerprint_key_version": True},
             {"currency": "usd"},
@@ -223,6 +226,17 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaises(FinanceVarianceReferenceError) as caught:
                 replace(original, **changed)
             self.assertEqual(caught.exception.code, "finance_reference_invalid")
+
+    def test_canonical_fractional_time_and_31_day_window_are_valid(self):
+        original = grain()
+        self.assertEqual(
+            replace(original, period_start_at="2026-09-01T00:00:00.100000Z").period_start_at,
+            "2026-09-01T00:00:00.100000Z",
+        )
+        self.assertEqual(
+            replace(original, period_end_at="2026-10-02T00:00:00Z").period_end_at,
+            "2026-10-02T00:00:00Z",
+        )
 
     def test_anthropic_cost_grain_requires_usd(self):
         anthropic = replace(grain(), provider="anthropic", collection_profile="anthropic.organization-costs.v1")

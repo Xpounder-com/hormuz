@@ -9,11 +9,11 @@ here are not account-ownership proof, invoice facts, or a runtime report.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, DecimalException
 import re
 
-from .finance_collection import PROFILE_SPECS
+from .finance_collection import MAX_WINDOW_DAYS, PROFILE_SPECS, _time_text
 from .finance_values import FinanceValueError, currency_code, decimal_text, exact_context
 
 
@@ -47,9 +47,12 @@ def _utc(value: object) -> datetime:
     if not isinstance(value, str) or _UTC.fullmatch(value) is None:
         raise FinanceVarianceReferenceError("finance_reference_invalid")
     try:
-        return datetime.fromisoformat(value[:-1] + "+00:00")
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError:
         raise FinanceVarianceReferenceError("finance_reference_invalid") from None
+    if _time_text(parsed) != value:
+        raise FinanceVarianceReferenceError("finance_reference_invalid")
+    return parsed
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,7 @@ class ComparableAccountGrain:
         except FinanceValueError:
             valid_currency = False
         profile = PROFILE_SPECS.get(self.collection_profile) if isinstance(self.collection_profile, str) else None
+        period_length = _utc(self.period_end_at) - _utc(self.period_start_at)
         if (
             not _identifier(self.organization_id)
             or not isinstance(self.provider, str)
@@ -105,7 +109,7 @@ class ComparableAccountGrain:
             or profile is None
             or profile.provider != self.provider
             or profile.source_kind != "cost"
-            or _utc(self.period_start_at) >= _utc(self.period_end_at)
+            or not timedelta(0) < period_length <= timedelta(days=MAX_WINDOW_DAYS)
         ):
             raise FinanceVarianceReferenceError("finance_reference_invalid")
 

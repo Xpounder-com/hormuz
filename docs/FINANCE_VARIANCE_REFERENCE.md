@@ -13,8 +13,10 @@ A future authorized report builder must first pin the collection as-of cutoff
 and selected snapshot IDs/digests, authorize the tenant, validate each
 immutable attempt binding against its registered source binding, and establish
 compatible account, scope, half-open UTC period, currency, product and
-collection profile. The reference compares only provider-account grain; it
-cannot represent team, actor, application or model allocation. Exact coordinate
+collection profile. Period coordinates use the collection selector's canonical
+UTC spelling and must span no more than 31 days. The reference compares only
+provider-account grain; it cannot represent team, actor, application or model
+allocation. Exact coordinate
 equality and caller-asserted complete provider and gateway coverage are checked
 before amounts are read.
 An empty/missing/partial/stale provider bucket is not zero. Duplicate provider
