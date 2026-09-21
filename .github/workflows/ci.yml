@@ -238,13 +238,21 @@ jobs:
         with:
           python-version: "3.12"
       - name: Fetch and verify the immutable released v1 baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python -m pip install --editable .
-          baseline_url="https://github.com/Xpounder-com/hormuz/releases/download/candidate-v1.0.0-2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a"
-          curl --fail --location --retry 3 "$baseline_url/hormuz-1.0.0.tar.gz" \
-            --output "$RUNNER_TEMP/hormuz-1.0.0.tar.gz"
-          curl --fail --location --retry 3 "$baseline_url/hormuz-v1.0.0-candidate-manifest.json" \
-            --output "$RUNNER_TEMP/hormuz-v1.0.0-candidate-manifest.json"
+          for attempt in 1 2 3; do
+            if gh release download candidate-v1.0.0-2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a \
+              --repo Xpounder-com/hormuz \
+              --pattern hormuz-1.0.0.tar.gz \
+              --pattern hormuz-v1.0.0-candidate-manifest.json \
+              --dir "$RUNNER_TEMP" --clobber; then
+              break
+            fi
+            [[ "$attempt" -lt 3 ]] || exit 1
+            sleep "$attempt"
+          done
           python tools/verify_registry_transition_plan.py \
             --baseline-archive "$RUNNER_TEMP/hormuz-1.0.0.tar.gz" \
             --baseline-manifest "$RUNNER_TEMP/hormuz-v1.0.0-candidate-manifest.json"
@@ -353,12 +361,20 @@ jobs:
           "$RUNNER_TEMP/hormuz-finance-collection-runtime-baseline/bin/python" -m pip install \
             "$RUNNER_TEMP/finance-collection-runtime-baseline-0973662.tar[postgres]"
       - name: Verify and install the published v1.2.0 account-binding predecessor
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          baseline_url="https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0"
-          curl --fail --location --retry 3 "$baseline_url/hormuz-1.2.0.tar.gz" \
-            --output "$RUNNER_TEMP/hormuz-1.2.0.tar.gz"
-          curl --fail --location --retry 3 "$baseline_url/hormuz-1.2.0-py3-none-any.whl" \
-            --output "$RUNNER_TEMP/hormuz-1.2.0-py3-none-any.whl"
+          for attempt in 1 2 3; do
+            if gh release download v1.2.0 \
+              --repo Xpounder-com/hormuz \
+              --pattern hormuz-1.2.0.tar.gz \
+              --pattern hormuz-1.2.0-py3-none-any.whl \
+              --dir "$RUNNER_TEMP" --clobber; then
+              break
+            fi
+            [[ "$attempt" -lt 3 ]] || exit 1
+            sleep "$attempt"
+          done
           python tools/verify_finance_account_binding_preflight.py --historical-plan-only \
             --predecessor-source "$RUNNER_TEMP/hormuz-1.2.0.tar.gz" \
             --predecessor-wheel "$RUNNER_TEMP/hormuz-1.2.0-py3-none-any.whl"
@@ -384,6 +400,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_registry_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_attribution_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_outcome_transition_plan.py
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_github_connector_preflight.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_budget_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_native_attempt_transition_plan.py \
@@ -401,6 +418,7 @@ jobs:
             tests.test_finance_collection_packaging tests.test_finance_collection_postgres_runtime_plan \
             tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
             tests.test_finance_variance_reference tests.test_finance_reconciliation_coverage \
+            tests.test_github_connector_preflight tests.test_github_connector_fixtures \
             tests.test_portfolio_wire_contract
       - name: Prove PostgreSQL migration and repository compatibility
         env:
@@ -800,6 +818,7 @@ jobs:
             --output "$RUNNER_TEMP/hormuz-multi-replica-state.json"
       - name: Prove the disposable signed-image Kubernetes profile
         env:
+          GH_TOKEN: ${{ github.token }}
           HORMUZ_KUBERNETES_PROOF_ACK: I_UNDERSTAND_THIS_IS_A_DISPOSABLE_KUBERNETES_REFERENCE_PROOF
           HORMUZ_KUBERNETES_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-kubernetes-reference
           HORMUZ_KUBERNETES_CLUSTER_NAME: hormuz-${{ github.run_id }}-${{ github.run_attempt }}
@@ -828,6 +847,7 @@ jobs:
           persist-credentials: false
       - name: Prove safe promotion and quorum-loss refusal
         env:
+          GH_TOKEN: ${{ github.token }}
           HORMUZ_POSTGRES_HA_PROOF_ACK: I_UNDERSTAND_THIS_IS_A_DISPOSABLE_POSTGRESQL_HA_REFERENCE_PROOF
           HORMUZ_POSTGRES_HA_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-postgres-ha-reference
           HORMUZ_POSTGRES_HA_CLUSTER_NAME: hormuz-postgres-ha-${{ github.run_id }}-${{ github.run_attempt }}
@@ -855,6 +875,7 @@ jobs:
           persist-credentials: false
       - name: Prove the Kubernetes enterprise-reference recovery contract
         env:
+          GH_TOKEN: ${{ github.token }}
           HORMUZ_DISASTER_RECOVERY_PROOF_ACK: I_UNDERSTAND_THIS_IS_A_DISPOSABLE_DISASTER_RECOVERY_REFERENCE_PROOF
           HORMUZ_DISASTER_RECOVERY_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-disaster-recovery
           HORMUZ_DR_SOURCE_CLUSTER_NAME: hormuz-dr-source-${{ github.run_id }}-${{ github.run_attempt }}
