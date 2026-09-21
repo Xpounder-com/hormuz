@@ -70,9 +70,11 @@ synthetic and tests only the source-neutral receipt/storage foundation:
    discard outcome evidence, release uncertain reservations, or replay AI
    provider work. A storage outage cannot produce a success acknowledgement.
 
-The focused SQLite witness executes failure, retry, disablement, separate
-checkpoint restore, and retained forward recovery. It does **not** prove a
-v1.2.0 binary running against newer state, PostgreSQL parity, source/wheel or
+The focused SQLite witnesses separately exercise a zero-post-checkpoint-write
+snapshot restore and a post-write retained forward recovery, alongside failure,
+retry, and disablement. The restore witness uses the current binary and a
+separate database destination; it does **not** prove a v1.2.0 application and
+database pair, PostgreSQL parity, source/wheel or
 signed-OCI/Compose transition, or real GitHub delivery. Those are explicit
 implementation and final-candidate gates in the plan. If the connector needs
 new tables or permissions, the next preflight must add a red-first dual-backend

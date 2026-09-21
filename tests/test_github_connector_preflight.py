@@ -133,7 +133,24 @@ class GitHubOfflineTransitionTests(unittest.TestCase):
             self.error("forbidden", lambda: self.ingestor(config=disabled).ingest(HEADERS, self.raw))
         self.assertEqual(sqlite_snapshot(self.config.database_path), before)
 
-    def test_failure_repair_replay_disable_restore_and_forward_recovery(self):
+    def test_zero_post_checkpoint_write_restores_a_separate_snapshot(self):
+        self.error("invalid_request", lambda: self.ingestor(RejectingNormalizer()).ingest(HEADERS, self.raw))
+        checkpoint_state = sqlite_snapshot(self.config.database_path)
+        self.assertEqual(len(checkpoint_state["rows"]["portfolio_outcome_dead_letters"]), 1)
+        checkpoint = self.root / "zero-write-checkpoint.sqlite3"
+        sqlite_backup(self.config.database_path, checkpoint)
+
+        disabled = replace(self.config, portfolio_control=replace(self.config.portfolio_control, connectors=()))
+        self.error("forbidden", lambda: self.ingestor(config=disabled).ingest(HEADERS, self.raw))
+        self.assertEqual(sqlite_snapshot(self.config.database_path), checkpoint_state)
+
+        restored = self.root / "zero-write-restored.sqlite3"
+        sqlite_backup(checkpoint, restored)
+        UsageStore(restored, read_only=True).verify_ready()
+        self.assertEqual(sqlite_snapshot(restored), checkpoint_state)
+        self.assertEqual(sqlite_snapshot(self.config.database_path), checkpoint_state)
+
+    def test_failure_repair_replay_disable_and_post_write_forward_recovery(self):
         original = sqlite_snapshot(self.config.database_path)
         self.error("invalid_request", lambda: self.ingestor(RejectingNormalizer()).ingest(HEADERS, self.raw))
         failed = sqlite_snapshot(self.config.database_path)
@@ -141,8 +158,8 @@ class GitHubOfflineTransitionTests(unittest.TestCase):
         self.assertEqual(failed["rows"]["portfolio_outcome_receipts"], original["rows"]["portfolio_outcome_receipts"])
         self.assertEqual(len(failed["rows"]["portfolio_outcome_dead_letters"]), 1)
         self.assertNotIn("SYNTHETIC_EXCLUDED", repr(failed))
-        old_checkpoint = self.root / "old-checkpoint.sqlite3"
-        sqlite_backup(self.config.database_path, old_checkpoint)
+        checkpoint = self.root / "pre-write-checkpoint.sqlite3"
+        sqlite_backup(self.config.database_path, checkpoint)
 
         receipt = self.ingestor().ingest(HEADERS, self.raw)
         self.assertEqual(receipt["disposition"], "accepted")
@@ -158,17 +175,15 @@ class GitHubOfflineTransitionTests(unittest.TestCase):
             {**HEADERS, "delivery": "20000000-0000-4000-8000-000000000003"}, self.raw))
         self.assertEqual(sqlite_snapshot(self.config.database_path), accepted)
 
-        old_restored = self.root / "old-restored.sqlite3"
-        sqlite_backup(old_checkpoint, old_restored)
-        self.assertEqual(sqlite_snapshot(old_restored), failed)
-        self.assertEqual(sqlite_snapshot(self.config.database_path), accepted)
+        self.assertEqual(sqlite_snapshot(checkpoint), failed)
+        self.assertNotEqual(failed, accepted)
         forward = self.root / "forward.sqlite3"
         sqlite_backup(self.config.database_path, forward)
         forward_config = replace(self.config, database_path=forward)
         forward_repository = create_portfolio_repository(forward_config).outcomes
         self.assertEqual(self.ingestor(config=forward_config, repository=forward_repository).ingest(HEADERS, self.raw), receipt)
         self.assertEqual(sqlite_snapshot(forward), accepted)
-        self.assertNotEqual(sqlite_snapshot(old_restored), accepted)
+        self.assertEqual(sqlite_snapshot(self.config.database_path), accepted)
 
     def test_storage_outage_cannot_acknowledge_or_create_database(self):
         absent = self.root / "absent.sqlite3"
