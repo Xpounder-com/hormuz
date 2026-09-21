@@ -1167,13 +1167,14 @@ def _select_collection_observations(
         rows = sql.execute(
             f"SELECT * FROM {table} WHERE organization_id=? "
             "AND snapshot_id=? AND bucket_start_at=? AND bucket_end_at=? "
-            "ORDER BY observation_digest",
+            "ORDER BY observation_digest "
+            f"{'LIMIT ?' if max_observations is not None else ''}",
             (
                 organization_id,
                 selected["snapshot_id"],
                 selected["bucket_start_at"],
                 selected["bucket_end_at"],
-            ),
+            ) + ((selected["observation_count"] + 1,) if max_observations is not None else ()),
         ).fetchall()
         if len(rows) != selected["observation_count"]:
             raise FinanceCollectionError("unavailable")
