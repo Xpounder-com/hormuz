@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import ssl
 import stat
 import subprocess
@@ -184,6 +185,7 @@ class RelayOptimizer:
 class LocalRelayServer(ThreadingHTTPServer):
     allow_reuse_address = False
     daemon_threads = True
+    _UPSTREAM_DRAIN_SECONDS = 5
 
     def __init__(
         self,
@@ -207,11 +209,69 @@ class LocalRelayServer(ThreadingHTTPServer):
         self.gateway_credential = gateway_credential
         self.optimizer = optimizer
         self.timeout_seconds = timeout_seconds
+        self._upstream_condition = threading.Condition()
+        self._upstreams: dict[http.client.HTTPConnection, socket.socket | None] = {}
+        self._stopping = False
         super().__init__(("127.0.0.1", 0), LocalRelayHandler)
 
     @property
     def origin(self) -> str:
         return f"http://127.0.0.1:{self.server_port}"
+
+    def _register_upstream(self, connection: http.client.HTTPConnection) -> bool:
+        with self._upstream_condition:
+            if self._stopping:
+                return False
+            self._upstreams[connection] = None
+            return True
+
+    def _attach_upstream_socket(self, connection: http.client.HTTPConnection) -> bool:
+        current = connection.sock
+        if current is None:
+            return False
+        # HTTPConnection may clear its socket after response headers with
+        # Connection: close, while HTTPResponse still reads through makefile.
+        # Keep a separate raw socket owner so shutdown can interrupt that read.
+        try:
+            borrowed = socket.socket(fileno=current.fileno())
+            try:
+                owned = borrowed.dup()
+            finally:
+                borrowed.detach()
+        except OSError:
+            return False
+        with self._upstream_condition:
+            if self._stopping or connection not in self._upstreams:
+                owned.close()
+                return False
+            self._upstreams[connection] = owned
+            return True
+
+    def _unregister_upstream(self, connection: http.client.HTTPConnection) -> None:
+        with self._upstream_condition:
+            owned = self._upstreams.pop(connection, None)
+            if owned is not None:
+                owned.close()
+            self._upstream_condition.notify_all()
+
+    def shutdown(self) -> None:
+        # Closing HTTPConnection from another thread is insufficient: a
+        # response's socket file object can retain a blocking read. Shutdown
+        # the separate raw socket owner to wake reads without clearing
+        # connection.sock or allowing http.client to reconnect and replay.
+        with self._upstream_condition:
+            self._stopping = True
+            sockets = tuple(value for value in self._upstreams.values() if value is not None)
+        for current in sockets:
+            try:
+                current.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        super().shutdown()
+        with self._upstream_condition:
+            self._upstream_condition.wait_for(
+                lambda: not self._upstreams, timeout=self._UPSTREAM_DRAIN_SECONDS
+            )
 
 
 class LocalRelayHandler(BaseHTTPRequestHandler):
@@ -270,6 +330,9 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
         self._response_started = False
         try:
             connection = _gateway_connection(self.server.gateway, self.server.timeout_seconds)
+            if not self.server._register_upstream(connection):
+                self.close_connection = True
+                return
             upstream_path = _gateway_path(self.server.gateway, path.path, path.query)
             if length <= MAX_REQUEST_BYTES:
                 body = self.rfile.read(length)
@@ -280,10 +343,21 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                 headers = _forward_headers(
                     self.headers, gateway_token, len(changed), context_headers
                 )
+                # Registration precedes connect. A connection racing shutdown
+                # closes before its first POST; a connected socket is shut
+                # down without clearing connection.sock or allowing reconnect.
+                connection.connect()
+                if not self.server._attach_upstream_socket(connection):
+                    self.close_connection = True
+                    return
                 connection.request("POST", upstream_path, body=changed, headers=headers)
             else:
                 self.server.optimizer.note_oversized_passthrough()
                 headers = _forward_headers(self.headers, gateway_token, length, {})
+                connection.connect()
+                if not self.server._attach_upstream_socket(connection):
+                    self.close_connection = True
+                    return
                 connection.putrequest("POST", upstream_path, skip_accept_encoding=True)
                 for name, value in headers.items():
                     connection.putheader(name, value)
@@ -307,6 +381,7 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
         finally:
             if connection is not None:
                 connection.close()
+                self.server._unregister_upstream(connection)
 
     def _relay_response(self, response: http.client.HTTPResponse) -> None:
         try:

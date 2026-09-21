@@ -1,19 +1,29 @@
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import os
 import shutil
+import socket
+import ssl
 import subprocess
 import tempfile
 import threading
 import unittest
 import uuid
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
+
+from hormuz import client_relay as relay_module
 from hormuz.client_relay import (
     ClientRelayError,
     LocalRelayServer,
@@ -438,6 +448,252 @@ class RelayTests(unittest.TestCase):
             gateway.shutdown()
             gateway_thread.join(timeout=2)
             gateway.server_close()
+
+    def test_shutdown_interrupts_blocked_upstream_read(self) -> None:
+        for response_started in (False, True):
+            with self.subTest(response_started=response_started):
+                self._assert_shutdown_interrupts_blocked_upstream_read(response_started)
+
+    def _assert_shutdown_interrupts_blocked_upstream_read(self, response_started: bool) -> None:
+        gateway = socket.socket()
+        gateway.bind(("127.0.0.1", 0))
+        gateway.listen(1)
+        gateway.settimeout(5)
+        relay = LocalRelayServer(
+            gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}", client="codex",
+            local_credential=LOCAL_TOKEN, gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=RelayOptimizer(preference_store=self.store, client="codex", gateway_compatible=False),
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        client = http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        upstream = None
+        try:
+            client.request("POST", "/v1/responses", body=b"{}", headers={
+                "Authorization": "Bearer " + LOCAL_TOKEN,
+            })
+            upstream, _ = gateway.accept()
+            upstream.settimeout(5)
+            request = b""
+            while b"\r\n\r\n{}" not in request:
+                request += upstream.recv(8192)
+            self.assertTrue(request.startswith(b"POST /v1/responses"))
+            if response_started:
+                # Connection: close makes http.client clear connection.sock
+                # after headers, while the handler still reads the response.
+                upstream.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial"
+                )
+                self.assertEqual(client.getresponse().status, 200)
+            client.close()
+            relay.shutdown()
+            relay_thread.join(timeout=2)
+            self.assertFalse(relay_thread.is_alive())
+            upstream.settimeout(1)
+            try:
+                self.assertEqual(upstream.recv(1), b"")
+            except (ConnectionResetError, ConnectionAbortedError):
+                pass
+            with relay._upstream_condition:
+                self.assertFalse(relay._upstreams)
+            self.assertFalse(relay._register_upstream(http.client.HTTPConnection("127.0.0.1", 1)))
+        finally:
+            client.close()
+            if upstream is not None:
+                upstream.close()
+            if relay_thread.is_alive():
+                relay.shutdown()
+                relay_thread.join(timeout=2)
+            relay.server_close()
+            gateway.close()
+
+    def test_shutdown_during_connect_sends_no_late_post(self) -> None:
+        gateway = socket.socket()
+        gateway.bind(("127.0.0.1", 0))
+        gateway.listen(1)
+        gateway.settimeout(5)
+        relay = LocalRelayServer(
+            gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}", client="codex",
+            local_credential=LOCAL_TOKEN, gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=RelayOptimizer(preference_store=self.store, client="codex", gateway_compatible=False),
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        about_to_connect = threading.Event()
+        release_connect = threading.Event()
+        original_factory = relay_module._gateway_connection
+
+        def delayed_connection(origin: str, timeout: float) -> http.client.HTTPConnection:
+            connection = original_factory(origin, timeout)
+            connect = connection.connect
+
+            def wait_then_connect() -> None:
+                about_to_connect.set()
+                if not release_connect.wait(5):
+                    raise TimeoutError("test did not release the gateway connect")
+                connect()
+
+            connection.connect = wait_then_connect
+            return connection
+
+        client = http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        upstream = None
+        shutdown_thread = None
+        try:
+            with mock.patch("hormuz.client_relay._gateway_connection", side_effect=delayed_connection):
+                client.request("POST", "/v1/responses", body=b"{}", headers={
+                    "Authorization": "Bearer " + LOCAL_TOKEN,
+                })
+                self.assertTrue(about_to_connect.wait(5))
+                shutdown_thread = threading.Thread(target=relay.shutdown)
+                shutdown_thread.start()
+                with relay._upstream_condition:
+                    self.assertTrue(relay._upstream_condition.wait_for(lambda: relay._stopping, timeout=5))
+                release_connect.set()
+                shutdown_thread.join(timeout=5)
+                self.assertFalse(shutdown_thread.is_alive())
+            upstream, _ = gateway.accept()
+            upstream.settimeout(1)
+            try:
+                self.assertEqual(upstream.recv(1), b"")
+            except (ConnectionResetError, ConnectionAbortedError):
+                pass
+            with relay._upstream_condition:
+                self.assertFalse(relay._upstreams)
+        finally:
+            release_connect.set()
+            client.close()
+            if upstream is not None:
+                upstream.close()
+            if shutdown_thread is not None:
+                shutdown_thread.join(timeout=6)
+            if relay_thread.is_alive():
+                relay.shutdown()
+                relay_thread.join(timeout=2)
+            relay.server_close()
+            gateway.close()
+
+    def test_shutdown_interrupts_https_response_read(self) -> None:
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+        now = datetime.now(timezone.utc)
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1))
+            .not_valid_after(now + timedelta(minutes=5))
+            .add_extension(
+                x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
+                critical=False,
+            )
+            .sign(key, hashes.SHA256())
+        )
+        certificate_path = self.state / "fake-gateway.crt"
+        key_path = self.state / "fake-gateway.key"
+        certificate_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        key_path.write_bytes(key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        ))
+        key_path.chmod(0o600)
+        server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server_context.load_cert_chain(str(certificate_path), str(key_path))
+        client_context = ssl.create_default_context(cafile=str(certificate_path))
+        gateway = socket.socket()
+        gateway.bind(("127.0.0.1", 0))
+        gateway.listen(1)
+        gateway.settimeout(5)
+        relay = LocalRelayServer(
+            gateway=f"https://127.0.0.1:{gateway.getsockname()[1]}", client="codex",
+            local_credential=LOCAL_TOKEN, gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=RelayOptimizer(preference_store=self.store, client="codex", gateway_compatible=False),
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        client = http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        upstream = None
+        try:
+            with mock.patch.object(relay_module.ssl, "create_default_context", return_value=client_context):
+                client.request("POST", "/v1/responses", body=b"{}", headers={
+                    "Authorization": "Bearer " + LOCAL_TOKEN,
+                })
+                raw, _ = gateway.accept()
+                upstream = server_context.wrap_socket(raw, server_side=True)
+                upstream.settimeout(5)
+                request = b""
+                while b"\r\n\r\n{}" not in request:
+                    request += upstream.recv(8192)
+                self.assertTrue(request.startswith(b"POST /v1/responses"))
+                upstream.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial"
+                )
+                self.assertEqual(client.getresponse().status, 200)
+                client.close()
+                relay.shutdown()
+            relay_thread.join(timeout=2)
+            self.assertFalse(relay_thread.is_alive())
+            upstream.settimeout(1)
+            try:
+                self.assertEqual(upstream.recv(1), b"")
+            except (ssl.SSLError, ConnectionResetError, ConnectionAbortedError):
+                pass
+            with relay._upstream_condition:
+                self.assertFalse(relay._upstreams)
+        finally:
+            client.close()
+            if upstream is not None:
+                upstream.close()
+            if relay_thread.is_alive():
+                relay.shutdown()
+                relay_thread.join(timeout=2)
+            relay.server_close()
+            gateway.close()
+
+    def test_uncertain_gateway_post_is_not_replayed(self) -> None:
+        gateway = socket.socket()
+        gateway.bind(("127.0.0.1", 0))
+        gateway.listen(2)
+        gateway.settimeout(5)
+        relay = LocalRelayServer(
+            gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}", client="codex",
+            local_credential=LOCAL_TOKEN, gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=RelayOptimizer(preference_store=self.store, client="codex", gateway_compatible=False),
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        client = http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        try:
+            client.request("POST", "/v1/responses", body=b"{}", headers={
+                "Authorization": "Bearer " + LOCAL_TOKEN,
+            })
+            upstream, _ = gateway.accept()
+            with upstream:
+                upstream.settimeout(5)
+                request = b""
+                while b"\r\n\r\n{}" not in request:
+                    request += upstream.recv(8192)
+                self.assertTrue(request.startswith(b"POST /v1/responses"))
+                # The gateway may have committed the request before disconnect.
+            try:
+                response = client.getresponse()
+            except (http.client.RemoteDisconnected, ConnectionResetError):
+                pass  # The existing relay closes a reset upstream without replay.
+            else:
+                self.assertEqual(response.status, 502)
+                response.read()
+            gateway.settimeout(0.25)
+            with self.assertRaises(socket.timeout):
+                gateway.accept()
+        finally:
+            client.close()
+            relay.shutdown()
+            relay_thread.join(timeout=2)
+            relay.server_close()
+            gateway.close()
 
     def test_oversized_eligible_request_uses_exact_streaming_passthrough(self) -> None:
         gateway = _Gateway()
