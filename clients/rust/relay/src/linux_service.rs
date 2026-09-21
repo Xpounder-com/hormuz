@@ -11,19 +11,35 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const SHOW_BUDGET: Duration = Duration::from_secs(3);
+const SERVICE_BUDGET: Duration = Duration::from_secs(3);
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_SHOW_BYTES: u64 = 4096;
 
 pub(crate) fn require_user_service() -> io::Result<()> {
     let membership = std::fs::read_to_string("/proc/self/cgroup")?;
     let path = unified_path(&membership).ok_or_else(unavailable)?;
     let unit = service_unit(path).ok_or_else(unavailable)?;
-    let properties = show_unit(unit)?;
-    if valid_service(&properties, path, std::process::id()) {
-        Ok(())
-    } else {
-        Err(unavailable())
-    }
+    let deadline = Instant::now() + SERVICE_BUDGET;
+    verify_service(
+        path,
+        std::process::id(),
+        || {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                Err(unavailable())
+            } else {
+                show_unit(unit, remaining)
+            }
+        },
+        || {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            thread::sleep(POLL_INTERVAL.min(remaining));
+            Instant::now() < deadline
+        },
+    )
 }
 
 fn unavailable() -> io::Error {
@@ -93,9 +109,15 @@ fn systemctl_command() -> io::Result<Command> {
     Ok(command)
 }
 
-fn show_unit(unit: &str) -> io::Result<String> {
+fn show_unit(unit: &str, budget: Duration) -> io::Result<String> {
     // Captured output and time are bounded before any client version probe
     // or relay listener starts.
+    if budget.is_zero() {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "systemctl show timed out",
+        ));
+    }
     let mut stdout = tempfile::tempfile()?;
     let mut command = systemctl_command()?;
     command
@@ -110,7 +132,7 @@ fn show_unit(unit: &str) -> io::Result<String> {
         .stdout(Stdio::from(stdout.try_clone()?))
         .stderr(Stdio::null());
     let mut child = command.spawn()?;
-    let deadline = Instant::now() + SHOW_BUDGET;
+    let deadline = Instant::now() + budget;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -151,15 +173,48 @@ fn property<'a>(output: &'a str, name: &str) -> Option<&'a str> {
     values.next().is_none().then_some(value)
 }
 
-fn valid_service(output: &str, path: &str, pid: u32) -> bool {
-    property(output, "ControlGroup") == Some(path)
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ServiceState {
+    Active,
+    Activating,
+    Invalid,
+}
+
+fn service_state(output: &str, path: &str, pid: u32) -> ServiceState {
+    let exact = property(output, "ControlGroup") == Some(path)
         && property(output, "MainPID").and_then(|value| value.parse::<u32>().ok()) == Some(pid)
         && property(output, "ExitType") == Some("main")
         && property(output, "RemainAfterExit") == Some("no")
         && property(output, "KillMode") == Some("control-group")
         && matches!(property(output, "KillSignal"), Some("9" | "SIGKILL"))
-        && property(output, "Transient") == Some("yes")
-        && property(output, "ActiveState") == Some("active")
+        && property(output, "Transient") == Some("yes");
+    if !exact {
+        return ServiceState::Invalid;
+    }
+    match property(output, "ActiveState") {
+        Some("active") => ServiceState::Active,
+        Some("activating") => ServiceState::Activating,
+        _ => ServiceState::Invalid,
+    }
+}
+
+fn verify_service<Show, Retry>(
+    path: &str,
+    pid: u32,
+    mut show: Show,
+    mut retry: Retry,
+) -> io::Result<()>
+where
+    Show: FnMut() -> io::Result<String>,
+    Retry: FnMut() -> bool,
+{
+    loop {
+        match service_state(&show()?, path, pid) {
+            ServiceState::Active => return Ok(()),
+            ServiceState::Activating if retry() => {}
+            ServiceState::Activating | ServiceState::Invalid => return Err(unavailable()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -182,8 +237,8 @@ mod tests {
 
     #[test]
     fn requires_the_main_pid_and_tree_kill_properties() {
-        assert!(valid_service(GOOD, PATH, 123));
-        assert!(!valid_service(GOOD, PATH, 124));
+        assert_eq!(service_state(GOOD, PATH, 123), ServiceState::Active);
+        assert_eq!(service_state(GOOD, PATH, 124), ServiceState::Invalid);
         for (old, new) in [
             ("ExitType=main", "ExitType=cgroup"),
             ("RemainAfterExit=no", "RemainAfterExit=yes"),
@@ -192,19 +247,94 @@ mod tests {
             ("Transient=yes", "Transient=no"),
             ("ActiveState=active", "ActiveState=inactive"),
         ] {
-            assert!(!valid_service(&GOOD.replace(old, new), PATH, 123));
+            assert_eq!(
+                service_state(&GOOD.replace(old, new), PATH, 123),
+                ServiceState::Invalid
+            );
         }
-        assert!(!valid_service(
-            &format!("{GOOD}KillMode=control-group\n"),
+        assert_eq!(
+            service_state(&format!("{GOOD}KillMode=control-group\n"), PATH, 123),
+            ServiceState::Invalid
+        );
+        assert_eq!(
+            service_state(&GOOD.replace("RemainAfterExit=no\n", ""), PATH, 123),
+            ServiceState::Invalid
+        );
+        assert_eq!(
+            service_state(GOOD, "/another.service", 123),
+            ServiceState::Invalid
+        );
+    }
+
+    #[test]
+    fn retries_an_exact_activating_service_until_active() {
+        let activating = GOOD.replace("ActiveState=active", "ActiveState=activating");
+        let mut outputs = [activating, GOOD.to_owned()].into_iter();
+        let mut reads = 0;
+        let mut retries = 0;
+        assert!(verify_service(
             PATH,
-            123
-        ));
-        assert!(!valid_service(
-            &GOOD.replace("RemainAfterExit=no\n", ""),
+            123,
+            || {
+                reads += 1;
+                Ok(outputs.next().unwrap())
+            },
+            || {
+                retries += 1;
+                true
+            }
+        )
+        .is_ok());
+        assert_eq!(reads, 2);
+        assert_eq!(retries, 1);
+    }
+
+    #[test]
+    fn activating_service_times_out_without_sleeping() {
+        let activating = GOOD.replace("ActiveState=active", "ActiveState=activating");
+        let mut reads = 0;
+        let mut retries = 0;
+        let error = verify_service(
             PATH,
-            123
-        ));
-        assert!(!valid_service(GOOD, "/another.service", 123));
+            123,
+            || {
+                reads += 1;
+                Ok(activating.clone())
+            },
+            || {
+                retries += 1;
+                retries < 3
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(reads, 3);
+        assert_eq!(retries, 3);
+    }
+
+    #[test]
+    fn invalid_activating_service_is_rejected_without_retry() {
+        let invalid = GOOD
+            .replace("ActiveState=active", "ActiveState=activating")
+            .replace("KillMode=control-group", "KillMode=process");
+        let mut reads = 0;
+        let mut retries = 0;
+        let error = verify_service(
+            PATH,
+            123,
+            || {
+                reads += 1;
+                Ok(invalid.clone())
+            },
+            || {
+                retries += 1;
+                true
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(reads, 1);
+        assert_eq!(retries, 0);
     }
 
     #[test]
@@ -258,10 +388,6 @@ mod host_tests {
     }
 
     fn launcher(root: &Path, mode: &str) {
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while require_user_service().is_err() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
         require_user_service().unwrap();
         assert_eq!(
             std::env::var("PATH").unwrap(),

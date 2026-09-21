@@ -36,6 +36,10 @@ service**. The guard verifies the kernel cgroup membership against the live
 service's `ControlGroup`, `MainPID`, `ExitType=main`,
 `RemainAfterExit=no`, `KillMode=control-group`, and `KillSignal=SIGKILL`
 properties. It does not trust an environment flag.
+An otherwise exact unit may remain in `ActiveState=activating` briefly after
+exec; production verification retries only that state within one three-second
+deadline. Missing, duplicate, or mismatched security properties fail
+immediately.
 The lookup uses the owned socket at `/run/user/<effective-uid>/bus`, with a
 private 0700 runtime directory and non-root matching real/effective UID,
 rather than a caller-supplied D-Bus address.
