@@ -332,8 +332,10 @@ def _gateway_coverage(
     }[provider]
     request_ids: set[str] = set()
     evidence_ids: set[str] = set()
+    terminal_ids: set[str] = set()
+    usage_ids: set[str] = set()
     rate_identities: set[tuple[str, int, str]] = set()
-    rate_currencies: dict[tuple[str, int, str], str] = {}
+    rate_versions: dict[tuple[str, int], tuple[str, str]] = {}
     priced = unpriced = different_currency = failed = rate_limited = unknown = 0
     try:
         with exact_context():
@@ -347,19 +349,29 @@ def _gateway_coverage(
                     or not start <= timestamp < end
                     or event["request_attempt_id"] in request_ids
                     or event["evidence_event_id"] in evidence_ids
+                    or event["terminal_attempt_event_id"] in terminal_ids
+                    or (
+                        event["usage_event_id"] is not None
+                        and event["usage_event_id"] in usage_ids
+                    )
                 ):
                     _invalid()
                 request_ids.add(event["request_attempt_id"])
                 evidence_ids.add(event["evidence_event_id"])
+                terminal_ids.add(event["terminal_attempt_event_id"])
+                if event["usage_event_id"] is not None:
+                    usage_ids.add(event["usage_event_id"])
                 rate_identity = (
                     event["configured_rate_card_id"],
                     event["configured_rate_card_version"],
                     event["configured_rate_card_digest"],
                 )
                 rate_currency = event["configured_estimate_currency"]
-                if rate_identity in rate_currencies and rate_currencies[rate_identity] != rate_currency:
+                rate_version = rate_identity[:2]
+                rate_value = (rate_identity[2], rate_currency)
+                if rate_version in rate_versions and rate_versions[rate_version] != rate_value:
                     _invalid()
-                rate_currencies[rate_identity] = rate_currency
+                rate_versions[rate_version] = rate_value
                 rate_identities.add(rate_identity)
                 state = event["terminal_state"]
                 failed += state == "failed"

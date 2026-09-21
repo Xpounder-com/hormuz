@@ -14,6 +14,7 @@ from hormuz.finance_attempts import (
     build_finance_attempt_event,
     unavailable_estimate,
     unknown_native_observation,
+    validate_finance_attempt_event,
 )
 from hormuz.finance_collection_repository import AsOfCollectionView, SelectedCollectionSnapshot
 from hormuz.finance_reconciliation_coverage import (
@@ -231,6 +232,21 @@ class FinanceReconciliationCoverageTests(unittest.TestCase):
     def test_same_immutable_rate_card_identity_cannot_change_currency(self):
         with self.assertRaises(FinanceCoveragePreviewError):
             preview(events=(event("1", currency="USD"), event("2", currency="EUR")))
+
+    def test_same_rate_card_version_with_conflicting_digest_fails_closed(self):
+        first = event("1")
+        second = {**event("2"), "configured_rate_card_digest": "f" * 64}
+        validate_finance_attempt_event(second)
+        with self.assertRaises(FinanceCoveragePreviewError):
+            preview(events=(first, second))
+
+    def test_reused_terminal_or_usage_event_identity_fails_closed(self):
+        first = event("1")
+        for field in ("terminal_attempt_event_id", "usage_event_id"):
+            second = {**event("2"), field: first[field]}
+            validate_finance_attempt_event(second)
+            with self.subTest(field=field), self.assertRaises(FinanceCoveragePreviewError):
+                preview(events=(first, second))
 
     def test_cross_tenant_provider_and_window_events_fail_closed(self):
         cases = (
