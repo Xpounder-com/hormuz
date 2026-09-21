@@ -16,7 +16,7 @@ dimension individually. A null quantity or zero denominator is inconclusive.
 The sample threshold counts distinct, previously source-qualified opaque
 work-item IDs across strata, so
 retries for one work item cannot inflate evidence. Every declared stratum must
-be present and pass all eight mandatory guardrails; even one small failing
+be nonempty and pass all eight mandatory guardrails; even one small failing
 stratum blocks eligibility. A rule must be versioned and declared before the
 window, and the observation must cover the closed window and meet the owner's
 freshness bound. Unknown actual model version, association rule, policy, or

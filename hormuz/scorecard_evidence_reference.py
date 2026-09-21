@@ -336,6 +336,8 @@ def qualify_evidence(
     work_items: set[str] = set()
     for stratum in cohort.strata:
         unique_here = set(stratum.work_item_ids)
+        if not unique_here:
+            reasons.add("empty_stratum")
         if work_items.intersection(unique_here):
             raise ScorecardEvidenceError()
         work_items.update(unique_here)

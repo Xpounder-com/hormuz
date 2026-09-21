@@ -160,6 +160,16 @@ class ScorecardEvidenceTests(unittest.TestCase):
         self.assertEqual(result.status, "inconclusive")
         self.assertIn("strata_mismatch", result.reason_codes)
 
+    def test_empty_declared_stratum_cannot_qualify_from_other_strata(self):
+        chosen = replace(cohort(), strata=(
+            StratumEvidence("stratum-a", ("work-a", "work-b", "work-c"), guards()),
+            StratumEvidence("stratum-b", (), guards()),
+        ))
+        result = qualify_evidence(context(), policy(), chosen)
+        self.assertEqual(result.distinct_work_item_count, 3)
+        self.assertEqual(result.status, "inconclusive")
+        self.assertIn("empty_stratum", result.reason_codes)
+
     def test_unknown_actual_version_or_provenance_is_inconclusive(self):
         for changed, reason in (
             ({"actual_model_version": None}, "unknown_actual_model"),
