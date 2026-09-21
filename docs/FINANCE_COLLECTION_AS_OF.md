@@ -26,3 +26,9 @@ SQLite 12/PostgreSQL 17 schemas and PostgreSQL 199-permission boundary are
 unchanged. PostgreSQL uses its existing restricted `SELECT` grants and tenant
 RLS. No migration, provider call, credential, CLI/HTTP route, release or #214
 final-candidate acceptance is involved.
+
+The historical reconciliation scope probe keeps its seven original predecessor
+hashes and fails on this changed repository module by default. CI uses its
+explicit `--current-runtime` mode to recheck the still-unbound account gap and
+the unchanged latest-read signature without claiming the old seven-file source
+binding for this checkout.
