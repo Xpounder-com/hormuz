@@ -282,38 +282,96 @@ public static class PreviewAcceptance
         report.checks.Add("sendinput_escape_enter_hide_and_reopen_focus");
     }
 
-    // Query numeric process topology only. Do not collect command lines, paths or owners.
-    // Each observation includes all currently discoverable descendants of this owned PID.
+    sealed class ProcessEntry
+    {
+        public int parent;
+        public string created;
+    }
+
+    static DateTime StartedUtc(int pid, ProcessEntry entry)
+    {
+        Require(!string.IsNullOrWhiteSpace(entry.created) && entry.created.IndexOf('*') < 0,
+            "Process creation time is unavailable for PID " + pid + ".");
+        try
+        {
+            DateTime started = ManagementDateTimeConverter.ToDateTime(entry.created).ToUniversalTime();
+            Require(started > DateTime.MinValue, "Process creation time is invalid for PID " + pid + ".");
+            return started;
+        }
+        catch (Exception)
+        {
+            throw new InvalidOperationException("Process creation time is invalid for PID " + pid + ".");
+        }
+    }
+
+    // Query numeric process topology and creation times only; never read paths or owners.
+    // A parent PID alone can name a different process after Windows reuses that PID.
     static int ProcessCount(int root)
     {
-        Dictionary<int, int> parents = new Dictionary<int, int>();
+        Dictionary<int, ProcessEntry> processes = new Dictionary<int, ProcessEntry>();
         using (ManagementObjectSearcher search = new ManagementObjectSearcher(
-            "SELECT ProcessId, ParentProcessId FROM Win32_Process"))
+            "SELECT ProcessId, ParentProcessId, CreationDate FROM Win32_Process"))
         using (ManagementObjectCollection rows = search.Get())
         {
             foreach (ManagementObject row in rows)
             {
                 using (row)
-                    parents[Convert.ToInt32(row["ProcessId"])] = Convert.ToInt32(row["ParentProcessId"]);
+                {
+                    Require(row["ProcessId"] != null && row["ParentProcessId"] != null,
+                        "Numeric process topology is unavailable.");
+                    int pid = Convert.ToInt32(row["ProcessId"]);
+                    int parent = Convert.ToInt32(row["ParentProcessId"]);
+                    Require(pid >= 0 && parent >= 0 && !processes.ContainsKey(pid),
+                        "Numeric process topology is invalid.");
+                    processes.Add(pid, new ProcessEntry {
+                        parent = parent,
+                        created = row["CreationDate"] as string
+                    });
+                }
             }
         }
-        Require(parents.ContainsKey(root), "Owned preview process disappeared.");
+        Require(processes.ContainsKey(root), "Owned preview process disappeared.");
         HashSet<int> found = new HashSet<int> { root };
+        Dictionary<int, DateTime> started = new Dictionary<int, DateTime>();
+        started.Add(root, StartedUtc(root, processes[root]));
         bool changed;
         do
         {
             changed = false;
-            foreach (KeyValuePair<int, int> row in parents)
-                if (found.Contains(row.Value) && found.Add(row.Key)) changed = true;
+            foreach (KeyValuePair<int, ProcessEntry> row in processes)
+            {
+                if (!found.Contains(row.Value.parent) || found.Contains(row.Key)) continue;
+                DateTime childStarted = StartedUtc(row.Key, row.Value);
+                if (childStarted < started[row.Value.parent]) continue;
+                found.Add(row.Key);
+                started.Add(row.Key, childStarted);
+                changed = true;
+            }
         } while (changed);
+        if (found.Count != 1)
+        {
+            List<int> descendants = new List<int>(found);
+            descendants.Remove(root);
+            descendants.Sort();
+            List<string> details = new List<string>();
+            for (int index = 0; index < descendants.Count && index < 8; index++)
+            {
+                int pid = descendants[index];
+                int parent = processes[pid].parent;
+                long ageMilliseconds = (started[pid] - started[parent]).Ticks / TimeSpan.TicksPerMillisecond;
+                details.Add("pid=" + pid + ",parent_pid=" + parent + ",age_from_parent_ms=" + ageMilliseconds);
+            }
+            throw new InvalidOperationException("Synthetic preview unexpectedly owns helper processes. " +
+                "root_pid=" + root + " descendant_count=" + descendants.Count +
+                " descendants=" + string.Join(";", details.ToArray()));
+        }
         return found.Count;
     }
 
     static PreviewSample Sample(Process process, string scenario, int repetition, Stopwatch clock)
     {
         int count = ProcessCount(process.Id);
-        // This preview explicitly has no helpers. Do not report root-only metrics as a tree total.
-        Require(count == 1, "Synthetic preview unexpectedly owns helper processes.");
+        // ProcessCount rejects helpers instead of reporting root-only metrics as a tree total.
         process.Refresh();
         uint gdi = GetGuiResources(process.Handle, 0);
         uint user = GetGuiResources(process.Handle, 1);

@@ -152,8 +152,11 @@ intervals, plus settled samples before and after the interaction cycles. These
 are short CI observations, not the controlled five-minute baseline in #332.
 Actual elapsed times and cumulative CPU times are preserved in every sample.
 WMI process topology must show exactly the owned preview and no descendants at
-each observation; an observed helper causes failure instead of a root-only
-memory claim. Processes that start and exit between observations may be missed.
+each observation. Creation times disqualify stale parent-PID links after PID
+reuse; missing timestamps for the preview or a candidate child fail the check.
+An observed helper causes failure with numeric PID/parent/age diagnostics rather
+than a root-only memory claim. Processes that start and exit between observations
+may be missed.
 
 The JSON records working set, private bytes, CPU time, process/handle counts,
 GDI/USER objects, observer CPU time, OS/architecture, and source/executable hashes.
