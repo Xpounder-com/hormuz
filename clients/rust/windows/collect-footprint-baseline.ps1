@@ -186,7 +186,7 @@ $metadata = [ordered]@{
     scenario = $Scenario
     run_count = $runs.Count
     sample_count_per_run = [int]($DurationSeconds * 1000 / $IntervalMilliseconds) + 1
-    measurement_tools = "UIAutomationClient, System.Diagnostics.Process, numeric Win32_Process PID/parent topology"
+    measurement_tools = "UIAutomationClient, System.Diagnostics.Process, numeric Win32_Process PID/parent/creation-time topology"
     runs = @($runs.ToArray())
     limitations = @(
         "Three independent synthetic preview launches on one hosted Windows runner for this scenario; other scenarios use separate runners.",

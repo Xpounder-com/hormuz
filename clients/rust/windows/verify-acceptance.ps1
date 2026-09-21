@@ -110,7 +110,7 @@ try {
         os = [Environment]::OSVersion.VersionString
         architecture = $env:PROCESSOR_ARCHITECTURE
         logical_processors = [Environment]::ProcessorCount
-        measurement_tools = "UIAutomationClient, Win32 SendInput, System.Diagnostics.Process, Win32 GetGuiResources, numeric Win32_Process topology"
+        measurement_tools = "UIAutomationClient, Win32 SendInput, System.Diagnostics.Process, Win32 GetGuiResources, numeric Win32_Process PID/parent/creation-time topology"
         evidence = $result
         limitations = @(
             "Short CI observations; no numerical regression budget or physical-footprint claim.",
