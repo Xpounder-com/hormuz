@@ -13,8 +13,9 @@ use hormuz_client_session::{Clock, SessionTransport};
 use hormuz_client_session::{NativeTransport, Operation, SessionController, SystemClock};
 #[cfg(any(target_os = "macos", windows))]
 use serde::Deserialize;
-#[cfg(any(target_os = "macos", windows))]
 use std::ffi::OsStr;
+#[cfg(target_os = "linux")]
+use std::ffi::OsString;
 #[cfg(target_os = "linux")]
 use std::path::Path;
 use std::path::PathBuf;
@@ -98,6 +99,10 @@ fn execute() -> Result<i32, RelayError> {
 
 #[cfg(target_os = "linux")]
 fn execute() -> Result<i32, RelayError> {
+    if let Some(token) = linux_stop_token_from(std::env::args_os().skip(1)) {
+        hormuz_client_relay::stop_linux_user_service(&token?)?;
+        return Ok(0);
+    }
     let (key, root) = arguments()?;
     execute_linux_with(
         &key,
@@ -115,6 +120,32 @@ fn execute() -> Result<i32, RelayError> {
         },
         run_client,
     )
+}
+
+/// Parse the Linux control operation before any private-state or custody work.
+/// The service layer validates the exact token and canonical same-UID bus.
+#[cfg(target_os = "linux")]
+fn linux_stop_token_from<I>(arguments: I) -> Option<Result<String, RelayError>>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let mut arguments = arguments.into_iter();
+    if arguments.next()?.as_os_str() != OsStr::new("stop") {
+        return None;
+    }
+    if arguments.next().as_deref() != Some(OsStr::new("--unit-token")) {
+        return Some(Err(RelayError::InvalidConfiguration));
+    }
+    let token = match arguments.next() {
+        Some(token) => token
+            .into_string()
+            .map_err(|_| RelayError::InvalidConfiguration),
+        None => Err(RelayError::InvalidConfiguration),
+    };
+    if arguments.next().is_some() {
+        return Some(Err(RelayError::InvalidConfiguration));
+    }
+    Some(token)
 }
 
 /// The Linux preflight runs before opening the private directory or touching
@@ -395,6 +426,24 @@ mod linux_tests {
     const KEY: &str = "12345678-1234-1234-1234-123456789abc";
     const NOW: f64 = 1_780_000_000.0;
     const FOUNDATION_EPOCH: f64 = 978_307_200.0;
+
+    #[test]
+    fn stop_command_is_exact_and_separate_from_launch_arguments() {
+        let parse = |parts: &[&str]| linux_stop_token_from(parts.iter().map(OsString::from));
+        assert_eq!(
+            parse(&["stop", "--unit-token", "test-42"]),
+            Some(Ok("test-42".to_owned()))
+        );
+        assert_eq!(parse(&["--profile", KEY]), None);
+        for parts in [
+            &["stop"][..],
+            &["stop", "--unit-token"],
+            &["stop", "--profile", KEY],
+            &["stop", "--unit-token", "test", "--state-directory", "/tmp"],
+        ] {
+            assert_eq!(parse(parts), Some(Err(RelayError::InvalidConfiguration)));
+        }
+    }
 
     #[derive(Clone)]
     struct FakeCoordinator {

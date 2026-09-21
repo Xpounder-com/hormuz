@@ -20,6 +20,16 @@ mod relay;
 
 #[cfg(target_os = "linux")]
 pub use launch::require_linux_user_service;
+#[cfg(target_os = "linux")]
+pub fn stop_linux_user_service(token: &str) -> Result<(), RelayError> {
+    linux_service::stop_user_service(token).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::InvalidInput {
+            RelayError::InvalidConfiguration
+        } else {
+            RelayError::NativeServiceStopFailed
+        }
+    })
+}
 pub use launch::{discover_supported_client, run_client};
 pub use relay::{
     CredentialSource, LocalRelay, Optimization, OptimizerCancellation, RequestOptimizer,
@@ -37,6 +47,7 @@ pub enum RelayError {
     RelayUnavailable,
     ClientLaunchFailed,
     NativeSupervisionUnavailable,
+    NativeServiceStopFailed,
     ClientExitedUnsuccessfully,
 }
 impl fmt::Display for RelayError {
@@ -52,6 +63,7 @@ impl fmt::Display for RelayError {
             Self::NativeSupervisionUnavailable => {
                 "A verified on-demand user service is required before launching an AI client."
             }
+            Self::NativeServiceStopFailed => "The on-demand user service could not be stopped.",
             Self::ClientExitedUnsuccessfully => "The AI client exited unsuccessfully.",
         })
     }

@@ -12,8 +12,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const SERVICE_BUDGET: Duration = Duration::from_secs(3);
+const STOP_BUDGET: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_SHOW_BYTES: u64 = 4096;
+const MAX_UNIT_TOKEN_BYTES: usize = 128;
 
 pub(crate) fn require_user_service() -> io::Result<()> {
     let expires_at = Instant::now() + SERVICE_BUDGET;
@@ -94,6 +96,21 @@ fn service_unit(path: &str) -> Option<&str> {
     }
 }
 
+fn stop_unit_name(token: &str) -> io::Result<String> {
+    if token.is_empty()
+        || token.len() > MAX_UNIT_TOKEN_BYTES
+        || !token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid relay unit token",
+        ));
+    }
+    Ok(format!("hormuz-relay-{token}.service"))
+}
+
 fn user_runtime_directory(uid: u32) -> PathBuf {
     PathBuf::from(format!("/run/user/{uid}"))
 }
@@ -138,6 +155,41 @@ fn kill_and_reap(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
+fn wait_command<Now>(
+    child: &mut std::process::Child,
+    deadline: &mut Deadline<Now>,
+) -> io::Result<std::process::ExitStatus>
+where
+    Now: FnMut() -> Instant,
+{
+    loop {
+        if let Err(error) = deadline.check() {
+            kill_and_reap(child);
+            return Err(error);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                deadline.check()?;
+                return Ok(status);
+            }
+            Ok(None) => {
+                let remaining = match deadline.remaining() {
+                    Ok(remaining) => remaining,
+                    Err(error) => {
+                        kill_and_reap(child);
+                        return Err(error);
+                    }
+                };
+                thread::sleep(POLL_INTERVAL.min(remaining));
+            }
+            Err(error) => {
+                kill_and_reap(child);
+                return Err(error);
+            }
+        }
+    }
+}
+
 fn read_show_output<Now, Output>(
     stdout: &mut Output,
     deadline: &mut Deadline<Now>,
@@ -173,7 +225,7 @@ where
             "--no-pager",
             "show",
             unit,
-            "--property=ControlGroup,MainPID,ExitType,RemainAfterExit,Restart,KillMode,KillSignal,Transient,ActiveState",
+            "--property=Id,LoadState,ControlGroup,MainPID,ExitType,RemainAfterExit,Restart,KillMode,KillSignal,Transient,ActiveState",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout.try_clone()?))
@@ -184,35 +236,7 @@ where
         kill_and_reap(&mut child);
         return Err(error);
     }
-    let status = loop {
-        if let Err(error) = deadline.check() {
-            kill_and_reap(&mut child);
-            return Err(error);
-        }
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if let Err(error) = deadline.check() {
-                    kill_and_reap(&mut child);
-                    return Err(error);
-                }
-                break status;
-            }
-            Ok(None) => {
-                let remaining = match deadline.remaining() {
-                    Ok(remaining) => remaining,
-                    Err(error) => {
-                        kill_and_reap(&mut child);
-                        return Err(error);
-                    }
-                };
-                thread::sleep(POLL_INTERVAL.min(remaining));
-            }
-            Err(error) => {
-                kill_and_reap(&mut child);
-                return Err(error);
-            }
-        }
-    };
+    let status = wait_command(&mut child, deadline)?;
     if !status.success() {
         return Err(unavailable());
     }
@@ -285,6 +309,128 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StopState {
+    Running,
+    Stopping,
+    Stopped,
+    Invalid,
+}
+
+fn stop_state(output: &str, unit: &str) -> StopState {
+    if property(output, "Id") != Some(unit) {
+        return StopState::Invalid;
+    }
+    let load = property(output, "LoadState");
+    let active = property(output, "ActiveState");
+    let pid = property(output, "MainPID").and_then(|value| value.parse::<u32>().ok());
+    let group = property(output, "ControlGroup");
+    if load == Some("not-found")
+        && active == Some("inactive")
+        && pid == Some(0)
+        && group == Some("")
+    {
+        return StopState::Stopped;
+    }
+    let exact = load == Some("loaded")
+        && property(output, "ExitType") == Some("main")
+        && property(output, "RemainAfterExit") == Some("no")
+        && property(output, "Restart") == Some("no")
+        && property(output, "KillMode") == Some("control-group")
+        && matches!(property(output, "KillSignal"), Some("9" | "SIGKILL"))
+        && property(output, "Transient") == Some("yes");
+    if !exact {
+        return StopState::Invalid;
+    }
+    if active == Some("inactive") && pid == Some(0) && group == Some("") {
+        return StopState::Stopped;
+    }
+    let owned_group =
+        group.is_some_and(|path| path.starts_with('/') && path.ends_with(&format!("/{unit}")));
+    if !owned_group {
+        return StopState::Invalid;
+    }
+    match active {
+        Some("active" | "activating") if pid.is_some_and(|value| value > 0) => StopState::Running,
+        Some("deactivating") => StopState::Stopping,
+        _ => StopState::Invalid,
+    }
+}
+
+fn issue_stop<Now>(unit: &str, deadline: &mut Deadline<Now>) -> io::Result<()>
+where
+    Now: FnMut() -> Instant,
+{
+    deadline.check()?;
+    let mut command = systemctl_command()?;
+    command
+        .args(["--user", "--no-block", "stop", unit])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    deadline.check()?;
+    let mut child = command.spawn()?;
+    if let Err(error) = deadline.check() {
+        kill_and_reap(&mut child);
+        return Err(error);
+    }
+    if !wait_command(&mut child, deadline)?.success() {
+        return Err(unavailable());
+    }
+    deadline.check()
+}
+
+fn stop_user_service_with<Now, Show, Stop, Wait>(
+    unit: &str,
+    deadline: &mut Deadline<Now>,
+    mut show: Show,
+    mut stop: Stop,
+    mut wait: Wait,
+) -> io::Result<()>
+where
+    Now: FnMut() -> Instant,
+    Show: FnMut(&mut Deadline<Now>) -> io::Result<String>,
+    Stop: FnMut(&mut Deadline<Now>) -> io::Result<()>,
+    Wait: FnMut(Duration),
+{
+    deadline.check()?;
+    let initial = stop_state(&show(deadline)?, unit);
+    deadline.check()?;
+    match initial {
+        StopState::Stopped => return Ok(()),
+        StopState::Running | StopState::Stopping => stop(deadline)?,
+        StopState::Invalid => return Err(unavailable()),
+    }
+    loop {
+        deadline.check()?;
+        match stop_state(&show(deadline)?, unit) {
+            StopState::Stopped => {
+                deadline.check()?;
+                return Ok(());
+            }
+            StopState::Running | StopState::Stopping => {
+                let remaining = deadline.remaining()?;
+                wait(POLL_INTERVAL.min(remaining));
+            }
+            StopState::Invalid => return Err(unavailable()),
+        }
+    }
+}
+
+/// Stop only a validated Hormuz transient service through the canonical user
+/// bus. This control operation does not open private state or Secret Service.
+pub(crate) fn stop_user_service(token: &str) -> io::Result<()> {
+    let unit = stop_unit_name(token)?;
+    let mut deadline = Deadline::new(Instant::now() + STOP_BUDGET, Instant::now);
+    stop_user_service_with(
+        &unit,
+        &mut deadline,
+        |deadline| show_unit(&unit, deadline),
+        |deadline| issue_stop(&unit, deadline),
+        thread::sleep,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +440,130 @@ mod tests {
     const GOOD: &str = "ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service\nMainPID=123\nExitType=main\nRemainAfterExit=no\nRestart=no\nKillMode=control-group\nKillSignal=9\nTransient=yes\nActiveState=active\n";
     const PATH: &str =
         "/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service";
+    const UNIT: &str = "hormuz-relay-test.service";
+    const GOOD_STOP: &str = "Id=hormuz-relay-test.service\nLoadState=loaded\nControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service\nMainPID=123\nExitType=main\nRemainAfterExit=no\nRestart=no\nKillMode=control-group\nKillSignal=9\nTransient=yes\nActiveState=active\n";
+    const COLLECTED: &str = "Id=hormuz-relay-test.service\nLoadState=not-found\nControlGroup=\nMainPID=0\nActiveState=inactive\n";
+
+    #[test]
+    fn stop_accepts_only_an_exact_bounded_unit_token() {
+        assert_eq!(
+            stop_unit_name("test_42-A").unwrap(),
+            "hormuz-relay-test_42-A.service"
+        );
+        for token in ["", "other.service", "../other", "a/b", "a*", "a b", "é"] {
+            assert_eq!(
+                stop_unit_name(token).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+        assert_eq!(
+            stop_unit_name(&"a".repeat(MAX_UNIT_TOKEN_BYTES + 1))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn stop_requires_exact_transient_tree_kill_identity() {
+        assert_eq!(stop_state(GOOD_STOP, UNIT), StopState::Running);
+        assert_eq!(stop_state(COLLECTED, UNIT), StopState::Stopped);
+        let inactive = GOOD_STOP
+            .replace(&format!("ControlGroup={PATH}"), "ControlGroup=")
+            .replace("MainPID=123", "MainPID=0")
+            .replace("ActiveState=active", "ActiveState=inactive");
+        assert_eq!(stop_state(&inactive, UNIT), StopState::Stopped);
+        for (old, new) in [
+            ("Id=hormuz-relay-test.service", "Id=other.service"),
+            ("LoadState=loaded", "LoadState=masked"),
+            ("MainPID=123", "MainPID=0"),
+            ("ExitType=main", "ExitType=cgroup"),
+            ("RemainAfterExit=no", "RemainAfterExit=yes"),
+            ("Restart=no", "Restart=always"),
+            ("KillMode=control-group", "KillMode=process"),
+            ("KillSignal=9", "KillSignal=15"),
+            ("Transient=yes", "Transient=no"),
+            ("ActiveState=active", "ActiveState=failed"),
+        ] {
+            assert_eq!(
+                stop_state(&GOOD_STOP.replace(old, new), UNIT),
+                StopState::Invalid
+            );
+        }
+        assert_eq!(
+            stop_state(&format!("{GOOD_STOP}KillMode=control-group\n"), UNIT),
+            StopState::Invalid
+        );
+        assert_eq!(
+            stop_state(&GOOD_STOP.replace(PATH, "/other.service"), UNIT),
+            StopState::Invalid
+        );
+    }
+
+    #[test]
+    fn stop_rechecks_the_exact_unit_until_collected() {
+        let mut outputs = [
+            GOOD_STOP.to_owned(),
+            GOOD_STOP.to_owned(),
+            COLLECTED.to_owned(),
+        ]
+        .into_iter();
+        let now = Instant::now();
+        let mut deadline = Deadline::new(now + STOP_BUDGET, || now);
+        let mut stops = 0;
+        let mut waits = 0;
+        stop_user_service_with(
+            UNIT,
+            &mut deadline,
+            |_| Ok(outputs.next().unwrap()),
+            |_| {
+                stops += 1;
+                Ok(())
+            },
+            |_| waits += 1,
+        )
+        .unwrap();
+        assert_eq!(stops, 1);
+        assert_eq!(waits, 1);
+    }
+
+    #[test]
+    fn stop_rejects_a_mismatch_without_signaling_and_times_out_after_a_signal() {
+        let now = Instant::now();
+        let mut deadline = Deadline::new(now + STOP_BUDGET, || now);
+        let mut stops = 0;
+        let error = stop_user_service_with(
+            UNIT,
+            &mut deadline,
+            |_| Ok(GOOD_STOP.replace("KillMode=control-group", "KillMode=process")),
+            |_| {
+                stops += 1;
+                Ok(())
+            },
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(stops, 0);
+
+        let now = Cell::new(Instant::now());
+        let expires_at = now.get() + Duration::from_millis(30);
+        let mut deadline = Deadline::new(expires_at, || now.get());
+        let mut stops = 0;
+        let error = stop_user_service_with(
+            UNIT,
+            &mut deadline,
+            |_| Ok(GOOD_STOP.to_owned()),
+            |_| {
+                stops += 1;
+                Ok(())
+            },
+            |_| now.set(expires_at),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(stops, 1);
+    }
 
     #[test]
     fn parses_only_a_unified_service_membership() {
@@ -660,7 +930,7 @@ mod host_tests {
         let session_path = format!("{}:/session/${{HOME}}/bin", root.join("bin").display());
         let mut command = Command::new(script);
         command
-            .arg(token)
+            .arg(&token)
             .arg("/usr/bin/env")
             .arg(format!("DBUS_SESSION_BUS_ADDRESS={spoofed_bus}"))
             .arg(format!("XDG_RUNTIME_DIR={}", root.display()))
@@ -710,12 +980,7 @@ mod host_tests {
         match mode {
             "normal" => fs::write(root.join("release"), b"").unwrap(),
             "cancel" => {
-                let status = systemctl_command()
-                    .unwrap()
-                    .args(["--user", "stop", &unit])
-                    .status()
-                    .unwrap();
-                assert!(status.success());
+                stop_user_service(&token).unwrap();
             }
             "abrupt" => {
                 let pid: i32 = fs::read_to_string(root.join("launcher-pid"))

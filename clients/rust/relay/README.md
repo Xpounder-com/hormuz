@@ -49,6 +49,17 @@ rather than a caller-supplied D-Bus address.
 On a host with a user manager, `run-in-user-service.sh` starts a single
 invocation with those properties. The caller chooses a unique token and owns
 `hormuz-relay-<token>.service`; an explicit quit/update must stop that unit.
+The Linux-only `hormuz-client-relay stop --unit-token <same-token>` command
+provides that exact-unit control path from outside the service. It validates
+the token and the canonical same-UID user bus, checks the live transient unit's
+identity and tree-kill properties, asks systemd to stop it, and waits within a
+five-second total deadline for inactive or collected state. It does not open
+private state, contact Secret Service, discover a client, or start a relay.
+Malformed tokens, an unavailable canonical bus, mismatched properties, and
+timeout fail closed; caller-supplied bus variables are ignored. Stopping the
+service sends its configured `SIGKILL` to the whole cgroup, so an already-sent
+POST can have an uncertain upstream outcome;
+the relay does not replay it. A panel close must not invoke this stop command.
 The wrapper selects a PTY for interactive input and pipes otherwise. It passes
 only the relay executable and its existing invocation arguments to systemd,
 disables systemd environment expansion for that already-formed argv, and copies
@@ -84,7 +95,8 @@ The Linux-only synthetic test runs normal-exit, explicit-stop and abrupt
 launcher-death cases with a detached listener when a real user systemd manager
 is reachable. It checks the new session, cgroup membership, listener closure,
 and empty/removed cgroup while passing spoofed bus variables to the wrapper
-and launcher. On CI without that manager it reports a host-only
+and launcher. The explicit-stop case calls the same production stop control
+path as the terminal command. On CI without that manager it reports a host-only
 skip; ordinary Rust tests still check the fail-closed property parser. Run
 `cargo test -p hormuz-client-relay --locked linux_service` on an Ubuntu 24.04
 user session for host evidence. Linux binary tests inject a synthetic session,
@@ -108,6 +120,15 @@ explicit run without the marker fails. Installed-client traffic and desktop
 Secret Service behavior beyond this synthetic account,
 native-shell lifecycle wiring and clean-install proof remain open. Issue #341
 remains open; this source checkpoint does not qualify Linux support.
+
+A separate ignored `linux_stop_active_relay` host test needs only a disposable
+systemd user manager, not Secret Service. With
+`HORMUZ_RELAY_ISOLATED_USER_SERVICE_TEST=1`, it starts an Off relay and fake
+gateway in one transient unit, stops it while one synthetic upstream POST is
+waiting for a response, and checks upstream closure, one refused relay-listener
+connection, an empty/removed cgroup, and no second POST. This proves forceful
+source-lifetime cleanup for that fixture; it cannot establish the outcome of
+the already-sent POST or a native shell's quit/update integration.
 
 The relay admits the client's expected POST routes only. It checks Host,
 Origin, one local bearer/API-key credential, content length and a 25 MiB request

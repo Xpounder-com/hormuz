@@ -14,6 +14,10 @@ case "$unit_token" in
         echo 'relay unit token must use letters, digits, underscore, or hyphen' >&2
         exit 2 ;;
 esac
+if [ "${#unit_token}" -gt 128 ]; then
+    echo 'relay unit token is too long' >&2
+    exit 2
+fi
 case "$1" in
     /*) ;;
     *) echo 'relay executable must be absolute' >&2; exit 2 ;;
