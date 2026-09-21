@@ -16,29 +16,19 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_SHOW_BYTES: u64 = 4096;
 
 pub(crate) fn require_user_service() -> io::Result<()> {
+    let expires_at = Instant::now() + SERVICE_BUDGET;
+    let mut deadline = Deadline::new(expires_at, Instant::now);
+    deadline.check()?;
     let membership = std::fs::read_to_string("/proc/self/cgroup")?;
+    deadline.check()?;
     let path = unified_path(&membership).ok_or_else(unavailable)?;
     let unit = service_unit(path).ok_or_else(unavailable)?;
-    let deadline = Instant::now() + SERVICE_BUDGET;
     verify_service(
         path,
         std::process::id(),
-        || {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                Err(unavailable())
-            } else {
-                show_unit(unit, remaining)
-            }
-        },
-        || {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return false;
-            }
-            thread::sleep(POLL_INTERVAL.min(remaining));
-            Instant::now() < deadline
-        },
+        &mut deadline,
+        |deadline| show_unit(unit, deadline),
+        thread::sleep,
     )
 }
 
@@ -47,6 +37,40 @@ fn unavailable() -> io::Error {
         io::ErrorKind::PermissionDenied,
         "a verified on-demand user systemd service is required",
     )
+}
+
+fn timed_out() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        "systemd service verification timed out",
+    )
+}
+
+struct Deadline<Now> {
+    expires_at: Instant,
+    now: Now,
+}
+
+impl<Now> Deadline<Now>
+where
+    Now: FnMut() -> Instant,
+{
+    fn new(expires_at: Instant, now: Now) -> Self {
+        Self { expires_at, now }
+    }
+
+    fn check(&mut self) -> io::Result<()> {
+        self.remaining().map(|_| ())
+    }
+
+    fn remaining(&mut self) -> io::Result<Duration> {
+        let remaining = self.expires_at.saturating_duration_since((self.now)());
+        if remaining.is_zero() {
+            Err(timed_out())
+        } else {
+            Ok(remaining)
+        }
+    }
 }
 
 fn unified_path(membership: &str) -> Option<&str> {
@@ -109,15 +133,38 @@ fn systemctl_command() -> io::Result<Command> {
     Ok(command)
 }
 
-fn show_unit(unit: &str, budget: Duration) -> io::Result<String> {
+fn kill_and_reap(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn read_show_output<Now, Output>(
+    stdout: &mut Output,
+    deadline: &mut Deadline<Now>,
+) -> io::Result<String>
+where
+    Now: FnMut() -> Instant,
+    Output: Read + Seek,
+{
+    deadline.check()?;
+    stdout.seek(SeekFrom::Start(0))?;
+    let mut bytes = Vec::new();
+    stdout.take(MAX_SHOW_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_SHOW_BYTES as usize {
+        return Err(unavailable());
+    }
+    let output = String::from_utf8(bytes).map_err(|_| unavailable())?;
+    deadline.check()?;
+    Ok(output)
+}
+
+fn show_unit<Now>(unit: &str, deadline: &mut Deadline<Now>) -> io::Result<String>
+where
+    Now: FnMut() -> Instant,
+{
     // Captured output and time are bounded before any client version probe
     // or relay listener starts.
-    if budget.is_zero() {
-        return Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "systemctl show timed out",
-        ));
-    }
+    deadline.check()?;
     let mut stdout = tempfile::tempfile()?;
     let mut command = systemctl_command()?;
     command
@@ -131,23 +178,37 @@ fn show_unit(unit: &str, budget: Duration) -> io::Result<String> {
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout.try_clone()?))
         .stderr(Stdio::null());
+    deadline.check()?;
     let mut child = command.spawn()?;
-    let deadline = Instant::now() + budget;
+    if let Err(error) = deadline.check() {
+        kill_and_reap(&mut child);
+        return Err(error);
+    }
     let status = loop {
+        if let Err(error) = deadline.check() {
+            kill_and_reap(&mut child);
+            return Err(error);
+        }
         match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "systemctl show timed out",
-                ));
+            Ok(Some(status)) => {
+                if let Err(error) = deadline.check() {
+                    kill_and_reap(&mut child);
+                    return Err(error);
+                }
+                break status;
             }
-            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            Ok(None) => {
+                let remaining = match deadline.remaining() {
+                    Ok(remaining) => remaining,
+                    Err(error) => {
+                        kill_and_reap(&mut child);
+                        return Err(error);
+                    }
+                };
+                thread::sleep(POLL_INTERVAL.min(remaining));
+            }
             Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_and_reap(&mut child);
                 return Err(error);
             }
         }
@@ -155,13 +216,7 @@ fn show_unit(unit: &str, budget: Duration) -> io::Result<String> {
     if !status.success() {
         return Err(unavailable());
     }
-    stdout.seek(SeekFrom::Start(0))?;
-    let mut bytes = Vec::new();
-    stdout.take(MAX_SHOW_BYTES + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_SHOW_BYTES as usize {
-        return Err(unavailable());
-    }
-    String::from_utf8(bytes).map_err(|_| unavailable())
+    read_show_output(&mut stdout, deadline)
 }
 
 fn property<'a>(output: &'a str, name: &str) -> Option<&'a str> {
@@ -198,21 +253,33 @@ fn service_state(output: &str, path: &str, pid: u32) -> ServiceState {
     }
 }
 
-fn verify_service<Show, Retry>(
+fn verify_service<Now, Show, Wait>(
     path: &str,
     pid: u32,
+    deadline: &mut Deadline<Now>,
     mut show: Show,
-    mut retry: Retry,
+    mut wait: Wait,
 ) -> io::Result<()>
 where
-    Show: FnMut() -> io::Result<String>,
-    Retry: FnMut() -> bool,
+    Now: FnMut() -> Instant,
+    Show: FnMut(&mut Deadline<Now>) -> io::Result<String>,
+    Wait: FnMut(Duration),
 {
     loop {
-        match service_state(&show()?, path, pid) {
-            ServiceState::Active => return Ok(()),
-            ServiceState::Activating if retry() => {}
-            ServiceState::Activating | ServiceState::Invalid => return Err(unavailable()),
+        deadline.check()?;
+        let output = show(deadline)?;
+        deadline.check()?;
+        match service_state(&output, path, pid) {
+            ServiceState::Active => {
+                deadline.check()?;
+                return Ok(());
+            }
+            ServiceState::Activating => {
+                let remaining = deadline.remaining()?;
+                wait(POLL_INTERVAL.min(remaining));
+                deadline.check()?;
+            }
+            ServiceState::Invalid => return Err(unavailable()),
         }
     }
 }
@@ -220,6 +287,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::io::Cursor;
 
     const GOOD: &str = "ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/hormuz-relay-test.service\nMainPID=123\nExitType=main\nRemainAfterExit=no\nKillMode=control-group\nKillSignal=9\nTransient=yes\nActiveState=active\n";
     const PATH: &str =
@@ -272,16 +341,18 @@ mod tests {
         let mut outputs = [activating, GOOD.to_owned()].into_iter();
         let mut reads = 0;
         let mut retries = 0;
+        let now = Instant::now();
+        let mut deadline = Deadline::new(now + SERVICE_BUDGET, || now);
         assert!(verify_service(
             PATH,
             123,
-            || {
+            &mut deadline,
+            |_| {
                 reads += 1;
                 Ok(outputs.next().unwrap())
             },
-            || {
+            |_| {
                 retries += 1;
-                true
             }
         )
         .is_ok());
@@ -294,20 +365,24 @@ mod tests {
         let activating = GOOD.replace("ActiveState=active", "ActiveState=activating");
         let mut reads = 0;
         let mut retries = 0;
+        let now = Cell::new(Instant::now());
+        let expires_at = now.get() + Duration::from_millis(30);
+        let mut deadline = Deadline::new(expires_at, || now.get());
         let error = verify_service(
             PATH,
             123,
-            || {
+            &mut deadline,
+            |_| {
                 reads += 1;
                 Ok(activating.clone())
             },
-            || {
+            |duration| {
                 retries += 1;
-                retries < 3
+                now.set(now.get() + duration);
             },
         )
         .unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert_eq!(reads, 3);
         assert_eq!(retries, 3);
     }
@@ -319,22 +394,59 @@ mod tests {
             .replace("KillMode=control-group", "KillMode=process");
         let mut reads = 0;
         let mut retries = 0;
+        let now = Instant::now();
+        let mut deadline = Deadline::new(now + SERVICE_BUDGET, || now);
         let error = verify_service(
             PATH,
             123,
-            || {
+            &mut deadline,
+            |_| {
                 reads += 1;
                 Ok(invalid.clone())
             },
-            || {
+            |_| {
                 retries += 1;
-                true
             },
         )
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(reads, 1);
         assert_eq!(retries, 0);
+    }
+
+    #[test]
+    fn active_service_is_rejected_if_property_validation_reaches_the_deadline() {
+        let now = Instant::now();
+        let expires_at = now + SERVICE_BUDGET;
+        let mut samples = [now, now, expires_at].into_iter();
+        let mut deadline = Deadline::new(expires_at, || samples.next().unwrap_or(expires_at));
+        let mut reads = 0;
+        let mut retries = 0;
+        let error = verify_service(
+            PATH,
+            123,
+            &mut deadline,
+            |_| {
+                reads += 1;
+                Ok(GOOD.to_owned())
+            },
+            |_| retries += 1,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(reads, 1);
+        assert_eq!(retries, 0);
+    }
+
+    #[test]
+    fn parsed_show_output_is_rejected_if_it_reaches_the_deadline() {
+        let now = Instant::now();
+        let expires_at = now + SERVICE_BUDGET;
+        let mut samples = [now, expires_at].into_iter();
+        let mut deadline = Deadline::new(expires_at, || samples.next().unwrap_or(expires_at));
+        let mut output = Cursor::new(GOOD.as_bytes());
+        let error = read_show_output(&mut output, &mut deadline).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     }
 
     #[test]

@@ -38,7 +38,8 @@ service's `ControlGroup`, `MainPID`, `ExitType=main`,
 properties. It does not trust an environment flag.
 An otherwise exact unit may remain in `ActiveState=activating` briefly after
 exec; production verification retries only that state within one three-second
-deadline. Missing, duplicate, or mismatched security properties fail
+deadline shared by process setup, polling, bounded output parsing, and final
+acceptance. Missing, duplicate, or mismatched security properties fail
 immediately.
 The lookup uses the owned socket at `/run/user/<effective-uid>/bus`, with a
 private 0700 runtime directory and non-root matching real/effective UID,
