@@ -30,6 +30,14 @@ or local source paths, and it has no candidate child mode. `validate`,
 `hormuz/compaction.py` and `hormuz/compaction_formats.py` source bytes from
 that same checkout, bypassing package exports and bytecode caches. The CLI is
 for a trusted maintainer checkout and does not confine adversarial code.
+It opens each source once as a regular file, checks file and path identity
+before and after a read capped at 1 MiB, and compiles those bytes. A changed source
+is rejected; this does not promise containment against a hostile process
+rapidly replacing ancestor directories.
+Invoke it with an isolated interpreter, for example
+`python3 -I -S benchmarks/code_optimizer/compaction.py --root . --action validate`.
+Without both flags it exits before non-built-in imports, so adjacent Python
+source or legacy bytecode cannot shadow its standard-library imports.
 Its JSON report identifies the local source path, and profile output may name
 source files. Keep raw local reports in the trusted workspace; publish only
 content-free counts and digests.

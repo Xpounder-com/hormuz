@@ -6,6 +6,11 @@ copy the pure fixture functions but owns candidate execution and containment.
 
 from __future__ import annotations
 
+import sys
+
+if __name__ == "__main__" and not (sys.flags.isolated and sys.flags.no_site):
+    raise SystemExit("benchmark_requires_isolated_python")
+
 import argparse
 import cProfile
 import hashlib
@@ -14,8 +19,9 @@ import importlib.util
 import itertools
 import json
 import math
+import os
 import pstats
-import sys
+import stat
 import time
 from pathlib import Path
 from types import CodeType, ModuleType
@@ -27,6 +33,7 @@ except ImportError:  # Windows has no resource module.
 
 
 _IMPORT_SEQUENCE = itertools.count()
+_MAX_SOURCE_BYTES = 1_048_576
 
 
 def cases() -> dict[str, tuple[str, str]]:
@@ -80,13 +87,13 @@ def heldout_cases() -> dict[str, tuple[str, str]]:
     return {
         "framed_paths": (
             "unrelated header\n" + "\n".join(
-                f"src/δelta/part_{index}.py" for index in range(1, 33)
+                f"src/δelta/part_{(index * 7) % 23:02d}.py" for index in range(80)
             ) + "\nunrelated footer\n", "path_list",
         ),
         "crlf_paths": ("src/a.py\r\nsrc/b.py\r\n", "path_list"),
         "malformed_envelope": ('{"format":"hormuz-path-list-v1","suffixes":[]}', "path_list"),
         "lines_mixed": (
-            "OK\n" * 80 + "ERROR permission denied\n" + "OK\n" * 40,
+            "OK\n" * 320 + "ERROR permission denied\n" + "OK\n" * 40,
             "line_runs",
         ),
         "search_mixed": (
@@ -94,15 +101,16 @@ def heldout_cases() -> dict[str, tuple[str, str]]:
         ),
         "search_framed": (
             "Output:\n" + "".join(
-                f"src/request.py:{index}:value: {index}\n"
+                f"src/request.py:{index:03d}:value: {index}\n"
                 for index in range(1, 140)
             ) + "Notice: results complete",
             "search_lines",
         ),
         "json_table": (
             json.dumps(
-                [{"record_id": index, "status": "synthetic", "region": "local"}
-                 for index in range(24)],
+                [{"record_id": index, "value": "保留原文", "active": index % 2 == 0,
+                  "nothing": None} for index in range(80)],
+                ensure_ascii=False,
                 separators=(",", ":"),
             ),
             "json_table",
@@ -152,6 +160,64 @@ def _checked_local_root(root: Path) -> Path:
     return resolved
 
 
+def _source_signature(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev, info.st_ino, info.st_mode, info.st_size,
+        info.st_mtime_ns, info.st_ctime_ns,
+    )
+
+
+def _read_local_source(source: Path, root: Path, initial: os.stat_result) -> bytes:
+    """Read one regular-file descriptor and reject observable path changes."""
+    flags = os.O_RDONLY
+    for optional in ("O_CLOEXEC", "O_NOFOLLOW", "O_NONBLOCK", "O_BINARY"):
+        flags |= getattr(os, optional, 0)
+    try:
+        descriptor = os.open(source, flags)
+    except OSError as error:
+        raise RuntimeError("benchmark_source_changed") from error
+
+    def verify_path(opened: os.stat_result) -> None:
+        component = root
+        for part in source.relative_to(root).parts:
+            component = component / part
+            if _path_is_alias(component):
+                raise RuntimeError("benchmark_source_changed")
+        try:
+            canonical = source.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise RuntimeError("benchmark_source_changed") from error
+        if canonical != source:
+            raise RuntimeError("benchmark_source_changed")
+        on_path = os.stat(source, follow_symlinks=False)
+        if not stat.S_ISREG(on_path.st_mode) or _source_signature(on_path) != _source_signature(opened):
+            raise RuntimeError("benchmark_source_changed")
+
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or _source_signature(opened) != _source_signature(initial):
+            raise RuntimeError("benchmark_source_changed")
+        verify_path(opened)
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            chunk = os.read(descriptor, min(65_536, _MAX_SOURCE_BYTES + 1 - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > _MAX_SOURCE_BYTES:
+                raise RuntimeError("benchmark_source_too_large")
+        if _source_signature(os.fstat(descriptor)) != _source_signature(opened):
+            raise RuntimeError("benchmark_source_changed")
+        verify_path(opened)
+        return b"".join(chunks)
+    except OSError as error:
+        raise RuntimeError("benchmark_source_changed") from error
+    finally:
+        os.close(descriptor)
+
+
 def _prepare_local_source(package_name: str, name: str) -> tuple[ModuleType, CodeType, str]:
     """Compile the checkout's exact source bytes, ignoring package exports and pyc."""
     root = _own_root()
@@ -161,9 +227,16 @@ def _prepare_local_source(package_name: str, name: str) -> tuple[ModuleType, Cod
         component = component / part
         if _path_is_alias(component):
             raise RuntimeError("benchmark_source_alias")
-    if not source.is_file():
+    try:
+        initial = os.stat(source, follow_symlinks=False)
+    except OSError as error:
+        raise RuntimeError("benchmark_source_not_regular_file") from error
+    if not stat.S_ISREG(initial.st_mode):
         raise RuntimeError("benchmark_source_not_regular_file")
-    expected = source.resolve(strict=True)
+    try:
+        expected = source.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise RuntimeError("benchmark_source_changed") from error
     if expected != source:
         raise RuntimeError("benchmark_source_alias")
     if not expected.is_relative_to(root):
@@ -175,7 +248,7 @@ def _prepare_local_source(package_name: str, name: str) -> tuple[ModuleType, Cod
     module = importlib.util.module_from_spec(spec)
     if getattr(module, "__file__", None) != source_name:
         raise RuntimeError("benchmark_imported_wrong_source")
-    code = compile(expected.read_bytes(), source_name, "exec", dont_inherit=True)
+    code = compile(_read_local_source(source, root, initial), source_name, "exec", dont_inherit=True)
     return module, code, source_name
 
 

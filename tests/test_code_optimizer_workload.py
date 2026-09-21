@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import py_compile
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ from hormuz import compaction
 ROOT = Path(__file__).resolve().parents[1]
 WORKLOAD = ROOT / "benchmarks/code_optimizer/compaction.py"
 SOURCE = ROOT / "hormuz/compaction.py"
+CLI = (sys.executable, "-I", "-S", str(WORKLOAD))
 
 
 class CodeOptimizerWorkloadTests(unittest.TestCase):
@@ -31,7 +33,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
 
     def test_local_cli_accepts_own_checkout_and_rejects_foreign_root(self) -> None:
         own = subprocess.run(
-            [sys.executable, str(WORKLOAD), "--root", ".", "--action", "validate"],
+            [*CLI, "--root", ".", "--action", "validate"],
             cwd=ROOT, capture_output=True, text=True, check=True,
         )
         report = json.loads(own.stdout)
@@ -45,7 +47,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             for name in ("compaction.py", "compaction_formats.py"):
                 (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
             command = [
-                sys.executable, str(WORKLOAD), "--root", str(foreign),
+                *CLI, "--root", str(foreign),
                 "--action", "validate",
             ]
             rejected = subprocess.run(command, capture_output=True, text=True)
@@ -54,6 +56,43 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             self.assertNotIn(str(foreign), rejected.stderr)
             with self.assertRaisesRegex(RuntimeError, "benchmark_foreign_root"):
                 self.workload.evaluate(foreign, "validate")
+
+    def test_local_cli_requires_isolated_bootstrap_before_sibling_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True) / "checkout"
+            script = root / "benchmarks/code_optimizer/compaction.py"
+            script.parent.mkdir(parents=True)
+            script.write_bytes(WORKLOAD.read_bytes())
+            package = root / "hormuz"
+            package.mkdir()
+            for name in ("compaction.py", "compaction_formats.py"):
+                (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
+            marker = root / "unsafe_import_executed"
+            sibling = script.parent / "resource.py"
+            sibling.write_text(
+                "from pathlib import Path\n"
+                f"Path({str(marker)!r}).write_text('executed')\n"
+            )
+            legacy_bytecode = script.parent / "resource.pyc"
+            py_compile.compile(str(sibling), cfile=str(legacy_bytecode), doraise=True)
+            for kind in ("source", "legacy_bytecode"):
+                with self.subTest(kind=kind):
+                    if kind == "legacy_bytecode":
+                        sibling.unlink()
+                    arguments = [str(script), "--root", str(root), "--action", "validate"]
+                    ordinary = subprocess.run(
+                        [sys.executable, *arguments], capture_output=True, text=True,
+                    )
+                    self.assertNotEqual(ordinary.returncode, 0)
+                    self.assertIn("benchmark_requires_isolated_python", ordinary.stderr)
+                    self.assertNotIn(str(root), ordinary.stderr)
+                    self.assertFalse(marker.exists())
+                    isolated = subprocess.run(
+                        [sys.executable, "-I", "-S", *arguments],
+                        capture_output=True, text=True, check=True,
+                    )
+                    self.assertEqual(json.loads(isolated.stdout)["source"], str(package / "compaction.py"))
+                    self.assertFalse(marker.exists())
 
     def test_local_cli_rejects_symlink_alias_and_child_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -64,7 +103,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             for supplied in (alias, ancestor_alias / ROOT.name):
                 with self.subTest(supplied=supplied):
                     rejected = subprocess.run(
-                        [sys.executable, str(WORKLOAD), "--root", str(supplied),
+                        [*CLI, "--root", str(supplied),
                          "--action", "validate"],
                         capture_output=True, text=True,
                     )
@@ -75,7 +114,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
                         self.workload.evaluate(supplied, "validate")
 
         no_child = subprocess.run(
-            [sys.executable, str(WORKLOAD), "--root", str(ROOT),
+            [*CLI, "--root", str(ROOT),
              "--action", "validate", "--child"],
             capture_output=True, text=True,
         )
@@ -136,6 +175,36 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
                         with self.assertRaisesRegex(RuntimeError, "benchmark_source_alias"):
                             self.workload._prepare_local_source("probe", "compaction")
 
+    def test_local_loader_rejects_source_swapped_after_canonical_check(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True) / "checkout"
+            package = root / "hormuz"
+            package.mkdir(parents=True)
+            source = package / "compaction.py"
+            source.write_bytes(SOURCE.read_bytes())
+            (package / "compaction_formats.py").write_bytes(
+                (ROOT / "hormuz/compaction_formats.py").read_bytes()
+            )
+            foreign = root / "foreign.py"
+            foreign.write_text('raise RuntimeError("foreign_source_executed")\n')
+            original_resolve = Path.resolve
+            swapped = False
+
+            def swap_after_check(path: Path, *args: object, **kwargs: object) -> Path:
+                nonlocal swapped
+                if path == source and not swapped:
+                    source.unlink()
+                    source.symlink_to(foreign)
+                    swapped = True
+                    return source
+                return original_resolve(path, *args, **kwargs)
+
+            with patch.object(self.workload, "_own_root", return_value=root):
+                with patch.object(Path, "resolve", swap_after_check):
+                    with self.assertRaisesRegex(RuntimeError, "^benchmark_source_changed$"):
+                        self.workload._load_local_compaction()
+            self.assertTrue(swapped)
+
     def test_reference_workload_covers_primary_and_heldout_cases(self) -> None:
         workload = self.workload
         measured = workload.cases()
@@ -151,6 +220,12 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         self.assertIn("search_framed", heldout)
         self.assertIn("json_table", heldout)
         self.assertFalse(set(measured) & set(heldout))
+        framed_paths = heldout["framed_paths"][0].splitlines()[1:-1]
+        self.assertEqual(len(framed_paths), 80)
+        self.assertLess(len(set(framed_paths)), len(framed_paths))
+        self.assertTrue(any(left > right for left, right in zip(framed_paths, framed_paths[1:])))
+        self.assertGreater(len(heldout["lines_mixed"][0].splitlines()), 300)
+        self.assertIn(":001:", heldout["search_framed"][0])
 
         baseline = workload.evaluate(ROOT, "validate")
         holdout = workload.evaluate(ROOT, "heldout")
@@ -175,7 +250,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             self.assertEqual(self.workload.evaluate(ROOT, "validate")["source"], validated_source)
 
     def test_mixed_runs_and_framed_search_are_effective_heldout_cases(self) -> None:
-        for name in ("lines_mixed", "search_framed"):
+        for name in ("framed_paths", "lines_mixed", "search_framed"):
             with self.subTest(name=name):
                 value, format_name = self.workload.heldout_cases()[name]
                 compacted = compaction.compact_text(value, format_name)
@@ -205,8 +280,24 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
                 disabled = self.workload.evaluate(ROOT, "heldout")
         self.assertNotEqual(baseline["outputs"]["search_framed"], disabled["outputs"]["search_framed"])
 
+        module = self.workload.load_local_compaction()
+        original_framed = module._compact_framed_lines
+
+        def disabled_paths(text: str, *, format: str) -> str:
+            return text if format == "path_list" else original_framed(text, format=format)
+
+        with patch.object(module, "_compact_framed_lines", side_effect=disabled_paths):
+            with patch.object(self.workload, "_load_local_compaction", return_value=(module, str(SOURCE))):
+                disabled = self.workload.evaluate(ROOT, "heldout")
+        self.assertNotEqual(baseline["outputs"]["framed_paths"], disabled["outputs"]["framed_paths"])
+
     def test_heldout_json_table_detects_disabled_compaction(self) -> None:
         value, format_name = self.workload.heldout_cases()["json_table"]
+        rows = json.loads(value)
+        self.assertIn("保留原文", value)
+        self.assertIs(rows[0]["active"], True)
+        self.assertIs(rows[1]["active"], False)
+        self.assertIsNone(rows[0]["nothing"])
         compacted = compaction.compact_text(value, format_name)
         self.assertLess(len(compacted.encode("utf-8")), len(value.encode("utf-8")))
         self.assertTrue(compaction.decode_text(compacted).recognized)
@@ -317,7 +408,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         seed = "ab" * 32
         for action in ("validate", "heldout", "profile", "benchmark"):
             for seeded in (False, True):
-                command = [sys.executable, str(WORKLOAD), "--root", str(ROOT), "--action", action]
+                command = [*CLI, "--root", str(ROOT), "--action", action]
                 if seeded:
                     command.append("--seed-stdin")
                 completed = subprocess.run(
@@ -337,7 +428,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
                         item["path"].startswith("hormuz/") for item in report["hotspots"]
                     ))
         invalid = subprocess.run(
-            [sys.executable, str(WORKLOAD), "--root", str(ROOT),
+            [*CLI, "--root", str(ROOT),
              "--action", "benchmark", "--seed-stdin"],
             input="not-a-seed\n", capture_output=True, text=True,
         )
