@@ -170,6 +170,11 @@ REQUIRED_FINANCE_VALUES_SDIST_PATHS = (
     "tests/test_finance_rate_cards.py",
     "tests/test_finance_packaging.py",
 )
+REQUIRED_FINANCE_VARIANCE_REFERENCE_SDIST_PATHS = (
+    "docs/FINANCE_VARIANCE_REFERENCE.md",
+    "hormuz/finance_variance_reference.py",
+    "tests/test_finance_variance_reference.py",
+)
 REQUIRED_FINANCE_HISTORY_SDIST_PATHS = (
     "docs/FINANCE_RATE_CARDS.md",
     "docs/finance-transition-plan-v2.json",
@@ -391,6 +396,18 @@ def main(argv: list[str] | None = None) -> int:
     _assert_outcome_preflight_sdist_boundary(sdist)
     _assert_finance_preflight_sdist_boundary(sdist)
     _assert_finance_values_sdist_boundary(sdist)
+    _assert_required_archive_paths(
+        sdist,
+        _sdist_members,
+        REQUIRED_FINANCE_VARIANCE_REFERENCE_SDIST_PATHS,
+        "Finance variance reference source kit",
+    )
+    _assert_required_archive_paths(
+        wheel,
+        _wheel_members,
+        ("hormuz/finance_variance_reference.py",),
+        "Finance variance reference wheel",
+    )
     _assert_finance_history_sdist_boundary(sdist)
     _assert_finance_native_attempt_preflight_sdist_boundary(sdist)
     _assert_finance_collection_preflight_sdist_boundary(sdist)
