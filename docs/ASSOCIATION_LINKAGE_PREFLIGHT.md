@@ -7,15 +7,17 @@ association runtime, or release evidence. The product target is v1.3.0.
 
 The frozen `hormuz.governed-run-attribution-event` identifies an immutable
 `request_attempt_id` and one versioned use case. The frozen
-`hormuz.external-work-binding-event` identifies a connector work object and
-one versioned use case. A normalized `hormuz.work-outcome-event` identifies the
-connector, work object, source revision, and source event. None of these records
+`hormuz.external-work-binding-event` authorizes a connector container
+(GitHub repository or Linear project) for one versioned use case. A normalized
+`hormuz.work-outcome-event` separately identifies the connector container,
+work object (issue or pull request), source revision, and source event. None of
+these records
 asserts that a particular request attempt worked on a particular object or
 revision. The planned `hormuz.run-outcome-association-event` contains both
 identities, but it is a *result*, not evidence that supplies the missing link.
 
-For example, if two governed attempts share use case U and one accepted pull
-request is bound to U, organization, scope, and time-window equality suggests
+For example, if two governed attempts share use case U and a repository with an
+accepted pull request is bound to U, organization, scope, and time-window equality suggests
 two possible runs, but neither is an eligible association candidate. Even a
 sole run would establish only coincident scope and time. Without an accepted
 explicit link, the eligible candidate count is zero and the decision is
@@ -28,12 +30,21 @@ paths, actor identity, or a current mutable binding to guess the missing edge.
 
 Before implementation, review a versioned, metadata-only run-to-work link
 contract. An authenticated portfolio administrator would submit an exact
-tenant-local `request_attempt_id`, `connector_id`, `external_object_id`, and
-verified `source_revision` (or an explicit unknown revision), plus the current
-external-work-binding event ID and the expected prior link event ID for
-compare-and-set. The server would resolve the tenant and actor, reauthorize the
-attempt and work object within one tenant transaction, and append an immutable
-link, correction, or tombstone with a fixed reason. It would never alter the v1
+tenant-local `request_attempt_id`, `connector_id`, `source_event_id`, and an
+idempotency identity. The server would bind that identity to the canonical
+request digest and
+resolve the referenced immutable observation, including its distinct
+`container_id`, `external_object_id`, verified `source_revision` (or explicit
+unknown revision), and historical external-work-binding event ID captured in
+the immutable outcome context. It
+would compare that historical binding with the observation's recorded context,
+not require the currently active binding to have the same event ID. The request
+also carries the expected prior link event ID for compare-and-set. An exact
+retry of a committed identity returns the original receipt before current-state
+CAS; reuse with different content fails closed, including across replicas.
+The server would resolve the tenant and actor, reauthorize the attempt and
+work object within one tenant transaction, and append an immutable link,
+correction, or tombstone with a fixed reason. It would never alter the v1
 attempt, attribution, outcome, usage, cost, or external observation rows.
 
 The link contract needs an explicit eligibility rule for which principal may
@@ -42,33 +53,44 @@ and what evidence quality the attestation warrants. An administrator assertion
 alone cannot be presented as connector-verified authorship or causal proof.
 Connector source revision must come from the verified source event, not from an
 untrusted free-text request field. A missing or conflicting revision leaves
-the observation unmatched or ambiguous. A link spanning tenants, a stale
-binding or attribution version, a superseded source event, or an unauthorized
-scope fails closed.
+the observation unmatched or ambiguous. A link spanning tenants, a mismatched
+historical binding or attribution version, a superseded source event, or
+an unauthorized scope fails closed. A later registry replacement cannot retarget
+or invalidate an otherwise eligible historical observation.
 
 ## Evaluation and accounting contract
 
 Evaluate a fixed rule version and predeclared window against a consistent
-snapshot of current immutable attribution, work binding, source observation,
-and link events. Sort by source revision where the connector has an authorized
-ordering rule, then ingestion time and opaque event ID; do not order revisions
-lexically or use source event time as authority. Store each decision as an
+snapshot of current immutable attribution, historical work binding, source
+observation, and link events. Select authoritative current object state only by
+the connector's approved revision/order rule. Equal conflicting revisions and
+incomparable revisions remain ambiguous; ingestion time and opaque event ID may
+stabilize presentation order but never break an authority tie. Do not order
+revisions lexically or use source event time as authority. Store each decision
+as an
 append-only association event, including rule version, candidate count,
 state, reason, and supersedes ID. Re-evaluation after a late event or
 correction appends a new decision instead of rewriting previous evidence.
 
 `associated` requires one eligible, explicit, tenant-qualified link whose
-attempt, use-case version, binding event, connector, object, and verified
-revision all agree. Multiple eligible links remain `ambiguous`; no link is
+attempt, use-case version, historical binding event, connector, exact
+`source_event_id`, object, and verified revision all agree with the selected
+authoritative current observation. Multiple eligible links remain `ambiguous`;
+no link is
 `unmatched`; tombstoned, unsupported, or out-of-policy observations are
 `excluded`. Production connector evidence remains at most `associated`.
 
 Aggregate at unique attempt and unique external-work-object grains. Charge an
-attempt's cost at most once within its use case and preserve its original
-provider-final, provider-aggregate, estimate, allocation, credit, or
-unavailable basis. Count an accepted work object once even if retries,
-redeliveries, reopenings, or several observations exist. Emit separate
-denominators for eligible attempts, priced attempts, eligible outcome events,
+attempt's cost at most once within its use case only when the evidence is
+genuinely attempt-grained: provider-final at proven attempt scope, the original
+configured estimate, or a separately approved allocated estimate. Keep provider
+aggregates, credits, discounts, and unavailable cost as separate evidence and
+coverage; never assign an aggregate to an attempt by coincidence. Count an
+accepted work object once only when its selected authoritative state at the
+evaluation snapshot remains accepted. Prior accepted observations stay in
+coverage, but reopenings or reversions remove that object from the current
+accepted denominator. Emit separate denominators for eligible attempts, priced
+attempts, eligible outcome events,
 unique work objects, eligible association candidates, ambiguous/excluded
 records, and connector health. Never turn an undefined cost-per-accepted-item
 denominator into zero.
@@ -81,8 +103,9 @@ denominator into zero.
   connector migration ownership is settled; prove tenant isolation and the
   least-privilege PostgreSQL runtime grants before activation.
 - Exercise exact reference vectors for zero, one, and multiple links; stale
-  versions; cross-tenant collisions; duplicate delivery; late and superseding
-  source events; revisions, retries, reopenings, reversions, and cost-basis
+  versions; cross-tenant collisions; exact replay after a lost response and
+  changed-content idempotency conflicts; late and superseding source events;
+  equal conflicting revisions, retries, reopenings, reversions, and cost-basis
   separation on both storage adapters.
 - Prove read/export authorization before query planning, deterministic replay,
   pagination, old-binary refusal and quiesced backup/restore. Scan all routine
