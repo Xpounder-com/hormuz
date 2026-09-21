@@ -219,10 +219,12 @@ where
     deadline.check()?;
     let mut stdout = tempfile::tempfile()?;
     let mut command = systemctl_command()?;
+    // Stop validation needs an explicit empty ControlGroup after exit.
     command
         .args([
             "--user",
             "--no-pager",
+            "--all",
             "show",
             unit,
             "--property=Id,LoadState,ControlGroup,MainPID,ExitType,RemainAfterExit,Restart,KillMode,KillSignal,Transient,ActiveState",
@@ -398,7 +400,21 @@ where
     deadline.check()?;
     match initial {
         StopState::Stopped => return Ok(()),
-        StopState::Running | StopState::Stopping => stop(deadline)?,
+        StopState::Running | StopState::Stopping => {
+            if let Err(error) = stop(deadline) {
+                // A --collect unit can disappear between the first show and
+                // the stop request. A failed request is success only after a
+                // fresh, exact stopped-state check within the same budget.
+                deadline.check()?;
+                let current = stop_state(&show(deadline)?, unit);
+                deadline.check()?;
+                return if current == StopState::Stopped {
+                    Ok(())
+                } else {
+                    Err(error)
+                };
+            }
+        }
         StopState::Invalid => return Err(unavailable()),
     }
     loop {
@@ -468,6 +484,10 @@ mod tests {
     fn stop_requires_exact_transient_tree_kill_identity() {
         assert_eq!(stop_state(GOOD_STOP, UNIT), StopState::Running);
         assert_eq!(stop_state(COLLECTED, UNIT), StopState::Stopped);
+        assert_eq!(
+            stop_state(&COLLECTED.replace("ControlGroup=\n", ""), UNIT),
+            StopState::Invalid
+        );
         let inactive = GOOD_STOP
             .replace(&format!("ControlGroup={PATH}"), "ControlGroup=")
             .replace("MainPID=123", "MainPID=0")
@@ -525,6 +545,36 @@ mod tests {
         .unwrap();
         assert_eq!(stops, 1);
         assert_eq!(waits, 1);
+    }
+
+    #[test]
+    fn stop_failure_accepts_only_a_fresh_exact_stopped_state() {
+        let stopping = GOOD_STOP.replace("ActiveState=active", "ActiveState=deactivating");
+        for (after, accepted) in [
+            (COLLECTED.to_owned(), true),
+            (GOOD_STOP.to_owned(), false),
+            (
+                COLLECTED.replace("Id=hormuz-relay-test.service", "Id=other.service"),
+                false,
+            ),
+        ] {
+            let mut outputs = [stopping.clone(), after].into_iter();
+            let now = Instant::now();
+            let mut deadline = Deadline::new(now + STOP_BUDGET, || now);
+            let mut stops = 0;
+            let result = stop_user_service_with(
+                UNIT,
+                &mut deadline,
+                |_| Ok(outputs.next().unwrap()),
+                |_| {
+                    stops += 1;
+                    Err(unavailable())
+                },
+                |_| panic!("failed stop must not poll"),
+            );
+            assert_eq!(result.is_ok(), accepted);
+            assert_eq!(stops, 1);
+        }
     }
 
     #[test]
