@@ -8,10 +8,11 @@ association runtime, or release evidence. The product target is v1.3.0.
 The frozen `hormuz.governed-run-attribution-event` identifies an immutable
 `request_attempt_id` and one versioned use case. The frozen
 `hormuz.external-work-binding-event` authorizes a connector container
-(GitHub repository or Linear project) for one versioned use case. A normalized
-`hormuz.work-outcome-event` separately identifies the connector container,
-work object (issue or pull request), source revision, and source event. None of
-these records
+(GitHub repository or Linear project) for one versioned use case. The internal
+source observation has separate container and work-object (issue or pull
+request) IDs; its immutable context records the container and historical
+binding. The closed public `hormuz.work-outcome-event` carries the work-object,
+source revision, and source-event IDs, but no container ID. None of these records
 asserts that a particular request attempt worked on a particular object or
 revision. The planned `hormuz.run-outcome-association-event` contains both
 identities, but it is a *result*, not evidence that supplies the missing link.
