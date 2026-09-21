@@ -75,13 +75,6 @@ import os
 import sys
 from urllib.parse import urlsplit
 
-if "--version" in sys.argv:
-    print("claude 2.1.233")
-    raise SystemExit(0)
-
-origin = urlsplit(os.environ["ANTHROPIC_BASE_URL"])
-if origin.hostname != "127.0.0.1" or not origin.port:
-    raise SystemExit("relay did not bind loopback")
 sentinels = {
     "OPENAI_API_KEY": "synthetic-openai-must-not-reach-client",
     "ANTHROPIC_API_KEY": "synthetic-anthropic-must-not-reach-client",
@@ -90,13 +83,23 @@ sentinels = {
 for name, sentinel in sentinels.items():
     if os.environ.get(name) == sentinel:
         raise SystemExit("provider credential reached fake client: " + name)
+if "--version" in sys.argv:
+    if any(name in os.environ for name in sentinels):
+        raise SystemExit("provider credential name reached version probe")
+    print("claude 2.1.233")
+    raise SystemExit(0)
+
+origin = urlsplit(os.environ["ANTHROPIC_BASE_URL"])
+if origin.hostname != "127.0.0.1" or not origin.port:
+    raise SystemExit("relay did not bind loopback")
 if "OPENAI_API_KEY" in os.environ or "CLAUDE_CODE_OAUTH_TOKEN" in os.environ:
     raise SystemExit("unrelated provider credential name reached fake client")
 if os.environ.get("ANTHROPIC_API_KEY") != "":
     raise SystemExit("Claude API key was not replaced with an empty value")
 if os.environ.get("PYTHONOPTIMIZE") != "1":
     raise SystemExit("fixture did not exercise optimized Python")
-connection = http.client.HTTPConnection(origin.hostname, origin.port, timeout=5)
+# A valid request-time Secret Service load may use its full 10-second budget.
+connection = http.client.HTTPConnection(origin.hostname, origin.port, timeout=20)
 body = b'{"messages":[]}'
 connection.request("POST", "/v1/messages", body, {
     "Authorization": "Bearer " + os.environ["ANTHROPIC_AUTH_TOKEN"],
@@ -196,6 +199,13 @@ fn fake_gateway(listener: TcpListener) -> GatewayGuard {
         }
         let text = String::from_utf8(headers).unwrap();
         assert!(text.starts_with("POST /v1/messages HTTP/1.1\r\n"));
+        assert!(
+            !text
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .any(|(name, _)| name.eq_ignore_ascii_case("x-hormuz-context-format")),
+            "Optimization::Off declared a structural context format"
+        );
         let authorization: Vec<_> = text
             .lines()
             .filter_map(|line| {
@@ -257,12 +267,14 @@ impl Drop for SecretGuard<'_> {
     }
 }
 
-struct ManagerEnvironmentGuard;
+struct ManagerEnvironmentGuard {
+    active: bool,
+}
 impl ManagerEnvironmentGuard {
-    fn seed() -> Self {
-        let prior = user_systemctl(&["show-environment"]);
-        assert!(prior.status.success());
-        let prior = String::from_utf8(prior.stdout).unwrap();
+    fn assert_absent() {
+        let environment = user_systemctl(&["show-environment"]);
+        assert!(environment.status.success());
+        let environment = String::from_utf8(environment.stdout).unwrap();
         for name in [
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
@@ -270,13 +282,17 @@ impl ManagerEnvironmentGuard {
             "PYTHONOPTIMIZE",
         ] {
             assert!(
-                !prior
+                !environment
                     .lines()
                     .any(|line| line.starts_with(&format!("{name}="))),
-                "disposable user manager must not already hold {name}"
+                "disposable user manager retained {name}"
             );
         }
-        let guard = Self;
+    }
+
+    fn seed() -> Self {
+        Self::assert_absent();
+        let guard = Self { active: true };
         assert!(user_systemctl(&[
             "set-environment",
             "OPENAI_API_KEY=synthetic-openai-must-not-reach-client",
@@ -288,16 +304,32 @@ impl ManagerEnvironmentGuard {
         .success());
         guard
     }
-}
-impl Drop for ManagerEnvironmentGuard {
-    fn drop(&mut self) {
-        let _ = user_systemctl(&[
+
+    fn clear(mut self) {
+        assert!(user_systemctl(&[
             "unset-environment",
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "PYTHONOPTIMIZE",
-        ]);
+        ])
+        .status
+        .success());
+        Self::assert_absent();
+        self.active = false;
+    }
+}
+impl Drop for ManagerEnvironmentGuard {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = user_systemctl(&[
+                "unset-environment",
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "CLAUDE_CODE_OAUTH_TOKEN",
+                "PYTHONOPTIMIZE",
+            ]);
+        }
     }
 }
 
@@ -399,7 +431,7 @@ fn isolated_secret_service_launch_forwards_once_and_tears_down() {
     let report = root.path().join("relay-port");
     let path =
         std::env::join_paths([bin.as_path(), Path::new("/usr/bin"), Path::new("/bin")]).unwrap();
-    let _manager_environment = ManagerEnvironmentGuard::seed();
+    let manager_environment = ManagerEnvironmentGuard::seed();
     let probe_token = format!("secret-env-probe-{}-{nonce}", std::process::id());
     let probe_log_path = root.path().join("environment-probe.log");
     let probe_log = File::create(&probe_log_path).unwrap();
@@ -467,4 +499,5 @@ fn isolated_secret_service_launch_forwards_once_and_tears_down() {
     assert_eq!(error.kind(), ErrorKind::ConnectionRefused);
     store.delete().unwrap();
     assert!(store.load().unwrap().is_none());
+    manager_environment.clear();
 }
