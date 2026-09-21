@@ -21,6 +21,7 @@ include docs/attribution-transition-plan-v1.json
 include docs/attribution-transition-plan-v2.json
 include docs/outcome-transition-plan-v1.json
 include docs/outcome-transition-plan-v2.json
+include docs/github-connector-preflight-v1.json
 include docs/finance-transition-plan-v1.json
 include docs/finance-transition-plan-v2.json
 include docs/finance-transition-plan-v3.json
@@ -61,6 +62,7 @@ include tools/verify_portfolio_extensions.py
 include tools/verify_registry_transition_plan.py
 include tools/verify_attribution_transition_plan.py
 include tools/verify_outcome_transition_plan.py
+include tools/verify_github_connector_preflight.py
 include tools/verify_finance_transition_plan.py
 include tools/verify_finance_native_attempt_transition_plan.py
 include tools/verify_finance_collection_transition_plan.py
