@@ -382,6 +382,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_registry_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_attribution_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_outcome_transition_plan.py
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_github_connector_preflight.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_budget_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_native_attempt_transition_plan.py \
@@ -399,6 +400,7 @@ jobs:
             tests.test_finance_collection_packaging tests.test_finance_collection_postgres_runtime_plan \
             tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
             tests.test_finance_variance_reference \
+            tests.test_github_connector_preflight tests.test_github_connector_fixtures \
             tests.test_portfolio_wire_contract
       - name: Prove PostgreSQL migration and repository compatibility
         env:
