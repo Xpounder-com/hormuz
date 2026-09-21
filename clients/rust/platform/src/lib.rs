@@ -1,8 +1,8 @@
 //! OS custody and storage primitives for #333. No session/network policy.
 //!
 //! All calls are synchronous and belong on a worker, never a native UI thread.
-//! Linux native adapters remain in #343. Browser/process/event interfaces are
-//! implemented by their owning shell/lifecycle work, not initialized here.
+//! Browser/process/event interfaces are implemented by their owning
+//! shell/lifecycle work, not initialized here.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -118,6 +118,10 @@ pub use macos::NativeCredentialStore;
 mod windows;
 #[cfg(windows)]
 pub use windows::NativeCredentialStore;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::NativeCredentialStore;
 
 mod private;
 /// Native application ownership can only be acquired through a private
