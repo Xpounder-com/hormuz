@@ -211,21 +211,33 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         heldout = workload.heldout_cases()
         self.assertIn("paths_typical", measured)
         self.assertIn("paths_large", measured)
+        self.assertIn("paths_wrapped", measured)
         self.assertIn("paths_empty", measured)
         self.assertIn("paths_malformed_marker", measured)
         self.assertIn("paths_duplicate_unicode", measured)
         self.assertIn("json_typical", measured)
+        self.assertIn("search_wrapped", measured)
         self.assertIn("crlf_paths", heldout)
         self.assertIn("lines_mixed", heldout)
         self.assertIn("search_framed", heldout)
         self.assertIn("json_table", heldout)
         self.assertFalse(set(measured) & set(heldout))
         framed_paths = heldout["framed_paths"][0].splitlines()[1:-1]
-        self.assertEqual(len(framed_paths), 80)
+        self.assertEqual(len(framed_paths), 320)
         self.assertLess(len(set(framed_paths)), len(framed_paths))
         self.assertTrue(any(left > right for left, right in zip(framed_paths, framed_paths[1:])))
+        self.assertEqual(len(measured["paths_large"][0].splitlines()), 320)
+        self.assertEqual(len(measured["search_large"][0].splitlines()), 320)
+        for name in ("paths_large", "search_large"):
+            value, format_name = measured[name]
+            compacted = compaction.compact_text(value, format_name)
+            self.assertLess(len(compacted.encode("utf-8")), len(value.encode("utf-8")))
+            self.assertEqual(compaction.decode_text(compacted).text, value)
         self.assertGreater(len(heldout["lines_mixed"][0].splitlines()), 300)
+        self.assertIn("hormuz-line-runs-v1", heldout["lines_mixed"][0])
         self.assertIn(":001:", heldout["search_framed"][0])
+        self.assertEqual(len(heldout["search_framed"][0].splitlines()[1:-1]), 320)
+        self.assertEqual(len(json.loads(heldout["json_table"][0])), 320)
 
         baseline = workload.evaluate(ROOT, "validate")
         holdout = workload.evaluate(ROOT, "heldout")
@@ -268,6 +280,17 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             with patch.object(self.workload, "_load_local_compaction", return_value=(module, str(SOURCE))):
                 disabled = self.workload.evaluate(ROOT, "heldout")
         self.assertNotEqual(baseline["outputs"]["lines_mixed"], disabled["outputs"]["lines_mixed"])
+
+        module = self.workload.load_local_compaction()
+        original = module.compact_text
+
+        def skip_literal_marker(text: str, format_name: str) -> str:
+            return text if "hormuz-" in text else original(text, format_name)
+
+        with patch.object(module, "compact_text", side_effect=skip_literal_marker):
+            with patch.object(self.workload, "_load_local_compaction", return_value=(module, str(SOURCE))):
+                skipped = self.workload.evaluate(ROOT, "heldout")
+        self.assertNotEqual(baseline["outputs"]["lines_mixed"], skipped["outputs"]["lines_mixed"])
 
         module = self.workload.load_local_compaction()
         original_framed = module._compact_framed_lines
@@ -313,6 +336,11 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
 
     def test_benchmark_uses_distinct_inputs_and_fingerprints_their_outputs(self) -> None:
         measured = self.workload.cases()
+        for name in ("paths_wrapped", "search_wrapped"):
+            value, format_name = measured[name]
+            compacted = compaction.compact_text(value, format_name)
+            self.assertLess(len(compacted.encode("utf-8")), len(value.encode("utf-8")))
+            self.assertEqual(compaction.decode_text(compacted).text, value)
         value, format_name = measured["json_typical"]
         self.assertLess(
             len(compaction.compact_text(value, format_name).encode("utf-8")),
@@ -360,6 +388,17 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             mutated["outputs"]["paths_typical"]["timed_sha256"],
         )
 
+        module = self.workload.load_local_compaction()
+        with patch.object(module, "_compact_framed_lines", side_effect=lambda text, *, format: text):
+            with patch.object(self.workload, "_load_local_compaction", return_value=(module, str(SOURCE))):
+                unframed = self.workload.evaluate(ROOT, "benchmark")
+        for name in ("paths_wrapped", "search_wrapped"):
+            self.assertIn(name, benchmark["samples_ns"])
+            self.assertNotEqual(
+                benchmark["outputs"][name]["timed_sha256"],
+                unframed["outputs"][name]["timed_sha256"],
+            )
+
     def test_job_seed_changes_timed_inputs_but_preserves_comparability(self) -> None:
         first_seed = bytes.fromhex("ab" * 32)
         second_seed = bytes.fromhex("cd" * 32)
@@ -391,8 +430,8 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         with patch.object(self.workload, "_resource", None):
             report = self.workload.evaluate(ROOT, "benchmark")
         self.assertIsNone(report["peak_rss_bytes"])
-        self.assertEqual(len(report["samples_ns"]), 10)
-        self.assertEqual(sum(map(len, report["samples_ns"].values())), 170)
+        self.assertEqual(len(report["samples_ns"]), 12)
+        self.assertEqual(sum(map(len, report["samples_ns"].values())), 204)
         self.assertTrue(all(
             len(report["outputs"][name]["timed_sha256"]) == 64
             for name in report["samples_ns"]
@@ -418,10 +457,10 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
                 report = json.loads(completed.stdout)
                 self.assertNotIn(seed, completed.stdout)
                 self.assertNotIn("seed", report)
-                self.assertEqual(len(report["outputs"]), 7 if action == "heldout" else 12)
+                self.assertEqual(len(report["outputs"]), 7 if action == "heldout" else 14)
                 if action == "benchmark":
-                    self.assertEqual(len(report["samples_ns"]), 10)
-                    self.assertEqual(sum(map(len, report["samples_ns"].values())), 170)
+                    self.assertEqual(len(report["samples_ns"]), 12)
+                    self.assertEqual(sum(map(len, report["samples_ns"].values())), 204)
                 if action == "profile":
                     self.assertEqual(len(report["hotspots"]), 12)
                     self.assertTrue(all(

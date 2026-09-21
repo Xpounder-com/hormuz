@@ -69,13 +69,16 @@ rule while regressions are rejected.
 
 Path-list, line-run, search-line, and JSON-table cases include small,
 typical, large, empty, malformed, duplicate, and Unicode inputs, plus
-held-out correctness cases. Empty and malformed inputs are checked for
-behavior but excluded from timing. Every timed invocation gets a distinct,
-structurally equivalent input, and timed outputs are fingerprinted alongside
-canonical outputs. Held-out mixed line runs, framed search output, and a
-separate JSON table must each compact and round-trip; mutation regressions
-prove disabling those paths changes their held-out fingerprints. A result on
-this helper does not establish a gateway or customer throughput improvement.
+held-out correctness cases. Each of the four formats has a compacting
+held-out input above 300 rows. Timed path-list and search-line cases include
+wrapped output that exercises their framed-line fallback. Empty and malformed
+inputs are checked for behavior but excluded from timing. Every timed
+invocation gets a distinct, structurally equivalent input, and timed outputs
+are fingerprinted alongside canonical outputs. Held-out mixed line runs
+contain a literal format marker that must still compact and round-trip;
+mutation regressions prove disabling those paths changes their held-out
+fingerprints. A result on this helper does not establish a gateway or
+customer throughput improvement.
 
 The app's **Optimize** and **Super Optimize** controls differ in search
 depth; both use the same behavior and performance acceptance rules. Neither

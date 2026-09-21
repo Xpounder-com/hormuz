@@ -48,11 +48,16 @@ def cases() -> dict[str, tuple[str, str]]:
             "path_list",
         ),
         "paths_large": (
-            "\n".join(f"src/generated/item_{index:04d}.py" for index in range(300)) + "\n",
+            "\n".join(f"src/generated/item_{index:04d}.py" for index in range(320)) + "\n",
             "path_list",
         ),
         "paths_duplicate_unicode": (
             "\n".join("src/résumé/file.py" for _ in range(24)) + "\n", "path_list",
+        ),
+        "paths_wrapped": (
+            "Output:\n" + "\n".join(
+                f"src/generated/item_{index:04d}.py" for index in range(120)
+            ) + "\nDone", "path_list",
         ),
         "paths_malformed_marker": (
             '{"format":"hormuz-path-list-v1","suffixes":[', "path_list",
@@ -76,8 +81,17 @@ def cases() -> dict[str, tuple[str, str]]:
             "search_lines",
         ),
         "search_large": (
-            "\n".join(f"src/service/request.py:{index}:candidate_{index}" for index in range(1, 301)) + "\n",
+            "\n".join(
+                f"src/service/request.py:{index}:candidate_{index}"
+                for index in range(1, 321)
+            ) + "\n",
             "search_lines",
+        ),
+        "search_wrapped": (
+            "Output:\n" + "\n".join(
+                f"src/service/request.py:{index}:candidate_{index}"
+                for index in range(1, 121)
+            ) + "\nDone", "search_lines",
         ),
     }
 
@@ -87,13 +101,14 @@ def heldout_cases() -> dict[str, tuple[str, str]]:
     return {
         "framed_paths": (
             "unrelated header\n" + "\n".join(
-                f"src/δelta/part_{(index * 7) % 23:02d}.py" for index in range(80)
+                f"src/δelta/part_{(index * 7) % 23:02d}.py" for index in range(320)
             ) + "\nunrelated footer\n", "path_list",
         ),
         "crlf_paths": ("src/a.py\r\nsrc/b.py\r\n", "path_list"),
         "malformed_envelope": ('{"format":"hormuz-path-list-v1","suffixes":[]}', "path_list"),
         "lines_mixed": (
-            "OK\n" * 320 + "ERROR permission denied\n" + "OK\n" * 40,
+            "OK hormuz-line-runs-v1\n" * 320 + "ERROR permission denied\n"
+            + "OK hormuz-line-runs-v1\n" * 40,
             "line_runs",
         ),
         "search_mixed": (
@@ -102,14 +117,14 @@ def heldout_cases() -> dict[str, tuple[str, str]]:
         "search_framed": (
             "Output:\n" + "".join(
                 f"src/request.py:{index:03d}:value: {index}\n"
-                for index in range(1, 140)
+                for index in range(1, 321)
             ) + "Notice: results complete",
             "search_lines",
         ),
         "json_table": (
             json.dumps(
                 [{"record_id": index, "value": "保留原文", "active": index % 2 == 0,
-                  "nothing": None} for index in range(80)],
+                  "nothing": None} for index in range(320)],
                 ensure_ascii=False,
                 separators=(",", ":"),
             ),
@@ -124,7 +139,7 @@ def timed_variant(name: str, value: str, ordinal: int, seed: bytes | None = None
         hmac.digest(seed, f"{name}:{ordinal}".encode("ascii"), "sha256")[:16].hex()
         if seed is not None else f"{ordinal:06d}"
     )
-    if name in {"paths_small", "paths_typical", "paths_large"}:
+    if name in {"paths_small", "paths_typical", "paths_large", "paths_wrapped"}:
         return value.replace("src/generated/", f"src/generated/{marker}/")
     if name == "paths_duplicate_unicode":
         return value.replace("src/résumé/", f"src/résumé/{marker}/")
@@ -132,7 +147,7 @@ def timed_variant(name: str, value: str, ordinal: int, seed: bytes | None = None
         return value.replace('"region":"local"', f'"region":"{marker}"')
     if name in {"lines_small", "lines_typical", "lines_large"}:
         return value.replace("INFO heartbeat", f"INFO heartbeat {marker}")
-    if name in {"search_typical", "search_large"}:
+    if name in {"search_typical", "search_large", "search_wrapped"}:
         return value.replace("src/service/request.py:", f"src/service/{marker}/request.py:")
     raise ValueError("unsupported_timed_case")
 
