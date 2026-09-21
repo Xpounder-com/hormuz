@@ -1,0 +1,120 @@
+{
+  "schema_id": "hormuz.linear-connector-preflight",
+  "schema_version": 1,
+  "stage": "offline_pre_implementation",
+  "target_release": "1.3.0",
+  "feature_issue": 220,
+  "gate_issue": 214,
+  "base_main_commit": "7c8e5296329255bca35ef5e7d2cda9735885e7df",
+  "frozen_file_sha256": {
+    "docs/linear-context-wire-v1.json": "66a708b9456ced1fd0c919cd1a92b4f461d3900e11766e01afd64c29e2d958f0",
+    "docs/portfolio-extension-contract-v1.json": "8ff2069fc5dec957a9ec1980087c94fbc259f61f5b07ec71f51357af8453fda4",
+    "docs/portfolio-intelligence-wire-v1.json": "26ef36b12d475d5b8354e45abfc92c76187ca6ff5aafb4b0ebce6fab439feb80",
+    "hormuz/portfolio-outcome-wire-v1.json": "0716c5483b6be72736d357f4ff318c89eeac10fa3f3ae86d3f3bdb9eb99f53a2"
+  },
+  "baseline_schema_at_base_main_commit": {
+    "sqlite": 12,
+    "postgresql": 17
+  },
+  "successor_schema": {
+    "assignment": "unassigned_pending_integration_order",
+    "historical_finance_proposal_at_base_sqlite": 13,
+    "historical_finance_proposal_at_base_postgresql": 18,
+    "linear_sqlite": null,
+    "linear_postgresql": null,
+    "reason": "At the base commit, finance account-binding proposed 13/18. Those are historical facts, not an assertion about the checkout's current schema. Linear cannot consume or skip versions without a reviewed integration order and a superseding transition plan."
+  },
+  "source_reference": {
+    "url": "https://linear.app/developers/webhooks",
+    "reviewed_on": "2026-09-21",
+    "documented_generic_models": ["Issue", "Project", "Initiative", "Cycle"],
+    "documented_generic_actions": ["create", "update", "remove"],
+    "documented_delivery_header": "Linear-Delivery",
+    "documented_signature": "HMAC-SHA256_of_exact_raw_body",
+    "documented_response_deadline_ms": 5000,
+    "provider_specific_mapping": "pending_actual_schema_and_authorized_test_delivery"
+  },
+  "typed_authority": {
+    "selection": "server_route_registration_only_never_payload_tenant_or_scope",
+    "cardinality": "one_Linear_workspace_to_one_Hormuz_organization_and_one_webhook_id_to_one_route",
+    "team_mode": "exact_operator_registered_team_ids_no_all_public_teams_default",
+    "enrollment": "separate_exact_typed_initiative_project_cycle_issue_ID_sets; project-only legacy registry does not grant other kinds",
+    "change": "versioned_disable_revoke_or_move_requires_new_binding; recheck_current_binding_in_commit_transaction",
+    "source_claims": "signed_workspace_webhook_type_object_and_optional_team_fields_must_match_registration; absence_of_team_field_is_unproven_not_permission",
+    "relationships": "independently_authorize_both_ends; no_parent_or_public_initiative_infers_private_child_access"
+  },
+  "authentication": {
+    "order": "bound_route_and_enabled_registration_then_bounded_raw_read_then_HMAC_then_parse_then_signed_scope_comparison_then_typed_enrollment_then_commit_recheck",
+    "rotation": "one_active_key_plus_at_most_one_expiring_previous_key; server_versions_only; constant_time_digest_comparison",
+    "timestamp": "signed_body_webhookTimestamp_matches_Linear-Timestamp_and_is_within_60000ms_of_server_receive_time",
+    "delivery_identity": "Linear-Delivery_is_unsigned_header_hint; tenant_keyed_exact_body_fingerprint_and_source_fact_identity_also_enforce_idempotency",
+    "header_rule": "reject_case_insensitive_duplicate_Linear_headers_before_selection",
+    "resource_limits": "at_most_1MiB_raw_body_depth_16_4096_JSON_members_100_events_per_delivery_8_process_slots_no_unbounded_read_or_retry",
+    "fingerprint": "tenant_and_connector_domain_separated_HMAC_of_exact_body_with_separate_versioned_server_key; never_store_raw_body_or_plain_hash"
+  },
+  "normalization": {
+    "status": "not_implemented",
+    "generic_authenticated_envelope_allowlist": {
+      "Initiative": ["create", "update", "remove"],
+      "Project": ["create", "update", "remove"],
+      "Cycle": ["create", "update", "remove"],
+      "Issue": ["create", "update", "remove"]
+    },
+    "per_entity_mapping": "pending_authorized_source_schema_evidence; generic_envelope_acceptance_does_not_authorize_state_or_relationship_mutation",
+    "remove": "no_assumed_archive_delete_or_tombstone_mapping",
+    "revision": "unknown_until_verified_ordering_domain; never_delivery_UUID_or_header_order",
+    "relationship_coverage": "unknown_or_partial_until_exact_complete_parent_set_proven; moves_do_not_grant_parent_authority",
+    "issue_outcome": "frozen_issue_only_contract_and_exact_enrolled_project_container; no_parent_relabeling",
+    "context": "separate_hormuz.linear-context-event_v1_portfolio_admin_descriptive_inconclusive",
+    "unsupported_or_malformed": "no_normalized_mutation; content_free_failure_metadata_only"
+  },
+  "acknowledgment": {
+    "maximum_internal_elapsed_ms": 4000,
+    "linear_external_deadline_ms": 5000,
+    "success": "HTTP_200_only_after_one_atomic_durable_receipt_context_outcome_coverage_audit_commit_or_exact_prior_receipt",
+    "failure": "non_200_on_timeout_outage_or_uncertain_commit; no_automatic_200_or_provider_replay",
+    "measurement": "future_HTTP_test_measures_read_auth_parse_recheck_commit_and_response_end_to_end_with_forced_slow_and_outage_cases"
+  },
+  "storage_and_compatibility": {
+    "state": "no_new_migration_or_runtime_field_in_this_preflight",
+    "existing_v1_and_v1_2_contracts": "unchanged_routes_auth_errors_pagination_retry_policy_evidence_and_CLI",
+    "new_records": "additive_separately_versioned_context_and_authority_only_after_accepted_migration_plan",
+    "atomicity": "receipt_normalized_metadata_coverage_and_audit_one_transaction_with_tenant_keys_and_append_only_rows",
+    "privacy": "no_raw_payload_names_titles_descriptions_comments_attachments_labels_free_text_user_content_or_credentials_at_rest_or_in_logs",
+    "backfill": "separate_authenticated_bounded_snapshot_authority_and_provenance; never_relabel_as_webhook",
+    "reader": "raw_context_portfolio_admin_only; no_team_self_platform_or_finance_raw_access"
+  },
+  "required_transition_cases": {
+    "missing_successor_refusal": "actual_current_schema_and_populated_predecessor_refuse_missing_next_migration_without_row_or_object_change",
+    "ddl_failure_rollback_retry": "test_only_DDL_failure_rolls_back_ledger_DDL_and_predecessor_rows_then_idempotent_retry_on_SQLite_and_PostgreSQL",
+    "old_binary_partial_newer_refusal": "exact_published_v1_2_and_current_binary_refuse_partial_or_newer_schema_without_repair",
+    "quiesced_old_pair_restore": "only_verified_zero_post_checkpoint_writes_restore_exact_old_app_config_database_pair_into_separate_destination_and_replay_original_receipts",
+    "post_checkpoint_forward_recovery": "nonzero_or_unknown_writes_preserve_candidate_snapshot_and_forward_recover_without_retargeting_or_losing_history",
+    "receipt_replay_and_concurrent_conflict": "same_delivery_and_bytes_or_changed_unsigned_delivery_header_replay_original_receipt; conflicting_bytes_and_concurrent_races_fail_closed",
+    "durable_ack_outage_and_deadline": "forced_commit_outage_and_4_second_internal_budget_failure_return_non_200; no_normalized_mutation_or_false_durable_claim"
+  },
+  "rollout": {
+    "preflight": "stop_all_writers_and_pools; verify_old_pair_backup_restore_and_schema_version_assignment",
+    "migration": "serialize_existing_migrator; no_live_webhook_or_credential_activation",
+    "startup": "fresh_process_schema_shape_RLS_ACL_registration_and_receipt_checks_before_traffic",
+    "downgrade": "no_in_place_downgrade_or_ledger_edit",
+    "disablement": "stop_new_ingress_retain_receipt_history_and_reconciliation_gap; revoke_keys_and_binding_by_version",
+    "deletion": "append_source_tombstone_only_on_verified_mapping; operator_retention_marker_is_distinct_and_backups_follow_customer_policy"
+  },
+  "gates": {
+    "preflight_accepted": false,
+    "runtime_implemented": false,
+    "live_workspace_authorized": false,
+    "live_delivery_verified": false,
+    "final_candidate_accepted": false,
+    "released": false
+  },
+  "nonclaims": [
+    "production_receiver_or_source_normalizer",
+    "accepted_214_pre_implementation_checkpoint",
+    "actual_migration_or_PostgreSQL_permission_approval",
+    "five_second_end_to_end_live_delivery_proof",
+    "live_Linear_workspace_or_webhook_authority",
+    "v1_3_release_or_external_pilot"
+  ]
+}
