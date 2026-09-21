@@ -24,8 +24,11 @@ It uses exact decimal arithmetic with canonical bounded amounts. An explicit
 `no_observation` bucket and a missing bucket are counted separately; neither
 becomes numeric zero. A selected row in another currency fails closed. Gateway
 attempts in another currency remain in the denominator but are excluded from
-the selected-currency subtotal. Failed, rate-limited, unknown-outcome, and
-unpriced attempts remain visible. Negative provider rows are counted, including
+the selected-currency subtotal. An unavailable estimate is counted as unpriced
+even when its currency also mismatches; these diagnostic counts can overlap.
+Conflicting currencies for one immutable rate-card identity fail closed.
+Failed, rate-limited, unknown-outcome, and unpriced attempts remain visible.
+Negative provider rows are counted, including
 unclassified ones, without inferring credit, discount, bypass, or an employee
 charge. The preview never recalculates a historical estimate from a later rate
 card.

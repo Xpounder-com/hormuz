@@ -333,6 +333,7 @@ def _gateway_coverage(
     request_ids: set[str] = set()
     evidence_ids: set[str] = set()
     rate_identities: set[tuple[str, int, str]] = set()
+    rate_currencies: dict[tuple[str, int, str], str] = {}
     priced = unpriced = different_currency = failed = rate_limited = unknown = 0
     try:
         with exact_context():
@@ -350,20 +351,25 @@ def _gateway_coverage(
                     _invalid()
                 request_ids.add(event["request_attempt_id"])
                 evidence_ids.add(event["evidence_event_id"])
-                rate_identities.add((
+                rate_identity = (
                     event["configured_rate_card_id"],
                     event["configured_rate_card_version"],
                     event["configured_rate_card_digest"],
-                ))
+                )
+                rate_currency = event["configured_estimate_currency"]
+                if rate_identity in rate_currencies and rate_currencies[rate_identity] != rate_currency:
+                    _invalid()
+                rate_currencies[rate_identity] = rate_currency
+                rate_identities.add(rate_identity)
                 state = event["terminal_state"]
                 failed += state == "failed"
                 rate_limited += state == "rate_limited"
                 unknown += state == "outcome_unknown"
-                if event["configured_estimate_currency"] != currency:
-                    different_currency += 1
-                elif event["configured_estimate_availability"] == "unavailable":
+                if event["configured_estimate_availability"] == "unavailable":
                     unpriced += 1
-                else:
+                if rate_currency != currency:
+                    different_currency += 1
+                elif event["configured_estimate_availability"] == "available":
                     priced += 1
                     total += Decimal(event["configured_estimate_amount"])
             subtotal = decimal_text(total) if priced else None

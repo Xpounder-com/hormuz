@@ -220,13 +220,17 @@ class FinanceReconciliationCoverageTests(unittest.TestCase):
 
     def test_different_currency_is_excluded_from_subtotal_without_conversion(self):
         report = preview(events=(
-            event("1"), event("2", currency="EUR", amount="2"),
-            event("3", currency="EUR", amount=None),
+            event("1"), event("2", currency="EUR", amount="2", version=2),
+            event("3", currency="EUR", amount=None, version=3),
         ))
         self.assertEqual(report.gateway_estimate.known_subtotal, "0.75")
         self.assertEqual(report.gateway_estimate.currency_mismatch_attempt_count, 2)
         self.assertEqual(report.gateway_estimate.priced_attempt_count, 1)
-        self.assertEqual(report.gateway_estimate.unpriced_attempt_count, 0)
+        self.assertEqual(report.gateway_estimate.unpriced_attempt_count, 1)
+
+    def test_same_immutable_rate_card_identity_cannot_change_currency(self):
+        with self.assertRaises(FinanceCoveragePreviewError):
+            preview(events=(event("1", currency="USD"), event("2", currency="EUR")))
 
     def test_cross_tenant_provider_and_window_events_fail_closed(self):
         cases = (
