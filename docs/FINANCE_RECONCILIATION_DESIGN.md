@@ -1,6 +1,6 @@
 # Finance reconciliation — account-binding preflight for v1.3.0
 
-Status: **owner-approved scope; exact #214 preflight acceptance pending**.
+Status: **owner-approved scope and accepted #214 preflight; runtime pending**.
 The owner approved prospective metadata-only account capture on 2026-09-06;
 [durable approval record](https://github.com/Xpounder-com/hormuz/issues/8#issuecomment-5562564894).
 This is a continuation of #8, not a replacement for its remaining criteria.
@@ -143,11 +143,13 @@ profiles, attempt evidence IDs, price identities, attribution and budget
 versions, review-policy version and calculation version. Record a consistent
 database read boundary: separate latest-state queries are not one snapshot.
 
-The existing `current_observations` method selects latest coverage and has no
-explicit as-of argument. Runtime design must provide a bounded, reproducible
-selection and preserve exact input identities. Do not obtain a historical
-report by calling that method again after a provider refresh. Empty newer
-coverage suppresses old observations but is not an explicit zero value.
+`current_observations` selects latest coverage and has no explicit as-of
+argument. The internal [as-of collection read](FINANCE_COLLECTION_AS_OF.md)
+now pins a tenant-wide publication cutoff, selected snapshot identities and
+exact bucket coverage. A future report must retain that cutoff and all other
+input versions rather than calling `current_observations` again after a
+provider refresh. Empty newer coverage suppresses old observations but is not
+an explicit zero value.
 
 Compare only compatible account, scope, period, currency, product/profile and
 dimensions. Keep provider observation time and gateway attempt/terminal time

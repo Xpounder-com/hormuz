@@ -779,6 +779,144 @@ class FinanceCollectionSQLiteRepositoryTests(unittest.TestCase):
         self.assertEqual(exact_retry.supersedes_snapshot_id, refresh.snapshot_id)
         self.assertNotEqual(initial.snapshot_id, refresh.snapshot_id)
 
+    def test_as_of_selection_replays_tenant_high_water_after_empty_refresh(self):
+        self.bind()
+        usage_query = query("openai.organization-usage-completions.v1", end=END)
+        empty_before_publish = self.repository.observations_as_of(
+            ADMIN, binding_id=usage_query.binding_id, binding_version=1,
+            collection_profile=usage_query.collection_profile, start_at=START, end_at=END,
+        )
+        self.assertEqual(empty_before_publish.as_of_commit_sequence, 0)
+        self.assertEqual(empty_before_publish.selected_snapshots, ())
+        self.assertEqual(empty_before_publish.coverage, ())
+        self.assertEqual(empty_before_publish.observations, ())
+
+        initial = self.repository.publish_collection(
+            ADMIN,
+            self.repository.prepare_collection(
+                ADMIN, usage_query, idempotency_key="as-of-initial",
+                evidence_origin="customer_file",
+            ),
+            normalized_usage(usage_query),
+        )
+        first = self.repository.observations_as_of(
+            ADMIN, binding_id=usage_query.binding_id, binding_version=1,
+            collection_profile=usage_query.collection_profile, start_at=START, end_at=END,
+        )
+        self.assertEqual(first.as_of_commit_sequence, initial.commit_sequence)
+        self.assertEqual(
+            [(item.snapshot_id, item.content_digest, item.commit_sequence)
+             for item in first.selected_snapshots],
+            [(initial.snapshot_id, initial.content_digest, initial.commit_sequence)],
+        )
+        self.assertEqual(len(first.coverage), 2)
+        self.assertEqual(len(first.observations), 2)
+
+        # The cutoff belongs to the tenant, not to this binding/profile/window.
+        cost_query = query("openai.organization-costs.v1")
+        cost_collection = normalize_collection_pages(
+            cost_query,
+            (openai_page([openai_bucket(START, MIDDLE, [openai_cost()])]),),
+            fingerprint_key=KEY, fingerprint_key_version=1,
+        )
+        cost = self.repository.publish_collection(
+            ADMIN,
+            self.repository.prepare_collection(
+                ADMIN, cost_query, idempotency_key="as-of-cost",
+                evidence_origin="customer_file",
+            ),
+            cost_collection,
+        )
+        at_cost = self.repository.observations_as_of(
+            ADMIN, binding_id=usage_query.binding_id, binding_version=1,
+            collection_profile=usage_query.collection_profile, start_at=START, end_at=END,
+        )
+        self.assertEqual(at_cost.as_of_commit_sequence, cost.commit_sequence)
+        self.assertEqual(at_cost.selected_snapshots, first.selected_snapshots)
+        self.assertEqual(at_cost.coverage, first.coverage)
+        self.assertEqual(at_cost.observations, first.observations)
+
+        refresh_query = query(
+            usage_query.collection_profile, start=MIDDLE, end=END,
+        )
+        empty = normalize_collection_pages(
+            refresh_query,
+            (openai_page([openai_bucket(MIDDLE, END, [])]),),
+            fingerprint_key=KEY, fingerprint_key_version=1,
+        )
+        refreshed = self.repository.publish_collection(
+            ADMIN,
+            self.repository.prepare_collection(
+                ADMIN, refresh_query, idempotency_key="as-of-empty",
+                evidence_origin="customer_file",
+            ),
+            empty,
+        )
+        latest = self.repository.observations_as_of(
+            ADMIN, binding_id=usage_query.binding_id, binding_version=1,
+            collection_profile=usage_query.collection_profile, start_at=START, end_at=END,
+        )
+        self.assertEqual(latest.as_of_commit_sequence, refreshed.commit_sequence)
+        self.assertEqual(len(latest.observations), 1)
+        with self.assertRaisesRegex(FinanceCollectionError, "invalid_request"):
+            self.repository.observations_as_of(
+                ADMIN, binding_id=usage_query.binding_id, binding_version=1,
+                collection_profile=usage_query.collection_profile,
+                start_at=START, end_at=END,
+                as_of_commit_sequence=refreshed.commit_sequence + 1,
+            )
+        self.assertEqual(
+            [(item["coverage_state"], item["snapshot_id"]) for item in latest.coverage],
+            [("observed", initial.snapshot_id), ("no_observation", refreshed.snapshot_id)],
+        )
+        self.assertEqual(
+            [(item.snapshot_id, item.content_digest) for item in latest.selected_snapshots],
+            [(initial.snapshot_id, initial.content_digest),
+             (refreshed.snapshot_id, refreshed.content_digest)],
+        )
+        current = self.repository.current_observations(
+            ADMIN, binding_id=usage_query.binding_id, binding_version=1,
+            collection_profile=usage_query.collection_profile, start_at=START, end_at=END,
+        )
+        self.assertEqual(current.coverage, latest.coverage)
+        self.assertEqual(current.observations, latest.observations)
+
+        restarted = self.restart() if hasattr(self, "restart") else create_finance_collection_repository(self.config)
+        replay = restarted.observations_as_of(
+            ADMIN, binding_id=usage_query.binding_id, binding_version=1,
+            collection_profile=usage_query.collection_profile, start_at=START, end_at=END,
+            as_of_commit_sequence=at_cost.as_of_commit_sequence,
+        )
+        self.assertEqual(replay, at_cost)
+        before_any = restarted.observations_as_of(
+            ADMIN, binding_id=usage_query.binding_id, binding_version=1,
+            collection_profile=usage_query.collection_profile, start_at=START, end_at=END,
+            as_of_commit_sequence=empty_before_publish.as_of_commit_sequence,
+        )
+        self.assertEqual(before_any, empty_before_publish)
+
+    def test_as_of_selection_rejects_invalid_or_future_cutoffs_and_unauthorized_reads(self):
+        self.bind()
+        value = query("openai.organization-usage-completions.v1")
+        arguments = dict(
+            binding_id=value.binding_id, binding_version=1,
+            collection_profile=value.collection_profile, start_at=START, end_at=MIDDLE,
+        )
+        for cutoff in (True, False, -1, 1, 9_223_372_036_854_775_808, "0", 1.0):
+            with self.subTest(cutoff=cutoff), self.assertRaisesRegex(
+                FinanceCollectionError, "invalid_request"
+            ):
+                self.repository.observations_as_of(
+                    ADMIN, **arguments, as_of_commit_sequence=cutoff,
+                )
+        viewer = PortfolioPrincipal("acme", "finance", ("finance_viewer",))
+        with unittest.mock.patch(
+            "hormuz.finance_collection_repository.portfolio_transaction",
+            side_effect=AssertionError("unauthorized selection must not connect"),
+        ):
+            with self.assertRaisesRegex(FinanceCollectionError, "forbidden"):
+                self.repository.observations_as_of(viewer, **arguments)
+
     def test_current_cost_observations_expose_boolean_finality(self):
         self.bind()
         value = query("openai.organization-costs.v1")
