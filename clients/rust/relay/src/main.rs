@@ -1,6 +1,6 @@
-// Linux retains the Unix pipe fixtures, while its terminal command uses the
-// Secret Service store and keeps optimization Off for this source checkpoint.
-#[cfg(any(target_os = "macos", all(test, unix)))]
+// Linux uses the same bounded Unix helper exchange when a terminal invocation
+// explicitly opts in; both platforms retain the Unix pipe fixtures.
+#[cfg(any(target_os = "macos", target_os = "linux", all(test, unix)))]
 mod helper_exchange;
 
 // The same suspended-start Job Object owner used for launched AI clients also

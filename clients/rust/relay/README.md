@@ -76,12 +76,23 @@ path is not wired to a resident native Linux shell yet.
 On Linux, the command opens the validated private directory and uses the
 Secret Service default collection through `NativeCredentialStore`. It rejects
 missing or locked credentials, pending or lifetime-expired sessions, and
-profile mismatches before starting a relay listener. It always uses
-`Optimization::Off`; no Python optimizer or tokenizer is launched by this Linux
-command. Off still forwards through the authenticated, bounded governed relay
-and never automatically replays an uncertain upstream POST. The optional
-on-demand Python optimizer path below currently applies to macOS and Windows
-only.
+profile mismatches before starting a relay listener. With no extra argument,
+it uses `Optimization::Off`: no Python optimizer or tokenizer is launched, and
+the authenticated, bounded relay streams the exact body. A terminal caller may
+explicitly add `--optimizer-python <absolute-executable>` to the supervised
+invocation. The file must exist and be executable, and the Hormuz wheel must be
+installed for that interpreter so its isolated
+`-I -m hormuz.context_relay_bridge` invocation can find the module. An
+absolute executable path does not prove the wheel is installed; the module is
+not probed at launch. Interpreter file inspection follows the verified service
+and session checks and precedes the listener. If the wheel is absent when an
+On request arrives, the helper fails and the original body is forwarded once.
+The existing private per-profile toggle
+must also be enabled; an absent, invalid or Off toggle never starts Python.
+The helper gets only the gateway origin and bounded request body over stdin,
+with no provider credential or Python import override inherited. This path
+is source-level opt-in, not a packaged interpreter or native-shell integration.
+The relay never automatically replays an uncertain upstream POST.
 
 The launcher, version probe, client and normal descendants inherit the service
 cgroup on fork, even if a descendant double-forks or calls `setsid`. systemd
@@ -142,27 +153,37 @@ responses as they arrive. Requests are never replayed after an uncertain
 outcome. A failed or unavailable gateway credential prevents upstream egress.
 
 The existing private `context-optimization-<profile>.json` toggle is read for
-each eligible request. Missing, invalid and Off settings keep the exact body.
-On attempts invoke the existing Python optimizer through bounded stdin/stdout
-only for requests at most 1 MiB. The Python helper must be available in the
-selected `python3` (or `python.exe`) installation as an installed Hormuz wheel;
-`-I` intentionally excludes imports from the current working directory. If the
-helper, gateway capability or tokenizer resources are unavailable, the relay
-forwards the exact original body once. No Python process runs while idle.
+each eligible request when an optimizer is configured. Missing, invalid and
+Off settings keep the exact body. On attempts invoke the existing Python
+optimizer through bounded stdin/stdout only for requests at most 1 MiB. The
+helper must be available in the selected `python3` (macOS), `python.exe`
+(Windows), or explicit absolute interpreter (Linux) as an installed Hormuz
+wheel; `-I` intentionally excludes imports from the current working
+directory. If the helper, gateway capability or tokenizer resources are
+unavailable, the relay forwards the exact original body once. No Python
+process runs while idle.
 Claude token-count requests remain governed but bypass the optimizer entirely.
-The configured `HORMUZ_CONTEXT_TOKENIZER_CACHE` path is retained for the
-helper; direct provider credentials and Python import overrides are not.
+The configured `HORMUZ_CONTEXT_TOKENIZER_CACHE`, `SSL_CERT_FILE`, and
+`SSL_CERT_DIR` paths are retained for the helper; direct provider credentials
+and Python import overrides are not. On Linux, the helper gets the validated
+`--state-directory` as its child-only `HORMUZ_CLIENT_STATE_DIRECTORY` so the
+default tokenizer cache resolves under that private root when no explicit
+cache path is configured. An explicit `HORMUZ_CONTEXT_TOKENIZER_CACHE` keeps
+precedence. The helper does not inherit a caller-supplied state override.
 The gateway origin and request body reach the helper only through bounded
 stdin, never through process arguments.
 
-On macOS, the optimizer exchange uses nonblocking owned pipe ends and one
-30-second deadline for input delivery, output collection and helper exit.
+On macOS and opt-in Linux, the optimizer exchange uses nonblocking owned pipe
+ends and one 30-second deadline for input delivery, output collection and
+helper exit.
 It drains output while writing input, rejects excess output, and kills/reaps
 the direct helper on failure or relay-owner cancellation. A process retaining
 inherited pipe ends cannot extend the I/O deadline through a reader/writer
 thread join. This owns and reaps only the direct Unix helper; it does not
-contain a helper descendant after fork. Unix helper-tree containment remains a
-separate acceptance gate.
+contain a helper descendant after fork. Linux's verified user-service cgroup
+contains ordinary helper descendants until unit exit; deliberate same-UID
+cgroup migration remains outside this source guarantee. macOS helper-tree
+containment remains a separate acceptance gate.
 
 On Windows, the optimizer helper starts suspended and is assigned to its own
 kill-on-close Job Object before running. The exchange reads and writes pipes
@@ -183,7 +204,7 @@ shutdown share one lock, so no `spawn_blocking` job can register after closure.
 Abort handles stop jobs that remain queued. A closure scheduled concurrently
 with shutdown checks the sticky signal before calling the optimizer; an
 optimizer already running receives that signal and must return promptly. The
-first-party macOS implementation honors it by killing and reaping its direct
+first-party Unix implementation honors it by killing and reaping its direct
 helper, while the Windows Job Object stops the helper and its descendants
 before pipe workers join. Rust cannot forcibly stop arbitrary in-process
 `RequestOptimizer` implementations that ignore the cooperative contract, so
@@ -195,8 +216,8 @@ synthetic direct-client launcher-death, pre-exec race and normal-exit tests,
 plus a host-conditional user-service test for a detached grandchild. macOS
 still has direct-child-only cleanup; Linux's new cgroup path needs real user
 manager and shell-wiring acceptance. Native-shell panel and quit/update wiring,
-packaged optimizer interpreter, real
-Codex/Claude sessions, Windows accessibility and clean-machine acceptance
+packaged optimizer interpreter, real Codex/Claude sessions, Windows
+accessibility and clean-machine acceptance
 remain open. The blocked-optimizer shutdown fixture proves that cancellation
 stops first-party work before gateway egress; it does not establish a general
 linearization boundary between cancellation and an upstream POST that is
@@ -213,13 +234,17 @@ The Python bridge is covered by
 Synthetic Unix pipe tests also cover partial and bidirectional I/O, retained
 pipe ends after direct-helper exit, a helper that never consumes stdin, output
 overflow and direct-child reaping. Linux runs those fixtures alongside the
-guarded Off-only native relay command. Windows fake-helper tests cover Job
-Object containment, cancellation and pipe-worker completion without an
-installed optimizer or provider. These tests do not prove cancellation of an
-arbitrary non-cooperative in-process optimizer, Unix client or optimizer-helper
-descendant containment; the separate Linux user-service fixture above runs only
-with a real manager. These tests also do not prove macOS abrupt launcher-death
+guarded default-Off and explicit opt-in native relay command. A fake
+interpreter/gateway test checks transformed bytes only when both the explicit
+path and private preference are present; it never invokes a model or provider.
+Windows fake-helper tests cover Job Object containment, cancellation and
+pipe-worker completion without an installed optimizer or provider. These
+tests do not prove cancellation of an arbitrary non-cooperative in-process
+optimizer, Unix client or optimizer-helper descendant containment; the
+separate Linux user-service fixture above runs only with a real manager. These
+tests also do not prove macOS abrupt launcher-death
 cleanup, real optimizer/provider sessions, or packaged native-shell lifecycle
-behavior. The Linux parent-death tests cover a direct synthetic client only;
-the Linux executable now uses Secret Service after user-service preflight, but
-credential-backed user-manager launch remains unverified.
+behavior. The Linux parent-death tests cover a direct synthetic client only.
+The credential-backed host fixture proves the default-Off path under an
+isolated Secret Service user manager; the explicit Python path still needs
+packaged-interpreter and installed-client acceptance.

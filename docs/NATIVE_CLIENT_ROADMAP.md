@@ -151,13 +151,17 @@ open** for native-shell integration, installed-client proof, descendant
 containment and platform quit/update acceptance. Neither the Windows panel nor
 shipping Mac app launches this Rust relay yet.
 The Linux terminal command now uses the native Secret Service adapter with
-optimization Off. It verifies transient user-service supervision before
-private-state or credential access, then rechecks before client discovery.
+optimization Off by default and an explicit absolute-interpreter opt-in for
+the installed-wheel Python helper. It verifies transient user-service
+supervision before private-state or credential access, then rechecks before
+client discovery. The opt-in also requires the existing private preference;
+missing helpers fall back to the exact original body once.
 An exact-unit Linux stop command now gives a future shell a bounded quit/update
 control path without reading private state or Secret Service; its synthetic
 active-relay fixture tests forceful cgroup teardown without POST replay.
-Synthetic session, client and gateway tests cover fail-closed preflight and
-governed Off forwarding; the detached-descendant fixture remains conditional
-on a real user manager. Real installed-client traffic, Secret Service desktop
+Synthetic session, client and gateway tests cover fail-closed preflight,
+governed Off forwarding and fake-interpreter On behavior; the
+detached-descendant fixture remains conditional on a real user manager. Real
+installed-client traffic, Secret Service desktop
 behavior, native-shell quit/update wiring and clean-install proof remain open
 before Linux descendant containment or support can be accepted.
