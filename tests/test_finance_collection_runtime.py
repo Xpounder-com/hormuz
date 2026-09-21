@@ -11,6 +11,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from urllib.error import HTTPError
 
 from hormuz.finance_collection import (
@@ -910,7 +911,7 @@ class FinanceCollectionSQLiteRepositoryTests(unittest.TestCase):
                     ADMIN, **arguments, as_of_commit_sequence=cutoff,
                 )
         viewer = PortfolioPrincipal("acme", "finance", ("finance_viewer",))
-        with unittest.mock.patch(
+        with mock.patch(
             "hormuz.finance_collection_repository.portfolio_transaction",
             side_effect=AssertionError("unauthorized selection must not connect"),
         ):
