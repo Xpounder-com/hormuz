@@ -24,7 +24,7 @@ erasure. Session format validation and pending-state transitions belong to #335.
 | --- | --- | --- |
 | macOS | Existing file Keychain generic-password service `com.hormuz.mac.session.v1`, account `active-connection-v1`, synchronization disabled | 32,767 bytes; update in place, add only if missing; noninteractive native calls fail closed on unavailable/locked records |
 | Windows | Current-user Credential Manager generic target `Hormuz/session/v1/active-connection` | 2,560 bytes; native replacement; local-machine persistence means this user's record survives logons on this machine, not access for every machine user |
-| Linux | Deferred to #343 | No native credential backend or file fallback is supplied |
+| Linux | Existing unlocked Secret Service default collection, attributes `application=com.hormuz.client`, `service=com.hormuz.client.session.v1`, `account=active-connection-v1` | 32,767 bytes; encrypted D-Bus session; updates an exact existing item or creates one only when the service returns no prompt; locked, missing, ambiguous or prompt-required stores fail closed |
 
 No second Rust credential namespace is introduced on Mac. The file Keychain
 preserves the existing app's behavior; it does not claim Data Protection,
@@ -34,6 +34,28 @@ File-Keychain calls are serialized while the process interaction setting is
 temporarily disabled, then restore its exact prior value; per-query UI rejection
 is also requested. Native integration must route credential calls through this
 adapter instead of concurrently changing that process-wide setting elsewhere.
+
+Linux uses oo7's low-level Secret Service API so the adapter can inspect native
+prompt paths without executing them. It opens only an encrypted session, uses
+only the existing `default` alias and never calls `Unlock`, creates a collection,
+shells out to `secret-tool`, or falls back to a file. Every operation has a
+ten-second total deadline and each D-Bus method has a five-second deadline.
+It ignores `DBUS_SESSION_BUS_ADDRESS` and connects only to the socket at
+`/run/user/<effective-uid>/bus` after verifying non-root matching real,
+effective and saved UIDs, an owned non-symlink 0700 runtime directory, and an
+owned socket.
+Search results must contain at most one unlocked item with exactly the owned
+attributes. Creating and deleting accept only the `/` no-prompt path; any
+provider request for user interaction is `SecureStoreUnavailable`. Initial
+creation asks the service to atomically replace an exact-attribute race and then
+requires one item at the returned path. Both initial and replacement saves use
+that attribute-bound operation so a raced item proxy cannot receive the secret.
+This source contract targets both GNOME Secret Service and KWallet's Secret
+Service API, but real locked/missing-store behavior, binary payload round trips,
+and KWallet compatibility still require Linux desktop acceptance. The pinned
+`oo7` native-crypto implementation uses transient plaintext and key-derivation
+allocations outside `SecretRecord`'s owned zeroization boundary, so this source
+checkpoint does not claim complete process-memory erasure.
 
 Before a session operation, callers must check `maximum_record_bytes()`, validate
 their record, and hold the shared connection coordination guard through the
@@ -230,7 +252,11 @@ failure and preservation after unlock. The Mac credential operations run in a
 bounded child process with content-free phase markers; its parent retains
 ownership of temporary Keychain cleanup. Windows tests use a unique synthetic
 Credential Manager target, verify replacement/size failures and delete only
-that target. Neither test addresses the user's real Hormuz session.
+that target. Linux tests use only an in-memory fake backend and pure prompt/path
+classification. They cover binary payloads, replacement, idempotent deletion,
+locked/missing/ambiguous failures and prompt rejection without connecting to a
+session bus or touching a user's keyring. Neither platform test addresses the
+user's real Hormuz session.
 
 Native filesystem tests verify atomic snapshots, staged-write failure, real
 permission/ACL rejection, unsafe paths/hard links, concurrent updates, a second
@@ -242,8 +268,13 @@ post-lock sentinel identity, bounded staging collisions, atomic exchange and
 rollback identity/byte checks, process contention/crash recovery, and both
 directions of inherited lock-descriptor release. This is source and native test
 evidence only: a clean Ubuntu desktop, target filesystem matrix, XDG placement
-and real shell lifecycle acceptance remain in #343. Windows type-checking on a
-Mac is supplementary and never substitutes for native Windows execution.
+and real shell lifecycle acceptance remain in #343. Secret Service source and
+fake-backend tests do not qualify a clean Ubuntu 24.04 host or KWallet. Real
+desktop acceptance still needs locked and missing default collections, binary
+replacement and deletion, process restart, session-bus absence and package/runtime
+dependencies. The storage and credential adapters do not establish a usable
+Linux shell; issue #343 remains open. Windows type-checking on a Mac is
+supplementary and never substitutes for native Windows execution.
 
 Application tests race competing startups, deny a second process while permitting
 refresh, and recover after a child exits without destructors. Negative tests
