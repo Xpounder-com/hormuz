@@ -96,6 +96,32 @@ download_and_verify() {
     || fail "download checksum mismatch"
 }
 
+download_github_release_and_verify() {
+  local repository=$1
+  local tag=$2
+  local asset=$3
+  local output=$4
+  local expected=$5
+  local attempt
+  if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
+    download_and_verify \
+      "https://github.com/${repository}/releases/download/${tag}/${asset}" \
+      "${output}" "${expected}"
+    return 0
+  fi
+  for attempt in 1 2 3; do
+    rm -f -- "${output}"
+    if gh release download "${tag}" --repo "${repository}" \
+      --pattern "${asset}" --output "${output}"; then
+      printf '%s  %s\n' "${expected}" "${output}" | sha256sum --check --status \
+        || fail "download checksum mismatch"
+      return 0
+    fi
+    [[ "${attempt}" -lt 3 ]] || fail "GitHub release asset download failed"
+    sleep "${attempt}"
+  done
+}
+
 create_immutable_configmap() {
   local namespace=$1
   local name=$2
@@ -606,6 +632,9 @@ host_arch="$(uname -m)"
   || fail "the v1 proof requires native AMD64"
 command -v docker >/dev/null 2>&1 || fail "Docker is unavailable"
 command -v curl >/dev/null 2>&1 || fail "curl is unavailable"
+if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
+  command -v gh >/dev/null 2>&1 || fail "GitHub CLI is unavailable"
+fi
 command -v openssl >/dev/null 2>&1 || fail "OpenSSL is unavailable"
 command -v python3 >/dev/null 2>&1 || fail "Python 3 is unavailable"
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is unavailable"
@@ -644,8 +673,8 @@ PY
 export KUBECONFIG
 export PATH="${WORK_ROOT}/bin:${PATH}"
 
-download_and_verify \
-  "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64" \
+download_github_release_and_verify \
+  kubernetes-sigs/kind "${KIND_VERSION}" kind-linux-amd64 \
   "${WORK_ROOT}/bin/kind" "${KIND_SHA256}"
 download_and_verify \
   "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
