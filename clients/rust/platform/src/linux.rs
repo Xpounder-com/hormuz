@@ -212,9 +212,11 @@ impl SecretServiceBackend {
             .enable_all()
             .build()
             .map_err(unavailable)?;
-        runtime
-            .block_on(tokio::time::timeout(OPERATION_BUDGET, operation))
-            .map_err(unavailable)?
+        runtime.block_on(async move {
+            tokio::time::timeout(OPERATION_BUDGET, operation)
+                .await
+                .map_err(unavailable)?
+        })
     }
 
     fn run<T: Send>(
