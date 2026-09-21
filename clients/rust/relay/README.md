@@ -91,10 +91,19 @@ user session for host evidence. Linux binary tests inject a synthetic session,
 preflight, request client and gateway: failed preflight touches no private state,
 custody or egress; invalid sessions stop before listener creation; a valid
 session forwards one Off request. They use no real keyring or provider. A real
-credential-backed user-manager launch, installed-client traffic, Secret Service
-desktop behavior, native-shell lifecycle wiring and clean-install proof remain
-open. Issue #341 remains open; this source checkpoint does not qualify Linux
-support.
+credential-backed synthetic launch can also be checked by the opt-in
+`linux_secret_service_launch` host test. It runs only as a disposable
+`hormuzrelaytest` account with home `/tmp/hormuz-relay-test-home`, its own active
+user manager and an unlocked default Secret Service collection; set
+`HORMUZ_RELAY_ISOLATED_SECRET_SERVICE_TEST=1` when invoking the compiled test
+binary. It requires an empty Hormuz credential namespace, saves and later
+deletes a synthetic session, then runs this executable through the user-service
+wrapper with a fake client and gateway. The fixture verifies one Off request,
+credential custody, listener closure and an inactive service after client exit.
+Without that isolated account, ordinary CI skips the host test. Installed-client
+traffic, desktop Secret Service behavior beyond this synthetic account,
+native-shell lifecycle wiring and clean-install proof remain open. Issue #341
+remains open; this source checkpoint does not qualify Linux support.
 
 The relay admits the client's expected POST routes only. It checks Host,
 Origin, one local bearer/API-key credential, content length and a 25 MiB request
