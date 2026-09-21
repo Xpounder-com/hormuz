@@ -15,9 +15,12 @@ immutable attempt binding against its registered source binding, and establish
 compatible account, scope, half-open UTC period, currency, product and
 collection profile. The reference compares only provider-account grain; it
 cannot represent team, actor, application or model allocation. Exact coordinate
-equality and complete provider coverage are checked before amounts are read.
+equality and caller-asserted complete provider and gateway coverage are checked
+before amounts are read.
 An empty/missing/partial/stale provider bucket is not zero. Duplicate provider
-observations or gateway attempts are rejected.
+observations or gateway attempts are rejected. The collection profile must be
+an existing cost profile for the selected provider; an equal pair of usage or
+cross-provider profiles is not cost-comparable.
 
 The calculator cannot verify the caller's complete-coverage assertion, prove
 first-party transport or assign a boundary-crossing request to a provider's
@@ -32,6 +35,11 @@ with no decimal rounding; zero denominator leaves it undefined even for
 zero/zero. Unpriced attempts retain a count and make `supplied_attempt_pricing`
 `incomplete`; even `complete` means only that the supplied attempt rows are
 priced. The known subtotal and its difference are never a complete bill.
+When a caller supplies `gateway_coverage="complete"` and an empty selected
+attempt tuple, the reference yields a zero subtotal with no invented attempt
+IDs and `no_gateway_attempts` status. Missing, partial, or stale gateway
+selection is rejected. The caller's coverage claim is unverified here, and the
+provider-minus-zero difference does not prove bypass or pass a threshold.
 The reference never evaluates or passes a threshold and never labels an
 aggregate or adjustment as a final invoice or a team charge. Signed provider
 rows are counted once without inferring credits or bypass from their amount.

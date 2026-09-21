@@ -29,7 +29,7 @@ def grain() -> ComparableAccountGrain:
         period_end_at="2026-09-02T00:00:00Z",
         currency="USD",
         product="openai.costs",
-        collection_profile="openai.costs.v1",
+        collection_profile="openai.organization-costs.v1",
     )
 
 
@@ -55,6 +55,7 @@ def calculate(
     gateway_grain: ComparableAccountGrain | None = None,
     gateway_binding: BoundGatewayScopeClaim | None = None,
     provider_coverage: str = "complete",
+    gateway_coverage: str = "complete",
     provider_rows: tuple[ProviderCostRow, ...] = (provider("1.25"),),
     gateway_rows: tuple[GatewayEstimateRow, ...] = (estimate("1"),),
 ):
@@ -63,6 +64,7 @@ def calculate(
         gateway_grain=gateway_grain or grain(),
         gateway_binding=binding() if gateway_binding is None else gateway_binding,
         provider_coverage=provider_coverage,
+        gateway_coverage=gateway_coverage,
         provider_rows=provider_rows,
         gateway_rows=gateway_rows,
     )
@@ -93,6 +95,15 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
                 self.assertIsNone(result.relative_variance)
                 self.assertEqual(result.signed_variance, provider_amount)
 
+    def test_asserted_complete_empty_gateway_selection_has_no_fake_attempt(self):
+        result = calculate(gateway_rows=())
+        self.assertEqual((result.provider_total, result.configured_estimate_known_subtotal), ("1.25", "0"))
+        self.assertEqual((result.signed_variance, result.absolute_variance), ("1.25", "1.25"))
+        self.assertIsNone(result.relative_variance)
+        self.assertEqual((result.gateway_attempt_ids, result.gateway_price_identity_digests), ((), ()))
+        self.assertEqual((result.supplied_attempt_pricing, result.review_status),
+                         ("no_gateway_attempts", "not_evaluated"))
+
     def test_incomplete_pricing_keeps_known_subtotal_but_never_passes(self):
         result = calculate(gateway_rows=(estimate("0.75"), estimate(None, suffix="2")))
         self.assertEqual(result.configured_estimate_known_subtotal, "0.75")
@@ -122,7 +133,6 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
             replace(original, period_start_at="2026-09-01T12:00:00Z"),
             replace(original, currency="EUR"),
             replace(original, product="other.costs"),
-            replace(original, collection_profile="other.costs.v1"),
             replace(original, scope_kind="projects", scope_fingerprints=("f" * 64,)),
         )
         for mismatched in mismatches:
@@ -140,7 +150,8 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
             with self.subTest(claim=claim), self.assertRaises(FinanceVarianceReferenceError) as caught:
                 calculate_reference_variance(
                     provider_grain=grain(), gateway_grain=grain(), gateway_binding=claim,
-                    provider_coverage="complete", provider_rows=(provider("1"),), gateway_rows=(estimate("1"),),
+                    provider_coverage="complete", gateway_coverage="complete",
+                    provider_rows=(provider("1"),), gateway_rows=(estimate("1"),),
                 )
             self.assertEqual(caught.exception.code, "finance_grain_not_comparable")
 
@@ -153,6 +164,12 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
             with self.assertRaises(FinanceVarianceReferenceError) as caught:
                 calculate(provider_rows=rows)
             self.assertEqual(caught.exception.code, "finance_reference_invalid")
+
+    def test_missing_partial_or_stale_gateway_selection_is_not_zero(self):
+        for coverage in ("missing", "partial", "stale", "empty"):
+            with self.subTest(coverage=coverage), self.assertRaises(FinanceVarianceReferenceError) as caught:
+                calculate(gateway_coverage=coverage, gateway_rows=())
+            self.assertEqual(caught.exception.code, "finance_grain_not_comparable")
 
     def test_duplicate_attempts_invalid_estimates_and_unbounded_sums_fail_closed(self):
         cases = (
@@ -191,6 +208,8 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
             {"currency": "usd"},
             {"provider": []},
             {"scope_kind": []},
+            {"collection_profile": "openai.organization-usage-completions.v1"},
+            {"collection_profile": "anthropic.organization-costs.v1"},
         ):
             with self.subTest(changed=changed), self.assertRaises(FinanceVarianceReferenceError) as caught:
                 replace(original, **changed)

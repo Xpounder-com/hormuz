@@ -13,6 +13,7 @@ from datetime import datetime
 from decimal import Decimal, DecimalException
 import re
 
+from .finance_collection import PROFILE_SPECS
 from .finance_values import FinanceValueError, currency_code, decimal_text, exact_context
 
 
@@ -79,6 +80,7 @@ class ComparableAccountGrain:
             valid_currency = self.currency == currency_code(self.currency)
         except FinanceValueError:
             valid_currency = False
+        profile = PROFILE_SPECS.get(self.collection_profile) if isinstance(self.collection_profile, str) else None
         if (
             not _identifier(self.organization_id)
             or not isinstance(self.provider, str)
@@ -99,7 +101,9 @@ class ComparableAccountGrain:
             or (self.provider == "anthropic" and self.scope_kind == "projects")
             or not valid_currency
             or not _identifier(self.product)
-            or not _identifier(self.collection_profile)
+            or profile is None
+            or profile.provider != self.provider
+            or profile.source_kind != "cost"
             or _utc(self.period_start_at) >= _utc(self.period_end_at)
         ):
             raise FinanceVarianceReferenceError("finance_reference_invalid")
@@ -176,6 +180,7 @@ def calculate_reference_variance(
     gateway_grain: ComparableAccountGrain | None,
     gateway_binding: BoundGatewayScopeClaim | None,
     provider_coverage: str,
+    gateway_coverage: str,
     provider_rows: tuple[ProviderCostRow, ...],
     gateway_rows: tuple[GatewayEstimateRow, ...],
 ) -> VarianceReference:
@@ -193,6 +198,7 @@ def calculate_reference_variance(
         or not isinstance(gateway_binding, BoundGatewayScopeClaim)
         or provider_grain != gateway_grain
         or provider_coverage != "complete"
+        or gateway_coverage != "complete"
         or gateway_binding.source_binding_id != gateway_grain.source_binding_id
         or gateway_binding.source_binding_version != gateway_grain.source_binding_version
         or gateway_binding.source_binding_digest != gateway_grain.source_binding_digest
@@ -202,7 +208,7 @@ def calculate_reference_variance(
         type(provider_rows) is not tuple
         or type(gateway_rows) is not tuple
         or not 1 <= len(provider_rows) <= MAX_REFERENCE_ROWS
-        or not 1 <= len(gateway_rows) <= MAX_REFERENCE_ROWS
+        or len(gateway_rows) > MAX_REFERENCE_ROWS
     ):
         raise FinanceVarianceReferenceError("finance_reference_invalid")
 
@@ -262,7 +268,9 @@ def calculate_reference_variance(
         signed_variance=signed_text,
         absolute_variance=absolute_text,
         relative_variance=relative,
-        supplied_attempt_pricing="incomplete" if unpriced else "complete",
+        supplied_attempt_pricing=(
+            "no_gateway_attempts" if not gateway_rows else "incomplete" if unpriced else "complete"
+        ),
         review_status="not_evaluated",
         provider_observation_keys=tuple(provider_keys),
         gateway_attempt_ids=tuple(attempt_ids),
