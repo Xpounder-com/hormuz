@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
@@ -33,14 +34,18 @@ from .finance_collection import (
     PROFILE_SPECS,
     CollectionQuery,
     FinanceCollectionError,
+    MAX_WINDOW_DAYS,
     NormalizedCollection,
+    finance_collection_source_identity,
     tenant_fingerprint,
     _unicode_safe,
     validate_normalized_collection,
     validate_finance_collection_event,
     validate_finance_snapshot_event,
     validate_finance_source_binding_event,
+    _digest as _collection_digest,
 )
+from .finance_attempts import finance_attempt_event_from_row
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import PortfolioError
 from .postgres import POSTGRES_SCHEMA_VERSION, PostgresConnectionPool
@@ -880,6 +885,194 @@ class FinanceCollectionRepository:
                 observations,
             )
 
+    def coverage_report_evidence(
+        self,
+        principal: PortfolioPrincipal,
+        *,
+        binding_id: str,
+        binding_version: int,
+        collection_profile: str,
+        start_at: str,
+        end_at: str,
+        as_of_commit_sequence: int | None = None,
+    ) -> tuple[
+        AsOfCollectionView,
+        tuple[Mapping[str, object], ...],
+        int,
+        tuple[Mapping[str, str], ...],
+    ]:
+        """Read a cost selection and every terminal sidecar in one tenant transaction.
+
+        The integer counts terminal attempts without a finance sidecar. The
+        final tuple carries the stored source origin and scope provenance for
+        each selected cost snapshot.
+        Neither the selected provider aggregate nor an attempt is assigned to
+        a provider account by this read.
+        """
+
+        self._authorize(principal)
+        _validate_collection_selection(binding_id, binding_version, collection_profile)
+        if PROFILE_SPECS[collection_profile].source_kind != "cost":
+            raise FinanceCollectionError("invalid_request")
+        start_at, end_at = _selection_bounds(start_at, end_at)
+        if start_at[11:] != "00:00:00Z" or end_at[11:] != "00:00:00Z":
+            raise FinanceCollectionError("invalid_request")
+        if as_of_commit_sequence is not None and (
+            type(as_of_commit_sequence) is not int
+            or not 0 <= as_of_commit_sequence <= 9_223_372_036_854_775_807
+        ):
+            raise FinanceCollectionError("invalid_request")
+
+        # The sidecar stores canonical +00:00 timestamps, whereas collection
+        # bucket bounds use Z. Normalize before SQLite lexical comparison;
+        # PostgreSQL accepts the same value as TIMESTAMPTZ.
+        terminal_start = start_at[:-1] + "+00:00"
+        terminal_end = end_at[:-1] + "+00:00"
+        provider_profile = {
+            "openai": "openai.responses.usage.v1",
+            "anthropic": "anthropic.messages.usage.v1",
+        }[PROFILE_SPECS[collection_profile].provider]
+        from .finance_reconciliation_coverage import MAX_PREVIEW_ROWS
+
+        with self._transaction(principal) as sql:
+            maximum = sql.one(
+                f"SELECT COALESCE(MAX(commit_sequence),0) AS sequence "
+                f"FROM {SNAPSHOT_TABLE} WHERE organization_id=?",
+                (principal.organization_id,),
+            )["sequence"]
+            if type(maximum) is not int or not 0 <= maximum <= 9_223_372_036_854_775_807:
+                raise FinanceCollectionError("unavailable")
+            cutoff = maximum if as_of_commit_sequence is None else as_of_commit_sequence
+            if cutoff > maximum:
+                raise FinanceCollectionError("invalid_request")
+            coverage, observations, snapshots = _select_collection_observations(
+                sql,
+                organization_id=principal.organization_id,
+                binding_id=binding_id,
+                binding_version=binding_version,
+                collection_profile=collection_profile,
+                start_at=start_at,
+                end_at=end_at,
+                as_of_commit_sequence=cutoff,
+                max_observations=MAX_PREVIEW_ROWS,
+                max_coverage=MAX_WINDOW_DAYS,
+            )
+            for observation in observations:
+                body = dict(observation)
+                digest = body.pop("observation_digest", None)
+                body.pop("snapshot_id", None)
+                try:
+                    if _collection_digest(body) != digest:
+                        raise ValueError
+                except (FinanceCollectionError, TypeError, ValueError):
+                    raise FinanceCollectionError("unavailable") from None
+            selected_provenance: list[Mapping[str, str]] = []
+            for selected in snapshots:
+                stored = sql.one(
+                    f"SELECT snapshot.evidence_json, chain.event_json AS audit_event_json "
+                    f"FROM {SNAPSHOT_TABLE} snapshot "
+                    "LEFT JOIN gateway_audit_chain_entries chain "
+                    "ON chain.organization_id=snapshot.organization_id "
+                    "AND chain.entry_schema_version=2 "
+                    "AND chain.source_schema_id='hormuz.finance-snapshot' "
+                    "AND chain.source_schema_version=1 "
+                    "AND chain.source_event_id=snapshot.snapshot_id "
+                    "WHERE snapshot.organization_id=? AND snapshot.snapshot_id=?",
+                    (principal.organization_id, selected.snapshot_id),
+                )
+                try:
+                    if stored is None or stored["audit_event_json"] != stored["evidence_json"]:
+                        raise ValueError
+                    source = json.loads(stored["evidence_json"])
+                    if (
+                        canonical_json_text(source) != stored["evidence_json"]
+                        or finance_collection_source_identity("hormuz.finance-snapshot", source)
+                        != selected.snapshot_id
+                        or source["organization_id"] != principal.organization_id
+                        or source["binding_id"] != binding_id
+                        or source["binding_version"] != binding_version
+                        or source["collection_profile"] != collection_profile
+                        or source["commit_sequence"] != selected.commit_sequence
+                        or source["content_digest"] != selected.content_digest
+                    ):
+                        raise ValueError
+                    selected_provenance.append({
+                        "snapshot_id": selected.snapshot_id,
+                        "evidence_origin": source["evidence_origin"],
+                        "scope_provenance": source["scope_provenance"],
+                    })
+                except (
+                    AuditChainError, FinanceCollectionError, KeyError, OverflowError,
+                    RecursionError, TypeError, UnicodeError, ValueError,
+                ):
+                    raise FinanceCollectionError("unavailable") from None
+            terminal_rows = sql.execute(
+                "SELECT terminal.id AS terminal_id, terminal.state AS terminal_state_check, "
+                "terminal.occurred_at AS terminal_occurred_at, finance.*, "
+                "chain.event_json AS audit_event_json "
+                "FROM gateway_request_attempt_events terminal "
+                "JOIN gateway_request_attempts root "
+                "ON root.organization_id=terminal.organization_id "
+                "AND root.attempt_id=terminal.attempt_id "
+                "LEFT JOIN gateway_finance_attempt_evidence finance "
+                "ON finance.organization_id=terminal.organization_id "
+                "AND finance.terminal_attempt_event_id=terminal.id "
+                "LEFT JOIN gateway_audit_chain_entries chain "
+                "ON chain.organization_id=finance.organization_id "
+                "AND chain.entry_schema_version=2 "
+                "AND chain.source_schema_id='hormuz.finance-attempt-evidence' "
+                "AND chain.source_schema_version=1 "
+                "AND chain.source_event_id=finance.evidence_event_id "
+                "WHERE terminal.organization_id=? AND root.protocol=? "
+                "AND terminal.state IN ('succeeded','failed','rate_limited','outcome_unknown') "
+                "AND terminal.occurred_at>=? AND terminal.occurred_at<? "
+                "ORDER BY terminal.occurred_at,terminal.id LIMIT ?",
+                (
+                    principal.organization_id,
+                    PROFILE_SPECS[collection_profile].provider,
+                    terminal_start,
+                    terminal_end,
+                    MAX_PREVIEW_ROWS + 1,
+                ),
+            ).fetchall()
+            if len(terminal_rows) > MAX_PREVIEW_ROWS:
+                raise FinanceCollectionError("unavailable")
+            events: list[Mapping[str, object]] = []
+            missing_sidecars = 0
+            for raw in terminal_rows:
+                row = dict(raw)
+                if row["evidence_event_id"] is None:
+                    missing_sidecars += 1
+                    continue
+                try:
+                    event = finance_attempt_event_from_row(row)
+                    occurred = row["terminal_occurred_at"]
+                    if isinstance(occurred, datetime):
+                        if occurred.tzinfo is None:
+                            raise ValueError
+                        occurred = occurred.astimezone(timezone.utc).isoformat()
+                    if (
+                        event["organization_id"] != principal.organization_id
+                        or event["provider_schema_id"] != provider_profile
+                        or event["terminal_attempt_event_id"] != row["terminal_id"]
+                        or event["terminal_state"] != row["terminal_state_check"]
+                        or event["occurred_at"] != occurred
+                        or canonical_json_text(event) != row["evidence_json"]
+                        or row["audit_event_json"] != row["evidence_json"]
+                    ):
+                        raise ValueError
+                except (
+                    AuditChainError, KeyError, OverflowError, RecursionError,
+                    TypeError, UnicodeError, ValueError,
+                ):
+                    raise FinanceCollectionError("unavailable") from None
+                events.append(event)
+            view = AsOfCollectionView(
+                principal.organization_id, binding_id, binding_version,
+                collection_profile, cutoff, snapshots, coverage, observations,
+            )
+            return view, tuple(events), missing_sidecars, tuple(selected_provenance)
+
 
 def _validate_collection_selection(
     binding_id: str, binding_version: int, collection_profile: str,
@@ -903,6 +1096,8 @@ def _select_collection_observations(
     start_at: str,
     end_at: str,
     as_of_commit_sequence: int | None = None,
+    max_observations: int | None = None,
+    max_coverage: int | None = None,
 ) -> tuple[
     tuple[Mapping[str, object], ...],
     tuple[Mapping[str, object], ...],
@@ -932,9 +1127,12 @@ def _select_collection_observations(
         f"AND coverage.bucket_start_at>=? AND coverage.bucket_end_at<=? "
         f"{cutoff_clause}) "
         f"SELECT * FROM ranked WHERE selection_rank=1 "
-        f"ORDER BY bucket_start_at,bucket_end_at",
-        parameters,
+        f"ORDER BY bucket_start_at,bucket_end_at "
+        f"{'LIMIT ?' if max_coverage is not None else ''}",
+        parameters + ((max_coverage + 1,) if max_coverage is not None else ()),
     ).fetchall()
+    if max_coverage is not None and len(coverage_rows) > max_coverage:
+        raise FinanceCollectionError("unavailable")
     coverage = tuple(
         {
             "bucket_start_at": row["bucket_start_at"],
@@ -946,6 +1144,10 @@ def _select_collection_observations(
         }
         for row in coverage_rows
     )
+    if max_observations is not None and sum(
+        row["observation_count"] for row in coverage
+    ) > max_observations:
+        raise FinanceCollectionError("unavailable")
     selected_snapshots = tuple(sorted(
         {
             str(row["snapshot_id"]): SelectedCollectionSnapshot(
