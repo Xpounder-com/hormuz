@@ -4,6 +4,9 @@
 #![cfg_attr(any(target_os = "linux", windows), deny(unsafe_code))]
 
 mod launch;
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+mod linux_service;
 // Linux's parent-death signal requires one pre-exec syscall. Keep the unsafe
 // fork-side hook in this reviewed module; the rest of the crate remains safe.
 #[cfg(target_os = "linux")]
@@ -31,6 +34,7 @@ pub enum RelayError {
     TooManyClients,
     RelayUnavailable,
     ClientLaunchFailed,
+    NativeSupervisionUnavailable,
     ClientExitedUnsuccessfully,
 }
 impl fmt::Display for RelayError {
@@ -43,6 +47,9 @@ impl fmt::Display for RelayError {
             Self::TooManyClients => "The local relay is at capacity.",
             Self::RelayUnavailable => "The local relay is unavailable.",
             Self::ClientLaunchFailed => "The AI client could not be launched.",
+            Self::NativeSupervisionUnavailable => {
+                "A verified on-demand user service is required before launching an AI client."
+            }
             Self::ClientExitedUnsuccessfully => "The AI client exited unsuccessfully.",
         })
     }

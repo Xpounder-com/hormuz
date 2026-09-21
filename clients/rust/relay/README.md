@@ -28,6 +28,59 @@ direct-child-only cleanup,
 and neither Unix path changes shell job control. A panel close must leave the
 launcher alive; a shell quit/update must coordinate its termination separately.
 
+### Linux user-service containment source checkpoint
+
+Linux library client discovery now fails before a version probe or relay starts
+unless this launcher is the main PID of an active, transient **user systemd
+service**. The guard verifies the kernel cgroup membership against the live
+service's `ControlGroup`, `MainPID`, `ExitType=main`,
+`RemainAfterExit=no`, `Restart=no`, `KillMode=control-group`, and `KillSignal=SIGKILL`
+properties. It does not trust an environment flag.
+An otherwise exact unit may remain in `ActiveState=activating` briefly after
+exec; production verification retries only that state within one three-second
+deadline shared by process setup, polling, bounded output parsing, and final
+acceptance. Missing, duplicate, or mismatched security properties fail
+immediately.
+The lookup uses the owned socket at `/run/user/<effective-uid>/bus`, with a
+private 0700 runtime directory and non-root matching real/effective UID,
+rather than a caller-supplied D-Bus address.
+On a host with a user manager, `run-in-user-service.sh` starts a single
+invocation with those properties. The caller chooses a unique token and owns
+`hormuz-relay-<token>.service`; an explicit quit/update must stop that unit.
+The wrapper selects a PTY for interactive input and pipes otherwise. It passes
+only the relay executable and its existing invocation arguments to systemd,
+disables systemd environment expansion for that already-formed argv, and copies
+the caller's `PATH` by variable name for session-local client discovery. The
+`PATH` value and relay credentials are not added to the command line; relay
+credentials are resolved inside the launcher. The literal-argument switch
+requires systemd 254 or newer and fails closed when unavailable. This source
+path is not wired to a native Linux shell yet.
+
+The launcher, version probe, client and normal descendants inherit the service
+cgroup on fork, even if a descendant double-forks or calls `setsid`. systemd
+stops the whole group after its main launcher exits, is killed, or the unit is
+explicitly stopped. The live unit must report `RemainAfterExit=no` so main
+process exit enters that stop path. A scope unit does not have that
+main-process lifetime.
+The direct-child parent-death guard remains defense in depth. A same-UID
+process that can deliberately migrate itself out of the user manager's cgroup
+tree is outside this ordinary-client lifetime guarantee; stronger isolation
+would require separate host authority and acceptance. No fallback to PID or
+process-group enumeration is treated as equivalent containment.
+
+The Linux-only synthetic test runs normal-exit, explicit-stop and abrupt
+launcher-death cases with a detached listener when a real user systemd manager
+is reachable. It checks the new session, cgroup membership, listener closure,
+and empty/removed cgroup while passing spoofed bus variables to the wrapper
+and launcher. On CI without that manager it reports a host-only
+skip; ordinary Rust tests still check the fail-closed property parser. Run
+`cargo test -p hormuz-client-relay --locked linux_service` on an Ubuntu 24.04
+user session for host evidence. The executable still exits
+`native_secure_store_unavailable` on Linux; the Linux credential adapter,
+native-shell wiring, real supported-client traffic, and clean-install proof
+remain open. Issue #341 remains open; this checkpoint does not qualify Linux
+support.
+
 The relay admits the client's expected POST routes only. It checks Host,
 Origin, one local bearer/API-key credential, content length and a 25 MiB request
 limit before obtaining the current gateway credential. It forwards the selected
@@ -86,9 +139,10 @@ this checkpoint does not claim that broader guarantee.
 This source checkpoint is not loaded by the Windows panel or shipping Mac app.
 Windows Job Object descendant cleanup is covered by fake clients. Linux has
 synthetic direct-client launcher-death, pre-exec race and normal-exit tests,
-but neither Unix platform contains descendants after fork, including an
-alternate-process-group grandchild. Unix process-tree containment, native-shell
-panel and quit/update wiring, packaged optimizer interpreter, real
+plus a host-conditional user-service test for a detached grandchild. macOS
+still has direct-child-only cleanup; Linux's new cgroup path needs real user
+manager and shell-wiring acceptance. Native-shell panel and quit/update wiring,
+packaged optimizer interpreter, real
 Codex/Claude sessions, Windows accessibility and clean-machine acceptance
 remain open. The blocked-optimizer shutdown fixture proves that cancellation
 stops first-party work before gateway egress; it does not establish a general
@@ -110,7 +164,8 @@ the unsupported native relay command. Windows fake-helper tests cover Job
 Object containment, cancellation and pipe-worker completion without an
 installed optimizer or provider. These tests do not prove cancellation of an
 arbitrary non-cooperative in-process optimizer, Unix client or optimizer-helper
-descendant containment, macOS abrupt launcher-death cleanup, real
-optimizer/provider sessions, or packaged native-shell lifecycle behavior. The
-Linux parent-death tests cover a direct synthetic client only; Linux's native
-executable still fails closed without a secure-store adapter.
+descendant containment; the separate Linux user-service fixture above runs only
+with a real manager. These tests also do not prove macOS abrupt launcher-death
+cleanup, real optimizer/provider sessions, or packaged native-shell lifecycle
+behavior. The Linux parent-death tests cover a direct synthetic client only;
+Linux's native executable still fails closed without a secure-store adapter.

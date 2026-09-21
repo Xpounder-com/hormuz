@@ -19,6 +19,9 @@ const MAX_VERSION_OUTPUT: u64 = 4096;
 /// Only the client versions already qualified by the Python reference are
 /// admitted. Never fall through to an unverified executable on PATH.
 pub fn discover_supported_client(client: AIClient) -> Result<PathBuf, RelayError> {
+    #[cfg(target_os = "linux")]
+    crate::linux_service::require_user_service()
+        .map_err(|_| RelayError::NativeSupervisionUnavailable)?;
     let path = std::env::var_os("PATH").ok_or(RelayError::UnsupportedClient)?;
     discover_in_path(client, &path)
 }
