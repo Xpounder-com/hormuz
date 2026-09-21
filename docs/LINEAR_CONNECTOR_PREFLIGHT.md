@@ -36,7 +36,7 @@ revocation races. No body field selects the tenant or work scope.
 
 [Linear's webhook documentation](https://linear.app/developers/webhooks)
 describes organization/team-scoped webhooks, an HMAC-SHA256 signature over the
-exact raw body, delivery/event/timestamp headers, generic `create`, `update`
+exact raw body, delivery/event headers, generic `create`, `update`
 and `remove` actions for data-change events, a five-second response deadline,
 and retries. It documents Issue, Project, Initiative and Cycle model streams.
 The same reference does not prove every field, parent-set completeness,
@@ -45,17 +45,25 @@ The [#313 synthetic scenarios](../tests/fixtures/connectors/linear/README.md)
 keep those mappings pending. This plan does not promote them to production
 semantics.
 
-The offline oracle in `tools/verify_linear_connector_preflight.py` first
-selects server registration, bounds the exact bytes, verifies HMAC against
+The offline oracle in `tools/verify_linear_connector_preflight.py` validates
+and snapshots server route registrations once before accepting deliveries. It
+then selects one route, bounds the exact bytes, verifies HMAC against
 one active or one unexpired retiring secret, then parses bounded strict JSON.
 It compares signed workspace and webhook claims against the registration,
-compares the header event and timestamp against signed body fields, and checks
+compares the header event against the signed body type, checks the signed body
+`webhookTimestamp` within one minute of server receipt, and checks
 the typed object ID. A signed team claim may disprove scope when it mismatches;
 an absent claim is `unproven` and does not establish team authority. This is a
 test oracle, not an installed adapter. It does not return a lifecycle state,
 relationship projection, source revision or work-outcome event. A generic
 authenticated `remove` envelope cannot be labeled archive, delete or
 tombstone without provider-specific evidence.
+
+The timestamp header is not required or used for freshness. Only duplicate
+`Linear-Signature`, `Linear-Delivery` and `Linear-Event` headers are rejected,
+case insensitively; unrelated headers remain bounded and cannot select source
+authority. Replacing a route or revoking its key requires a newly validated
+snapshot before accepting another delivery.
 
 `Linear-Delivery` is a header outside the signed body. Changing only that
 header must not create a second fact. The runtime needs a tenant-keyed,

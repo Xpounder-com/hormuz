@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 import re
 import sys
+from types import MappingProxyType
 from typing import Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,13 +31,15 @@ DELIVERY_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]
 OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 SIGNATURE = re.compile(r"[0-9a-f]{64}\Z")
 HEADER_NAME = re.compile(r"[A-Za-z0-9-]+\Z")
-PLAN_SHA256 = "b5967898f2218a9104c3a5bf759c61667818355558f55eb0b3ad805377379c69"
+PLAN_SHA256 = "ffd2e14abffea1586789095569b5ff5ba0b8683d2eb99799ff4ee5a53d0da39e"
 KINDS = {"Initiative": "initiative", "Project": "project", "Cycle": "cycle", "Issue": "issue"}
 ACTIONS = frozenset({"create", "update", "remove"})
 SCOPE_OVERRIDES = frozenset({
     "organization_id", "tenant_id", "tenantId", "work_scope_id", "workScopeId",
     "connector_id", "connectorId", "hormuzOrganizationId",
 })
+SECURITY_HEADERS = frozenset({"linear-signature", "linear-delivery", "linear-event"})
+_VALIDATED_REGISTRY = object()
 
 
 class PreflightError(ValueError):
@@ -68,6 +71,25 @@ class Authority:
 
 
 @dataclass(frozen=True)
+class PreparedAuthority:
+    binding: Authority
+    team_ids: frozenset[str]
+    typed_object_ids: Mapping[str, frozenset[str]]
+
+
+@dataclass(frozen=True, init=False)
+class PreparedRegistry:
+    """Immutable, fully validated route index built before receiving deliveries."""
+
+    routes: Mapping[str, PreparedAuthority]
+
+    def __init__(self, routes: Mapping[str, PreparedAuthority], *, _token: object) -> None:
+        if _token is not _VALIDATED_REGISTRY:
+            raise PreflightError("authority_invalid")
+        object.__setattr__(self, "routes", MappingProxyType(dict(routes)))
+
+
+@dataclass(frozen=True)
 class VerifiedCandidate:
     organization_id: str
     connector_id: str
@@ -83,12 +105,13 @@ class VerifiedCandidate:
     team_claim: str
 
 
-def validate_registry(registry: Mapping[str, Authority]) -> None:
-    """Require one tenant per workspace and exact webhook route ownership."""
+def validate_registry(registry: Mapping[str, Authority]) -> PreparedRegistry:
+    """Validate once and snapshot route authority before accepting deliveries."""
     if not isinstance(registry, Mapping) or len(registry) > 1000:
         raise PreflightError("authority_invalid")
     owners: dict[str, str] = {}
     webhooks: set[str] = set()
+    routes: dict[str, PreparedAuthority] = {}
     for route, authority in registry.items():
         if not isinstance(authority, Authority) or route != authority.route_id:
             raise PreflightError("authority_invalid")
@@ -134,6 +157,17 @@ def validate_registry(registry: Mapping[str, Authority]) -> None:
             active += key.usable_until_ms is None
         if active != 1:
             raise PreflightError("authority_invalid")
+        copied = Authority(
+            route, authority.organization_id, authority.connector_id,
+            authority.workspace_id, authority.webhook_id, tuple(authority.team_ids),
+            MappingProxyType({kind: tuple(values) for kind, values in authority.typed_object_ids.items()}),
+            tuple(authority.signing_keys), authority.enabled,
+        )
+        routes[route] = PreparedAuthority(
+            copied, frozenset(copied.team_ids),
+            MappingProxyType({kind: frozenset(values) for kind, values in copied.typed_object_ids.items()}),
+        )
+    return PreparedRegistry(routes, _token=_VALIDATED_REGISTRY)
 
 
 def _headers(pairs: Sequence[tuple[str, str]]) -> dict[str, str]:
@@ -146,17 +180,18 @@ def _headers(pairs: Sequence[tuple[str, str]]) -> dict[str, str]:
                 or not HEADER_NAME.fullmatch(pair[0]) or "\r" in pair[1] or "\n" in pair[1]):
             raise PreflightError("invalid_request")
         key = pair[0].lower()
-        if key in headers:
+        if key in SECURITY_HEADERS and key in headers:
             raise PreflightError("invalid_request")
-        headers[key] = pair[1]
-    required = {"linear-signature", "linear-delivery", "linear-event", "linear-timestamp"}
+        if key in SECURITY_HEADERS:
+            headers[key] = pair[1]
+    required = SECURITY_HEADERS
     if not required.issubset(headers):
         raise PreflightError("unauthenticated")
     return headers
 
 
 def authenticate_candidate(
-    *, route_id: str, registry: Mapping[str, Authority], headers: Sequence[tuple[str, str]],
+    *, route_id: str, registry: PreparedRegistry, headers: Sequence[tuple[str, str]],
     raw: bytes, now_ms: int, fingerprint_key: bytes, fingerprint_key_version: str,
 ) -> VerifiedCandidate:
     """Verify raw bytes and server authority before parsing; never normalize."""
@@ -166,10 +201,12 @@ def authenticate_candidate(
         raise PreflightError("authority_invalid")
     if not isinstance(route_id, str):
         raise PreflightError("forbidden")
-    validate_registry(registry)
-    authority = registry.get(route_id)
-    if authority is None or not authority.enabled:
+    if not isinstance(registry, PreparedRegistry):
+        raise PreflightError("authority_invalid")
+    prepared = registry.routes.get(route_id)
+    if prepared is None or not prepared.binding.enabled:
         raise PreflightError("forbidden")
+    authority = prepared.binding
     if type(raw) is not bytes or not 1 <= len(raw) <= REQUEST_BYTES:
         raise PreflightError("invalid_request")
     supplied = _headers(headers)
@@ -194,8 +231,7 @@ def authenticate_candidate(
     if body.get("organizationId") != authority.workspace_id or body.get("webhookId") != authority.webhook_id:
         raise PreflightError("forbidden")
     sent_ms = body.get("webhookTimestamp")
-    if (type(sent_ms) is not int or abs(now_ms - sent_ms) > 60_000
-            or supplied["linear-timestamp"] != str(sent_ms)):
+    if type(sent_ms) is not int or abs(now_ms - sent_ms) > 60_000:
         raise PreflightError("unauthenticated")
     delivery = supplied["linear-delivery"]
     if not DELIVERY_UUID.fullmatch(delivery):
@@ -215,15 +251,15 @@ def authenticate_candidate(
     object_id = data.get("id")
     if not isinstance(object_id, str) or not UUID.fullmatch(object_id):
         raise PreflightError("invalid_request")
-    if object_id not in authority.typed_object_ids[kind]:
+    if object_id not in prepared.typed_object_ids[kind]:
         raise PreflightError("forbidden")
     team_id = data.get("teamId")
-    if team_id is not None and (not isinstance(team_id, str) or team_id not in authority.team_ids):
+    if team_id is not None and (not isinstance(team_id, str) or team_id not in prepared.team_ids):
         raise PreflightError("forbidden")
     team_ids = data.get("teamIds")
     if team_ids is not None:
         if (not isinstance(team_ids, list) or not 1 <= len(team_ids) <= 100
-                or any(not isinstance(value, str) or value not in authority.team_ids for value in team_ids)
+                or any(not isinstance(value, str) or value not in prepared.team_ids for value in team_ids)
                 or len(set(team_ids)) != len(team_ids)
                 or (team_id is not None and team_id not in team_ids)):
             raise PreflightError("forbidden")

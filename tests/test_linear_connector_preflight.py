@@ -12,7 +12,7 @@ import unittest
 from unittest import mock
 
 from tools.verify_linear_connector_preflight import (
-    Authority, PreflightError, SigningKey, authenticate_candidate, validate_registry,
+    Authority, PreparedRegistry, PreflightError, SigningKey, authenticate_candidate, validate_registry,
     verify_plan,
 )
 
@@ -60,7 +60,6 @@ def signed_request(*, kind="Issue", action="create", data=None, body_changes=Non
     headers = {
         "Linear-Signature": hmac.new(secret, raw, hashlib.sha256).hexdigest(),
         "Linear-Delivery": delivery, "Linear-Event": kind,
-        "Linear-Timestamp": str(NOW),
     }
     headers.update(header_changes or {})
     return list(headers.items()), raw
@@ -68,11 +67,14 @@ def signed_request(*, kind="Issue", action="create", data=None, body_changes=Non
 
 class LinearConnectorPreflightTests(unittest.TestCase):
     def setUp(self):
-        self.registry = {"synthetic-linear-route": authority()}
+        self.registry = validate_registry({"synthetic-linear-route": authority()})
 
     def verify(self, headers, raw, *, registry=None, route="synthetic-linear-route", now=NOW):
+        selected_registry = self.registry if registry is None else (
+            registry if isinstance(registry, PreparedRegistry) else validate_registry(registry)
+        )
         return authenticate_candidate(
-            route_id=route, registry=self.registry if registry is None else registry,
+            route_id=route, registry=selected_registry,
             headers=headers, raw=raw, now_ms=now, fingerprint_key=FINGERPRINT_KEY,
             fingerprint_key_version="fingerprint-test-v1",
         )
@@ -172,6 +174,35 @@ class LinearConnectorPreflightTests(unittest.TestCase):
             validate_registry({"synthetic-linear-route": repeated_secret})
         self.assertNotIn(repr(SECRET_ACTIVE), repr(authority()))
 
+    def test_prepared_registry_is_immutable_and_delivery_never_scans_all_routes(self):
+        objects = dict(OBJECTS)
+        routes = {"synthetic-linear-route": authority(typed_object_ids=objects)}
+        for index in range(1, 1000):
+            routes[f"other-route-{index}"] = authority(
+                route_id=f"other-route-{index}",
+                workspace_id=f"{index:08x}-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                webhook_id=f"{index:08x}-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            )
+        prepared = validate_registry(routes)
+        objects["issue"] = ()
+        routes.clear()
+        with self.assertRaises(TypeError):
+            prepared.routes["synthetic-linear-route"] = None
+        with self.assertRaisesRegex(PreflightError, "authority_invalid"):
+            PreparedRegistry({}, _token=object())
+        headers, raw = signed_request()
+        with mock.patch("tools.verify_linear_connector_preflight.validate_registry",
+                        side_effect=AssertionError("registry rescanned")):
+            self.assertEqual(self.verify(headers, raw, registry=prepared).object_kind, "issue")
+            self.denied("unauthenticated", headers, raw + b" ", registry=prepared)
+        with self.assertRaisesRegex(PreflightError, "authority_invalid"):
+            authenticate_candidate(
+                route_id="synthetic-linear-route", registry=routes,
+                headers=headers, raw=raw, now_ms=NOW,
+                fingerprint_key=FINGERPRINT_KEY,
+                fingerprint_key_version="fingerprint-test-v1",
+            )
+
     def test_typed_enrollment_and_signed_claims_do_not_expand_scope(self):
         unknown_id = "99999999-9999-4999-8999-999999999999"
         headers, raw = signed_request(data={"id": unknown_id, "projectId": OBJECTS["project"][0],
@@ -196,9 +227,9 @@ class LinearConnectorPreflightTests(unittest.TestCase):
         changed_event = [(name, "Project" if name == "Linear-Event" else value)
                          for name, value in headers]
         self.denied("unsupported", changed_event, raw)
-        changed_time = [(name, str(NOW - 1) if name == "Linear-Timestamp" else value)
-                        for name, value in headers]
-        self.denied("unauthenticated", changed_time, raw)
+        timestamp_hint = headers + [("Linear-Timestamp", str(NOW - 1))]
+        self.assertEqual(self.verify(timestamp_hint, raw).keyed_body_fingerprint,
+                         first.keyed_body_fingerprint)
         other_tenant = authority(organization_id="other-tenant")
         other = self.verify(headers, raw, registry={"synthetic-linear-route": other_tenant})
         self.assertNotEqual(first.keyed_body_fingerprint, other.keyed_body_fingerprint)
@@ -216,10 +247,18 @@ class LinearConnectorPreflightTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "unauthenticated")
         self.assertNotIn(sentinel, str(caught.exception))
 
-    def test_duplicate_headers_old_timestamp_unsupported_and_malformed_json_fail(self):
+    def test_security_header_duplicates_and_signed_timestamp_fail_closed(self):
         headers, raw = signed_request()
-        self.denied("invalid_request", headers + [("linear-signature", headers[0][1])], raw)
+        for name in ("Linear-Signature", "Linear-Delivery", "Linear-Event"):
+            value = next(value for header, value in headers if header == name)
+            with self.subTest(name=name):
+                self.denied("invalid_request", headers + [(name.lower(), value)], raw)
+        ordinary_duplicates = headers + [("Accept", "application/json"), ("accept", "*/*"),
+                                         ("Linear-Timestamp", "0"), ("linear-timestamp", "1")]
+        self.assertEqual(self.verify(ordinary_duplicates, raw).object_kind, "issue")
+        self.denied("invalid_request", headers + [("Accept", "bad\r\nheader")], raw)
         self.denied("unauthenticated", headers, raw, now=NOW + 60_001)
+        self.denied("unauthenticated", headers, raw, now=NOW - 60_001)
         self.denied("invalid_request", headers, b"x" * 1048577)
         unsupported, other_raw = signed_request(kind="Comment")
         self.denied("unsupported", unsupported, other_raw)

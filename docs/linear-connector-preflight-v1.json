@@ -31,6 +31,7 @@
     "documented_generic_actions": ["create", "update", "remove"],
     "documented_delivery_header": "Linear-Delivery",
     "documented_signature": "HMAC-SHA256_of_exact_raw_body",
+    "documented_freshness_field": "signed_body_webhookTimestamp",
     "documented_response_deadline_ms": 5000,
     "provider_specific_mapping": "pending_actual_schema_and_authorized_test_delivery"
   },
@@ -44,11 +45,11 @@
     "relationships": "independently_authorize_both_ends; no_parent_or_public_initiative_infers_private_child_access"
   },
   "authentication": {
-    "order": "bound_route_and_enabled_registration_then_bounded_raw_read_then_HMAC_then_parse_then_signed_scope_comparison_then_typed_enrollment_then_commit_recheck",
+    "order": "prevalidated_immutable_route_index_then_bound_enabled_route_then_bounded_raw_read_then_HMAC_then_parse_then_signed_scope_comparison_then_typed_enrollment_then_commit_recheck",
     "rotation": "one_active_key_plus_at_most_one_expiring_previous_key; server_versions_only; constant_time_digest_comparison",
-    "timestamp": "signed_body_webhookTimestamp_matches_Linear-Timestamp_and_is_within_60000ms_of_server_receive_time",
+    "timestamp": "signed_body_webhookTimestamp_is_within_60000ms_of_server_receive_time; no_timestamp_header_requirement",
     "delivery_identity": "Linear-Delivery_is_unsigned_header_hint; tenant_keyed_exact_body_fingerprint_and_source_fact_identity_also_enforce_idempotency",
-    "header_rule": "reject_case_insensitive_duplicate_Linear_headers_before_selection",
+    "header_rule": "reject_case_insensitive_duplicates_of_Linear-Signature_Linear-Delivery_Linear-Event; bound_other_headers_but_do_not_use_them_for_authority",
     "resource_limits": "at_most_1MiB_raw_body_depth_16_4096_JSON_members_100_events_per_delivery_8_process_slots_no_unbounded_read_or_retry",
     "fingerprint": "tenant_and_connector_domain_separated_HMAC_of_exact_body_with_separate_versioned_server_key; never_store_raw_body_or_plain_hash"
   },
