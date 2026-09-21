@@ -1,12 +1,10 @@
-"""Prove the optional external optimizer workload still describes Hormuz code."""
+"""Exercise the trusted local reference fixtures without candidate execution."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
-import marshal
 import math
-import py_compile
 import subprocess
 import sys
 import tempfile
@@ -30,149 +28,54 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         spec.loader.exec_module(workload)
         self.workload = workload
 
-    def candidate_source_with(self, original: str, replacement: str) -> Path:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        root = Path(temporary.name)
-        package = root / "hormuz"
-        package.mkdir()
-        for name in ("compaction.py", "compaction_formats.py"):
-            (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
-        source = package / "compaction.py"
-        content = source.read_text(encoding="utf-8")
-        self.assertEqual(content.count(original), 1)
-        source.write_text(content.replace(original, replacement, 1), encoding="utf-8")
-        return root
+    def test_local_cli_accepts_own_checkout_and_rejects_foreign_root(self) -> None:
+        own = subprocess.run(
+            [sys.executable, str(WORKLOAD), "--root", ".", "--action", "validate"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+        report = json.loads(own.stdout)
+        self.assertEqual(report["source"], str(ROOT / "hormuz/compaction.py"))
+        self.assertEqual(report["outputs"], self.workload.evaluate(ROOT, "validate")["outputs"])
 
-    def test_exact_compaction_file_bypasses_candidate_package_export(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            package = root / "hormuz"
-            package.mkdir()
+            foreign = Path(temporary) / "candidate"
+            package = foreign / "hormuz"
+            package.mkdir(parents=True)
             for name in ("compaction.py", "compaction_formats.py"):
                 (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
-            (package / "decoy.py").write_text("# candidate decoy\n", encoding="utf-8")
-            (package / "__init__.py").write_text(
-                "from pathlib import Path\n"
-                "from types import SimpleNamespace\n"
-                "compaction = SimpleNamespace("
-                "__file__=str(Path(__file__).with_name('decoy.py')), "
-                "compact_text=lambda value, format_name: value)\n",
-                encoding="utf-8",
-            )
-            completed = subprocess.run(
-                [sys.executable, str(WORKLOAD), "--root", str(root), "--action", "validate"],
-                capture_output=True, text=True, check=True,
-            )
-            result = json.loads(completed.stdout)
-            baseline = self.workload.evaluate(ROOT, "validate")
-            self.assertEqual(Path(result["source"]).resolve(), (package / "compaction.py").resolve())
-            self.assertEqual(result["outputs"], baseline["outputs"])
+            command = [
+                sys.executable, str(WORKLOAD), "--root", str(foreign),
+                "--action", "validate",
+            ]
+            rejected = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("benchmark_foreign_root", rejected.stderr)
+            self.assertNotIn(str(foreign), rejected.stderr)
+            with self.assertRaisesRegex(RuntimeError, "benchmark_foreign_root"):
+                self.workload.evaluate(foreign, "validate")
 
-    def test_exact_source_bytes_bypass_forged_candidate_bytecode(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        root = Path(temporary.name)
-        package = root / "hormuz"
-        package.mkdir()
-        for name in ("compaction.py", "compaction_formats.py"):
-            (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
-        source = package / "compaction.py"
-        for name, fake_source in (
-            ("compaction", "def compact_text(text, format):\n    return text\n"),
-            ("compaction_formats", "raise RuntimeError('forged_helper_cache_executed')\n"),
-        ):
-            target = package / f"{name}.py"
-            cache = Path(importlib.util.cache_from_source(str(target)))
-            py_compile.compile(str(target), cfile=str(cache), doraise=True)
-            original_cache = cache.read_bytes()
-            cache.write_bytes(
-                original_cache[:16]
-                + marshal.dumps(compile(fake_source, str(target), "exec"))
-            )
-        # SourceFileLoader accepts this valid-header cache and runs the decoy.
-        spec = importlib.util.spec_from_file_location("forged_compaction_control", source)
-        self.assertIsNotNone(spec)
-        self.assertIsNotNone(spec.loader)
-        decoy = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(decoy)
-        self.assertEqual(decoy.compact_text("sentinel", "path_list"), "sentinel")
-        self.assertEqual(
-            self.workload.evaluate(ROOT, "validate")["outputs"],
-            self.workload.evaluate(root, "validate")["outputs"],
-        )
-
-    def test_first_candidate_module_cannot_poison_second_source_load(self) -> None:
+    def test_local_cli_rejects_symlink_alias_and_child_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            package = root / "hormuz"
-            package.mkdir()
-            for name in ("compaction.py", "compaction_formats.py"):
-                (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
-            source = package / "compaction.py"
-            original_source = source.read_bytes()
-            helper = package / "compaction_formats.py"
-            helper.write_text(
-                helper.read_text(encoding="utf-8") + "\n"
-                "import builtins\n"
-                "from pathlib import Path\n"
-                "_original_read = Path.read_bytes\n"
-                "_original_compile = builtins.compile\n"
-                "_original_exec = builtins.exec\n"
-                "_decoy = 'def compact_text(text, format):\\n    return text\\n'\n"
-                "def _poisoned_read(path):\n"
-                "    if path.name == 'compaction.py':\n"
-                "        return _decoy.encode()\n"
-                "    return _original_read(path)\n"
-                "def _poisoned_compile(source, filename, mode, *args, **kwargs):\n"
-                "    if isinstance(source, bytes) and str(filename).endswith('/hormuz/compaction.py'):\n"
-                "        return _original_compile(_decoy, filename, mode, *args, **kwargs)\n"
-                "    return _original_compile(source, filename, mode, *args, **kwargs)\n"
-                "def _poisoned_exec(code, globals=None, locals=None):\n"
-                "    if getattr(code, 'co_filename', None) == str(Path(__file__).with_name('compaction.py')):\n"
-                "        return _original_exec(_original_compile(_decoy, '<decoy>', 'exec'), globals, locals)\n"
-                "    return _original_exec(code, globals, locals)\n"
-                "Path.read_bytes = _poisoned_read\n"
-                "builtins.compile = _poisoned_compile\n"
-                "builtins.exec = _poisoned_exec\n",
-                encoding="utf-8",
+            alias = Path(temporary) / "checkout-alias"
+            alias.symlink_to(ROOT, target_is_directory=True)
+            rejected = subprocess.run(
+                [sys.executable, str(WORKLOAD), "--root", str(alias),
+                 "--action", "validate"],
+                capture_output=True, text=True,
             )
-            baseline = self.workload.evaluate(ROOT, "validate")
-            attacked = self.workload.evaluate(root, "validate")
-            self.assertEqual(attacked["source"], str(source.resolve()))
-            self.assertEqual(source.read_bytes(), original_source)
-            self.assertEqual(attacked["outputs"], baseline["outputs"])
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("benchmark_foreign_root", rejected.stderr)
+            self.assertNotIn(str(alias), rejected.stderr)
+            with self.assertRaisesRegex(RuntimeError, "benchmark_foreign_root"):
+                self.workload.evaluate(alias, "validate")
 
-    def test_candidate_root_cannot_shadow_absolute_import_with_bytecode(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        root = Path(temporary.name)
-        package = root / "hormuz"
-        package.mkdir()
-        for name in ("compaction.py", "compaction_formats.py"):
-            (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
-        marker = root / "forged_typing_ran"
-        fake_source = root / "typing.py"
-        fake_source.write_text(
-            "from pathlib import Path\n"
-            f"Path({str(marker)!r}).write_text('executed')\n",
-            encoding="utf-8",
+        no_child = subprocess.run(
+            [sys.executable, str(WORKLOAD), "--root", str(ROOT),
+             "--action", "validate", "--child"],
+            capture_output=True, text=True,
         )
-        py_compile.compile(str(fake_source), cfile=str(root / "typing.pyc"), doraise=True)
-        fake_source.unlink()
-        control = subprocess.run(
-            [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); "
-             "sys.modules.pop('typing', None); import typing", str(root)],
-            capture_output=True, text=True, check=True,
-        )
-        self.assertEqual(control.returncode, 0)
-        self.assertTrue(marker.is_file())
-        marker.unlink()
-        self.assertEqual(
-            self.workload.evaluate(ROOT, "validate")["outputs"],
-            self.workload.evaluate(root, "validate")["outputs"],
-        )
-        self.assertFalse(marker.exists())
+        self.assertNotEqual(no_child.returncode, 0)
+        self.assertIn("unrecognized arguments", no_child.stderr)
 
     def test_reference_workload_covers_primary_and_heldout_cases(self) -> None:
         workload = self.workload
@@ -195,10 +98,10 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         self.assertEqual(len(baseline["outputs"]), len(measured))
         self.assertEqual(len(holdout["outputs"]), len(heldout))
         self.assertNotEqual(baseline["fixture_sha256"], holdout["fixture_sha256"])
-        self.assertEqual(
-            Path(baseline["source"]).resolve(), (ROOT / "hormuz/compaction.py").resolve()
-        )
+        self.assertEqual(baseline["source"], str(ROOT / "hormuz/compaction.py"))
         self.assertTrue(all(len(record["sha256"]) == 64 for record in baseline["outputs"].values()))
+        local_module = workload.load_local_compaction()
+        self.assertEqual(Path(local_module.__file__).resolve(), ROOT / "hormuz/compaction.py")
 
     def test_mixed_runs_and_framed_search_are_effective_heldout_cases(self) -> None:
         for name in ("lines_mixed", "search_framed"):
@@ -209,22 +112,27 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
                 self.assertEqual(compaction.decode_text(compacted).text, value)
 
         baseline = self.workload.evaluate(ROOT, "heldout")
-        disabled_mixed_root = self.candidate_source_with(
-            "def _compact_line_runs(text: str) -> str:\n",
-            "def _compact_line_runs(text: str) -> str:\n"
-            "    if len(set(text.splitlines())) > 1:\n"
-            "        return text\n",
-        )
-        disabled_mixed = self.workload.evaluate(disabled_mixed_root, "heldout")
-        self.assertNotEqual(baseline["outputs"]["lines_mixed"], disabled_mixed["outputs"]["lines_mixed"])
-        disabled_framed_root = self.candidate_source_with(
-            'def _compact_framed_lines(text: str, *, format: Literal["search_lines", "path_list"]) -> str:\n',
-            'def _compact_framed_lines(text: str, *, format: Literal["search_lines", "path_list"]) -> str:\n'
-            '    if format == "search_lines":\n'
-            '        return text\n',
-        )
-        disabled_framed = self.workload.evaluate(disabled_framed_root, "heldout")
-        self.assertNotEqual(baseline["outputs"]["search_framed"], disabled_framed["outputs"]["search_framed"])
+        module = self.workload.load_local_compaction()
+        original_lines = module._compact_line_runs
+
+        def disabled_mixed_lines(text: str) -> str:
+            return text if len(set(text.splitlines())) > 1 else original_lines(text)
+
+        with patch.object(module, "_compact_line_runs", side_effect=disabled_mixed_lines):
+            with patch.object(self.workload, "load_local_compaction", return_value=module):
+                disabled = self.workload.evaluate(ROOT, "heldout")
+        self.assertNotEqual(baseline["outputs"]["lines_mixed"], disabled["outputs"]["lines_mixed"])
+
+        module = self.workload.load_local_compaction()
+        original_framed = module._compact_framed_lines
+
+        def disabled_search(text: str, *, format: str) -> str:
+            return text if format == "search_lines" else original_framed(text, format=format)
+
+        with patch.object(module, "_compact_framed_lines", side_effect=disabled_search):
+            with patch.object(self.workload, "load_local_compaction", return_value=module):
+                disabled = self.workload.evaluate(ROOT, "heldout")
+        self.assertNotEqual(baseline["outputs"]["search_framed"], disabled["outputs"]["search_framed"])
 
     def test_heldout_json_table_detects_disabled_compaction(self) -> None:
         value, format_name = self.workload.heldout_cases()["json_table"]
@@ -234,11 +142,10 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         self.assertEqual(compaction.decode_text(compacted).text, value)
 
         baseline = self.workload.evaluate(ROOT, "heldout")
-        disabled_root = self.candidate_source_with(
-            "def _compact_json_table(text: str) -> str:\n",
-            "def _compact_json_table(text: str) -> str:\n    return text\n",
-        )
-        disabled = self.workload.evaluate(disabled_root, "heldout")
+        module = self.workload.load_local_compaction()
+        with patch.object(module, "_compact_json_table", side_effect=lambda text: text):
+            with patch.object(self.workload, "load_local_compaction", return_value=module):
+                disabled = self.workload.evaluate(ROOT, "heldout")
         self.assertEqual(baseline["fixture_sha256"], disabled["fixture_sha256"])
         self.assertNotEqual(baseline["outputs"]["json_table"], disabled["outputs"]["json_table"])
 
@@ -271,13 +178,17 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             len(benchmark["outputs"][name]["timed_sha256"]) == 64 for name in samples
         ))
 
-        mutation_root = self.candidate_source_with(
-            "def compact_text(text: str, format: Format) -> str:\n",
-            "def compact_text(text: str, format: Format) -> str:\n"
-            '    if "src/generated/000020/" in text:\n'
-            '        return text + "synthetic mutation"\n',
-        )
-        mutated = self.workload.evaluate(mutation_root, "benchmark")
+        module = self.workload.load_local_compaction()
+        original = module.compact_text
+
+        def mutate_one_timed_path(text: str, format_name: str) -> str:
+            if "src/generated/000020/" in text:
+                return text + "synthetic mutation"
+            return original(text, format_name)
+
+        with patch.object(module, "compact_text", side_effect=mutate_one_timed_path):
+            with patch.object(self.workload, "load_local_compaction", return_value=module):
+                mutated = self.workload.evaluate(ROOT, "benchmark")
         self.assertEqual(
             benchmark["outputs"]["paths_typical"]["sha256"],
             mutated["outputs"]["paths_typical"]["sha256"],
@@ -314,84 +225,37 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
                 changed["outputs"][name]["timed_sha256"],
             )
 
-    def test_seed_stdin_contract_is_bounded_and_not_reported(self) -> None:
+    def test_seed_stdin_contract_and_all_four_local_actions(self) -> None:
         seed = "ab" * 32
-        command = [sys.executable, str(WORKLOAD), "--root", str(ROOT), "--action", "benchmark", "--seed-stdin"]
-        completed = subprocess.run(command, input=seed + "\n", capture_output=True, text=True, check=True)
-        report = json.loads(completed.stdout)
-        self.assertNotIn(seed, completed.stdout)
-        self.assertNotIn("seed", report)
-        self.assertEqual(len(report["samples_ns"]), 10)
-        invalid = subprocess.run(command, input="not-a-seed\n", capture_output=True, text=True)
+        for action in ("validate", "heldout", "profile", "benchmark"):
+            for seeded in (False, True):
+                command = [sys.executable, str(WORKLOAD), "--root", str(ROOT), "--action", action]
+                if seeded:
+                    command.append("--seed-stdin")
+                completed = subprocess.run(
+                    command, input=(seed + "\n") if seeded else None,
+                    capture_output=True, text=True, check=True,
+                )
+                report = json.loads(completed.stdout)
+                self.assertNotIn(seed, completed.stdout)
+                self.assertNotIn("seed", report)
+                self.assertEqual(len(report["outputs"]), 7 if action == "heldout" else 12)
+                if action == "benchmark":
+                    self.assertEqual(len(report["samples_ns"]), 10)
+                    self.assertEqual(sum(map(len, report["samples_ns"].values())), 170)
+                if action == "profile":
+                    self.assertEqual(len(report["hotspots"]), 12)
+                    self.assertTrue(all(
+                        item["path"].startswith("hormuz/") for item in report["hotspots"]
+                    ))
+        invalid = subprocess.run(
+            [sys.executable, str(WORKLOAD), "--root", str(ROOT),
+             "--action", "benchmark", "--seed-stdin"],
+            input="not-a-seed\n", capture_output=True, text=True,
+        )
         self.assertNotEqual(invalid.returncode, 0)
         self.assertIn("benchmark_invalid_seed", invalid.stderr)
         self.assertNotIn("not-a-seed", invalid.stderr)
-
-    def test_candidate_module_cannot_patch_parent_hashes_or_clock(self) -> None:
-        baseline = self.workload.evaluate(ROOT, "benchmark")
-        attack_root = self.candidate_source_with(
-            "from __future__ import annotations\n",
-            "from __future__ import annotations\n"
-            "import hashlib\nimport time\n"
-            "hashlib.sha256 = lambda *args, **kwargs: type('FakeHash', (), "
-            "{'hexdigest': lambda self: '0' * 64, 'update': lambda self, value: None})()\n"
-            "time.perf_counter_ns = lambda: 0\n",
-        )
-        attacked = self.workload.evaluate(attack_root, "benchmark")
-        self.assertEqual(baseline["fixture_sha256"], attacked["fixture_sha256"])
-        self.assertEqual(baseline["outputs"], attacked["outputs"])
-        self.assertTrue(all(
-            all(math.isfinite(sample) and sample > 0 for sample in values)
-            for values in attacked["samples_ns"].values()
-        ))
-
-    @unittest.skipUnless(sys.platform == "darwin", "macOS RLIMIT_NPROC enforcement")
-    def test_candidate_import_cannot_fork_or_posix_spawn(self) -> None:
-        attack_root = self.candidate_source_with(
-            "from __future__ import annotations\n",
-            "from __future__ import annotations\n"
-            "import os\nimport sys\n"
-            "try:\n    _fork_pid = os.fork()\n"
-            "except OSError:\n    _fork_blocked = True\n"
-            "else:\n"
-            "    if _fork_pid == 0:\n        os._exit(0)\n"
-            "    os.waitpid(_fork_pid, 0)\n    _fork_blocked = False\n"
-            "try:\n"
-            "    _spawn_pid = os.posix_spawn(sys.executable, "
-            "[sys.executable, '-c', 'pass'], {})\n"
-            "except OSError:\n    _spawn_blocked = True\n"
-            "else:\n"
-            "    os.waitpid(_spawn_pid, 0)\n    _spawn_blocked = False\n"
-            "if not (_fork_blocked and _spawn_blocked):\n"
-            "    raise RuntimeError('benchmark_child_process_cap_failed')\n",
-        )
-        self.assertEqual(
-            self.workload.evaluate(ROOT, "validate")["outputs"],
-            self.workload.evaluate(attack_root, "validate")["outputs"],
-        )
-
-    def test_candidate_output_and_roundtrip_limits_fail_closed(self) -> None:
-        oversized_root = self.candidate_source_with(
-            "def compact_text(text: str, format: Format) -> str:\n",
-            "def compact_text(text: str, format: Format) -> str:\n"
-            '    return "x" * 70000\n',
-        )
-        with self.assertRaisesRegex(RuntimeError, "benchmark_child_invalid_outputs"):
-            self.workload.evaluate(oversized_root, "validate")
-        slow_root = self.candidate_source_with(
-            "def compact_text(text: str, format: Format) -> str:\n",
-            "def compact_text(text: str, format: Format) -> str:\n"
-            "    import time\n    time.sleep(2)\n",
-        )
-        with patch.object(self.workload, "_ROUNDTRIP_TIMEOUT_SECONDS", 0.2):
-            with self.assertRaisesRegex(RuntimeError, "benchmark_child_timeout"):
-                self.workload.evaluate(slow_root, "validate")
-
-    def test_candidate_inherits_outer_worker_process_group(self) -> None:
-        import os
-
-        with self.workload.CandidateProcess(ROOT) as candidate:
-            self.assertEqual(os.getpgid(candidate.process.pid), os.getpgrp())
 
 
 if __name__ == "__main__":
