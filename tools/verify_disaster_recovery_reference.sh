@@ -70,6 +70,32 @@ download_and_verify() {
     || fail "download checksum mismatch"
 }
 
+download_github_release_and_verify() {
+  local repository=$1
+  local tag=$2
+  local asset=$3
+  local output=$4
+  local expected=$5
+  local attempt
+  if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
+    download_and_verify \
+      "https://github.com/${repository}/releases/download/${tag}/${asset}" \
+      "${output}" "${expected}"
+    return 0
+  fi
+  for attempt in 1 2 3; do
+    rm -f -- "${output}"
+    if gh release download "${tag}" --repo "${repository}" \
+      --pattern "${asset}" --output "${output}"; then
+      printf '%s  %s\n' "${expected}" "${output}" | sha256sum --check --status \
+        || fail "download checksum mismatch"
+      return 0
+    fi
+    [[ "${attempt}" -lt 3 ]] || fail "GitHub release asset download failed"
+    sleep "${attempt}"
+  done
+}
+
 write_random_hex_secret() {
   local output=$1
   local value
@@ -758,6 +784,9 @@ done
 for command in base64 curl docker grep install openssl python3 sed sha256sum tar timeout; do
   command -v "${command}" >/dev/null 2>&1 || fail "${command} is unavailable"
 done
+if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
+  command -v gh >/dev/null 2>&1 || fail "gh is unavailable"
+fi
 docker_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
 [[ "${docker_platform}" == "linux/x86_64" || "${docker_platform}" == "linux/amd64" ]] \
   || fail "the Docker daemon is not native linux/amd64"
@@ -777,8 +806,8 @@ mkdir --mode=0700 -- "${EVIDENCE_DIR}"
 export KUBECONFIG
 export PATH="${WORK_ROOT}/bin:${PATH}"
 
-download_and_verify \
-  "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64" \
+download_github_release_and_verify \
+  kubernetes-sigs/kind "${KIND_VERSION}" kind-linux-amd64 \
   "${WORK_ROOT}/bin/kind" "${KIND_SHA256}"
 download_and_verify \
   "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
