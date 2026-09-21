@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import unittest
 from urllib.parse import unquote, urlsplit
 import zipfile
@@ -25,6 +26,49 @@ V1_ARCHIVE_SHA256 = "2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8b
 V1_MANIFEST_SHA256 = "85774aa45a8b30be88d1cb1a7b543222cc1396523aec31c17de07470b09d56b2"
 V12_SOURCE_SHA256 = "257c99b99af891838a1a0f1ba77bcc9c6baa74fba586d99381adab9f7b1af909"
 V12_WHEEL_SHA256 = "5519df553d4a9c330e6cf1fa822d6f8efc956e8eb5a7ac178eee01a89ffaa2bb"
+MAX_V1_ARCHIVE_BYTES = 32 * 1024 * 1024
+MAX_V1_RUNTIME_FILES = 1024
+MAX_V1_RUNTIME_FILE_BYTES = 2 * 1024 * 1024
+
+V1_RUNTIME_PROBE = """
+import hashlib
+import importlib.metadata
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+expected = json.load(sys.stdin)
+distribution = importlib.metadata.distribution('hormuz')
+direct = json.loads(distribution.read_text('direct_url.json') or '{}')
+package = Path(distribution.locate_file('hormuz'))
+spec = importlib.util.find_spec('hormuz')
+if (distribution.version != '1.0.0'
+        or direct.get('archive_info', {}).get('hashes', {}).get('sha256') != expected['archive_sha256']
+        or package.is_symlink() or not package.is_dir()
+        or not package.resolve().is_relative_to(Path(sys.prefix).resolve())
+        or spec is None or spec.origin is None
+        or Path(spec.origin).resolve() != package.resolve() / '__init__.py'):
+    raise SystemExit(1)
+actual = {}
+for path in package.rglob('*'):
+    if '__pycache__' in path.relative_to(package).parts:
+        continue
+    if path.is_symlink():
+        raise SystemExit(1)
+    if path.is_dir():
+        continue
+    if not path.is_file() or len(actual) >= 1024:
+        raise SystemExit(1)
+    with path.open('rb') as stream:
+        payload = stream.read(2 * 1024 * 1024 + 1)
+    if len(payload) > 2 * 1024 * 1024:
+        raise SystemExit(1)
+    actual[path.relative_to(package).as_posix()] = hashlib.sha256(payload).hexdigest()
+if actual != expected['files']:
+    raise SystemExit(1)
+print('ok')
+"""
 
 SQLITE_CASES = (
     "test_sqlite_registry_transition.SQLiteRegistryTransitionTests.test_released_sqlite_binary_preserves_old_state_and_refuses_newer_or_partial_state",
@@ -76,6 +120,50 @@ def verify_published_artifacts(paths: dict[str, Path]) -> None:
             raise MatrixRefusal(f"{name}_missing") from error
         if actual != digest:
             raise MatrixRefusal(f"{name}_digest_mismatch")
+
+
+def verify_v1_installed_runtime(archive_path: Path, python: Path,
+                                expected_digest: str = V1_ARCHIVE_SHA256) -> None:
+    try:
+        with archive_path.open("rb") as stream:
+            payload = stream.read(MAX_V1_ARCHIVE_BYTES + 1)
+        if len(payload) > MAX_V1_ARCHIVE_BYTES or hashlib.sha256(payload).hexdigest() != expected_digest:
+            raise MatrixRefusal("v1_archive_digest_mismatch")
+        expected: dict[str, str] = {}
+        prefix = "hormuz-1.0.0/hormuz/"
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+            for member in archive:
+                if not member.name.startswith(prefix):
+                    continue
+                relative = member.name[len(prefix):].rstrip("/")
+                if not relative or "\\" in relative or any(
+                    part in ("", ".", "..") for part in relative.split("/")
+                ):
+                    raise MatrixRefusal("v1_runtime_archive_invalid")
+                if member.isdir():
+                    continue
+                if (not member.isfile() or member.size > MAX_V1_RUNTIME_FILE_BYTES
+                        or len(expected) >= MAX_V1_RUNTIME_FILES or relative in expected):
+                    raise MatrixRefusal("v1_runtime_archive_invalid")
+                source = archive.extractfile(member)
+                if source is None:
+                    raise MatrixRefusal("v1_runtime_archive_invalid")
+                with source:
+                    contents = source.read(MAX_V1_RUNTIME_FILE_BYTES + 1)
+                if len(contents) != member.size:
+                    raise MatrixRefusal("v1_runtime_archive_invalid")
+                expected[relative] = hashlib.sha256(contents).hexdigest()
+        if not expected or "__init__.py" not in expected:
+            raise MatrixRefusal("v1_runtime_archive_invalid")
+        result = subprocess.run(
+            (str(python), "-I", "-c", V1_RUNTIME_PROBE),
+            input=json.dumps({"archive_sha256": expected_digest, "files": expected}),
+            text=True, capture_output=True, timeout=30,
+        )
+    except (OSError, tarfile.TarError, subprocess.TimeoutExpired) as error:
+        raise MatrixRefusal("v1_installed_runtime_mismatch") from error
+    if result.returncode != 0 or result.stdout.strip() != "ok":
+        raise MatrixRefusal("v1_installed_runtime_mismatch")
 
 
 def wheel_runtime_files(wheel: Path) -> dict[str, bytes]:
@@ -203,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
             "v12_source": args.v12_source,
             "v12_wheel": args.v12_wheel,
         })
+        verify_v1_installed_runtime(args.v1_archive, args.v1_python)
         runtime = verify_candidate_runtime_pair(source_root, args.candidate_wheel)
         verify_candidate_import(args.mode, source_root, args.candidate_wheel, runtime)
         # A venv's ``bin/python`` is normally a symlink. Resolving it jumps to

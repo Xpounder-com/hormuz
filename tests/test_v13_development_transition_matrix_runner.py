@@ -4,18 +4,62 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 import io
+import hashlib
 import json
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
+import venv
 import zipfile
 
 from tools import run_v13_development_transition_matrix as matrix
 
 
 class DevelopmentTransitionMatrixRunnerTests(unittest.TestCase):
+    def test_v1_installed_runtime_must_match_pinned_archive_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive_path = root / "hormuz-1.0.0.tar.gz"
+            archived = {
+                "__init__.py": b"__version__ = '1.0.0'\n",
+                "module.py": b"value = 'released'\n",
+            }
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for name, contents in archived.items():
+                    member = tarfile.TarInfo(f"hormuz-1.0.0/hormuz/{name}")
+                    member.size = len(contents)
+                    archive.addfile(member, io.BytesIO(contents))
+            digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+            environment = root / "venv"
+            venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+            python = environment / "bin/python"
+            site = Path(subprocess.run(
+                (str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"),
+                check=True, capture_output=True, text=True,
+            ).stdout.strip())
+            package = site / "hormuz"
+            package.mkdir()
+            for name, contents in archived.items():
+                (package / name).write_bytes(contents)
+            metadata = site / "hormuz-1.0.0.dist-info"
+            metadata.mkdir()
+            (metadata / "METADATA").write_text("Metadata-Version: 2.4\nName: hormuz\nVersion: 1.0.0\n")
+            (metadata / "direct_url.json").write_text(json.dumps({
+                "archive_info": {"hashes": {"sha256": digest}},
+            }))
+            matrix.verify_v1_installed_runtime(archive_path, python, digest)
+
+            (package / "module.py").write_bytes(b"value = 'modified'\n")
+            with self.assertRaisesRegex(matrix.MatrixRefusal, "v1_installed_runtime_mismatch"):
+                matrix.verify_v1_installed_runtime(archive_path, python, digest)
+            (package / "module.py").write_bytes(archived["module.py"])
+            (package / "extra.py").write_bytes(b"extra = True\n")
+            with self.assertRaisesRegex(matrix.MatrixRefusal, "v1_installed_runtime_mismatch"):
+                matrix.verify_v1_installed_runtime(archive_path, python, digest)
+
     def test_candidate_wheel_must_match_every_source_runtime_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

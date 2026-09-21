@@ -15,6 +15,9 @@ and the published v1.2.0 source and wheel (SHA-256
 and `5519df553d4a9c330e6cf1fa822d6f8efc956e8eb5a7ac178eee01a89ffaa2bb`).
 Install each predecessor from those local artifacts into its own environment.
 Their existing isolated drivers verify install identity again before seeding.
+The runner also compares every installed v1.0.0 runtime file with the pinned
+source archive before any transition case starts, so a modified interpreter
+cannot pass merely by retaining its distribution metadata.
 
 Build the development wheel from the checkout into a temporary directory and
 install it into an isolated environment. The source run byte-compares every
