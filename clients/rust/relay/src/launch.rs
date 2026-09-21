@@ -110,7 +110,12 @@ fn bounded_version_output(executable: &Path) -> Result<Vec<u8>, RelayError> {
         ));
     #[cfg(windows)]
     let mut child = OwnedClient::spawn(&mut command).map_err(|_| RelayError::UnsupportedClient)?;
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    let mut child = OwnedClient(Some(
+        crate::process_scope_linux::spawn(&mut command)
+            .map_err(|_| RelayError::UnsupportedClient)?,
+    ));
+    #[cfg(all(not(windows), not(target_os = "linux")))]
     let mut child = OwnedClient(Some(
         command.spawn().map_err(|_| RelayError::UnsupportedClient)?,
     ));
@@ -265,6 +270,10 @@ impl LaunchPlan {
         }
         #[cfg(not(windows))]
         {
+            #[cfg(target_os = "linux")]
+            let child = crate::process_scope_linux::spawn(&mut command)
+                .map_err(|_| RelayError::ClientLaunchFailed)?;
+            #[cfg(not(target_os = "linux"))]
             let child = command
                 .spawn()
                 .map_err(|_| RelayError::ClientLaunchFailed)?;

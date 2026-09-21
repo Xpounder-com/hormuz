@@ -17,9 +17,13 @@ fresh authenticated 127.0.0.1 relay. The relay exists only while the directly
 launched client is alive. On Windows, the launcher assigns a suspended client
 to a kill-on-close Job Object before resuming it. The job stops its descendants
 after normal exit, failure or explicit cancellation, and the direct child is
-reaped. Unix retains direct-child-only cleanup and shell job control. A panel
-close must leave the launcher alive; a shell quit/update must coordinate its
-termination separately.
+reaped. Linux also arms a parent-death signal before each direct client or
+version probe executes, so abrupt launcher death kills an ordinary direct
+process; the pre-exec hook rejects a child if the launcher already died. Linux
+clears this setting on fork, privileged exec and credential changes, so it does
+not contain descendants. macOS retains direct-child-only cleanup,
+and neither Unix path changes shell job control. A panel close must leave the
+launcher alive; a shell quit/update must coordinate its termination separately.
 
 The relay admits the client's expected POST routes only. It checks Host,
 Origin, one local bearer/API-key credential, content length and a 25 MiB request
@@ -62,10 +66,11 @@ This is a #339 helper-lifetime and #341 relay checkpoint; both issues remain
 open.
 
 This source checkpoint is not loaded by the Windows panel or shipping Mac app.
-Windows Job Object descendant cleanup is covered by fake clients; Unix still
-reaps only the direct child, and descendants can remain after it exits or when
-the launcher is terminated. Unix process-tree containment, native-shell panel,
-quit/update and installed-client wiring, packaged optimizer interpreter, real
+Windows Job Object descendant cleanup is covered by fake clients. Linux has
+synthetic direct-client launcher-death, pre-exec race and normal-exit tests,
+but neither Unix platform contains descendants after fork, including an
+alternate-process-group grandchild. Unix process-tree containment, native-shell
+panel and quit/update wiring, packaged optimizer interpreter, real
 Codex/Claude sessions, Windows accessibility and clean-machine acceptance
 remain open. Relay-wide cancellation of queued/running optimizer tasks also
 remains open; a bounded individual exchange does not prove those tasks have
@@ -83,6 +88,8 @@ pipe ends after direct-helper exit, a helper that never consumes stdin, output
 overflow and direct-child reaping. Linux runs those fixtures without enabling
 the unsupported native relay command. Windows fake-helper tests cover Job
 Object containment and pipe-worker completion without an installed optimizer
-or provider. These tests do not prove Unix descendant containment, abrupt
+or provider. These tests do not prove Unix descendant containment, macOS abrupt
 launcher-death cleanup, real optimizer/provider sessions, or packaged
-native-shell lifecycle behavior.
+native-shell lifecycle behavior. The Linux parent-death tests cover a direct
+synthetic client only; Linux's native executable still fails closed without a
+secure-store adapter.
