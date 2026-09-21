@@ -15,11 +15,15 @@ import itertools
 import json
 import math
 import pstats
-import resource
 import sys
 import time
 from pathlib import Path
 from types import CodeType, ModuleType
+
+try:
+    import resource as _resource
+except ImportError:  # Windows has no resource module.
+    _resource = None
 
 
 _IMPORT_SEQUENCE = itertools.count()
@@ -129,16 +133,21 @@ def _own_root() -> Path:
     return Path(__file__).resolve(strict=True).parents[2]
 
 
+def _path_is_alias(path: Path) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return path.is_symlink() or (callable(is_junction) and is_junction())
+
+
 def _checked_local_root(root: Path) -> Path:
     """Accept only this benchmark file's own checkout, without path aliases."""
     supplied = root if root.is_absolute() else Path.cwd() / root
-    if any(path.is_symlink() for path in (supplied, *supplied.parents)):
+    if any(_path_is_alias(path) for path in (supplied, *supplied.parents)):
         raise RuntimeError("benchmark_foreign_root")
     try:
         resolved = supplied.resolve(strict=True)
     except OSError as error:
         raise RuntimeError("benchmark_foreign_root") from error
-    if resolved != _own_root():
+    if resolved != supplied or resolved != _own_root():
         raise RuntimeError("benchmark_foreign_root")
     return resolved
 
@@ -147,9 +156,16 @@ def _prepare_local_source(package_name: str, name: str) -> tuple[ModuleType, Cod
     """Compile the checkout's exact source bytes, ignoring package exports and pyc."""
     root = _own_root()
     source = root / "hormuz" / f"{name}.py"
-    if source.is_symlink() or not source.is_file():
+    component = root
+    for part in source.relative_to(root).parts:
+        component = component / part
+        if _path_is_alias(component):
+            raise RuntimeError("benchmark_source_alias")
+    if not source.is_file():
         raise RuntimeError("benchmark_source_not_regular_file")
     expected = source.resolve(strict=True)
+    if expected != source:
+        raise RuntimeError("benchmark_source_alias")
     if not expected.is_relative_to(root):
         raise RuntimeError("benchmark_source_outside_root")
     spec = importlib.util.spec_from_file_location(f"{package_name}.{name}", expected)
@@ -204,7 +220,7 @@ def evaluate(root: Path, action: str, *, seed: bytes | None = None) -> dict[str,
     if action not in {"validate", "heldout", "profile", "benchmark"}:
         raise ValueError("unknown_benchmark_action")
     compaction = load_local_compaction()
-    source = root / "hormuz" / "compaction.py"
+    source = Path(compaction.__file__)
     selected = heldout_cases() if action == "heldout" else cases()
     fixture_sha256 = hashlib.sha256(json.dumps(selected, sort_keys=True).encode("utf-8")).hexdigest()
     outputs: dict[str, dict[str, object]] = {}
@@ -257,9 +273,12 @@ def evaluate(root: Path, action: str, *, seed: bytes | None = None) -> dict[str,
                 timed_outputs.update(encoded)
         measurements[name] = samples
         outputs[name]["timed_sha256"] = timed_outputs.hexdigest()
-    peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     report["samples_ns"] = measurements
-    report["peak_rss_bytes"] = peak_rss * (1024 if sys.platform.startswith("linux") else 1)
+    if _resource is None:
+        report["peak_rss_bytes"] = None
+    else:
+        peak_rss = _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss
+        report["peak_rss_bytes"] = peak_rss * (1024 if sys.platform.startswith("linux") else 1)
     return report
 
 

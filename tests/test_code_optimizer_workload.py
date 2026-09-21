@@ -81,6 +81,60 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         self.assertNotEqual(no_child.returncode, 0)
         self.assertIn("unrecognized arguments", no_child.stderr)
 
+    def test_local_loader_rejects_source_ancestor_alias_inside_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True) / "checkout"
+            foreign = root / "vendor" / "foreign" / "hormuz"
+            foreign.mkdir(parents=True)
+            for name in ("compaction.py", "compaction_formats.py"):
+                (foreign / name).write_text('raise RuntimeError("foreign_source_executed")\n')
+            (root / "hormuz").symlink_to(foreign, target_is_directory=True)
+            with patch.object(self.workload, "_own_root", return_value=root):
+                with self.assertRaisesRegex(RuntimeError, "benchmark_source_alias"):
+                    self.workload.evaluate(root, "validate")
+
+    def test_local_loader_rejects_junction_like_root_and_source_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True) / "checkout"
+            package = root / "hormuz"
+            package.mkdir(parents=True)
+            for name in ("compaction.py", "compaction_formats.py"):
+                (package / name).write_text('raise RuntimeError("foreign_source_executed")\n')
+            for aliased, error in (
+                (root, "benchmark_foreign_root"),
+                (package, "benchmark_source_alias"),
+            ):
+                with self.subTest(aliased=aliased):
+                    with patch.object(
+                        Path, "is_junction", lambda path: path == aliased, create=True,
+                    ):
+                        with patch.object(self.workload, "_own_root", return_value=root):
+                            with self.assertRaisesRegex(RuntimeError, error):
+                                self.workload.evaluate(root, "validate")
+
+    def test_local_loader_rejects_resolved_source_alias_without_junction_api(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True) / "checkout"
+            package = root / "hormuz"
+            package.mkdir(parents=True)
+            source = package / "compaction.py"
+            source.write_text('raise RuntimeError("foreign_source_executed")\n')
+            foreign = root / "vendor" / "foreign" / "hormuz" / "compaction.py"
+            foreign.parent.mkdir(parents=True)
+            foreign.write_text('raise RuntimeError("foreign_source_executed")\n')
+            original_resolve = Path.resolve
+
+            def resolve_as_junction(path: Path, *args: object, **kwargs: object) -> Path:
+                if path == source:
+                    return foreign
+                return original_resolve(path, *args, **kwargs)
+
+            with patch.object(self.workload, "_own_root", return_value=root):
+                with patch.object(self.workload, "_path_is_alias", return_value=False):
+                    with patch.object(Path, "resolve", resolve_as_junction):
+                        with self.assertRaisesRegex(RuntimeError, "benchmark_source_alias"):
+                            self.workload._prepare_local_source("probe", "compaction")
+
     def test_reference_workload_covers_primary_and_heldout_cases(self) -> None:
         workload = self.workload
         measured = workload.cases()
@@ -228,6 +282,17 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
                 first["outputs"][name]["timed_sha256"],
                 changed["outputs"][name]["timed_sha256"],
             )
+
+    def test_benchmark_without_resource_keeps_output_contract(self) -> None:
+        with patch.object(self.workload, "_resource", None):
+            report = self.workload.evaluate(ROOT, "benchmark")
+        self.assertIsNone(report["peak_rss_bytes"])
+        self.assertEqual(len(report["samples_ns"]), 10)
+        self.assertEqual(sum(map(len, report["samples_ns"].values())), 170)
+        self.assertTrue(all(
+            len(report["outputs"][name]["timed_sha256"]) == 64
+            for name in report["samples_ns"]
+        ))
 
     def test_seed_stdin_contract_and_all_four_local_actions(self) -> None:
         seed = "ab" * 32

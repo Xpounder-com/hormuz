@@ -24,8 +24,9 @@ cross-repository hash check with `HORMUZ_CODE_OPTIMIZER_TEST_REPO` pointing at
 a local Hormuz checkout.
 
 The public CLI's `--root` must identify the checkout containing that CLI
-file. It rejects another checkout and symlink aliases, and it has no candidate
-child mode. `validate`, `heldout`, `profile`, and `benchmark` load exact
+file. It rejects another checkout and symlink or junction aliases in the root
+or local source paths, and it has no candidate child mode. `validate`,
+`heldout`, `profile`, and `benchmark` load exact
 `hormuz/compaction.py` and `hormuz/compaction_formats.py` source bytes from
 that same checkout, bypassing package exports and bytecode caches. The CLI is
 for a trusted maintainer checkout and does not confine adversarial code.
@@ -48,7 +49,8 @@ execute candidates.
 
 The public `benchmark` action times direct local `compact_text` calls after
 inputs are prepared, excluding fixture generation and output hashing.
-Its RSS is the local process's RSS. These local samples confirm finite,
+Its RSS is the local process's RSS, or `null` when the platform does not
+provide the Python `resource` module. These local samples confirm finite,
 well-formed helper measurements; they are not directly comparable to the
 private Worker's sandboxed IPC measurements or an acceptance threshold.
 Profile hotspots are advisory. The private app owns its measurement boundary
