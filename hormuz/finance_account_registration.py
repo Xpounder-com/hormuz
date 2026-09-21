@@ -11,9 +11,17 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
+from typing import TYPE_CHECKING
 
 from .audit_chain import AuditChainError, canonical_json_bytes
-from .finance_account_binding import _identifier, _version
+from .finance_account_binding import (
+    FinanceAccountCandidate,
+    _identifier,
+    _version,
+)
+
+if TYPE_CHECKING:
+    from .finance_collection_repository import SourceBindingVersion
 
 
 MAX_ACCOUNT_BINDING_REQUEST_BYTES = 64 * 1024
@@ -27,11 +35,23 @@ _REGISTRATION_FIELDS = frozenset({
 _SOURCE_BINDING_FIELDS = frozenset({"binding_id", "version", "content_digest"})
 
 
+def _sha256(value: object) -> bool:
+    return isinstance(value, str) and _SHA256.fullmatch(value) is not None
+
+
 class AccountBindingRequestError(ValueError):
     """Fixed, content-free validation failure for dormant registration intake."""
 
     def __init__(self) -> None:
         self.code = "invalid_request"
+        super().__init__(self.code)
+
+
+class AccountBindingMatchError(ValueError):
+    """A fixed, content-free mismatch before a future registration transaction."""
+
+    def __init__(self) -> None:
+        self.code = "binding_conflict"
         super().__init__(self.code)
 
 
@@ -56,6 +76,120 @@ class AccountBindingRegistrationRequest:
 
     def __repr__(self) -> str:
         return "AccountBindingRegistrationRequest(<metadata>)"
+
+
+@dataclass(frozen=True, repr=False)
+class MatchedActiveAccountBindingSource:
+    """Copied source coordinates; not a registration, receipt or authority grant."""
+
+    organization_id: str
+    binding_id: str
+    version: int
+    request_digest: str
+    upstream_reference_id: str
+    upstream_reference_version: int
+    transport_profile: str
+    inference_credential_reference_id: str
+    inference_credential_reference_version: int
+    source_binding_id: str
+    source_binding_version: int
+    source_binding_digest: str
+    provider: str
+    provider_account_fingerprint: str
+    scope_kind: str
+    scope_fingerprints: tuple[str, ...]
+    fingerprint_key_version: int
+
+    def __repr__(self) -> str:
+        return "MatchedActiveAccountBindingSource(<metadata>)"
+
+
+def match_active_account_binding_source(
+    request: AccountBindingRegistrationRequest,
+    *,
+    selected: FinanceAccountCandidate,
+    source: SourceBindingVersion,
+    current_source: SourceBindingVersion,
+) -> MatchedActiveAccountBindingSource:
+    """Match an active request to exact configured and source coordinates.
+
+    Future storage code must read both source rows and reauthorize under the
+    tenant's registration lock, check historical request replay and current
+    registration CAS, then append the version and audit entry atomically. This
+    helper performs no I/O, grants no account authority and does not handle
+    revocation (which copies a prior registration, even if source is revoked).
+    It cannot infer or backfill a historical attempt's account from a current
+    credential or rate card; absent attempt sidecars remain unmatched.
+    """
+
+    # Keep strict request parsing independent of the storage/config dependency
+    # graph until the prospective registration matcher is actually invoked.
+    from .finance_collection_repository import SourceBindingVersion
+
+    if (
+        not isinstance(request, AccountBindingRegistrationRequest)
+        or not isinstance(selected, FinanceAccountCandidate)
+        or not isinstance(source, SourceBindingVersion)
+        or not isinstance(current_source, SourceBindingVersion)
+        or request.state != "active"
+        or request.expected_version == 2_147_483_647
+    ):
+        raise AccountBindingMatchError()
+    version = 1 if request.expected_version is None else request.expected_version + 1
+    identity, binding = selected.identity, selected.binding
+    if (
+        binding.organization_id != request.organization_id
+        or binding.binding_id != request.binding_id
+        or binding.binding_version != version
+        or binding.upstream_reference_id != request.upstream_reference_id
+        or identity.upstream_reference_id != request.upstream_reference_id
+        or identity.upstream_reference_version != request.upstream_reference_version
+        or identity.transport_profile != request.transport_profile
+        or identity.inference_credential_reference_id
+        != request.inference_credential_reference_id
+        or identity.inference_credential_reference_version
+        != request.inference_credential_reference_version
+        or source.organization_id != request.organization_id
+        or source.binding_id != request.source_binding_id
+        or source.version != request.source_binding_version
+        or source.content_digest != request.source_binding_digest
+        or source.binding_state != "active"
+        or current_source != source
+        or (request.transport_profile, source.provider) not in {
+            ("openai.first-party.v1", "openai"),
+            ("anthropic.first-party.v1", "anthropic"),
+        }
+        or not _sha256(source.provider_account_fingerprint)
+        or source.scope_kind not in {"organization", "projects", "workspaces"}
+        or not isinstance(source.scope_fingerprints, tuple)
+        or len(source.scope_fingerprints) > 1000
+        or any(not _sha256(value) for value in source.scope_fingerprints)
+        or source.scope_fingerprints != tuple(sorted(set(source.scope_fingerprints)))
+        or (source.scope_kind == "organization") != (source.scope_fingerprints == ())
+        or (source.provider == "openai" and source.scope_kind == "workspaces")
+        or (source.provider == "anthropic" and source.scope_kind == "projects")
+        or not _version(source.fingerprint_key_version)
+    ):
+        raise AccountBindingMatchError()
+    return MatchedActiveAccountBindingSource(
+        organization_id=request.organization_id,
+        binding_id=request.binding_id,
+        version=version,
+        request_digest=request.request_digest,
+        upstream_reference_id=request.upstream_reference_id,
+        upstream_reference_version=request.upstream_reference_version,
+        transport_profile=request.transport_profile,
+        inference_credential_reference_id=request.inference_credential_reference_id,
+        inference_credential_reference_version=request.inference_credential_reference_version,
+        source_binding_id=source.binding_id,
+        source_binding_version=source.version,
+        source_binding_digest=source.content_digest,
+        provider=source.provider,
+        provider_account_fingerprint=source.provider_account_fingerprint,
+        scope_kind=source.scope_kind,
+        scope_fingerprints=source.scope_fingerprints,
+        fingerprint_key_version=source.fingerprint_key_version,
+    )
 
 
 def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
