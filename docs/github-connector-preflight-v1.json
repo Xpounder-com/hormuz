@@ -1,0 +1,96 @@
+{
+  "schema_id": "hormuz.github-connector-preflight",
+  "schema_version": 1,
+  "status": "proposed_offline_preimplementation_not_accepted",
+  "target_release": "1.3.0",
+  "feature_issue": 219,
+  "compatibility_gate_issue": 214,
+  "baseline": {
+    "source_commit": "7c8e5296329255bca35ef5e7d2cda9735885e7df",
+    "published_v1_2_0_commit": "d854a5a453fcbe20cb3f4c1e261e146f2da93855",
+    "sqlite_schema_version": 12,
+    "postgresql_schema_version": 17,
+    "schema_versions_are_observations_not_successor_reservations": true
+  },
+  "frozen_inputs_sha256": {
+    "docs/portfolio-intelligence-contract-v1.json": "40c27f7555631d2ecaa004f6481eef07d565ccebcb5e206106c5820ee3586c49",
+    "hormuz/portfolio-outcome-wire-v1.json": "0716c5483b6be72736d357f4ff318c89eeac10fa3f3ae86d3f3bdb9eb99f53a2",
+    "tests/fixtures/connectors/github/cases.json": "efbabd0fb521bff2123ae1e1f7ce2cee353f81e5f24a7b7431df9998c795c580"
+  },
+  "compatibility": {
+    "existing_v1_and_v1_2_gateway_auth_policy_errors_pagination_and_cli": "unchanged",
+    "public_outcome_event_page_and_receipt": "approved_v1_shapes_unchanged",
+    "new_public_route": "planned_POST_v1_connectors_github_events_not_activated",
+    "new_provider_credential_or_secret_store": false,
+    "connector_owned_production_ddl": false,
+    "connector_owned_migration_number": null,
+    "future_ddl_requires_successor_preflight": true,
+    "existing_durable_evidence": "immutable_and_not_rewritten",
+    "provider_work_replay": "never_automatic"
+  },
+  "authentication_decisions": {
+    "enrollment_profile": "undecided_dedicated_or_shared_app_requires_review",
+    "exact_permissions": "undecided_requires_review",
+    "signing_channel_and_delivery_identity": "undecided_requires_review",
+    "raw_body_signature": "verify_HMAC_SHA256_over_exact_bytes_before_JSON_parse",
+    "headers": "event_delivery_and_hook_headers_untrusted_until_channel_and_delivery_identity_are_bound",
+    "tenant_and_container": "server_registered_installation_and_repository_only_body_claims_never_authorize",
+    "rotation": "explicit_versioned_overlap_with_every_accepted_delivery_signed",
+    "acknowledgement": "only_after_atomic_durable_receipt_or_original_exact_replay",
+    "source_profile": "GitHub.com_only_unless_separately_tested"
+  },
+  "normalization_decisions": {
+    "fixture_pack": "github-outcome-proposals-v1",
+    "accepted_event_action_conclusion_matrix": null,
+    "pending_case_ids": [
+      "pr-opened",
+      "pr-closed-merged",
+      "pr-closed-unmerged",
+      "review-submitted",
+      "check-run-success",
+      "check-run-failure",
+      "pr-opened-missing-object-id",
+      "pr-opened-invalid-object-id-type"
+    ],
+    "checks_and_reviews_without_verified_PR_relationship": "unsupported_or_unmatched_never_inferred",
+    "evidence_level": "descriptive_only",
+    "content_retention": "no_raw_payload_names_urls_branch_messages_review_text_patches_paths_or_credentials"
+  },
+  "offline_transition_contract": {
+    "phase_0": "published_v1_2_0_and_current_source_artifacts_must_be_verified_before_candidate_transition",
+    "phase_1": "connector_disabled_no_GitHub_transport_or_schema_change",
+    "phase_2": "test_only_verified_delivery_failure_records_no_success_receipt_or_outcome",
+    "phase_3": "test_only_repaired_delivery_commits_once_and_exact_redelivery_has_no_writes",
+    "phase_4": "disable_connector_and_verify_no_new_mutation",
+    "rollback_before_writes": "restore_verified_old_application_database_pair_to_separate_destination_only_after_stop_and_zero_post_checkpoint_writes",
+    "recovery_after_writes_or_unknown_count": "retain_candidate_and_recover_forward_never_in_place_downgrade",
+    "storage_failure": "no_success_acknowledgement_no_automatic_provider_replay",
+    "sqlite_and_postgresql_final_candidate": "required_separately_under_214"
+  },
+  "required_red_first_cases": [
+    "no_GitHub_runtime_adapter_or_transport_activated",
+    "fixture_mappings_remain_proposals_only",
+    "body_signature_alone_does_not_prove_tenant_or_header_identity",
+    "unknown_or_conflicting_header_delivery_identity_denied_before_parse_or_storage",
+    "wrong_installation_repository_or_cross_tenant_claim_denied",
+    "missing_or_unapproved_event_mapping_no_normalized_mutation"
+  ],
+  "required_implementation_cases": [
+    "exact_permissions_enrollment_profile_and_header_identity_reviewed",
+    "raw_byte_proxy_Unicode_rotation_and_replay_denials",
+    "allowlisted_event_action_conclusion_and_verified_parent_relationship",
+    "cross_tenant_unknown_installation_repository_mismatch_and_scope_override_denials",
+    "bounded_bytes_depth_members_time_concurrency_and_backfill",
+    "durable_receipt_before_ack_outage_partial_failure_retry_and_independent_instance_race",
+    "source_wheel_SQLite_PostgreSQL_old_pair_rollback_and_forward_recovery",
+    "signed_OCI_Compose_and_both_v1_0_0_v1_2_0_predecessors_under_final_214",
+    "authorized_live_GitHub_com_install_delivery_redelivery_after_offline_acceptance"
+  ],
+  "gates": {
+    "feature_preflight_accepted": false,
+    "runtime_implemented": false,
+    "live_integration_verified": false,
+    "final_candidate_accepted": false,
+    "release_authorized": false
+  }
+}
