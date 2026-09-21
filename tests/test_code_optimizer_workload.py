@@ -58,16 +58,20 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             alias = Path(temporary) / "checkout-alias"
             alias.symlink_to(ROOT, target_is_directory=True)
-            rejected = subprocess.run(
-                [sys.executable, str(WORKLOAD), "--root", str(alias),
-                 "--action", "validate"],
-                capture_output=True, text=True,
-            )
-            self.assertNotEqual(rejected.returncode, 0)
-            self.assertIn("benchmark_foreign_root", rejected.stderr)
-            self.assertNotIn(str(alias), rejected.stderr)
-            with self.assertRaisesRegex(RuntimeError, "benchmark_foreign_root"):
-                self.workload.evaluate(alias, "validate")
+            ancestor_alias = Path(temporary) / "parent-alias"
+            ancestor_alias.symlink_to(ROOT.parent, target_is_directory=True)
+            for supplied in (alias, ancestor_alias / ROOT.name):
+                with self.subTest(supplied=supplied):
+                    rejected = subprocess.run(
+                        [sys.executable, str(WORKLOAD), "--root", str(supplied),
+                         "--action", "validate"],
+                        capture_output=True, text=True,
+                    )
+                    self.assertNotEqual(rejected.returncode, 0)
+                    self.assertIn("benchmark_foreign_root", rejected.stderr)
+                    self.assertNotIn(str(supplied), rejected.stderr)
+                    with self.assertRaisesRegex(RuntimeError, "benchmark_foreign_root"):
+                        self.workload.evaluate(supplied, "validate")
 
         no_child = subprocess.run(
             [sys.executable, str(WORKLOAD), "--root", str(ROOT),
