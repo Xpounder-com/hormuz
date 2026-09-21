@@ -58,8 +58,12 @@ private state, contact Secret Service, discover a client, or start a relay.
 Malformed tokens, an unavailable canonical bus, mismatched properties, and
 timeout fail closed; caller-supplied bus variables are ignored. Stopping the
 service sends its configured `SIGKILL` to the whole cgroup, so an already-sent
-POST can have an uncertain upstream outcome;
-the relay does not replay it. A panel close must not invoke this stop command.
+POST can have an uncertain upstream outcome; the relay does not replay it. A
+panel close must not invoke this stop command.
+The wrapper and stop command now limit tokens to 128 ASCII bytes. No shipping
+launcher creates these units yet; a longer unit created with the earlier
+source-only wrapper needs its exact unit stopped through the user manager
+before adopting this control path.
 The wrapper selects a PTY for interactive input and pipes otherwise. It passes
 only the relay executable and its existing invocation arguments to systemd,
 disables systemd environment expansion for that already-formed argv, and copies
