@@ -150,3 +150,7 @@ optimizer cancellation and a fake client's listener lifetime. **#341 remains
 open** for native-shell integration, installed-client proof, descendant
 containment and platform quit/update acceptance. Neither the Windows panel nor
 shipping Mac app launches this Rust relay yet.
+The Linux library has a fail-closed source guard for a transient user systemd
+service and a host-conditional detached-descendant fixture. It needs a real
+user-manager run, native Linux secure-store integration, and shell lifecycle
+wiring before Linux descendant containment or support can be accepted.

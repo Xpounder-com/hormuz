@@ -28,6 +28,42 @@ direct-child-only cleanup,
 and neither Unix path changes shell job control. A panel close must leave the
 launcher alive; a shell quit/update must coordinate its termination separately.
 
+### Linux user-service containment source checkpoint
+
+Linux library client discovery now fails before a version probe or relay starts
+unless this launcher is the main PID of an active, transient **user systemd
+service**. The guard verifies the kernel cgroup membership against the live
+service's `ControlGroup`, `MainPID`, `ExitType=main`, `KillMode=control-group`,
+and `KillSignal=SIGKILL` properties. It does not trust an environment flag.
+On a host with a user manager, `run-in-user-service.sh` starts a single
+invocation with those properties. The caller chooses a unique token and owns
+`hormuz-relay-<token>.service`; an explicit quit/update must stop that unit.
+The wrapper selects a PTY for interactive input and pipes otherwise. It passes
+only the relay executable and its existing invocation arguments to systemd;
+relay credentials are resolved inside the launcher and are not command-line
+arguments. This source path is not wired to a native Linux shell yet.
+
+The launcher, version probe, client and normal descendants inherit the service
+cgroup on fork, even if a descendant double-forks or calls `setsid`. systemd
+stops the whole group after its main launcher exits, is killed, or the unit is
+explicitly stopped. A scope unit does not have that main-process lifetime.
+The direct-child parent-death guard remains defense in depth. A same-UID
+process that can deliberately migrate itself out of the user manager's cgroup
+tree is outside this ordinary-client lifetime guarantee; stronger isolation
+would require separate host authority and acceptance. No fallback to PID or
+process-group enumeration is treated as equivalent containment.
+
+The Linux-only synthetic test runs normal-exit, explicit-stop and abrupt
+launcher-death cases with a detached listener when a real user systemd manager
+is reachable. It checks the new session, cgroup membership, listener closure,
+and empty/removed cgroup. On CI without that manager it reports a host-only
+skip; ordinary Rust tests still check the fail-closed property parser. Run
+`cargo test -p hormuz-client-relay --locked linux_service` on an Ubuntu 24.04
+user session for host evidence. The executable still exits
+`native_secure_store_unavailable` on Linux; the Linux credential adapter,
+native-shell wiring, real supported-client traffic, and clean-install proof
+remain open. This checkpoint cannot close #341 or qualify Linux support.
+
 The relay admits the client's expected POST routes only. It checks Host,
 Origin, one local bearer/API-key credential, content length and a 25 MiB request
 limit before obtaining the current gateway credential. It forwards the selected
