@@ -196,7 +196,11 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
             context.traps[Inexact] = True
             context.traps[Rounded] = True
             result = calculate(provider_rows=(provider("4"),), gateway_rows=(estimate("3"),))
+            wide = "123456789012345678.123456789012345678"
+            wide_result = calculate(provider_rows=(provider("0"),), gateway_rows=(estimate(wide),))
         self.assertEqual((result.relative_variance.numerator, result.relative_variance.denominator), ("1", "3"))
+        self.assertEqual((wide_result.relative_variance.numerator, wide_result.relative_variance.denominator),
+                         ("-" + wide, wide))
         tiny = calculate(
             provider_rows=(provider("0.000000000000000002"),),
             gateway_rows=(estimate("0.000000000000000001"),),
@@ -219,6 +223,13 @@ class FinanceVarianceReferenceTests(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaises(FinanceVarianceReferenceError) as caught:
                 replace(original, **changed)
             self.assertEqual(caught.exception.code, "finance_reference_invalid")
+
+    def test_anthropic_cost_grain_requires_usd(self):
+        anthropic = replace(grain(), provider="anthropic", collection_profile="anthropic.organization-costs.v1")
+        self.assertEqual(calculate(provider_grain=anthropic, gateway_grain=anthropic).signed_variance, "0.25")
+        with self.assertRaises(FinanceVarianceReferenceError) as caught:
+            replace(anthropic, currency="EUR")
+        self.assertEqual(caught.exception.code, "finance_reference_invalid")
 
 
 if __name__ == "__main__":

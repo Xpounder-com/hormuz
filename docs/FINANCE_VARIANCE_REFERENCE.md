@@ -22,6 +22,7 @@ observation digests are rejected even across different snapshot IDs, as are
 duplicate gateway attempts. The collection profile must be
 an existing cost profile for the selected provider; an equal pair of usage or
 cross-provider profiles is not cost-comparable.
+The Anthropic cost profile requires USD, matching its collection normalizer.
 
 The calculator cannot verify the caller's complete-coverage assertion, prove
 first-party transport or assign a boundary-crossing request to a provider's
@@ -32,7 +33,8 @@ At that synthetic comparable grain, signed variance is the selected signed
 provider aggregate minus the subtotal of available original configured
 estimates. Absolute variance is its magnitude. Relative variance is an exact
 signed numerator over the positive magnitude of the estimate denominator,
-with no decimal rounding; zero denominator leaves it undefined even for
+using the exact canonical estimate subtotal with no decimal rounding; zero
+denominator leaves it undefined even for
 zero/zero. Unpriced attempts retain a count and make `supplied_attempt_pricing`
 `incomplete`; even `complete` means only that the supplied attempt rows are
 priced. The known subtotal and its difference are never a complete bill.

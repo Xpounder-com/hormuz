@@ -100,6 +100,7 @@ class ComparableAccountGrain:
             or (self.provider == "openai" and self.scope_kind == "workspaces")
             or (self.provider == "anthropic" and self.scope_kind == "projects")
             or not valid_currency
+            or (self.provider == "anthropic" and self.currency != "USD")
             or not _identifier(self.product)
             or profile is None
             or profile.provider != self.provider
@@ -262,7 +263,7 @@ def calculate_reference_variance(
     ):
         raise FinanceVarianceReferenceError("finance_reference_invalid")
     relative = None if estimate_subtotal.is_zero() else ExactRelativeVariance(
-        signed_text, decimal_text(abs(estimate_subtotal)),
+        signed_text, estimate_text,
     )
     return VarianceReference(
         provider_total=provider_text,
