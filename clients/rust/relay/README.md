@@ -21,7 +21,10 @@ reaped. Linux also arms a parent-death signal before each direct client or
 version probe executes, so abrupt launcher death kills an ordinary direct
 process; the pre-exec hook rejects a child if the launcher already died. Linux
 clears this setting on fork, privileged exec and credential changes, so it does
-not contain descendants. macOS retains direct-child-only cleanup,
+not contain descendants. The kernel ties it to the spawning launcher thread:
+that thread's exit kills the direct child even if other launcher threads remain.
+The current launch and version-probe paths wait on that thread. macOS retains
+direct-child-only cleanup,
 and neither Unix path changes shell job control. A panel close must leave the
 launcher alive; a shell quit/update must coordinate its termination separately.
 

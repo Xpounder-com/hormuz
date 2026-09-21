@@ -1,5 +1,7 @@
 //! A Linux-only direct-child guard for abrupt launcher death. The kernel
 //! clears `PR_SET_PDEATHSIG` on fork, so this is not descendant containment.
+//! The signal follows the thread that calls `spawn`, not the whole launcher;
+//! current client and version-probe paths wait on that same thread.
 
 use std::io;
 use std::os::unix::process::CommandExt;
@@ -118,19 +120,9 @@ mod tests {
         let ready = std::env::var_os(READY).map(PathBuf::from);
         if stage.as_deref() == Some("client") {
             let ready = ready.unwrap();
-            let mut parent_death_signal = 0;
-            // SAFETY: prctl writes one c_int into this live stack variable.
-            let result = unsafe {
-                libc::prctl(
-                    libc::PR_GET_PDEATHSIG,
-                    &mut parent_death_signal as *mut libc::c_int,
-                    0 as libc::c_ulong,
-                    0 as libc::c_ulong,
-                    0 as libc::c_ulong,
-                )
-            };
-            assert_eq!(result, 0);
-            assert_eq!(parent_death_signal, libc::SIGKILL);
+            // libtest runs this function on a new thread, whose parent-death
+            // setting is cleared on clone. Prove the process lifetime through
+            // its owned listener instead of reading this worker's setting.
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             // SAFETY: getpgrp reads the process group of this fixture only.
             let group = unsafe { libc::getpgrp() };
