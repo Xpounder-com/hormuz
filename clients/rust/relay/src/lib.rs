@@ -18,6 +18,8 @@ mod process_scope_linux;
 mod process_scope;
 mod relay;
 
+#[cfg(target_os = "linux")]
+pub use launch::require_linux_user_service;
 pub use launch::{discover_supported_client, run_client};
 pub use relay::{
     CredentialSource, LocalRelay, Optimization, OptimizerCancellation, RequestOptimizer,

@@ -1,5 +1,5 @@
-// Linux compiles this module only for the synthetic Unix pipe tests. The
-// executable still requires a supported native secure store below.
+// Linux retains the Unix pipe fixtures, while its terminal command uses the
+// Secret Service store and keeps optimization Off for this source checkpoint.
 #[cfg(any(target_os = "macos", all(test, unix)))]
 mod helper_exchange;
 
@@ -11,15 +11,15 @@ mod helper_exchange_windows;
 #[path = "process_scope.rs"]
 mod process_scope;
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 mod native_cli;
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 fn main() -> std::process::ExitCode {
     native_cli::main()
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn main() -> std::process::ExitCode {
     eprintln!("relay error: native_secure_store_unavailable");
     std::process::ExitCode::FAILURE

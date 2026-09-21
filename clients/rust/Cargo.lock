@@ -592,6 +592,7 @@ dependencies = [
  "hormuz-client-core",
  "hormuz-client-platform",
  "hormuz-client-session",
+ "hormuz-client-transport",
  "http-body-util",
  "hyper",
  "hyper-util",
