@@ -22,12 +22,16 @@ const FIXTURE_USER: &str = "hormuzrelaytest";
 const PROFILE_KEY: &str = "12345678-1234-1234-1234-123456789abc";
 const BODY: &[u8] = b"{\"messages\":[]}";
 const FOUNDATION_EPOCH: f64 = 978_307_200.0;
+// Two service checks, several 10-second Secret Service calls, and the client
+// version probe may all complete within their individual production budgets.
+const HOST_STARTUP_BUDGET: Duration = Duration::from_secs(120);
 
 fn user_systemctl(arguments: &[&str]) -> std::process::Output {
     let uid = unsafe { libc::getuid() };
     let runtime = format!("/run/user/{uid}");
     Command::new("/usr/bin/systemctl")
         .env_clear()
+        .env("LC_ALL", "C")
         .env("XDG_RUNTIME_DIR", &runtime)
         .env(
             "DBUS_SESSION_BUS_ADDRESS",
@@ -73,9 +77,20 @@ if "--version" in sys.argv:
     raise SystemExit(0)
 
 origin = urlsplit(os.environ["ANTHROPIC_BASE_URL"])
-assert origin.hostname == "127.0.0.1" and origin.port
-assert "OPENAI_API_KEY" not in os.environ
-assert "CLAUDE_CODE_OAUTH_TOKEN" not in os.environ
+if origin.hostname != "127.0.0.1" or not origin.port:
+    raise SystemExit("relay did not bind loopback")
+sentinels = {
+    "OPENAI_API_KEY": "synthetic-openai-must-not-reach-client",
+    "ANTHROPIC_API_KEY": "synthetic-anthropic-must-not-reach-client",
+    "CLAUDE_CODE_OAUTH_TOKEN": "synthetic-oauth-must-not-reach-client",
+}
+for name, sentinel in sentinels.items():
+    if os.environ.get(name) == sentinel:
+        raise SystemExit("provider credential reached fake client: " + name)
+if "OPENAI_API_KEY" in os.environ or "CLAUDE_CODE_OAUTH_TOKEN" in os.environ:
+    raise SystemExit("unrelated provider credential name reached fake client")
+if os.environ.get("ANTHROPIC_API_KEY") != "":
+    raise SystemExit("Claude API key was not replaced with an empty value")
 connection = http.client.HTTPConnection(origin.hostname, origin.port, timeout=5)
 body = b'{"messages":[]}'
 connection.request("POST", "/v1/messages", body, {
@@ -83,7 +98,8 @@ connection.request("POST", "/v1/messages", body, {
     "Content-Type": "application/json",
 })
 response = connection.getresponse()
-assert response.status == 200 and response.read() == b"OK"
+if response.status != 200 or response.read() != b"OK":
+    raise SystemExit("relay returned unexpected response")
 connection.close()
 with open("relay-port", "w", encoding="ascii") as report:
     report.write(str(origin.port))
@@ -98,7 +114,7 @@ with open("relay-port", "w", encoding="ascii") as report:
 fn fake_gateway(listener: TcpListener) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         listener.set_nonblocking(true).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(12);
+        let deadline = Instant::now() + HOST_STARTUP_BUDGET;
         let mut stream = loop {
             match listener.accept() {
                 Ok((stream, _)) => break stream,
@@ -124,9 +140,19 @@ fn fake_gateway(listener: TcpListener) -> thread::JoinHandle<()> {
         }
         let text = String::from_utf8(headers).unwrap();
         assert!(text.starts_with("POST /v1/messages HTTP/1.1\r\n"));
-        assert!(text
-            .to_ascii_lowercase()
-            .contains(&format!("authorization: bearer hox_a_{}", "a".repeat(43))));
+        let authorization: Vec<_> = text
+            .lines()
+            .filter_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("authorization")
+                    .then_some(value.trim())
+            })
+            .collect();
+        assert_eq!(authorization.len(), 1);
+        let mut parts = authorization[0].split_whitespace();
+        assert!(parts.next().unwrap().eq_ignore_ascii_case("bearer"));
+        assert_eq!(parts.next().unwrap(), format!("hox_a_{}", "A".repeat(43)));
+        assert!(parts.next().is_none());
         let length: usize = text
             .lines()
             .find_map(|line| {
@@ -176,7 +202,7 @@ impl Drop for UnitGuard {
 }
 
 fn wait_wrapper(guard: &mut UnitGuard, log: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + HOST_STARTUP_BUDGET;
     loop {
         if let Some(status) = guard.wrapper.try_wait().unwrap() {
             let bounded_log = fs::read(log).unwrap_or_default();
@@ -267,6 +293,15 @@ fn isolated_secret_service_launch_forwards_once_and_tears_down() {
         .arg(&directory)
         .current_dir(root.path())
         .env("PATH", path)
+        .env("OPENAI_API_KEY", "synthetic-openai-must-not-reach-client")
+        .env(
+            "ANTHROPIC_API_KEY",
+            "synthetic-anthropic-must-not-reach-client",
+        )
+        .env(
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "synthetic-oauth-must-not-reach-client",
+        )
         .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/spoofed-bus")
         .env("XDG_RUNTIME_DIR", root.path())
         .stdin(Stdio::null())
@@ -291,11 +326,19 @@ fn isolated_secret_service_launch_forwards_once_and_tears_down() {
         thread::sleep(Duration::from_millis(10));
     }
     let status = user_systemctl(&["show", &guard.unit, "--property=ActiveState"]);
-    assert!(status.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&status.stdout).trim(),
-        "ActiveState=inactive"
-    );
+    if status.status.success() {
+        assert_eq!(
+            String::from_utf8_lossy(&status.stdout).trim(),
+            "ActiveState=inactive"
+        );
+    } else {
+        // --collect may unload the completed unit before this query.
+        assert!(
+            String::from_utf8_lossy(&status.stderr).contains("could not be found"),
+            "could not verify service teardown: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+    }
     store.delete().unwrap();
     assert!(store.load().unwrap().is_none());
 }
