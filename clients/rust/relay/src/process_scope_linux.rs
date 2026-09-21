@@ -124,6 +124,7 @@ mod tests {
             // setting is cleared on clone. Prove the process lifetime through
             // its owned listener instead of reading this worker's setting.
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
             // SAFETY: getpgrp reads the process group of this fixture only.
             let group = unsafe { libc::getpgrp() };
             let value = format!(
@@ -136,7 +137,16 @@ mod tests {
             fs::rename(temporary, ready).unwrap();
             // Bound a failed fixture's lifetime even if the parent-death guard
             // regresses and the outer test is interrupted.
-            thread::sleep(Duration::from_secs(20));
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((stream, _)) => drop(stream),
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("synthetic listener failed: {error}"),
+                }
+            }
             return;
         }
         if stage.as_deref() == Some("supervisor") {
