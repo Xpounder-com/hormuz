@@ -52,21 +52,36 @@ stdin, never through process arguments.
 On macOS, the optimizer exchange uses nonblocking owned pipe ends and one
 30-second deadline for input delivery, output collection and helper exit.
 It drains output while writing input, rejects excess output, and kills/reaps
-the direct helper on failure. A process retaining inherited pipe ends cannot
-extend the I/O deadline through a reader/writer thread join.
+the direct helper on failure or relay-owner cancellation. A process retaining
+inherited pipe ends cannot extend the I/O deadline through a reader/writer
+thread join. This owns and reaps only the direct Unix helper; it does not
+contain a helper descendant after fork. Unix helper-tree containment remains a
+separate acceptance gate.
 
 On Windows, the optimizer helper starts suspended and is assigned to its own
 kill-on-close Job Object before running. The exchange reads and writes pipes
 concurrently under one 30-second deadline. It closes the job before joining
-the workers, requests cancellation of pending synchronous pipe I/O, and exits
-the dedicated relay without a crash dump if workers cannot finish within a
-further two seconds;
+the workers on failure, timeout or relay-owner cancellation, requests
+cancellation of pending synchronous pipe I/O, and exits the dedicated relay
+without a crash dump if workers cannot finish within a further two seconds;
 it cannot return while threads still hold request or response bytes. Synthetic
 Windows tests exercise inherited pipe ends, blocked I/O, oversized output and
 bidirectional exchange. Process creation and kernel termination are not covered
 by a hard elapsed-time guarantee. Request and response bytes stay in memory.
 This is a #339 helper-lifetime and #341 relay checkpoint; both issues remain
 open.
+
+Relay shutdown publishes one sticky optimizer-cancellation signal before it
+closes the optimizer job registry or stops request tasks. Registration and
+shutdown share one lock, so no `spawn_blocking` job can register after closure.
+Abort handles stop jobs that remain queued. A closure scheduled concurrently
+with shutdown checks the sticky signal before calling the optimizer; an
+optimizer already running receives that signal and must return promptly. The
+first-party macOS implementation honors it by killing and reaping its direct
+helper, while the Windows Job Object stops the helper and its descendants
+before pipe workers join. Rust cannot forcibly stop arbitrary in-process
+`RequestOptimizer` implementations that ignore the cooperative contract, so
+this checkpoint does not claim that broader guarantee.
 
 This source checkpoint is not loaded by the Windows panel or shipping Mac app.
 Windows Job Object descendant cleanup is covered by fake clients. Linux has
@@ -75,24 +90,27 @@ but neither Unix platform contains descendants after fork, including an
 alternate-process-group grandchild. Unix process-tree containment, native-shell
 panel and quit/update wiring, packaged optimizer interpreter, real
 Codex/Claude sessions, Windows accessibility and clean-machine acceptance
-remain open. Relay-wide cancellation of queued/running optimizer tasks also
-remains open; a bounded individual exchange does not prove those tasks have
-stopped when the relay owner's shutdown timeout expires. No release or package
-version is changed.
+remain open. The blocked-optimizer shutdown fixture proves that cancellation
+stops first-party work before gateway egress; it does not establish a general
+linearization boundary between cancellation and an upstream POST that is
+already starting or in flight. Such an uncertain POST is still never replayed.
+No release or package version is changed.
 
 From `clients/rust`, run `cargo test --workspace --locked` and
 `cargo clippy --workspace --all-targets --locked -- -D warnings`. The relay
 unit tests cover local auth, Off bytes, streaming, optional transforms,
-oversized bodies, unavailable credentials and Windows fake-client job lifetime.
+oversized bodies, unavailable credentials, queued/running optimizer shutdown
+and Windows fake-client job lifetime.
 The Python bridge is covered by
 `python -m unittest -v tests.test_context_relay_bridge`.
 Synthetic Unix pipe tests also cover partial and bidirectional I/O, retained
 pipe ends after direct-helper exit, a helper that never consumes stdin, output
 overflow and direct-child reaping. Linux runs those fixtures without enabling
 the unsupported native relay command. Windows fake-helper tests cover Job
-Object containment and pipe-worker completion without an installed optimizer
-or provider. These tests do not prove Unix descendant containment, macOS abrupt
-launcher-death cleanup, real optimizer/provider sessions, or packaged
-native-shell lifecycle behavior. The Linux parent-death tests cover a direct
-synthetic client only; Linux's native executable still fails closed without a
-secure-store adapter.
+Object containment, cancellation and pipe-worker completion without an
+installed optimizer or provider. These tests do not prove cancellation of an
+arbitrary non-cooperative in-process optimizer, Unix client or optimizer-helper
+descendant containment, macOS abrupt launcher-death cleanup, real
+optimizer/provider sessions, or packaged native-shell lifecycle behavior. The
+Linux parent-death tests cover a direct synthetic client only; Linux's native
+executable still fails closed without a secure-store adapter.

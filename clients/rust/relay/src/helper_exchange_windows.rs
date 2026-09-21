@@ -3,6 +3,7 @@
 //! Request bytes remain in memory and are never written to an artifact.
 
 use crate::process_scope::OwnedClient;
+use hormuz_client_relay::OptimizerCancellation;
 use std::io::{self, Read, Write};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
@@ -24,7 +25,24 @@ pub(crate) fn run(
     original: &[u8],
     budget: Duration,
     max_body_bytes: usize,
+    cancellation: &OptimizerCancellation,
 ) -> Option<Vec<u8>> {
+    run_controlled(command, gateway, original, budget, max_body_bytes, &|| {
+        cancellation.is_cancelled()
+    })
+}
+
+fn run_controlled<C: Fn() -> bool>(
+    command: &mut Command,
+    gateway: &[u8],
+    original: &[u8],
+    budget: Duration,
+    max_body_bytes: usize,
+    cancelled: &C,
+) -> Option<Vec<u8>> {
+    if cancelled() {
+        return None;
+    }
     let length = u16::try_from(gateway.len()).ok()?.to_be_bytes();
     if original.len() > max_body_bytes {
         return None;
@@ -38,6 +56,9 @@ pub(crate) fn run(
     input.extend_from_slice(&length);
     input.extend_from_slice(gateway);
     input.extend_from_slice(original);
+    if cancelled() {
+        return None;
+    }
 
     let mut child = OwnedClient::spawn(
         command
@@ -89,7 +110,7 @@ pub(crate) fn run(
     let mut wrote = false;
     let mut output = None;
     let mut failed = false;
-    while Instant::now() < deadline {
+    while Instant::now() < deadline && !cancelled() {
         if status.is_none() {
             match child.try_wait_status() {
                 Ok(Some(exit)) => status = Some(exit),
@@ -127,15 +148,21 @@ pub(crate) fn run(
         }
     }
 
+    let was_cancelled = cancelled();
     // The job closes before any join. Its kernel lifetime rule stops children
     // that inherited the pipe ends, including after the direct helper exited.
     drop(child);
-    if failed || status.is_none() || !wrote || output.is_none() {
+    if was_cancelled || failed || status.is_none() || !wrote || output.is_none() {
         cancel_pipe_io(&writer);
         cancel_pipe_io(&reader);
     }
     finish_pipe_threads(writer, reader);
-    if !failed && status.is_some_and(|exit| exit.success()) && wrote {
+    if !was_cancelled
+        && !cancelled()
+        && !failed
+        && status.is_some_and(|exit| exit.success())
+        && wrote
+    {
         let mut output = output?;
         Some(std::mem::take(&mut *output))
     } else {
@@ -189,9 +216,14 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
 
     const WORKER: &str = "helper_exchange_windows::tests::worker";
     const LATE_MARKER_DELAY: Duration = Duration::from_secs(6);
+    const CANCEL_MARKER_DELAY: Duration = Duration::from_secs(2);
 
     fn command(mode: &str, marker: &Path) -> Command {
         let mut command = Command::new(std::env::current_exe().unwrap());
@@ -205,13 +237,23 @@ mod tests {
 
     fn exchange(mode: &str, body: &[u8], budget: Duration, maximum: usize) -> Option<Vec<u8>> {
         let temporary = tempfile::tempdir().unwrap();
-        run(
+        run_uncancelled(
             &mut command(mode, &temporary.path().join("late")),
             b"origin",
             body,
             budget,
             maximum,
         )
+    }
+
+    fn run_uncancelled(
+        command: &mut Command,
+        gateway: &[u8],
+        original: &[u8],
+        budget: Duration,
+        maximum: usize,
+    ) -> Option<Vec<u8>> {
+        run_controlled(command, gateway, original, budget, maximum, &|| false)
     }
 
     #[test]
@@ -231,7 +273,7 @@ mod tests {
     fn oversized_output_fails_closed_and_stops_helper() {
         let temporary = tempfile::tempdir().unwrap();
         let marker = temporary.path().join("running");
-        assert!(run(
+        assert!(run_uncancelled(
             &mut command("overflow", &marker),
             b"origin",
             b"body",
@@ -254,13 +296,44 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_closes_job_and_pipe_workers_before_deadline() {
+        let temporary = tempfile::tempdir().unwrap();
+        let marker = temporary.path().join("cancelled");
+        let ready = marker.with_extension("ready");
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let setter = cancelled.clone();
+        let canceller = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !ready.exists() && Instant::now() < deadline {
+                thread::sleep(POLL_INTERVAL);
+            }
+            assert!(ready.exists(), "fake cancellable helper did not start");
+            setter.store(true, Ordering::SeqCst);
+        });
+        let started = Instant::now();
+        assert!(run_controlled(
+            &mut command("cancel_wait", &marker),
+            b"origin",
+            &vec![b'x'; 1024 * 1024],
+            Duration::from_secs(10),
+            1024 * 1024,
+            &|| cancelled.load(Ordering::SeqCst),
+        )
+        .is_none());
+        canceller.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        thread::sleep(CANCEL_MARKER_DELAY + Duration::from_millis(500));
+        assert!(!marker.exists(), "cancelled helper survived job cleanup");
+    }
+
+    #[test]
     fn inherited_pipe_ends_do_not_block_or_leave_late_descendants() {
         let temporary = tempfile::tempdir().unwrap();
         for mode in ["inherited_stdout", "inherited_stdin"] {
             let marker = temporary.path().join(mode);
             let body = vec![b'x'; 1024 * 1024];
             let started = Instant::now();
-            assert!(run(
+            assert!(run_uncancelled(
                 &mut command(mode, &marker),
                 b"origin",
                 &body,
@@ -289,7 +362,7 @@ mod tests {
     fn rejects_oversized_input_before_helper_launch() {
         let temporary = tempfile::tempdir().unwrap();
         let marker = temporary.path().join("launched");
-        assert!(run(
+        assert!(run_uncancelled(
             &mut command("mark", &marker),
             b"origin",
             b"too long",
@@ -316,6 +389,12 @@ mod tests {
         if mode == "late_marker" {
             fs::write(marker.with_extension("ready"), b"running").unwrap();
             thread::sleep(LATE_MARKER_DELAY);
+            fs::write(marker, b"survived").unwrap();
+            return;
+        }
+        if mode == "cancel_wait" {
+            fs::write(marker.with_extension("ready"), b"running").unwrap();
+            thread::sleep(CANCEL_MARKER_DELAY);
             fs::write(marker, b"survived").unwrap();
             return;
         }

@@ -3,6 +3,8 @@
 //! to temporary files, and no I/O thread can outlive the exchange.
 #![forbid(unsafe_code)]
 
+#[cfg(target_os = "macos")]
+use hormuz_client_relay::OptimizerCancellation;
 use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
 use std::io::{self, Read, Write};
 use std::os::fd::AsFd;
@@ -14,13 +16,31 @@ use zeroize::Zeroizing;
 const CHUNK_BYTES: usize = 8192;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+#[cfg(target_os = "macos")]
 pub(super) fn run(
     command: &mut Command,
     gateway: &[u8],
     original: &[u8],
     budget: Duration,
     max_body_bytes: usize,
+    cancellation: &OptimizerCancellation,
 ) -> Option<Vec<u8>> {
+    run_controlled(command, gateway, original, budget, max_body_bytes, &|| {
+        cancellation.is_cancelled()
+    })
+}
+
+fn run_controlled<C: Fn() -> bool>(
+    command: &mut Command,
+    gateway: &[u8],
+    original: &[u8],
+    budget: Duration,
+    max_body_bytes: usize,
+    cancelled: &C,
+) -> Option<Vec<u8>> {
+    if cancelled() {
+        return None;
+    }
     let length = u16::try_from(gateway.len()).ok()?.to_be_bytes();
     if original.len() > max_body_bytes {
         return None;
@@ -31,6 +51,9 @@ pub(super) fn run(
     input.extend_from_slice(&length);
     input.extend_from_slice(gateway);
     input.extend_from_slice(original);
+    if cancelled() {
+        return None;
+    }
     let mut child = OwnedTransform(
         command
             .stdin(Stdio::piped())
@@ -41,7 +64,16 @@ pub(super) fn run(
     );
     let stdin = child.0.stdin.take()?;
     let stdout = child.0.stdout.take()?;
-    exchange(child, stdin, stdout, &input, deadline, max_output_bytes).ok()
+    exchange(
+        child,
+        stdin,
+        stdout,
+        &input,
+        deadline,
+        max_output_bytes,
+        cancelled,
+    )
+    .ok()
 }
 
 fn nonblocking(pipe: &impl AsFd) -> io::Result<()> {
@@ -50,13 +82,14 @@ fn nonblocking(pipe: &impl AsFd) -> io::Result<()> {
     Ok(())
 }
 
-fn exchange(
+fn exchange<C: Fn() -> bool>(
     mut child: OwnedTransform,
     stdin: impl AsFd + Write,
     mut stdout: impl AsFd + Read,
     input: &[u8],
     deadline: Instant,
     max_output_bytes: usize,
+    cancelled: &C,
 ) -> io::Result<Vec<u8>> {
     nonblocking(&stdin)?;
     nonblocking(&stdout)?;
@@ -68,6 +101,9 @@ fn exchange(
     let mut exited = false;
 
     loop {
+        if cancelled() {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
         if Instant::now() >= deadline {
             return Err(io::ErrorKind::TimedOut.into());
         }
@@ -145,6 +181,10 @@ impl Drop for OwnedTransform {
 mod tests {
     use super::*;
     use rustix::process::{waitpid, Pid, WaitOptions};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
 
     const BUDGET: Duration = Duration::from_millis(150);
     const TEST_LIMIT: Duration = Duration::from_secs(2);
@@ -164,11 +204,23 @@ mod tests {
         );
     }
 
+    fn run_uncancelled(
+        command: &mut Command,
+        gateway: &[u8],
+        original: &[u8],
+        budget: Duration,
+        max_body_bytes: usize,
+    ) -> Option<Vec<u8>> {
+        run_controlled(command, gateway, original, budget, max_body_bytes, &|| {
+            false
+        })
+    }
+
     #[test]
     fn preserves_request_frame_and_drains_partial_reads_and_writes() {
         let gateway = b"https://gateway.example.invalid";
         let body = vec![b'x'; 1024 * 1024];
-        let result = run(
+        let result = run_uncancelled(
             &mut Command::new("/bin/cat"),
             gateway,
             &body,
@@ -183,7 +235,7 @@ mod tests {
 
     #[test]
     fn drains_output_while_helper_has_not_yet_read_input() {
-        let output = run(
+        let output = run_uncancelled(
             &mut shell("head -c 131072 /dev/zero; cat >/dev/null"),
             b"https://gateway.example.invalid",
             &vec![b'x'; 1024 * 1024],
@@ -200,8 +252,8 @@ mod tests {
         let marker = temporary.path().join("launched");
         let mut command = shell("touch \"$1\"");
         command.arg("fixture").arg(&marker);
-        assert!(run(&mut command, b"origin", &[0; 8], BUDGET, 7).is_none());
-        assert!(run(&mut command, &vec![0; 65536], b"body", BUDGET, 8).is_none());
+        assert!(run_uncancelled(&mut command, b"origin", &[0; 8], BUDGET, 7).is_none());
+        assert!(run_uncancelled(&mut command, &vec![0; 65536], b"body", BUDGET, 8).is_none());
         assert!(!marker.exists());
     }
 
@@ -236,6 +288,7 @@ mod tests {
             &vec![b'x'; 1024 * 1024],
             started + BUDGET,
             1024 * 1024,
+            &|| false,
         )
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
@@ -265,6 +318,7 @@ mod tests {
             &vec![b'x'; 1024 * 1024],
             started + BUDGET,
             1024 * 1024,
+            &|| false,
         )
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
@@ -273,9 +327,45 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_kills_and_reaps_helper_before_deadline() {
+        let mut child = OwnedTransform(
+            Command::new("/bin/sleep")
+                .arg("10")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let pid = child.0.id();
+        let stdin = child.0.stdin.take().unwrap();
+        let stdout = child.0.stdout.take().unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let setter = cancelled.clone();
+        let canceller = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            setter.store(true, Ordering::SeqCst);
+        });
+        let started = Instant::now();
+        let error = exchange(
+            child,
+            stdin,
+            stdout,
+            &vec![b'x'; 1024 * 1024],
+            started + Duration::from_secs(5),
+            1024 * 1024,
+            &|| cancelled.load(Ordering::SeqCst),
+        )
+        .unwrap_err();
+        canceller.join().unwrap();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert!(started.elapsed() < TEST_LIMIT);
+        assert_reaped(pid);
+    }
+
+    #[test]
     fn oversized_output_and_failed_exit_fail_without_waiting_for_deadline() {
         let started = Instant::now();
-        assert!(run(
+        assert!(run_uncancelled(
             Command::new("/usr/bin/head").args(["-c", "131072", "/dev/zero"]),
             b"origin",
             b"body",
@@ -283,7 +373,7 @@ mod tests {
             1024,
         )
         .is_none());
-        assert!(run(
+        assert!(run_uncancelled(
             &mut shell("cat >/dev/null; printf '\\001changed'; exit 37"),
             b"origin",
             b"body",
