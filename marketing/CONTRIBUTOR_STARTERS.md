@@ -1,9 +1,10 @@
 # Small ways to help Hormuz
 
 Start in [Discussions](https://github.com/Xpounder-com/hormuz/discussions/211)
-and check [CONTRIBUTING.md](../CONTRIBUTING.md). These are scoped starter ideas,
-not claims that someone is assigned or that a test already passed. Coordinate
-before opening a PR so work is not duplicated.
+and see the [first-contribution quickstart](../CONTRIBUTING.md#first-contribution-quickstart)
+for the POSIX source path.
+These are scoped starter ideas, not claims that someone is assigned or that a
+test already passed. Coordinate before opening a PR so work is not duplicated.
 
 | Starter | Acceptance criteria | Out of scope |
 | --- | --- | --- |

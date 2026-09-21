@@ -22,12 +22,45 @@ The verified source-development path is CPython 3.11 through 3.14 on the
 GitHub-hosted Ubuntu runner. Other environments may work, but are not release
 gates for the first alpha.
 
-From a clean checkout on a POSIX shell:
+### First contribution quickstart
+
+This is source development on current `main`. The [README quickstart](README.md#quickstart)
+installs a published release tag for users instead. Fork Hormuz on GitHub if
+you need your own remote for a PR, or clone upstream as shown; use your fork URL
+in the clone command if you made one. From an empty parent directory on a POSIX
+shell, choose a branch name for your change:
 
 ```bash
+git clone --branch main --depth 1 https://github.com/Xpounder-com/hormuz.git
+cd hormuz
+git switch -c docs/my-first-change
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --editable .
+python -m hormuz demo
+```
+
+Cloning and installing Python dependencies may use the network. The demo uses
+disposable local loopback simulators; it needs no provider key or external
+model service. A successful run shows allow, reroute, redact, and deny behavior,
+validates content-free evidence, reports zero external provider calls, and
+removes its temporary evidence. It does not verify a live provider.
+
+Run one focused module from the repository root before the full suite:
+
+| Command | Purpose |
+| --- | --- |
+| `python -m unittest -v tests.test_demo` | Checks the demo's output, provider-free path, and cleanup. |
+| `python -m unittest -v tests.test_public_community_paths` | Checks the public contribution and support paths. |
+| `python -m unittest -v tests.test_outcome_contract` | Checks the versioned, content-free outcome contract. |
+
+Choose an [open good first issue](https://github.com/Xpounder-com/hormuz/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22), an [open help wanted issue](https://github.com/Xpounder-com/hormuz/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22), or a [small starter idea](marketing/CONTRIBUTOR_STARTERS.md).
+
+### Broader development checks
+
+After the quickstart, run the existing broader checks for your change:
+
+```bash
 python -m hormuz --help
 python tools/verify_secret_inventory.py
 python -m unittest -v
