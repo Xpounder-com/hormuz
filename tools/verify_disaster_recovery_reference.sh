@@ -70,6 +70,26 @@ download_and_verify() {
     || fail "download checksum mismatch"
 }
 
+download_github_release_and_verify() {
+  local repository=$1
+  local tag=$2
+  local asset=$3
+  local output=$4
+  local expected=$5
+  local attempt
+  for attempt in 1 2 3; do
+    rm -f -- "${output}"
+    if gh release download "${tag}" --repo "${repository}" \
+      --pattern "${asset}" --output "${output}"; then
+      printf '%s  %s\n' "${expected}" "${output}" | sha256sum --check --status \
+        || fail "download checksum mismatch"
+      return 0
+    fi
+    [[ "${attempt}" -lt 3 ]] || fail "GitHub release asset download failed"
+    sleep "${attempt}"
+  done
+}
+
 write_random_hex_secret() {
   local output=$1
   local value
@@ -755,7 +775,7 @@ done
 [[ "$(uname -s)" == "Linux" ]] || fail "the reference rehearsal requires Linux"
 [[ "$(uname -m)" == "x86_64" || "$(uname -m)" == "amd64" ]] \
   || fail "the reference rehearsal requires native AMD64"
-for command in base64 curl docker grep install openssl python3 sed sha256sum tar timeout; do
+for command in base64 curl docker gh grep install openssl python3 sed sha256sum tar timeout; do
   command -v "${command}" >/dev/null 2>&1 || fail "${command} is unavailable"
 done
 docker_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
@@ -777,8 +797,8 @@ mkdir --mode=0700 -- "${EVIDENCE_DIR}"
 export KUBECONFIG
 export PATH="${WORK_ROOT}/bin:${PATH}"
 
-download_and_verify \
-  "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64" \
+download_github_release_and_verify \
+  kubernetes-sigs/kind "${KIND_VERSION}" kind-linux-amd64 \
   "${WORK_ROOT}/bin/kind" "${KIND_SHA256}"
 download_and_verify \
   "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
