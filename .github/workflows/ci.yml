@@ -143,6 +143,8 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_values.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_finance_variance_reference.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_usage.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_rate_cards.py -v
@@ -175,6 +177,7 @@ jobs:
             tests.test_finance_collection_transition_plan tests.test_finance_collection_runtime_plan \
             tests.test_finance_collection_packaging tests.test_finance_collection_postgres_runtime_plan \
             tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
+            tests.test_finance_variance_reference \
             tests.test_portfolio_wire_contract
       - name: Verify the resolved license boundary for every declared extra
         run: |
@@ -395,6 +398,7 @@ jobs:
             tests.test_finance_collection_transition_plan tests.test_finance_collection_runtime_plan \
             tests.test_finance_collection_packaging tests.test_finance_collection_postgres_runtime_plan \
             tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
+            tests.test_finance_variance_reference \
             tests.test_portfolio_wire_contract
       - name: Prove PostgreSQL migration and repository compatibility
         env:
