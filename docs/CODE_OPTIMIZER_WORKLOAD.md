@@ -22,9 +22,13 @@ a local Hormuz checkout.
 
 The trusted benchmark parent generates fixtures, measures batched round-trip
 time, and hashes the returned outputs. A persistent child loads the exact
-`hormuz/compaction.py` source file, bypassing candidate package exports. It
-receives bounded requests over stdin and returns bounded responses over
-stdout. Its synthetic package path supports relative imports without adding
+`hormuz/compaction.py` and `hormuz/compaction_formats.py` source bytes,
+bypassing candidate package exports and bytecode caches. Both source files
+are read and compiled before either candidate module executes, so helper
+patches to source reads, compilation, or execution cannot replace the
+measured module's snapshotted code object. The child receives bounded
+requests over stdin and returns bounded responses over stdout. Its synthetic
+package path supports relative imports without adding
 the candidate root to Python's absolute import path, where forged bytecode
 could shadow a standard-library module. Candidate Python cannot patch the
 parent's clocks or hashes through shared modules. Before candidate import,

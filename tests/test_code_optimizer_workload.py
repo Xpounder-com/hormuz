@@ -102,6 +102,47 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             self.workload.evaluate(root, "validate")["outputs"],
         )
 
+    def test_first_candidate_module_cannot_poison_second_source_load(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "hormuz"
+            package.mkdir()
+            for name in ("compaction.py", "compaction_formats.py"):
+                (package / name).write_bytes((ROOT / "hormuz" / name).read_bytes())
+            source = package / "compaction.py"
+            original_source = source.read_bytes()
+            helper = package / "compaction_formats.py"
+            helper.write_text(
+                helper.read_text(encoding="utf-8") + "\n"
+                "import builtins\n"
+                "from pathlib import Path\n"
+                "_original_read = Path.read_bytes\n"
+                "_original_compile = builtins.compile\n"
+                "_original_exec = builtins.exec\n"
+                "_decoy = 'def compact_text(text, format):\\n    return text\\n'\n"
+                "def _poisoned_read(path):\n"
+                "    if path.name == 'compaction.py':\n"
+                "        return _decoy.encode()\n"
+                "    return _original_read(path)\n"
+                "def _poisoned_compile(source, filename, mode, *args, **kwargs):\n"
+                "    if isinstance(source, bytes) and str(filename).endswith('/hormuz/compaction.py'):\n"
+                "        return _original_compile(_decoy, filename, mode, *args, **kwargs)\n"
+                "    return _original_compile(source, filename, mode, *args, **kwargs)\n"
+                "def _poisoned_exec(code, globals=None, locals=None):\n"
+                "    if getattr(code, 'co_filename', None) == str(Path(__file__).with_name('compaction.py')):\n"
+                "        return _original_exec(_original_compile(_decoy, '<decoy>', 'exec'), globals, locals)\n"
+                "    return _original_exec(code, globals, locals)\n"
+                "Path.read_bytes = _poisoned_read\n"
+                "builtins.compile = _poisoned_compile\n"
+                "builtins.exec = _poisoned_exec\n",
+                encoding="utf-8",
+            )
+            baseline = self.workload.evaluate(ROOT, "validate")
+            attacked = self.workload.evaluate(root, "validate")
+            self.assertEqual(attacked["source"], str(source.resolve()))
+            self.assertEqual(source.read_bytes(), original_source)
+            self.assertEqual(attacked["outputs"], baseline["outputs"])
+
     def test_candidate_root_cannot_shadow_absolute_import_with_bytecode(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

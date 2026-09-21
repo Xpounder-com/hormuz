@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from types import ModuleType
+from types import CodeType, ModuleType
 
 
 _IMPORT_SEQUENCE = itertools.count()
@@ -132,8 +132,8 @@ def timed_variant(name: str, value: str, ordinal: int, seed: bytes | None = None
     raise ValueError("unsupported_timed_case")
 
 
-def _load_exact_source(root: Path, package_name: str, name: str) -> ModuleType:
-    """Compile source bytes directly; importlib's loader may trust a forged pyc."""
+def _prepare_exact_source(root: Path, package_name: str, name: str) -> tuple[ModuleType, CodeType]:
+    """Snapshot source before candidate code can change the loader or a pyc."""
     source = root / "hormuz" / f"{name}.py"
     if source.is_symlink() or not source.is_file():
         raise RuntimeError("benchmark_source_not_regular_file")
@@ -144,23 +144,29 @@ def _load_exact_source(root: Path, package_name: str, name: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise RuntimeError("benchmark_source_unloadable")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    exec(compile(expected.read_bytes(), str(expected), "exec", dont_inherit=True), module.__dict__)
-    loaded_file = getattr(module, "__file__", None)
-    if not isinstance(loaded_file, str) or Path(loaded_file).resolve(strict=True) != expected:
+    if getattr(module, "__file__", None) != str(expected):
         raise RuntimeError("benchmark_imported_wrong_source")
-    return module
+    code = compile(expected.read_bytes(), str(expected), "exec", dont_inherit=True)
+    return module, code
 
 
 def load_compaction(root: Path) -> ModuleType:
     """Load the exact compaction sources without candidate package exports."""
+    trusted_exec = exec
     package_name = f"_hormuz_optimizer_target_{next(_IMPORT_SEQUENCE)}"
     package = ModuleType(package_name)
     package.__path__ = [str(root / "hormuz")]
     package.__package__ = package_name
+    # Prepare both code objects before executing either candidate-controlled
+    # module. Otherwise the first can poison the second source read/compile.
+    formats, formats_code = _prepare_exact_source(root, package_name, "compaction_formats")
+    compaction, compaction_code = _prepare_exact_source(root, package_name, "compaction")
     sys.modules[package_name] = package
-    _load_exact_source(root, package_name, "compaction_formats")
-    return _load_exact_source(root, package_name, "compaction")
+    sys.modules[formats.__name__] = formats
+    trusted_exec(formats_code, formats.__dict__)
+    sys.modules[compaction.__name__] = compaction
+    trusted_exec(compaction_code, compaction.__dict__)
+    return compaction
 
 
 def _child_main(root: Path) -> int:
