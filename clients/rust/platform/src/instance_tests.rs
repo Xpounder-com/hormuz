@@ -149,9 +149,9 @@ fn instance_sentinel_rejects_nonempty_files_hardlinks_and_directories() {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
-fn mac_removed_directory_exhausts_creation_recovery_without_claiming_or_recreating() {
+fn unix_removed_directory_exhausts_creation_recovery_without_claiming_or_recreating() {
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("private");
     let directory = PrivateDirectory::open(&path).unwrap();
@@ -225,9 +225,9 @@ fn mac_instance_rejects_symlinks_public_modes_and_extended_acls() {
     ));
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
-fn mac_changed_sentinel_is_rejected_after_acquisition_without_deleting_either_file() {
+fn unix_changed_sentinel_is_rejected_after_acquisition_without_deleting_either_file() {
     use std::os::unix::fs::OpenOptionsExt;
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("private");
@@ -263,7 +263,7 @@ fn windows_instance_handle_prevents_sentinel_replacement() {
     directory.try_claim_instance().unwrap();
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn dropping_owner_releases_lease_even_while_a_fork_inherits_the_descriptor() {
     let temporary = tempfile::tempdir().unwrap();

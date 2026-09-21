@@ -388,7 +388,7 @@ fn drop_attempts_cleanup_then_uses_the_adapters_non_detaching_fallback() {
     // requires the native shell's process group/job object acceptance.
 }
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 #[test]
 fn owner_holds_instance_lease_until_cleanup_and_allows_session_refresh() {
     let temporary = tempfile::tempdir().unwrap();

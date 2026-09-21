@@ -687,7 +687,7 @@ fn changed_profile_cannot_redirect_access_and_lock_wait_is_bounded_cancelable() 
     h.done();
 }
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 #[test]
 fn native_coordinator_serializes_concurrent_refresh_and_reuses_committed_record() {
     let temporary = tempfile::tempdir().unwrap();

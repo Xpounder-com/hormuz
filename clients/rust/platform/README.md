@@ -50,6 +50,13 @@ unsafe existing object. All cooperating app/helper processes must use the same
 directory and the fixed `connection.lock`; choosing a different root is not an
 independent session store. Do not put credentials in this directory.
 
+On Linux, opening the root resolves that shell-supplied absolute path for the
+final `mkdir`/`open`, then retains and validates the resulting directory
+descriptor. Secure ancestor traversal, parent ownership/path selection and
+crash durability of the new parent entry are not provided by this adapter; the
+shell must supply the already-existing parent and those acceptance items remain
+open. Only child file and lock operations are descriptor-relative.
+
 `RefreshCoordinator` exposes nonblocking acquisition. `PrivateTransaction` owns
 the kernel lock until dropped, including across awaits. `Busy` leaves retry and
 deadline policy with the scheduler; the platform layer never blocks the UI in a
@@ -60,6 +67,11 @@ The `PrivateFiles` interface is available only through the retained transaction.
   and rejects extended ACL entries. Files are opened relative to the retained
   directory descriptor with no symlink following. Regular files must have one
   hard link. No existing permissions are silently broadened or repaired.
+- Linux creates the directory as 0700 and files as 0600, rejects root or a
+  real/effective/saved UID mismatch, and requires that exact UID and mode on
+  every retained descriptor. It fails closed when access ACLs, directory
+  default ACLs or ACL inspection are present/unavailable. Relative opens use
+  `openat` with no symlink following; regular files require one hard link.
 - Windows creates objects with an explicit current-user owner and a protected
   DACL granting only that user full access. Every opened handle is checked using
   `GetSecurityInfo`; inherited/public/null/other-user ACLs fail. The adapter
@@ -76,6 +88,11 @@ The `PrivateFiles` interface is available only through the retained transaction.
   preserves both files instead of deleting the displaced data. All normal
   writers must cooperate with the connection lock; this is not isolation from a
   malicious process running as the same user or an administrator.
+- Linux uses `renameat2` with `RENAME_NOREPLACE` for creation and
+  `RENAME_EXCHANGE` for replacement. Rollback binds both exchanged names to
+  their captured inode identities and bytes before and after the exchange. The
+  committed/restored target is validated and its directory synced before the
+  known staging copy is removed and the directory is synced again.
 - Windows replacement preserves the destination's DACL. If a raced ACL change
   makes it unsafe, recovery compares the installed file with the staging file's
   native identity and bounded bytes before rollback; public reads still reject
@@ -87,6 +104,15 @@ The `PrivateFiles` interface is available only through the retained transaction.
   delete arbitrary abandoned files. A write failure after the native commit
   can have an uncertain durability outcome: re-read before retrying. Power-loss,
   network-filesystem and every disk-failure combination are not qualified here.
+
+Linux staging cleanup verifies the pathname's inode and bytes before `unlinkat`,
+but Linux does not provide an unlink-by-inode operation. A malicious process
+with the same UID can still exchange that name between the check and removal,
+just as it can edit any private file. Ambiguous names are otherwise preserved.
+Linux support requires a local filesystem and kernel that implement descriptor xattrs,
+`flock`, directory `fsync`, and both required `renameat2` flags; unsupported or
+ambiguous behavior fails closed. Network, FUSE, overlay, unusual ACL/xattr
+implementations and power-loss behavior have not been qualified.
 
 All native APIs are synchronous worker operations. Errors are fixed variants
 and fixed display messages; they contain no paths, SIDs, OS diagnostics or data.
@@ -101,9 +127,10 @@ native event delivery remain work for the owning shell issues.
 lock on the fixed private `instance.lock`. `ApplicationInstance` retains that
 lock and the directory until dropped. The sentinel must be an empty regular
 file with the same owner, mode/ACL, no-follow and single-hard-link checks as
-private configuration. Mac also checks that the opened and current sentinel
-identities match after acquisition; Windows denies deletion/replacement while
-its handle is open. Unsafe or nonempty sentinels fail without repair or removal.
+private configuration. Mac and Linux also check that the opened and current
+sentinel identities match after acquisition; Windows denies deletion/replacement
+while its handle is open. Unsafe or nonempty sentinels fail without repair or
+removal.
 If Mac's concurrent first creation returns `ENOENT`, acquisition makes one
 attempt to open the existing winner's sentinel and still takes the kernel lock;
 an absent sentinel remains `Unavailable`. Other unsafe failures are not retried.
@@ -114,8 +141,9 @@ Every manual, login-start and reopen path must choose the same shell-provided
 application-data root. A second process receives `Busy` and must use the native
 shell's activation/reopen path without creating a helper owner. The long-lived
 application lock is independent of `connection.lock`: app/helper refresh
-transactions remain available while the application is resident. Linux still
-returns `Unsupported`; no ordinary-file fallback is introduced.
+transactions remain available while the application is resident. The Linux
+storage/lock adapter does not choose an XDG root or provide activation, GTK,
+relay execution or helper supervision; those remain shell integration work.
 
 `lifecycle::HelperLifecycle` owns an application guard and at most one
 `ProcessSupervisor::Child`. `tick` runs on a bounded worker; the shell supplies
@@ -208,10 +236,14 @@ Native filesystem tests verify atomic snapshots, staged-write failure, real
 permission/ACL rejection, unsafe paths/hard links, concurrent updates, a second
 process denied by the held lock, and abrupt process exit before commit followed
 by recovery. The crash worker intentionally exits without running destructors.
-Synthetic marker/debug checks protect diagnostics. Linux tests explicitly
-verify `Unsupported` without creating an ordinary-file fallback; Linux storage
-acceptance remains in #343. Windows type-checking on a Mac is supplementary and
-never substitutes for native Windows execution.
+Synthetic marker/debug checks protect diagnostics. Linux tests exercise exact
+mode and POSIX access/default ACL rejection, symlink/hard-link rejection,
+post-lock sentinel identity, bounded staging collisions, atomic exchange and
+rollback identity/byte checks, process contention/crash recovery, and both
+directions of inherited lock-descriptor release. This is source and native test
+evidence only: a clean Ubuntu desktop, target filesystem matrix, XDG placement
+and real shell lifecycle acceptance remain in #343. Windows type-checking on a
+Mac is supplementary and never substitutes for native Windows execution.
 
 Application tests race competing startups, deny a second process while permitting
 refresh, and recover after a child exits without destructors. Negative tests
@@ -223,9 +255,9 @@ exhausted crash recovery and independent sleep/lock gates. Native Windows and
 Linux runtime results come from their own CI runners; the local Mac suite is
 not a substitute.
 
-On macOS, application and refresh guards explicitly unlock before closing. This
-prevents an unrelated concurrent fork from temporarily retaining a released
-lease through an inherited open file description. The fork regression keeps a
-child alive across both guard drops, verifies reacquisition and reaps that child.
-Crash recovery still depends on kernel ownership; no sentinel is deleted and no
-live lease is stolen.
+On macOS and Linux, application and refresh guards explicitly unlock in the
+process that created the guard before closing. This prevents an unrelated
+concurrent fork from temporarily retaining a released lease through an inherited
+open file description while preventing a child destructor from unlocking its
+parent's live lease. The regressions cover both directions. Crash recovery still
+depends on kernel ownership; no sentinel is deleted and no live lease is stolen.

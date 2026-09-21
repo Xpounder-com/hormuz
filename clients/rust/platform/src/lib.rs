@@ -161,5 +161,5 @@ impl RefreshCoordinator for PrivateDirectory {
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, any(target_os = "macos", windows)))]
+#[cfg(all(test, any(target_os = "macos", target_os = "linux", windows)))]
 mod instance_tests;
