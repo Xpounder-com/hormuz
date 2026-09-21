@@ -59,7 +59,8 @@ process-group enumeration is treated as equivalent containment.
 The Linux-only synthetic test runs normal-exit, explicit-stop and abrupt
 launcher-death cases with a detached listener when a real user systemd manager
 is reachable. It checks the new session, cgroup membership, listener closure,
-and empty/removed cgroup. On CI without that manager it reports a host-only
+and empty/removed cgroup while passing spoofed bus variables to the wrapper
+and launcher. On CI without that manager it reports a host-only
 skip; ordinary Rust tests still check the fail-closed property parser. Run
 `cargo test -p hormuz-client-relay --locked linux_service` on an Ubuntu 24.04
 user session for host evidence. The executable still exits

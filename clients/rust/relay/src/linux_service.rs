@@ -81,13 +81,26 @@ fn canonical_user_bus() -> io::Result<(PathBuf, PathBuf)> {
     Ok((directory, bus))
 }
 
-fn show_unit(unit: &str) -> io::Result<String> {
+fn systemctl_command() -> io::Result<Command> {
     // This is a root-owned program path, never a command resolved from an
-    // untrusted PATH. Captured output and time are bounded before any client
-    // version probe or relay listener starts.
+    // untrusted PATH. Only the canonical per-UID bus is used.
     let (runtime, bus) = canonical_user_bus()?;
-    let mut stdout = tempfile::tempfile()?;
     let mut command = Command::new("/usr/bin/systemctl");
+    command
+        .env_clear()
+        .env("XDG_RUNTIME_DIR", runtime)
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={}", bus.display()),
+        );
+    Ok(command)
+}
+
+fn show_unit(unit: &str) -> io::Result<String> {
+    // Captured output and time are bounded before any client version probe
+    // or relay listener starts.
+    let mut stdout = tempfile::tempfile()?;
+    let mut command = systemctl_command()?;
     command
         .args([
             "--user",
@@ -96,12 +109,6 @@ fn show_unit(unit: &str) -> io::Result<String> {
             unit,
             "--property=ControlGroup,MainPID,ExitType,KillMode,KillSignal,Transient,ActiveState",
         ])
-        .env_clear()
-        .env("XDG_RUNTIME_DIR", runtime)
-        .env(
-            "DBUS_SESSION_BUS_ADDRESS",
-            format!("unix:path={}", bus.display()),
-        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout.try_clone()?))
         .stderr(Stdio::null());
@@ -319,11 +326,13 @@ mod host_tests {
     }
     impl Drop for UnitGuard {
         fn drop(&mut self) {
-            let _ = Command::new("/usr/bin/systemctl")
-                .args(["--user", "stop", &self.unit])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            if let Ok(mut command) = systemctl_command() {
+                let _ = command
+                    .args(["--user", "stop", &self.unit])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+            }
             let _ = self.wrapper.kill();
             let _ = self.wrapper.wait();
         }
@@ -363,15 +372,20 @@ mod host_tests {
         let unit = format!("hormuz-relay-{token}.service");
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("run-in-user-service.sh");
         let log = fs::File::create(root.join("service.log")).unwrap();
+        let spoofed_bus = format!("unix:path={}", root.join("spoofed-bus").display());
         let mut command = Command::new(script);
         command
             .arg(token)
             .arg("/usr/bin/env")
+            .arg(format!("DBUS_SESSION_BUS_ADDRESS={spoofed_bus}"))
+            .arg(format!("XDG_RUNTIME_DIR={}", root.display()))
             .arg(format!("{STAGE}=launcher"))
             .arg(format!("{ROOT}={}", root.display()))
             .arg(format!("{MODE}={mode}"))
             .arg(std::env::current_exe().unwrap())
             .args(["--exact", TEST_NAME, "--nocapture"])
+            .env("DBUS_SESSION_BUS_ADDRESS", spoofed_bus.as_str())
+            .env("XDG_RUNTIME_DIR", root)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::from(log));
@@ -408,7 +422,8 @@ mod host_tests {
         match mode {
             "normal" => fs::write(root.join("release"), b"").unwrap(),
             "cancel" => {
-                let status = Command::new("/usr/bin/systemctl")
+                let status = systemctl_command()
+                    .unwrap()
                     .args(["--user", "stop", &unit])
                     .status()
                     .unwrap();
@@ -459,16 +474,18 @@ mod host_tests {
         }
         if !Path::new("/usr/bin/systemd-run").is_file()
             || !Path::new("/usr/bin/setsid").is_file()
-            || std::env::var_os("XDG_RUNTIME_DIR").is_none()
+            || canonical_user_bus().is_err()
         {
             eprintln!("host-only cgroup test skipped: a real Linux user manager is unavailable");
             return;
         }
-        let manager = Command::new("/usr/bin/systemctl")
-            .args(["--user", "show-environment"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        let manager = systemctl_command().and_then(|mut command| {
+            command
+                .args(["--user", "show-environment"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        });
         if !manager.is_ok_and(|status| status.success()) {
             eprintln!("host-only cgroup test skipped: no reachable systemd user manager");
             return;
