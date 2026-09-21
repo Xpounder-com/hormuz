@@ -17,6 +17,7 @@ from hormuz import compaction
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKLOAD = ROOT / "benchmarks/code_optimizer/compaction.py"
+SOURCE = ROOT / "hormuz/compaction.py"
 
 
 class CodeOptimizerWorkloadTests(unittest.TestCase):
@@ -161,6 +162,18 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         local_module = workload.load_local_compaction()
         self.assertEqual(Path(local_module.__file__).resolve(), ROOT / "hormuz/compaction.py")
 
+    def test_report_keeps_validated_source_when_module_changes_file(self) -> None:
+        module, validated_source = self.workload._load_local_compaction()
+        self.assertEqual(validated_source, str(SOURCE))
+        self.assertIsInstance(validated_source, str)
+        module.__file__ = "synthetic-decoy.py"
+        with patch.object(
+            self.workload, "_load_local_compaction", return_value=(module, validated_source),
+        ):
+            self.assertEqual(self.workload.evaluate(ROOT, "validate")["source"], validated_source)
+            del module.__file__
+            self.assertEqual(self.workload.evaluate(ROOT, "validate")["source"], validated_source)
+
     def test_mixed_runs_and_framed_search_are_effective_heldout_cases(self) -> None:
         for name in ("lines_mixed", "search_framed"):
             with self.subTest(name=name):
@@ -177,7 +190,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             return text if len(set(text.splitlines())) > 1 else original_lines(text)
 
         with patch.object(module, "_compact_line_runs", side_effect=disabled_mixed_lines):
-            with patch.object(self.workload, "load_local_compaction", return_value=module):
+            with patch.object(self.workload, "_load_local_compaction", return_value=(module, str(SOURCE))):
                 disabled = self.workload.evaluate(ROOT, "heldout")
         self.assertNotEqual(baseline["outputs"]["lines_mixed"], disabled["outputs"]["lines_mixed"])
 
@@ -188,7 +201,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             return text if format == "search_lines" else original_framed(text, format=format)
 
         with patch.object(module, "_compact_framed_lines", side_effect=disabled_search):
-            with patch.object(self.workload, "load_local_compaction", return_value=module):
+            with patch.object(self.workload, "_load_local_compaction", return_value=(module, str(SOURCE))):
                 disabled = self.workload.evaluate(ROOT, "heldout")
         self.assertNotEqual(baseline["outputs"]["search_framed"], disabled["outputs"]["search_framed"])
 
@@ -202,7 +215,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
         baseline = self.workload.evaluate(ROOT, "heldout")
         module = self.workload.load_local_compaction()
         with patch.object(module, "_compact_json_table", side_effect=lambda text: text):
-            with patch.object(self.workload, "load_local_compaction", return_value=module):
+            with patch.object(self.workload, "_load_local_compaction", return_value=(module, str(SOURCE))):
                 disabled = self.workload.evaluate(ROOT, "heldout")
         self.assertEqual(baseline["fixture_sha256"], disabled["fixture_sha256"])
         self.assertNotEqual(baseline["outputs"]["json_table"], disabled["outputs"]["json_table"])
@@ -245,7 +258,7 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             return original(text, format_name)
 
         with patch.object(module, "compact_text", side_effect=mutate_one_timed_path):
-            with patch.object(self.workload, "load_local_compaction", return_value=module):
+            with patch.object(self.workload, "_load_local_compaction", return_value=(module, str(SOURCE))):
                 mutated = self.workload.evaluate(ROOT, "benchmark")
         self.assertEqual(
             benchmark["outputs"]["paths_typical"]["sha256"],
@@ -293,6 +306,12 @@ class CodeOptimizerWorkloadTests(unittest.TestCase):
             len(report["outputs"][name]["timed_sha256"]) == 64
             for name in report["samples_ns"]
         ))
+
+    def test_rss_units_are_explicit_by_platform(self) -> None:
+        self.assertEqual(self.workload._rss_to_bytes(7, "darwin"), 7)
+        self.assertEqual(self.workload._rss_to_bytes(7, "linux"), 7 * 1024)
+        self.assertEqual(self.workload._rss_to_bytes(7, "freebsd15"), 7 * 1024)
+        self.assertIsNone(self.workload._rss_to_bytes(7, "openbsd7"))
 
     def test_seed_stdin_contract_and_all_four_local_actions(self) -> None:
         seed = "ab" * 32

@@ -152,7 +152,7 @@ def _checked_local_root(root: Path) -> Path:
     return resolved
 
 
-def _prepare_local_source(package_name: str, name: str) -> tuple[ModuleType, CodeType]:
+def _prepare_local_source(package_name: str, name: str) -> tuple[ModuleType, CodeType, str]:
     """Compile the checkout's exact source bytes, ignoring package exports and pyc."""
     root = _own_root()
     source = root / "hormuz" / f"{name}.py"
@@ -168,31 +168,37 @@ def _prepare_local_source(package_name: str, name: str) -> tuple[ModuleType, Cod
         raise RuntimeError("benchmark_source_alias")
     if not expected.is_relative_to(root):
         raise RuntimeError("benchmark_source_outside_root")
+    source_name = str(expected)
     spec = importlib.util.spec_from_file_location(f"{package_name}.{name}", expected)
     if spec is None or spec.loader is None:
         raise RuntimeError("benchmark_source_unloadable")
     module = importlib.util.module_from_spec(spec)
-    if getattr(module, "__file__", None) != str(expected):
+    if getattr(module, "__file__", None) != source_name:
         raise RuntimeError("benchmark_imported_wrong_source")
-    code = compile(expected.read_bytes(), str(expected), "exec", dont_inherit=True)
-    return module, code
+    code = compile(expected.read_bytes(), source_name, "exec", dont_inherit=True)
+    return module, code, source_name
 
 
-def load_local_compaction() -> ModuleType:
-    """Load only the implementation adjacent to this reference workload."""
+def _load_local_compaction() -> tuple[ModuleType, str]:
+    """Load the adjacent implementation and retain its pre-execution source path."""
     trusted_exec = exec
     package_name = f"_hormuz_optimizer_local_{next(_IMPORT_SEQUENCE)}"
     package = ModuleType(package_name)
     package.__path__ = [str(_own_root() / "hormuz")]
     package.__package__ = package_name
-    formats, formats_code = _prepare_local_source(package_name, "compaction_formats")
-    compaction, compaction_code = _prepare_local_source(package_name, "compaction")
+    formats, formats_code, _ = _prepare_local_source(package_name, "compaction_formats")
+    compaction, compaction_code, source = _prepare_local_source(package_name, "compaction")
     sys.modules[package_name] = package
     sys.modules[formats.__name__] = formats
     trusted_exec(formats_code, formats.__dict__)
     sys.modules[compaction.__name__] = compaction
     trusted_exec(compaction_code, compaction.__dict__)
-    return compaction
+    return compaction, source
+
+
+def load_local_compaction() -> ModuleType:
+    """Load only the implementation adjacent to this reference workload."""
+    return _load_local_compaction()[0]
 
 
 def _local_call(compaction: ModuleType, items: list[tuple[str, str]]) -> list[str]:
@@ -212,6 +218,14 @@ def _local_hotspots(profiler: cProfile.Profile, root: Path) -> list[dict[str, ob
     return hot[:12]
 
 
+def _rss_to_bytes(value: int, platform: str) -> int | None:
+    if platform == "darwin":
+        return value
+    if platform.startswith(("linux", "freebsd")):
+        return value * 1024
+    return None
+
+
 def evaluate(root: Path, action: str, *, seed: bytes | None = None) -> dict[str, object]:
     """Exercise only the checkout containing this script with synthetic inputs."""
     root = _checked_local_root(root)
@@ -219,8 +233,7 @@ def evaluate(root: Path, action: str, *, seed: bytes | None = None) -> dict[str,
         raise ValueError("benchmark_invalid_seed")
     if action not in {"validate", "heldout", "profile", "benchmark"}:
         raise ValueError("unknown_benchmark_action")
-    compaction = load_local_compaction()
-    source = Path(compaction.__file__)
+    compaction, source = _load_local_compaction()
     selected = heldout_cases() if action == "heldout" else cases()
     fixture_sha256 = hashlib.sha256(json.dumps(selected, sort_keys=True).encode("utf-8")).hexdigest()
     outputs: dict[str, dict[str, object]] = {}
@@ -229,7 +242,7 @@ def evaluate(root: Path, action: str, *, seed: bytes | None = None) -> dict[str,
         encoded = result.encode("utf-8")
         outputs[name] = {"sha256": hashlib.sha256(encoded).hexdigest(), "bytes": len(encoded)}
     report: dict[str, object] = {
-        "source": str(source), "fixture_sha256": fixture_sha256,
+        "source": source, "fixture_sha256": fixture_sha256,
         "python_version": sys.version.split()[0], "outputs": outputs,
     }
     if action in {"validate", "heldout"}:
@@ -278,7 +291,7 @@ def evaluate(root: Path, action: str, *, seed: bytes | None = None) -> dict[str,
         report["peak_rss_bytes"] = None
     else:
         peak_rss = _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss
-        report["peak_rss_bytes"] = peak_rss * (1024 if sys.platform.startswith("linux") else 1)
+        report["peak_rss_bytes"] = _rss_to_bytes(peak_rss, sys.platform)
     return report
 
 

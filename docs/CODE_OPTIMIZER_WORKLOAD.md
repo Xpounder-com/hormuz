@@ -49,10 +49,12 @@ execute candidates.
 
 The public `benchmark` action times direct local `compact_text` calls after
 inputs are prepared, excluding fixture generation and output hashing.
-Its RSS is the local process's RSS, or `null` when the platform does not
-provide the Python `resource` module. These local samples confirm finite,
-well-formed helper measurements; they are not directly comparable to the
-private Worker's sandboxed IPC measurements or an acceptance threshold.
+Its peak RSS is the local process's `ru_maxrss`: bytes on macOS, and KiB
+converted to bytes on Linux and FreeBSD. It is `null` when Python has no
+`resource` module or the platform's units are unknown. These local samples
+confirm finite, well-formed helper measurements; they are not directly
+comparable to the private Worker's sandboxed IPC measurements or an
+acceptance threshold.
 Profile hotspots are advisory. The private app owns its measurement boundary
 and must prove that real synthetic gains cross its unchanged >5% and 4×MAD
 rule while regressions are rejected.
