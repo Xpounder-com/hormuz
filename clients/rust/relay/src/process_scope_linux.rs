@@ -155,7 +155,10 @@ mod tests {
         let (address, child_pid, group) =
             wait_for_ready(&ready, Instant::now() + Duration::from_secs(5))
                 .expect("synthetic client did not open its listener");
-        assert_eq!(group, child_pid, "fixture did not enter its own process group");
+        assert_eq!(
+            group, child_pid,
+            "fixture did not enter its own process group"
+        );
         assert!(TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok());
         supervisor.0.kill().unwrap();
         supervisor.0.wait().unwrap();
