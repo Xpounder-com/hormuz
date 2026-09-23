@@ -62,7 +62,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.config = registry_config(self.root)
         self.path = self.config.database_path
-        self.assertEqual(UsageStore.schema_version, 12)
+        self.assertEqual(UsageStore.schema_version, 13)
         seeded = registry_predecessor_call({"backend": "sqlite", "path": str(self.path), "mode": "seed"})
         self.assertEqual(seeded["status"], "ready")
         self.writes, self.page = seeded["writes"], seeded["page"]

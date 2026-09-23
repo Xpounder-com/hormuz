@@ -39,6 +39,14 @@ class PostgresFinanceCollectionRuntimeTransitionTests(PostgresTestCase):
     bind = collection.FinanceCollectionSQLiteRepositoryTests.bind
 
     def setUp(self):
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 18)
+        version_patch = mock.patch.object(
+            postgres_module,
+            "POSTGRES_SCHEMA_VERSION",
+            17,
+        )
+        version_patch.start()
+        self.addCleanup(version_patch.stop)
         self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 17)
         self._drop_schema(self.schema)
         self.seeded = seed_postgres_collection_predecessor(

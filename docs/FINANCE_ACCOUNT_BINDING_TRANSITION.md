@@ -6,6 +6,13 @@ in the gateway. The source baseline is protected main
 `16fe3640abd9935d9d16d8ccc80af236b546dbfd`; its 161 runtime files are identical to
 published v1.2.0 commit `d854a5a453fcbe20cb3f4c1e261e146f2da93855`.
 
+This document remains the immutable v8 preflight record. The later reviewed
+successor combines account binding with privileged-read audit in
+[`FINANCE_SUCCESSOR_SCHEMA_PROPOSAL.md`](FINANCE_SUCCESSOR_SCHEMA_PROPOSAL.md).
+That implementation uses three tables and exactly six PostgreSQL privileges at
+SQLite schema 13 / PostgreSQL schema 18. The two-table/four-privilege 203/204
+measurements below are historical and are not the implemented ACL boundary.
+
 The [owner-approved boundary](https://github.com/Xpounder-com/hormuz/issues/8#issuecomment-5562564894)
 and frozen `finance-account-binding-contract-v1.json` remain unchanged. That
 contract's v1.1.0 target and earlier baseline are historical provenance. The
@@ -263,3 +270,22 @@ artifacts it reports zero verified runtime files. The default verifier still
 rejects any current-runtime mismatch; the isolated predecessor driver still
 requires the exact published source and installed wheel. No implementation,
 transition, reconciliation, deployment or acceptance gate is changed.
+
+## Reviewed successor implementation
+
+The approved source implementation adds
+`portfolio_finance_account_binding_versions`,
+`gateway_finance_attempt_account_bindings`, and
+`portfolio_finance_query_audit_events`. The PostgreSQL runtime role receives
+only `SELECT` and `INSERT` on each table. Two independent clean managed-role
+bootstraps measured the accepted 205-entry ACL digest
+`56dd1434aaf078fdcdb5ed38059ed9c0f4a57f82310dc4fdfa18dff650628e9f`;
+an injected `DELETE` privilege produced the separately pinned, rejected
+206-entry digest
+`5946c0c2303c3c824223a6558e6547dce0c5f282d10f45852d0356bbc3cc74ef`.
+
+Schema 13/18 also extends the finite audit-source union for all three tables,
+implements account registration and pre-egress bound/explicit-unbound attempt
+capture, and retains the old-binary refusal and forward-recovery rules above.
+This source implementation does not itself prove a release, a persistent
+migration, live provider authority, report delivery, or reconciliation.

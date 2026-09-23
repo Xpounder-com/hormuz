@@ -21,6 +21,7 @@ from .finance_attempts import (
     ConfiguredRouteEstimate,
     NativeUsageObservation,
 )
+from .finance_account_binding import FinanceAccountCandidate, UnavailableFinance
 from .postgres import PostgresConnectionPool, PostgresStorageError
 from .postgres_usage_store import PostgresUsageStore
 from .provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
@@ -87,6 +88,7 @@ class _ProviderReliabilityBegin(Protocol):
         work_budget: WorkBudgetContext | None,
         provider_failover: ProviderFailoverContext | None,
         configured_rate_card: ConfiguredRateCardBinding | None = None,
+        finance_account: FinanceAccountCandidate | UnavailableFinance | None = None,
     ) -> RequestAttempt: ...
 
 
@@ -205,6 +207,7 @@ class ProviderReliabilityAdapter:
         work_budget: WorkBudgetContext | None,
         provider_failover: ProviderFailoverContext | None,
         configured_rate_card: ConfiguredRateCardBinding | None = None,
+        finance_account: FinanceAccountCandidate | UnavailableFinance | None = None,
     ) -> RequestAttempt:
         return self._begin(
             identity=identity,
@@ -224,6 +227,7 @@ class ProviderReliabilityAdapter:
             work_budget=work_budget,
             provider_failover=provider_failover,
             configured_rate_card=configured_rate_card,
+            finance_account=finance_account,
         )
 
     def finalize_request_attempt(

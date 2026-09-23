@@ -150,7 +150,7 @@ def verify_finance_collection_runtime(
         validate_finance_sources(source_contract)
         native = verify_finance_native_attempt_transition_plan(
             root, allow_successor_schema=True,
-            successor_postgres_schema=17 if allow_successor_schema else 16,
+            successor_postgres_schema=18 if allow_successor_schema else 16,
         )
     except FinanceCollectionRuntimeError:
         raise
@@ -167,8 +167,17 @@ def verify_finance_collection_runtime(
             _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
         )
 
-        expected_current = (12, 17) if allow_successor_schema else (12, 16)
-        if (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != expected_current:
+        if allow_successor_schema:
+            current_is_supported_successor = (
+                (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
+                in {(12, 17), (13, 18)}
+            )
+        else:
+            current_is_supported_successor = (
+                SQLITE_SCHEMA_VERSION,
+                POSTGRES_SCHEMA_VERSION,
+            ) == (12, 16)
+        if not current_is_supported_successor:
             _fail("finance_collection_runtime_schema_version_invalid")
         if POSTGRES_FINANCE_COLLECTION_RUNTIME_ACCEPTED is not False:
             _fail("finance_collection_postgres_runtime_gate_changed")
@@ -244,8 +253,8 @@ def verify_finance_collection_runtime(
         "target_release": "1.1.0",
         "feature_issue": 8,
         "gate_issue": 214,
-        "current_sqlite_schema_version": 12,
-        "current_postgresql_schema_version": 16,
+        "current_sqlite_schema_version": SQLITE_SCHEMA_VERSION,
+        "current_postgresql_schema_version": POSTGRES_SCHEMA_VERSION,
         "collection_profile_count": 4,
         "collection_table_count": 7,
         "collection_preflight_accepted": True,

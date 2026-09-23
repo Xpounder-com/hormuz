@@ -315,13 +315,19 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 elif version == 12:
                     self.assertNotIn("portfolio_finance_source_binding_versions", names)
                     self.assertNotIn("portfolio_finance_cost_observations", names)
+                elif version == 13:
+                    self.assertIn("portfolio_finance_source_binding_versions", names)
+                    self.assertNotIn("portfolio_finance_account_binding_versions", names)
                 else:
                     self.fail(f"unexpected migration version: {version}")
                 original_apply_migration(connection, version)
 
             with mock.patch.object(UsageStore, "_apply_migration", side_effect=verify_then_apply) as applied:
                 store = UsageStore(path)
-            self.assertEqual([call.args[1] for call in applied.call_args_list], [3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+            self.assertEqual(
+                [call.args[1] for call in applied.call_args_list],
+                [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+            )
             store.verify_ready()
             connection = sqlite3.connect(path)
             reservation_columns = {
@@ -341,7 +347,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
             self.assertEqual(tables, {"gateway_request_attempts", "gateway_request_attempt_events"})
             self.assertEqual(
                 migrations,
-                [(version, "applied") for version in range(1, 13)],
+                [(version, "applied") for version in range(1, 14)],
             )
             self.assertEqual(store.active_budget_reservations(organization_id="acme"), 1)
             self.assertEqual(

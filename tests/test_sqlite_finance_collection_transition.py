@@ -509,7 +509,7 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 12)
+        self.assertEqual(UsageStore.schema_version, 13)
         # Build the exact v11 predecessor with the still-supported migration
         # code, then let the current binary perform the real 11-to-12 step.
         with (
@@ -560,7 +560,10 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
             if version == 12 and fail:
                 raise RuntimeError("synthetic_finance_collection_migration_failure")
 
-        with mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
+        with (
+            mock.patch.object(UsageStore, "schema_version", 12),
+            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
+        ):
             UsageStore(target).verify_ready()
 
     def test_predecessor_has_every_accepted_populated_domain(self):
@@ -760,7 +763,8 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         recovered = self.root / "forward-recovered.sqlite3"
         sqlite_backup(self.path, retained)
         sqlite_backup(retained, recovered)
-        UsageStore(recovered, read_only=True).verify_ready()
+        with mock.patch.object(UsageStore, "schema_version", 12):
+            UsageStore(recovered, read_only=True).verify_ready()
         self.assertEqual(sqlite_snapshot(recovered), after_write)
         with mock.patch.object(UsageStore, "schema_version", 11), self.assertRaises(
             StorageSchemaError

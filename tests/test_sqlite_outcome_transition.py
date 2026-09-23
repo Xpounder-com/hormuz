@@ -57,7 +57,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 12)
+        self.assertEqual(UsageStore.schema_version, 13)
         self.predecessor_request = {"backend": "sqlite", "path": str(self.path)}
         self.seeded = attribution_predecessor_call({**self.predecessor_request, "mode": "seed"})
         self.assertEqual(self.seeded["status"], "ready")
@@ -105,7 +105,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         # The candidate binary ends at schema 12.  Pretend the next schema
         # exists so the already-upgraded v12 database exercises the
         # unsupported-following-migration guard.
-        with mock.patch.object(UsageStore, "schema_version", 13):
+        with mock.patch.object(UsageStore, "schema_version", 14):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

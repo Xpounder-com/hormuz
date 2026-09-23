@@ -18,7 +18,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 17
+POSTGRES_SCHEMA_VERSION = 18
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 # Each tuple is the count and SHA-256 digest of the canonical non-owner ACL
@@ -42,6 +42,11 @@ _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION = {
     17: (
         199,
         "1fa41892fb1206e7e70b922768ac27a39fce6ed98441a9fb78ce1511e1582906",
+    ),
+    # Twice measured from independent clean managed-role schema-18 bootstraps.
+    18: (
+        205,
+        "56dd1434aaf078fdcdb5ed38059ed9c0f4a57f82310dc4fdfa18dff650628e9f",
     ),
 }
 
@@ -1290,6 +1295,9 @@ def migrate_postgres(
                     if max(states) >= 16:
                         from ._finance_collection_schema import verify_postgres_finance_collection
                         verify_postgres_finance_collection(cursor, schema, PostgresStorageError)
+                    if max(states) >= 18:
+                        from ._finance_account_binding_schema import verify_postgres_finance_account_binding
+                        verify_postgres_finance_account_binding(cursor, schema, PostgresStorageError)
                 for version in range(1, POSTGRES_SCHEMA_VERSION + 1):
                     if version in states:
                         continue
@@ -1345,6 +1353,9 @@ def migrate_postgres(
                 if POSTGRES_SCHEMA_VERSION >= 16:
                     from ._finance_collection_schema import verify_postgres_finance_collection
                     verify_postgres_finance_collection(cursor, schema, PostgresStorageError)
+                if POSTGRES_SCHEMA_VERSION >= 18:
+                    from ._finance_account_binding_schema import verify_postgres_finance_account_binding
+                    verify_postgres_finance_account_binding(cursor, schema, PostgresStorageError)
                 _verify_postgres_migration_ownership(
                     cursor,
                     schema=schema,
@@ -1485,6 +1496,15 @@ def _schema_migration_rows(
                 if max(states) >= 15:
                     from ._finance_attempt_schema import verify_postgres_finance_attempt
                     verify_postgres_finance_attempt(cursor, schema, PostgresStorageError)
+                # Schema 16 installs the collection tables for owner-side
+                # qualification; schema 17 is the first version that grants
+                # the runtime role access to verify them.
+                if max(states) >= 17:
+                    from ._finance_collection_schema import verify_postgres_finance_collection
+                    verify_postgres_finance_collection(cursor, schema, PostgresStorageError)
+                if max(states) >= 18:
+                    from ._finance_account_binding_schema import verify_postgres_finance_account_binding
+                    verify_postgres_finance_account_binding(cursor, schema, PostgresStorageError)
             if (
                 verify_custody_schema
                 and states
@@ -2394,6 +2414,7 @@ def _migration_sql(
         15: "0015_finance_attempt_evidence.sql",
         16: "0016_finance_collection.sql",
         17: "0017_finance_collection_runtime.sql",
+        18: "0018_finance_account_binding_and_query_audit.sql",
     }
     filename = filenames.get(version)
     if filename is None:

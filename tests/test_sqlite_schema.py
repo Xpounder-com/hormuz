@@ -24,7 +24,7 @@ class SQLiteSchemaOwnershipTests(unittest.TestCase):
             connection.close()
         self.assertEqual(
             migrations,
-            [(version, "applied") for version in range(1, 13)],
+            [(version, "applied") for version in range(1, 14)],
         )
 
     def test_gateway_ddl_is_owned_only_by_the_internal_schema_module(self) -> None:

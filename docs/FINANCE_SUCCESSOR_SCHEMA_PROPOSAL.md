@@ -5,6 +5,11 @@ and privileged finance-report reads reviewable. It proposes one combined
 successor: SQLite schema 13 and PostgreSQL schema 18. It is not a migration,
 does not alter a database, and does not authorize a production rollout.
 
+The proposal was subsequently approved for source implementation. The bundled
+candidate migration and runtime checks implement this exact three-table,
+six-privilege boundary; release acceptance, persistent migration and traffic
+switch remain separate gates.
+
 ## Decision requested
 
 Approve exactly six PostgreSQL runtime-role privileges: `SELECT` and `INSERT`

@@ -54,7 +54,7 @@ class SQLiteFinanceTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 12)
+        self.assertEqual(UsageStore.schema_version, 13)
         self.predecessor_request = {"backend": "sqlite", "path": str(self.path)}
         self.seeded = outcome_predecessor_call({**self.predecessor_request, "mode": "seed"})
         self.assertEqual(self.seeded["status"], "ready")
@@ -104,8 +104,8 @@ class SQLiteFinanceTransitionTests(unittest.TestCase):
         current = sqlite_snapshot(self.path)
         self.assertEqual(len(current["rows"]), 46)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
-        # v12 is the accepted collection successor; v13 is intentionally absent.
-        with mock.patch.object(UsageStore, "schema_version", 13):
+        # v13 is the account-binding successor; v14 is intentionally absent.
+        with mock.patch.object(UsageStore, "schema_version", 14):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

@@ -17,6 +17,7 @@ from hormuz._attribution_schema import TABLE_DDL as ATTRIBUTION_TABLES
 from hormuz._outcome_schema import TABLE_DDL as OUTCOME_TABLES
 from hormuz._finance_schema import TABLE_DDL as FINANCE_TABLES
 from hormuz._finance_collection_schema import TABLE_DDL as FINANCE_COLLECTION_TABLES
+from hormuz._finance_account_binding_schema import TABLE_DDL as FINANCE_ACCOUNT_TABLES
 from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
 from hormuz._portfolio_schema import TABLE_DDL as REGISTRY_TABLES
 from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_RELIABILITY_TABLES
@@ -315,11 +316,13 @@ class PostgresTestCase(unittest.TestCase):
                     *REGISTRY_TABLES, *ATTRIBUTION_TABLES, *OUTCOME_TABLES,
                     *FINANCE_TABLES, *BUDGET_TABLES, *PROVIDER_RELIABILITY_TABLES,
                     FINANCE_ATTEMPT_TABLE, *FINANCE_COLLECTION_TABLES,
+                    *FINANCE_ACCOUNT_TABLES,
                 ) if table in present)
                 immutable_tables = tuple(table for table in (
                     *ATTRIBUTION_TABLES, *OUTCOME_TABLES, *FINANCE_TABLES,
                     *BUDGET_TABLES, *PROVIDER_RELIABILITY_TABLES,
                     FINANCE_ATTEMPT_TABLE, *FINANCE_COLLECTION_TABLES,
+                    *FINANCE_ACCOUNT_TABLES,
                 ) if table in present)
                 # This class owns its unique disposable schema. Reset the exact
                 # FK-connected fixture tables together; never truncate a shared

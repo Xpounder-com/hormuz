@@ -245,13 +245,20 @@ REQUIRED_FINANCE_COLLECTION_RUNTIME_SDIST_PATHS = (
     "tests/test_finance_collection_runtime_plan.py",
 )
 REQUIRED_FINANCE_ACCOUNT_REGISTRATION_WHEEL_PATHS = (
+    "hormuz/_finance_account_binding_schema.py",
+    "hormuz/finance_account_capture.py",
+    "hormuz/finance_account_evidence.py",
     "hormuz/finance_account_registration.py",
     "hormuz/finance_account_registration_store.py",
+    "hormuz/migrations/postgresql/0018_finance_account_binding_and_query_audit.sql",
 )
 REQUIRED_FINANCE_ACCOUNT_REGISTRATION_SDIST_PATHS = (
     *REQUIRED_FINANCE_ACCOUNT_REGISTRATION_WHEEL_PATHS,
+    "docs/FINANCE_ACCOUNT_BINDING_TRANSITION.md",
+    "docs/FINANCE_SUCCESSOR_SCHEMA_PROPOSAL.md",
     "docs/finance-account-binding-acl-proposal.sql",
     "docs/finance-successor-schema-acl-proposal.sql",
+    "tests/test_finance_account_binding_transition_preflight.py",
     "tests/test_finance_account_registration_request.py",
     "tests/test_finance_account_registration_store.py",
 )
