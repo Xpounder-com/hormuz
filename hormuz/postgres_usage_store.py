@@ -44,6 +44,13 @@ from .finance_attempts import (
     unavailable_estimate,
     unknown_native_observation,
 )
+from .finance_account_binding import FinanceAccountCandidate, UnavailableFinance
+from .finance_account_capture import (
+    FinanceAccountCaptureError,
+    FinanceAccountCaptureSQL,
+    append_finance_attempt_account_binding,
+)
+from .finance_account_evidence import ATTEMPT_ACCOUNT_BINDING_SCHEMA_ID
 from .provider_reliability import (
     ProviderAttemptMetrics,
     ProviderFailoverContext,
@@ -816,6 +823,7 @@ class PostgresUsageStore:
         work_budget: WorkBudgetContext | None,
         provider_failover: ProviderFailoverContext | None = None,
         configured_rate_card: ConfiguredRateCardBinding | None = None,
+        finance_account: FinanceAccountCandidate | UnavailableFinance | None = None,
     ) -> RequestAttempt:
         """Atomically persist a pending pre-egress attempt and its budget hold."""
 
@@ -952,6 +960,32 @@ class PostgresUsageStore:
                     reason_code=None,
                     usage_event_id=None,
                 )
+                from . import postgres as postgres_module
+
+                if postgres_module.POSTGRES_SCHEMA_VERSION >= 18:
+                    try:
+                        append_finance_attempt_account_binding(
+                            FinanceAccountCaptureSQL(cursor, postgres=True),
+                            root=root,
+                            selected=(
+                                finance_account
+                                if isinstance(finance_account, (FinanceAccountCandidate, UnavailableFinance))
+                                else UnavailableFinance("not_configured")
+                            ),
+                            append_audit=lambda event: self._append_audit_chain_entry_in_cursor(
+                                cursor,
+                                event=event,
+                                source=AuditChainSource(
+                                    ATTEMPT_ACCOUNT_BINDING_SCHEMA_ID,
+                                    1,
+                                    str(event["event_id"]),
+                                ),
+                            ),
+                        )
+                    except FinanceAccountCaptureError:
+                        raise PostgresStorageError(
+                            "finance_account_binding_unavailable"
+                        ) from None
                 if provider_failover is not None:
                     self._append_provider_failover_in_cursor(
                         cursor,
@@ -2345,6 +2379,22 @@ class PostgresUsageStore:
                 "hormuz.finance-snapshot",
             )
             cursor.execute(
+                f"SELECT EXISTS (SELECT 1 FROM {self._table('hormuz_schema_migrations')} "
+                "WHERE version=18 AND state='applied') AS account_ready"
+            )
+            account_ready_row = cursor.fetchone()
+            account_ready = bool(
+                next(iter(account_ready_row.values()))
+                if isinstance(account_ready_row, dict)
+                else account_ready_row[0]
+            )
+            if account_ready:
+                collection_source_ids += (
+                    "hormuz.finance-account-binding-version",
+                    "hormuz.finance-attempt-account-binding",
+                    "hormuz.finance-query-audit-event",
+                )
+            cursor.execute(
                 f"SELECT source_schema_id, source_event_id "
                 f"FROM {self._table('gateway_audit_chain_entries')} "
                 "WHERE organization_id = %s AND entry_schema_version = 2 "
@@ -2421,17 +2471,31 @@ class PostgresUsageStore:
             sources.append(source)
         for source_schema_id, source_event_id, event_json in collection_rows:
             try:
+                from .finance_account_evidence import (
+                    FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS,
+                    finance_account_source_identity,
+                )
                 from .finance_collection import (
+                    FINANCE_COLLECTION_SOURCE_SCHEMA_IDS,
                     FinanceCollectionError,
                     finance_collection_source_identity,
                 )
 
                 event = json.loads(event_json)
+                if source_schema_id in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS:
+                    observed_identity = finance_collection_source_identity(
+                        source_schema_id, event,
+                    )
+                elif source_schema_id in FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS:
+                    observed_identity = finance_account_source_identity(
+                        source_schema_id, event,
+                    )
+                else:
+                    raise ValueError
                 if (
                     not isinstance(event, dict)
                     or canonical_json_text(event) != event_json
-                    or finance_collection_source_identity(source_schema_id, event)
-                    != source_event_id
+                    or observed_identity != source_event_id
                 ):
                     raise ValueError
                 source = normalize_audit_chain_source_event_input(
@@ -2474,10 +2538,13 @@ class PostgresUsageStore:
             if entry.get("entry_schema_version") != 2:
                 continue
             source_schema_id = entry.get("source_schema_id")
+            from .finance_account_evidence import FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS
             from .finance_collection import FINANCE_COLLECTION_SOURCE_SCHEMA_IDS
 
             if source_schema_id == FINANCE_ATTEMPT_SCHEMA_ID or (
                 source_schema_id in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS
+            ) or (
+                source_schema_id in FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS
             ):
                 # Finance evidence is directly readable by the runtime role
                 # and was loaded by _audit_chain_source_events_in_cursor.

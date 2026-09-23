@@ -42,6 +42,9 @@ class SQLiteOutcomeTests(OutcomeAssertions, unittest.TestCase):
     def test_sqlite_outcome_metadata_replay_and_rotation(self):
         self.check_atomic_metadata_receipt_replay_and_rotation()
 
+    def test_sqlite_github_runtime_adapter(self):
+        self.check_github_runtime_adapter_uses_real_repository_path()
+
     def test_sqlite_outcome_ordering_corrections_and_tombstones(self):
         self.check_ordering_uncertainty_and_corrections_never_rewrite_facts()
 

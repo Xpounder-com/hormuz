@@ -61,6 +61,8 @@ from .finance_account_binding import (
     UnavailableFinance,
     select_finance_account,
 )
+from .github_connector import GitHubOutcomeReceiver
+from .github_http import GITHUB_EVENTS_PATH, handle_github_webhook
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
@@ -126,8 +128,8 @@ class _EgressConfiguration:
 class _SelectedUpstream:
     """One immutable transport/metadata choice; contains no credential value.
 
-    Finance candidates are not passed to persistence in this source checkpoint.
-    Future capture must validate each new attempt in its existing transaction.
+    The same finance candidate is validated and captured in the new attempt's
+    existing transaction before this selected transport performs egress.
     """
 
     upstream: UpstreamConfig
@@ -331,6 +333,11 @@ class GatewayServer(ThreadingHTTPServer):
             if self.session_broker is not None and config.session_broker.console_enabled:
                 self.console = ConsoleService(self.session_broker, self.store)
             self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
+            self.github_outcome_receiver = (
+                GitHubOutcomeReceiver(config, portfolio.outcomes)
+                if config.outcome_connectors is not None
+                else None
+            )
             self.attribution_repository = portfolio.attributions
             self.budget_repository = portfolio.budgets
             provider_reliability_store = create_provider_reliability_repository(self.store)
@@ -378,6 +385,8 @@ class GatewayServer(ThreadingHTTPServer):
                 for issuer in config.oidc_issuers.values()
                 if issuer.login is not None and len(issuer.login.client_secret) >= 8
             )
+            if config.outcome_connectors is not None:
+                protected_values.extend(config.outcome_connectors.protected_values())
             self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
             if config.session_broker.policy_impact_enabled:
                 from .policy_impact import ImpactRecorder, ImpactStore, impact_path
@@ -696,6 +705,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path.startswith(PORTFOLIO_PREFIX + "/"):
             handle_registry(self)
+            return
+        if path == GITHUB_EVENTS_PATH:
+            handle_github_webhook(self)
             return
         if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
             handle_console_request(self)
@@ -1523,6 +1535,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 ),
                 provider_failover=provider_failover,
                 configured_rate_card=rate_card_binding,
+                finance_account=selected_upstream.finance,
             )
         except _STORAGE_FAILURES:
             if admission is not None:

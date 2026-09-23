@@ -121,7 +121,9 @@ class OutcomeIngestor:
         try:
             verified = self.adapter.verify(binding=binding, headers=headers, raw=raw)
         except PortfolioError as error:
-            code = error.code if error.code in {"unauthenticated", "forbidden", "unavailable"} else "unavailable"
+            code = error.code if error.code in {
+                "invalid_request", "unauthenticated", "forbidden", "unavailable",
+            } else "unavailable"
             raise PortfolioError(code) from None
         except Exception:
             # Adapter exceptions may contain source content/credentials.

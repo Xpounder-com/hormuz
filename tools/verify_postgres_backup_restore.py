@@ -54,9 +54,9 @@ except ModuleNotFoundError:  # Direct execution resolves helpers beside this scr
 
 
 STATE_SCHEMA_ID = "hormuz.postgresql-recovery-drill-state"
-STATE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 3
 SUMMARY_SCHEMA_ID = "hormuz.postgresql-recovery-drill-summary"
-SUMMARY_SCHEMA_VERSION = 2
+SUMMARY_SCHEMA_VERSION = 3
 SUMMARY_COVERAGE = "ephemeral_logical_backup_restore_only"
 _DEFAULT_OPERATOR_READINESS_ATTEMPTS = 30
 _DEFAULT_OPERATOR_READINESS_INTERVAL_SECONDS = 0.25
@@ -70,6 +70,9 @@ _REQUIRED_RECORD_COUNT_KEYS = (
     "request_attempts",
     "request_attempt_events",
     "finance_attempt_evidence",
+    "finance_account_binding_versions",
+    "finance_attempt_account_bindings",
+    "finance_query_audit_events",
     "policy_administrators",
     "policy_versions",
     "active_policy_versions",
@@ -87,13 +90,16 @@ _EXPECTED_RECORD_COUNTS = {
     "request_attempts": 2,
     "request_attempt_events": 4,
     "finance_attempt_evidence": 2,
+    "finance_account_binding_versions": 0,
+    "finance_attempt_account_bindings": 2,
+    "finance_query_audit_events": 0,
     "policy_administrators": 2,
     "policy_versions": 2,
     "active_policy_versions": 2,
     "policy_control_events": 6,
     "audit_chain_epochs": 2,
     "audit_chain_heads": 2,
-    "audit_chain_entries": 6,
+    "audit_chain_entries": 8,
     "audit_chain_checkpoints": 0,
 }
 _STATE_CHECK_KEYS = (
@@ -102,6 +108,7 @@ _STATE_CHECK_KEYS = (
     "active_policy_versions",
     "audit_chain_integrity",
     "finance_attempt_evidence",
+    "finance_account_bindings",
     "rls_without_organization_context",
 )
 _NEGATIVE_CHECK_KEYS = (
@@ -805,7 +812,7 @@ def _capture_state(
         if store.monthly_secret_totals(organization_id=organization_id).events != 1:
             raise RecoveryDrillError("recovery_tenant_repository_check_failed")
         audit_chain = store.verify_audit_chain(organization_id=organization_id)
-        if audit_chain.sequence != 3 or audit_chain.head_digest is None:
+        if audit_chain.sequence != 4 or audit_chain.head_digest is None:
             raise RecoveryDrillError("recovery_audit_chain_check_failed")
         if store.active_budget_reservations(organization_id=organization_id) != 2:
             raise RecoveryDrillError("recovery_budget_reservation_check_failed")
@@ -831,6 +838,11 @@ def _capture_state(
                     "FROM gateway_finance_attempt_evidence ORDER BY request_attempt_id"
                 )
                 finance_evidence = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(
+                    "SELECT state, reason_code, binding_id, binding_version "
+                    "FROM gateway_finance_attempt_account_bindings ORDER BY request_attempt_id"
+                )
+                finance_account_bindings = [dict(row) for row in cursor.fetchall()]
         if attempt_events != [
             {"state": "pending", "reason_code": None, "usage_event_id": None},
             {
@@ -862,6 +874,15 @@ def _capture_state(
             }
         ]:
             raise RecoveryDrillError("recovery_finance_attempt_evidence_check_failed")
+        if finance_account_bindings != [
+            {
+                "state": "unbound",
+                "reason_code": "not_configured",
+                "binding_id": None,
+                "binding_version": None,
+            }
+        ]:
+            raise RecoveryDrillError("recovery_finance_account_binding_check_failed")
 
         status = service.status(organization_id=organization_id, credential_env=identity.token_env)
         snapshot = runtime.snapshot_for(identity)
@@ -897,6 +918,13 @@ def _capture_state(
         "request_attempts": len(records["gateway_request_attempts"]),
         "request_attempt_events": len(records["gateway_request_attempt_events"]),
         "finance_attempt_evidence": len(records["gateway_finance_attempt_evidence"]),
+        "finance_account_binding_versions": len(
+            records["portfolio_finance_account_binding_versions"]
+        ),
+        "finance_attempt_account_bindings": len(
+            records["gateway_finance_attempt_account_bindings"]
+        ),
+        "finance_query_audit_events": len(records["portfolio_finance_query_audit_events"]),
         "policy_administrators": len(records["policy_administrators"]),
         "policy_versions": len(records["policy_versions"]),
         "active_policy_versions": len(records["policy_active_versions"]),
@@ -925,6 +953,7 @@ def _capture_state(
             "active_policy_versions": True,
             "audit_chain_integrity": True,
             "finance_attempt_evidence": True,
+            "finance_account_bindings": True,
             "rls_without_organization_context": True,
         },
     }
@@ -958,6 +987,18 @@ def _collect_restricted_records(
         ("gateway_request_attempts", "attempt_id"),
         ("gateway_request_attempt_events", "attempt_id, sequence"),
         ("gateway_finance_attempt_evidence", "organization_id, request_attempt_id"),
+        (
+            "portfolio_finance_account_binding_versions",
+            "organization_id, binding_id, version",
+        ),
+        (
+            "gateway_finance_attempt_account_bindings",
+            "organization_id, request_attempt_id",
+        ),
+        (
+            "portfolio_finance_query_audit_events",
+            "organization_id, occurred_at, query_event_id",
+        ),
         ("gateway_audit_chain_epochs", "organization_id, chain_epoch"),
         ("gateway_audit_chain_heads", "organization_id"),
         ("gateway_audit_chain_entries", "organization_id, chain_epoch, sequence"),
@@ -1058,6 +1099,9 @@ def _verify_rls_without_organization_context(
         (runtime_dsn, "gateway_request_attempts"),
         (runtime_dsn, "gateway_request_attempt_events"),
         (runtime_dsn, "gateway_finance_attempt_evidence"),
+        (runtime_dsn, "portfolio_finance_account_binding_versions"),
+        (runtime_dsn, "gateway_finance_attempt_account_bindings"),
+        (runtime_dsn, "portfolio_finance_query_audit_events"),
         (runtime_dsn, "gateway_audit_chain_epochs"),
         (runtime_dsn, "gateway_audit_chain_heads"),
         (runtime_dsn, "gateway_audit_chain_entries"),

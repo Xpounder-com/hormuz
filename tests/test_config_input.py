@@ -53,6 +53,50 @@ class ConfigurationInputTests(unittest.TestCase):
         self.assertEqual(config.listen.host, "127.0.0.1")
         self.assertIn("gpt-5.4-mini", config.model_routes)
 
+    def test_github_outcome_runtime_resolves_only_versioned_secret_references(self) -> None:
+        value = self._valid_configuration()
+        value["portfolio_control"] = {
+            "schema_id": "hormuz.portfolio-control",
+            "schema_version": 1,
+            "role_bindings": [],
+            "connectors": [{
+                "organization_id": "xpounder",
+                "connector_id": "github-one",
+                "provider": "github",
+                "installation_id": "123",
+                "workspace_id": None,
+                "external_object_ids": ["456"],
+            }],
+        }
+        value["outcome_connectors"] = {
+            "schema_id": "hormuz.outcome-connectors",
+            "schema_version": 1,
+            "github": [{
+                "organization_id": "xpounder",
+                "connector_id": "github-one",
+                "webhook_secrets": [{
+                    "version": "webhook-v1",
+                    "environment_variable": "TEST_GITHUB_WEBHOOK_SECRET",
+                }],
+                "identity_keys": [{
+                    "version": "identity-v1",
+                    "environment_variable": "TEST_GITHUB_IDENTITY_KEY",
+                }],
+                "current_key_version": "identity-v1",
+                "delivery_identity_key_version": "identity-v1",
+            }],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            config = GatewayConfig.load(path, environ={
+                **TEST_ENVIRONMENT,
+                "TEST_GITHUB_WEBHOOK_SECRET": "synthetic-config-webhook-secret-12345",
+                "TEST_GITHUB_IDENTITY_KEY": "synthetic-config-identity-key-123456",
+            })
+        self.assertEqual(len(config.outcome_connectors.github), 1)
+        self.assertNotIn("synthetic-config", repr(config))
+
     def test_finance_metadata_does_not_relax_whole_file_json_guards(self) -> None:
         for metadata, reason in (
             ('{"binding_version":1,"binding_version":2}', "configuration_duplicate_member"),

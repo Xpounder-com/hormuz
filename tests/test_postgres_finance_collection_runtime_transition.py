@@ -5,6 +5,7 @@ import json
 import unittest
 from unittest import mock
 
+import hormuz.finance_collection_repository as finance_collection_repository_module
 import hormuz.postgres as postgres_module
 from hormuz.postgres import PostgresStorageError
 
@@ -39,6 +40,21 @@ class PostgresFinanceCollectionRuntimeTransitionTests(PostgresTestCase):
     bind = collection.FinanceCollectionSQLiteRepositoryTests.bind
 
     def setUp(self):
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 18)
+        version_patch = mock.patch.object(
+            postgres_module,
+            "POSTGRES_SCHEMA_VERSION",
+            17,
+        )
+        version_patch.start()
+        self.addCleanup(version_patch.stop)
+        repository_version_patch = mock.patch.object(
+            finance_collection_repository_module,
+            "POSTGRES_SCHEMA_VERSION",
+            17,
+        )
+        repository_version_patch.start()
+        self.addCleanup(repository_version_patch.stop)
         self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 17)
         self._drop_schema(self.schema)
         self.seeded = seed_postgres_collection_predecessor(

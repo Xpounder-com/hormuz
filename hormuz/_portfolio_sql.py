@@ -21,6 +21,10 @@ from ._finance_collection_schema import (
     TABLE_DDL as FINANCE_COLLECTION_TABLES,
     verify_postgres_finance_collection,
 )
+from ._finance_account_binding_schema import (
+    TABLE_DDL as FINANCE_ACCOUNT_TABLES,
+    verify_postgres_finance_account_binding,
+)
 from ._budget_schema import (
     ACTIVE_TABLE as BUDGET_ACTIVE_TABLE,
     TABLE_DDL as BUDGET_TABLES,
@@ -119,6 +123,12 @@ def portfolio_transaction(
                         verify_postgres_finance(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is FINANCE_COLLECTION_TABLES:
                         verify_postgres_finance_collection(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
+                    if tables is FINANCE_ACCOUNT_TABLES:
+                        verify_postgres_finance_account_binding(
                             cursor,
                             storage.postgres_schema,
                             PostgresStorageError,

@@ -35,6 +35,8 @@ include docs/finance-source-contract-v1.json
 include docs/finance-attempt-evidence-contract-v1.json
 include docs/finance-collection-contract-v1.json
 include docs/finance-account-binding-contract-v1.json
+include docs/finance-account-binding-acl-proposal.sql
+include docs/finance-successor-schema-acl-proposal.sql
 include docs/FINANCE_ACCOUNT_SELECTION.md
 include docs/budget-transition-plan-v1.json
 include docs/budget-transition-plan-v2.json
@@ -71,6 +73,7 @@ include tools/verify_finance_collection_runtime.py
 include tools/verify_finance_collection_postgres_runtime.py
 include tools/verify_finance_account_binding_contract.py
 include tools/verify_finance_account_binding_preflight.py
+include tools/run_v13_development_transition_matrix.py
 include tools/verify_v13_candidate_artifacts.py
 include tools/verify_linear_connector_preflight.py
 include tools/verify_budget_transition_plan.py

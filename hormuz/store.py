@@ -46,6 +46,13 @@ from .finance_attempts import (
     unavailable_estimate,
     unknown_native_observation,
 )
+from .finance_account_binding import FinanceAccountCandidate, UnavailableFinance
+from .finance_account_capture import (
+    FinanceAccountCaptureError,
+    FinanceAccountCaptureSQL,
+    append_finance_attempt_account_binding,
+)
+from .finance_account_evidence import ATTEMPT_ACCOUNT_BINDING_SCHEMA_ID
 from .provider_reliability import (
     ProviderAttemptMetrics,
     ProviderFailoverContext,
@@ -691,6 +698,7 @@ class UsageStore:
         work_budget: WorkBudgetContext | None,
         provider_failover: ProviderFailoverContext | None = None,
         configured_rate_card: ConfiguredRateCardBinding | None = None,
+        finance_account: FinanceAccountCandidate | UnavailableFinance | None = None,
     ) -> RequestAttempt:
         """Durably record a pending attempt and its budget hold before egress.
 
@@ -768,6 +776,28 @@ class UsageStore:
                 reason_code=None,
                 usage_event_id=None,
             )
+            if self.schema_version >= 13:
+                try:
+                    append_finance_attempt_account_binding(
+                        FinanceAccountCaptureSQL(connection, postgres=False),
+                        root=root,
+                        selected=(
+                            finance_account
+                            if isinstance(finance_account, (FinanceAccountCandidate, UnavailableFinance))
+                            else UnavailableFinance("not_configured")
+                        ),
+                        append_audit=lambda event: self._append_audit_chain_entry_in_connection(
+                            connection,
+                            event=event,
+                            source=AuditChainSource(
+                                ATTEMPT_ACCOUNT_BINDING_SCHEMA_ID,
+                                1,
+                                str(event["event_id"]),
+                            ),
+                        ),
+                    )
+                except FinanceAccountCaptureError:
+                    raise StorageSchemaError("finance_account_binding_unavailable") from None
             if provider_failover is not None:
                 self._append_provider_failover_in_connection(
                     connection,
@@ -2147,6 +2177,36 @@ class UsageStore:
                     (source_schema_id, str(row[identity_column]), str(row["evidence_json"]))
                     for row in rows
                 )
+        account_ready = connection.execute(
+            "SELECT 1 FROM hormuz_schema_migrations WHERE version=13 AND state='applied'"
+        ).fetchone() is not None
+        if account_ready:
+            for source_schema_id, table, identity_column in (
+                (
+                    "hormuz.finance-account-binding-version",
+                    "portfolio_finance_account_binding_versions",
+                    "binding_event_id",
+                ),
+                (
+                    "hormuz.finance-attempt-account-binding",
+                    "gateway_finance_attempt_account_bindings",
+                    "event_id",
+                ),
+                (
+                    "hormuz.finance-query-audit-event",
+                    "portfolio_finance_query_audit_events",
+                    "query_event_id",
+                ),
+            ):
+                rows = connection.execute(
+                    f"SELECT {identity_column}, evidence_json FROM {table} "
+                    "WHERE organization_id = ?",
+                    (organization_id,),
+                ).fetchall()
+                collection_rows.extend(
+                    (source_schema_id, str(row[identity_column]), str(row["evidence_json"]))
+                    for row in rows
+                )
         for row in usage_rows:
             try:
                 event = usage_audit_event(dict(row))
@@ -2194,17 +2254,31 @@ class UsageStore:
             sources.append(source)
         for source_schema_id, source_event_id, event_json in collection_rows:
             try:
+                from .finance_account_evidence import (
+                    FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS,
+                    finance_account_source_identity,
+                )
                 from .finance_collection import (
+                    FINANCE_COLLECTION_SOURCE_SCHEMA_IDS,
                     FinanceCollectionError,
                     finance_collection_source_identity,
                 )
 
                 event = json.loads(event_json)
+                if source_schema_id in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS:
+                    observed_identity = finance_collection_source_identity(
+                        source_schema_id, event,
+                    )
+                elif source_schema_id in FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS:
+                    observed_identity = finance_account_source_identity(
+                        source_schema_id, event,
+                    )
+                else:
+                    raise ValueError
                 if (
                     not isinstance(event, dict)
                     or canonical_json_text(event) != event_json
-                    or finance_collection_source_identity(source_schema_id, event)
-                    != source_event_id
+                    or observed_identity != source_event_id
                 ):
                     raise ValueError
                 source = normalize_audit_chain_source_event_input(

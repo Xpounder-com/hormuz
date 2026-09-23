@@ -15,31 +15,43 @@ POSTGRES_IMAGE = "postgres@sha256:" + ("b" * 64)
 
 class PostgresRecoverySummaryTests(unittest.TestCase):
     def _state(self) -> dict[str, object]:
-        state = json.loads((FIXTURES / "state-v2.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["migration_version"], 15)
-        # The v2 evidence envelope first covered finance attempt sidecars at
-        # migration 15 and remains usable while that recovery fixture is stable.
+        state = json.loads((FIXTURES / "state-v3.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["migration_version"], 18)
+        # The v3 evidence envelope first covered finance account bindings at
+        # migration 18 and remains usable while that recovery fixture is stable.
         state["migration_version"] = recovery.POSTGRES_SCHEMA_VERSION
         return state
 
     def test_compatibility_fixtures_validate(self) -> None:
         state = self._state()
-        summary = json.loads((FIXTURES / "summary-v2.json").read_text(encoding="utf-8"))
-        self.assertEqual(summary["state"]["migration_version"], 15)
+        summary = json.loads((FIXTURES / "summary-v3.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["state"]["migration_version"], 18)
         summary["state"]["migration_version"] = recovery.POSTGRES_SCHEMA_VERSION
 
         recovery._validate_state(state)
         recovery._validate_summary(summary)
         self.assertEqual(state["record_counts"]["finance_attempt_evidence"], 2)
-        self.assertEqual(state["record_counts"]["audit_chain_entries"], 6)
+        self.assertEqual(state["record_counts"]["finance_account_binding_versions"], 0)
+        self.assertEqual(state["record_counts"]["finance_attempt_account_bindings"], 2)
+        self.assertEqual(state["record_counts"]["finance_query_audit_events"], 0)
+        self.assertEqual(state["record_counts"]["audit_chain_entries"], 8)
         self.assertIs(state["checks"]["finance_attempt_evidence"], True)
+        self.assertIs(state["checks"]["finance_account_bindings"], True)
 
-    def test_archived_v1_evidence_is_not_current_candidate_evidence(self) -> None:
-        state = json.loads((FIXTURES / "state-v1.json").read_text(encoding="utf-8"))
-        summary = json.loads((FIXTURES / "summary-v1.json").read_text(encoding="utf-8"))
-        for validate, value in ((recovery._validate_state, state), (recovery._validate_summary, summary)):
-            with self.assertRaisesRegex(recovery.RecoveryDrillError, "schema_invalid"):
-                validate(value)
+    def test_archived_evidence_is_not_current_candidate_evidence(self) -> None:
+        for version in (1, 2):
+            state = json.loads(
+                (FIXTURES / f"state-v{version}.json").read_text(encoding="utf-8")
+            )
+            summary = json.loads(
+                (FIXTURES / f"summary-v{version}.json").read_text(encoding="utf-8")
+            )
+            for validate, value in (
+                (recovery._validate_state, state),
+                (recovery._validate_summary, summary),
+            ):
+                with self.assertRaisesRegex(recovery.RecoveryDrillError, "schema_invalid"):
+                    validate(value)
 
     def test_summary_is_content_free_and_binds_source_to_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

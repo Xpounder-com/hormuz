@@ -146,7 +146,7 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
         # The candidate now includes schema 17.  Probe schema 18 so the
         # upgraded v15 database exercises the unsupported-following-migration
         # guard instead of applying the real collection migration.
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 19):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

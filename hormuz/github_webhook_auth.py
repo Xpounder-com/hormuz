@@ -1,4 +1,4 @@
-"""Dormant GitHub App webhook authentication; no transport or outcome mapping.
+"""GitHub App webhook authentication for the opt-in outcome connector.
 
 The App secret signs the exact body, not GitHub's routing/delivery headers. A
 registered channel therefore derives its durable replay identity from signed
@@ -66,8 +66,8 @@ def _signed_numeric_id(body: dict, field: str) -> str:
 class GitHubWebhookAuthenticator:
     """Verify one server-enrolled installation/repository channel in memory.
 
-    Construction is explicit; no server route or provider credential loader
-    creates this class. Webhook key rotation may overlap two distinct secrets.
+    Construction is explicit and limited to strict runtime enrollment. Webhook
+    key rotation may overlap two distinct secrets.
     The independent outcome identity key/version must be retained throughout
     the delivery replay horizon, including webhook-secret rotation.
     """
@@ -129,8 +129,15 @@ class GitHubWebhookAuthenticator:
         body = decode_source_body(raw)
         binding = self._binding
         installation = _signed_numeric_id(body, "installation")
-        repository = _signed_numeric_id(body, "repository")
-        if installation != binding.installation_id or repository not in binding.external_object_ids:
+        repository = (
+            _signed_numeric_id(body, "repository")
+            if "repository" in body
+            else None
+        )
+        if (
+            installation != binding.installation_id
+            or (repository is not None and repository not in binding.external_object_ids)
+        ):
             raise PortfolioError("forbidden")
         delivery = self._identity_keys.delivery_digest(
             self._identity_version, binding.organization_id, binding.connector_id,

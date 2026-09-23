@@ -96,6 +96,7 @@ def _snapshot_sha256(config: GatewayConfig) -> str:
     value = _canonical(config, config_directory=config.source_path.parent)
     assert isinstance(value, dict) and isinstance(value["fields"], dict)
     assert value["fields"].pop("portfolio_control") is None
+    assert value["fields"].pop("outcome_connectors") is None
     assert value["fields"].pop("attribution_control") is None
     # Preserve every prior field's digest with the new metadata surface absent.
     assert value["fields"].pop("finance_account_bindings") is None

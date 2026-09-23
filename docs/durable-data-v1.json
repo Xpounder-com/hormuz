@@ -251,6 +251,39 @@
       ]
     },
     {
+      "id": "finance_account_binding_versions",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "portfolio_finance_account_binding_versions"
+      ],
+      "postgresql_tables": [
+        "portfolio_finance_account_binding_versions"
+      ]
+    },
+    {
+      "id": "finance_attempt_account_bindings",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "gateway_finance_attempt_account_bindings"
+      ],
+      "postgresql_tables": [
+        "gateway_finance_attempt_account_bindings"
+      ]
+    },
+    {
+      "id": "finance_query_audit",
+      "content_boundary": "operational_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "portfolio_finance_query_audit_events"
+      ],
+      "postgresql_tables": [
+        "portfolio_finance_query_audit_events"
+      ]
+    },
+    {
       "id": "audit_chain_state",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

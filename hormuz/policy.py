@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from ._persistence import ProviderReliabilityRepository, WorkBudgetRequestRepository
 from .config import GatewayConfig, Identity, ModelRoute, PolicyAnalysisContext
+from .finance_account_binding import FinanceAccountCandidate, UnavailableFinance
 from .finance_attempts import ConfiguredRateCardBinding
 from .policy_document import PolicySnapshot
 from .policy_runtime import PolicyRuntime
@@ -160,10 +161,15 @@ class PolicyEngine:
         work_budget: WorkBudgetContext | None = None,
         provider_failover: ProviderFailoverContext | None = None,
         configured_rate_card: ConfiguredRateCardBinding | None = None,
+        finance_account: FinanceAccountCandidate | UnavailableFinance | None = None,
     ) -> RequestAttempt:
         upstream_model = decision.route.upstream_model if decision.route is not None else None
         scopes = self.budget_scopes(identity=identity, decision=decision)
-        if provider_failover is not None or configured_rate_card is not None:
+        if (
+            provider_failover is not None
+            or configured_rate_card is not None
+            or finance_account is not None
+        ):
             if self._provider_reliability_requests is None:
                 raise StorageSchemaError("storage_schema_partial_upgrade")
             return self._provider_reliability_requests.begin_request_attempt(
@@ -184,6 +190,7 @@ class PolicyEngine:
                 work_budget=work_budget,
                 provider_failover=provider_failover,
                 configured_rate_card=configured_rate_card,
+                finance_account=finance_account,
             )
         if work_budget is None:
             # The built-in v1 method still enters the atomic budget transaction

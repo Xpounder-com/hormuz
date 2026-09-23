@@ -31,6 +31,15 @@ from ..finance_reconciliation_coverage import (
     build_finance_coverage_preview,
 )
 from ..finance_values import FinanceValueError, currency_code
+from ..finance_account_registration import (
+    MAX_ACCOUNT_BINDING_REQUEST_BYTES,
+    AccountBindingRequestError,
+)
+from ..finance_account_registration_store import (
+    AccountBindingStorageError,
+    FinanceAccountRegistrationRepository,
+    create_finance_account_registration_repository,
+)
 from ..portfolio_config import PortfolioPrincipal, authorize
 from ..portfolio_wire import PortfolioError
 
@@ -43,6 +52,9 @@ class FinanceCommandDependencies:
     authenticator: Callable[[GatewayConfig], Authenticator] = Authenticator
     create_repository: Callable[..., FinanceCollectionRepository] = (
         create_finance_collection_repository
+    )
+    create_account_repository: Callable[..., FinanceAccountRegistrationRepository] = (
+        create_finance_account_registration_repository
     )
     resolve_credentials: Callable[..., dict[str, str]] = resolve_upstream_credentials
     fetch_pages: Callable[..., tuple[bytes, ...]] = fetch_collection_pages
@@ -68,6 +80,24 @@ def add_finance_commands(
     bind.add_argument("file", help="Strict version-1 source-binding request JSON")
     _auth_arguments(bind)
     _fingerprint_key_argument(bind)
+
+    account = commands.add_parser(
+        "account",
+        help="Manage immutable inference-account binding versions",
+    )
+    account_commands = account.add_subparsers(
+        dest="finance_account_command",
+        required=True,
+    )
+    account_bind = account_commands.add_parser(
+        "bind",
+        help="Append an account binding or revocation after administrator authorization",
+    )
+    account_bind.add_argument(
+        "file",
+        help="Strict version-1 account-binding request JSON",
+    )
+    _auth_arguments(account_bind)
 
     collect = commands.add_parser(
         "collect",
@@ -138,8 +168,18 @@ def run(
     environment = os.environ if environ is None else environ
     try:
         principal = _principal(config, args.token_env, environment, dependencies)
-        repository = dependencies.create_repository(config, environ=environment)
-        if args.finance_command == "source" and args.finance_source_command == "bind":
+        if args.finance_command == "account" and args.finance_account_command == "bind":
+            account_repository = dependencies.create_account_repository(
+                config,
+                environ=environment,
+            )
+            payload = _read_bounded(
+                Path(args.file),
+                MAX_ACCOUNT_BINDING_REQUEST_BYTES,
+            )
+            result = account_repository.register(principal, payload)
+        elif args.finance_command == "source" and args.finance_source_command == "bind":
+            repository = dependencies.create_repository(config, environ=environment)
             key = _fingerprint_key(environment, args.fingerprint_key_env)
             request = _strict_json_object(_read_bounded(Path(args.file), _REQUEST_BYTES))
             result = repository.bind_source(
@@ -148,6 +188,7 @@ def run(
                 fingerprint_key=key,
             )
         elif args.finance_command in {"collect", "import"}:
+            repository = dependencies.create_repository(config, environ=environment)
             result = _collect_or_import(
                 config,
                 principal,
@@ -157,6 +198,7 @@ def run(
                 environment,
             )
         elif args.finance_command == "report":
+            repository = dependencies.create_repository(config, environ=environment)
             try:
                 if currency_code(args.currency) != args.currency:
                     raise FinanceValueError("finance_invalid_amount")
@@ -201,6 +243,10 @@ def run(
         return _failure(error.code)
     except FinanceCoveragePreviewError:
         return _failure("unavailable")
+    except AccountBindingRequestError:
+        return _failure("invalid_request")
+    except AccountBindingStorageError as error:
+        return _failure(error.code)
     except CustodyError:
         return _failure("unavailable")
     except OSError:

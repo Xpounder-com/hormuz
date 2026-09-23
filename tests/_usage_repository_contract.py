@@ -231,9 +231,9 @@ def exercise_usage_repository(case: unittest.TestCase, store: UsageRepository) -
         case.assertEqual(store.active_budget_reservations(organization_id="acme"), 2)
 
         head = store.audit_chain_head(organization_id="acme")
-        # Three frozen v1 usage/security entries plus one immutable finance
-        # sidecar for each of the terminal, unknown, and stale attempts.
-        case.assertEqual((head.chain_epoch, head.sequence), (1, 6))
+        # Six existing usage/security/native-finance entries plus one immutable
+        # account-binding sidecar for each terminal, unknown, and stale attempt.
+        case.assertEqual((head.chain_epoch, head.sequence), (1, 9))
         checkpoint = build_audit_chain_checkpoint(head, created_at=LedgerClock.current)
         case.assertEqual(store.verify_audit_chain(organization_id="acme", checkpoint=checkpoint), head)
         unanchored = store.audit_chain_anchor_status(organization_id="acme", now=LedgerClock.current)

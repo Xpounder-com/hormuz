@@ -109,7 +109,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
         self.assertEqual(tuple(row.values()), (organization_id,) * 4)
         self.assertEqual(
             store.verify_audit_chain(organization_id=organization_id).sequence,
-            2,
+            3,
         )
 
     def test_available_estimate_must_match_linked_usage_cost(self) -> None:
@@ -333,7 +333,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                 0,
             )
 
-        self.assertEqual(self.store.verify_audit_chain(organization_id="acme").sequence, 2)
+        self.assertEqual(self.store.verify_audit_chain(organization_id="acme").sequence, 3)
         with self.assertRaisesRegex(RequestAttemptStateError, "request_attempt_not_pending"):
             self.store._finalize_request_attempt_with_provider_metrics(
                 attempt=attempt,
@@ -456,7 +456,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                 0,
             )
         self.assertEqual(self.store.active_budget_reservations(organization_id="acme"), 2)
-        self.assertEqual(self.store.verify_audit_chain(organization_id="acme").sequence, 2)
+        self.assertEqual(self.store.verify_audit_chain(organization_id="acme").sequence, 4)
 
     def test_sidecar_failure_rolls_back_terminal_transition_and_retry_is_safe(self) -> None:
         attempt = begin(self.store)
@@ -904,7 +904,7 @@ class PostgresFinanceAttemptRuntimeTests(PostgresTestCase):
                 (counts["usage_count"], counts["finance_count"], counts["terminal_count"]),
                 (1, 1, 1),
             )
-        self.assertEqual(self.store.verify_audit_chain(organization_id="acme").sequence, 2)
+        self.assertEqual(self.store.verify_audit_chain(organization_id="acme").sequence, 3)
 
     def test_missing_query_index_fails_closed_and_is_not_repaired(self) -> None:
         drop = self.sql.SQL("DROP INDEX {}.gateway_finance_attempt_provider").format(
