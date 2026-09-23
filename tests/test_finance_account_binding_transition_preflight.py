@@ -228,9 +228,11 @@ POPULATED_TABLES = (
     "portfolio_finance_usage_observations", "portfolio_finance_cost_observations",
 )
 # Measured twice in independent disposable managed-role PostgreSQL bootstraps;
-# never derived as expectations from the database under test.
-PROPOSED_ACL = (213, "337ece4276d5c36f5115f88c28c97818a3c653862a37c53f6a1590eb7c9e2f85")
-INJECTED_ACL = (214, "359652b011ea8fa04c43a69d007630bf3c24296de3635b0ede9c95916a841363")
+# never derived as expectations from the database under test.  This cumulative
+# deployment probe follows the current schema-20 baseline after the Linear
+# reconciliation migration rather than freezing the historical schema-19 ACL.
+PROPOSED_ACL = (219, "a5aedcd593573c5d55f783904046d993bc6f2e0ddd03a48ed098c9498cd2adac")
+INJECTED_ACL = (220, "d154fee320e8fe4280a16e836f4ec30422d3fc9d3fd04844272b516875fe88f1")
 PINNED = bool(os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_PYTHON")
               and os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_SOURCE"))
 
@@ -363,7 +365,7 @@ class SQLitePublishedAccountBindingPreflightTests(unittest.TestCase):
             if table == "hormuz_schema_migrations":
                 actual = [
                     row for row in after["rows"][table]
-                    if row[0] not in {13, 14}
+                    if row[0] not in {13, 14, 15}
                 ]
             else:
                 actual = after["rows"][table]

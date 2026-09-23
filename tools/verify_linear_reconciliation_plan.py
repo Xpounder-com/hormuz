@@ -24,7 +24,7 @@ from hormuz.postgres import (
 
 PLAN_PATH = "docs/linear-reconciliation-plan-v1.json"
 CI_PATH = ".github/workflows/ci.yml"
-PLAN_SHA256 = "a85b58be9b894babdc9ab0cbd1258c3ecb40eaa98845125a8cfd91707bcf1b0d"
+PLAN_SHA256 = "0baba1d7d4f54c912d07872ec9d5455846b123549b37b1329688d8046bfaf888"
 PREDECESSOR_PATH = "docs/linear-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "0440419441a88b9405bf35c986edf91c02ba80fba99203df63d309e2fb9603e2"
@@ -46,6 +46,7 @@ AUDIT_SOURCES = (
     "hormuz.linear-snapshot-receipt",
 )
 CUMULATIVE_TRANSITION_FILES = (
+    "tests/test_finance_account_binding_transition_preflight.py",
     "tests/test_postgres_budget_transition.py",
     "tests/test_postgres_finance_transition.py",
     "tests/test_postgres_outcome_transition.py",
