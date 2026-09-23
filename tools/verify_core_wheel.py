@@ -276,6 +276,16 @@ REQUIRED_LINEAR_RECONCILIATION_SDIST_PATHS = (
     "tests/test_linear_snapshot_runtime.py",
     "tests/test_postgres_linear_snapshot_runtime.py",
 )
+REQUIRED_ASSOCIATION_TRANSITION_SDIST_PATHS = (
+    "docs/ASSOCIATION_LINKAGE_PREFLIGHT.md",
+    "docs/ASSOCIATION_TRANSITION.md",
+    "docs/association-transition-plan-v1.json",
+    "docs/association-successor-schema-proposal.sqlite.sql",
+    "docs/association-successor-schema-acl-proposal.sql",
+    "tools/verify_association_transition_plan.py",
+    "tests/test_association_transition_plan.py",
+    "tests/test_association_transition_preflight.py",
+)
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
     "docs/work-budget-reports-wire-v1.json",
@@ -467,6 +477,12 @@ def main(argv: list[str] | None = None) -> int:
         _sdist_members,
         REQUIRED_LINEAR_RECONCILIATION_SDIST_PATHS,
         "Linear reconciliation source kit",
+    )
+    _assert_required_archive_paths(
+        sdist,
+        _sdist_members,
+        REQUIRED_ASSOCIATION_TRANSITION_SDIST_PATHS,
+        "Association transition source kit",
     )
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)
