@@ -192,7 +192,7 @@ class SQLiteRegistrationStoreTests(unittest.TestCase):
         self.assertEqual((len(self.rows()), len(self.rows("test_registration_audit"))), (1, 1))
         replay, calls = self.append()
         self.assertEqual(replay, first)
-        self.assertEqual(calls, ["auth"])
+        self.assertEqual(calls, ["auth", "auth"])
         self.assertEqual((len(self.rows()), len(self.rows("test_registration_audit"))), (1, 1))
 
         second_request = request(expected=1, source_digest=self.source.content_digest)
@@ -234,6 +234,35 @@ class SQLiteRegistrationStoreTests(unittest.TestCase):
             self.append(fail_reauthorize_at=2)
         self.assertEqual(self.rows(), [])
         self.assertEqual(self.rows("test_registration_audit"), [])
+
+    def test_historical_replay_reauthorizes_before_return(self):
+        original, _ = self.append()
+        with self.assertRaisesRegex(AccountBindingStorageError, "^unavailable$"):
+            self.append(fail_reauthorize_at=2)
+        self.assertEqual(self.append()[0], original)
+        self.assertEqual((len(self.rows()), len(self.rows("test_registration_audit"))), (1, 1))
+
+    def test_forged_parsed_request_cannot_alias_replay_or_bypass_cas(self):
+        original = request(source_digest=self.source.content_digest)
+        forged = (
+            replace(original, request_digest="f" * 64),
+            replace(original, upstream_reference_id="different-upstream"),
+            replace(original, expected_version=True),
+            replace(original, source_binding_digest="f" * 64),
+        )
+        for invalid in forged:
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(AccountBindingStorageError, "^binding_conflict$"):
+                    self.append(invalid)
+        self.assertEqual((len(self.rows()), len(self.rows("test_registration_audit"))), (0, 0))
+
+        first, _ = self.append(original)
+        for invalid in forged:
+            with self.subTest(replay=invalid):
+                with self.assertRaisesRegex(AccountBindingStorageError, "^binding_conflict$"):
+                    self.append(invalid)
+        self.assertEqual(self.append(original)[0], first)
+        self.assertEqual((len(self.rows()), len(self.rows("test_registration_audit"))), (1, 1))
 
     def test_concurrent_exact_replays_append_one_version_and_one_audit(self):
         with ThreadPoolExecutor(max_workers=2) as executor:

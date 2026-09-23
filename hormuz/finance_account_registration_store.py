@@ -21,7 +21,9 @@ from .finance_account_binding import FinanceAccountCandidate, _identifier
 from .finance_account_registration import (
     AccountBindingMatchError,
     AccountBindingRegistrationRequest,
+    AccountBindingRequestError,
     match_active_account_binding_source,
+    parse_account_binding_registration_request,
 )
 from .finance_collection_repository import (
     FinanceCollectionError,
@@ -146,6 +148,40 @@ def _source_from_row(row: Mapping[str, object] | None) -> SourceBindingVersion:
         raise AccountBindingStorageError("unavailable") from None
 
 
+def _validate_parsed_request(request: AccountBindingRegistrationRequest) -> None:
+    """Bind a public request object's fields to the parser's tenant digest."""
+
+    wire = {
+        "schema_id": "hormuz.finance-account-binding-request",
+        "schema_version": 1,
+        "binding_id": request.binding_id,
+        "expected_version": request.expected_version,
+        "upstream_reference_id": request.upstream_reference_id,
+        "upstream_reference_version": request.upstream_reference_version,
+        "transport_profile": request.transport_profile,
+        "inference_credential_reference_id": request.inference_credential_reference_id,
+        "inference_credential_reference_version": request.inference_credential_reference_version,
+        "source_binding": {
+            "binding_id": request.source_binding_id,
+            "version": request.source_binding_version,
+            "content_digest": request.source_binding_digest,
+        },
+        "state": request.state,
+        "reason_code": request.reason_code,
+    }
+    try:
+        parsed = parse_account_binding_registration_request(
+            canonical_json_bytes(wire), organization_id=request.organization_id,
+        )
+    except (AccountBindingRequestError, AuditChainError):
+        raise AccountBindingStorageError("binding_conflict") from None
+    if parsed != request or any(
+        type(getattr(parsed, field)) is not type(getattr(request, field))
+        for field in parsed.__dataclass_fields__
+    ):
+        raise AccountBindingStorageError("binding_conflict")
+
+
 def append_active_account_registration(
     sql: Any,
     request: AccountBindingRegistrationRequest,
@@ -165,7 +201,7 @@ def append_active_account_registration(
     """
 
     if (
-        not isinstance(request, AccountBindingRegistrationRequest)
+        type(request) is not AccountBindingRegistrationRequest
         or not isinstance(selected, FinanceAccountCandidate)
         or not _identifier(actor_id)
         or not callable(reauthorize)
@@ -174,6 +210,7 @@ def append_active_account_registration(
         or selected.binding.organization_id != request.organization_id
     ):
         raise AccountBindingStorageError("binding_conflict")
+    _validate_parsed_request(request)
     reauthorize()
     tenant, binding_id = request.organization_id, request.binding_id
     replay = sql.one(
@@ -182,7 +219,9 @@ def append_active_account_registration(
         (tenant, binding_id, request.request_digest),
     )
     if replay is not None:
-        return _receipt_from_row(replay)
+        receipt = _receipt_from_row(replay)
+        reauthorize()
+        return receipt
 
     latest_row = sql.one(
         f"SELECT * FROM {REGISTRATION_TABLE} "
