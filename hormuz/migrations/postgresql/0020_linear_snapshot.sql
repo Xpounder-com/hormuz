@@ -56,8 +56,25 @@ CREATE TABLE {schema}.portfolio_linear_snapshot_context_events (
             REFERENCES {schema}.gateway_linear_snapshot_receipts
                 (organization_id, connector_id, receipt_id)
     );
+CREATE TABLE {schema}.portfolio_linear_snapshot_context_retention_events (
+        organization_id TEXT NOT NULL CHECK (length(organization_id) BETWEEN 1 AND 128),
+        connector_id TEXT NOT NULL CHECK (length(connector_id) BETWEEN 1 AND 128),
+        retention_event_id TEXT NOT NULL CHECK (length(retention_event_id) = 36),
+        target_context_event_id TEXT NOT NULL CHECK (length(target_context_event_id) = 36),
+        actor_id TEXT NOT NULL CHECK (length(actor_id) BETWEEN 1 AND 128),
+        reason_code TEXT NOT NULL CHECK (reason_code = 'tombstoned'),
+        observed_at TEXT NOT NULL,
+        ingested_at TEXT NOT NULL,
+        provenance_digest TEXT NOT NULL CHECK (length(provenance_digest) = 64),
+        evidence_json TEXT NOT NULL CHECK (length(evidence_json) BETWEEN 2 AND 65536),
+        PRIMARY KEY (organization_id, connector_id, retention_event_id),
+        FOREIGN KEY (organization_id, connector_id, target_context_event_id)
+            REFERENCES {schema}.portfolio_linear_snapshot_context_events
+                (organization_id, connector_id, context_event_id)
+    );
 CREATE INDEX gateway_linear_snapshot_receipt_time ON {schema}.gateway_linear_snapshot_receipts (organization_id, connector_id, committed_at, receipt_id);
 CREATE INDEX portfolio_linear_snapshot_context_object_time ON {schema}.portfolio_linear_snapshot_context_events (organization_id, connector_id, object_kind, object_id, commit_sequence DESC);
+CREATE INDEX portfolio_linear_snapshot_context_retention_target ON {schema}.portfolio_linear_snapshot_context_retention_events (organization_id, connector_id, target_context_event_id, ingested_at);
 ALTER TABLE {schema}.gateway_linear_snapshot_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE {schema}.gateway_linear_snapshot_receipts FORCE ROW LEVEL SECURITY;
 CREATE POLICY gateway_linear_snapshot_receipts_tenant ON {schema}.gateway_linear_snapshot_receipts
@@ -118,6 +135,17 @@ CREATE TRIGGER portfolio_linear_snapshot_context_events_immutable
 REVOKE ALL ON {schema}.portfolio_linear_snapshot_context_events FROM PUBLIC;
 GRANT SELECT, INSERT ON {schema}.portfolio_linear_snapshot_context_events TO {runtime_role};
 
+ALTER TABLE {schema}.portfolio_linear_snapshot_context_retention_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE {schema}.portfolio_linear_snapshot_context_retention_events FORCE ROW LEVEL SECURITY;
+CREATE POLICY portfolio_linear_snapshot_context_retention_events_tenant ON {schema}.portfolio_linear_snapshot_context_retention_events
+    USING (organization_id=current_setting('hormuz.organization_id', true))
+    WITH CHECK (organization_id=current_setting('hormuz.organization_id', true));
+CREATE TRIGGER portfolio_linear_snapshot_context_retention_events_immutable
+    BEFORE UPDATE OR DELETE OR TRUNCATE ON {schema}.portfolio_linear_snapshot_context_retention_events
+    FOR EACH STATEMENT EXECUTE FUNCTION {schema}.portfolio_reject_mutation();
+REVOKE ALL ON {schema}.portfolio_linear_snapshot_context_retention_events FROM PUBLIC;
+GRANT SELECT, INSERT ON {schema}.portfolio_linear_snapshot_context_retention_events TO {runtime_role};
+
 CREATE OR REPLACE FUNCTION {schema}.enforce_linear_context_cross_capture()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -157,6 +185,42 @@ CREATE TRIGGER portfolio_linear_context_webhook_cross_capture
 CREATE TRIGGER portfolio_linear_context_snapshot_cross_capture
     BEFORE INSERT ON {schema}.portfolio_linear_snapshot_context_events
     FOR EACH ROW EXECUTE FUNCTION {schema}.enforce_linear_context_cross_capture();
+
+CREATE FUNCTION {schema}.enforce_linear_retention_cross_capture()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended(
+        'portfolio:' || TG_TABLE_SCHEMA || ':' || NEW.organization_id,
+        0
+    ));
+    IF EXISTS (
+        SELECT 1 FROM {schema}.portfolio_linear_context_retention_events other
+        WHERE other.organization_id=NEW.organization_id
+          AND other.connector_id=NEW.connector_id
+          AND other.retention_event_id=NEW.retention_event_id
+    ) OR EXISTS (
+        SELECT 1 FROM {schema}.portfolio_linear_snapshot_context_retention_events other
+        WHERE other.organization_id=NEW.organization_id
+          AND other.connector_id=NEW.connector_id
+          AND other.retention_event_id=NEW.retention_event_id
+    ) THEN
+        RAISE EXCEPTION USING ERRCODE='23505', MESSAGE='linear_retention_cross_capture_conflict';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION {schema}.enforce_linear_retention_cross_capture() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION {schema}.enforce_linear_retention_cross_capture() TO {runtime_role};
+CREATE TRIGGER portfolio_linear_retention_webhook_cross_capture
+    BEFORE INSERT ON {schema}.portfolio_linear_context_retention_events
+    FOR EACH ROW EXECUTE FUNCTION {schema}.enforce_linear_retention_cross_capture();
+CREATE TRIGGER portfolio_linear_retention_snapshot_cross_capture
+    BEFORE INSERT ON {schema}.portfolio_linear_snapshot_context_retention_events
+    FOR EACH ROW EXECUTE FUNCTION {schema}.enforce_linear_retention_cross_capture();
 
 ALTER TABLE {schema}.gateway_audit_chain_entries
     DROP CONSTRAINT gateway_audit_chain_entries_source_identity_check;
@@ -275,8 +339,13 @@ BEGIN
             WHERE organization_id=p_organization_id AND context_event_id=p_source_event_id
         ) source;
     ELSIF p_source_schema_id='hormuz.linear-context-retention' AND p_source_schema_version=1 THEN
-        SELECT evidence_json INTO v_event_json FROM {schema}.portfolio_linear_context_retention_events
-        WHERE organization_id=p_organization_id AND retention_event_id=p_source_event_id;
+        SELECT source.evidence_json INTO v_event_json FROM (
+            SELECT evidence_json FROM {schema}.portfolio_linear_context_retention_events
+            WHERE organization_id=p_organization_id AND retention_event_id=p_source_event_id
+            UNION ALL
+            SELECT evidence_json FROM {schema}.portfolio_linear_snapshot_context_retention_events
+            WHERE organization_id=p_organization_id AND retention_event_id=p_source_event_id
+        ) source;
     ELSE
         RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='custody audit source schema is unsupported';
     END IF;
@@ -380,8 +449,13 @@ BEGIN
             WHERE organization_id=NEW.organization_id AND context_event_id=NEW.source_event_id
         ) source;
     ELSIF NEW.source_schema_id='hormuz.linear-context-retention' AND NEW.source_schema_version=1 THEN
-        SELECT evidence_json INTO v_source_json FROM {schema}.portfolio_linear_context_retention_events
-        WHERE organization_id=NEW.organization_id AND retention_event_id=NEW.source_event_id;
+        SELECT source.evidence_json INTO v_source_json FROM (
+            SELECT evidence_json FROM {schema}.portfolio_linear_context_retention_events
+            WHERE organization_id=NEW.organization_id AND retention_event_id=NEW.source_event_id
+            UNION ALL
+            SELECT evidence_json FROM {schema}.portfolio_linear_snapshot_context_retention_events
+            WHERE organization_id=NEW.organization_id AND retention_event_id=NEW.source_event_id
+        ) source;
     END IF;
     IF v_source_json IS NULL OR NEW.event_json IS DISTINCT FROM v_source_json THEN
         RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='audit source evidence mismatch';

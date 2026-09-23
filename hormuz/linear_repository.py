@@ -365,7 +365,6 @@ class LinearConnectorRepository:
                 projection,
                 binding_row,
                 keys,
-                receipt_id,
                 context_event_id,
                 observed_at,
                 committed_at,
@@ -460,7 +459,6 @@ class LinearConnectorRepository:
             "relationships": context["relationships"],
             "relationship_coverage": context["relationship_coverage"],
             "revision": revision,
-            "event_at": context["event_at"],
         }
         for row in rows:
             try:
@@ -636,7 +634,6 @@ class LinearConnectorRepository:
                     projection,
                     binding_row,
                     keys,
-                    receipt_id,
                     context_event_id,
                     observed_at,
                     committed_at,
@@ -768,7 +765,6 @@ class LinearConnectorRepository:
         projection,
         binding_row,
         keys,
-        receipt_id,
         context_event_id,
         observed_at,
         committed_at,
@@ -777,7 +773,6 @@ class LinearConnectorRepository:
         object_kind,
         object_id,
     ):
-        del receipt_id
         organization, connector = binding.organization_id, binding.connector_id
         if (
             capture_kind not in {"webhook", "authorized_snapshot"}
@@ -853,7 +848,9 @@ class LinearConnectorRepository:
             "object": projection.context["object"],
             "capture_kind": capture_kind,
             "source_delivery_id": (
-                verified.provider_delivery_id if capture_kind == "webhook" else None
+                verified.provider_delivery_id
+                if capture_kind == "webhook"
+                else verified.page_id
             ),
             "authority_binding": {
                 "id": connector,

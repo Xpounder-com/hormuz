@@ -56,10 +56,11 @@ _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION = {
         "337ece4276d5c36f5115f88c28c97818a3c653862a37c53f6a1590eb7c9e2f85",
     ),
     # Twice measured from independent clean managed-role schema-20 bootstraps
-    # after the bootstrap revoked PostgreSQL's default PUBLIC function grants.
+    # after snapshot retention support and revocation of PostgreSQL's default
+    # PUBLIC function grants.
     20: (
-        219,
-        "a5aedcd593573c5d55f783904046d993bc6f2e0ddd03a48ed098c9498cd2adac",
+        222,
+        "cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d",
     ),
 }
 

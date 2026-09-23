@@ -109,6 +109,7 @@
         "portfolio_linear_context_events",
         "portfolio_linear_context_retention_events",
         "portfolio_linear_snapshot_context_events",
+        "portfolio_linear_snapshot_context_retention_events",
         "portfolio_linear_source_binding_versions"
       ],
       "postgresql_tables": [
@@ -118,6 +119,7 @@
         "portfolio_linear_context_events",
         "portfolio_linear_context_retention_events",
         "portfolio_linear_snapshot_context_events",
+        "portfolio_linear_snapshot_context_retention_events",
         "portfolio_linear_source_binding_versions"
       ]
     },

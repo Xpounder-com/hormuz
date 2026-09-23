@@ -23,7 +23,7 @@ class AttributionSchemaTests(unittest.TestCase):
             with managed_sqlite_connection(path) as connection:
                 tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 self.assertTrue(set(TABLE_DDL).issubset(tables))
-                self.assertEqual(len(tables), 55)
+                self.assertEqual(len(tables), 56)
                 self.assertEqual(connection.execute("SELECT state FROM hormuz_schema_migrations WHERE version=6").fetchone(), ("applied",))
                 before = list(connection.iterdump())
             UsageStore(path).verify_ready()

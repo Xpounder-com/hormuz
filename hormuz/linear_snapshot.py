@@ -352,9 +352,18 @@ class LinearSnapshotAdapter:
             revision_value, revision_order = _event_clock(data["updatedAt"])
             if timestamp(revision_value) > verified.captured_at:
                 raise PortfolioError("invalid_request")
+            lifecycle_times = {
+                field: _optional_timestamp(data.get(field))
+                for field in ("archivedAt", "completedAt", "canceledAt", "startedAt")
+            }
+            if any(
+                value is not None and value > verified.captured_at
+                for value in lifecycle_times.values()
+            ):
+                raise PortfolioError("invalid_request")
             normalized_state, _state_basis = self._webhook._state(data)
             relationships, coverage, _project_id = self._webhook._relationships(kind, data)
-            archived = _optional_timestamp(data.get("archivedAt"))
+            archived = lifecycle_times["archivedAt"]
             lifecycle = "archived" if archived is not None else "updated"
             context = {
                 "object": {"kind": kind, "id": _uuid(data["id"])},

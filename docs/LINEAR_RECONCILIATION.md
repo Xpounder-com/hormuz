@@ -93,11 +93,15 @@ trigger checks the page set.
 ## Commit and evidence behavior
 
 SQLite migration 15 and PostgreSQL migration 20 add
-`gateway_linear_snapshot_receipts` and
-`portfolio_linear_snapshot_context_events`. Snapshot provenance is separate
-from webhook receipts and webhook context rows. Both context sources share one
-organization commit sequence, stable semantic deduplication, and supersession
-ordering.
+`gateway_linear_snapshot_receipts`,
+`portfolio_linear_snapshot_context_events`, and
+`portfolio_linear_snapshot_context_retention_events`. Snapshot provenance and
+retention foreign keys are separate from webhook receipts and webhook context
+rows. Both context sources share one organization commit sequence, stable
+semantic deduplication by object revision and normalized metadata, and
+supersession ordering. Each snapshot context binds its evidence to the signed
+page ID through `source_delivery_id`; capture-specific timestamps do not create
+a second context for the same semantic revision.
 
 A page commits its receipt, metadata-only context events, and finite audit-chain
 entries in one transaction. It emits no outcome event. A context already
@@ -173,6 +177,6 @@ HORMUZ_TEST_POSTGRES_DSN=... python -m unittest -v tests.test_postgres_linear_sn
 python tools/verify_linear_reconciliation_plan.py
 ```
 
-PostgreSQL qualification must reproduce the fixed schema-20 boundary of 219
+PostgreSQL qualification must reproduce the fixed schema-20 boundary of 222
 canonical non-owner ACL entries at
-`a5aedcd593573c5d55f783904046d993bc6f2e0ddd03a48ed098c9498cd2adac`.
+`cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d`.

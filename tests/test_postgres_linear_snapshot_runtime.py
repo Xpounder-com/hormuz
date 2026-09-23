@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 
@@ -15,6 +16,7 @@ from hormuz.config import UsageStorageConfig
 from hormuz.linear_connector import LinearOutcomeReceiver
 from hormuz.linear_snapshot import LinearSnapshotReceiver
 from hormuz.portfolio_repository import create_portfolio_repository
+from hormuz.portfolio_wire import canonical
 from hormuz.postgres import (
     POSTGRES_SCHEMA_VERSION,
     PostgresStorageError,
@@ -29,6 +31,7 @@ if __package__:
         snapshot_config,
         snapshot_headers,
         snapshot_payload,
+        snapshot_retention_event,
     )
 else:
     from _postgres_fixture import PostgresTestCase
@@ -37,6 +40,7 @@ else:
         snapshot_config,
         snapshot_headers,
         snapshot_payload,
+        snapshot_retention_event,
     )
 
 
@@ -117,6 +121,7 @@ class PostgresLinearSnapshotRuntimeTests(PostgresTestCase):
             {
                 "gateway_linear_snapshot_receipts": 1,
                 "portfolio_linear_snapshot_context_events": 1,
+                "portfolio_linear_snapshot_context_retention_events": 0,
             },
         )
         self.assertEqual(self.rows("portfolio_outcome_receipts"), [])
@@ -140,6 +145,77 @@ class PostgresLinearSnapshotRuntimeTests(PostgresTestCase):
             with self.assertRaises(self.psycopg.Error):
                 connection.execute(
                     "UPDATE gateway_linear_snapshot_receipts SET page_count=2"
+                )
+
+    def test_snapshot_context_retention_is_fk_bound_and_auditable(self):
+        self.ingest()
+        context_id = self.rows("portfolio_linear_snapshot_context_events")[0][
+            "context_event_id"
+        ]
+        event = snapshot_retention_event(context_id)
+        with self.repositories.linear._transaction(
+            "acme",
+            time.monotonic() + 4,
+        ) as sql:
+            sql.insert("portfolio_linear_snapshot_context_retention_events", {
+                "organization_id": event["organization_id"],
+                "connector_id": event["connector_id"],
+                "retention_event_id": event["retention_event_id"],
+                "target_context_event_id": event["target_context_event_id"],
+                "actor_id": event["actor_id"],
+                "reason_code": event["reason_code"],
+                "observed_at": event["observed_at"],
+                "ingested_at": event["ingested_at"],
+                "provenance_digest": event["provenance_digest"],
+                "evidence_json": canonical(event),
+            })
+            self.repositories.linear._append_audit(
+                sql,
+                event,
+                "hormuz.linear-context-retention",
+            )
+        self.assertEqual(
+            len(self.rows("portfolio_linear_snapshot_context_retention_events")),
+            1,
+        )
+        invalid = dict(self.rows("portfolio_linear_snapshot_context_retention_events")[0])
+        invalid.update({
+            "retention_event_id": "90000000-0000-4000-8000-000000000011",
+            "target_context_event_id": "90000000-0000-4000-8000-000000000012",
+        })
+        with self.transaction() as connection:
+            with self.assertRaises(self.psycopg.errors.ForeignKeyViolation):
+                connection.execute(
+                    "INSERT INTO portfolio_linear_snapshot_context_retention_events ("
+                    + ",".join(invalid)
+                    + ") VALUES ("
+                    + ",".join("%s" for _ in invalid)
+                    + ")",
+                    tuple(invalid.values()),
+                )
+
+        webhook_value = payload(action="create")
+        raw = encoded(webhook_value)
+        self.webhook.ingest(signed(raw), raw, now_ms=NOW_MS)
+        webhook_context_id = self.rows("portfolio_linear_context_events")[0][
+            "context_event_id"
+        ]
+        collision = dict(
+            self.rows("portfolio_linear_snapshot_context_retention_events")[0]
+        )
+        collision["target_context_event_id"] = webhook_context_id
+        with self.transaction() as connection:
+            with self.assertRaisesRegex(
+                self.psycopg.errors.UniqueViolation,
+                "linear_retention_cross_capture_conflict",
+            ):
+                connection.execute(
+                    "INSERT INTO portfolio_linear_context_retention_events ("
+                    + ",".join(collision)
+                    + ") VALUES ("
+                    + ",".join("%s" for _ in collision)
+                    + ")",
+                    tuple(collision.values()),
                 )
 
     def test_cross_capture_sequence_and_identity_are_storage_enforced(self):
@@ -245,6 +321,26 @@ class PostgresLinearSnapshotRuntimeTests(PostgresTestCase):
                         + ")",
                     tuple(conflicting[column] for column in columns),
                 )
+
+    def test_runtime_verifier_rejects_missing_retention_identity_trigger(self):
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    self.sql.SQL(
+                        "DROP TRIGGER portfolio_linear_retention_snapshot_cross_capture "
+                        "ON {}.portfolio_linear_snapshot_context_retention_events"
+                    ).format(self.sql.Identifier(self.schema))
+                )
+                with self.assertRaisesRegex(
+                    PostgresStorageError,
+                    "storage_schema_partial_upgrade",
+                ):
+                    verify_postgres_linear_snapshot(
+                        cursor,
+                        self.schema,
+                        PostgresStorageError,
+                    )
+            connection.rollback()
 
     def test_concurrent_pages_commit_one_context_and_all_receipts(self):
         pages = []

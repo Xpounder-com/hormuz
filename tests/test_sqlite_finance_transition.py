@@ -113,7 +113,7 @@ class SQLiteFinanceTransitionTests(unittest.TestCase):
         self.upgrade()
         self.assert_prior_state_preserved()
         current = sqlite_snapshot(self.path)
-        self.assertEqual(len(current["rows"]), 55)
+        self.assertEqual(len(current["rows"]), 56)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
         self.assertTrue(all(not current["rows"][table] for table in ACCOUNT_BINDING_TABLES))
         self.assertTrue(all(not current["rows"][table] for table in LINEAR_TABLES))

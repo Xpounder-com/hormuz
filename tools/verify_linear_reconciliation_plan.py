@@ -24,7 +24,7 @@ from hormuz.postgres import (
 
 PLAN_PATH = "docs/linear-reconciliation-plan-v1.json"
 CI_PATH = ".github/workflows/ci.yml"
-PLAN_SHA256 = "0baba1d7d4f54c912d07872ec9d5455846b123549b37b1329688d8046bfaf888"
+PLAN_SHA256 = "e781775f4fee5fd48b9d500d76ac729b962a55ed670a65ee4f3da8bf00e9c451"
 PREDECESSOR_PATH = "docs/linear-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "0440419441a88b9405bf35c986edf91c02ba80fba99203df63d309e2fb9603e2"
@@ -34,12 +34,13 @@ PREDECESSOR_CANONICAL_SHA256 = (
 )
 PREDECESSOR_SOURCE_COMMIT = "5ccadb542f96238b654b22c9a8f34b96673fad71"
 EXPECTED_ACL = (
-    219,
-    "a5aedcd593573c5d55f783904046d993bc6f2e0ddd03a48ed098c9498cd2adac",
+    222,
+    "cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d",
 )
 TABLES = (
     "gateway_linear_snapshot_receipts",
     "portfolio_linear_snapshot_context_events",
+    "portfolio_linear_snapshot_context_retention_events",
 )
 AUDIT_SOURCES = (
     "hormuz.linear-context-event",

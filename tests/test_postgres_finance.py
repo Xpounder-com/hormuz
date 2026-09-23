@@ -40,7 +40,7 @@ class PostgresFinanceTests(FinanceAssertions, PostgresTestCase):
 
     def test_postgres_finance_real_schema_and_checked_in_migration(self):
         self.assertEqual(POSTGRES_SCHEMA_VERSION, 20)
-        self.assertEqual(len(self.legacy_rows()) + len(TABLE_DDL), 78)
+        self.assertEqual(len(self.legacy_rows()) + len(TABLE_DDL), 79)
         self.assertEqual(resources.files("hormuz").joinpath("migrations/postgresql/0012_finance_rate_cards.sql").read_text(),
                          postgres_statements("{schema}", "{runtime_role}"))
 

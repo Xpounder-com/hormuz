@@ -320,7 +320,7 @@ def _validate_context(event: Mapping[str, object]) -> None:
     source_delivery = event.get("source_delivery_id")
     if source_delivery is not None:
         _uuid(source_delivery)
-    if (capture_kind == "webhook") != (source_delivery is not None):
+    if capture_kind == "webhook" and source_delivery is None:
         _fail()
 
     authority = _version_ref(event.get("authority_binding"))

@@ -23,7 +23,7 @@ class OutcomeSchemaTests(unittest.TestCase):
             with managed_sqlite_connection(path) as connection:
                 names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 self.assertTrue(set(TABLE_DDL).issubset(names))
-                self.assertEqual(len(names), 55)
+                self.assertEqual(len(names), 56)
                 self.assertNotIn("outcome_transition_test_probe", names)
                 before = list(connection.iterdump())
             UsageStore(path).verify_ready()

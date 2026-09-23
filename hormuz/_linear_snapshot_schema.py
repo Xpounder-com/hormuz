@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 SNAPSHOT_RECEIPT_TABLE = "gateway_linear_snapshot_receipts"
 SNAPSHOT_CONTEXT_TABLE = "portfolio_linear_snapshot_context_events"
+SNAPSHOT_RETENTION_TABLE = "portfolio_linear_snapshot_context_retention_events"
 
 TABLE_DDL = {
     SNAPSHOT_RECEIPT_TABLE: """
@@ -66,6 +67,22 @@ TABLE_DDL = {
             REFERENCES {prefix}gateway_linear_snapshot_receipts
                 (organization_id, connector_id, receipt_id)
     """,
+    SNAPSHOT_RETENTION_TABLE: """
+        organization_id TEXT NOT NULL CHECK (length(organization_id) BETWEEN 1 AND 128),
+        connector_id TEXT NOT NULL CHECK (length(connector_id) BETWEEN 1 AND 128),
+        retention_event_id TEXT NOT NULL CHECK (length(retention_event_id) = 36),
+        target_context_event_id TEXT NOT NULL CHECK (length(target_context_event_id) = 36),
+        actor_id TEXT NOT NULL CHECK (length(actor_id) BETWEEN 1 AND 128),
+        reason_code TEXT NOT NULL CHECK (reason_code = 'tombstoned'),
+        observed_at TEXT NOT NULL,
+        ingested_at TEXT NOT NULL,
+        provenance_digest TEXT NOT NULL CHECK (length(provenance_digest) = 64),
+        evidence_json TEXT NOT NULL CHECK (length(evidence_json) BETWEEN 2 AND 65536),
+        PRIMARY KEY (organization_id, connector_id, retention_event_id),
+        FOREIGN KEY (organization_id, connector_id, target_context_event_id)
+            REFERENCES {prefix}portfolio_linear_snapshot_context_events
+                (organization_id, connector_id, context_event_id)
+    """,
 }
 
 INDEX_DDL = {
@@ -74,6 +91,9 @@ INDEX_DDL = {
     ),
     "portfolio_linear_snapshot_context_object_time": (
         f"{SNAPSHOT_CONTEXT_TABLE} (organization_id, connector_id, object_kind, object_id, commit_sequence DESC)"
+    ),
+    "portfolio_linear_snapshot_context_retention_target": (
+        f"{SNAPSHOT_RETENTION_TABLE} (organization_id, connector_id, target_context_event_id, ingested_at)"
     ),
 }
 
@@ -88,6 +108,9 @@ _CONFLICT_KEYS = {
         ("organization_id", "connector_id", "context_event_id"),
         ("organization_id", "commit_sequence"),
         ("organization_id", "connector_id", "source_fact_key_version", "source_fact_fingerprint"),
+    ),
+    SNAPSHOT_RETENTION_TABLE: (
+        ("organization_id", "connector_id", "retention_event_id"),
     ),
 }
 
@@ -138,11 +161,18 @@ WHEN NEW.entry_schema_version=2
                     AND source.evidence_json=NEW.event_json
               )
           )) OR
-          (NEW.source_schema_id='hormuz.linear-context-retention' AND EXISTS (
-              SELECT 1 FROM portfolio_linear_context_retention_events source
-              WHERE source.organization_id=NEW.organization_id
-                AND source.retention_event_id=NEW.source_event_id
-                AND source.evidence_json=NEW.event_json
+          (NEW.source_schema_id='hormuz.linear-context-retention' AND (
+              EXISTS (
+                  SELECT 1 FROM portfolio_linear_context_retention_events source
+                  WHERE source.organization_id=NEW.organization_id
+                    AND source.retention_event_id=NEW.source_event_id
+                    AND source.evidence_json=NEW.event_json
+              ) OR EXISTS (
+                  SELECT 1 FROM portfolio_linear_snapshot_context_retention_events source
+                  WHERE source.organization_id=NEW.organization_id
+                    AND source.retention_event_id=NEW.source_event_id
+                    AND source.evidence_json=NEW.event_json
+              )
           ))
       )
   )
@@ -171,6 +201,27 @@ WHEN EXISTS (
       )
 )
 BEGIN SELECT RAISE(ABORT, 'linear_context_cross_table_conflict'); END""",
+)
+
+_SQLITE_CROSS_RETENTION_TRIGGERS = (
+    """CREATE TRIGGER portfolio_linear_retention_webhook_identity_unique
+BEFORE INSERT ON portfolio_linear_context_retention_events
+WHEN EXISTS (
+    SELECT 1 FROM portfolio_linear_snapshot_context_retention_events other
+    WHERE other.organization_id=NEW.organization_id
+      AND other.connector_id=NEW.connector_id
+      AND other.retention_event_id=NEW.retention_event_id
+)
+BEGIN SELECT RAISE(ABORT, 'linear_retention_cross_table_conflict'); END""",
+    """CREATE TRIGGER portfolio_linear_retention_snapshot_identity_unique
+BEFORE INSERT ON portfolio_linear_snapshot_context_retention_events
+WHEN EXISTS (
+    SELECT 1 FROM portfolio_linear_context_retention_events other
+    WHERE other.organization_id=NEW.organization_id
+      AND other.connector_id=NEW.connector_id
+      AND other.retention_event_id=NEW.retention_event_id
+)
+BEGIN SELECT RAISE(ABORT, 'linear_retention_cross_table_conflict'); END""",
 )
 
 _SQLITE_SNAPSHOT_SET_TRIGGER = """CREATE TRIGGER gateway_linear_snapshot_page_set_consistent
@@ -212,6 +263,7 @@ def sqlite_statements() -> tuple[str, ...]:
             "BEGIN SELECT RAISE(ABORT, 'linear_snapshot_replace_refused'); END"
         )
     statements.extend(_SQLITE_CROSS_SEQUENCE_TRIGGERS)
+    statements.extend(_SQLITE_CROSS_RETENTION_TRIGGERS)
     statements.append(_SQLITE_SNAPSHOT_SET_TRIGGER)
     return tuple(statements)
 
@@ -352,6 +404,7 @@ def verify_postgres_linear_snapshot(cursor, schema: str, error_factory) -> None:
         "custody_audit_chain_source_event_json",
         "enforce_linear_snapshot_page_set",
         "enforce_linear_context_cross_capture",
+        "enforce_linear_retention_cross_capture",
     ):
         cursor.execute(
             "SELECT p.prosrc,p.prosecdef,p.proconfig FROM pg_proc p "
@@ -379,11 +432,19 @@ def verify_postgres_linear_snapshot(cursor, schema: str, error_factory) -> None:
                 "context_event_id",
                 "commit_sequence",
             )
+        elif function == "enforce_linear_retention_cross_capture":
+            required = (
+                "pg_advisory_xact_lock",
+                "portfolio_linear_context_retention_events",
+                SNAPSHOT_RETENTION_TABLE,
+                "retention_event_id",
+            )
         else:
             required = (
                 "hormuz.linear-snapshot-receipt",
                 SNAPSHOT_RECEIPT_TABLE,
                 SNAPSHOT_CONTEXT_TABLE,
+                SNAPSHOT_RETENTION_TABLE,
             )
         if (
             len(values) != 3
@@ -392,3 +453,60 @@ def verify_postgres_linear_snapshot(cursor, schema: str, error_factory) -> None:
             or values[2] != ["search_path=pg_catalog"]
         ):
             raise error_factory("storage_schema_partial_upgrade")
+    expected_triggers = {
+        (
+            "gateway_linear_snapshot_page_set_consistent",
+            SNAPSHOT_RECEIPT_TABLE,
+            "O",
+            7,
+            "enforce_linear_snapshot_page_set",
+            schema,
+        ),
+        (
+            "portfolio_linear_context_webhook_cross_capture",
+            "portfolio_linear_context_events",
+            "O",
+            7,
+            "enforce_linear_context_cross_capture",
+            schema,
+        ),
+        (
+            "portfolio_linear_context_snapshot_cross_capture",
+            SNAPSHOT_CONTEXT_TABLE,
+            "O",
+            7,
+            "enforce_linear_context_cross_capture",
+            schema,
+        ),
+        (
+            "portfolio_linear_retention_webhook_cross_capture",
+            "portfolio_linear_context_retention_events",
+            "O",
+            7,
+            "enforce_linear_retention_cross_capture",
+            schema,
+        ),
+        (
+            "portfolio_linear_retention_snapshot_cross_capture",
+            SNAPSHOT_RETENTION_TABLE,
+            "O",
+            7,
+            "enforce_linear_retention_cross_capture",
+            schema,
+        ),
+    }
+    cursor.execute(
+        "SELECT t.tgname,rel.relname,t.tgenabled,t.tgtype,p.proname,pn.nspname "
+        "FROM pg_trigger t JOIN pg_class rel ON rel.oid=t.tgrelid "
+        "JOIN pg_namespace n ON n.oid=rel.relnamespace "
+        "JOIN pg_proc p ON p.oid=t.tgfoid "
+        "JOIN pg_namespace pn ON pn.oid=p.pronamespace "
+        "WHERE n.nspname=%s AND NOT t.tgisinternal AND t.tgname=ANY(%s)",
+        (schema, [item[0] for item in expected_triggers]),
+    )
+    observed_triggers = {
+        tuple(row.values()) if isinstance(row, Mapping) else tuple(row)
+        for row in cursor.fetchall()
+    }
+    if observed_triggers != expected_triggers:
+        raise error_factory("storage_schema_partial_upgrade")

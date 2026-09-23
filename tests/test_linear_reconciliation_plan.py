@@ -43,7 +43,7 @@ class LinearReconciliationPlanTests(unittest.TestCase):
             (15, 20),
         )
         self.assertEqual(result["postgresql_acl"], list(verifier.EXPECTED_ACL))
-        self.assertEqual((result["table_count"], result["audit_source_count"]), (2, 2))
+        self.assertEqual((result["table_count"], result["audit_source_count"]), (3, 2))
         self.assertTrue(result["reconciliation_implemented"])
         self.assertFalse(result["live_workspace_authorized"])
         self.assertFalse(result["live_reconciliation_verified"])

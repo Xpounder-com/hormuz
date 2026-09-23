@@ -32,7 +32,7 @@ class BudgetSchemaTests(unittest.TestCase):
                     )
                 }
                 self.assertTrue(set(TABLE_DDL).issubset(tables))
-                self.assertEqual(len(tables), 55)
+                self.assertEqual(len(tables), 56)
                 self.assertEqual(
                     connection.execute(
                         "SELECT state FROM hormuz_schema_migrations WHERE version=9"

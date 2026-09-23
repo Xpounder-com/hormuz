@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import sqlite3
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -29,7 +30,7 @@ from hormuz.outcome_connector_config import (
 )
 from hormuz.outcome_wire import REQUEST_BYTES
 from hormuz.portfolio_repository import create_portfolio_repository
-from hormuz.portfolio_wire import PortfolioError
+from hormuz.portfolio_wire import PortfolioError, canonical
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
 
@@ -73,6 +74,7 @@ SNAPSHOT_SECRET = "synthetic-linear-snapshot-secret-12345678"
 RECONCILIATION = "90000000-0000-4000-8000-000000000001"
 SNAPSHOT = "90000000-0000-4000-8000-000000000002"
 PAGE = "90000000-0000-4000-8000-000000000003"
+RETENTION = "90000000-0000-4000-8000-000000000010"
 
 
 def snapshot_document() -> dict:
@@ -136,6 +138,23 @@ def snapshot_headers(raw: bytes, *, secret: str = SNAPSHOT_SECRET, now_ms: int =
     return {
         "X-Hormuz-Linear-Snapshot-Signature": signature,
         "X-Hormuz-Linear-Snapshot-Timestamp": timestamp_value,
+    }
+
+
+def snapshot_retention_event(target_context_event_id: str) -> dict:
+    return {
+        "schema_id": "hormuz.linear-context-retention",
+        "schema_version": 1,
+        "organization_id": "acme",
+        "connector_id": "linear-one",
+        "retention_event_id": RETENTION,
+        "target_context_event_id": target_context_event_id,
+        "actor_id": "alice",
+        "reader_role": "portfolio_admin",
+        "reason_code": "tombstoned",
+        "observed_at": "2026-09-23T12:01:00.000000Z",
+        "ingested_at": "2026-09-23T12:01:00.000000Z",
+        "provenance_digest": "a" * 64,
     }
 
 
@@ -252,6 +271,20 @@ class LinearSnapshotConfigAndAuthenticationTests(unittest.TestCase):
                 )
             self.assertEqual(caught.exception.code, "invalid_request")
 
+    def test_lifecycle_and_state_timestamps_cannot_exceed_capture_time(self):
+        for field in ("archivedAt", "completedAt", "canceledAt", "startedAt"):
+            value = snapshot_payload()
+            value["items"][0]["data"][field] = "2026-09-23T12:00:01Z"
+            raw = encoded(value)
+            verified, body = self.authenticator.authenticate(
+                snapshot_headers(raw),
+                raw,
+                now_ms=NOW_MS,
+            )
+            with self.subTest(field=field), self.assertRaises(PortfolioError) as caught:
+                self.adapter.normalize(verified, body)
+            self.assertEqual(caught.exception.code, "invalid_request")
+
 
 class LinearSnapshotSQLiteRuntimeTests(unittest.TestCase):
     def setUp(self):
@@ -300,7 +333,7 @@ class LinearSnapshotSQLiteRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(
             (context["capture_kind"], context["source_delivery_id"]),
-            ("authorized_snapshot", None),
+            ("authorized_snapshot", PAGE),
         )
         validate_linear_evidence("hormuz.linear-context-event", context)
         sources = [
@@ -375,6 +408,7 @@ class LinearSnapshotSQLiteRuntimeTests(unittest.TestCase):
             page[field] = value
             if field == "captured_at":
                 page["items"][0]["data"]["updatedAt"] = value
+                page["items"][0]["data"]["startedAt"] = value
             with self.subTest(field=field), self.assertRaises(PortfolioError) as caught:
                 self.ingest(page)
             self.assertEqual(caught.exception.code, "idempotency_conflict")
@@ -409,6 +443,7 @@ class LinearSnapshotSQLiteRuntimeTests(unittest.TestCase):
 
     def test_webhook_and_snapshot_share_ordering_without_duplicate_context(self):
         update = payload(action="update", updatedFrom={"title": "before"})
+        update["createdAt"] = "2026-09-23T11:59:00Z"
         raw = encoded(update)
         webhook_receipt = self.webhook.ingest(
             signed(raw),
@@ -445,6 +480,99 @@ class LinearSnapshotSQLiteRuntimeTests(unittest.TestCase):
             (webhook_context["commit_sequence"], snapshot_context["commit_sequence"]),
             (1, 2),
         )
+        self.assertNotEqual(
+            webhook_context["event_at"],
+            webhook_context["revision"]["value"],
+        )
+
+    def test_snapshot_context_retention_is_fk_bound_and_auditable(self):
+        self.ingest()
+        context_id = self.rows("portfolio_linear_snapshot_context_events")[0][
+            "context_event_id"
+        ]
+        event = snapshot_retention_event(context_id)
+        validate_linear_evidence("hormuz.linear-context-retention", event)
+        with self.repositories.linear._transaction(
+            "acme",
+            time.monotonic() + 4,
+        ) as sql:
+            sql.insert("portfolio_linear_snapshot_context_retention_events", {
+                "organization_id": event["organization_id"],
+                "connector_id": event["connector_id"],
+                "retention_event_id": event["retention_event_id"],
+                "target_context_event_id": event["target_context_event_id"],
+                "actor_id": event["actor_id"],
+                "reason_code": event["reason_code"],
+                "observed_at": event["observed_at"],
+                "ingested_at": event["ingested_at"],
+                "provenance_digest": event["provenance_digest"],
+                "evidence_json": canonical(event),
+            })
+            self.repositories.linear._append_audit(
+                sql,
+                event,
+                "hormuz.linear-context-retention",
+            )
+        self.assertEqual(
+            len(self.rows("portfolio_linear_snapshot_context_retention_events")),
+            1,
+        )
+        self.assertIn(
+            RETENTION,
+            {
+                row["source_event_id"]
+                for row in self.rows("gateway_audit_chain_entries")
+                if row["source_schema_id"] == "hormuz.linear-context-retention"
+            },
+        )
+
+        invalid = dict(self.rows("portfolio_linear_snapshot_context_retention_events")[0])
+        invalid.update({
+            "retention_event_id": "90000000-0000-4000-8000-000000000011",
+            "target_context_event_id": "90000000-0000-4000-8000-000000000012",
+        })
+        connection = sqlite3.connect(self.config.database_path)
+        try:
+            connection.execute("PRAGMA foreign_keys=ON")
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "INSERT INTO portfolio_linear_snapshot_context_retention_events ("
+                    + ",".join(invalid)
+                    + ") VALUES ("
+                    + ",".join("?" for _ in invalid)
+                    + ")",
+                    tuple(invalid.values()),
+                )
+        finally:
+            connection.close()
+
+        webhook_value = payload(action="create")
+        raw = encoded(webhook_value)
+        self.webhook.ingest(signed(raw), raw, now_ms=NOW_MS)
+        webhook_context_id = self.rows("portfolio_linear_context_events")[0][
+            "context_event_id"
+        ]
+        collision = dict(
+            self.rows("portfolio_linear_snapshot_context_retention_events")[0]
+        )
+        collision["target_context_event_id"] = webhook_context_id
+        connection = sqlite3.connect(self.config.database_path)
+        try:
+            connection.execute("PRAGMA foreign_keys=ON")
+            with self.assertRaisesRegex(
+                sqlite3.IntegrityError,
+                "linear_retention_cross_table_conflict",
+            ):
+                connection.execute(
+                    "INSERT INTO portfolio_linear_context_retention_events ("
+                    + ",".join(collision)
+                    + ") VALUES ("
+                    + ",".join("?" for _ in collision)
+                    + ")",
+                    tuple(collision.values()),
+                )
+        finally:
+            connection.close()
 
     def test_context_audit_failure_rolls_back_the_complete_page(self):
         original = self.repositories.linear._append_audit

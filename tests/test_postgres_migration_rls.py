@@ -609,8 +609,8 @@ class PostgresMigrationRLSTests(PostgresTestCase):
         self._assert_managed_bootstrap(
             20,
             (
-                219,
-                "a5aedcd593573c5d55f783904046d993bc6f2e0ddd03a48ed098c9498cd2adac",
+                222,
+                "cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d",
             ),
             None,
         )

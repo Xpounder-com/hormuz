@@ -118,7 +118,7 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         self.assertEqual(UsageStore.schema_version, 15)
         for _ in range(2):
             UsageStore(self.path).verify_ready()
-            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 55)
+            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 56)
             self.assert_v1_preserved()
 
     def test_sqlite_registry_failure_rolls_back_and_retry_preserves_v1_rows(self) -> None:

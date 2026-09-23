@@ -140,7 +140,7 @@ class PostgresLinearConnectorRuntimeTests(PostgresTestCase):
                 "SELECT count(*) FROM pg_tables WHERE schemaname=%s",
                 (self.schema,),
             ).fetchone()[0]
-        self.assertEqual(table_count, 78)
+        self.assertEqual(table_count, 79)
 
         accepted = self.ingest()
         self.assertEqual(

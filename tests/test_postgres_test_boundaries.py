@@ -120,7 +120,9 @@ EXPECTED_OWNERS = {
         {
             "test_concurrent_pages_commit_one_context_and_all_receipts",
             "test_cross_capture_sequence_and_identity_are_storage_enforced",
+            "test_runtime_verifier_rejects_missing_retention_identity_trigger",
             "test_schema20_restricted_commit_replay_rls_audit_and_no_outcome",
+            "test_snapshot_context_retention_is_fk_bound_and_auditable",
             "test_snapshot_page_set_consistency_is_storage_enforced",
         },
     ),
@@ -249,7 +251,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 125)
+        self.assertEqual(len(owned), 127)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

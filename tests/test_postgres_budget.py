@@ -154,7 +154,7 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
                     (self.schema, BUDGET_AUDIT_REPORT_INDEX),
                 ).fetchall()
             )
-            self.assertEqual(count, 78)
+            self.assertEqual(count, 79)
         self.assertEqual(index_columns, BUDGET_AUDIT_REPORT_COLUMNS)
         actual = resources.files("hormuz").joinpath(
             "migrations/postgresql/0013_work_budgets.sql"

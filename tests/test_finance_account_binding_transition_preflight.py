@@ -231,8 +231,8 @@ POPULATED_TABLES = (
 # never derived as expectations from the database under test.  This cumulative
 # deployment probe follows the current schema-20 baseline after the Linear
 # reconciliation migration rather than freezing the historical schema-19 ACL.
-PROPOSED_ACL = (219, "a5aedcd593573c5d55f783904046d993bc6f2e0ddd03a48ed098c9498cd2adac")
-INJECTED_ACL = (220, "d154fee320e8fe4280a16e836f4ec30422d3fc9d3fd04844272b516875fe88f1")
+PROPOSED_ACL = (222, "cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d")
+INJECTED_ACL = (223, "012a3b9915df3000feab05f408ee27a1fae18e6f14cf773d665f8ee498dcbb11")
 PINNED = bool(os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_PYTHON")
               and os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_SOURCE"))
 

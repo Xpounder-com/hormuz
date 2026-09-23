@@ -244,8 +244,8 @@ python tools/verify_linear_reconciliation_plan.py
 ```
 
 PostgreSQL qualification must use an owned disposable schema with the restricted
-runtime role and reproduce the fixed schema-20 boundary of 219 canonical
+runtime role and reproduce the fixed schema-20 boundary of 222 canonical
 non-owner ACL entries at
-`a5aedcd593573c5d55f783904046d993bc6f2e0ddd03a48ed098c9498cd2adac`.
+`cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d`.
 Live Linear proof remains open until an owner-selected workspace and webhook
 are authorized.
