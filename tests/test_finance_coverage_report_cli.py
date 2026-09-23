@@ -11,9 +11,15 @@ import tempfile
 import unittest
 from unittest import mock
 
+from hormuz._finance_account_binding_schema import QUERY_AUDIT_TABLE
 from hormuz.cli import build_parser
 from hormuz.commands import finance as finance_commands
-from hormuz.finance_collection import CollectionQuery, normalize_collection_pages
+from hormuz.finance_account_evidence import QUERY_AUDIT_SCHEMA_ID
+from hormuz.finance_collection import (
+    CollectionQuery,
+    FinanceCollectionError,
+    normalize_collection_pages,
+)
 from hormuz.finance_collection_repository import create_finance_collection_repository
 from hormuz.portfolio_config import PortfolioPrincipal
 from hormuz.store import UsageStore
@@ -31,6 +37,7 @@ else:
 
 
 ADMIN = PortfolioPrincipal("acme", "alice", ("portfolio_admin",))
+OTHER_ADMIN = PortfolioPrincipal("beta", "bob", ("portfolio_admin",))
 PROFILE = "openai.organization-costs.v1"
 
 
@@ -49,12 +56,13 @@ class FinanceCoverageReportCLITests(unittest.TestCase):
         self.end = (start + timedelta(days=1)).isoformat().replace("+00:00", "Z")
         self.environment = {"HORMUZ_PORTFOLIO_TOKEN": ADMIN_TOKEN}
 
-    def invoke(self, *extra: str, environment=None, dependencies=None):
+    def invoke(self, *extra: str, environment=None, dependencies=None, output=None):
         args = self.parser.parse_args([
             "finance", "report", "source-a", "1", PROFILE, self.start, self.end,
             "--currency", "USD", *extra,
         ])
-        stdout, stderr = io.StringIO(), io.StringIO()
+        stdout = io.StringIO() if output is None else output
+        stderr = io.StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
             status = finance_commands.run(
                 self.config, args, dependencies,
@@ -120,6 +128,7 @@ class FinanceCoverageReportCLITests(unittest.TestCase):
                 connection.execute("SELECT count(*) FROM gateway_audit_chain_entries").fetchone()[0],
                 connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0],
                 connection.execute("SELECT count(*) FROM gateway_finance_attempt_evidence").fetchone()[0],
+                connection.execute(f"SELECT count(*) FROM {QUERY_AUDIT_TABLE}").fetchone()[0],
             )
         dependencies = finance_commands.FinanceCommandDependencies(
             resolve_credentials=mock.Mock(side_effect=AssertionError("provider credentials opened")),
@@ -130,6 +139,7 @@ class FinanceCoverageReportCLITests(unittest.TestCase):
         report = json.loads(stdout)
         self.assertEqual((report["schema_id"], report["reader_role"]),
                          ("hormuz.finance-coverage-report", "portfolio_admin"))
+        self.assertIsInstance(report["query_audit_event_id"], str)
         self.assertEqual(report["terminal_attempts_missing_sidecar_count"], 0)
         self.assertEqual(report["selected_snapshot_provenance"], [{
             "snapshot_id": receipt.snapshot_id,
@@ -156,8 +166,25 @@ class FinanceCoverageReportCLITests(unittest.TestCase):
                 connection.execute("SELECT count(*) FROM gateway_audit_chain_entries").fetchone()[0],
                 connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0],
                 connection.execute("SELECT count(*) FROM gateway_finance_attempt_evidence").fetchone()[0],
+                connection.execute(f"SELECT count(*) FROM {QUERY_AUDIT_TABLE}").fetchone()[0],
             )
-        self.assertEqual(after, before)
+            row = connection.execute(
+                f"SELECT evidence_json FROM {QUERY_AUDIT_TABLE} "
+                "WHERE organization_id=? AND query_event_id=?",
+                ("acme", report["query_audit_event_id"]),
+            ).fetchone()
+        self.assertEqual(after, (before[0] + 1, before[1], before[2], before[3] + 1))
+        event = json.loads(row[0])
+        self.assertEqual(event["schema_id"], QUERY_AUDIT_SCHEMA_ID)
+        self.assertEqual(event["actor_id"], "alice")
+        self.assertEqual(event["query_class"], "finance_coverage_report_v1")
+        self.assertEqual(event["query_event_id"], report["query_audit_event_id"])
+        self.assertEqual(event["currency"], "USD")
+        self.assertEqual(event["selected_snapshot_count"], 1)
+        self.assertEqual(event["coverage_bucket_count"], 1)
+        self.assertEqual(event["provider_observation_count"], 1)
+        self.assertEqual(event["terminal_attempt_count"], 2)
+        self.assertEqual(event["terminal_attempts_missing_sidecar_count"], 0)
 
     def test_explicit_cutoff_replays_prior_cost_after_empty_refresh(self):
         first = self.seed_cost(idempotency_key="first", records=[openai_cost()])
@@ -200,6 +227,23 @@ class FinanceCoverageReportCLITests(unittest.TestCase):
     def test_other_tenant_admin_cannot_read_cost_or_attempts(self):
         self.seed_cost(idempotency_key="first", records=[openai_cost()])
         self.seed_attempt()
+        self.repository.bind_source(
+            OTHER_ADMIN,
+            {
+                "schema_id": "hormuz.finance-source-binding-request",
+                "schema_version": 1,
+                "binding_id": "source-a",
+                "expected_version": None,
+                "provider": "openai",
+                "provider_account_reference_id": "other-provider-account",
+                "scope": {"kind": "organization", "ids": []},
+                "credential_reference_version": 1,
+                "fingerprint_key_version": 1,
+                "state": "active",
+                "reason_code": "created",
+            },
+            fingerprint_key=KEY,
+        )
         status, stdout, stderr = self.invoke(
             environment={"HORMUZ_PORTFOLIO_TOKEN": OTHER_TOKEN},
         )
@@ -209,6 +253,78 @@ class FinanceCoverageReportCLITests(unittest.TestCase):
         self.assertIsNone(preview["provider_cost"]["known_subtotal"])
         self.assertIsNone(preview["gateway_estimate"]["known_subtotal"])
         self.assertEqual(preview["gateway_estimate"]["attempt_count"], 0)
+
+    def test_query_audit_failure_rolls_back_before_report_delivery(self):
+        self.seed_cost(idempotency_key="first", records=[openai_cost()])
+        with mock.patch(
+            "hormuz.finance_collection_repository._append_audit",
+            side_effect=FinanceCollectionError("unavailable"),
+        ):
+            status, stdout, stderr = self.invoke()
+        self.assertEqual((status, stdout), (2, ""))
+        self.assertEqual(json.loads(stderr), {"error": {"code": "unavailable"}})
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            self.assertEqual(
+                connection.execute(f"SELECT count(*) FROM {QUERY_AUDIT_TABLE}").fetchone()[0],
+                0,
+            )
+
+    def test_query_audit_commits_before_report_delivery(self):
+        self.seed_cost(idempotency_key="first", records=[openai_cost()])
+        test_case = self
+
+        class CommitAwareOutput(io.StringIO):
+            checked = False
+
+            def write(self, value):
+                if value and not self.checked:
+                    with managed_sqlite_connection(
+                        test_case.config.database_path
+                    ) as connection:
+                        test_case.assertEqual(
+                            connection.execute(
+                                f"SELECT count(*) FROM {QUERY_AUDIT_TABLE}"
+                            ).fetchone()[0],
+                            1,
+                        )
+                    self.checked = True
+                return super().write(value)
+
+        output = CommitAwareOutput()
+        status, stdout, stderr = self.invoke(output=output)
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertTrue(output.checked)
+        self.assertEqual(json.loads(stdout)["query_audit_event_id"].count("-"), 4)
+
+    def test_authorization_change_rolls_back_query_audit_before_delivery(self):
+        self.seed_cost(idempotency_key="first", records=[openai_cost()])
+        authorize = self.repository._authorize
+        calls = 0
+
+        def revoked_before_commit(principal):
+            nonlocal calls
+            calls += 1
+            if calls == 4:
+                raise FinanceCollectionError("forbidden")
+            authorize(principal)
+
+        dependencies = finance_commands.FinanceCommandDependencies(
+            create_repository=mock.Mock(return_value=self.repository),
+        )
+        with mock.patch.object(
+            self.repository,
+            "_authorize",
+            side_effect=revoked_before_commit,
+        ):
+            status, stdout, stderr = self.invoke(dependencies=dependencies)
+        self.assertEqual(calls, 4)
+        self.assertEqual((status, stdout), (2, ""))
+        self.assertEqual(json.loads(stderr), {"error": {"code": "forbidden"}})
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            self.assertEqual(
+                connection.execute(f"SELECT count(*) FROM {QUERY_AUDIT_TABLE}").fetchone()[0],
+                0,
+            )
 
     def test_invalid_window_and_cutoff_fail_without_provider_access(self):
         for option in (("--as-of-commit-sequence", "-1"),):

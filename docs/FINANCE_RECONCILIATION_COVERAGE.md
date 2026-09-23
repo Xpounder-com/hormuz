@@ -39,17 +39,21 @@ numeric subtotals. It does not emit native usage payload JSON, credentials,
 provider account identifiers, prompt or response content, or raw provider
 line items.
 
-This draft command does **not** commit a metadata-only query audit before
-delivering a successful privileged read. The verified audit sources above prove
-the provenance of stored finance evidence, not who queried this report. Issue
-[#223](https://github.com/Xpounder-com/hormuz/issues/223) requires query class,
-bounded scope, and result-count metadata for every privileged read. The
-existing finance collection reads share this gap. The current rate-card read
-audit is bound to an exact card/version and cannot represent this report's
-query metadata; the v2 gateway audit chain accepts a finite source-event union
-that does not include read queries. A durable, commit-before-delivery read-audit
-contract and SQLite/PostgreSQL proof are required before this CLI is release
-qualified. This draft adds no substitute log-based audit claim.
+Before returning a successful result, the repository builds the bounded preview
+and appends a strict `hormuz.finance-query-audit-event` plus its v2 audit-chain
+entry in the same tenant transaction. The event contains only the actor, fixed
+query class, source-binding coordinates, requested window and currency,
+collection cutoff, result counts, and occurrence time. The response returns the
+committed `query_audit_event_id` as a receipt. An audit-source mismatch, insert
+failure, authorization change, or chain failure rolls the transaction back and
+the CLI emits no report. The append-only table has forced PostgreSQL RLS and the
+runtime role has only `SELECT` and `INSERT`; SQLite and PostgreSQL both require
+the exact canonical source row before the chain entry can commit.
+
+This qualifies the `finance report` read only. Other finance, platform, team,
+pagination, export, and API reads required by issue
+[#223](https://github.com/Xpounder-com/hormuz/issues/223) still need their own
+bounded query contracts and commit-before-delivery audit proof.
 
 The preview keeps the selected provider cost aggregate and the original gateway
 configured-rate estimate in different fields with different cost-basis labels.
@@ -85,9 +89,9 @@ it does not prove complete provider-account coverage. Similarly,
 `terminal_attempts_missing_sidecar_count` must be read alongside it. Pending
 attempts have no terminal cost and are outside both counts. The preview has no
 team, actor, or application attribution, independent bypass evidence, approved
-allocation, threshold policy, or invoice fact. Those requirements, the actual
-account binding and comparable period
-contract, PostgreSQL transition/recovery, live OpenAI finance evidence, #214,
+allocation, threshold policy, or invoice fact. Those requirements, an
+account-matched comparable-period
+contract, live OpenAI finance evidence, #214,
 [#223](https://github.com/Xpounder-com/hormuz/issues/223), and #225 remain
 open before #8 or v1.3.0 can close.
 

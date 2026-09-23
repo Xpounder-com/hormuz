@@ -26,11 +26,7 @@ from ..finance_collection_repository import (
     FinanceCollectionRepository,
     create_finance_collection_repository,
 )
-from ..finance_reconciliation_coverage import (
-    FinanceCoveragePreviewError,
-    build_finance_coverage_preview,
-)
-from ..finance_values import FinanceValueError, currency_code
+from ..finance_reconciliation_coverage import FinanceCoveragePreviewError
 from ..finance_account_registration import (
     MAX_ACCOUNT_BINDING_REQUEST_BYTES,
     AccountBindingRequestError,
@@ -199,31 +195,23 @@ def run(
             )
         elif args.finance_command == "report":
             repository = dependencies.create_repository(config, environ=environment)
-            try:
-                if currency_code(args.currency) != args.currency:
-                    raise FinanceValueError("finance_invalid_amount")
-            except FinanceValueError:
-                raise FinanceCollectionError("invalid_request") from None
-            view, events, missing_sidecars, provenance = repository.coverage_report_evidence(
-                principal,
-                binding_id=args.binding_id,
-                binding_version=args.binding_version,
-                collection_profile=args.collection_profile,
-                start_at=args.query_start_at,
-                end_at=args.query_end_at,
-                as_of_commit_sequence=args.as_of_commit_sequence,
-            )
-            preview = build_finance_coverage_preview(
-                provider_view=view,
-                gateway_attempt_events=events,
-                start_at=args.query_start_at,
-                end_at=args.query_end_at,
-                currency=args.currency,
+            preview, missing_sidecars, provenance, query_event_id = (
+                repository.coverage_report_evidence(
+                    principal,
+                    binding_id=args.binding_id,
+                    binding_version=args.binding_version,
+                    collection_profile=args.collection_profile,
+                    start_at=args.query_start_at,
+                    end_at=args.query_end_at,
+                    currency=args.currency,
+                    as_of_commit_sequence=args.as_of_commit_sequence,
+                )
             )
             result = {
                 "schema_id": "hormuz.finance-coverage-report",
                 "schema_version": 1,
                 "reader_role": "portfolio_admin",
+                "query_audit_event_id": query_event_id,
                 "terminal_attempts_missing_sidecar_count": missing_sidecars,
                 "selected_snapshot_provenance": provenance,
                 "preview": asdict(preview),

@@ -9,7 +9,7 @@ import hashlib
 import hmac
 import json
 import os
-from typing import Any, Iterator, Mapping
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
 from uuid import uuid4
 
 from ._finance_collection_schema import (
@@ -22,7 +22,8 @@ from ._finance_collection_schema import (
     TABLE_DDL,
     USAGE_TABLE,
 )
-from ._portfolio_sql import portfolio_transaction
+from ._finance_account_binding_schema import QUERY_AUDIT_TABLE
+from ._portfolio_sql import FINANCE_COLLECTION_ACCOUNT_TABLES, portfolio_transaction
 from .audit_chain import (
     AuditChainError,
     AuditChainSource,
@@ -46,9 +47,17 @@ from .finance_collection import (
     _digest as _collection_digest,
 )
 from .finance_attempts import finance_attempt_event_from_row
+from .finance_account_evidence import (
+    QUERY_AUDIT_SCHEMA_ID,
+    validate_finance_query_audit_event,
+)
+from .finance_values import FinanceValueError, currency_code
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import PortfolioError
 from .postgres import POSTGRES_SCHEMA_VERSION, PostgresConnectionPool
+
+if TYPE_CHECKING:
+    from .finance_reconciliation_coverage import FinanceCoveragePreview
 
 
 # Schema 17 implements the separately approved fixed 199-permission boundary.
@@ -220,6 +229,8 @@ class FinanceCollectionRepository:
     def _transaction(
         self,
         principal: PortfolioPrincipal,
+        *,
+        include_query_audit: bool = False,
     ) -> Iterator[Any]:
         self._authorize(principal)
         if (
@@ -233,7 +244,11 @@ class FinanceCollectionRepository:
                 principal.organization_id,
                 dsn=self._dsn,
                 connection_pool=self._pool,
-                tables=TABLE_DDL,
+                tables=(
+                    FINANCE_COLLECTION_ACCOUNT_TABLES
+                    if include_query_audit
+                    else TABLE_DDL
+                ),
                 statement_timeout_ms=10_000,
             ) as sql:
                 self._authorize(principal)
@@ -894,23 +909,30 @@ class FinanceCollectionRepository:
         collection_profile: str,
         start_at: str,
         end_at: str,
+        currency: str,
         as_of_commit_sequence: int | None = None,
     ) -> tuple[
-        AsOfCollectionView,
-        tuple[Mapping[str, object], ...],
+        FinanceCoveragePreview,
         int,
         tuple[Mapping[str, str], ...],
+        str,
     ]:
         """Read a cost selection and every terminal sidecar in one tenant transaction.
 
         The integer counts terminal attempts without a finance sidecar. The
-        final tuple carries the stored source origin and scope provenance for
-        each selected cost snapshot.
+        provenance tuple carries the stored source origin and scope for each
+        selected cost snapshot. The final string is the committed query-audit
+        event receipt.
         Neither the selected provider aggregate nor an attempt is assigned to
         a provider account by this read.
         """
 
         self._authorize(principal)
+        try:
+            if currency_code(currency) != currency:
+                raise FinanceValueError("finance_invalid_amount")
+        except FinanceValueError:
+            raise FinanceCollectionError("invalid_request") from None
         _validate_collection_selection(binding_id, binding_version, collection_profile)
         if PROFILE_SPECS[collection_profile].source_kind != "cost":
             raise FinanceCollectionError("invalid_request")
@@ -932,9 +954,12 @@ class FinanceCollectionRepository:
             "openai": "openai.responses.usage.v1",
             "anthropic": "anthropic.messages.usage.v1",
         }[PROFILE_SPECS[collection_profile].provider]
-        from .finance_reconciliation_coverage import MAX_PREVIEW_ROWS
+        from .finance_reconciliation_coverage import (
+            MAX_PREVIEW_ROWS,
+            build_finance_coverage_preview,
+        )
 
-        with self._transaction(principal) as sql:
+        with self._transaction(principal, include_query_audit=True) as sql:
             maximum = sql.one(
                 f"SELECT COALESCE(MAX(commit_sequence),0) AS sequence "
                 f"FROM {SNAPSHOT_TABLE} WHERE organization_id=?",
@@ -1071,7 +1096,41 @@ class FinanceCollectionRepository:
                 principal.organization_id, binding_id, binding_version,
                 collection_profile, cutoff, snapshots, coverage, observations,
             )
-            return view, tuple(events), missing_sidecars, tuple(selected_provenance)
+            event_values = tuple(events)
+            preview = build_finance_coverage_preview(
+                provider_view=view,
+                gateway_attempt_events=event_values,
+                start_at=start_at,
+                end_at=end_at,
+                currency=currency,
+            )
+            query_event_id = str(uuid4())
+            _append_query_audit(
+                sql,
+                event={
+                    "schema_id": QUERY_AUDIT_SCHEMA_ID,
+                    "schema_version": 1,
+                    "organization_id": principal.organization_id,
+                    "query_event_id": query_event_id,
+                    "actor_id": principal.actor_id,
+                    "query_class": "finance_coverage_report_v1",
+                    "binding_id": binding_id,
+                    "binding_version": binding_version,
+                    "collection_profile": collection_profile,
+                    "query_start_at": start_at,
+                    "query_end_at": end_at,
+                    "as_of_commit_sequence": cutoff,
+                    "currency": currency,
+                    "selected_snapshot_count": len(snapshots),
+                    "coverage_bucket_count": len(coverage),
+                    "provider_observation_count": len(observations),
+                    "terminal_attempt_count": len(terminal_rows),
+                    "terminal_attempts_missing_sidecar_count": missing_sidecars,
+                    "occurred_at": sql.now(),
+                },
+            )
+            self._authorize(principal)
+            return preview, missing_sidecars, tuple(selected_provenance), query_event_id
 
 
 def _validate_collection_selection(
@@ -1533,6 +1592,31 @@ def _receipt_for_attempt(
         None if row["supersedes_snapshot_id"] is None else str(row["supersedes_snapshot_id"]),
         int(row["commit_sequence"]),
         str(row["occurred_at"]),
+    )
+
+
+def _append_query_audit(
+    sql: Any,
+    *,
+    event: Mapping[str, object],
+) -> None:
+    try:
+        validate_finance_query_audit_event(event)
+        event_id = str(event["query_event_id"])
+        evidence_json = canonical_json_text(dict(event))
+    except (AuditChainError, KeyError, TypeError, ValueError):
+        raise FinanceCollectionError("unavailable") from None
+    row = {
+        key: value
+        for key, value in event.items()
+        if key not in {"schema_id", "schema_version"}
+    }
+    row["evidence_json"] = evidence_json
+    sql.insert(QUERY_AUDIT_TABLE, row)
+    _append_audit(
+        sql,
+        event=event,
+        source=AuditChainSource(QUERY_AUDIT_SCHEMA_ID, 1, event_id),
     )
 
 

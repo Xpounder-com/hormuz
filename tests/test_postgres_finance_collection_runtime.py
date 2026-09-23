@@ -19,6 +19,11 @@ from hormuz.finance_collection import CollectionQuery, FinanceCollectionError, n
 from hormuz.portfolio_config import PortfolioPrincipal
 from hormuz.postgres import PostgresStorageError, postgres_transaction
 from hormuz._finance_collection_schema import TABLE_DDL
+from hormuz._finance_account_binding_schema import (
+    QUERY_AUDIT_TABLE,
+    TABLE_DDL as FINANCE_ACCOUNT_TABLE_DDL,
+)
+from hormuz.finance_account_evidence import QUERY_AUDIT_SCHEMA_ID
 from hormuz.cli import build_parser
 from hormuz.commands import finance as finance_commands
 
@@ -70,7 +75,7 @@ class PostgresFinanceCollectionRuntimeTests(PostgresTestCase):
         )
 
     def count(self, table):
-        self.assertIn(table, TABLE_DDL)
+        self.assertIn(table, {**TABLE_DDL, **FINANCE_ACCOUNT_TABLE_DDL})
         with self.transaction() as connection:
             return connection.execute(f"SELECT count(*) AS n FROM {table}").fetchone()["n"]
 
@@ -257,6 +262,7 @@ class PostgresFinanceCollectionRuntimeTests(PostgresTestCase):
             )
         self.assertEqual((status, stderr.getvalue()), (0, ""))
         report = json.loads(stdout.getvalue())
+        self.assertIsInstance(report["query_audit_event_id"], str)
         self.assertEqual(report["preview"]["provider_cost"]["known_subtotal"], "1.25")
         self.assertEqual(report["preview"]["gateway_estimate"]["known_subtotal"], "0.000035")
         self.assertEqual(report["preview"]["gateway_estimate"]["attempt_count"], 1)
@@ -267,6 +273,27 @@ class PostgresFinanceCollectionRuntimeTests(PostgresTestCase):
             "scope_provenance": "customer_supplied_scope_unverified",
         }])
         self.assertIsNone(report["preview"]["signed_variance"])
+        self.assertEqual(self.count(QUERY_AUDIT_TABLE), 1)
+        with self.transaction() as connection:
+            query = connection.execute(
+                f"SELECT evidence_json FROM {QUERY_AUDIT_TABLE} "
+                "WHERE organization_id=%s AND query_event_id=%s",
+                ("acme", report["query_audit_event_id"]),
+            ).fetchone()
+            chain = connection.execute(
+                "SELECT event_json FROM gateway_audit_chain_entries "
+                "WHERE organization_id=%s AND source_schema_id=%s "
+                "AND source_schema_version=1 AND source_event_id=%s",
+                ("acme", QUERY_AUDIT_SCHEMA_ID, report["query_audit_event_id"]),
+            ).fetchone()
+        self.assertEqual(query["evidence_json"], chain["event_json"])
+        event = json.loads(query["evidence_json"])
+        self.assertEqual(event["actor_id"], "alice")
+        self.assertEqual(event["selected_snapshot_count"], 1)
+        self.assertEqual(event["coverage_bucket_count"], 1)
+        self.assertEqual(event["provider_observation_count"], 1)
+        self.assertEqual(event["terminal_attempt_count"], 1)
+        self.assertEqual(event["terminal_attempts_missing_sidecar_count"], 0)
 
     def test_authorization_precedes_connection_and_revocation_rolls_back(self):
         viewer = PortfolioPrincipal("acme", "finance", ("finance_viewer",))
