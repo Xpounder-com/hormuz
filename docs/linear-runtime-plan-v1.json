@@ -118,7 +118,7 @@
     "tests/test_sqlite_budget_transition.py": "0791cfa62703a744985a2afbcf2164b5c1e12ca058e9f53da693fb62ba23274c",
     "tests/test_sqlite_finance.py": "5f5bcebcf5bcccd744582a1a5c87f05e122d9aba69b9e11fa8ecd197ee3c58e6",
     "tests/test_sqlite_finance_collection_transition.py": "21baa854273830ee24ab2e778977ca2e11b5f22d09d6c6c6a8ff445b3d07f0d5",
-    "tests/test_sqlite_finance_native_attempt_transition.py": "dc3cb525a3c432391d8307ebbaa0449e20f981fd6e7b5119f22644068f2d4508",
+    "tests/test_sqlite_finance_native_attempt_transition.py": "d64fa3c08147ccbc6c9eb76f1812db8b542822b18cc9074073c3a8d6612b16b5",
     "tests/test_sqlite_finance_transition.py": "2d7fb3245c35320d3d255ec87234236892ee6084d21980fa898ca6042eaf3564",
     "tests/test_sqlite_outcome_transition.py": "2f106bf15d22c2f6da09c05b9cc51f2b348815a53a5e6b0f0f753a377822d4e4",
     "tests/test_sqlite_registry_transition.py": "9fe5367e81289675ca3282ce1d082f0384f0a0203942eb37f6168bfe25ba9888",

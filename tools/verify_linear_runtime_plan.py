@@ -23,7 +23,7 @@ from hormuz.postgres import (
 
 
 PLAN_PATH = "docs/linear-runtime-plan-v1.json"
-PLAN_SHA256 = "562e20c0491d2e8b1403d2daa5242774e6d7f08e8e7675db1834a9e00c8e4f2c"
+PLAN_SHA256 = "3020918384ca5a14c635bbd247c3b0eb251ea0f992c8fde729d34f9588c8dff7"
 PREDECESSOR_PATH = "docs/linear-transition-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = "a6fd47259f67ae7b607a205cb6896cae2cb218ce2539829d54260e8bdd5bf0d4"
 PREDECESSOR_CANONICAL_SHA256 = "681633994ba4c826e99f826730f92cfad1ac1e4bed6fc730a650caf2ad0c699f"
