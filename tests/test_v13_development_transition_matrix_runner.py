@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -19,6 +20,21 @@ from tools import run_v13_development_transition_matrix as matrix
 
 
 class DevelopmentTransitionMatrixRunnerTests(unittest.TestCase):
+    def test_every_selected_case_id_resolves_to_exactly_one_test(self):
+        def cases(suite):
+            for item in suite:
+                if isinstance(item, unittest.TestSuite):
+                    yield from cases(item)
+                else:
+                    yield item
+
+        test_path = str(Path(__file__).resolve().parent)
+        with mock.patch.object(sys, "path", [test_path, *sys.path]):
+            for name in matrix.SQLITE_CASES + matrix.POSTGRES_CASES:
+                with self.subTest(name=name):
+                    resolved = list(cases(unittest.defaultTestLoader.loadTestsFromName(name)))
+                    self.assertEqual([case.id() for case in resolved], [name])
+
     def test_v1_installed_runtime_must_match_pinned_archive_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
