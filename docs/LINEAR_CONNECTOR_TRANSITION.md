@@ -105,6 +105,11 @@ mode additionally requires an owned disposable database and matching backup
 container. No production DSN, provider credential or customer data belongs in
 the matrix.
 
+Both clean development modes completed all fourteen SQLite and fourteen
+PostgreSQL cases with zero skips and the same candidate-wheel digest. This
+satisfies the published-predecessor source/wheel transition gate only; it is
+not final-candidate, runtime, live-provider or release evidence.
+
 ## Remaining connector and release gates
 
 This checkpoint leaves the following work open:

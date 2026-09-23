@@ -18,7 +18,7 @@ from hormuz.postgres import POSTGRES_SCHEMA_VERSION
 
 
 PLAN_PATH = "docs/linear-transition-plan-v1.json"
-PLAN_SHA256 = "42660f7633ad275b183b1571075bf0f54745215b810534fb08154e8034d2893d"
+PLAN_SHA256 = "681633994ba4c826e99f826730f92cfad1ac1e4bed6fc730a650caf2ad0c699f"
 SQLITE_PROPOSAL = "docs/linear-successor-schema-proposal.sqlite.sql"
 POSTGRES_PROPOSAL = "docs/linear-successor-schema-acl-proposal.sql"
 REQUIRED_FILES = (
@@ -48,7 +48,7 @@ TRANSITION_CASES = {
 EXPECTED_GATES = {
     "schema_versions_assigned": True,
     "transition_harness_implemented": True,
-    "published_predecessor_source_wheel_matrix_passed": False,
+    "published_predecessor_source_wheel_matrix_passed": True,
     "successor_acl_measured": True,
     "exact_storage_and_audit_contract_frozen": False,
     "receipt_concurrency_runtime_proven": False,

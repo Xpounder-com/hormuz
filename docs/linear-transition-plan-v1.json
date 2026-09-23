@@ -139,7 +139,7 @@
   "gates": {
     "schema_versions_assigned": true,
     "transition_harness_implemented": true,
-    "published_predecessor_source_wheel_matrix_passed": false,
+    "published_predecessor_source_wheel_matrix_passed": true,
     "successor_acl_measured": true,
     "exact_storage_and_audit_contract_frozen": false,
     "receipt_concurrency_runtime_proven": false,
