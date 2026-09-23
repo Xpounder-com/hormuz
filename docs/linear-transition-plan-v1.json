@@ -1,0 +1,163 @@
+{
+  "schema_id": "hormuz.linear-transition-plan",
+  "schema_version": 1,
+  "stage": "assigned_successor_transition_preflight",
+  "target_release": "1.3.0",
+  "feature_issue": 220,
+  "gate_issue": 214,
+  "base_main_commit": "72df12391fa33c7a53d45fabf4899c1346139196",
+  "base_main_ci": "https://github.com/Xpounder-com/hormuz/actions/runs/35892367877",
+  "published_predecessor": {
+    "release": "v1.2.0",
+    "source_commit": "d854a5a453fcbe20cb3f4c1e261e146f2da93855",
+    "source_asset": "hormuz-1.2.0.tar.gz",
+    "source_sha256": "257c99b99af891838a1a0f1ba77bcc9c6baa74fba586d99381adab9f7b1af909",
+    "wheel_asset": "hormuz-1.2.0-py3-none-any.whl",
+    "wheel_sha256": "5519df553d4a9c330e6cf1fa822d6f8efc956e8eb5a7ac178eee01a89ffaa2bb",
+    "sqlite_schema_version": 12,
+    "postgresql_schema_version": 17
+  },
+  "integrated_baseline": {
+    "commit": "72df12391fa33c7a53d45fabf4899c1346139196",
+    "package_version": "1.2.0",
+    "sqlite_schema_version": 13,
+    "postgresql_schema_version": 18,
+    "postgresql_acl_boundary": {
+      "entry_count": 205,
+      "sha256": "56dd1434aaf078fdcdb5ed38059ed9c0f4a57f82310dc4fdfa18dff650628e9f"
+    },
+    "status": "real_finance_account_binding_migrations_installed_and_exact_main_ci_green"
+  },
+  "transitions": {
+    "sqlite": {
+      "from": 13,
+      "to": 14
+    },
+    "postgresql": {
+      "from": 18,
+      "to": 19
+    }
+  },
+  "version_policy": "assigned_next_versions_for_linear_only_no_bundled_migration_replan_if_consumed_before_implementation",
+  "frozen_file_sha256": {
+    "docs/linear-connector-preflight-v1.json": "407c3e7fd0b5394e94b2fcc59b2ca7b78ea633d8fd06e357ab2842a136963825",
+    "docs/linear-context-wire-v1.json": "66a708b9456ced1fd0c919cd1a92b4f461d3900e11766e01afd64c29e2d958f0",
+    "docs/portfolio-extension-contract-v1.json": "8ff2069fc5dec957a9ec1980087c94fbc259f61f5b07ec71f51357af8453fda4",
+    "docs/portfolio-intelligence-wire-v1.json": "26ef36b12d475d5b8354e45abfc92c76187ca6ff5aafb4b0ebce6fab439feb80",
+    "hormuz/portfolio-outcome-wire-v1.json": "0716c5483b6be72736d357f4ff318c89eeac10fa3f3ae86d3f3bdb9eb99f53a2",
+    "docs/linear-successor-schema-proposal.sqlite.sql": "1e4c8633790f901bc680ad720a480db0a2c1e54647ad4c483b0cc541ea77b259",
+    "docs/linear-successor-schema-acl-proposal.sql": "971606d584030936e4647453f98de104fffb960b5fe65c6761bd64857554d46c"
+  },
+  "proposed_storage": {
+    "status": "review_only_test_only_DDL_not_bundled_runtime_schema",
+    "tables": [
+      "portfolio_linear_source_binding_versions",
+      "gateway_linear_delivery_receipts",
+      "portfolio_linear_context_events",
+      "portfolio_linear_context_retention_events"
+    ],
+    "append_only": true,
+    "tenant_key": "organization_id_on_every_primary_and_foreign_key",
+    "context_contract": "docs/linear-context-wire-v1.json_remains_unchanged",
+    "raw_payload_storage": false,
+    "free_text_storage": false,
+    "credentials_or_credential_hashes": false,
+    "body_identity": "tenant_connector_and_key_version_domain_separated_HMAC_of_exact_signed_body_plain_payload_hash_forbidden",
+    "delivery_identity": "source_delivery_ID_conflict_check_plus_exact_body_and_stable_source_fact_fingerprint_replay_identity",
+    "audit": "future_runtime_must_extend_the_finite_commit_chain_source_union_in_the_same_transaction",
+    "global_workspace_and_webhook_cardinality": "future_runtime_schema_must_serialize_and_enforce_one_workspace_to_one_organization_and_one_webhook_to_one_route_before_activation",
+    "proposal_limit": "column_RLS_and_ACL_review_surface_only_not_exact_runtime_storage_acceptance"
+  },
+  "postgresql_acl": {
+    "tables": [
+      "portfolio_linear_source_binding_versions",
+      "gateway_linear_delivery_receipts",
+      "portfolio_linear_context_events",
+      "portfolio_linear_context_retention_events"
+    ],
+    "runtime_privileges": [
+      "SELECT",
+      "INSERT"
+    ],
+    "row_level_security": "enabled_and_forced_organization_id_current_setting",
+    "mutation_guard": "statement_trigger_rejects_update_delete_truncate",
+    "public_privileges": [],
+    "grant_option": false,
+    "successor_complete_acl_boundary": {
+      "entry_count": 233,
+      "sha256": "0e51b64f26df25b78877e071695568a463d58cc1845d1b4751016ff3642f2adc"
+    },
+    "measurement": "measured_twice_in_independent_clean_disposable_role_bound_schema_19_bootstraps_extra_DELETE_changes_fingerprint"
+  },
+  "acknowledgment": {
+    "linear_external_deadline_ms": 5000,
+    "maximum_internal_elapsed_ms": 4000,
+    "clock_start": "first_request_body_read",
+    "clock_stop": "response_bytes_ready_after_commit",
+    "success": "HTTP_200_only_after_atomic_receipt_context_coverage_audit_commit_or_verified_exact_prior_receipt",
+    "failure": "non_200_on_timeout_storage_outage_uncertain_commit_capacity_denial_or_binding_recheck_failure",
+    "replay": "no_automatic_governed_provider_work_replay",
+    "delayed_retry": "unknown_stale_body_fails_closed_until_authorized_live_evidence_pins_retry_body_timestamp_and_delivery_behavior",
+    "execution": "not_implemented_transition_tests_do_not_claim_HTTP_timing"
+  },
+  "required_transition_cases": {
+    "missing_successor_refusal": "populated_real_13_18_baseline_refuses_missing_14_19_without_change",
+    "ddl_failure_rollback_retry": "test_only_exact_proposal_DDL_failure_rolls_back_then_retry_applies_once",
+    "old_binary_partial_newer_refusal": "published_12_17_and_current_13_18_binaries_refuse_partial_or_newer_candidate_state",
+    "quiesced_old_pair_restore": "verified_zero_post_checkpoint_writes_restore_exact_published_app_config_database_pair_in_separate_destination_and_replay_original_receipt",
+    "post_checkpoint_forward_recovery": "candidate_witness_write_retained_in_separate_forward_restore_old_pair_never_overwrites_candidate",
+    "receipt_replay_and_concurrent_conflict": "required_runtime_test_not_satisfied_by_transition_DDL",
+    "durable_ack_outage_and_deadline": "required_runtime_HTTP_test_not_satisfied_by_transition_DDL"
+  },
+  "matrix": {
+    "source_and_wheel": true,
+    "published_predecessor_required": true,
+    "sqlite_case_ids": [
+      "test_missing_linear_successor_preserves_integrated_baseline",
+      "test_test_only_linear_ddl_failure_rolls_back_and_retry_is_idempotent",
+      "test_published_and_current_binaries_refuse_partial_and_newer_without_repair",
+      "test_quiesced_published_pair_restore_replays_original_receipt",
+      "test_post_checkpoint_witness_requires_retained_forward_recovery"
+    ],
+    "postgresql_case_ids": [
+      "test_missing_linear_successor_preserves_integrated_baseline",
+      "test_test_only_linear_ddl_failure_rolls_back_and_retry_is_idempotent",
+      "test_published_and_current_binaries_refuse_partial_and_newer_without_repair",
+      "test_quiesced_published_pair_restore_replays_original_receipt",
+      "test_post_checkpoint_witness_requires_retained_forward_recovery"
+    ],
+    "skips_allowed": false
+  },
+  "rollout": {
+    "preflight": "stop_all_writers_and_pools_verify_exact_old_pair_and_schema_assignment",
+    "migration": "serialized_existing_migrator_only_after_separate_exact_storage_review",
+    "startup": "fresh_process_schema_shape_RLS_ACL_binding_receipt_context_and_audit_checks_before_traffic",
+    "downgrade": "no_in_place_downgrade_or_ledger_edit",
+    "restore": "old_pair_only_with_verified_zero_post_checkpoint_writes_otherwise_forward_recover",
+    "external_activation": "requires_separate_owner_selected_Linear_test_workspace_and_webhook_authority"
+  },
+  "gates": {
+    "schema_versions_assigned": true,
+    "transition_harness_implemented": true,
+    "published_predecessor_source_wheel_matrix_passed": true,
+    "successor_acl_measured": true,
+    "exact_storage_and_audit_contract_frozen": false,
+    "receipt_concurrency_runtime_proven": false,
+    "durable_ack_HTTP_budget_proven": false,
+    "connector_preimplementation_checkpoint_accepted": false,
+    "runtime_implemented": false,
+    "live_workspace_authorized": false,
+    "live_delivery_verified": false,
+    "final_candidate_accepted": false,
+    "released": false
+  },
+  "nonclaims": [
+    "bundled_SQLite_14_or_PostgreSQL_19_migration",
+    "production_receiver_or_source_normalizer",
+    "accepted_214_connector_checkpoint",
+    "exact_storage_or_audit_contract_acceptance",
+    "five_second_end_to_end_HTTP_proof",
+    "live_Linear_workspace_or_webhook_authority",
+    "v1_3_release_or_external_pilot"
+  ]
+}

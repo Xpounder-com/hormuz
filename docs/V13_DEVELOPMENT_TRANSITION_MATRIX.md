@@ -3,9 +3,10 @@
 This checkpoint combines existing, provider-free transition cases under one
 strict runner. It runs both immutable published predecessors against the
 current development source **and** a wheel built from that same runtime tree.
-The current tree still declares package `1.2.0`, SQLite schema 12 and
-PostgreSQL schema 17. It is not an exact v1.3.0 candidate, and this matrix
-does not approve any planned 13/18 migration or a production rollback.
+The current tree still declares package `1.2.0`, but merged main now installs
+SQLite schema 13 and PostgreSQL schema 18. The Linear checkpoint assigns 14/19
+and exposes its proposal only through a patched test migration. This is not an
+exact v1.3.0 candidate, a bundled Linear migration or a production rollback.
 
 The runner requires the published v1.0.0 source archive and custody manifest
 (SHA-256 `2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a`
@@ -23,9 +24,9 @@ Build the development wheel from the checkout into a temporary directory and
 install it into an isolated environment. The source run byte-compares every
 candidate `hormuz/` runtime file in the source tree and wheel; the wheel run
 also compares the installed runtime before running any case. It refuses missing
-published artifacts, digest mismatches,
-missing tests and all skipped cases. The source and wheel executions must each
-report nine SQLite cases, zero skips and the same wheel digest. The runner
+published artifacts, digest mismatches, missing tests and all skipped cases.
+The source and wheel executions must each report fourteen SQLite cases, zero
+skips and the same wheel digest. The runner
 requires a clean checkout; its `source_head` is development context, not
 final-candidate acceptance. Prepare all four release files and four isolated
 interpreters from the repository root:
@@ -73,7 +74,7 @@ COMMON=(--source-root "$ROOT" \
 
 For owned disposable PostgreSQL, set `HORMUZ_TEST_POSTGRES_DSN` and
 `HORMUZ_TEST_PG_CONTAINER` to the same local test service, and add `--postgres`
-to **both** invocations. This requires all nine PostgreSQL cases; missing
+to **both** invocations. This requires all fourteen PostgreSQL cases; missing
 container backup tools or a skipped case is a refusal. No production DSN or
 customer data belongs in this run. The runner does not print DSNs, rows,
 provider payloads or subprocess stderr.
@@ -82,13 +83,14 @@ The v1.0.0 path proves its actual released binary refuses the real additive
 schema and partial ledger, preserves an uncertain reservation and audit/usage
 facts, permits a verified quiesced old-pair restore with zero later writes,
 and retains post-checkpoint writes for forward recovery. The v1.2.0 path seeds
-populated synthetic finance and outcome history from its exact released wheel,
-replays original receipts, and tests migration transaction failure, partial
-and newer-state refusal, old-pair restore, and retained forward recovery using
-**test-only successor DDL** already defined in the account-binding preflight.
-Those witness tables are not a v1.3 schema. The current same-version 12/17
-binary can read the published v1.2.0 state; this does not promise future
-v1.2.0 compatibility after actual v1.3 migrations or semantic changes.
+populated synthetic finance and outcome history from its exact released wheel.
+The account-binding cases advance through the real 12-to-13 and 17-to-18
+migrations and retain their rollback, partial/newer-state, restore and forward
+recovery proof. The Linear cases then expose exact review-only 14/19 proposal
+DDL through a patched migrator and repeat those five boundaries. Proposal
+tables are not bundled runtime schema. Published 12/17 and current 13/18
+binaries must refuse the newer state; compatibility is restoration with an
+exact quiesced old pair or retained forward recovery, never a ledger edit.
 
 Successful output is a source/wheel development checkpoint only. #214 still
 requires an exact final-candidate matrix for complete APIs, source install,

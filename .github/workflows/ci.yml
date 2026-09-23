@@ -180,6 +180,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_account_binding_contract.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_account_binding_preflight.py --historical-plan-only
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_linear_connector_preflight.py
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_linear_transition_plan.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I docs/evidence/reconciliation_scope_probe.py --current-runtime
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest -v \
             tests.test_portfolio_extensions tests.test_portfolio_extension_packaging \
@@ -192,6 +193,7 @@ jobs:
             tests.test_finance_variance_reference tests.test_finance_reconciliation_coverage \
             tests.test_scorecard_evidence_reference \
             tests.test_linear_connector_preflight tests.test_linear_connector_fixtures \
+            tests.test_linear_transition_plan tests.test_linear_transition_preflight \
             tests.test_portfolio_wire_contract
       - name: Verify the resolved license boundary for every declared extra
         run: |
@@ -420,6 +422,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_collection_postgres_runtime.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_finance_account_binding_contract.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_finance_account_binding_preflight.py --historical-plan-only
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_linear_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I docs/evidence/reconciliation_scope_probe.py --current-runtime
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest -v \
             tests.test_registry_transition_plan tests.test_attribution_transition_plan tests.test_outcome_transition_plan \
@@ -434,6 +437,7 @@ jobs:
             tests.test_scorecard_evidence_reference \
             tests.test_github_connector_preflight tests.test_github_connector_fixtures \
             tests.test_github_webhook_auth tests.test_github_connector_runtime \
+            tests.test_linear_transition_plan tests.test_linear_transition_preflight \
             tests.test_portfolio_wire_contract
       - name: Prove PostgreSQL migration and repository compatibility
         env:
@@ -509,6 +513,8 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_postgres_finance_collection_runtime_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_binding_transition_preflight.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_linear_transition_preflight.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_registration_store.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
