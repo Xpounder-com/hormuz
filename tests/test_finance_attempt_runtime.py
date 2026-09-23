@@ -706,7 +706,7 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                 )
             self.assertEqual(
                 store.verify_audit_chain(organization_id=organization_id).sequence,
-                2,
+                3,
             )
 
     def test_available_estimate_must_match_linked_usage_cost(self) -> None:
@@ -1140,7 +1140,7 @@ class SQLiteFinanceAttemptStorageTests(unittest.TestCase):
                     ).fetchone()[0],
                     1,
                 )
-            self.assertEqual(store.verify_audit_chain(organization_id="acme").sequence, 2)
+            self.assertEqual(store.verify_audit_chain(organization_id="acme").sequence, 3)
 
             with self.assertRaisesRegex(RequestAttemptStateError, "request_attempt_not_pending"):
                 store._finalize_request_attempt_with_provider_metrics(

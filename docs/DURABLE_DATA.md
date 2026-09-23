@@ -46,6 +46,9 @@ unregistered table.
 | `provider_reliability_evidence` | `gateway_provider_attempt_metrics`, `gateway_provider_failover_events` | `gateway_provider_attempt_metrics`, `gateway_provider_failover_events` | Append-only per-egress monotonic header/first-byte/total timing, provider/downstream byte counts, provider status, and one-hop attempt linkage with fixed trigger reason. No prompt or response body. |
 | `provider_attempt_finance_evidence` | `gateway_finance_attempt_evidence` | `gateway_finance_attempt_evidence` | One append-only fact per post-migration terminal provider attempt: bounded allowlisted native counters/dimensions, nullable normalized values, configured estimate and immutable rate-card provenance. No prompt, response body, or provider-final invoice claim. |
 | `provider_finance_collection_evidence` | `portfolio_finance_source_binding_versions`, `portfolio_finance_collection_attempts`, `portfolio_finance_collection_events`, `portfolio_finance_snapshots`, `portfolio_finance_snapshot_bucket_coverage`, `portfolio_finance_usage_observations`, `portfolio_finance_cost_observations` | `portfolio_finance_source_binding_versions`, `portfolio_finance_collection_attempts`, `portfolio_finance_collection_events`, `portfolio_finance_snapshots`, `portfolio_finance_snapshot_bucket_coverage`, `portfolio_finance_usage_observations`, `portfolio_finance_cost_observations` | Append-only source-binding versions, content-free collection attempts and terminal events, complete typed snapshots, explicit empty-bucket coverage, tenant-keyed provider dimensions, and exact native/canonical cost text. No raw provider payload, cursor, credential, prompt, response, or invoice-final claim. |
+| `finance_account_binding_versions` | `portfolio_finance_account_binding_versions` | `portfolio_finance_account_binding_versions` | Immutable tenant-qualified inference-account registrations bound to an exact collection source version, upstream and inference credential references, keyed account/scope fingerprints, state, reason, actor, timestamp, and canonical digests. No credential value, provider payload, prompt, or response. |
+| `finance_attempt_account_bindings` | `gateway_finance_attempt_account_bindings` | `gateway_finance_attempt_account_bindings` | Exactly one append-only bound or explicit-unbound account fact for each post-migration request attempt, committed with the attempt root before egress. Bound facts copy only immutable registration metadata and keyed fingerprints; unbound facts carry a fixed reason code. |
+| `finance_query_audit` | `portfolio_finance_query_audit_events` | `portfolio_finance_query_audit_events` | Metadata-only privileged finance-read audit facts committed before delivery: actor, query class and window, source binding/profile, as-of sequence, currency, bounded result counts, and timestamp. No report rows, provider payload, prompt, or response. |
 | `audit_chain_state` | `gateway_audit_chain_checkpoints`, `gateway_audit_chain_entries`, `gateway_audit_chain_epochs`, `gateway_audit_chain_heads` | `gateway_audit_chain_checkpoints`, `gateway_audit_chain_entries`, `gateway_audit_chain_epochs`, `gateway_audit_chain_heads` | Tenant-qualified event references, sequence, timestamps, hashes, checkpoint receipts, and external object versions. |
 | `policy_impact_sample` | `observations`, `previews` (separate sidecar) | — | Optional bounded seven-day request metadata and signed, membership-bound proposals. No prompts, responses, or guaranteed savings. See [Policy impact](POLICY_IMPACT.md). |
 | `policy_control` | — | `policy_active_versions`, `policy_administrators`, `policy_control_events`, `policy_tenants`, `policy_versions` | Administrator identity keys, immutable policy JSON/documents, activation pointers, hashes, summaries, and control events. Policy documents are organization configuration, not request content. |
@@ -77,12 +80,18 @@ allowlist and configured estimates; missing values stay null and no field is
 claimed as provider-final invoice truth. See
 [FINANCE_NATIVE_ATTEMPT_RUNTIME.md](FINANCE_NATIVE_ATTEMPT_RUNTIME.md).
 The provider collection candidate adds seven append-only collection tables in
-SQLite migration 12 / PostgreSQL migration 16. SQLite collection runtime and
-customer-file import are implemented behind the candidate gates; PostgreSQL
-collection runtime grants remain withheld until a separately reviewed literal
-ACL boundary is accepted. Collection snapshots are complete and typed, while
+SQLite migration 12 / PostgreSQL migration 16. SQLite collection runtime,
+customer-file import, and the separately reviewed PostgreSQL schema-17 runtime
+grants are implemented behind the candidate gates. Collection snapshots are
+complete and typed, while
 coverage records authoritative empty buckets without claiming numeric zero.
 See [FINANCE_COLLECTION_RUNTIME.md](FINANCE_COLLECTION_RUNTIME.md).
+The finance account-binding successor adds the three metadata-only classes
+`finance_account_binding_versions`, `finance_attempt_account_bindings`, and
+`finance_query_audit` in SQLite migration 13 / PostgreSQL migration 18. The
+runtime records one bound or explicit-unbound sidecar before provider egress,
+and privileged report delivery must follow a committed audit event. See
+[FINANCE_ACCOUNT_BINDING_TRANSITION.md](FINANCE_ACCOUNT_BINDING_TRANSITION.md).
 #214 stays open for final-candidate
 transition proof. See [REGISTRY.md](REGISTRY.md) for the opt-in authority and
 [REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) for the application/database

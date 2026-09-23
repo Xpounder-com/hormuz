@@ -55,8 +55,14 @@ def probe(*, current_runtime: bool = False) -> dict:
         relative: hashlib.sha256((ROOT / relative).read_bytes()).hexdigest()
         for relative in SOURCE_SHA256
     }
+    successor_runtime_sources = {
+        "hormuz/store.py",
+        "hormuz/finance_collection_repository.py",
+        "hormuz/_sqlite_schema.py",
+        "hormuz/postgres.py",
+    }
     for relative, expected in SOURCE_SHA256.items():
-        if current_runtime and relative == "hormuz/finance_collection_repository.py":
+        if current_runtime and relative in successor_runtime_sources:
             continue
         require(source_hashes[relative] == expected,
                 "reconciliation_scope_probe_predecessor_changed")
@@ -148,7 +154,7 @@ def probe(*, current_runtime: bool = False) -> dict:
         result["historical_baseline_commit"] = "c877f49da8baf6a837924f33f06494964cd7118b"
         result.pop("baseline_binding")
         result["source_binding"] = (
-            "six_unchanged_predecessor_source_hashes_and_current_collection_repository_semantics"
+            "three_unchanged_predecessor_sources_and_current_successor_runtime_semantics"
         )
         result["current_runtime_checked"] = True
         result["current_collection_repository_sha256"] = source_hashes[

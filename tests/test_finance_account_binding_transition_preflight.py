@@ -1,9 +1,4 @@
-"""Account-binding preflight, with explicit test-only successor witnesses.
-
-Missing production migrations stay red. Synthetic DDL exercises the real
-migration transaction, refusal, backup and recovery paths; it is not an
-implemented account-binding schema, permission approval or runtime proof.
-"""
+"""SQLite 12 to 13 and PostgreSQL 17 to 18 account-binding transitions."""
 
 from contextlib import contextmanager
 import json
@@ -16,6 +11,14 @@ from unittest import mock
 from uuid import uuid4
 
 import hormuz.postgres as postgres_module
+import hormuz._portfolio_sql as portfolio_sql_module
+from hormuz._finance_account_binding_schema import QUERY_AUDIT_TABLE
+from hormuz.audit_chain import AuditChainSource
+from hormuz.finance_account_evidence import (
+    QUERY_AUDIT_SCHEMA_ID,
+    canonical_evidence_text,
+    validate_finance_query_audit_event,
+)
 from hormuz.postgres import PostgresStorageError
 from hormuz.store import StorageSchemaError, UsageStore
 
@@ -41,32 +44,74 @@ else:
     import test_postgres_finance_collection_transition as previous
 
 
-class SQLiteFinanceAccountBindingTransitionPreflightTests(unittest.TestCase):
-    def test_absent_successor_refuses_without_touching_populated_predecessor(self):
-        self.assertEqual(UsageStore.schema_version, 12)
+class SQLiteFinanceAccountBindingTransitionTests(unittest.TestCase):
+    def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
+        self.assertEqual(UsageStore.schema_version, 13)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "synthetic.sqlite3"
-            seed_sqlite_collection_predecessor(path)
+            with (
+                mock.patch.object(UsageStore, "schema_version", 12),
+                mock.patch.object(portfolio_sql_module, "SQLITE_SCHEMA_VERSION", 12),
+            ):
+                seed_sqlite_collection_predecessor(path)
             before = sqlite_snapshot(path)
             for table in ("gateway_finance_attempt_evidence", "gateway_audit_chain_entries",
                           "portfolio_work_budget_plan_versions", "gateway_provider_attempt_metrics"):
                 self.assertTrue(before["rows"][table], table)
-            with mock.patch.object(UsageStore, "schema_version", 13):
-                with self.assertRaisesRegex(StorageSchemaError, "storage_schema_migration_unsupported"):
-                    UsageStore(path)
-            self.assertEqual(sqlite_snapshot(path), before)
+            UsageStore(path).verify_ready()
+            after = sqlite_snapshot(path)
+            for table, rows in before["rows"].items():
+                if table == "hormuz_schema_migrations":
+                    self.assertEqual(
+                        [row for row in after["rows"][table] if row[0] != 13],
+                        rows,
+                    )
+                else:
+                    self.assertEqual(after["rows"][table], rows, table)
+            for table in PROBE_TABLES:
+                self.assertEqual(after["rows"][table], [])
+            self.assertIn(
+                (13, "applied"),
+                {
+                    (row[0], row[1])
+                    for row in after["rows"]["hormuz_schema_migrations"]
+                },
+            )
             UsageStore(path, read_only=True).verify_ready()
-            self.assertEqual(sqlite_snapshot(path), before)
+            with mock.patch.object(UsageStore, "schema_version", 12):
+                with self.assertRaisesRegex(
+                    StorageSchemaError,
+                    "storage_schema_newer_than_binary",
+                ):
+                    UsageStore(path, read_only=True)
+
+    def test_runtime_verifier_rejects_tampered_account_audit_source_guard(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "synthetic.sqlite3"
+            UsageStore(path)
+            with managed_sqlite_connection(path) as connection:
+                connection.execute(
+                    "DROP TRIGGER gateway_finance_account_audit_source_required"
+                )
+                connection.execute(
+                    "CREATE TRIGGER gateway_finance_account_audit_source_required "
+                    "BEFORE INSERT ON gateway_audit_chain_entries BEGIN SELECT 1; END"
+                )
+            with self.assertRaisesRegex(
+                StorageSchemaError,
+                "storage_schema_partial_upgrade",
+            ):
+                UsageStore(path, read_only=True)
 
 
 @unittest.skipUnless(os.environ.get("HORMUZ_TEST_POSTGRES_DSN"), "requires disposable PostgreSQL")
-class PostgresFinanceAccountBindingTransitionPreflightTests(PostgresTestCase):
+class PostgresFinanceAccountBindingTransitionTests(PostgresTestCase):
     migrate = previous.PostgresFinanceCollectionTransitionTests.migrate
     snapshot = previous.PostgresFinanceCollectionTransitionTests.snapshot
     runtime = previous.PostgresFinanceCollectionTransitionTests.runtime
 
-    def test_absent_successor_refuses_without_touching_populated_predecessor(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 17)
+    def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 18)
         self._drop_schema(self.schema)
         seed_postgres_collection_predecessor(
             owner_dsn=self.owner_dsn, runtime_dsn=self.runtime_dsn, schema=self.schema,
@@ -74,24 +119,88 @@ class PostgresFinanceAccountBindingTransitionPreflightTests(PostgresTestCase):
             custody_control_role=self.custody_control_role,
             custody_executor_role=self.custody_executor_role,
         )
-        self.assertEqual(self.migrate().version, 17)
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 17):
+            self.assertEqual(self.migrate().version, 17)
         before = self.snapshot()
         for table in ("gateway_finance_attempt_evidence", "gateway_audit_chain_entries",
                       "portfolio_work_budget_plan_versions", "gateway_provider_attempt_metrics"):
             self.assertTrue(before["rows"][table], table)
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
-            with self.assertRaisesRegex(PostgresStorageError, "storage_schema_migration_unsupported"):
-                self.migrate()
-        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.migrate().version, 18)
+        after = self.snapshot()
+        for table, rows in before["rows"].items():
+            if table == "hormuz_schema_migrations":
+                continue
+            self.assertEqual(after["rows"][table], rows, table)
+        for table in PROBE_TABLES:
+            self.assertEqual(after["rows"][table], [])
         self.runtime().verify_ready()
-        self.assertEqual(self.snapshot(), before)
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 17):
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "storage_schema_newer_than_binary",
+            ):
+                self.runtime()
+
+    def test_runtime_verifier_rejects_missing_account_consistency_trigger(self):
+        drop = self.sql.SQL(
+            "DROP TRIGGER portfolio_finance_account_binding_source_consistency "
+            "ON {}.portfolio_finance_account_binding_versions"
+        ).format(self.sql.Identifier(self.schema))
+        restore = self.sql.SQL(
+            "CREATE TRIGGER portfolio_finance_account_binding_source_consistency "
+            "BEFORE INSERT ON {}.portfolio_finance_account_binding_versions "
+            "FOR EACH ROW EXECUTE FUNCTION {}.enforce_finance_account_binding_source()"
+        ).format(self.sql.Identifier(self.schema), self.sql.Identifier(self.schema))
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            connection.execute(drop)
+        try:
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "storage_schema_partial_upgrade",
+            ):
+                self.runtime()
+        finally:
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                connection.execute(restore)
+
+    def test_runtime_verifier_rejects_weakened_account_audit_guard(self):
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            original = connection.execute(
+                "SELECT pg_get_functiondef(p.oid) FROM pg_proc p "
+                "JOIN pg_namespace n ON n.oid=p.pronamespace "
+                "WHERE n.nspname=%s "
+                "AND p.proname='enforce_custody_audit_chain_entry_insert'",
+                (self.schema,),
+            ).fetchone()[0]
+            weakened = self.sql.SQL(
+                "CREATE OR REPLACE FUNCTION {}.enforce_custody_audit_chain_entry_insert() "
+                "RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog "
+                "AS $$ BEGIN "
+                "PERFORM 'hormuz.finance-account-binding-version'; "
+                "PERFORM 'hormuz.finance-account-binding-version'; "
+                "PERFORM 'hormuz.finance-attempt-account-binding'; "
+                "PERFORM 'hormuz.finance-attempt-account-binding'; "
+                "PERFORM 'hormuz.finance-query-audit-event'; "
+                "PERFORM 'hormuz.finance-query-audit-event'; "
+                "RETURN NEW; END; $$"
+            ).format(self.sql.Identifier(self.schema))
+            connection.execute(weakened)
+        try:
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "storage_schema_partial_upgrade",
+            ):
+                self.runtime()
+        finally:
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                connection.execute(original)
 
 
-# These names determine the proposed four-grant ACL surface. The witness
-# columns below deliberately do not pretend to implement the planned tables.
+# These names determine the implemented six-grant ACL surface.
 PROBE_TABLES = (
     "portfolio_finance_account_binding_versions",
     "gateway_finance_attempt_account_bindings",
+    "portfolio_finance_query_audit_events",
 )
 POPULATED_TABLES = (
     "gateway_usage_events", "gateway_request_attempts", "gateway_budget_reservations",
@@ -103,31 +212,120 @@ POPULATED_TABLES = (
     "portfolio_finance_snapshots", "portfolio_finance_snapshot_bucket_coverage",
     "portfolio_finance_usage_observations", "portfolio_finance_cost_observations",
 )
-BASELINE_READY = {"status": "ready", "runtime_files_verified": 161}
-BASELINE_ACL = (199, "1fa41892fb1206e7e70b922768ac27a39fce6ed98441a9fb78ce1511e1582906")
-# Measured in disposable managed-role PostgreSQL; never derived as expectations.
-PROPOSED_ACL = (203, "731d5b3bd66799555bf723adde3a9b19ac1922d1574bd48b7c79fca7752dc920")
-INJECTED_ACL = (204, "09efbe7dcf3ed9b871a645cfcfc455ef2a4816e2b4a4bfb76cf380f880cc689b")
+# Measured twice in independent disposable managed-role PostgreSQL bootstraps;
+# never derived as expectations from the database under test.
+PROPOSED_ACL = (205, "56dd1434aaf078fdcdb5ed38059ed9c0f4a57f82310dc4fdfa18dff650628e9f")
+INJECTED_ACL = (206, "5946c0c2303c3c824223a6558e6547dce0c5f282d10f45852d0356bbc3cc74ef")
 PINNED = bool(os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_PYTHON")
               and os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_SOURCE"))
 
 
+def query_audit_event(binding_id, binding_version):
+    event = {
+        "schema_id": QUERY_AUDIT_SCHEMA_ID,
+        "schema_version": 1,
+        "organization_id": "acme",
+        "query_event_id": str(uuid4()),
+        "actor_id": "alice",
+        "query_class": "finance_coverage_report_v1",
+        "binding_id": binding_id,
+        "binding_version": binding_version,
+        "collection_profile": "openai.organization-usage-completions.v1",
+        "query_start_at": "2026-09-01T00:00:00.000000Z",
+        "query_end_at": "2026-09-02T00:00:00.000000Z",
+        "as_of_commit_sequence": 0,
+        "currency": "USD",
+        "selected_snapshot_count": 0,
+        "coverage_bucket_count": 0,
+        "provider_observation_count": 0,
+        "terminal_attempt_count": 0,
+        "terminal_attempts_missing_sidecar_count": 0,
+        "occurred_at": "2026-09-02T00:00:00.000000Z",
+    }
+    validate_finance_query_audit_event(event)
+    return event
+
+
+def query_audit_row(event):
+    row = {
+        key: value
+        for key, value in event.items()
+        if key not in {"schema_id", "schema_version"}
+    }
+    row["evidence_json"] = canonical_evidence_text(event)
+    return row
+
+
+def query_audit_source(event):
+    return AuditChainSource(
+        QUERY_AUDIT_SCHEMA_ID,
+        1,
+        str(event["query_event_id"]),
+    )
+
+
+def append_sqlite_query_audit(store):
+    with store._connection() as connection:
+        binding = connection.execute(
+            "SELECT binding_id, version FROM portfolio_finance_source_binding_versions "
+            "WHERE organization_id='acme' ORDER BY version DESC LIMIT 1"
+        ).fetchone()
+        if binding is None:
+            raise AssertionError("published_predecessor_source_binding_missing")
+        event = query_audit_event(str(binding[0]), int(binding[1]))
+        row = query_audit_row(event)
+        columns = tuple(row)
+        connection.execute(
+            f"INSERT INTO {QUERY_AUDIT_TABLE} ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)})",
+            tuple(row.values()),
+        )
+        store._append_audit_chain_entry_in_connection(
+            connection,
+            event=event,
+            source=query_audit_source(event),
+        )
+
+
+def append_postgres_query_audit(store):
+    with store._transaction("acme") as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT binding_id, version FROM "
+                f"{store._table('portfolio_finance_source_binding_versions')} "
+                "WHERE organization_id=%s ORDER BY version DESC LIMIT 1",
+                ("acme",),
+            )
+            binding = cursor.fetchone()
+            if binding is None:
+                raise AssertionError("published_predecessor_source_binding_missing")
+            binding_id = binding["binding_id"] if isinstance(binding, dict) else binding[0]
+            binding_version = binding["version"] if isinstance(binding, dict) else binding[1]
+            event = query_audit_event(str(binding_id), int(binding_version))
+            row = query_audit_row(event)
+            columns = tuple(row)
+            cursor.execute(
+                f"INSERT INTO {store._table(QUERY_AUDIT_TABLE)} "
+                f"({', '.join(columns)}) VALUES ({', '.join('%s' for _ in columns)})",
+                tuple(row.values()),
+            )
+            store._append_audit_chain_entry_in_cursor(
+                cursor,
+                event=event,
+                source=query_audit_source(event),
+            )
+
+
 @contextmanager
-def sqlite_witness(*, fail=False):
+def sqlite_migration_failure():
     original = UsageStore._apply_migration
 
     def migration(connection, version):
-        if version != 13:
-            return original(connection, version)
-        for table in PROBE_TABLES:
-            connection.execute(f"CREATE TABLE {table} (organization_id TEXT NOT NULL, "
-                               "event_id TEXT PRIMARY KEY, evidence_json TEXT NOT NULL)")
-        if fail:
+        original(connection, version)
+        if version == 13:
             connection.execute("INSERT INTO deliberately_absent_account_binding_probe VALUES (1)")
 
-    with mock.patch.object(UsageStore, "schema_version", 13), mock.patch.object(
-        UsageStore, "_apply_migration", side_effect=migration
-    ):
+    with mock.patch.object(UsageStore, "_apply_migration", side_effect=migration):
         yield
 
 
@@ -145,60 +343,74 @@ class SQLitePublishedAccountBindingPreflightTests(unittest.TestCase):
     def request(self, path=None, mode="ready"):
         return {"backend": "sqlite", "path": str(path or self.path), "mode": mode}
 
-    def assert_old_rows(self, after):
+    def assert_old_rows(self, after, *, allow_appended=False):
         for table, rows in self.before["rows"].items():
             if table == "hormuz_schema_migrations":
-                self.assertEqual([row for row in after["rows"][table] if row[0] != 13], rows)
+                actual = [row for row in after["rows"][table] if row[0] != 13]
             else:
-                self.assertEqual(after["rows"][table], rows, table)
-        for definition in self.before["objects"]:
-            self.assertIn(definition, after["objects"])
+                actual = after["rows"][table]
+            if allow_appended:
+                if table == "gateway_audit_chain_heads":
+                    self.assertEqual(len(actual), len(rows), table)
+                else:
+                    self.assertTrue(all(row in actual for row in rows), table)
+            else:
+                self.assertEqual(actual, rows, table)
 
     def test_published_predecessor_populates_finance_and_replays_original_receipts(self):
         for table in POPULATED_TABLES:
             self.assertTrue(self.before["rows"][table], table)
         self.assertEqual(predecessor_call(self.request(mode="replay")), self.seeded)
         self.assertEqual(sqlite_snapshot(self.path), self.before)
+        with self.assertRaisesRegex(StorageSchemaError, "storage_schema_unavailable"):
+            UsageStore(self.path, read_only=True)
+
+    def test_real_successor_preserves_published_predecessor(self):
+        UsageStore(self.path).verify_ready()
+        after = sqlite_snapshot(self.path)
+        self.assert_old_rows(after)
+        self.assertTrue(all(after["rows"][table] == [] for table in PROBE_TABLES))
+        self.assertEqual(
+            predecessor_call(self.request()),
+            {"status": "refused", "code": "storage_schema_newer_than_binary"},
+        )
+
+    def test_real_ddl_failure_rolls_back_and_retry_is_idempotent(self):
+        with sqlite_migration_failure(), self.assertRaises(sqlite3.OperationalError):
+            UsageStore(self.path)
+        self.assertEqual(sqlite_snapshot(self.path), self.before)
+        UsageStore(self.path)
+        after = sqlite_snapshot(self.path)
+        self.assert_old_rows(after)
+        self.assertTrue(all(after["rows"][table] == [] for table in PROBE_TABLES))
+        UsageStore(self.path)
+        self.assertEqual(sqlite_snapshot(self.path), after)
+
+    def test_published_binary_refuses_newer_and_both_refuse_partial_without_repair(self):
+        UsageStore(self.path)
+        self.assertEqual(
+            predecessor_call(self.request()),
+            {"status": "refused", "code": "storage_schema_newer_than_binary"},
+        )
         UsageStore(self.path, read_only=True).verify_ready()
-
-    def test_real_missing_successor_preserves_published_predecessor(self):
-        with mock.patch.object(UsageStore, "schema_version", 13):
-            with self.assertRaisesRegex(StorageSchemaError, "storage_schema_migration_unsupported"):
-                UsageStore(self.path)
-        self.assertEqual(sqlite_snapshot(self.path), self.before)
-        self.assertEqual(predecessor_call(self.request()), BASELINE_READY)
-
-    def test_test_only_ddl_failure_rolls_back_and_retry_is_idempotent(self):
-        with sqlite_witness(fail=True), self.assertRaises(sqlite3.OperationalError):
-            UsageStore(self.path)
-        self.assertEqual(sqlite_snapshot(self.path), self.before)
-        with sqlite_witness():
-            UsageStore(self.path)
-            after = sqlite_snapshot(self.path)
-            self.assert_old_rows(after)
-            self.assertTrue(all(after["rows"][table] == [] for table in PROBE_TABLES))
-            UsageStore(self.path)
-            self.assertEqual(sqlite_snapshot(self.path), after)
-
-    def test_published_and_current_binaries_refuse_partial_and_newer_without_repair(self):
-        with sqlite_witness():
-            UsageStore(self.path)
-        for state, code in (("applied", "storage_schema_newer_than_binary"),
-                            ("applying", "storage_schema_partial_upgrade")):
-            with managed_sqlite_connection(self.path) as connection:
-                connection.execute("UPDATE hormuz_schema_migrations SET state=? WHERE version=13", (state,))
-            before = sqlite_snapshot(self.path)
-            self.assertEqual(predecessor_call(self.request()), {"status": "refused", "code": code})
-            for read_only in (True, False):
-                with self.assertRaisesRegex(StorageSchemaError, code):
-                    UsageStore(self.path, read_only=read_only)
-            self.assertEqual(sqlite_snapshot(self.path), before)
+        with managed_sqlite_connection(self.path) as connection:
+            connection.execute(
+                "UPDATE hormuz_schema_migrations SET state='applying' WHERE version=13"
+            )
+        before = sqlite_snapshot(self.path)
+        self.assertEqual(
+            predecessor_call(self.request()),
+            {"status": "refused", "code": "storage_schema_partial_upgrade"},
+        )
+        for read_only in (True, False):
+            with self.assertRaisesRegex(StorageSchemaError, "storage_schema_partial_upgrade"):
+                UsageStore(self.path, read_only=read_only)
+        self.assertEqual(sqlite_snapshot(self.path), before)
 
     def test_quiesced_old_pair_restore_is_separate_and_preserves_original_receipts(self):
         checkpoint = self.root / "checkpoint.sqlite3"
         sqlite_backup(self.path, checkpoint)
-        with sqlite_witness():
-            UsageStore(self.path)
+        UsageStore(self.path)
         retained = sqlite_snapshot(self.path)
         restored = self.root / "restored.sqlite3"
         sqlite_backup(checkpoint, restored)
@@ -206,21 +418,18 @@ class SQLitePublishedAccountBindingPreflightTests(unittest.TestCase):
         self.assertEqual(predecessor_call(self.request(restored, "replay")), self.seeded)
         self.assertEqual(sqlite_snapshot(self.path), retained)
 
-    def test_post_checkpoint_witness_write_requires_retained_forward_recovery(self):
+    def test_post_checkpoint_write_requires_retained_forward_recovery(self):
         old = self.root / "old.sqlite3"
         sqlite_backup(self.path, old)
-        with sqlite_witness():
-            UsageStore(self.path)
-            with managed_sqlite_connection(self.path) as connection:
-                for table in PROBE_TABLES:
-                    connection.execute(f"INSERT INTO {table} VALUES (?, ?, ?)",
-                                       ("acme", "synthetic-post-checkpoint", '{"test_only":true}'))
-            retained = sqlite_snapshot(self.path)
-            restored = self.root / "forward.sqlite3"
-            sqlite_backup(self.path, restored)
-            UsageStore(restored, read_only=True).verify_ready()
-            self.assertEqual(sqlite_snapshot(restored), retained)
-        self.assert_old_rows(retained)
+        store = UsageStore(self.path)
+        append_sqlite_query_audit(store)
+        retained = sqlite_snapshot(self.path)
+        self.assertTrue(retained["rows"][QUERY_AUDIT_TABLE])
+        restored = self.root / "forward.sqlite3"
+        sqlite_backup(self.path, restored)
+        UsageStore(restored, read_only=True).verify_ready()
+        self.assertEqual(sqlite_snapshot(restored), retained)
+        self.assert_old_rows(retained, allow_appended=True)
         self.assertNotEqual(sqlite_snapshot(old), retained)
         self.assertEqual(predecessor_call(self.request(old, "replay")), self.seeded)
         self.assertEqual(predecessor_call(self.request(restored)),
@@ -250,81 +459,88 @@ class PostgresPublishedAccountBindingPreflightTests(PostgresTestCase):
                 "custody_control_role": self.custody_control_role, "custody_executor_role": self.custody_executor_role}
 
     @contextmanager
-    def witness(self, *, fail=False):
+    def migration_failure(self):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            if version != 18:
-                return original(version, schema, *roles)
-            statements = [f"CREATE TABLE {schema}.{table} (organization_id TEXT NOT NULL, "
-                          "event_id TEXT PRIMARY KEY, evidence_json TEXT NOT NULL);" for table in PROBE_TABLES]
-            if fail:
-                statements.append("SELECT 1 / 0;")
-            return "\n".join(statements)
+            statement = original(version, schema, *roles)
+            return statement + ("\nSELECT 1 / 0;" if version == 18 else "")
 
-        # Test-only owner tables receive no grants. No production ACL
-        # expectation is patched or promoted by the transaction witness.
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18), mock.patch.object(
-            postgres_module, "_migration_sql", side_effect=migration
-        ):
+        with mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
             yield
 
-    def assert_old_rows(self, after):
+    def assert_old_rows(self, after, *, allow_appended=False):
         for table, rows in self.before["rows"].items():
             actual = after["rows"][table]
             if table == "hormuz_schema_migrations":
                 actual = [row for row in actual if json.loads(row[0])["version"] != 18]
-            self.assertEqual(actual, rows, table)
-        for field in ("shape", "constraints", "triggers", "functions"):
-            for definition in self.before[field]:
-                self.assertIn(definition, after[field], field)
+            if allow_appended:
+                if table == "gateway_audit_chain_heads":
+                    self.assertEqual(len(actual), len(rows), table)
+                else:
+                    self.assertTrue(all(row in actual for row in rows), table)
+            else:
+                self.assertEqual(actual, rows, table)
 
     def test_published_predecessor_populates_finance_and_replays_original_receipts(self):
         for table in POPULATED_TABLES:
             self.assertTrue(self.before["rows"][table], table)
         self.assertEqual(predecessor_call(self.request(mode="replay")), self.seeded)
         self.assertEqual(self.snapshot(), self.before)
+        with self.assertRaisesRegex(PostgresStorageError, "storage_schema_unavailable"):
+            self.runtime()
+
+    def test_real_successor_preserves_published_predecessor(self):
+        self.assertEqual(self.migrate().version, 18)
+        after = self.snapshot()
+        self.assert_old_rows(after)
+        self.assertTrue(all(after["rows"][table] == [] for table in PROBE_TABLES))
         self.runtime().verify_ready()
+        self.assertEqual(
+            predecessor_call(self.request()),
+            {"status": "refused", "code": "storage_schema_newer_than_binary"},
+        )
 
-    def test_real_missing_successor_preserves_published_predecessor(self):
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
-            with self.assertRaisesRegex(PostgresStorageError, "storage_schema_migration_unsupported"):
-                self.migrate()
-        self.assertEqual(self.snapshot(), self.before)
-        self.assertEqual(predecessor_call(self.request()), BASELINE_READY)
-
-    def test_test_only_ddl_failure_rolls_back_and_retry_is_idempotent(self):
-        with self.witness(fail=True), self.assertRaisesRegex(PostgresStorageError, "storage_unavailable"):
+    def test_real_ddl_failure_rolls_back_and_retry_is_idempotent(self):
+        with self.migration_failure(), self.assertRaisesRegex(
+            PostgresStorageError, "storage_unavailable"
+        ):
             self.migrate()
         self.assertEqual(self.snapshot(), self.before)
-        with self.witness():
-            self.assertEqual(self.migrate().version, 18)
-            after = self.snapshot()
-            self.assert_old_rows(after)
-            self.assertTrue(all(after["rows"][table] == [] for table in PROBE_TABLES))
-            self.migrate()
-            self.assertEqual(self.snapshot(), after)
+        self.assertEqual(self.migrate().version, 18)
+        after = self.snapshot()
+        self.assert_old_rows(after)
+        self.assertTrue(all(after["rows"][table] == [] for table in PROBE_TABLES))
+        self.migrate()
+        self.assertEqual(self.snapshot(), after)
 
-    def test_published_and_current_binaries_refuse_partial_and_newer_without_repair(self):
-        with self.witness():
-            self.migrate()
-        for state, code in (("applied", "storage_schema_newer_than_binary"),
-                            ("applying", "storage_schema_partial_upgrade")):
-            with self.psycopg.connect(self.owner_dsn) as connection:
-                connection.execute(self.sql.SQL("UPDATE {}.hormuz_schema_migrations SET state=%s WHERE version=18")
-                                   .format(self.sql.Identifier(self.schema)), (state,))
-            before = self.snapshot()
-            self.assertEqual(predecessor_call(self.request()), {"status": "refused", "code": code})
-            for operation in (self.migrate, self.runtime):
-                with self.assertRaisesRegex(PostgresStorageError, code):
-                    operation()
-            self.assertEqual(self.snapshot(), before)
+    def test_published_binary_refuses_newer_and_both_refuse_partial_without_repair(self):
+        self.migrate()
+        self.assertEqual(
+            predecessor_call(self.request()),
+            {"status": "refused", "code": "storage_schema_newer_than_binary"},
+        )
+        self.runtime().verify_ready()
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            connection.execute(
+                self.sql.SQL(
+                    "UPDATE {}.hormuz_schema_migrations SET state='applying' WHERE version=18"
+                ).format(self.sql.Identifier(self.schema))
+            )
+        before = self.snapshot()
+        self.assertEqual(
+            predecessor_call(self.request()),
+            {"status": "refused", "code": "storage_schema_partial_upgrade"},
+        )
+        for operation in (self.migrate, self.runtime):
+            with self.assertRaisesRegex(PostgresStorageError, "storage_schema_partial_upgrade"):
+                operation()
+        self.assertEqual(self.snapshot(), before)
 
     @unittest.skipUnless(os.environ.get("HORMUZ_TEST_PG_CONTAINER"), "requires matching pg_dump/restore")
     def test_quiesced_old_pair_restore_is_separate_and_preserves_original_receipts(self):
         checkpoint = self.backup()
-        with self.witness():
-            self.migrate()
+        self.migrate()
         retained = self.snapshot()
         owner, runtime = self.restore(checkpoint)
         self.assertEqual(self.snapshot(owner), self.before)
@@ -332,21 +548,17 @@ class PostgresPublishedAccountBindingPreflightTests(PostgresTestCase):
         self.assertEqual(self.snapshot(), retained)
 
     @unittest.skipUnless(os.environ.get("HORMUZ_TEST_PG_CONTAINER"), "requires matching pg_dump/restore")
-    def test_post_checkpoint_witness_write_requires_retained_forward_recovery(self):
+    def test_post_checkpoint_write_requires_retained_forward_recovery(self):
         old = self.backup()
-        with self.witness():
-            self.migrate()
-            with self.psycopg.connect(self.owner_dsn) as connection:
-                for table in PROBE_TABLES:
-                    connection.execute(self.sql.SQL("INSERT INTO {}.{} VALUES (%s, %s, %s)").format(
-                        self.sql.Identifier(self.schema), self.sql.Identifier(table)),
-                        ("acme", "synthetic-post-checkpoint", '{"test_only":true}'))
-            retained = self.snapshot()
-            forward = self.backup()
-            owner, runtime = self.restore(forward)
-            self.runtime(runtime).verify_ready()
-            self.assertEqual(self.snapshot(owner), retained)
-        self.assert_old_rows(retained)
+        self.migrate()
+        append_postgres_query_audit(self.runtime())
+        retained = self.snapshot()
+        self.assertTrue(retained["rows"][QUERY_AUDIT_TABLE])
+        forward = self.backup()
+        owner, runtime = self.restore(forward)
+        self.runtime(runtime).verify_ready()
+        self.assertEqual(self.snapshot(owner), retained)
+        self.assert_old_rows(retained, allow_appended=True)
         old_owner, old_runtime = self.restore(old)
         self.assertEqual(self.snapshot(old_owner), self.before)
         self.assertNotEqual(self.snapshot(old_owner), retained)
@@ -399,21 +611,9 @@ class PostgresAccountBindingACLPreflightTests(PostgresTestCase):
 
         first = bootstrap()
         with self.psycopg.connect(self.owner_dsn) as connection:
-            self.assertEqual(acl(connection), BASELINE_ACL)
+            self.assertEqual(acl(connection), PROPOSED_ACL)
         self.assertEqual(bootstrap(), first)
         verify_runtime()
-        with self.psycopg.connect(self.owner_dsn) as connection:
-            self.assertEqual(acl(connection), BASELINE_ACL)
-            for table in PROBE_TABLES:
-                connection.execute(self.sql.SQL("CREATE TABLE {}.{} (organization_id TEXT NOT NULL, "
-                    "event_id TEXT PRIMARY KEY, evidence_json TEXT NOT NULL)").format(
-                    self.sql.Identifier(schema), self.sql.Identifier(table)))
-                connection.execute(self.sql.SQL("GRANT SELECT, INSERT ON {}.{} TO {}").format(
-                    self.sql.Identifier(schema), self.sql.Identifier(table), self.sql.Identifier(roles[0])))
-            proposed = acl(connection)
-        for operation in (bootstrap, verify_runtime):
-            with self.assertRaisesRegex(PostgresStorageError, "acl_boundary_invalid"):
-                operation()
         with self.psycopg.connect(self.owner_dsn) as connection:
             connection.execute(self.sql.SQL("GRANT DELETE ON {}.gateway_provider_attempt_metrics TO {}")
                                .format(self.sql.Identifier(schema), self.sql.Identifier(roles[0])))
@@ -421,5 +621,4 @@ class PostgresAccountBindingACLPreflightTests(PostgresTestCase):
         for operation in (bootstrap, verify_runtime):
             with self.assertRaisesRegex(PostgresStorageError, "acl_boundary_invalid"):
                 operation()
-        self.assertEqual({"proposed": proposed, "injected": injected},
-                         {"proposed": PROPOSED_ACL, "injected": INJECTED_ACL})
+        self.assertEqual(injected, INJECTED_ACL)

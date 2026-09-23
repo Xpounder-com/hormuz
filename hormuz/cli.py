@@ -255,6 +255,9 @@ def _finance_command_dependencies() -> finance_commands.FinanceCommandDependenci
     return finance_commands.FinanceCommandDependencies(
         authenticator=Authenticator,
         create_repository=finance_commands.create_finance_collection_repository,
+        create_account_repository=(
+            finance_commands.create_finance_account_registration_repository
+        ),
         resolve_credentials=resolve_upstream_credentials,
         fetch_pages=finance_commands.fetch_collection_pages,
         normalize_pages=finance_commands.normalize_collection_pages,

@@ -70,7 +70,12 @@ EXPECTED_COMMAND_TREE = {
     },
     "demo": None,
     "doctor": None,
-    "finance": {"collect": None, "import": None, "source": {"bind": None}},
+    "finance": {
+        "account": {"bind": None},
+        "collect": None,
+        "import": None,
+        "source": {"bind": None},
+    },
     "login": None,
     "logout": None,
     "policy": {

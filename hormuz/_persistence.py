@@ -27,6 +27,7 @@ from .finance_attempts import (
     ConfiguredRouteEstimate,
     NativeUsageObservation,
 )
+from .finance_account_binding import FinanceAccountCandidate, UnavailableFinance
 from .provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -200,6 +201,7 @@ class ProviderReliabilityRepository(Protocol):
         work_budget: WorkBudgetContext | None,
         provider_failover: ProviderFailoverContext | None,
         configured_rate_card: ConfiguredRateCardBinding | None = None,
+        finance_account: FinanceAccountCandidate | UnavailableFinance | None = None,
     ) -> RequestAttempt: ...
 
     def finalize_request_attempt(

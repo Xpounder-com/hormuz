@@ -580,9 +580,23 @@ def verify_postgres_finance_collection(cursor, schema: str, error_factory) -> No
     source_reader_row = cursor.fetchone()
     quoted_schema = '"' + schema.replace('"', '""') + '"'
     try:
+        cursor.execute(
+            f"SELECT EXISTS (SELECT 1 FROM {quoted_schema}.hormuz_schema_migrations "
+            "WHERE version=18 AND state='applied')"
+        )
+        successor_row = cursor.fetchone()
+        successor_applied = bool(
+            next(iter(successor_row.values()))
+            if isinstance(successor_row, Mapping)
+            else successor_row[0]
+        )
         template = (
             resources.files("hormuz.migrations.postgresql")
-            .joinpath("0016_finance_collection.sql")
+            .joinpath(
+                "0018_finance_account_binding_and_query_audit.sql"
+                if successor_applied
+                else "0016_finance_collection.sql"
+            )
             .read_text(encoding="utf-8")
         )
         rendered = template.format(

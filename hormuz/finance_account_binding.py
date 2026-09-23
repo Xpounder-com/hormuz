@@ -1,10 +1,10 @@
-"""Provider-free configuration candidates for prospective account binding.
+"""Provider-free configuration candidates for finance account binding.
 
 These immutable values carry only operator-supplied metadata references. A
 candidate is not a registered binding, account-ownership proof or permission
-to match financial evidence. Registration/source validation and durable
-attempt capture remain unimplemented. No credentials, storage or provider
-lookups belong in this module.
+to match financial evidence. The registration and attempt-capture transaction
+must still validate it against durable source state. No credentials, storage or
+provider lookups belong in this module.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ class FinanceAccountBindings:
 
 @dataclass(frozen=True)
 class FinanceAccountCandidate:
-    """References requiring future tenant-bound registration/source validation."""
+    """References requiring tenant-bound registration/source validation."""
 
     identity: FinanceIdentity
     binding: ConfiguredFinanceBinding

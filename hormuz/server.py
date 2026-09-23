@@ -128,8 +128,8 @@ class _EgressConfiguration:
 class _SelectedUpstream:
     """One immutable transport/metadata choice; contains no credential value.
 
-    Finance candidates are not passed to persistence in this source checkpoint.
-    Future capture must validate each new attempt in its existing transaction.
+    The same finance candidate is validated and captured in the new attempt's
+    existing transaction before this selected transport performs egress.
     """
 
     upstream: UpstreamConfig
@@ -1535,6 +1535,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 ),
                 provider_failover=provider_failover,
                 configured_rate_card=rate_card_binding,
+                finance_account=selected_upstream.finance,
             )
         except _STORAGE_FAILURES:
             if admission is not None:

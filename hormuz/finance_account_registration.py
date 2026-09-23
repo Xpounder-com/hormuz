@@ -1,4 +1,4 @@
-"""Dormant, provider-free intake for prospective account registration.
+"""Provider-free intake for finance account registration.
 
 The caller must authenticate and authorize the tenant before reading a request
 file and passing its bytes here. This module validates metadata only: it does
@@ -40,7 +40,7 @@ def _sha256(value: object) -> bool:
 
 
 class AccountBindingRequestError(ValueError):
-    """Fixed, content-free validation failure for dormant registration intake."""
+    """Fixed, content-free validation failure for registration intake."""
 
     def __init__(self) -> None:
         self.code = "invalid_request"
@@ -48,7 +48,7 @@ class AccountBindingRequestError(ValueError):
 
 
 class AccountBindingMatchError(ValueError):
-    """A fixed, content-free mismatch before a future registration transaction."""
+    """A fixed, content-free mismatch inside the registration transaction."""
 
     def __init__(self) -> None:
         self.code = "binding_conflict"
@@ -113,7 +113,7 @@ def match_active_account_binding_source(
 ) -> MatchedActiveAccountBindingSource:
     """Match an active request to exact configured and source coordinates.
 
-    Future storage code must read both source rows and reauthorize under the
+    Storage code must read both source rows and reauthorize under the
     tenant's registration lock, check historical request replay and current
     registration CAS, then append the version and audit entry atomically. This
     helper performs no I/O, grants no account authority and does not handle
@@ -123,7 +123,7 @@ def match_active_account_binding_source(
     """
 
     # Keep strict request parsing independent of the storage/config dependency
-    # graph until the prospective registration matcher is actually invoked.
+    # graph until the registration matcher is invoked.
     from .finance_collection_repository import SourceBindingVersion
 
     if (

@@ -1113,8 +1113,18 @@ class GatewayIntegrationTests(unittest.TestCase):
             root = connection.execute("SELECT organization_id FROM gateway_request_attempts").fetchone()
             self.assertEqual(root[0], self.config.organization_ids[0])
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            self.assertNotIn("gateway_finance_attempt_account_bindings", tables)
-            self.assertNotIn("portfolio_finance_account_binding_versions", tables)
+            self.assertIn("gateway_finance_attempt_account_bindings", tables)
+            sidecar = connection.execute(
+                "SELECT state, reason_code, binding_id "
+                "FROM gateway_finance_attempt_account_bindings"
+            ).fetchone()
+            self.assertEqual(sidecar, ("unbound", "binding_invalid", None))
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM portfolio_finance_account_binding_versions"
+                ).fetchone()[0],
+                0,
+            )
 
     def test_finance_selection_runs_only_after_existing_authentication_and_admission(self) -> None:
         with mock.patch("hormuz.server.select_finance_account", side_effect=AssertionError("unauthorized selection")):
@@ -1228,9 +1238,14 @@ class GatewayIntegrationTests(unittest.TestCase):
             ).fetchall()
             usage_count = connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0]
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            sidecar = connection.execute(
+                "SELECT state, reason_code, binding_id "
+                "FROM gateway_finance_attempt_account_bindings"
+            ).fetchone()
         self.assertEqual(terminal_events, [("outcome_unknown", "provider_transport_ambiguous", None)])
         self.assertEqual(usage_count, 0)
-        self.assertNotIn("gateway_finance_attempt_account_bindings", tables)
+        self.assertIn("gateway_finance_attempt_account_bindings", tables)
+        self.assertEqual(sidecar, ("unbound", "binding_missing", None))
 
     def test_startup_egress_snapshot_ignores_input_mutation_before_selection(self) -> None:
         from hormuz.finance_account_binding import parse_finance_account_bindings

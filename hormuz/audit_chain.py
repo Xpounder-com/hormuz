@@ -502,21 +502,32 @@ def _normalized_v2_source_event(event: Mapping[str, Any], *, source: AuditChainS
             validate_finance_attempt_event(parsed)
             expected_id = parsed.get("evidence_event_id")
         elif source.schema_version == 1:
-            from .finance_collection import (
-                FINANCE_COLLECTION_SOURCE_SCHEMA_IDS,
-                FinanceCollectionError,
-                finance_collection_source_identity,
+            from .finance_account_evidence import (
+                FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS,
+                finance_account_source_identity,
             )
 
-            if source.schema_id not in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS:
-                raise AuditChainError("audit_chain_event_schema_unsupported")
-            try:
-                expected_id = finance_collection_source_identity(
-                    source.schema_id,
-                    parsed,
+            if source.schema_id in FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS:
+                try:
+                    expected_id = finance_account_source_identity(source.schema_id, parsed)
+                except ValueError:
+                    raise AuditChainError("audit_chain_event_malformed") from None
+            else:
+                from .finance_collection import (
+                    FINANCE_COLLECTION_SOURCE_SCHEMA_IDS,
+                    FinanceCollectionError,
+                    finance_collection_source_identity,
                 )
-            except FinanceCollectionError:
-                raise AuditChainError("audit_chain_event_malformed") from None
+
+                if source.schema_id not in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS:
+                    raise AuditChainError("audit_chain_event_schema_unsupported")
+                try:
+                    expected_id = finance_collection_source_identity(
+                        source.schema_id,
+                        parsed,
+                    )
+                except FinanceCollectionError:
+                    raise AuditChainError("audit_chain_event_malformed") from None
         else:
             raise AuditChainError("audit_chain_event_schema_unsupported")
     except (AuditChainError, ContractValidationError, TypeError, ValueError, json.JSONDecodeError):

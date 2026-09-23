@@ -135,6 +135,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         "hormuz/_outcome_schema.py",
         "hormuz/_finance_schema.py",
         "hormuz/_finance_collection_schema.py",
+        "hormuz/_finance_account_binding_schema.py",
         "hormuz/_budget_schema.py",
         "hormuz/_provider_reliability_schema.py",
     ):
@@ -155,7 +156,10 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
             # so the runtime SQL and audit-source map cannot drift apart.  The
             # inventory verifier resolves those literal names without importing
             # or executing the checkout under review.
-            if path != "hormuz/_finance_collection_schema.py" or not isinstance(
+            if path not in {
+                "hormuz/_finance_collection_schema.py",
+                "hormuz/_finance_account_binding_schema.py",
+            } or not isinstance(
                 declarations, ast.Dict
             ):
                 raise DurableDataInventoryError(
@@ -214,11 +218,12 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
             if not isinstance(active_table, str):
                 raise DurableDataInventoryError("registry_schema_tables_invalid")
             registry_tables[active_table] = "active_pointer"
-        table_pattern = (
-            r"gateway_provider_[a-z_]+"
-            if path == "hormuz/_provider_reliability_schema.py"
-            else r"portfolio_[a-z_]+"
-        )
+        if path == "hormuz/_provider_reliability_schema.py":
+            table_pattern = r"gateway_provider_[a-z_]+"
+        elif path == "hormuz/_finance_account_binding_schema.py":
+            table_pattern = r"(?:gateway|portfolio)_finance_[a-z_]+"
+        else:
+            table_pattern = r"portfolio_[a-z_]+"
         if not all(
             isinstance(name, str) and re.fullmatch(table_pattern, name)
             for name in registry_tables

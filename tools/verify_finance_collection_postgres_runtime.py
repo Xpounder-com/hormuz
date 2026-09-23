@@ -62,7 +62,8 @@ def verify(root=ROOT, *, predecessor_archive=None):
         POSTGRES_FINANCE_COLLECTION_RUNTIME_ACCEPTED,
     )
     if (
-        (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != (12, 17)
+        (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
+        not in {(12, 17), (13, 18)}
         or _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(17) != EXPECTED_ACL
         or POSTGRES_FINANCE_COLLECTION_RUNTIME_ENABLED is not True
         or POSTGRES_FINANCE_COLLECTION_RUNTIME_ACCEPTED is not False
@@ -78,8 +79,8 @@ def verify(root=ROOT, *, predecessor_archive=None):
         verify_predecessor_archive(predecessor_archive)
     return {
         "status": "finance_collection_postgres_runtime_candidate_verified",
-        "current_sqlite_schema_version": 12,
-        "current_postgresql_schema_version": 17,
+        "current_sqlite_schema_version": SQLITE_SCHEMA_VERSION,
+        "current_postgresql_schema_version": POSTGRES_SCHEMA_VERSION,
         "postgresql_acl_current": EXPECTED_ACL,
         "postgresql_acl_injected_rejected": INJECTED_ACL,
         "gates": plan["gates"],

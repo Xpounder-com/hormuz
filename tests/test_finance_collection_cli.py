@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 import io
 import json
 from pathlib import Path
@@ -13,6 +14,10 @@ from unittest import mock
 from hormuz.cli import build_parser
 from hormuz.commands import finance as finance_commands
 from hormuz.finance_collection_repository import create_finance_collection_repository
+from hormuz.finance_account_binding import (
+    parse_finance_account_bindings,
+    parse_finance_identity,
+)
 from hormuz.portfolio_config import PortfolioPrincipal
 from hormuz.store import UsageStore
 
@@ -120,6 +125,82 @@ class FinanceCollectionCLITests(unittest.TestCase):
         self.assertNotIn("raw-provider-account", stdout)
         with self.config.database_path.open("rb") as database:
             self.assertNotIn(b"raw-provider-account", database.read())
+
+    def test_account_binding_authorizes_before_file_and_commits_audited_receipt(self):
+        source = self.bind()
+        upstream = replace(
+            self.config.upstreams["openai"],
+            base_url="https://api.openai.com/v1",
+            finance_identity=parse_finance_identity({
+                "upstream_reference_id": "openai-primary",
+                "upstream_reference_version": 1,
+                "transport_profile": "openai.first-party.v1",
+                "inference_credential_reference_id": "inference-primary",
+                "inference_credential_reference_version": 2,
+            }),
+        )
+        self.config = replace(
+            self.config,
+            upstreams={**self.config.upstreams, "openai": upstream},
+            finance_account_bindings=parse_finance_account_bindings([{
+                "organization_id": "acme",
+                "upstream_reference_id": "openai-primary",
+                "binding_id": "primary-account",
+                "binding_version": 1,
+            }]),
+        )
+        request = self.root / "account-binding.json"
+        request.write_text(json.dumps({
+            "schema_id": "hormuz.finance-account-binding-request",
+            "schema_version": 1,
+            "binding_id": "primary-account",
+            "expected_version": None,
+            "upstream_reference_id": "openai-primary",
+            "upstream_reference_version": 1,
+            "transport_profile": "openai.first-party.v1",
+            "inference_credential_reference_id": "inference-primary",
+            "inference_credential_reference_version": 2,
+            "source_binding": {
+                "binding_id": source.binding_id,
+                "version": source.version,
+                "content_digest": source.content_digest,
+            },
+            "state": "active",
+            "reason_code": "created",
+        }), encoding="utf-8")
+        status, stdout, stderr = self.invoke(
+            ["finance", "account", "bind", str(request)]
+        )
+        self.assertEqual((status, stderr), (0, ""))
+        receipt = json.loads(stdout)
+        self.assertEqual(
+            (receipt["schema_id"], receipt["binding_id"], receipt["version"]),
+            ("hormuz.finance-account-binding-receipt", "primary-account", 1),
+        )
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM gateway_audit_chain_entries "
+                    "WHERE source_schema_id='hormuz.finance-account-binding-version'"
+                ).fetchone()[0],
+                1,
+            )
+
+        missing = self.root / "must-not-open-account.json"
+        dependencies = finance_commands.FinanceCommandDependencies(
+            create_account_repository=mock.Mock(
+                side_effect=AssertionError("database opened")
+            ),
+        )
+        status, stdout, stderr = self.invoke(
+            ["finance", "account", "bind", str(missing)],
+            dependencies=dependencies,
+            environment={"HORMUZ_PORTFOLIO_TOKEN": "invalid"},
+        )
+        self.assertEqual(status, 2)
+        self.assertEqual(stdout, "")
+        self.assertEqual(json.loads(stderr), {"error": {"code": "unauthenticated"}})
+        dependencies.create_account_repository.assert_not_called()
 
     def test_import_commits_pending_before_file_and_retry_never_reopens_it(self):
         self.bind()
