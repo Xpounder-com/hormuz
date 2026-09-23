@@ -349,12 +349,28 @@ fn stop_state(output: &str, unit: &str) -> StopState {
     }
     let owned_group =
         group.is_some_and(|path| path.starts_with('/') && path.ends_with(&format!("/{unit}")));
-    if !owned_group {
-        return StopState::Invalid;
-    }
+    let no_main = pid == Some(0);
+    let empty_group = group == Some("");
     match active {
-        Some("active" | "activating") if pid.is_some_and(|value| value > 0) => StopState::Running,
-        Some("deactivating") => StopState::Stopping,
+        Some("active" | "activating")
+            if pid.is_some_and(|value| value > 0) && owned_group =>
+        {
+            StopState::Running
+        }
+        // With ExitType=main, systemd can clear MainPID before it updates
+        // ActiveState or removes the service cgroup. These are verified
+        // states of the same exact transient unit, so continue the bounded
+        // stop/collection observation instead of rejecting the race.
+        Some("active" | "activating" | "inactive" | "failed")
+            if no_main && (owned_group || empty_group) =>
+        {
+            StopState::Stopping
+        }
+        Some("deactivating")
+            if owned_group || (no_main && empty_group) =>
+        {
+            StopState::Stopping
+        }
         _ => StopState::Invalid,
     }
 }
@@ -493,10 +509,24 @@ mod tests {
             .replace("MainPID=123", "MainPID=0")
             .replace("ActiveState=active", "ActiveState=inactive");
         assert_eq!(stop_state(&inactive, UNIT), StopState::Stopped);
+        for transition in [
+            GOOD_STOP
+                .replace("MainPID=123", "MainPID=0")
+                .replace("ActiveState=active", "ActiveState=inactive"),
+            GOOD_STOP
+                .replace("MainPID=123", "MainPID=0")
+                .replace("ActiveState=active", "ActiveState=failed"),
+            GOOD_STOP.replace("MainPID=123", "MainPID=0"),
+            GOOD_STOP
+                .replace(&format!("ControlGroup={PATH}"), "ControlGroup=")
+                .replace("MainPID=123", "MainPID=0")
+                .replace("ActiveState=active", "ActiveState=deactivating"),
+        ] {
+            assert_eq!(stop_state(&transition, UNIT), StopState::Stopping);
+        }
         for (old, new) in [
             ("Id=hormuz-relay-test.service", "Id=other.service"),
             ("LoadState=loaded", "LoadState=masked"),
-            ("MainPID=123", "MainPID=0"),
             ("ExitType=main", "ExitType=cgroup"),
             ("RemainAfterExit=no", "RemainAfterExit=yes"),
             ("Restart=no", "Restart=always"),
