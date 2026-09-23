@@ -97,6 +97,20 @@ _NORMALIZER_RULES = {
 _NORMALIZER_DIGEST = hashlib.sha256(
     canonical(_NORMALIZER_RULES).encode("ascii")
 ).hexdigest()
+_SNAPSHOT_NORMALIZER_RULES = {
+    "schema_id": "hormuz.linear-authorized-snapshot-normalizer",
+    "schema_version": 1,
+    "entities": ["cycle", "initiative", "issue", "project"],
+    "revision": "source_updated_at_v1",
+    "content": "opaque_ids_and_timestamps_only",
+    "lifecycle": "archived_or_updated_at_capture",
+    "state_outcomes": "current_state_only_no_outcome",
+    "capture_time": "revision_and_lifecycle_not_after_capture",
+    "relationship_coverage": "explicit_empty_complete_absent_unknown",
+}
+_SNAPSHOT_NORMALIZER_DIGEST = hashlib.sha256(
+    canonical(_SNAPSHOT_NORMALIZER_RULES).encode("ascii")
+).hexdigest()
 
 
 def _fail() -> None:
@@ -327,10 +341,18 @@ def _validate_context(event: Mapping[str, object]) -> None:
     if authority.get("id") != event.get("connector_id"):
         _fail()
     normalizer = _version_ref(event.get("normalizer"))
+    expected_normalizer = (
+        ("linear-webhook-normalizer", _NORMALIZER_DIGEST)
+        if capture_kind == "webhook"
+        else (
+            "linear-authorized-snapshot-normalizer",
+            _SNAPSHOT_NORMALIZER_DIGEST,
+        )
+    )
     if (
-        normalizer.get("id") != "linear-webhook-normalizer"
+        normalizer.get("id") != expected_normalizer[0]
         or normalizer.get("version") != 1
-        or normalizer.get("content_digest") != _NORMALIZER_DIGEST
+        or normalizer.get("content_digest") != expected_normalizer[1]
     ):
         _fail()
     _opaque(event.get("credential_version"))

@@ -16,7 +16,11 @@ import time
 import unittest
 from unittest import mock
 
-from hormuz.linear_connector import LinearOutcomeReceiver
+from hormuz.linear_connector import (
+    LinearOutcomeReceiver,
+    NORMALIZER_DIGEST,
+    SNAPSHOT_NORMALIZER_DIGEST,
+)
 from hormuz.linear_evidence import validate_linear_evidence
 from hormuz.linear_snapshot import (
     LINEAR_SNAPSHOTS_PATH,
@@ -335,7 +339,27 @@ class LinearSnapshotSQLiteRuntimeTests(unittest.TestCase):
             (context["capture_kind"], context["source_delivery_id"]),
             ("authorized_snapshot", PAGE),
         )
+        self.assertEqual(
+            context["normalizer"],
+            {
+                "id": "linear-authorized-snapshot-normalizer",
+                "version": 1,
+                "content_digest": SNAPSHOT_NORMALIZER_DIGEST,
+            },
+        )
+        self.assertNotEqual(SNAPSHOT_NORMALIZER_DIGEST, NORMALIZER_DIGEST)
         validate_linear_evidence("hormuz.linear-context-event", context)
+        wrong_normalizer = json.loads(json.dumps(context))
+        wrong_normalizer["normalizer"] = {
+            "id": "linear-webhook-normalizer",
+            "version": 1,
+            "content_digest": NORMALIZER_DIGEST,
+        }
+        with self.assertRaisesRegex(ValueError, "linear_evidence_invalid"):
+            validate_linear_evidence(
+                "hormuz.linear-context-event",
+                wrong_normalizer,
+            )
         sources = [
             row["source_schema_id"]
             for row in self.rows("gateway_audit_chain_entries")

@@ -13,7 +13,11 @@ from uuid import UUID, uuid5
 
 from ._portfolio_sql import OUTCOME_LINEAR_TABLES, portfolio_transaction
 from .audit_chain import AuditChainSource, build_audit_chain_entry, canonical_json_text
-from .linear_connector import LinearProjection, NORMALIZER_DIGEST
+from .linear_connector import (
+    LinearProjection,
+    NORMALIZER_DIGEST,
+    SNAPSHOT_NORMALIZER_DIGEST,
+)
 from .linear_evidence import linear_source_identity, validate_linear_evidence
 from .linear_webhook_auth import LinearVerifiedDelivery
 from .outcome_connector_config import LinearOutcomeChannelConfig
@@ -837,6 +841,14 @@ class LinearConnectorRepository:
             registry_sequence,
             observed_at,
         )
+        normalizer = (
+            ("linear-webhook-normalizer", NORMALIZER_DIGEST)
+            if capture_kind == "webhook"
+            else (
+                "linear-authorized-snapshot-normalizer",
+                SNAPSHOT_NORMALIZER_DIGEST,
+            )
+        )
         event = {
             "schema_id": "hormuz.linear-context-event",
             "schema_version": 1,
@@ -858,9 +870,9 @@ class LinearConnectorRepository:
                 "content_digest": binding_row["content_digest"],
             },
             "normalizer": {
-                "id": "linear-webhook-normalizer",
+                "id": normalizer[0],
                 "version": 1,
-                "content_digest": NORMALIZER_DIGEST,
+                "content_digest": normalizer[1],
             },
             "credential_version": verified.credential_version,
             "source_authentication": "verified_connector",

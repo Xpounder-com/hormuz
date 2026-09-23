@@ -29,6 +29,20 @@ NORMALIZER_RULES = {
     "relationship_coverage": "explicit_empty_complete_absent_unknown",
 }
 NORMALIZER_DIGEST = hashlib.sha256(canonical(NORMALIZER_RULES).encode("ascii")).hexdigest()
+SNAPSHOT_NORMALIZER_RULES = {
+    "schema_id": "hormuz.linear-authorized-snapshot-normalizer",
+    "schema_version": 1,
+    "entities": ["cycle", "initiative", "issue", "project"],
+    "revision": "source_updated_at_v1",
+    "content": "opaque_ids_and_timestamps_only",
+    "lifecycle": "archived_or_updated_at_capture",
+    "state_outcomes": "current_state_only_no_outcome",
+    "capture_time": "revision_and_lifecycle_not_after_capture",
+    "relationship_coverage": "explicit_empty_complete_absent_unknown",
+}
+SNAPSHOT_NORMALIZER_DIGEST = hashlib.sha256(
+    canonical(SNAPSHOT_NORMALIZER_RULES).encode("ascii")
+).hexdigest()
 _INGEST_SLOTS = threading.BoundedSemaphore(8)
 _UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z")
 

@@ -101,7 +101,10 @@ rows. Both context sources share one organization commit sequence, stable
 semantic deduplication by object revision and normalized metadata, and
 supersession ordering. Each snapshot context binds its evidence to the signed
 page ID through `source_delivery_id`; capture-specific timestamps do not create
-a second context for the same semantic revision.
+a second context for the same semantic revision. Its `normalizer` reference uses
+the digest-bound `linear-authorized-snapshot-normalizer`, so the provenance
+identifies the capture-time bounds and snapshot lifecycle rules that produced
+the durable event.
 
 A page commits its receipt, metadata-only context events, and finite audit-chain
 entries in one transaction. It emits no outcome event. A context already

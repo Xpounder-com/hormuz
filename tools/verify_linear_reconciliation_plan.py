@@ -24,7 +24,7 @@ from hormuz.postgres import (
 
 PLAN_PATH = "docs/linear-reconciliation-plan-v1.json"
 CI_PATH = ".github/workflows/ci.yml"
-PLAN_SHA256 = "e781775f4fee5fd48b9d500d76ac729b962a55ed670a65ee4f3da8bf00e9c451"
+PLAN_SHA256 = "68f95a12d5324c0e66548dbb567b472dc2e8f74c965467a10a56969acc320780"
 PREDECESSOR_PATH = "docs/linear-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "0440419441a88b9405bf35c986edf91c02ba80fba99203df63d309e2fb9603e2"
