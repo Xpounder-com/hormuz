@@ -22,7 +22,11 @@ from ._finance_collection_schema import (
     TABLE_DDL,
     USAGE_TABLE,
 )
-from ._finance_account_binding_schema import QUERY_AUDIT_TABLE
+from ._finance_account_binding_schema import (
+    ATTEMPT_BINDING_TABLE,
+    QUERY_AUDIT_TABLE,
+    REGISTRATION_TABLE,
+)
 from ._portfolio_sql import FINANCE_COLLECTION_ACCOUNT_TABLES, portfolio_transaction
 from .audit_chain import (
     AuditChainError,
@@ -48,7 +52,12 @@ from .finance_collection import (
 )
 from .finance_attempts import finance_attempt_event_from_row
 from .finance_account_evidence import (
+    ACCOUNT_BINDING_FIELDS,
+    ATTEMPT_ACCOUNT_BINDING_FIELDS,
     QUERY_AUDIT_SCHEMA_ID,
+    canonical_evidence_text,
+    validate_finance_account_binding_event,
+    validate_finance_attempt_account_binding_event,
     validate_finance_query_audit_event,
 )
 from .finance_values import FinanceValueError, currency_code
@@ -917,24 +926,112 @@ class FinanceCollectionRepository:
         tuple[Mapping[str, str], ...],
         str,
     ]:
+        result = self._coverage_report_evidence_internal(
+            principal,
+            source_binding_id=binding_id,
+            source_binding_version=binding_version,
+            account_binding_id=None,
+            account_binding_version=None,
+            collection_profile=collection_profile,
+            start_at=start_at,
+            end_at=end_at,
+            currency=currency,
+            as_of_commit_sequence=as_of_commit_sequence,
+        )
+        preview, missing_sidecars, provenance, query_event_id, _ = result
+        return preview, missing_sidecars, provenance, query_event_id
+
+    def account_reconciliation_report_evidence(
+        self,
+        principal: PortfolioPrincipal,
+        *,
+        account_binding_id: str,
+        account_binding_version: int,
+        collection_profile: str,
+        start_at: str,
+        end_at: str,
+        currency: str,
+        as_of_commit_sequence: int | None = None,
+    ) -> tuple[
+        FinanceCoveragePreview,
+        int,
+        tuple[Mapping[str, str], ...],
+        str,
+        Mapping[str, object],
+    ]:
+        """Build an account-bound comparison without provider or credential access."""
+
+        return self._coverage_report_evidence_internal(
+            principal,
+            source_binding_id=None,
+            source_binding_version=None,
+            account_binding_id=account_binding_id,
+            account_binding_version=account_binding_version,
+            collection_profile=collection_profile,
+            start_at=start_at,
+            end_at=end_at,
+            currency=currency,
+            as_of_commit_sequence=as_of_commit_sequence,
+        )
+
+    def _coverage_report_evidence_internal(
+        self,
+        principal: PortfolioPrincipal,
+        *,
+        source_binding_id: str | None,
+        source_binding_version: int | None,
+        account_binding_id: str | None,
+        account_binding_version: int | None,
+        collection_profile: str,
+        start_at: str,
+        end_at: str,
+        currency: str,
+        as_of_commit_sequence: int | None = None,
+    ) -> tuple[
+        FinanceCoveragePreview,
+        int,
+        tuple[Mapping[str, str], ...],
+        str,
+        Mapping[str, object] | None,
+    ]:
         """Read a cost selection and every terminal sidecar in one tenant transaction.
 
         The integer counts terminal attempts without a finance sidecar. The
         provenance tuple carries the stored source origin and scope for each
         selected cost snapshot. The final string is the committed query-audit
-        event receipt.
-        Neither the selected provider aggregate nor an attempt is assigned to
-        a provider account by this read.
+        event receipt. Source-mode reports retain the existing unbound preview;
+        account mode admits only attempts carrying the exact immutable binding.
         """
 
         self._authorize(principal)
+        source_mode = (
+            source_binding_id is not None
+            and source_binding_version is not None
+            and account_binding_id is None
+            and account_binding_version is None
+        )
+        account_mode = (
+            account_binding_id is not None
+            and account_binding_version is not None
+            and source_binding_id is None
+            and source_binding_version is None
+        )
+        if source_mode:
+            binding_id = source_binding_id
+            binding_version = source_binding_version
+        elif account_mode:
+            binding_id = account_binding_id
+            binding_version = account_binding_version
+        else:
+            raise FinanceCollectionError("invalid_request")
+        _validate_collection_selection(binding_id, binding_version, collection_profile)
         try:
             if currency_code(currency) != currency:
                 raise FinanceValueError("finance_invalid_amount")
         except FinanceValueError:
             raise FinanceCollectionError("invalid_request") from None
-        _validate_collection_selection(binding_id, binding_version, collection_profile)
-        if PROFILE_SPECS[collection_profile].source_kind != "cost":
+        profile = PROFILE_SPECS[collection_profile]
+        if profile.source_kind != "cost":
             raise FinanceCollectionError("invalid_request")
         start_at, end_at = _selection_bounds(start_at, end_at)
         if start_at[11:] != "00:00:00Z" or end_at[11:] != "00:00:00Z":
@@ -953,13 +1050,34 @@ class FinanceCollectionRepository:
         provider_profile = {
             "openai": "openai.responses.usage.v1",
             "anthropic": "anthropic.messages.usage.v1",
-        }[PROFILE_SPECS[collection_profile].provider]
+        }[profile.provider]
         from .finance_reconciliation_coverage import (
             MAX_PREVIEW_ROWS,
             build_finance_coverage_preview,
         )
 
         with self._transaction(principal, include_query_audit=True) as sql:
+            selected_account: Mapping[str, object] | None = None
+            selected_source: SourceBindingVersion | None = None
+            if account_mode:
+                selected_account = _selected_account_binding_event(
+                    sql,
+                    organization_id=principal.organization_id,
+                    binding_id=binding_id,
+                    binding_version=binding_version,
+                )
+                if selected_account["binding_state"] != "active":
+                    raise FinanceCollectionError("invalid_request")
+                selected_source = _selected_account_source_binding(
+                    sql,
+                    organization_id=principal.organization_id,
+                    account_event=selected_account,
+                )
+                if selected_source.provider != profile.provider:
+                    raise FinanceCollectionError("invalid_request")
+                binding_id = selected_source.binding_id
+                binding_version = selected_source.version
+
             maximum = sql.one(
                 f"SELECT COALESCE(MAX(commit_sequence),0) AS sequence "
                 f"FROM {SNAPSHOT_TABLE} WHERE organization_id=?",
@@ -1031,67 +1149,277 @@ class FinanceCollectionRepository:
                     RecursionError, TypeError, UnicodeError, ValueError,
                 ):
                     raise FinanceCollectionError("unavailable") from None
-            terminal_rows = sql.execute(
-                "SELECT terminal.id AS terminal_id, terminal.state AS terminal_state_check, "
-                "terminal.occurred_at AS terminal_occurred_at, finance.*, "
-                "chain.event_json AS audit_event_json "
-                "FROM gateway_request_attempt_events terminal "
-                "JOIN gateway_request_attempts root "
-                "ON root.organization_id=terminal.organization_id "
-                "AND root.attempt_id=terminal.attempt_id "
-                "LEFT JOIN gateway_finance_attempt_evidence finance "
-                "ON finance.organization_id=terminal.organization_id "
-                "AND finance.terminal_attempt_event_id=terminal.id "
-                "LEFT JOIN gateway_audit_chain_entries chain "
-                "ON chain.organization_id=finance.organization_id "
-                "AND chain.entry_schema_version=2 "
-                "AND chain.source_schema_id='hormuz.finance-attempt-evidence' "
-                "AND chain.source_schema_version=1 "
-                "AND chain.source_event_id=finance.evidence_event_id "
-                "WHERE terminal.organization_id=? AND root.protocol=? "
-                "AND terminal.state IN ('succeeded','failed','rate_limited','outcome_unknown') "
-                "AND terminal.occurred_at>=? AND terminal.occurred_at<? "
-                "ORDER BY terminal.occurred_at,terminal.id LIMIT ?",
-                (
-                    principal.organization_id,
-                    PROFILE_SPECS[collection_profile].provider,
-                    terminal_start,
-                    terminal_end,
-                    MAX_PREVIEW_ROWS + 1,
-                ),
-            ).fetchall()
-            if len(terminal_rows) > MAX_PREVIEW_ROWS:
+
+            account_columns = ", ".join(
+                f"account.{field} AS account_{field}"
+                for field in sorted(
+                    ATTEMPT_ACCOUNT_BINDING_FIELDS - {"schema_id", "schema_version"}
+                )
+            )
+            account_evidence_select = (
+                f"{account_columns}, account.evidence_json AS account_evidence_json, "
+                "account_chain.event_json AS account_audit_event_json, "
+                "attempt_registration.evidence_json AS account_registration_evidence_json, "
+                "registration_chain.event_json AS account_registration_audit_event_json, "
+                "attempt_source.evidence_json AS account_source_evidence_json, "
+                "source_chain.event_json AS account_source_audit_event_json"
+            )
+            account_select = (
+                f", {account_evidence_select}, root.attempt_id AS root_attempt_id, "
+                "root.created_at AS root_created_at "
+                if account_mode
+                else ""
+            )
+            account_joins = (
+                f"LEFT JOIN {ATTEMPT_BINDING_TABLE} account "
+                "ON account.organization_id=root.organization_id "
+                "AND account.request_attempt_id=root.attempt_id "
+                "LEFT JOIN gateway_audit_chain_entries account_chain "
+                "ON account_chain.organization_id=account.organization_id "
+                "AND account_chain.entry_schema_version=2 "
+                "AND account_chain.source_schema_id='hormuz.finance-attempt-account-binding' "
+                "AND account_chain.source_schema_version=1 "
+                "AND account_chain.source_event_id=account.event_id "
+                f"LEFT JOIN {REGISTRATION_TABLE} attempt_registration "
+                "ON attempt_registration.organization_id=account.organization_id "
+                "AND attempt_registration.binding_id=account.binding_id "
+                "AND attempt_registration.version=account.binding_version "
+                "LEFT JOIN gateway_audit_chain_entries registration_chain "
+                "ON registration_chain.organization_id=attempt_registration.organization_id "
+                "AND registration_chain.entry_schema_version=2 "
+                "AND registration_chain.source_schema_id='hormuz.finance-account-binding-version' "
+                "AND registration_chain.source_schema_version=1 "
+                "AND registration_chain.source_event_id=attempt_registration.binding_event_id "
+                f"LEFT JOIN {SOURCE_BINDING_TABLE} attempt_source "
+                "ON attempt_source.organization_id=account.organization_id "
+                "AND attempt_source.binding_id=account.source_binding_id "
+                "AND attempt_source.version=account.source_binding_version "
+                "LEFT JOIN gateway_audit_chain_entries source_chain "
+                "ON source_chain.organization_id=attempt_source.organization_id "
+                "AND source_chain.entry_schema_version=2 "
+                "AND source_chain.source_schema_id='hormuz.finance-source-binding-version' "
+                "AND source_chain.source_schema_version=1 "
+                "AND source_chain.source_event_id=attempt_source.binding_event_id "
+                if account_mode
+                else ""
+            )
+            if account_mode:
+                account_attempt_rows = sql.execute(
+                    f"SELECT terminal.id AS terminal_id, "
+                    "terminal.state AS terminal_state_check, "
+                    "terminal.occurred_at AS terminal_occurred_at, finance.*, "
+                    f"chain.event_json AS audit_event_json{account_select}, "
+                    "CASE WHEN terminal.occurred_at>=? AND terminal.occurred_at<? "
+                    "THEN 1 ELSE 0 END AS in_audit_window "
+                    "FROM gateway_request_attempts root "
+                    "LEFT JOIN gateway_request_attempt_events terminal "
+                    "ON terminal.organization_id=root.organization_id "
+                    "AND terminal.attempt_id=root.attempt_id "
+                    "AND terminal.state IN "
+                    "('succeeded','failed','rate_limited','outcome_unknown') "
+                    "LEFT JOIN gateway_finance_attempt_evidence finance "
+                    "ON finance.organization_id=terminal.organization_id "
+                    "AND finance.terminal_attempt_event_id=terminal.id "
+                    "LEFT JOIN gateway_audit_chain_entries chain "
+                    "ON chain.organization_id=finance.organization_id "
+                    "AND chain.entry_schema_version=2 "
+                    "AND chain.source_schema_id='hormuz.finance-attempt-evidence' "
+                    "AND chain.source_schema_version=1 "
+                    "AND chain.source_event_id=finance.evidence_event_id "
+                    f"{account_joins}"
+                    "WHERE root.organization_id=? AND root.protocol=? AND ("
+                    "(terminal.occurred_at>=? AND terminal.occurred_at<?) OR "
+                    "(root.created_at<? AND "
+                    "(terminal.id IS NULL OR terminal.occurred_at>=?))) "
+                    "ORDER BY COALESCE(terminal.occurred_at,root.created_at), "
+                    "root.attempt_id LIMIT ?",
+                    (
+                        terminal_start,
+                        terminal_end,
+                        principal.organization_id,
+                        profile.provider,
+                        terminal_start,
+                        terminal_end,
+                        terminal_end,
+                        terminal_end,
+                        MAX_PREVIEW_ROWS + 1,
+                    ),
+                ).fetchall()
+                if len(account_attempt_rows) > MAX_PREVIEW_ROWS:
+                    raise FinanceCollectionError("unavailable")
+                base_terminal_rows = tuple(
+                    row for row in account_attempt_rows
+                    if row["terminal_id"] is not None and bool(row["in_audit_window"])
+                )
+                boundary_terminal_rows = tuple(
+                    row for row in account_attempt_rows
+                    if row["terminal_id"] is not None and not bool(row["in_audit_window"])
+                )
+                pending_attempt_rows = tuple(
+                    row for row in account_attempt_rows
+                    if row["terminal_id"] is None
+                )
+            else:
+                base_terminal_rows = sql.execute(
+                    "SELECT terminal.id AS terminal_id, "
+                    "terminal.state AS terminal_state_check, "
+                    "terminal.occurred_at AS terminal_occurred_at, finance.*, "
+                    "chain.event_json AS audit_event_json "
+                    "FROM gateway_request_attempt_events terminal "
+                    "JOIN gateway_request_attempts root "
+                    "ON root.organization_id=terminal.organization_id "
+                    "AND root.attempt_id=terminal.attempt_id "
+                    "LEFT JOIN gateway_finance_attempt_evidence finance "
+                    "ON finance.organization_id=terminal.organization_id "
+                    "AND finance.terminal_attempt_event_id=terminal.id "
+                    "LEFT JOIN gateway_audit_chain_entries chain "
+                    "ON chain.organization_id=finance.organization_id "
+                    "AND chain.entry_schema_version=2 "
+                    "AND chain.source_schema_id='hormuz.finance-attempt-evidence' "
+                    "AND chain.source_schema_version=1 "
+                    "AND chain.source_event_id=finance.evidence_event_id "
+                    "WHERE terminal.organization_id=? AND root.protocol=? "
+                    "AND terminal.state IN "
+                    "('succeeded','failed','rate_limited','outcome_unknown') "
+                    "AND terminal.occurred_at>=? AND terminal.occurred_at<? "
+                    "ORDER BY terminal.occurred_at,terminal.id LIMIT ?",
+                    (
+                        principal.organization_id,
+                        profile.provider,
+                        terminal_start,
+                        terminal_end,
+                        MAX_PREVIEW_ROWS + 1,
+                    ),
+                ).fetchall()
+                boundary_terminal_rows = ()
+                pending_attempt_rows = ()
+            terminal_rows = (
+                tuple((row, True) for row in base_terminal_rows)
+                + tuple((row, False) for row in boundary_terminal_rows)
+            )
+            if len(terminal_rows) + len(pending_attempt_rows) > MAX_PREVIEW_ROWS:
                 raise FinanceCollectionError("unavailable")
             events: list[Mapping[str, object]] = []
             missing_sidecars = 0
-            for raw in terminal_rows:
+            audit_missing_sidecars = 0
+            matched_attempts = 0
+            matched_missing_finance = 0
+            unbound_attempts = 0
+            historical_missing_account = 0
+            same_account_other_binding = 0
+            uncomparable_account_identity = 0
+            other_account_attempts = 0
+            period_boundary_crossing_attempts = 0
+            pending_account_gap = 0
+            uncomparable_account_pending = 0
+            other_account_pending = 0
+            unbound_reasons: dict[str, int] = {}
+            for raw, in_audit_window in terminal_rows:
                 row = dict(raw)
+                account_class = "matched"
+                if account_mode:
+                    if selected_account is None:
+                        raise FinanceCollectionError("unavailable")
+                    account_event = _attempt_account_binding_event(
+                        row,
+                        organization_id=principal.organization_id,
+                        provider=profile.provider,
+                    )
+                    if account_event is None:
+                        account_class = "historical_missing"
+                        historical_missing_account += 1
+                    elif account_event["state"] == "unbound":
+                        account_class = "unbound"
+                        unbound_attempts += 1
+                        reason = str(account_event["reason_code"])
+                        unbound_reasons[reason] = unbound_reasons.get(reason, 0) + 1
+                    elif (
+                        account_event["binding_id"] == selected_account["binding_id"]
+                        and account_event["binding_version"] == selected_account["version"]
+                        and account_event["binding_digest"]
+                        == selected_account["content_digest"]
+                    ):
+                        if _attempt_lifetime_within_period(
+                            row,
+                            start_at=start_at,
+                            end_at=end_at,
+                        ):
+                            matched_attempts += 1
+                        else:
+                            account_class = "period_boundary_crossing"
+                            period_boundary_crossing_attempts += 1
+                    else:
+                        grain_relation = _account_grain_relation(
+                            account_event,
+                            selected_account,
+                        )
+                        if grain_relation == "unknown":
+                            account_class = "uncomparable_account_identity"
+                            uncomparable_account_identity += 1
+                        elif (
+                            account_event["binding_id"]
+                            == selected_account["binding_id"]
+                            or grain_relation == "same"
+                        ):
+                            account_class = "same_account_other_binding"
+                            same_account_other_binding += 1
+                        else:
+                            account_class = "other_account"
+                            other_account_attempts += 1
+
+                finance_event: Mapping[str, object] | None = None
                 if row["evidence_event_id"] is None:
                     missing_sidecars += 1
-                    continue
-                try:
-                    event = finance_attempt_event_from_row(row)
-                    occurred = row["terminal_occurred_at"]
-                    if isinstance(occurred, datetime):
-                        if occurred.tzinfo is None:
+                    audit_missing_sidecars += in_audit_window
+                    if account_class == "matched" and account_mode:
+                        matched_missing_finance += 1
+                else:
+                    try:
+                        event = finance_attempt_event_from_row(row)
+                        occurred = _stored_timestamp_text(row["terminal_occurred_at"])
+                        if (
+                            event["organization_id"] != principal.organization_id
+                            or event["provider_schema_id"] != provider_profile
+                            or event["terminal_attempt_event_id"] != row["terminal_id"]
+                            or event["terminal_state"] != row["terminal_state_check"]
+                            or event["occurred_at"] != occurred
+                            or canonical_json_text(event) != row["evidence_json"]
+                            or row["audit_event_json"] != row["evidence_json"]
+                        ):
                             raise ValueError
-                        occurred = occurred.astimezone(timezone.utc).isoformat()
-                    if (
-                        event["organization_id"] != principal.organization_id
-                        or event["provider_schema_id"] != provider_profile
-                        or event["terminal_attempt_event_id"] != row["terminal_id"]
-                        or event["terminal_state"] != row["terminal_state_check"]
-                        or event["occurred_at"] != occurred
-                        or canonical_json_text(event) != row["evidence_json"]
-                        or row["audit_event_json"] != row["evidence_json"]
+                    except (
+                        AuditChainError, KeyError, OverflowError, RecursionError,
+                        TypeError, UnicodeError, ValueError,
                     ):
-                        raise ValueError
-                except (
-                    AuditChainError, KeyError, OverflowError, RecursionError,
-                    TypeError, UnicodeError, ValueError,
-                ):
-                    raise FinanceCollectionError("unavailable") from None
-                events.append(event)
+                        raise FinanceCollectionError("unavailable") from None
+                    finance_event = event
+                if finance_event is not None and account_class == "matched":
+                    events.append(finance_event)
+            for raw in pending_attempt_rows:
+                if selected_account is None:
+                    raise FinanceCollectionError("unavailable")
+                account_event = _attempt_account_binding_event(
+                    dict(raw),
+                    organization_id=principal.organization_id,
+                    provider=profile.provider,
+                )
+                if account_event is None or account_event["state"] == "unbound":
+                    pending_account_gap += 1
+                else:
+                    grain_relation = _account_grain_relation(
+                        account_event,
+                        selected_account,
+                    )
+                    if grain_relation == "unknown":
+                        uncomparable_account_pending += 1
+                    elif (
+                        account_event["binding_id"]
+                        == selected_account["binding_id"]
+                        or grain_relation == "same"
+                    ):
+                        pending_account_gap += 1
+                    else:
+                        other_account_pending += 1
             view = AsOfCollectionView(
                 principal.organization_id, binding_id, binding_version,
                 collection_profile, cutoff, snapshots, coverage, observations,
@@ -1103,7 +1431,37 @@ class FinanceCollectionRepository:
                 start_at=start_at,
                 end_at=end_at,
                 currency=currency,
+                account_binding_state="matched" if account_mode else "unavailable",
             )
+            reconciliation = None
+            if account_mode:
+                if selected_account is None or selected_source is None:
+                    raise FinanceCollectionError("unavailable")
+                reconciliation = _account_reconciliation_result(
+                    account_event=selected_account,
+                    source_binding=selected_source,
+                    preview=preview,
+                    provider_observations=observations,
+                    gateway_attempt_events=event_values,
+                    matched_attempt_count=matched_attempts,
+                    matched_missing_finance_sidecar_count=matched_missing_finance,
+                    unbound_attempt_count=unbound_attempts,
+                    historical_missing_account_binding_count=historical_missing_account,
+                    same_account_other_binding_count=same_account_other_binding,
+                    uncomparable_account_identity_count=(
+                        uncomparable_account_identity
+                    ),
+                    other_account_attempt_count=other_account_attempts,
+                    period_boundary_crossing_attempt_count=(
+                        period_boundary_crossing_attempts
+                    ),
+                    pending_account_gap_count=pending_account_gap,
+                    uncomparable_account_pending_attempt_count=(
+                        uncomparable_account_pending
+                    ),
+                    other_account_pending_attempt_count=other_account_pending,
+                    unbound_reason_counts=unbound_reasons,
+                )
             query_event_id = str(uuid4())
             _append_query_audit(
                 sql,
@@ -1124,13 +1482,570 @@ class FinanceCollectionRepository:
                     "selected_snapshot_count": len(snapshots),
                     "coverage_bucket_count": len(coverage),
                     "provider_observation_count": len(observations),
-                    "terminal_attempt_count": len(terminal_rows),
-                    "terminal_attempts_missing_sidecar_count": missing_sidecars,
+                    "terminal_attempt_count": len(base_terminal_rows),
+                    "terminal_attempts_missing_sidecar_count": audit_missing_sidecars,
                     "occurred_at": sql.now(),
                 },
             )
             self._authorize(principal)
-            return preview, missing_sidecars, tuple(selected_provenance), query_event_id
+            return (
+                preview,
+                missing_sidecars,
+                tuple(selected_provenance),
+                query_event_id,
+                reconciliation,
+            )
+
+
+_ACCOUNT_BINDING_STORAGE_FIELDS = (
+    ACCOUNT_BINDING_FIELDS - {"schema_id", "schema_version"}
+) | {"evidence_json"}
+_ATTEMPT_ACCOUNT_STORAGE_FIELDS = (
+    ATTEMPT_ACCOUNT_BINDING_FIELDS - {"schema_id", "schema_version"}
+)
+_ATTEMPT_ACCOUNT_LINK_FIELDS = (
+    "account_registration_evidence_json",
+    "account_registration_audit_event_json",
+    "account_source_evidence_json",
+    "account_source_audit_event_json",
+)
+
+
+def _validated_account_event(
+    evidence_json: object,
+    audit_event_json: object,
+) -> Mapping[str, object]:
+    try:
+        if (
+            not isinstance(evidence_json, str)
+            or audit_event_json != evidence_json
+        ):
+            raise ValueError
+        event = json.loads(evidence_json)
+        if (
+            not isinstance(event, dict)
+            or canonical_evidence_text(event) != evidence_json
+        ):
+            raise ValueError
+        validate_finance_account_binding_event(event)
+        return event
+    except (
+        KeyError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        raise FinanceCollectionError("unavailable") from None
+
+
+def _selected_account_binding_event(
+    sql: Any,
+    *,
+    organization_id: str,
+    binding_id: str,
+    binding_version: int,
+) -> Mapping[str, object]:
+    row = sql.one(
+        f"SELECT registration.*, chain.event_json AS audit_event_json "
+        f"FROM {REGISTRATION_TABLE} registration "
+        "LEFT JOIN gateway_audit_chain_entries chain "
+        "ON chain.organization_id=registration.organization_id "
+        "AND chain.entry_schema_version=2 "
+        "AND chain.source_schema_id='hormuz.finance-account-binding-version' "
+        "AND chain.source_schema_version=1 "
+        "AND chain.source_event_id=registration.binding_event_id "
+        "WHERE registration.organization_id=? AND registration.binding_id=? "
+        "AND registration.version=?",
+        (organization_id, binding_id, binding_version),
+    )
+    try:
+        if row is None:
+            raise ValueError
+        stored = dict(row)
+        audit_event_json = stored.pop("audit_event_json")
+        if set(stored) != _ACCOUNT_BINDING_STORAGE_FIELDS:
+            raise ValueError
+        event = _validated_account_event(
+            stored["evidence_json"],
+            audit_event_json,
+        )
+        if any(
+            type(stored[field]) is not type(event[field])
+            or stored[field] != event[field]
+            for field in ACCOUNT_BINDING_FIELDS - {"schema_id", "schema_version"}
+        ):
+            raise ValueError
+        if (
+            event["organization_id"] != organization_id
+            or event["binding_id"] != binding_id
+            or event["version"] != binding_version
+        ):
+            raise ValueError
+        return event
+    except FinanceCollectionError:
+        raise
+    except (
+        KeyError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        UnicodeError,
+        ValueError,
+    ):
+        raise FinanceCollectionError("unavailable") from None
+
+
+def _selected_account_source_binding(
+    sql: Any,
+    *,
+    organization_id: str,
+    account_event: Mapping[str, object],
+) -> SourceBindingVersion:
+    row = sql.one(
+        f"SELECT source.*, chain.event_json AS audit_event_json "
+        f"FROM {SOURCE_BINDING_TABLE} source "
+        "LEFT JOIN gateway_audit_chain_entries chain "
+        "ON chain.organization_id=source.organization_id "
+        "AND chain.entry_schema_version=2 "
+        "AND chain.source_schema_id='hormuz.finance-source-binding-version' "
+        "AND chain.source_schema_version=1 "
+        "AND chain.source_event_id=source.binding_event_id "
+        "WHERE source.organization_id=? AND source.binding_id=? AND source.version=?",
+        (
+            organization_id,
+            account_event["source_binding_id"],
+            account_event["source_binding_version"],
+        ),
+    )
+    try:
+        if row is None:
+            raise ValueError
+        stored = dict(row)
+        audit_event_json = stored.pop("audit_event_json")
+        if audit_event_json != stored.get("evidence_json"):
+            raise ValueError
+        source = _binding_from_row(stored)
+        if (
+            source.organization_id != organization_id
+            or source.binding_id != account_event["source_binding_id"]
+            or source.version != account_event["source_binding_version"]
+            or source.content_digest != account_event["source_binding_digest"]
+            or source.provider != account_event["provider"]
+            or source.provider_account_fingerprint
+            != account_event["provider_account_fingerprint"]
+            or source.scope_kind != account_event["scope_kind"]
+            or canonical_evidence_text(list(source.scope_fingerprints))
+            != account_event["scope_fingerprints_json"]
+            or source.fingerprint_key_version
+            != account_event["fingerprint_key_version"]
+        ):
+            raise ValueError
+        return source
+    except FinanceCollectionError:
+        raise
+    except (
+        KeyError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        UnicodeError,
+        ValueError,
+    ):
+        raise FinanceCollectionError("unavailable") from None
+
+
+def _stored_timestamp_text(value: object) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            raise ValueError("finance_timestamp_invalid")
+        return value.astimezone(timezone.utc).isoformat()
+    if not isinstance(value, str):
+        raise ValueError("finance_timestamp_invalid")
+    return value
+
+
+def _attempt_lifetime_within_period(
+    row: Mapping[str, object],
+    *,
+    start_at: str,
+    end_at: str,
+) -> bool:
+    try:
+        start = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
+        created = datetime.fromisoformat(
+            _stored_timestamp_text(row["root_created_at"]).replace("Z", "+00:00")
+        )
+        terminal = datetime.fromisoformat(
+            _stored_timestamp_text(row["terminal_occurred_at"]).replace("Z", "+00:00")
+        )
+        if (
+            any(value.tzinfo is None for value in (start, end, created, terminal))
+            or created > terminal
+        ):
+            raise ValueError
+        return start <= created and terminal < end
+    except (KeyError, TypeError, ValueError):
+        raise FinanceCollectionError("unavailable") from None
+
+
+def _validated_source_event(
+    evidence_json: object,
+    audit_event_json: object,
+) -> Mapping[str, object]:
+    try:
+        if (
+            not isinstance(evidence_json, str)
+            or audit_event_json != evidence_json
+        ):
+            raise ValueError
+        event = json.loads(evidence_json)
+        if (
+            not isinstance(event, dict)
+            or canonical_evidence_text(event) != evidence_json
+            or finance_collection_source_identity(
+                "hormuz.finance-source-binding-version",
+                event,
+            )
+            != event.get("binding_event_id")
+        ):
+            raise ValueError
+        return event
+    except (
+        FinanceCollectionError,
+        KeyError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        raise FinanceCollectionError("unavailable") from None
+
+
+def _attempt_account_binding_event(
+    row: Mapping[str, object],
+    *,
+    organization_id: str,
+    provider: str,
+) -> Mapping[str, object] | None:
+    try:
+        stored = {
+            field: row[f"account_{field}"]
+            for field in _ATTEMPT_ACCOUNT_STORAGE_FIELDS
+        }
+        evidence_json = row["account_evidence_json"]
+        audit_event_json = row["account_audit_event_json"]
+        link_values = tuple(row[field] for field in _ATTEMPT_ACCOUNT_LINK_FIELDS)
+        if evidence_json is None:
+            if (
+                audit_event_json is not None
+                or any(value is not None for value in stored.values())
+                or any(value is not None for value in link_values)
+            ):
+                raise ValueError
+            return None
+        if not isinstance(evidence_json, str) or audit_event_json != evidence_json:
+            raise ValueError
+        event = json.loads(evidence_json)
+        if (
+            not isinstance(event, dict)
+            or canonical_evidence_text(event) != evidence_json
+        ):
+            raise ValueError
+        validate_finance_attempt_account_binding_event(event)
+        if any(
+            type(stored[field]) is not type(event[field])
+            or stored[field] != event[field]
+            for field in _ATTEMPT_ACCOUNT_STORAGE_FIELDS
+        ):
+            raise ValueError
+        if (
+            event["organization_id"] != organization_id
+            or event["request_attempt_id"] != row["root_attempt_id"]
+            or event["captured_at"]
+            != _stored_timestamp_text(row["root_created_at"])
+        ):
+            raise ValueError
+        if event["state"] == "unbound":
+            if any(value is not None for value in link_values):
+                raise ValueError
+            return event
+
+        registration = _validated_account_event(link_values[0], link_values[1])
+        source = _validated_source_event(link_values[2], link_values[3])
+        registration_pairs = (
+            ("binding_id", "binding_id"),
+            ("binding_version", "version"),
+            ("binding_digest", "content_digest"),
+            ("upstream_reference_id", "upstream_reference_id"),
+            ("upstream_reference_version", "upstream_reference_version"),
+            ("transport_profile", "transport_profile"),
+            (
+                "inference_credential_reference_id",
+                "inference_credential_reference_id",
+            ),
+            (
+                "inference_credential_reference_version",
+                "inference_credential_reference_version",
+            ),
+            ("source_binding_id", "source_binding_id"),
+            ("source_binding_version", "source_binding_version"),
+            ("source_binding_digest", "source_binding_digest"),
+            ("provider", "provider"),
+            ("provider_account_fingerprint", "provider_account_fingerprint"),
+            ("scope_kind", "scope_kind"),
+            ("scope_fingerprints_json", "scope_fingerprints_json"),
+            ("fingerprint_key_version", "fingerprint_key_version"),
+        )
+        if (
+            registration["organization_id"] != organization_id
+            or registration["binding_state"] != "active"
+            or any(event[left] != registration[right] for left, right in registration_pairs)
+            or source["organization_id"] != organization_id
+            or source["binding_id"] != event["source_binding_id"]
+            or source["version"] != event["source_binding_version"]
+            or source["content_digest"] != event["source_binding_digest"]
+            or source["provider"] != event["provider"]
+            or source["provider"] != provider
+            or source["provider_account_fingerprint"]
+            != event["provider_account_fingerprint"]
+            or source["scope_kind"] != event["scope_kind"]
+            or canonical_evidence_text(source["scope_fingerprints"])
+            != event["scope_fingerprints_json"]
+            or source["fingerprint_key_version"]
+            != event["fingerprint_key_version"]
+        ):
+            raise ValueError
+        return event
+    except FinanceCollectionError:
+        raise
+    except (
+        KeyError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        raise FinanceCollectionError("unavailable") from None
+
+
+def _account_grain_relation(
+    attempt_event: Mapping[str, object],
+    selected_account: Mapping[str, object],
+) -> str:
+    """Compare provider account/scope identity without source-binding identity.
+
+    Fingerprints generated under different key versions are not comparable,
+    so they must block reconciliation instead of proving another account.
+    """
+    if (
+        attempt_event["provider"] != selected_account["provider"]
+        or attempt_event["fingerprint_key_version"]
+        != selected_account["fingerprint_key_version"]
+    ):
+        return "unknown"
+    return "same" if all(
+        attempt_event[field] == selected_account[field]
+        for field in (
+            "provider_account_fingerprint",
+            "scope_kind",
+            "scope_fingerprints_json",
+        )
+    ) else "different"
+
+
+def _account_reconciliation_result(
+    *,
+    account_event: Mapping[str, object],
+    source_binding: SourceBindingVersion,
+    preview: FinanceCoveragePreview,
+    provider_observations: tuple[Mapping[str, object], ...],
+    gateway_attempt_events: tuple[Mapping[str, object], ...],
+    matched_attempt_count: int,
+    matched_missing_finance_sidecar_count: int,
+    unbound_attempt_count: int,
+    historical_missing_account_binding_count: int,
+    same_account_other_binding_count: int,
+    uncomparable_account_identity_count: int,
+    other_account_attempt_count: int,
+    period_boundary_crossing_attempt_count: int,
+    pending_account_gap_count: int,
+    uncomparable_account_pending_attempt_count: int,
+    other_account_pending_attempt_count: int,
+    unbound_reason_counts: Mapping[str, int],
+) -> Mapping[str, object]:
+    from .finance_variance_reference import (
+        BoundGatewayScopeClaim,
+        ComparableAccountGrain,
+        FinanceVarianceReferenceError,
+        GatewayEstimateRow,
+        ProviderCostRow,
+        calculate_reference_variance,
+    )
+
+    result: dict[str, object] = {
+        "account_binding_id": account_event["binding_id"],
+        "account_binding_version": account_event["version"],
+        "account_binding_digest": account_event["content_digest"],
+        "account_binding_event_id": account_event["binding_event_id"],
+        "source_binding_id": source_binding.binding_id,
+        "source_binding_version": source_binding.version,
+        "source_binding_digest": source_binding.content_digest,
+        "matching_basis": "operator_attested_unverified",
+        "matched_terminal_attempt_count": matched_attempt_count,
+        "matched_finance_attempt_count": len(gateway_attempt_events),
+        "matched_terminal_attempts_missing_finance_sidecar_count": (
+            matched_missing_finance_sidecar_count
+        ),
+        "unbound_terminal_attempt_count": unbound_attempt_count,
+        "unbound_reason_counts": dict(sorted(unbound_reason_counts.items())),
+        "historical_missing_account_binding_count": (
+            historical_missing_account_binding_count
+        ),
+        "same_account_other_binding_count": same_account_other_binding_count,
+        "uncomparable_account_identity_count": (
+            uncomparable_account_identity_count
+        ),
+        "other_account_attempt_count": other_account_attempt_count,
+        "period_boundary_crossing_attempt_count": (
+            period_boundary_crossing_attempt_count
+        ),
+        "pending_account_gap_count": pending_account_gap_count,
+        "uncomparable_account_pending_attempt_count": (
+            uncomparable_account_pending_attempt_count
+        ),
+        "other_account_pending_attempt_count": (
+            other_account_pending_attempt_count
+        ),
+        "period_matching_basis": (
+            "attempt_lifetime_fully_contained_in_selected_utc_window_unverified"
+        ),
+        "provider_coverage_state": preview.provider_cost.numeric_selection_state,
+        "gateway_pricing_state": preview.gateway_estimate.supplied_attempt_pricing,
+        "provider_total": preview.provider_cost.known_subtotal,
+        "gateway_estimate_known_subtotal": preview.gateway_estimate.known_subtotal,
+        "signed_variance": None,
+        "absolute_variance": None,
+        "relative_variance": None,
+        "variance_state": "provider_coverage_incomplete",
+        "review_status": "not_evaluated",
+        "bypass_state": "unknown",
+        "provider_final": False,
+        "invoice_final": False,
+    }
+    account_gap_count = (
+        matched_missing_finance_sidecar_count
+        + unbound_attempt_count
+        + historical_missing_account_binding_count
+        + same_account_other_binding_count
+        + uncomparable_account_identity_count
+        + period_boundary_crossing_attempt_count
+        + pending_account_gap_count
+        + uncomparable_account_pending_attempt_count
+    )
+    provider_complete = (
+        preview.provider_cost.numeric_selection_state
+        == "all_selected_buckets_observed"
+        and preview.provider_cost.known_subtotal is not None
+    )
+    gateway_complete = (
+        matched_missing_finance_sidecar_count == 0
+        and preview.gateway_estimate.attempt_count == matched_attempt_count
+        and preview.gateway_estimate.unpriced_attempt_count == 0
+        and preview.gateway_estimate.currency_mismatch_attempt_count == 0
+        and preview.gateway_estimate.supplied_attempt_pricing
+        in {"all_supplied_attempts_priced", "no_attempts"}
+    )
+    if not provider_complete:
+        return result
+    if account_gap_count:
+        result["variance_state"] = "account_or_gateway_evidence_incomplete"
+        return result
+    if not gateway_complete:
+        result["variance_state"] = "gateway_pricing_incomplete"
+        return result
+
+    try:
+        grain = ComparableAccountGrain(
+            organization_id=source_binding.organization_id,
+            provider=source_binding.provider,
+            provider_account_fingerprint=source_binding.provider_account_fingerprint,
+            fingerprint_key_version=source_binding.fingerprint_key_version,
+            source_binding_id=source_binding.binding_id,
+            source_binding_version=source_binding.version,
+            source_binding_digest=source_binding.content_digest,
+            scope_kind=source_binding.scope_kind,
+            scope_fingerprints=source_binding.scope_fingerprints,
+            period_start_at=preview.period_start_at,
+            period_end_at=preview.period_end_at,
+            currency=preview.provider_cost.currency,
+            product=f"{source_binding.provider}.costs",
+            collection_profile=preview.collection_profile,
+        )
+        binding = BoundGatewayScopeClaim(
+            binding_id=str(account_event["binding_id"]),
+            binding_version=int(account_event["version"]),
+            binding_digest=str(account_event["content_digest"]),
+            source_binding_id=source_binding.binding_id,
+            source_binding_version=source_binding.version,
+            source_binding_digest=source_binding.content_digest,
+        )
+        variance = calculate_reference_variance(
+            provider_grain=grain,
+            gateway_grain=grain,
+            gateway_binding=binding,
+            provider_coverage="complete",
+            gateway_coverage="complete",
+            provider_rows=tuple(
+                ProviderCostRow(
+                    snapshot_id=str(row["snapshot_id"]),
+                    observation_digest=str(row["observation_digest"]),
+                    signed_amount=str(row["canonical_amount"]),
+                )
+                for row in provider_observations
+            ),
+            gateway_rows=tuple(
+                GatewayEstimateRow(
+                    attempt_id=str(event["request_attempt_id"]),
+                    price_identity_digest=str(event["configured_rate_card_digest"]),
+                    configured_amount=str(event["configured_estimate_amount"]),
+                )
+                for event in gateway_attempt_events
+            ),
+        )
+    except (
+        FinanceVarianceReferenceError,
+        KeyError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        UnicodeError,
+        ValueError,
+    ):
+        raise FinanceCollectionError("unavailable") from None
+    result.update({
+        "provider_total": variance.provider_total,
+        "gateway_estimate_known_subtotal": (
+            variance.configured_estimate_known_subtotal
+        ),
+        "signed_variance": variance.signed_variance,
+        "absolute_variance": variance.absolute_variance,
+        "relative_variance": (
+            None
+            if variance.relative_variance is None
+            else asdict(variance.relative_variance)
+        ),
+        "variance_state": "comparable_operator_attested",
+        "review_status": variance.review_status,
+    })
+    return result
 
 
 def _validate_collection_selection(
