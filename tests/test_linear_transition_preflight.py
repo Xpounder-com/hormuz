@@ -68,14 +68,28 @@ def _apply_sqlite_proposal(connection: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def sqlite_linear_candidate(*, fail: bool = False):
+def sqlite_linear_proposal():
     original = UsageStore._apply_migration
 
     def migration(connection, version):
         if version != 14:
             return original(connection, version)
         _apply_sqlite_proposal(connection)
-        if fail:
+
+    with (
+        mock.patch.object(UsageStore, "schema_version", 14),
+        mock.patch.object(UsageStore, "_apply_migration", side_effect=migration),
+    ):
+        yield
+
+
+@contextmanager
+def sqlite_linear_candidate(*, fail: bool = False):
+    original = UsageStore._apply_migration
+
+    def migration(connection, version):
+        original(connection, version)
+        if version == 14 and fail:
             connection.execute("INSERT INTO deliberately_absent_linear_probe VALUES (1)")
 
     with (
@@ -88,13 +102,12 @@ def sqlite_linear_candidate(*, fail: bool = False):
 @contextmanager
 def postgres_linear_candidate(*, fail: bool = False):
     original = postgres_module._migration_sql
-    proposal = POSTGRES_PROPOSAL.read_text(encoding="utf-8")
 
     def migration(version, schema, *roles):
-        if version != 19:
-            return original(version, schema, *roles)
-        statement = proposal.format(schema=schema, runtime_role=roles[0])
-        return statement + ("\nSELECT 1 / 0;" if fail else "")
+        statement = original(version, schema, *roles)
+        if version == 19 and fail:
+            statement += "\nSELECT 1 / 0;"
+        return statement
 
     with (
         mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 19),
@@ -140,7 +153,7 @@ class SQLiteLinearProposalBoundaryTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.path = Path(temporary.name) / "proposal.sqlite3"
         UsageStore(self.path).verify_ready()
-        with sqlite_linear_candidate():
+        with sqlite_linear_proposal():
             UsageStore(self.path).verify_ready()
         _sqlite_insert_witness(self.path)
         with managed_sqlite_connection(self.path) as connection:
@@ -564,7 +577,7 @@ class PostgresLinearProposalACLTests(PostgresTestCase):
     def bootstrap_clean_proposal(self):
         schema = "linear_acl_" + uuid4().hex[:12]
         self.addCleanup(self._drop_schema, schema)
-        with postgres_linear_candidate():
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
             status = postgres_module.migrate_postgres(
                 self.owner_dsn,
                 schema=schema,
@@ -573,7 +586,13 @@ class PostgresLinearProposalACLTests(PostgresTestCase):
                 custody_control_role=self.custody_control_role,
                 custody_executor_role=self.custody_executor_role,
             )
-        self.assertEqual(status.version, 19)
+        self.assertEqual(status.version, 18)
+        proposal = POSTGRES_PROPOSAL.read_text(encoding="utf-8").format(
+            schema=postgres_module._quote_identifier(schema),
+            runtime_role=postgres_module._quote_identifier(self.runtime_role),
+        )
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            connection.execute(proposal)
         with self.psycopg.connect(self.owner_dsn) as connection:
             with connection.cursor() as cursor:
                 owner = cursor.execute("SELECT current_user").fetchone()[0]
