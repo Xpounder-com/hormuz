@@ -251,6 +251,7 @@ REQUIRED_FINANCE_ACCOUNT_REGISTRATION_WHEEL_PATHS = (
 REQUIRED_FINANCE_ACCOUNT_REGISTRATION_SDIST_PATHS = (
     *REQUIRED_FINANCE_ACCOUNT_REGISTRATION_WHEEL_PATHS,
     "docs/finance-account-binding-acl-proposal.sql",
+    "docs/finance-successor-schema-acl-proposal.sql",
     "tests/test_finance_account_registration_request.py",
     "tests/test_finance_account_registration_store.py",
 )

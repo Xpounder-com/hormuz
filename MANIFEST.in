@@ -36,6 +36,7 @@ include docs/finance-attempt-evidence-contract-v1.json
 include docs/finance-collection-contract-v1.json
 include docs/finance-account-binding-contract-v1.json
 include docs/finance-account-binding-acl-proposal.sql
+include docs/finance-successor-schema-acl-proposal.sql
 include docs/FINANCE_ACCOUNT_SELECTION.md
 include docs/budget-transition-plan-v1.json
 include docs/budget-transition-plan-v2.json
