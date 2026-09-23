@@ -71,6 +71,7 @@ include tools/verify_finance_collection_runtime.py
 include tools/verify_finance_collection_postgres_runtime.py
 include tools/verify_finance_account_binding_contract.py
 include tools/verify_finance_account_binding_preflight.py
+include tools/run_v13_development_transition_matrix.py
 include tools/verify_v13_candidate_artifacts.py
 include tools/verify_linear_connector_preflight.py
 include tools/verify_budget_transition_plan.py
