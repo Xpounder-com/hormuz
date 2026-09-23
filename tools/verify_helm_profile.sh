@@ -266,6 +266,7 @@ capture_gateway_logs() {
   [[ "${checkpoint}" =~ ^[a-z0-9-]+$ ]] || fail "gateway log checkpoint invalid"
   local output="${ARTIFACT_ROOT}/gateway-${checkpoint}.log"
   local attempt pod pods pod_count error_output error_class status disappeared
+  local observation_output observation_error observation_status
   # Keep partial logs from disappearing replicas in the same protected capture.
   : >"${output}"
   for attempt in 1 2 3; do
@@ -311,8 +312,32 @@ capture_gateway_logs() {
         disappeared=1
         break
       fi
-      # Diagnostic classification does not change the retry or failure policy.
       error_class="$(classify_gateway_log_error "${error_output}")"
+      # kubectl can prefix a disappearing Pod's NotFound response with an
+      # informational warning, which makes the captured error intentionally
+      # unrecognizable. Retry only when a fresh, separately scanned GET proves
+      # that the exact selected Pod is now absent.
+      if [[ "${status}" -eq 1 && "${error_class}" == "unknown" ]]; then
+        observation_output="${ARTIFACT_ROOT}/gateway-${checkpoint}-${attempt}-${pod#pod/}-observation.txt"
+        observation_error="${ARTIFACT_ROOT}/gateway-${checkpoint}-${attempt}-${pod#pod/}-observation.stderr"
+        if kubectl --namespace hormuz-system get "${pod}" --output=name \
+          >"${observation_output}" 2>"${observation_error}"; then
+          observation_status=0
+        else
+          observation_status=$?
+        fi
+        python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
+          --artifact "${observation_output}" --artifact "${observation_error}" \
+          --secret-root "${SECRET_ROOT}" >/dev/null \
+          || fail "gateway log observation failed secret non-disclosure: ${checkpoint}"
+        if [[ "${observation_status}" -eq 1 ]] && cmp -s "${observation_error}" \
+          <(printf 'Error from server (NotFound): pods "%s" not found\n' "${pod#pod/}"); then
+          disappeared=1
+          break
+        fi
+      fi
+      # Diagnostic classification never exposes captured stderr or changes
+      # the failure policy unless exact Pod disappearance was proven above.
       printf 'gateway_log_capture_error checkpoint=%s class=%s exit_status=%s\n' \
         "${checkpoint}" "${error_class}" "${status}" >&2
       fail "gateway log capture failed: ${checkpoint} exit_status=${status}"
