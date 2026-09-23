@@ -49,6 +49,16 @@ public static class LifecycleWindows {
         }
         throw new Exception("Owned primary window did not become visible.");
     }
+    public static void WaitForRecoverableClose(Process process, IntPtr window) {
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < 5000) {
+            if (process.HasExited) throw new Exception("Close stopped the owned primary.");
+            if (Window(process.Id) != window) throw new Exception("Close replaced the owned primary window.");
+            if (!IsWindowVisible(window) || IsIconic(window)) return;
+            Thread.Sleep(20);
+        }
+        throw new Exception("Close did not retain a recoverable hidden/minimized primary.");
+    }
     public static void Send(IntPtr window, uint message, uint command) {
         UIntPtr result;
         if (SendMessageTimeout(window, message, new UIntPtr(command), IntPtr.Zero, 2, 2000, out result) == IntPtr.Zero)
@@ -71,9 +81,7 @@ try {
     $primary = Start-OwnedPreview $stateDirectory
     $window = [LifecycleWindows]::WaitForWindow($primary)
     [LifecycleWindows]::Send($window, 0x0010, 0) # Close hides; it must not stop the owner.
-    if ($primary.HasExited -or ([LifecycleWindows]::IsWindowVisible($window) -and -not [LifecycleWindows]::IsIconic($window))) {
-        throw "Close did not retain a recoverable hidden/minimized primary."
-    }
+    [LifecycleWindows]::WaitForRecoverableClose($primary, $window)
     $secondaries = @(1..8 | ForEach-Object { Start-OwnedPreview $stateDirectory })
     foreach ($secondary in $secondaries) {
         if (-not $secondary.WaitForExit(10000) -or $secondary.ExitCode -ne 0) {

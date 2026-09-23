@@ -96,6 +96,32 @@ download_and_verify() {
     || fail "download checksum mismatch"
 }
 
+download_github_release_and_verify() {
+  local repository=$1
+  local tag=$2
+  local asset=$3
+  local output=$4
+  local expected=$5
+  local attempt
+  if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
+    download_and_verify \
+      "https://github.com/${repository}/releases/download/${tag}/${asset}" \
+      "${output}" "${expected}"
+    return 0
+  fi
+  for attempt in 1 2 3; do
+    rm -f -- "${output}"
+    if gh release download "${tag}" --repo "${repository}" \
+      --pattern "${asset}" --output "${output}"; then
+      printf '%s  %s\n' "${expected}" "${output}" | sha256sum --check --status \
+        || fail "download checksum mismatch"
+      return 0
+    fi
+    [[ "${attempt}" -lt 3 ]] || fail "GitHub release asset download failed"
+    sleep "${attempt}"
+  done
+}
+
 create_immutable_configmap() {
   local namespace=$1
   local name=$2
@@ -240,6 +266,7 @@ capture_gateway_logs() {
   [[ "${checkpoint}" =~ ^[a-z0-9-]+$ ]] || fail "gateway log checkpoint invalid"
   local output="${ARTIFACT_ROOT}/gateway-${checkpoint}.log"
   local attempt pod pods pod_count error_output error_class status disappeared
+  local observation_output observation_error observation_status
   # Keep partial logs from disappearing replicas in the same protected capture.
   : >"${output}"
   for attempt in 1 2 3; do
@@ -285,8 +312,32 @@ capture_gateway_logs() {
         disappeared=1
         break
       fi
-      # Diagnostic classification does not change the retry or failure policy.
       error_class="$(classify_gateway_log_error "${error_output}")"
+      # kubectl can prefix a disappearing Pod's NotFound response with an
+      # informational warning, which makes the captured error intentionally
+      # unrecognizable. Retry only when a fresh, separately scanned GET proves
+      # that the exact selected Pod is now absent.
+      if [[ "${status}" -eq 1 && "${error_class}" == "unknown" ]]; then
+        observation_output="${ARTIFACT_ROOT}/gateway-${checkpoint}-${attempt}-${pod#pod/}-observation.txt"
+        observation_error="${ARTIFACT_ROOT}/gateway-${checkpoint}-${attempt}-${pod#pod/}-observation.stderr"
+        if kubectl --namespace hormuz-system get "${pod}" --output=name \
+          >"${observation_output}" 2>"${observation_error}"; then
+          observation_status=0
+        else
+          observation_status=$?
+        fi
+        python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
+          --artifact "${observation_output}" --artifact "${observation_error}" \
+          --secret-root "${SECRET_ROOT}" >/dev/null \
+          || fail "gateway log observation failed secret non-disclosure: ${checkpoint}"
+        if [[ "${observation_status}" -eq 1 ]] && cmp -s "${observation_error}" \
+          <(printf 'Error from server (NotFound): pods "%s" not found\n' "${pod#pod/}"); then
+          disappeared=1
+          break
+        fi
+      fi
+      # Diagnostic classification never exposes captured stderr or changes
+      # the failure policy unless exact Pod disappearance was proven above.
       printf 'gateway_log_capture_error checkpoint=%s class=%s exit_status=%s\n' \
         "${checkpoint}" "${error_class}" "${status}" >&2
       fail "gateway log capture failed: ${checkpoint} exit_status=${status}"
@@ -606,6 +657,9 @@ host_arch="$(uname -m)"
   || fail "the v1 proof requires native AMD64"
 command -v docker >/dev/null 2>&1 || fail "Docker is unavailable"
 command -v curl >/dev/null 2>&1 || fail "curl is unavailable"
+if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
+  command -v gh >/dev/null 2>&1 || fail "GitHub CLI is unavailable"
+fi
 command -v openssl >/dev/null 2>&1 || fail "OpenSSL is unavailable"
 command -v python3 >/dev/null 2>&1 || fail "Python 3 is unavailable"
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is unavailable"
@@ -644,8 +698,8 @@ PY
 export KUBECONFIG
 export PATH="${WORK_ROOT}/bin:${PATH}"
 
-download_and_verify \
-  "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64" \
+download_github_release_and_verify \
+  kubernetes-sigs/kind "${KIND_VERSION}" kind-linux-amd64 \
   "${WORK_ROOT}/bin/kind" "${KIND_SHA256}"
 download_and_verify \
   "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \

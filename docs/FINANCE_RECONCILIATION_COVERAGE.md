@@ -70,7 +70,9 @@ becomes numeric zero. A selected row in another currency fails closed. Gateway
 attempts in another currency remain in the denominator but are excluded from
 the selected-currency subtotal. An unavailable estimate is counted as unpriced
 even when its currency also mismatches; these diagnostic counts can overlap.
-Conflicting currencies for one immutable rate-card identity fail closed.
+Conflicting digests or currencies for one rate-card ID/version fail closed.
+Distinct attempts that reuse a terminal event ID or non-null usage event ID
+also fail closed before their estimates can be summed.
 Failed, rate-limited, unknown-outcome, and unpriced attempts remain visible.
 Negative provider rows are counted, including
 unclassified ones, without inferring credit, discount, bypass, or an employee
