@@ -68,22 +68,6 @@ def _apply_sqlite_proposal(connection: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def sqlite_linear_proposal():
-    original = UsageStore._apply_migration
-
-    def migration(connection, version):
-        if version != 14:
-            return original(connection, version)
-        _apply_sqlite_proposal(connection)
-
-    with (
-        mock.patch.object(UsageStore, "schema_version", 14),
-        mock.patch.object(UsageStore, "_apply_migration", side_effect=migration),
-    ):
-        yield
-
-
-@contextmanager
 def sqlite_linear_candidate(*, fail: bool = False):
     original = UsageStore._apply_migration
 
@@ -152,9 +136,10 @@ class SQLiteLinearProposalBoundaryTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.path = Path(temporary.name) / "proposal.sqlite3"
-        UsageStore(self.path).verify_ready()
-        with sqlite_linear_proposal():
+        with mock.patch.object(UsageStore, "schema_version", 13):
             UsageStore(self.path).verify_ready()
+        with managed_sqlite_connection(self.path) as connection:
+            _apply_sqlite_proposal(connection)
         _sqlite_insert_witness(self.path)
         with managed_sqlite_connection(self.path) as connection:
             connection.execute(
