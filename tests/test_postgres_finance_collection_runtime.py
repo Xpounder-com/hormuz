@@ -14,6 +14,14 @@ import unittest
 from unittest import mock
 
 from hormuz.config import UsageStorageConfig
+from hormuz.finance_account_binding import (
+    parse_finance_account_bindings,
+    parse_finance_identity,
+    select_finance_account,
+)
+from hormuz.finance_account_registration_store import (
+    create_finance_account_registration_repository,
+)
 from hormuz.finance_collection_repository import create_finance_collection_repository
 from hormuz.finance_collection import CollectionQuery, FinanceCollectionError, normalize_collection_pages
 from hormuz.portfolio_config import PortfolioPrincipal
@@ -26,17 +34,30 @@ from hormuz._finance_account_binding_schema import (
 from hormuz.finance_account_evidence import QUERY_AUDIT_SCHEMA_ID
 from hormuz.cli import build_parser
 from hormuz.commands import finance as finance_commands
+from hormuz.store import ReservationScope
 
 if __package__:
     from ._postgres_fixture import PostgresTestCase
     from ._portfolio_fixture import registry_config
     from . import test_finance_collection_runtime as collection
-    from .test_finance_attempt_runtime import begin, complete_estimate, complete_observation
+    from .test_finance_attempt_runtime import (
+        begin,
+        binding as rate_card,
+        complete_estimate,
+        complete_observation,
+        identity as runtime_identity,
+    )
 else:
     from _postgres_fixture import PostgresTestCase
     from _portfolio_fixture import registry_config
     import test_finance_collection_runtime as collection
-    from test_finance_attempt_runtime import begin, complete_estimate, complete_observation
+    from test_finance_attempt_runtime import (
+        begin,
+        binding as rate_card,
+        complete_estimate,
+        complete_observation,
+        identity as runtime_identity,
+    )
 
 
 @unittest.skipUnless(os.environ.get("HORMUZ_TEST_POSTGRES_DSN"), "requires disposable PostgreSQL")
@@ -294,6 +315,193 @@ class PostgresFinanceCollectionRuntimeTests(PostgresTestCase):
         self.assertEqual(event["provider_observation_count"], 1)
         self.assertEqual(event["terminal_attempt_count"], 1)
         self.assertEqual(event["terminal_attempts_missing_sidecar_count"], 0)
+
+    def test_account_reconciliation_matches_bound_attempt_through_restricted_role(self):
+        finance_identity = parse_finance_identity({
+            "upstream_reference_id": "openai-primary",
+            "upstream_reference_version": 1,
+            "transport_profile": "openai.first-party.v1",
+            "inference_credential_reference_id": "inference-primary",
+            "inference_credential_reference_version": 2,
+        })
+        upstream = replace(
+            self.config.upstreams["openai"],
+            base_url="https://api.openai.com/v1",
+            finance_identity=finance_identity,
+        )
+        finance_config = replace(
+            self.config,
+            upstreams={**self.config.upstreams, "openai": upstream},
+            finance_account_bindings=parse_finance_account_bindings([{
+                "organization_id": "acme",
+                "upstream_reference_id": "openai-primary",
+                "binding_id": "primary-account",
+                "binding_version": 1,
+            }]),
+        )
+        repository = create_finance_collection_repository(
+            finance_config,
+            environ={"HORMUZ_POSTGRES_DSN": self.runtime_dsn},
+        )
+        source = repository.bind_source(
+            collection.ADMIN,
+            {
+                "schema_id": "hormuz.finance-source-binding-request",
+                "schema_version": 1,
+                "binding_id": "source-primary",
+                "expected_version": None,
+                "provider": "openai",
+                "provider_account_reference_id": "raw-provider-account",
+                "scope": {"kind": "organization", "ids": []},
+                "credential_reference_version": 1,
+                "fingerprint_key_version": 1,
+                "state": "active",
+                "reason_code": "created",
+            },
+            fingerprint_key=collection.KEY,
+        )
+        registration = create_finance_account_registration_repository(
+            finance_config,
+            environ={"HORMUZ_POSTGRES_DSN": self.runtime_dsn},
+        )
+        registration.register(
+            collection.ADMIN,
+            json.dumps({
+                "schema_id": "hormuz.finance-account-binding-request",
+                "schema_version": 1,
+                "binding_id": "primary-account",
+                "expected_version": None,
+                "upstream_reference_id": "openai-primary",
+                "upstream_reference_version": 1,
+                "transport_profile": "openai.first-party.v1",
+                "inference_credential_reference_id": "inference-primary",
+                "inference_credential_reference_version": 2,
+                "source_binding": {
+                    "binding_id": source.binding_id,
+                    "version": source.version,
+                    "content_digest": source.content_digest,
+                },
+                "state": "active",
+                "reason_code": "created",
+            }).encode(),
+        )
+        selected = select_finance_account(
+            organization_id="acme",
+            protocol="openai",
+            base_url="https://api.openai.com/v1",
+            identity=finance_identity,
+            bindings=finance_config.finance_account_bindings,
+        )
+        midnight = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+        start = midnight.isoformat().replace("+00:00", "Z")
+        end = (midnight + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+        profile = "openai.organization-costs.v1"
+        query = CollectionQuery(
+            "acme", source.binding_id, source.version, profile, start, end, "1d", 1,
+        )
+        normalized = normalize_collection_pages(
+            query,
+            (collection.openai_page([
+                collection.openai_bucket(start, end, [collection.openai_cost()]),
+            ]),),
+            fingerprint_key=collection.KEY,
+            fingerprint_key_version=1,
+        )
+        prepared = repository.prepare_collection(
+            collection.ADMIN,
+            query,
+            idempotency_key="account-reconciliation-cost",
+            evidence_origin="customer_file",
+        )
+        repository.publish_collection(collection.ADMIN, prepared, normalized)
+        attempt = self.store._begin_request_attempt_with_work_budget(
+            identity=runtime_identity(),
+            client="codex",
+            protocol="openai",
+            requested_model="smart",
+            resolved_alias="smart",
+            upstream_model="gpt-test",
+            policy_version="policy-1",
+            policy_action="allowed",
+            redaction_count=0,
+            redaction_rules=(),
+            scopes=(ReservationScope(name="organization"),),
+            reserved_tokens=100,
+            reserved_cost_microusd=500,
+            ttl_seconds=60,
+            work_budget=None,
+            configured_rate_card=rate_card(),
+            finance_account=selected,
+        )
+        self.store._finalize_request_attempt_with_provider_metrics(
+            attempt=attempt,
+            organization_id="acme",
+            status="succeeded",
+            input_tokens=10,
+            output_tokens=4,
+            cache_read_tokens=2,
+            cost_microusd=35,
+            provider_metrics=None,
+            finance_observation=complete_observation(),
+            configured_estimate=complete_estimate(),
+        )
+        preview, missing, _, _, reconciliation = (
+            repository.account_reconciliation_report_evidence(
+                collection.ADMIN,
+                account_binding_id="primary-account",
+                account_binding_version=1,
+                collection_profile=profile,
+                start_at=start,
+                end_at=end,
+                currency="USD",
+            )
+        )
+        self.assertEqual((missing, preview.gateway_estimate.attempt_count), (0, 1))
+        self.assertEqual(preview.gateway_estimate.account_binding_state, "matched")
+        self.assertEqual(reconciliation["matched_terminal_attempt_count"], 1)
+        self.assertEqual(reconciliation["signed_variance"], "1.249965")
+        self.assertEqual(reconciliation["variance_state"], "comparable_operator_attested")
+
+        self.store._begin_request_attempt_with_work_budget(
+            identity=runtime_identity(),
+            client="codex",
+            protocol="openai",
+            requested_model="smart",
+            resolved_alias="smart",
+            upstream_model="gpt-test",
+            policy_version="policy-1",
+            policy_action="allowed",
+            redaction_count=0,
+            redaction_rules=(),
+            scopes=(ReservationScope(name="organization"),),
+            reserved_tokens=100,
+            reserved_cost_microusd=500,
+            ttl_seconds=60,
+            work_budget=None,
+            configured_rate_card=rate_card(),
+            finance_account=selected,
+        )
+        preview, missing, _, _, reconciliation = (
+            repository.account_reconciliation_report_evidence(
+                collection.ADMIN,
+                account_binding_id="primary-account",
+                account_binding_version=1,
+                collection_profile=profile,
+                start_at=start,
+                end_at=end,
+                currency="USD",
+            )
+        )
+        self.assertEqual((missing, preview.gateway_estimate.attempt_count), (0, 1))
+        self.assertEqual(reconciliation["pending_account_gap_count"], 1)
+        self.assertIsNone(reconciliation["signed_variance"])
+        self.assertEqual(
+            reconciliation["variance_state"],
+            "account_or_gateway_evidence_incomplete",
+        )
+        self.assertEqual(self.count(QUERY_AUDIT_TABLE), 2)
 
     def test_authorization_precedes_connection_and_revocation_rolls_back(self):
         viewer = PortfolioPrincipal("acme", "finance", ("finance_viewer",))

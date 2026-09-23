@@ -120,6 +120,19 @@ def add_finance_commands(
     report.add_argument("--as-of-commit-sequence", type=int)
     _auth_arguments(report)
 
+    reconcile = commands.add_parser(
+        "reconcile",
+        help="Compare provider cost with exact account-bound gateway estimates",
+    )
+    reconcile.add_argument("account_binding_id")
+    reconcile.add_argument("account_binding_version", type=int)
+    reconcile.add_argument("collection_profile")
+    reconcile.add_argument("query_start_at")
+    reconcile.add_argument("query_end_at")
+    reconcile.add_argument("--currency", required=True)
+    reconcile.add_argument("--as-of-commit-sequence", type=int)
+    _auth_arguments(reconcile)
+
 
 def _auth_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
@@ -215,6 +228,34 @@ def run(
                 "terminal_attempts_missing_sidecar_count": missing_sidecars,
                 "selected_snapshot_provenance": provenance,
                 "preview": asdict(preview),
+            }
+        elif args.finance_command == "reconcile":
+            repository = dependencies.create_repository(config, environ=environment)
+            (
+                preview,
+                missing_sidecars,
+                provenance,
+                query_event_id,
+                reconciliation,
+            ) = repository.account_reconciliation_report_evidence(
+                principal,
+                account_binding_id=args.account_binding_id,
+                account_binding_version=args.account_binding_version,
+                collection_profile=args.collection_profile,
+                start_at=args.query_start_at,
+                end_at=args.query_end_at,
+                currency=args.currency,
+                as_of_commit_sequence=args.as_of_commit_sequence,
+            )
+            result = {
+                "schema_id": "hormuz.finance-account-reconciliation-report",
+                "schema_version": 1,
+                "reader_role": "portfolio_admin",
+                "query_audit_event_id": query_event_id,
+                "terminal_attempts_missing_finance_sidecar_count": missing_sidecars,
+                "selected_snapshot_provenance": provenance,
+                "preview": asdict(preview),
+                "account_reconciliation": reconciliation,
             }
         else:
             raise FinanceCollectionError("invalid_request")

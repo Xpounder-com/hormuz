@@ -129,6 +129,7 @@ def build_finance_coverage_preview(
     start_at: str,
     end_at: str,
     currency: str,
+    account_binding_state: str = "unavailable",
 ) -> FinanceCoveragePreview:
     """Summarize selected evidence without manufacturing an account match.
 
@@ -139,6 +140,8 @@ def build_finance_coverage_preview(
     """
 
     if type(provider_view) is not AsOfCollectionView or type(gateway_attempt_events) is not tuple:
+        _invalid()
+    if account_binding_state not in {"unavailable", "matched"}:
         _invalid()
     if not isinstance(provider_view.collection_profile, str):
         _invalid()
@@ -182,7 +185,7 @@ def build_finance_coverage_preview(
     provider_cost = _provider_coverage(provider_view, expected_buckets, code)
     gateway_estimate = _gateway_coverage(
         gateway_attempt_events, provider_view.organization_id, spec.provider,
-        start, end, code,
+        start, end, code, account_binding_state,
     )
     return FinanceCoveragePreview(
         organization_id=provider_view.organization_id,
@@ -325,6 +328,7 @@ def _gateway_coverage(
     start: datetime,
     end: datetime,
     currency: str,
+    account_binding_state: str,
 ) -> GatewayEstimateCoverage:
     expected_profile = {
         "openai": "openai.responses.usage.v1",
@@ -404,4 +408,5 @@ def _gateway_coverage(
         unknown_outcome_attempt_count=unknown,
         attempt_evidence_ids=tuple(sorted(evidence_ids)),
         rate_card_identities=tuple(sorted(rate_identities)),
+        account_binding_state=account_binding_state,
     )
