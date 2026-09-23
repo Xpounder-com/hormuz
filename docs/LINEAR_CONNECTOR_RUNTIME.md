@@ -123,10 +123,13 @@ scope state, key/credential versions, and keyed provenance.
 
 Issue-to-project and issue-to-cycle, project-to-initiative, and initiative
 parent relationships are retained only when both typed endpoints are enrolled.
-An unenrolled or unsupported parent makes coverage partial; absent relationship
-fields remain unknown. Issue outcomes are projected only for an exactly
-enrolled project container. Every result stays descriptive and association
-eligibility stays inconclusive.
+An unenrolled, unsupported, or only partly represented relationship set makes
+coverage partial; absent relationship fields remain unknown, while an explicit
+empty set is complete. Issue outcomes are projected only for an exactly
+enrolled project container. Updates emit started, completed, or canceled
+outcomes only when `updatedFrom` identifies the corresponding state field as
+changed. Every result stays descriptive and association eligibility stays
+inconclusive.
 
 Names, titles, descriptions, comments, attachment data, label text, URLs,
 prompt/response content, and arbitrary fields are ignored and never persisted.
@@ -170,7 +173,9 @@ finite commit audit chain in the same transaction.
    next numeric version, and advance the selected current/body/source-fact
    version deliberately. Advancing `body_fingerprint_key_version` also
    requires the next `binding_version`. Old keyed identities remain available
-   for replay.
+   for replay. Binding request identity stays pinned to the binding's stored
+   body-fingerprint key version, so advancing only `current_key_version` does
+   not invalidate an unchanged binding.
 
 ## Retry, outage, and deadline response
 

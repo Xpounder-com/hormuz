@@ -356,31 +356,26 @@ class LinearConnectorRepository:
             f"{organization}:{connector}:{channel.binding_version}:{content_digest}",
         ))
         request_digest = keys.metadata_digest(
-            channel.current_key_version,
+            channel.body_fingerprint_key_version,
             organization,
             connector,
             "linear-binding-request-v1",
             basis,
         )
-        current = sql.one(
-            "SELECT * FROM portfolio_linear_source_binding_versions "
-            "WHERE organization_id=? AND connector_id=? AND version=?",
-            (organization, connector, channel.binding_version),
-        )
-        if current is not None:
-            if (
-                current["binding_event_id"] != binding_event_id
-                or current["content_digest"] != content_digest
-                or current["request_digest"] != request_digest
-                or current["binding_state"] != "active"
-            ):
-                raise PortfolioError("version_conflict")
-            return current
         latest = sql.one(
             "SELECT * FROM portfolio_linear_source_binding_versions "
             "WHERE organization_id=? AND connector_id=? ORDER BY version DESC LIMIT 1",
             (organization, connector),
         )
+        if latest is not None and int(latest["version"]) == channel.binding_version:
+            if (
+                latest["binding_event_id"] != binding_event_id
+                or latest["content_digest"] != content_digest
+                or latest["request_digest"] != request_digest
+                or latest["binding_state"] != "active"
+            ):
+                raise PortfolioError("version_conflict")
+            return latest
         expected_previous = channel.binding_version - 1
         if (
             (channel.binding_version == 1 and latest is not None)

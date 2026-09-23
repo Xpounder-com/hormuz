@@ -25,6 +25,8 @@ NORMALIZER_RULES = {
     "entities": ["cycle", "initiative", "issue", "project"],
     "revision": "source_updated_at_v1",
     "content": "opaque_ids_and_timestamps_only",
+    "state_outcomes": "updated_from_transition_only",
+    "relationship_coverage": "explicit_empty_complete_absent_unknown",
 }
 NORMALIZER_DIGEST = hashlib.sha256(canonical(NORMALIZER_RULES).encode("ascii")).hexdigest()
 _INGEST_SLOTS = threading.BoundedSemaphore(8)
@@ -114,7 +116,7 @@ class LinearOutcomeAdapter:
             revision = {"kind": "source_updated_at_v1", "value": revision_value}
 
         lifecycle = self._lifecycle(verified.action, data, updated_from)
-        normalized_state = self._state(data)
+        normalized_state, state_basis = self._state(data)
         relationships, coverage, project_id = self._relationships(
             verified.object_kind,
             data,
@@ -148,7 +150,13 @@ class LinearOutcomeAdapter:
         }
         outcome = None
         if verified.object_kind == "issue" and project_id in binding.external_object_ids:
-            event_type = self._outcome_event(verified.action, lifecycle, normalized_state)
+            event_type = self._outcome_event(
+                verified.action,
+                lifecycle,
+                normalized_state,
+                state_basis,
+                updated_from,
+            )
             if event_type is not None:
                 state = "tombstoned" if event_type == "deleted" else "observed"
                 outcome = {
@@ -191,21 +199,27 @@ class LinearOutcomeAdapter:
         return "updated"
 
     @staticmethod
-    def _state(data: dict) -> str:
+    def _state(data: dict) -> tuple[str, str | None]:
         completed = _optional_timestamp(data.get("completedAt"))
         canceled = _optional_timestamp(data.get("canceledAt"))
         started = _optional_timestamp(data.get("startedAt"))
         if completed is not None and canceled is not None:
             raise PortfolioError("invalid_request")
         if completed is not None:
-            return "completed"
+            return "completed", "completedAt"
         if canceled is not None:
-            return "canceled"
+            return "canceled", "canceledAt"
         if started is not None:
-            return "in_progress"
-        child = data.get("state") if "state" in data else data.get("status")
+            return "in_progress", "startedAt"
+        if "state" in data:
+            state_basis = "state"
+        elif "status" in data:
+            state_basis = "status"
+        else:
+            state_basis = None
+        child = data.get(state_basis) if state_basis is not None else None
         if child is None:
-            return "unknown"
+            return "unknown", None
         if not isinstance(child, dict) or not isinstance(child.get("type"), str):
             raise PortfolioError("invalid_request")
         return {
@@ -216,7 +230,7 @@ class LinearOutcomeAdapter:
             "completed": "completed",
             "canceled": "canceled",
             "cancelled": "canceled",
-        }.get(child["type"], "unknown")
+        }.get(child["type"], "unknown"), state_basis
 
     def _relationships(
         self,
@@ -226,12 +240,14 @@ class LinearOutcomeAdapter:
         object_id = _uuid(data.get("id"))
         candidates: list[tuple[str, str, str]] = []
         present = False
+        complete_input = False
         unrepresented = False
         project_id = None
         if kind == "issue":
             project_present, project_id = _linked_id(data, "projectId", "project")
             cycle_present, cycle_id = _linked_id(data, "cycleId", "cycle")
             present = project_present or cycle_present or "parentId" in data
+            complete_input = project_present and cycle_present
             if project_id is not None:
                 candidates.append(("project_issue", "project", project_id))
             if cycle_id is not None:
@@ -242,6 +258,7 @@ class LinearOutcomeAdapter:
         elif kind == "project":
             if "initiatives" in data:
                 present = True
+                complete_input = True
                 values = data["initiatives"]
                 if not isinstance(values, list) or len(values) > 100:
                     raise PortfolioError("invalid_request")
@@ -256,10 +273,12 @@ class LinearOutcomeAdapter:
                 "parentInitiative",
             )
             present = parent_present
+            complete_input = parent_present
             if parent_id is not None:
                 candidates.append(("initiative_parent", "initiative", parent_id))
             if "parentInitiatives" in data:
                 present = True
+                complete_input = True
                 values = data["parentInitiatives"]
                 if not isinstance(values, list) or len(values) > 100:
                     raise PortfolioError("invalid_request")
@@ -294,22 +313,28 @@ class LinearOutcomeAdapter:
         relationships.sort(key=lambda item: (item["kind"], item["parent"]["id"]))
         if not present:
             coverage = "unknown"
-        elif excluded:
+        elif excluded or not complete_input:
             coverage = "partial"
-        elif not candidates:
-            coverage = "not_applicable"
         else:
             coverage = "complete"
         return relationships, coverage, project_id
 
     @staticmethod
-    def _outcome_event(action: str, lifecycle: str, state: str) -> str | None:
+    def _outcome_event(
+        action: str,
+        lifecycle: str,
+        state: str,
+        state_basis: str | None,
+        updated_from: dict,
+    ) -> str | None:
         if action == "create":
             return "created"
         if action == "remove":
             return "deleted"
         if lifecycle == "restored":
             return "reopened"
+        if state_basis is None or state_basis not in updated_from:
+            return None
         return {
             "in_progress": "started",
             "completed": "completed",

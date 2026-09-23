@@ -213,6 +213,42 @@ class PostgresLinearConnectorRuntimeTests(PostgresTestCase):
         self.assertEqual(len(self.rows("gateway_linear_delivery_receipts")), 1)
         self.assertEqual(len(self.rows("portfolio_linear_context_events")), 1)
 
+    def test_binding_version_cannot_roll_back_after_successor_commit(self):
+        self.ingest()
+        channel = self.config.outcome_connectors.linear[0]
+        successor = replace(channel, binding_version=2)
+        successor_config = replace(
+            self.config,
+            outcome_connectors=replace(
+                self.config.outcome_connectors,
+                linear=(successor,),
+            ),
+        )
+        successor_receiver = LinearOutcomeReceiver(
+            successor_config,
+            create_portfolio_repository(
+                successor_config,
+                environ={"HORMUZ_POSTGRES_DSN": self.runtime_dsn},
+            ).linear,
+        )
+        update = payload(action="update", updatedFrom={"title": "before"})
+        update["data"]["updatedAt"] = "2026-09-23T12:00:01Z"
+        self.ingest(
+            update,
+            delivery="60000000-0000-4000-8000-000000000010",
+            receiver=successor_receiver,
+        )
+        before = self.counts()
+        rollback = payload(action="update", updatedFrom={"startedAt": None})
+        rollback["data"]["updatedAt"] = "2026-09-23T12:00:02Z"
+        with self.assertRaises(PortfolioError) as caught:
+            self.ingest(
+                rollback,
+                delivery="60000000-0000-4000-8000-000000000011",
+            )
+        self.assertEqual(caught.exception.code, "version_conflict")
+        self.assertEqual(self.counts(), before)
+
     def test_append_only_grants_and_storage_cardinality_fail_closed(self):
         self.ingest()
         for table in TABLE_DDL:

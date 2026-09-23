@@ -56,6 +56,7 @@ DELIVERY = "60000000-0000-4000-8000-000000000001"
 WEBHOOK_SECRET = "synthetic-linear-webhook-secret-123456789"
 PREVIOUS_SECRET = "synthetic-linear-previous-secret-12345678"
 IDENTITY_KEY = "synthetic-linear-identity-key-1234567890"
+ROTATED_IDENTITY_KEY = "synthetic-linear-identity-key-rotation-2"
 ROTATED_WEBHOOK_SECRET = "synthetic-linear-rotated-secret-12345678"
 NOW_MS = int(datetime(2026, 9, 23, 12, tzinfo=timezone.utc).timestamp() * 1000)
 
@@ -385,6 +386,95 @@ class LinearAuthenticationAndNormalizationTests(unittest.TestCase):
             ("deleted", "tombstoned"),
         )
 
+    def test_update_outcomes_require_matching_transition_field(self):
+        unrelated = payload(action="update", updatedFrom={"title": "before"})
+        verified, body, _raw = self.authenticate(unrelated)
+        projection = self.adapter.normalize(
+            binding=self.binding,
+            verified=verified,
+            body=body,
+        )
+        self.assertEqual(projection.context["normalized_state"], "in_progress")
+        self.assertIsNone(projection.outcome)
+
+        cases = (
+            ("startedAt", "started"),
+            ("completedAt", "completed"),
+            ("canceledAt", "canceled"),
+        )
+        for field, expected in cases:
+            value = payload(action="update", updatedFrom={field: None})
+            if field != "startedAt":
+                value["data"][field] = "2026-09-23T12:01:00Z"
+            verified, body, _raw = self.authenticate(value)
+            projection = self.adapter.normalize(
+                binding=self.binding,
+                verified=verified,
+                body=body,
+            )
+            with self.subTest(field=field):
+                self.assertEqual(projection.outcome["event_type"], expected)
+
+        state_change = payload(
+            action="update",
+            updatedFrom={"state": {"type": "unstarted"}},
+        )
+        state_change["data"].pop("startedAt")
+        state_change["data"]["state"] = {"type": "started"}
+        verified, body, _raw = self.authenticate(state_change)
+        projection = self.adapter.normalize(
+            binding=self.binding,
+            verified=verified,
+            body=body,
+        )
+        self.assertEqual(projection.outcome["event_type"], "started")
+
+    def test_explicit_empty_relationship_sets_are_complete(self):
+        cases = (
+            (
+                "Issue",
+                {
+                    "id": ISSUE,
+                    "teamId": TEAM,
+                    "projectId": None,
+                    "cycleId": None,
+                    "updatedAt": "2026-09-23T12:00:00Z",
+                },
+            ),
+            (
+                "Project",
+                {
+                    "id": PROJECT,
+                    "teamId": TEAM,
+                    "initiatives": [],
+                    "updatedAt": "2026-09-23T12:00:00Z",
+                },
+            ),
+            (
+                "Initiative",
+                {
+                    "id": INITIATIVE,
+                    "teamId": TEAM,
+                    "parentInitiatives": [],
+                    "updatedAt": "2026-09-23T12:00:00Z",
+                },
+            ),
+        )
+        for event_type, data in cases:
+            value = payload(type=event_type, data=data)
+            verified, body, _raw = self.authenticate(value)
+            projection = self.adapter.normalize(
+                binding=self.binding,
+                verified=verified,
+                body=body,
+            )
+            with self.subTest(event_type=event_type):
+                self.assertEqual(projection.context["relationships"], [])
+                self.assertEqual(
+                    projection.context["relationship_coverage"],
+                    "complete",
+                )
+
     def test_all_parent_entity_types_and_relationship_limits_are_closed(self):
         cases = (
             (
@@ -538,6 +628,18 @@ class LinearSQLiteRuntimeTests(unittest.TestCase):
         self.assertNotIn(b"SYNTHETIC_PRIVATE_LINEAR_TITLE", database_bytes)
         self.assertNotIn(b"SYNTHETIC_PRIVATE_LINEAR_DESCRIPTION", database_bytes)
 
+    def test_unrelated_issue_update_does_not_duplicate_state_outcome(self):
+        self.ingest()
+        update = payload(action="update", updatedFrom={"title": "before"})
+        update["data"]["updatedAt"] = "2026-09-23T12:00:01Z"
+        result = self.ingest(
+            update,
+            delivery="60000000-0000-4000-8000-000000000010",
+        )
+        self.assertEqual(result["accepted_event_count"], 1)
+        self.assertEqual(len(self.rows("portfolio_linear_context_events")), 2)
+        self.assertEqual(len(self.rows("portfolio_outcome_events")), 1)
+
     def test_linear_audit_evidence_rejects_extra_content_and_digest_tampering(self):
         self.ingest()
         context = json.loads(
@@ -670,6 +772,54 @@ class LinearSQLiteRuntimeTests(unittest.TestCase):
             ),
             first,
         )
+
+        rollback = payload(action="update", updatedFrom={"startedAt": None})
+        rollback["data"]["updatedAt"] = "2026-09-23T12:00:02Z"
+        self.assert_error(
+            "version_conflict",
+            rollback,
+            delivery="60000000-0000-4000-8000-000000000011",
+        )
+
+    def test_current_identity_key_rotation_preserves_existing_binding(self):
+        self.ingest()
+        channel = self.config.outcome_connectors.linear[0]
+        next_key = replace(
+            channel.identity_keys[0],
+            version="2",
+            environment_variable="SYNTHETIC_LINEAR_IDENTITY_KEY_2",
+            value=ROTATED_IDENTITY_KEY.encode("ascii"),
+        )
+        rotated = replace(
+            channel,
+            identity_keys=(*channel.identity_keys, next_key),
+            current_key_version="2",
+        )
+        rotated_config = replace(
+            self.config,
+            outcome_connectors=replace(
+                self.config.outcome_connectors,
+                linear=(rotated,),
+            ),
+        )
+        receiver = LinearOutcomeReceiver(
+            rotated_config,
+            create_portfolio_repository(rotated_config).linear,
+        )
+        update = payload(action="update", updatedFrom={"title": "before"})
+        update["data"]["updatedAt"] = "2026-09-23T12:00:01Z"
+        raw = encoded(update)
+        result = receiver.ingest(
+            signed(
+                raw,
+                delivery="60000000-0000-4000-8000-000000000012",
+            ),
+            raw,
+            now_ms=NOW_MS,
+        )
+        self.assertEqual(result["disposition"], "accepted")
+        self.assertEqual(len(self.rows("portfolio_linear_source_binding_versions")), 1)
+        self.assertEqual(len(self.rows("portfolio_linear_context_events")), 2)
 
     def test_conflicting_delivery_and_unknown_stale_body_fail_closed(self):
         self.ingest()
@@ -805,6 +955,31 @@ class LinearSQLiteRuntimeTests(unittest.TestCase):
             earlier["context_event_id"],
         )
         self.assertEqual(len(rows), 2)
+
+    def test_explicit_empty_issue_relationships_supersede_complete_context(self):
+        self.ingest()
+        cleared = payload(
+            action="update",
+            updatedFrom={"projectId": PROJECT, "cycleId": CYCLE},
+        )
+        cleared["data"]["updatedAt"] = "2026-09-23T12:01:00Z"
+        cleared["data"]["projectId"] = None
+        cleared["data"]["cycleId"] = None
+        self.ingest(
+            cleared,
+            delivery="60000000-0000-4000-8000-000000000013",
+        )
+        rows = sorted(
+            self.rows("portfolio_linear_context_events"),
+            key=lambda item: item["commit_sequence"],
+        )
+        earlier, latest = (json.loads(row["evidence_json"]) for row in rows)
+        self.assertEqual(latest["relationships"], [])
+        self.assertEqual(latest["relationship_coverage"], "complete")
+        self.assertEqual(
+            latest["supersedes_context_event_id"],
+            earlier["context_event_id"],
+        )
 
     def test_future_source_time_cannot_match_a_registry_binding(self):
         service = PortfolioService(self.config, self.repositories.registry)

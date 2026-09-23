@@ -83,6 +83,8 @@ _NORMALIZER_RULES = {
     "entities": ["cycle", "initiative", "issue", "project"],
     "revision": "source_updated_at_v1",
     "content": "opaque_ids_and_timestamps_only",
+    "state_outcomes": "updated_from_transition_only",
+    "relationship_coverage": "explicit_empty_complete_absent_unknown",
 }
 _NORMALIZER_DIGEST = hashlib.sha256(
     canonical(_NORMALIZER_RULES).encode("ascii")
