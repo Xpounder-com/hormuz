@@ -100,6 +100,24 @@
       ]
     },
     {
+      "id": "linear_connector_metadata",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "gateway_linear_delivery_receipts",
+        "portfolio_linear_context_events",
+        "portfolio_linear_context_retention_events",
+        "portfolio_linear_source_binding_versions"
+      ],
+      "postgresql_tables": [
+        "gateway_linear_delivery_receipts",
+        "gateway_linear_route_claims",
+        "portfolio_linear_context_events",
+        "portfolio_linear_context_retention_events",
+        "portfolio_linear_source_binding_versions"
+      ]
+    },
+    {
       "id": "portfolio_attribution_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

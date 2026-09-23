@@ -72,10 +72,8 @@ def sqlite_linear_candidate(*, fail: bool = False):
     original = UsageStore._apply_migration
 
     def migration(connection, version):
-        if version != 14:
-            return original(connection, version)
-        _apply_sqlite_proposal(connection)
-        if fail:
+        original(connection, version)
+        if version == 14 and fail:
             connection.execute("INSERT INTO deliberately_absent_linear_probe VALUES (1)")
 
     with (
@@ -88,13 +86,12 @@ def sqlite_linear_candidate(*, fail: bool = False):
 @contextmanager
 def postgres_linear_candidate(*, fail: bool = False):
     original = postgres_module._migration_sql
-    proposal = POSTGRES_PROPOSAL.read_text(encoding="utf-8")
 
     def migration(version, schema, *roles):
-        if version != 19:
-            return original(version, schema, *roles)
-        statement = proposal.format(schema=schema, runtime_role=roles[0])
-        return statement + ("\nSELECT 1 / 0;" if fail else "")
+        statement = original(version, schema, *roles)
+        if version == 19 and fail:
+            statement += "\nSELECT 1 / 0;"
+        return statement
 
     with (
         mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 19),
@@ -139,9 +136,10 @@ class SQLiteLinearProposalBoundaryTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.path = Path(temporary.name) / "proposal.sqlite3"
-        UsageStore(self.path).verify_ready()
-        with sqlite_linear_candidate():
+        with mock.patch.object(UsageStore, "schema_version", 13):
             UsageStore(self.path).verify_ready()
+        with managed_sqlite_connection(self.path) as connection:
+            _apply_sqlite_proposal(connection)
         _sqlite_insert_witness(self.path)
         with managed_sqlite_connection(self.path) as connection:
             connection.execute(
@@ -250,12 +248,17 @@ class SQLitePublishedLinearTransitionTests(unittest.TestCase):
         self.seeded = predecessor_call(self.request(mode="seed"))
         self.assertEqual(self.seeded["status"], "ready")
         self.published = sqlite_snapshot(self.path)
+        self.assertEqual(UsageStore.schema_version, 14)
+        version_patch = mock.patch.object(UsageStore, "schema_version", 13)
+        version_patch.start()
+        self.addCleanup(version_patch.stop)
 
     def request(self, path=None, mode="ready"):
         return {"backend": "sqlite", "path": str(path or self.path), "mode": mode}
 
     def advance_integrated_baseline(self):
-        UsageStore(self.path).verify_ready()
+        with mock.patch.object(UsageStore, "schema_version", 13):
+            UsageStore(self.path).verify_ready()
         self.baseline = sqlite_snapshot(self.path)
         self.assertIn((13, "applied"), {
             (row[0], row[1])
@@ -272,7 +275,17 @@ class SQLitePublishedLinearTransitionTests(unittest.TestCase):
 
     def test_missing_linear_successor_preserves_integrated_baseline(self):
         before = self.advance_integrated_baseline()
-        with mock.patch.object(UsageStore, "schema_version", 14):
+        original = UsageStore._apply_migration
+
+        def missing(connection, version):
+            if version == 14:
+                raise StorageSchemaError("storage_schema_migration_unsupported")
+            return original(connection, version)
+
+        with (
+            mock.patch.object(UsageStore, "schema_version", 14),
+            mock.patch.object(UsageStore, "_apply_migration", side_effect=missing),
+        ):
             with self.assertRaisesRegex(StorageSchemaError, "storage_schema_migration_unsupported"):
                 UsageStore(self.path)
         self.assertEqual(sqlite_snapshot(self.path), before)
@@ -299,8 +312,9 @@ class SQLitePublishedLinearTransitionTests(unittest.TestCase):
             predecessor_call(self.request()),
             {"status": "refused", "code": "storage_schema_newer_than_binary"},
         )
-        with self.assertRaisesRegex(StorageSchemaError, "storage_schema_newer_than_binary"):
-            UsageStore(self.path, read_only=True)
+        with mock.patch.object(UsageStore, "schema_version", 13):
+            with self.assertRaisesRegex(StorageSchemaError, "storage_schema_newer_than_binary"):
+                UsageStore(self.path, read_only=True)
         with managed_sqlite_connection(self.path) as connection:
             connection.execute(
                 "UPDATE hormuz_schema_migrations SET state='applying' WHERE version=14"
@@ -367,6 +381,12 @@ class PostgresPublishedLinearTransitionTests(PostgresTestCase):
         self.seeded = predecessor_call(self.request(mode="seed"))
         self.assertEqual(self.seeded["status"], "ready")
         self.published = self.snapshot()
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 19)
+        version_patch = mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 18
+        )
+        version_patch.start()
+        self.addCleanup(version_patch.stop)
 
     def request(self, dsn=None, mode="ready"):
         return {
@@ -382,7 +402,8 @@ class PostgresPublishedLinearTransitionTests(PostgresTestCase):
         }
 
     def advance_integrated_baseline(self):
-        self.assertEqual(self.migrate().version, 18)
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
+            self.assertEqual(self.migrate().version, 18)
         self.baseline = self.snapshot()
         return self.baseline
 
@@ -431,7 +452,17 @@ class PostgresPublishedLinearTransitionTests(PostgresTestCase):
 
     def test_missing_linear_successor_preserves_integrated_baseline(self):
         before = self.advance_integrated_baseline()
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 19):
+        original = postgres_module._migration_sql
+
+        def missing(version, *args, **kwargs):
+            if version == 19:
+                raise PostgresStorageError("storage_schema_migration_unsupported")
+            return original(version, *args, **kwargs)
+
+        with (
+            mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 19),
+            mock.patch.object(postgres_module, "_migration_sql", side_effect=missing),
+        ):
             with self.assertRaisesRegex(
                 PostgresStorageError, "storage_schema_migration_unsupported"
             ):
@@ -462,8 +493,9 @@ class PostgresPublishedLinearTransitionTests(PostgresTestCase):
             predecessor_call(self.request()),
             {"status": "refused", "code": "storage_schema_newer_than_binary"},
         )
-        with self.assertRaisesRegex(PostgresStorageError, "storage_schema_newer_than_binary"):
-            self.runtime()
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
+            with self.assertRaisesRegex(PostgresStorageError, "storage_schema_newer_than_binary"):
+                self.runtime()
         with self.psycopg.connect(self.owner_dsn) as connection:
             connection.execute(
                 self.sql.SQL(
@@ -475,8 +507,9 @@ class PostgresPublishedLinearTransitionTests(PostgresTestCase):
             predecessor_call(self.request()),
             {"status": "refused", "code": "storage_schema_partial_upgrade"},
         )
-        with self.assertRaisesRegex(PostgresStorageError, "storage_schema_partial_upgrade"):
-            self.runtime()
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
+            with self.assertRaisesRegex(PostgresStorageError, "storage_schema_partial_upgrade"):
+                self.runtime()
         with postgres_linear_candidate():
             with self.assertRaisesRegex(PostgresStorageError, "storage_schema_partial_upgrade"):
                 self.runtime()
@@ -529,7 +562,7 @@ class PostgresLinearProposalACLTests(PostgresTestCase):
     def bootstrap_clean_proposal(self):
         schema = "linear_acl_" + uuid4().hex[:12]
         self.addCleanup(self._drop_schema, schema)
-        with postgres_linear_candidate():
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
             status = postgres_module.migrate_postgres(
                 self.owner_dsn,
                 schema=schema,
@@ -538,7 +571,13 @@ class PostgresLinearProposalACLTests(PostgresTestCase):
                 custody_control_role=self.custody_control_role,
                 custody_executor_role=self.custody_executor_role,
             )
-        self.assertEqual(status.version, 19)
+        self.assertEqual(status.version, 18)
+        proposal = POSTGRES_PROPOSAL.read_text(encoding="utf-8").format(
+            schema=postgres_module._quote_identifier(schema),
+            runtime_role=postgres_module._quote_identifier(self.runtime_role),
+        )
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            connection.execute(proposal)
         with self.psycopg.connect(self.owner_dsn) as connection:
             with connection.cursor() as cursor:
                 owner = cursor.execute("SELECT current_user").fetchone()[0]

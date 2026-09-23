@@ -199,6 +199,148 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 require_restricted_migration_login=True,
             )
 
+            binding_sql = (
+                "INSERT INTO portfolio_linear_source_binding_versions ("
+                "organization_id,connector_id,version,binding_event_id,"
+                "previous_version,binding_state,source_workspace_id,"
+                "source_webhook_id,source_team_ids_json,typed_enrollment_json,"
+                "credential_version,fingerprint_key_version,content_digest,"
+                "request_digest,registered_by,registered_at,evidence_json"
+                ") VALUES ("
+                + ",".join("%s" for _ in range(17))
+                + ")"
+            )
+
+            def binding_row(
+                organization: str,
+                connector: str,
+                version: int,
+                event_id: str,
+                workspace_id: str,
+                webhook_id: str,
+                marker: str,
+            ) -> tuple[object, ...]:
+                return (
+                    organization,
+                    connector,
+                    version,
+                    event_id,
+                    None if version == 1 else version - 1,
+                    "active",
+                    workspace_id,
+                    webhook_id,
+                    "[]",
+                    "{}",
+                    "linear-v1",
+                    1,
+                    marker * 64,
+                    str((int(marker) + 1) % 10) * 64,
+                    "postgres16-test",
+                    "2026-09-23T12:00:00.000000Z",
+                    "{}",
+                )
+
+            workspace_id = "10000000-0000-4000-8000-000000000001"
+            webhook_id = "20000000-0000-4000-8000-000000000001"
+            with postgres_transaction(
+                runtime_dsn,
+                schema=schema,
+                runtime_role=runtime_role,
+                organization_id="acme",
+            ) as connection:
+                connection.execute(
+                    binding_sql,
+                    binding_row(
+                        "acme",
+                        "linear-one",
+                        1,
+                        "30000000-0000-4000-8000-000000000001",
+                        workspace_id,
+                        webhook_id,
+                        "1",
+                    ),
+                )
+                connection.execute(
+                    binding_sql,
+                    binding_row(
+                        "acme",
+                        "linear-one",
+                        2,
+                        "30000000-0000-4000-8000-000000000002",
+                        workspace_id,
+                        webhook_id,
+                        "3",
+                    ),
+                )
+            with self.assertRaisesRegex(
+                self.psycopg.errors.CheckViolation,
+                "linear_binding_cardinality_conflict",
+            ):
+                with self.psycopg.connect(
+                    runtime_dsn,
+                    row_factory=self.psycopg.rows.dict_row,
+                ) as connection:
+                    with postgres_module._tenant_transaction(
+                        connection,
+                        sql=self.sql,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        organization_id="beta",
+                    ):
+                        connection.execute(
+                            binding_sql,
+                            binding_row(
+                                "beta",
+                                "linear-two",
+                                1,
+                                "30000000-0000-4000-8000-000000000003",
+                                workspace_id,
+                                "20000000-0000-4000-8000-000000000002",
+                                "5",
+                            ),
+                        )
+            with self.assertRaisesRegex(
+                self.psycopg.errors.CheckViolation,
+                "linear_binding_cardinality_conflict",
+            ):
+                with self.psycopg.connect(
+                    runtime_dsn,
+                    row_factory=self.psycopg.rows.dict_row,
+                ) as connection:
+                    with postgres_module._tenant_transaction(
+                        connection,
+                        sql=self.sql,
+                        schema=schema,
+                        runtime_role=runtime_role,
+                        organization_id="acme",
+                    ):
+                        connection.execute(
+                            binding_sql,
+                            binding_row(
+                                "acme",
+                                "linear-two",
+                                1,
+                                "30000000-0000-4000-8000-000000000004",
+                                "10000000-0000-4000-8000-000000000002",
+                                webhook_id,
+                                "7",
+                            ),
+                        )
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                claims = connection.execute(
+                    self.sql.SQL(
+                        "SELECT claim_kind,source_identifier,organization_id,connector_id "
+                        "FROM {}.gateway_linear_route_claims ORDER BY claim_kind"
+                    ).format(self.sql.Identifier(schema))
+                ).fetchall()
+            self.assertEqual(
+                claims,
+                [
+                    ("webhook", webhook_id, "acme", "linear-one"),
+                    ("workspace", workspace_id, "acme", None),
+                ],
+            )
+
             with self.psycopg.connect(
                 self.owner_dsn, autocommit=True
             ) as connection:
@@ -452,6 +594,16 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                     (185, "46c2bf134047c4720d0d6236dfb9efa62e22e37b70c9b6ef8df4b166c656249a"),
                     (186, "d06ec615d82a176b107e1131c00e1dceb5f629d9504a7519f64e1eb77a0c7246"),
                 )
+
+    def test_schema19_bootstrap_preserves_reviewed_linear_acl_boundary(self) -> None:
+        self._assert_managed_bootstrap_at_version(
+            19,
+            (
+                213,
+                "337ece4276d5c36f5115f88c28c97818a3c653862a37c53f6a1590eb7c9e2f85",
+            ),
+            None,
+        )
 
     def _assert_managed_bootstrap(self, version, expected_acl_boundary, injected_acl_boundary):
         with unittest.mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", version):
@@ -821,10 +973,13 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                         )
                     )
             unexpected_acl_boundary = acl_boundary()
-            self.assertEqual(
-                unexpected_acl_boundary,
-                injected_acl_boundary,
-            )
+            if injected_acl_boundary is None:
+                self.assertNotEqual(unexpected_acl_boundary, expected_acl_boundary)
+            else:
+                self.assertEqual(
+                    unexpected_acl_boundary,
+                    injected_acl_boundary,
+                )
             with self.assertRaisesRegex(
                 PostgresStorageError,
                 "postgres_bootstrap_acl_boundary_invalid",

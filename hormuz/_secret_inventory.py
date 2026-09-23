@@ -168,6 +168,10 @@ _IDENTITY_CONNECTOR_HASH_MATERIALS = {
         "GitHubWebhookAuthenticator.authenticate",
     ): "identity_connector_secret",
     (
+        "hormuz/linear_webhook_auth.py",
+        "LinearWebhookAuthenticator.authenticate",
+    ): "identity_connector_secret",
+    (
         "hormuz/outcome_wire.py",
         "OutcomeKeys._digest",
     ): "tenant_fingerprint_key",

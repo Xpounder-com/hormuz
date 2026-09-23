@@ -2207,6 +2207,41 @@ class UsageStore:
                     (source_schema_id, str(row[identity_column]), str(row["evidence_json"]))
                     for row in rows
                 )
+        linear_ready = connection.execute(
+            "SELECT 1 FROM hormuz_schema_migrations WHERE version=14 AND state='applied'"
+        ).fetchone() is not None
+        if linear_ready:
+            for source_schema_id, table, identity_column in (
+                (
+                    "hormuz.linear-source-binding-version",
+                    "portfolio_linear_source_binding_versions",
+                    "binding_event_id",
+                ),
+                (
+                    "hormuz.linear-delivery-receipt",
+                    "gateway_linear_delivery_receipts",
+                    "receipt_id",
+                ),
+                (
+                    "hormuz.linear-context-event",
+                    "portfolio_linear_context_events",
+                    "context_event_id",
+                ),
+                (
+                    "hormuz.linear-context-retention",
+                    "portfolio_linear_context_retention_events",
+                    "retention_event_id",
+                ),
+            ):
+                rows = connection.execute(
+                    f"SELECT {identity_column}, evidence_json FROM {table} "
+                    "WHERE organization_id = ?",
+                    (organization_id,),
+                ).fetchall()
+                collection_rows.extend(
+                    (source_schema_id, str(row[identity_column]), str(row["evidence_json"]))
+                    for row in rows
+                )
         for row in usage_rows:
             try:
                 event = usage_audit_event(dict(row))
@@ -2263,6 +2298,10 @@ class UsageStore:
                     FinanceCollectionError,
                     finance_collection_source_identity,
                 )
+                from .linear_evidence import (
+                    LINEAR_SOURCE_SCHEMA_IDS,
+                    linear_source_identity,
+                )
 
                 event = json.loads(event_json)
                 if source_schema_id in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS:
@@ -2273,6 +2312,8 @@ class UsageStore:
                     observed_identity = finance_account_source_identity(
                         source_schema_id, event,
                     )
+                elif source_schema_id in LINEAR_SOURCE_SCHEMA_IDS:
+                    observed_identity = linear_source_identity(source_schema_id, event)
                 else:
                     raise ValueError
                 if (

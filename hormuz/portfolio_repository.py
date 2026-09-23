@@ -26,6 +26,7 @@ from .config import GatewayConfig
 from .attribution_repository import AttributionRepository
 from .budget_repository import WorkBudgetRepository, create_budget_repository
 from .outcome_repository import OutcomeRepository
+from .linear_repository import LinearConnectorRepository
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import PortfolioError, RESPONSE_BYTES, canonical, query_parameters, route, validate
 from .postgres import PostgresConnectionPool
@@ -326,6 +327,7 @@ class PortfolioRepositories:
     attributions: AttributionRepository
     outcomes: OutcomeRepository | None = None
     budgets: WorkBudgetRepository | None = None
+    linear: LinearConnectorRepository | None = None
 
     def execute(self, principal: PortfolioPrincipal, operation: str, *, path: str,
                 scope_id: str | None, query: dict[str, Any], body: dict[str, Any] | None,
@@ -341,10 +343,32 @@ def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, 
                                 connection_pool: PostgresConnectionPool | None = None,
                                 read_only: bool = False) -> PortfolioRepositories:
     registry = RegistryRepository(config, environ=environ, connection_pool=connection_pool, read_only=read_only)
-    return PortfolioRepositories(registry, AttributionRepository(
-        config, dsn=registry._dsn, connection_pool=connection_pool, read_only=read_only,
-    ), OutcomeRepository(
-        config, dsn=registry._dsn, connection_pool=connection_pool, read_only=read_only,
-    ), create_budget_repository(
-        config, environ=environ, connection_pool=connection_pool, read_only=read_only,
-    ))
+    outcomes = OutcomeRepository(
+        config,
+        dsn=registry._dsn,
+        connection_pool=connection_pool,
+        read_only=read_only,
+    )
+    return PortfolioRepositories(
+        registry=registry,
+        attributions=AttributionRepository(
+            config,
+            dsn=registry._dsn,
+            connection_pool=connection_pool,
+            read_only=read_only,
+        ),
+        outcomes=outcomes,
+        budgets=create_budget_repository(
+            config,
+            environ=environ,
+            connection_pool=connection_pool,
+            read_only=read_only,
+        ),
+        linear=LinearConnectorRepository(
+            config,
+            dsn=registry._dsn,
+            connection_pool=connection_pool,
+            read_only=read_only,
+            outcomes=outcomes,
+        ),
+    )

@@ -63,6 +63,8 @@ from .finance_account_binding import (
 )
 from .github_connector import GitHubOutcomeReceiver
 from .github_http import GITHUB_EVENTS_PATH, handle_github_webhook
+from .linear_connector import LinearOutcomeReceiver
+from .linear_http import LINEAR_EVENTS_PATH, handle_linear_webhook
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
@@ -335,7 +337,12 @@ class GatewayServer(ThreadingHTTPServer):
             self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
             self.github_outcome_receiver = (
                 GitHubOutcomeReceiver(config, portfolio.outcomes)
-                if config.outcome_connectors is not None
+                if config.outcome_connectors is not None and config.outcome_connectors.github
+                else None
+            )
+            self.linear_outcome_receiver = (
+                LinearOutcomeReceiver(config, portfolio.linear)
+                if config.outcome_connectors is not None and config.outcome_connectors.linear
                 else None
             )
             self.attribution_repository = portfolio.attributions
@@ -708,6 +715,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         if path == GITHUB_EVENTS_PATH:
             handle_github_webhook(self)
+            return
+        if path == LINEAR_EVENTS_PATH:
+            handle_linear_webhook(self)
             return
         if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
             handle_console_request(self)

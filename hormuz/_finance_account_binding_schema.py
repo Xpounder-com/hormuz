@@ -459,6 +459,32 @@ def verify_postgres_finance_account_binding(cursor, schema: str, error_factory) 
             custody_control_role='"custody_control_role"',
             custody_executor_role='"custody_executor_role"',
         )
+        cursor.execute(
+            f"SELECT EXISTS (SELECT 1 FROM {quoted_schema}.hormuz_schema_migrations "
+            "WHERE version=19 AND state='applied')"
+        )
+        successor_row = cursor.fetchone()
+        successor_applied = bool(
+            next(iter(successor_row.values()))
+            if isinstance(successor_row, Mapping)
+            else successor_row[0]
+        )
+        audit_template = (
+            resources.files("hormuz.migrations.postgresql")
+            .joinpath(
+                "0019_linear_connector.sql"
+                if successor_applied
+                else "0018_finance_account_binding_and_query_audit.sql"
+            )
+            .read_text(encoding="utf-8")
+        )
+        audit_rendered = audit_template.format(
+            schema=quoted_schema,
+            runtime_role='"runtime_role"',
+            policy_control_role='"policy_control_role"',
+            custody_control_role='"custody_control_role"',
+            custody_executor_role='"custody_executor_role"',
+        )
     except (FileNotFoundError, KeyError, ModuleNotFoundError, ValueError):
         raise error_factory("storage_schema_partial_upgrade") from None
 
@@ -542,7 +568,7 @@ def verify_postgres_finance_account_binding(cursor, schema: str, error_factory) 
             "enforce_custody_audit_chain_entry_insert()"
         )
         expected_body = " ".join(
-            rendered.split(marker, 1)[1]
+            audit_rendered.split(marker, 1)[1]
             .split("AS $$", 1)[1]
             .split("$$;", 1)[0]
             .split()
@@ -566,7 +592,7 @@ def verify_postgres_finance_account_binding(cursor, schema: str, error_factory) 
     try:
         marker = f"CREATE OR REPLACE FUNCTION {quoted_schema}.custody_audit_chain_source_event_json("
         expected_body = " ".join(
-            rendered.split(marker, 1)[1].split("AS $$", 1)[1].split("$$;", 1)[0].split()
+            audit_rendered.split(marker, 1)[1].split("AS $$", 1)[1].split("$$;", 1)[0].split()
         )
     except (FileNotFoundError, IndexError, KeyError, ModuleNotFoundError, ValueError):
         raise error_factory("storage_schema_partial_upgrade") from None

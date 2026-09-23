@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 
-SQLITE_SCHEMA_VERSION = 13
+SQLITE_SCHEMA_VERSION = 14
 
 
 class StorageErrorFactory(Protocol):
@@ -449,6 +449,9 @@ def verify_applied_sqlite_schema_shape(
     if version >= 13:
         from ._finance_account_binding_schema import verify_sqlite_finance_account_binding
         verify_sqlite_finance_account_binding(connection, error_factory)
+    if version >= 14:
+        from ._linear_schema import verify_sqlite_linear
+        verify_sqlite_linear(connection, error_factory)
 
     required = {
         "gateway_usage_events": {
@@ -713,6 +716,10 @@ def apply_sqlite_migration(
     if version == 13:
         from ._finance_account_binding_schema import apply_sqlite_finance_account_binding_migration
         apply_sqlite_finance_account_binding_migration(connection)
+        return
+    if version == 14:
+        from ._linear_schema import apply_sqlite_linear_migration
+        apply_sqlite_linear_migration(connection)
         return
     raise error_factory("storage_schema_migration_unsupported")
 
