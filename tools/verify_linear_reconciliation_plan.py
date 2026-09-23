@@ -24,7 +24,7 @@ from hormuz.postgres import (
 
 PLAN_PATH = "docs/linear-reconciliation-plan-v1.json"
 CI_PATH = ".github/workflows/ci.yml"
-PLAN_SHA256 = "13fd336fdfdeed0e2fea30fadbe6f2bdf5d7f82f9b3105ce116ab5524f535171"
+PLAN_SHA256 = "a85b58be9b894babdc9ab0cbd1258c3ecb40eaa98845125a8cfd91707bcf1b0d"
 PREDECESSOR_PATH = "docs/linear-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "0440419441a88b9405bf35c986edf91c02ba80fba99203df63d309e2fb9603e2"
@@ -44,6 +44,16 @@ TABLES = (
 AUDIT_SOURCES = (
     "hormuz.linear-context-event",
     "hormuz.linear-snapshot-receipt",
+)
+CUMULATIVE_TRANSITION_FILES = (
+    "tests/test_postgres_budget_transition.py",
+    "tests/test_postgres_finance_transition.py",
+    "tests/test_postgres_outcome_transition.py",
+    "tests/test_sqlite_attribution_transition.py",
+    "tests/test_sqlite_finance_native_attempt_transition.py",
+    "tests/test_sqlite_finance_transition.py",
+    "tests/test_sqlite_outcome_transition.py",
+    "tests/test_sqlite_registry_transition.py",
 )
 EXPECTED_GATES = {
     "runtime_predecessor_verified": True,
@@ -315,7 +325,11 @@ def verify(root: Path = ROOT) -> dict[str, object]:
 
     _validate_predecessor(root)
     sources = plan["source_sha256"]
-    if not isinstance(sources, dict) or not sources:
+    if (
+        not isinstance(sources, dict)
+        or not sources
+        or not set(CUMULATIVE_TRANSITION_FILES).issubset(sources)
+    ):
         _fail("linear_reconciliation_plan_invalid")
     for relative, expected in sources.items():
         if (

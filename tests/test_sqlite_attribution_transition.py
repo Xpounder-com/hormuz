@@ -23,6 +23,7 @@ from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_TABLES
 from hormuz._finance_collection_schema import TABLE_DDL as COLLECTION_TABLES
 from hormuz._finance_account_binding_schema import TABLE_DDL as ACCOUNT_BINDING_TABLES
 from hormuz._linear_schema import TABLE_DDL as LINEAR_TABLES
+from hormuz._linear_snapshot_schema import TABLE_DDL as LINEAR_SNAPSHOT_TABLES
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_wire import ATTRIBUTIONS, canonical
 if __package__:
@@ -76,7 +77,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            self.assertIn(version, (6, 7, 8, 9, 10, 11, 12, 13, 14))
+            self.assertIn(version, (6, 7, 8, 9, 10, 11, 12, 13, 14, 15))
             original(connection, version)
             if fail and version == 6:
                 raise RuntimeError("synthetic_attribution_migration_failure")
@@ -98,6 +99,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
             | set(COLLECTION_TABLES)
             | set(ACCOUNT_BINDING_TABLES)
             | set(LINEAR_TABLES)
+            | set(LINEAR_SNAPSHOT_TABLES)
         )
         current["objects"] = [
             row for row in current["objects"]
@@ -107,7 +109,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         current["rows"]["hormuz_schema_migrations"] = [
             row
             for row in current["rows"]["hormuz_schema_migrations"]
-            if row[0] not in {6, 7, 8, 9, 10, 11, 12, 13, 14}
+            if row[0] not in {6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
         ]
         self.assertEqual(current, before)
 
@@ -115,9 +117,10 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         for _ in range(2):
             self.probe()
             current = sqlite_snapshot(self.path)
-            self.assertEqual(len(current["rows"]), 53)
+            self.assertEqual(len(current["rows"]), 55)
             self.assertTrue(all(not current["rows"][table] for table in ACCOUNT_BINDING_TABLES))
             self.assertTrue(all(not current["rows"][table] for table in LINEAR_TABLES))
+            self.assertTrue(all(not current["rows"][table] for table in LINEAR_SNAPSHOT_TABLES))
             self.assert_prior_state_preserved()
 
     def test_sqlite_attribution_failure_and_retry_preserve_populated_registry(self):

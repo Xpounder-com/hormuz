@@ -142,8 +142,8 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
         self.assertEqual(len(current["rows"]), 61)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
         self.runtime().verify_ready()
-        # Schemas through 19 now exist; schema 20 remains intentionally absent.
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 20):
+        # Schemas through 20 now exist; schema 21 remains intentionally absent.
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 21):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(

@@ -99,6 +99,20 @@ class LinearReconciliationPlanTests(unittest.TestCase):
                 ):
                     verifier.verify(self.root)
 
+    def test_cumulative_transition_suites_are_fixed_source(self):
+        plan = self.plan()
+        self.assertTrue(
+            set(verifier.CUMULATIVE_TRANSITION_FILES).issubset(plan["source_sha256"])
+        )
+        plan["source_sha256"].pop(verifier.CUMULATIVE_TRANSITION_FILES[0])
+        self.write_plan(plan)
+        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)):
+            with self.assertRaisesRegex(
+                verifier.LinearReconciliationPlanError,
+                "linear_reconciliation_plan_invalid",
+            ):
+                verifier.verify(self.root)
+
     def test_migration_cannot_gain_mutation_privileges(self):
         relative = "hormuz/migrations/postgresql/0020_linear_snapshot.sql"
         path = self.root / relative
