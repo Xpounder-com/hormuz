@@ -162,6 +162,16 @@ _SOURCE_FIELDS = {
     "key_purpose",
 }
 _MANAGED_MATERIAL_FIELDS = _SOURCE_FIELDS.difference({"selector", "sensitivity"})
+_IDENTITY_CONNECTOR_HASH_MATERIALS = {
+    (
+        "hormuz/github_webhook_auth.py",
+        "GitHubWebhookAuthenticator.authenticate",
+    ): "identity_connector_secret",
+    (
+        "hormuz/outcome_wire.py",
+        "OutcomeKeys._digest",
+    ): "tenant_fingerprint_key",
+}
 
 
 class SecretInventoryError(RuntimeError):
@@ -516,7 +526,24 @@ def _validate_managed_materials(
             raise SecretInventoryError("secret_inventory_managed_source_missing")
         _enum(entry, "material_class", _MATERIAL_CLASSES, "secret_inventory_material_class_invalid")
         mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
-        local_session_mode = mode in {"session_flow_aead", "keyed_hash", "os_secure_store", "private_invitation_handoff", "browser_http_only_cookie"}
+        identity_connector_hash = (
+            mode == "keyed_hash"
+            and entry.get("key_purpose") == "identity_connector_secret"
+            and entry.get("material_class")
+            == _IDENTITY_CONNECTOR_HASH_MATERIALS.get(
+                (coordinate.source_module, coordinate.source_qualname)
+            )
+            and entry.get("storage_owner") == "customer_secret_manager"
+            and entry.get("runtime_consumer") == "portfolio_runtime"
+            and entry.get("rotation_authority") == "identity_operator"
+        )
+        local_session_mode = (
+            mode in {
+                "session_flow_aead", "keyed_hash", "os_secure_store",
+                "private_invitation_handoff", "browser_http_only_cookie",
+            }
+            and not identity_connector_hash
+        )
         if mode == "browser_http_only_cookie" and (
             coordinate.source_module != "hormuz/console_http.py"
             or coordinate.source_qualname != "_cookie_header"
@@ -557,7 +584,7 @@ def _validate_managed_materials(
             entry.get("key_purpose") != "session_material" or entry.get("material_class") != "session_material"
         ):
             raise SecretInventoryError("secret_inventory_managed_custody_invalid")
-        if not local_session_mode and mode not in {
+        if not local_session_mode and not identity_connector_hash and mode not in {
             "hormuz_encrypted_envelope", "external_service_encryption",
             "transient_import", "hosted_backup_aead",
         }:

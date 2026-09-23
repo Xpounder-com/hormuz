@@ -44,7 +44,7 @@ class SecretInventoryTests(unittest.TestCase):
         self.assertEqual(purposes["provider_credential"], "active")
         self.assertEqual(purposes["data_encryption"], "active")
         self.assertEqual(purposes["session_material"], "active")
-        self.assertEqual(purposes["identity_connector_secret"], "reserved")
+        self.assertEqual(purposes["identity_connector_secret"], "active")
         self.assertEqual(purposes["approval_fingerprint"], "reserved")
 
     def test_missing_or_duplicate_inventory_entry_fails_closed(self) -> None:
@@ -100,6 +100,28 @@ class SecretInventoryTests(unittest.TestCase):
             ("hosted-backup-key-import", "source_qualname", "_validated_key"),
             ("hosted-offsite-backup-archive", "material_class", "data_encryption_key"),
             ("hosted-offsite-backup-archive", "runtime_consumer", "gateway_runtime"),
+        )
+        for entry_id, field, value in mutations:
+            candidate = copy.deepcopy(self.inventory)
+            entry = next(item for item in candidate["managed_materials"] if item["id"] == entry_id)
+            entry[field] = value
+            with self.subTest(entry=entry_id, field=field), self.assertRaisesRegex(
+                SecretInventoryError, "secret_inventory_managed_custody_invalid"
+            ):
+                validate_secret_inventory(candidate, source_root=ROOT)
+
+    def test_identity_connector_hash_custody_is_exact(self) -> None:
+        mutations = (
+            ("github-webhook-signature-verification", "material_class", "tenant_fingerprint_key"),
+            ("github-webhook-signature-verification", "storage_owner", "operator_process"),
+            ("github-webhook-signature-verification", "runtime_consumer", "gateway_runtime"),
+            ("github-webhook-signature-verification", "rotation_authority", "deployment_operator"),
+            ("github-webhook-signature-verification", "key_purpose", "session_material"),
+            ("outcome-delivery-and-provenance-hashes", "material_class", "identity_connector_secret"),
+            ("outcome-delivery-and-provenance-hashes", "storage_owner", "operator_process"),
+            ("outcome-delivery-and-provenance-hashes", "runtime_consumer", "gateway_runtime"),
+            ("outcome-delivery-and-provenance-hashes", "rotation_authority", "deployment_operator"),
+            ("outcome-delivery-and-provenance-hashes", "key_purpose", "session_material"),
         )
         for entry_id, field, value in mutations:
             candidate = copy.deepcopy(self.inventory)

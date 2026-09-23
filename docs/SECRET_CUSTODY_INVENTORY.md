@@ -20,7 +20,7 @@ custody integration tests separately prove encryption and recovery behavior.
 
 ## Ownership boundary
 
-The active core has four custody categories:
+The active core has six custody categories:
 
 1. **Hormuz-managed protected material.** Provider credentials may be stored
    in owner-only encrypted envelope files. Metadata-only audit artifacts use
@@ -61,6 +61,13 @@ The active core has four custody categories:
    injects only a short-lived loopback relay credential, and never sends the
    inherited environment to the Hormuz gateway. Hormuz does not persist, log,
    hash, or serialize these values.
+6. **GitHub connector signing and identity keys.** The opt-in outcome receiver
+   resolves versioned webhook and tenant fingerprint keys from the deployment
+   secret manager at startup. It uses them only for exact-body signature
+   verification and domain-separated delivery, receipt, authority, and
+   provenance hashes. Values are hidden from representations and added to the
+   runtime redactor. The JSON configuration contains only environment-variable
+   names and non-secret versions.
 
 The second category must not be recursively placed behind the same service it
 is needed to access. For example, Hormuz cannot use OpenBao Transit to decrypt
@@ -84,14 +91,15 @@ entrypoints without inspecting the credential selected by the SDK.
 | --- | --- | --- |
 | `provider_credential` | Active | Gateway provider-credential envelopes |
 | `data_encryption` | Active | Metadata-only immutable audit artifacts and offline authenticated hosted-state archives |
-| `identity_connector_secret` | Reserved managed-envelope purpose | OIDC login secrets are externally injected; no connector envelope migration |
+| `identity_connector_secret` | Active when a GitHub outcome channel is enabled | Externally injected webhook secrets and delivery/provenance keyed hashes |
 | `session_material` | Active when login enabled | Local session master key, keyed hashes, encrypted transient flow state, and OS-secured client credentials |
 | `approval_fingerprint` | Reserved | Approval workflow is outside the reduced core |
 
-Reserved means the name and separation requirement are retained, but the core
-does not claim to store, encrypt, rotate, or audit that material. Static gateway
-identity tokens are externally injected credentials; they are not mislabeled as
-an implemented identity-connector envelope migration.
+The remaining reserved purpose retains its name and separation requirement,
+but the core does not claim to store, encrypt, rotate, or audit that material.
+Static gateway identity tokens and OIDC client secrets remain externally
+injected credentials; they are not mislabeled as an implemented connector
+envelope migration.
 
 ## Rotation and revocation ownership
 
@@ -118,6 +126,11 @@ The browser's own backup/retention behavior remains under user control.
 - Identity operators rotate static or short-lived administrator credentials;
   the policy and custody services continue to authorize the resulting principal
   rather than trusting an actor name supplied to the CLI.
+- Identity operators rotate GitHub webhook secrets through a bounded two-key
+  overlap and retain the channel's delivery identity version for the replay
+  horizon. They may add a new current receipt/provenance key while retaining
+  old versions. A compromised delivery identity requires connector disablement
+  and new enrollment rather than in-place reinterpretation.
 - For configured-subject-only deployments, identity operators rotate the local session master key by replacing the
   injected value and restarting the broker, invalidating all prior sessions
   and pending flows. Rotate before restoring a session backup to avoid replay

@@ -15,6 +15,7 @@ from ._config_input import (
 )
 from .custody_lifecycle import CustodyLifecycleConfig
 from .portfolio_config import PortfolioConfig
+from .outcome_connector_config import OutcomeConnectorConfig
 from .attribution_config import AttributionConfig
 from .finance_account_binding import FinanceAccountBindings, FinanceIdentity, UnavailableFinance
 
@@ -452,6 +453,7 @@ class GatewayConfig:
     audit_anchor: AuditAnchorConfig | None = None
     audit_chain: AuditChainConfig | None = None
     portfolio_control: PortfolioConfig | None = None
+    outcome_connectors: OutcomeConnectorConfig | None = None
     attribution_control: AttributionConfig | None = None
     finance_account_bindings: FinanceAccountBindings | None = None
 

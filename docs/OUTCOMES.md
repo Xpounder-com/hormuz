@@ -1,13 +1,14 @@
 # Work-outcome foundation (frozen v1.1 design; accepted v1.3 foundation)
 
 Closed issue #218 added source-neutral, metadata-only outcome storage and
-administrator reads as a foundation for the v1.3.0 portfolio program. This is
-not a released connector, associated or controlled evidence, final-candidate
-acceptance, or a live customer pilot. Frozen v1.1 identifiers remain
-compatibility provenance.
-GitHub (#219), Linear (#220), association (#221), and evaluation (#222) remain
-separate gates. A source observation is not proof of AI productivity or a basis
-for employee ranking.
+administrator reads as a foundation for the v1.3.0 portfolio program. The
+current source also contains an opt-in GitHub receiver and normalizer, but it
+is not a released or live-verified connector, associated or controlled
+evidence, final-candidate acceptance, or a customer pilot. Frozen v1.1
+identifiers remain compatibility provenance. GitHub live acceptance (#219),
+Linear (#220), association (#221), and evaluation (#222) remain separate
+gates. A source observation is not proof of AI productivity or a basis for
+employee ranking.
 
 ## Read outcomes
 
@@ -21,10 +22,13 @@ hormuz --config /path/to/config.json portfolio outcomes --limit 50
 ```
 
 The additive HTTP equivalent is `GET /v1/admin/portfolio/outcomes`. Existing
-portfolio authentication and safe errors apply. There is no outcome POST route
-or generic JSON write API. Finance, platform, team, and self roles do not gain
-raw-outcome access. The repository rechecks current administrator authority
-before opening storage, and commits the read audit before returning results.
+portfolio authentication and safe errors apply. There is no administrator
+outcome POST or generic JSON write API. The GitHub-only provider route accepts
+signed provider bytes under the separate connector boundary documented in
+[GITHUB_WEBHOOK_AUTH.md](GITHUB_WEBHOOK_AUTH.md). Finance, platform, team, and
+self roles do not gain raw-outcome access. The repository rechecks current
+administrator authority before opening storage, and commits the read audit
+before returning results.
 
 The page defaults to 50 items, at most 100. Optional filters are `connector_id`,
 `work_scope_id`, `start_at` (inclusive), and `end_at` (exclusive). Times are UTC.
@@ -43,11 +47,13 @@ administrator retention marker. This preserves the approved public shapes.
 
 ## Connector-author boundary
 
-`OutcomeIngestor` requires an explicitly injected verifier, normalizer, repository
-and versioned provenance keys. It activates no transport. Every delivery must
-be authenticated against the server-registered connector before JSON parsing,
-normalization or repository access. `AuthenticatedDelivery` is metadata, not a
-credential. The test verifier is explicitly synthetic, not GitHub/Linear proof.
+`OutcomeIngestor` requires an explicitly injected verifier, normalizer,
+repository and versioned provenance keys. It activates no transport on its own.
+The opt-in GitHub transport constructs only the reviewed GitHub adapter from
+strict runtime enrollment. Every delivery must be authenticated against the
+server-registered connector before normalization or repository access.
+`AuthenticatedDelivery` is metadata, not a credential. Synthetic fixtures are
+not live GitHub/Linear proof.
 
 The verifier must authenticate exact bytes and configured source ownership.
 A shared application signature alone is insufficient tenant authorization;
@@ -129,8 +135,10 @@ representations. Tenant/connector/domain-separated HMACs distinguish exact-byte
 replay fingerprints from metadata provenance. Retain old versions needed for
 replay/verification; a missing old key fails closed. Source signing credential
 rotation is separate, and only its non-secret version is recorded. No new
-environment variable, secret store, live source credential or key export is
-introduced by this foundation.
+environment variable, secret store, live source credential or key export was
+introduced by the #218 foundation. The later GitHub runtime accepts only
+versioned environment-variable references and resolves their values from the
+deployment secret manager at startup.
 
 For an incident, disable the configured connector/transport first; preserve
 content-free receipts and evidence. Owner-controlled signing/key rotation,
@@ -160,6 +168,8 @@ rewrite migration history, or replay provider work to force recovery.
 
 See [OUTCOME_TRANSITION.md](OUTCOME_TRANSITION.md) for real predecessor and
 populated restore tests, [DURABLE_DATA.md](DURABLE_DATA.md) for storage ownership,
-and [REGISTRY.md](REGISTRY.md) for existing configuration.
+and [REGISTRY.md](REGISTRY.md) for existing configuration. See
+[GITHUB_WEBHOOK_AUTH.md](GITHUB_WEBHOOK_AUTH.md) for the GitHub permission,
+normalization, rotation, failure, disablement, and coverage runbooks.
 These tests do not substitute for #214 final source/wheel/signed-OCI/Compose
 candidate evidence or #225 independent real-organization validation.

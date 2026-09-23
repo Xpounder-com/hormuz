@@ -76,6 +76,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "audit_anchor",
         "audit_chain",
         "portfolio_control",
+        "outcome_connectors",
         "attribution_control",
         "finance_account_bindings",
     }
