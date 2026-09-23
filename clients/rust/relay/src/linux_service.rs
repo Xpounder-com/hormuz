@@ -352,9 +352,7 @@ fn stop_state(output: &str, unit: &str) -> StopState {
     let no_main = pid == Some(0);
     let empty_group = group == Some("");
     match active {
-        Some("active" | "activating")
-            if pid.is_some_and(|value| value > 0) && owned_group =>
-        {
+        Some("active" | "activating") if pid.is_some_and(|value| value > 0) && owned_group => {
             StopState::Running
         }
         // With ExitType=main, systemd can clear MainPID before it updates
@@ -366,11 +364,7 @@ fn stop_state(output: &str, unit: &str) -> StopState {
         {
             StopState::Stopping
         }
-        Some("deactivating")
-            if owned_group || (no_main && empty_group) =>
-        {
-            StopState::Stopping
-        }
+        Some("deactivating") if owned_group || (no_main && empty_group) => StopState::Stopping,
         _ => StopState::Invalid,
     }
 }
