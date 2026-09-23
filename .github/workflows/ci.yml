@@ -158,7 +158,7 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_budget_schema.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_budget.py -v
-      - name: Verify additive portfolio, budget, and finance preflights from the source distribution
+      - name: Verify additive portfolio, budget, finance, and Linear preflights from the source distribution
         run: |
           hormuz_extension_source="$(mktemp -d "$RUNNER_TEMP/hormuz-extensions.XXXXXX")"
           hormuz_extension_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
@@ -171,6 +171,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_collection_postgres_runtime.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_account_binding_contract.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_finance_account_binding_preflight.py --historical-plan-only
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_linear_connector_preflight.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I docs/evidence/reconciliation_scope_probe.py --current-runtime
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest -v \
             tests.test_portfolio_extensions tests.test_portfolio_extension_packaging \
@@ -180,6 +181,7 @@ jobs:
             tests.test_finance_collection_packaging tests.test_finance_collection_postgres_runtime_plan \
             tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
             tests.test_finance_variance_reference tests.test_finance_reconciliation_coverage \
+            tests.test_linear_connector_preflight tests.test_linear_connector_fixtures \
             tests.test_portfolio_wire_contract
       - name: Verify the resolved license boundary for every declared extra
         run: |
