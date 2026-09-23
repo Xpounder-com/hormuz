@@ -185,8 +185,6 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         "postgresql": {"from": 18, "to": 19},
     }:
         raise LinearTransitionPlanError("linear_transition_schema_assignment_invalid")
-    if (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != (13, 18):
-        raise LinearTransitionPlanError("linear_transition_baseline_changed")
     if set(plan.get("required_transition_cases", {})) != TRANSITION_CASES:
         raise LinearTransitionPlanError("linear_transition_plan_invalid")
     if plan.get("gates") != EXPECTED_GATES:
@@ -211,6 +209,20 @@ def verify(root: Path = ROOT) -> dict[str, object]:
             raise LinearTransitionPlanError("linear_transition_frozen_file_changed")
     _proposal_boundary(root, SQLITE_PROPOSAL, postgresql=False)
     _proposal_boundary(root, POSTGRES_PROPOSAL, postgresql=True)
+    runtime_successor_verified = False
+    versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
+    if versions == (14, 19):
+        try:
+            from tools.verify_linear_runtime_plan import verify as verify_runtime
+
+            verify_runtime(root)
+        except Exception:
+            raise LinearTransitionPlanError(
+                "linear_transition_baseline_changed"
+            ) from None
+        runtime_successor_verified = True
+    elif versions != (13, 18):
+        raise LinearTransitionPlanError("linear_transition_baseline_changed")
     return {
         "status": "linear_transition_plan_verified",
         "plan_sha256": PLAN_SHA256,
@@ -218,6 +230,7 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         "postgresql_transition": [18, 19],
         "proposal_tables": len(PROPOSAL_TABLES),
         "runtime_implemented": False,
+        "runtime_successor_verified": runtime_successor_verified,
         "live_workspace_authorized": False,
         "gates": plan["gates"],
     }

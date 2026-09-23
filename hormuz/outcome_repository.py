@@ -147,30 +147,108 @@ class OutcomeRepository:
             raise PortfolioError("idempotency_conflict")
         observations = self._lineage_order(observations)
         observed_at = timestamp(observed_at)
-        organization, connector, delivery = binding.organization_id, binding.connector_id, verified.source_delivery_id
-        with self._transaction(organization) as sql:
-            previous = self._replay(sql, binding, verified, raw, keys)
-            if previous is not None:
-                return previous
-            now, receipt_id = sql.now(), uuid4().hex
-            unsupported = not observations or all(item.event_type == "unsupported" for item in observations)
-            sequence = self._audit(sql, organization, "ingest", receipt_id, "unsupported" if unsupported else "observed",
-                                   connector=connector, now=now)
-            receipt = {
-                "organization_id": organization, "connector_id": connector, "source_delivery_id": delivery,
-                "receipt_id": receipt_id, "schema_version": 1,
-                "fingerprint": keys.delivery_digest(keys.current_version, organization, connector, delivery, raw),
-                "authority_digest": self._authority_digest(keys, keys.current_version, binding),
-                "key_version": keys.current_version, "disposition": "unsupported" if unsupported else "accepted",
-                "accepted_event_count": len(observations), "observed_at": observed_at, "ingested_at": now, "sequence": sequence,
-            }
-            sql.insert("portfolio_outcome_receipts", receipt)
-            for observation in observations:
-                self._append(sql, binding, verified, observation, keys, observed_at, now, sequence)
-            if not observations:
-                self._coverage(sql, organization, connector, delivery, None, "unsupported", "unsupported", now, sequence)
-            result = self._public(self._receipt(receipt))
-        return result
+        with self._transaction(binding.organization_id) as sql:
+            return self._accept_in_transaction(
+                sql,
+                binding=binding,
+                verified=verified,
+                raw=raw,
+                keys=keys,
+                observed_at=observed_at,
+                observations=observations,
+            )
+
+    def _accept_in_transaction(
+        self,
+        sql,
+        *,
+        binding,
+        verified,
+        raw,
+        keys,
+        observed_at,
+        observations,
+        force_accepted=False,
+        accepted_event_count=None,
+    ):
+        """Commit a verified delivery inside a caller-owned tenant transaction."""
+
+        organization, connector, delivery = (
+            binding.organization_id,
+            binding.connector_id,
+            verified.source_delivery_id,
+        )
+        previous = self._replay(sql, binding, verified, raw, keys)
+        if previous is not None:
+            return previous
+        now, receipt_id = sql.now(), uuid4().hex
+        unsupported = (
+            not force_accepted
+            and (not observations or all(item.event_type == "unsupported" for item in observations))
+        )
+        sequence = self._audit(
+            sql,
+            organization,
+            "ingest",
+            receipt_id,
+            "unsupported" if unsupported else "observed",
+            connector=connector,
+            now=now,
+        )
+        receipt = {
+            "organization_id": organization,
+            "connector_id": connector,
+            "source_delivery_id": delivery,
+            "receipt_id": receipt_id,
+            "schema_version": 1,
+            "fingerprint": keys.delivery_digest(
+                keys.current_version,
+                organization,
+                connector,
+                delivery,
+                raw,
+            ),
+            "authority_digest": self._authority_digest(
+                keys,
+                keys.current_version,
+                binding,
+            ),
+            "key_version": keys.current_version,
+            "disposition": "unsupported" if unsupported else "accepted",
+            "accepted_event_count": (
+                len(observations)
+                if accepted_event_count is None
+                else accepted_event_count
+            ),
+            "observed_at": observed_at,
+            "ingested_at": now,
+            "sequence": sequence,
+        }
+        sql.insert("portfolio_outcome_receipts", receipt)
+        for observation in observations:
+            self._append(
+                sql,
+                binding,
+                verified,
+                observation,
+                keys,
+                observed_at,
+                now,
+                sequence,
+            )
+        if not observations:
+            self._coverage(
+                sql,
+                organization,
+                connector,
+                delivery,
+                None,
+                "unsupported" if unsupported else "observed",
+                "unsupported" if unsupported else "observed",
+                now,
+                sequence,
+            )
+        return self._public(self._receipt(receipt))
 
     def _append(self, sql, binding, verified, observation, keys, observed_at, now, sequence):
         organization, connector = binding.organization_id, binding.connector_id

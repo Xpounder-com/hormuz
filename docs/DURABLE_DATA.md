@@ -28,6 +28,7 @@ unregistered table.
 | `portfolio_work_budget_audit` | `portfolio_work_budget_audit_events` | `portfolio_work_budget_audit_events` | Tenant-qualified create/activate/preview/report and fixed-class denial events with actor, plan/version, evaluation timestamp and sequence. Denials retain the transaction's evaluation time even when their mandatory audit commits after the rejected reservation rolls back. A required tenant/plan/operation/evaluation-time index keeps per-plan denial reporting bounded to its report keyspace; every declared PostgreSQL column must be a true key attribute rather than only an `INCLUDE` attribute. Reports inspect at most 10,001 matching denial facts and fail closed beyond the supported 10,000-row window without deleting or truncating evidence. No submitted JSON body or provider payload is retained. |
 | `portfolio_outcome_metadata` | `portfolio_outcome_contexts`, `portfolio_outcome_coverage_events`, `portfolio_outcome_events`, `portfolio_outcome_observations` | `portfolio_outcome_contexts`, `portfolio_outcome_coverage_events`, `portfolio_outcome_events`, `portfolio_outcome_observations` | Strict allowlisted source metadata; descriptive events; historical binding/use-case versions, source revision uncertainty and key-version references; coverage distinguishes source-event from delivery units. No webhook, title, body, comment, path, prompt, response, credential or source content. |
 | `portfolio_outcome_control` | `portfolio_outcome_audit_events`, `portfolio_outcome_cursors`, `portfolio_outcome_dead_letters`, `portfolio_outcome_receipts`, `portfolio_outcome_retention_events` | `portfolio_outcome_audit_events`, `portfolio_outcome_cursors`, `portfolio_outcome_dead_letters`, `portfolio_outcome_receipts`, `portfolio_outcome_retention_events` | Audited receipt/replay fingerprints, bounded fixed-code failure metadata, role/registration/retention-bound cursors and separate administrator tombstones. No key values, raw request bodies, fabricated provider receipts or destructive erasure. |
+| `linear_connector_metadata` | `gateway_linear_delivery_receipts`, `portfolio_linear_context_events`, `portfolio_linear_context_retention_events`, `portfolio_linear_source_binding_versions` | `gateway_linear_delivery_receipts`, `gateway_linear_route_claims`, `portfolio_linear_context_events`, `portfolio_linear_context_retention_events`, `portfolio_linear_source_binding_versions` | Immutable Linear route-binding versions, keyed raw-body and stable-source-fact replay identities, metadata-only lifecycle/context facts, separate retention markers, and a PostgreSQL-private global route-claim index. The runtime role has no access to the private claim table. No raw webhook body, plain payload hash, title, description, comment, attachment, label text, credential, prompt, or response body. |
 | `portfolio_attribution_metadata` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | Immutable tenant-qualified attempt/use-case version references, source confidence, append-only corrections, and fixed-class admission receipts. Rejections are separate from eligible attempts. No request header, prompt, response, filename, source/work content, or guessed model facts. |
 | `portfolio_attribution_control` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | Safe read/mutation audit, role-bound frozen-window cursors, keyed request digests and immutable-result references. No copied v1 financial facts or raw JSON mutation bodies. |
 | `portfolio_registry_metadata` | `portfolio_binding_events`, `portfolio_work_scope_versions` | `portfolio_binding_events`, `portfolio_work_scope_versions` | Append-only tenant-qualified scope/binding IDs, pinned hierarchy/ownership/lifecycle versions, and bounded administrator-entered scope display names. No external work content. |
@@ -67,8 +68,8 @@ The #218 source implementation adds nine outcome tables in SQLite migration 7
 in SQLite migration 8 / PostgreSQL migration 12. The #217 work-budget runtime
 adds five tables in SQLite migration 9 / PostgreSQL migration 13. None of these
 source changes is by itself a v1.3.0 portfolio release. Provider-invoice/general-ledger
-reconciliation, live connectors, scorecards and recommendations remain
-separately gated and have no tables in this inventory.
+reconciliation, scorecards and recommendations remain separately gated and
+have no tables in this inventory. Live provider activation also remains gated.
 The provider-reliability source slice adds two content-free, append-only tables
 in SQLite migration 10 / PostgreSQL migration 14. They store gateway-observed
 latency/byte counters and the exact one-hop failover relationship, never a
@@ -92,6 +93,14 @@ The finance account-binding successor adds the three metadata-only classes
 runtime records one bound or explicit-unbound sidecar before provider egress,
 and privileged report delivery must follow a committed audit event. See
 [FINANCE_ACCOUNT_BINDING_TRANSITION.md](FINANCE_ACCOUNT_BINDING_TRANSITION.md).
+The Linear connector successor adds the `linear_connector_metadata` class in
+SQLite migration 14 / PostgreSQL migration 19. Raw bytes exist only during
+bounded signature verification. Durable rows retain opaque provider IDs,
+allowlisted lifecycle and relationship state, keyed replay identities, and
+audit evidence. Workspace ownership and webhook-route cardinality are enforced
+again in storage. PostgreSQL uses a private, append-only global claim table so
+forced tenant RLS cannot hide an existing claim from the security-definer
+binding trigger. See [LINEAR_CONNECTOR_TRANSITION.md](LINEAR_CONNECTOR_TRANSITION.md).
 #214 stays open for final-candidate
 transition proof. See [REGISTRY.md](REGISTRY.md) for the opt-in authority and
 [REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) for the application/database

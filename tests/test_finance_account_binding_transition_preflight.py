@@ -46,7 +46,7 @@ else:
 
 class SQLiteFinanceAccountBindingTransitionTests(unittest.TestCase):
     def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
-        self.assertEqual(UsageStore.schema_version, 13)
+        self.assertEqual(UsageStore.schema_version, 14)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "synthetic.sqlite3"
             with (
@@ -58,7 +58,11 @@ class SQLiteFinanceAccountBindingTransitionTests(unittest.TestCase):
             for table in ("gateway_finance_attempt_evidence", "gateway_audit_chain_entries",
                           "portfolio_work_budget_plan_versions", "gateway_provider_attempt_metrics"):
                 self.assertTrue(before["rows"][table], table)
-            UsageStore(path).verify_ready()
+            with (
+                mock.patch.object(UsageStore, "schema_version", 13),
+                mock.patch.object(portfolio_sql_module, "SQLITE_SCHEMA_VERSION", 13),
+            ):
+                UsageStore(path).verify_ready()
             after = sqlite_snapshot(path)
             for table, rows in before["rows"].items():
                 if table == "hormuz_schema_migrations":
@@ -77,7 +81,11 @@ class SQLiteFinanceAccountBindingTransitionTests(unittest.TestCase):
                     for row in after["rows"]["hormuz_schema_migrations"]
                 },
             )
-            UsageStore(path, read_only=True).verify_ready()
+            with (
+                mock.patch.object(UsageStore, "schema_version", 13),
+                mock.patch.object(portfolio_sql_module, "SQLITE_SCHEMA_VERSION", 13),
+            ):
+                UsageStore(path, read_only=True).verify_ready()
             with mock.patch.object(UsageStore, "schema_version", 12):
                 with self.assertRaisesRegex(
                     StorageSchemaError,
@@ -111,7 +119,7 @@ class PostgresFinanceAccountBindingTransitionTests(PostgresTestCase):
     runtime = previous.PostgresFinanceCollectionTransitionTests.runtime
 
     def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 18)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 19)
         self._drop_schema(self.schema)
         seed_postgres_collection_predecessor(
             owner_dsn=self.owner_dsn, runtime_dsn=self.runtime_dsn, schema=self.schema,
@@ -125,7 +133,8 @@ class PostgresFinanceAccountBindingTransitionTests(PostgresTestCase):
         for table in ("gateway_finance_attempt_evidence", "gateway_audit_chain_entries",
                       "portfolio_work_budget_plan_versions", "gateway_provider_attempt_metrics"):
             self.assertTrue(before["rows"][table], table)
-        self.assertEqual(self.migrate().version, 18)
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
+            self.assertEqual(self.migrate().version, 18)
         after = self.snapshot()
         for table, rows in before["rows"].items():
             if table == "hormuz_schema_migrations":
@@ -133,7 +142,8 @@ class PostgresFinanceAccountBindingTransitionTests(PostgresTestCase):
             self.assertEqual(after["rows"][table], rows, table)
         for table in PROBE_TABLES:
             self.assertEqual(after["rows"][table], [])
-        self.runtime().verify_ready()
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 18):
+            self.runtime().verify_ready()
         with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 17):
             with self.assertRaisesRegex(
                 PostgresStorageError,
@@ -447,6 +457,12 @@ class PostgresPublishedAccountBindingPreflightTests(PostgresTestCase):
     restore = previous.PostgresFinanceCollectionTransitionTests.restore
 
     def setUp(self):
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 19)
+        version_patch = mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 18
+        )
+        version_patch.start()
+        self.addCleanup(version_patch.stop)
         self._drop_schema(self.schema)
         self.seeded = predecessor_call(self.request(mode="seed"))
         self.assertEqual(self.seeded["status"], "ready")

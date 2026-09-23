@@ -25,6 +25,10 @@ from ._finance_account_binding_schema import (
     TABLE_DDL as FINANCE_ACCOUNT_TABLES,
     verify_postgres_finance_account_binding,
 )
+from ._linear_schema import (
+    TABLE_DDL as LINEAR_TABLES,
+    verify_postgres_linear,
+)
 from ._budget_schema import (
     ACTIVE_TABLE as BUDGET_ACTIVE_TABLE,
     TABLE_DDL as BUDGET_TABLES,
@@ -40,6 +44,10 @@ from .store import StorageSchemaError
 FINANCE_COLLECTION_ACCOUNT_TABLES = {
     **FINANCE_COLLECTION_TABLES,
     **FINANCE_ACCOUNT_TABLES,
+}
+OUTCOME_LINEAR_TABLES = {
+    **OUTCOME_TABLES,
+    **LINEAR_TABLES,
 }
 
 
@@ -123,7 +131,7 @@ def portfolio_transaction(
                     verify_postgres_registry(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is ATTRIBUTION_TABLES:
                         verify_postgres_attribution(cursor, storage.postgres_schema, PostgresStorageError)
-                    if tables is OUTCOME_TABLES:
+                    if tables is OUTCOME_TABLES or tables is OUTCOME_LINEAR_TABLES:
                         verify_postgres_outcomes(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is FINANCE_TABLES:
                         verify_postgres_finance(cursor, storage.postgres_schema, PostgresStorageError)
@@ -145,6 +153,8 @@ def portfolio_transaction(
                             storage.postgres_schema,
                             PostgresStorageError,
                         )
+                    if tables is LINEAR_TABLES or tables is OUTCOME_LINEAR_TABLES:
+                        verify_postgres_linear(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is BUDGET_TABLES:
                         verify_postgres_budget(cursor, storage.postgres_schema, PostgresStorageError)
                 for table in tables:

@@ -51,10 +51,10 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         # Retain the migration-5 failure witness while the full current
         # transition also advances through attribution 6, outcomes 7, finance 8,
         # work budgets 9, provider reliability 10, native finance 11, and
-        # provider collection 12, and account-binding capture 13.
+        # provider collection 12, account-binding capture 13, and Linear 14.
         original = UsageStore._apply_migration
         def apply(connection, version):
-            self.assertIn(version, (5, 6, 7, 8, 9, 10, 11, 12, 13))
+            self.assertIn(version, (5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
             original(connection, version)
             if fail and version == 5:
                 raise RuntimeError("synthetic_migration_failure")
@@ -80,6 +80,8 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
             and not row[1].startswith("gateway_provider_")
             and not row[1].startswith("gateway_finance_attempt_")
             and not row[2].startswith("gateway_finance_attempt_")
+            and not row[1].startswith("gateway_linear_")
+            and not row[2].startswith("gateway_linear_")
             and row[2] not in changed_tables
             and row[1] not in added_base_indexes
         ]
@@ -90,12 +92,17 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         after["rows"] = {
             key: value for key, value in after["rows"].items()
             if not key.startswith(
-                ("portfolio_", "gateway_provider_", "gateway_finance_attempt_")
+                (
+                    "portfolio_",
+                    "gateway_provider_",
+                    "gateway_finance_attempt_",
+                    "gateway_linear_",
+                )
             )
         }
         after["rows"]["hormuz_schema_migrations"] = [
             row for row in after["rows"]["hormuz_schema_migrations"]
-            if row[0] not in {5, 6, 7, 8, 9, 10, 11, 12, 13}
+            if row[0] not in {5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
         ]
         after["rows"]["gateway_request_attempts"] = [
             row[:-5] for row in after["rows"]["gateway_request_attempts"]
@@ -107,10 +114,10 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         self.assertEqual(after["rows"], self.before["rows"])
 
     def test_registry_sqlite_migration_is_additive_and_idempotent(self) -> None:
-        self.assertEqual(UsageStore.schema_version, 13)
+        self.assertEqual(UsageStore.schema_version, 14)
         for _ in range(2):
             UsageStore(self.path).verify_ready()
-            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 49)
+            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 53)
             self.assert_v1_preserved()
 
     def test_sqlite_registry_failure_rolls_back_and_retry_preserves_v1_rows(self) -> None:

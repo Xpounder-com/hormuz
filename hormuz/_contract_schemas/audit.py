@@ -228,39 +228,52 @@ def _validate_audit_chain_v2_source(
             raise ContractValidationError("finance attempt audit source is invalid") from error
         expected_source_id = _value_string(event, "evidence_event_id")
     elif source_schema_version == 1:
-        from ..finance_account_evidence import (
-            FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS,
-            finance_account_source_identity,
+        from ..linear_evidence import (
+            LINEAR_SOURCE_SCHEMA_IDS,
+            linear_source_identity,
         )
 
-        if source_schema_id in FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS:
+        if source_schema_id in LINEAR_SOURCE_SCHEMA_IDS:
             try:
-                expected_source_id = finance_account_source_identity(
-                    source_schema_id,
-                    event,
-                )
+                expected_source_id = linear_source_identity(source_schema_id, event)
             except ValueError as error:
                 raise ContractValidationError(
-                    "finance account audit source is invalid"
+                    "linear audit source is invalid"
                 ) from error
         else:
-            from ..finance_collection import (
-                FINANCE_COLLECTION_SOURCE_SCHEMA_IDS,
-                FinanceCollectionError,
-                finance_collection_source_identity,
+            from ..finance_account_evidence import (
+                FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS,
+                finance_account_source_identity,
             )
 
-            if source_schema_id not in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS:
-                raise ContractValidationError("audit chain v2 source schema is unsupported")
-            try:
-                expected_source_id = finance_collection_source_identity(
-                    source_schema_id,
-                    event,
+            if source_schema_id in FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS:
+                try:
+                    expected_source_id = finance_account_source_identity(
+                        source_schema_id,
+                        event,
+                    )
+                except ValueError as error:
+                    raise ContractValidationError(
+                        "finance account audit source is invalid"
+                    ) from error
+            else:
+                from ..finance_collection import (
+                    FINANCE_COLLECTION_SOURCE_SCHEMA_IDS,
+                    FinanceCollectionError,
+                    finance_collection_source_identity,
                 )
-            except FinanceCollectionError as error:
-                raise ContractValidationError(
-                    "finance collection audit source is invalid"
-                ) from error
+
+                if source_schema_id not in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS:
+                    raise ContractValidationError("audit chain v2 source schema is unsupported")
+                try:
+                    expected_source_id = finance_collection_source_identity(
+                        source_schema_id,
+                        event,
+                    )
+                except FinanceCollectionError as error:
+                    raise ContractValidationError(
+                        "finance collection audit source is invalid"
+                    ) from error
     else:
         raise ContractValidationError("audit chain v2 source schema is unsupported")
     if source_event_id != expected_source_id:

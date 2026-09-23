@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 from tools import verify_linear_transition_plan as verifier
+from tools import verify_linear_runtime_plan as runtime_verifier
 
 
 class LinearTransitionPlanTests(unittest.TestCase):
@@ -18,6 +19,11 @@ class LinearTransitionPlanTests(unittest.TestCase):
         self.root = Path(temporary.name)
         plan = json.loads((verifier.ROOT / verifier.PLAN_PATH).read_text())
         paths = set(verifier.REQUIRED_FILES) | set(plan["frozen_file_sha256"])
+        runtime = json.loads(
+            (runtime_verifier.ROOT / runtime_verifier.PLAN_PATH).read_text()
+        )
+        paths.update(runtime_verifier.REQUIRED_FILES)
+        paths.update(runtime["source_sha256"])
         for relative in paths:
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -37,6 +43,7 @@ class LinearTransitionPlanTests(unittest.TestCase):
         self.assertEqual(result["postgresql_transition"], [18, 19])
         self.assertEqual(result["proposal_tables"], 4)
         self.assertFalse(result["runtime_implemented"])
+        self.assertTrue(result["runtime_successor_verified"])
         self.assertFalse(result["live_workspace_authorized"])
 
     def test_duplicate_plan_member_is_rejected(self):
@@ -92,7 +99,10 @@ class LinearTransitionPlanTests(unittest.TestCase):
                 verifier.verify(self.root)
 
     def test_runtime_schema_advance_requires_a_superseding_plan(self):
-        with mock.patch.object(verifier, "SQLITE_SCHEMA_VERSION", 14):
+        (self.root / runtime_verifier.PLAN_PATH).unlink()
+        with mock.patch.object(verifier, "SQLITE_SCHEMA_VERSION", 14), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 19,
+        ):
             with self.assertRaisesRegex(
                 verifier.LinearTransitionPlanError,
                 "linear_transition_baseline_changed",

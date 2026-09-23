@@ -2395,6 +2395,23 @@ class PostgresUsageStore:
                     "hormuz.finance-query-audit-event",
                 )
             cursor.execute(
+                f"SELECT EXISTS (SELECT 1 FROM {self._table('hormuz_schema_migrations')} "
+                "WHERE version=19 AND state='applied') AS linear_ready"
+            )
+            linear_ready_row = cursor.fetchone()
+            linear_ready = bool(
+                next(iter(linear_ready_row.values()))
+                if isinstance(linear_ready_row, Mapping)
+                else linear_ready_row[0]
+            )
+            if linear_ready:
+                collection_source_ids += (
+                    "hormuz.linear-source-binding-version",
+                    "hormuz.linear-delivery-receipt",
+                    "hormuz.linear-context-event",
+                    "hormuz.linear-context-retention",
+                )
+            cursor.execute(
                 f"SELECT source_schema_id, source_event_id "
                 f"FROM {self._table('gateway_audit_chain_entries')} "
                 "WHERE organization_id = %s AND entry_schema_version = 2 "
@@ -2480,6 +2497,10 @@ class PostgresUsageStore:
                     FinanceCollectionError,
                     finance_collection_source_identity,
                 )
+                from .linear_evidence import (
+                    LINEAR_SOURCE_SCHEMA_IDS,
+                    linear_source_identity,
+                )
 
                 event = json.loads(event_json)
                 if source_schema_id in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS:
@@ -2490,6 +2511,8 @@ class PostgresUsageStore:
                     observed_identity = finance_account_source_identity(
                         source_schema_id, event,
                     )
+                elif source_schema_id in LINEAR_SOURCE_SCHEMA_IDS:
+                    observed_identity = linear_source_identity(source_schema_id, event)
                 else:
                     raise ValueError
                 if (
@@ -2540,11 +2563,14 @@ class PostgresUsageStore:
             source_schema_id = entry.get("source_schema_id")
             from .finance_account_evidence import FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS
             from .finance_collection import FINANCE_COLLECTION_SOURCE_SCHEMA_IDS
+            from .linear_evidence import LINEAR_SOURCE_SCHEMA_IDS
 
             if source_schema_id == FINANCE_ATTEMPT_SCHEMA_ID or (
                 source_schema_id in FINANCE_COLLECTION_SOURCE_SCHEMA_IDS
             ) or (
                 source_schema_id in FINANCE_ACCOUNT_SOURCE_SCHEMA_IDS
+            ) or (
+                source_schema_id in LINEAR_SOURCE_SCHEMA_IDS
             ):
                 # Finance evidence is directly readable by the runtime role
                 # and was loaded by _audit_chain_source_events_in_cursor.

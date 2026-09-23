@@ -100,6 +100,17 @@ EXPECTED_OWNERS = {
             "test_runtime_role_fails_closed_without_an_organization_context",
             "test_newer_or_partial_schema_fails_closed_without_mutating_evidence",
             "test_schema_v8_missing_custody_evidence_trigger_fails_closed",
+            "test_schema19_bootstrap_preserves_reviewed_linear_acl_boundary",
+        },
+    ),
+    "test_postgres_linear_connector_runtime": (
+        "PostgresLinearConnectorRuntimeTests",
+        {
+            "test_append_only_grants_and_storage_cardinality_fail_closed",
+            "test_concurrent_replay_commits_one_receipt",
+            "test_runtime_verifier_rejects_missing_cardinality_trigger",
+            "test_schema19_restricted_commit_replay_rls_and_content_exclusion",
+            "test_staged_failure_and_storage_outage_publish_nothing",
         },
     ),
     "test_postgres_policy_control": (
@@ -227,7 +238,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 113)
+        self.assertEqual(len(owned), 119)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

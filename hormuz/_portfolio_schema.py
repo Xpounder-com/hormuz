@@ -202,7 +202,10 @@ def verify_postgres_owned_tables(cursor, schema, error_factory, tables, indexes,
                 columns.append(parts[0])
         quoted = '"' + schema.replace('"', '""') + '"'
         cursor.execute(f"SELECT {', '.join(columns)} FROM {quoted}.{table} WHERE false")
-    cursor.execute("SELECT indexname FROM pg_indexes WHERE schemaname=%s AND indexname LIKE 'portfolio_%%'", (schema,))
+    cursor.execute(
+        "SELECT indexname FROM pg_indexes WHERE schemaname=%s AND indexname=ANY(%s)",
+        (schema, list(indexes)),
+    )
     observed_indexes = {next(iter(row.values())) if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
     if not set(indexes).issubset(observed_indexes):
         raise error_factory("storage_schema_partial_upgrade")
