@@ -111,7 +111,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.upgrade()
         self.assert_prior_state_preserved()
         current = sqlite_snapshot(self.path)
-        self.assertEqual(len(current["rows"]), 49)
+        self.assertEqual(len(current["rows"]), 53)
         self.assertTrue(all(not current["rows"][table] for table in ACCOUNT_BINDING_TABLES))
         self.assertTrue(all(not current["rows"][table] for table in LINEAR_TABLES))
         before = sqlite_snapshot(self.path)
