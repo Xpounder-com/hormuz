@@ -33,6 +33,8 @@
     "documented_signature": "HMAC-SHA256_of_exact_raw_body",
     "documented_freshness_field": "signed_body_webhookTimestamp",
     "documented_response_deadline_ms": 5000,
+    "documented_retry_schedule": "after_1_minute_then_1_hour_then_6_hours",
+    "retry_body_timestamp_and_delivery_stability": "not_documented_requires_authorized_live_observation",
     "provider_specific_mapping": "pending_actual_schema_and_authorized_test_delivery"
   },
   "typed_authority": {
@@ -47,7 +49,8 @@
   "authentication": {
     "order": "prevalidated_immutable_route_index_then_bound_enabled_route_then_bounded_raw_read_then_HMAC_then_parse_then_signed_scope_comparison_then_typed_enrollment_then_commit_recheck",
     "rotation": "one_active_key_plus_at_most_one_expiring_previous_key; server_versions_only; constant_time_digest_comparison",
-    "timestamp": "signed_body_webhookTimestamp_is_within_60000ms_of_server_receive_time; no_timestamp_header_requirement",
+    "oracle_timestamp": "stateless_oracle_requires_signed_body_webhookTimestamp_within_60000ms_of_server_receive_time_and_has_no_receipt_lookup; no_timestamp_header_requirement",
+    "runtime_replay_timestamp": "after_valid_HMAC_only_an_exact_tenant_bound_already_committed_keyed_body_fingerprint_may_return_its_receipt_before_stale_body_denial; unknown_stale_or_unsigned_delivery_only_match_fails_closed; runtime_rule_waits_for_authorized_retry_shape_evidence",
     "delivery_identity": "Linear-Delivery_is_unsigned_header_hint; tenant_keyed_exact_body_fingerprint_and_source_fact_identity_also_enforce_idempotency",
     "header_rule": "reject_case_insensitive_duplicates_of_Linear-Signature_Linear-Delivery_Linear-Event; bound_other_headers_but_do_not_use_them_for_authority",
     "resource_limits": "at_most_1MiB_raw_body_depth_16_4096_JSON_members_100_events_per_delivery_8_process_slots_no_unbounded_read_or_retry",
@@ -91,7 +94,7 @@
     "old_binary_partial_newer_refusal": "exact_published_v1_2_and_current_binary_refuse_partial_or_newer_schema_without_repair",
     "quiesced_old_pair_restore": "only_verified_zero_post_checkpoint_writes_restore_exact_old_app_config_database_pair_into_separate_destination_and_replay_original_receipts",
     "post_checkpoint_forward_recovery": "nonzero_or_unknown_writes_preserve_candidate_snapshot_and_forward_recover_without_retargeting_or_losing_history",
-    "receipt_replay_and_concurrent_conflict": "same_delivery_and_bytes_or_changed_unsigned_delivery_header_replay_original_receipt; conflicting_bytes_and_concurrent_races_fail_closed",
+    "receipt_replay_and_concurrent_conflict": "same_delivery_and_bytes_or_changed_unsigned_delivery_header_replay_original_receipt; delayed_retry_with_exact_committed_receipt_may_return_only_after_valid_HMAC_and_keyed_body_match; delayed_unknown_stale_body_conflicting_bytes_and_concurrent_races_fail_closed; execute_against_authorized_observed_retry_shape",
     "durable_ack_outage_and_deadline": "forced_commit_outage_and_4_second_internal_budget_failure_return_non_200; no_normalized_mutation_or_false_durable_claim"
   },
   "rollout": {

@@ -54,7 +54,9 @@ compares the header event against the signed body type, checks the signed body
 `webhookTimestamp` within one minute of server receipt, and checks
 the typed object ID. A signed team claim may disprove scope when it mismatches;
 an absent claim is `unproven` and does not establish team authority. This is a
-test oracle, not an installed adapter. It does not return a lifecycle state,
+stateless test oracle, not an installed adapter. It always rejects a signed
+timestamp outside that window because it has no durable receipt lookup, so it
+does not model delayed provider redelivery. It does not return a lifecycle state,
 relationship projection, source revision or work-outcome event. A generic
 authenticated `remove` envelope cannot be labeled archive, delete or
 tombstone without provider-specific evidence.
@@ -76,6 +78,19 @@ same tenant-bound receipt/observation transaction. The key version is
 operator metadata; neither secret bytes, plain payload hash, raw JSON nor
 free-text error can enter rows or logs. Explicit signing-secret overlap and
 expiry are required for rotation; version labels cannot be chosen by payload.
+
+The published retry schedule starts after the oracle's one-minute freshness
+window, while the provider reference does not specify whether retry bytes,
+the signed `webhookTimestamp`, or `Linear-Delivery` remain identical. Do not
+copy the oracle's unconditional freshness check into a receiver until an
+authorized live delivery establishes that behavior. The runtime design must
+first verify HMAC with an active or unexpired retiring key. It may then return
+only an exact, tenant-bound, already-committed receipt by keyed body
+fingerprint before rejecting an otherwise stale body. An unknown stale body,
+an unsigned delivery-ID-only match, or a fingerprint conflict fails closed.
+If a legitimate retry after an uncertain or failed commit arrives with an old
+signed timestamp and no prior receipt, the connector remains unqualified
+until a reviewed protocol rule handles that observed provider behavior.
 
 The future normalizer must use an exact reviewed per-entity/action/state
 allowlist. Initiative, project, cycle and issue remain in scope, but an
@@ -124,7 +139,9 @@ numbered successor; source and isolated wheel must both exercise them.
    discard accepted context or release an uncertain reservation.
 6. Exact delivery replay, changed unsigned delivery header, conflicting bytes
    and concurrent commit races return the original receipt or fail closed as
-   appropriate, with no duplicate outcome/context fact.
+   appropriate, with no duplicate outcome/context fact. Exercise delayed
+   retries both with and without an exact committed receipt, using the body,
+   timestamp and delivery-header behavior observed in the authorized live test.
 7. Forced commit outage and deadline expiry return non-`200` without a false
    durable claim. Measure request read, HMAC, parse, binding recheck,
    transaction and HTTP response under the complete four-second budget.
@@ -145,10 +162,11 @@ selection, exact typed enrollment, rotation/overlap, failed delivery/retry,
 bounded reconciliation, disablement, source deletion versus operator
 retention, and coverage gaps. The owner must select and authorize a Linear
 test workspace and webhook permissions. One live delivery and redelivery with
-content-free evidence, source/wheel and SQLite/PostgreSQL proof, independent
-review, protected-main CI and the complete #214 candidate transition remain
-separate gates. No external credentials, content or workspace data are used
-by this preflight.
+content-free evidence must record whether the retry preserves or replaces the
+body bytes, signed timestamp and delivery header. Source/wheel and
+SQLite/PostgreSQL proof, independent review, protected-main CI and the complete
+#214 candidate transition remain separate gates. No external credentials,
+content or workspace data are used by this preflight.
 
 Run the offline checks from this source tree:
 

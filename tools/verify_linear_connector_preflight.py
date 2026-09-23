@@ -4,6 +4,8 @@
 The oracle accepts only synthetic inputs in tests. It intentionally stops at an
 authenticated, typed candidate: source action/state mapping, durable receipts,
 HTTP acknowledgment, persistence, and live authority are separate gates.
+Because it has no receipt store, it always applies the signed timestamp window
+and intentionally does not model delayed redelivery of an exact prior receipt.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ DELIVERY_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]
 OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 SIGNATURE = re.compile(r"[0-9a-f]{64}\Z")
 HEADER_NAME = re.compile(r"[A-Za-z0-9-]+\Z")
-PLAN_SHA256 = "ffd2e14abffea1586789095569b5ff5ba0b8683d2eb99799ff4ee5a53d0da39e"
+PLAN_SHA256 = "407c3e7fd0b5394e94b2fcc59b2ca7b78ea633d8fd06e357ab2842a136963825"
 KINDS = {"Initiative": "initiative", "Project": "project", "Cycle": "cycle", "Issue": "issue"}
 ACTIONS = frozenset({"create", "update", "remove"})
 SCOPE_OVERRIDES = frozenset({

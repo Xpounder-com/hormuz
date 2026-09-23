@@ -95,6 +95,12 @@ class LinearConnectorPreflightTests(unittest.TestCase):
         self.assertFalse(any(plan["gates"].values()))
         self.assertEqual(plan["acknowledgment"]["maximum_internal_elapsed_ms"], 4000)
         self.assertEqual(plan["acknowledgment"]["linear_external_deadline_ms"], 5000)
+        self.assertEqual(plan["source_reference"]["retry_body_timestamp_and_delivery_stability"],
+                         "not_documented_requires_authorized_live_observation")
+        self.assertIn("stateless_oracle_requires", plan["authentication"]["oracle_timestamp"])
+        self.assertIn("already_committed_keyed_body_fingerprint",
+                      plan["authentication"]["runtime_replay_timestamp"])
+        self.assertIn("unknown_stale", plan["authentication"]["runtime_replay_timestamp"])
         with tempfile.TemporaryDirectory() as temporary:
             plan_path = Path(temporary) / "docs/linear-connector-preflight-v1.json"
             plan_path.parent.mkdir()
