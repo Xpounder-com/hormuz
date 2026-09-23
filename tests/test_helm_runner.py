@@ -131,11 +131,12 @@ class HelmRunnerDiagnosticsTests(unittest.TestCase):
                     raise SystemExit("unexpected extra Kubernetes request")
                 response = responses[len(previous)]
                 command = response["command"]
-                flags = (
-                    ["--selector=app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway", "--output=name"]
-                    if command[0] == "get" else
-                    ["--all-containers=true", "--prefix=true", "--tail=-1"]
-                )
+                if command[:2] == ["get", "pods"]:
+                    flags = ["--selector=app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway", "--output=name"]
+                elif command[0] == "get":
+                    flags = ["--output=name"]
+                else:
+                    flags = ["--all-containers=true", "--prefix=true", "--tail=-1"]
                 if args != ["--namespace", "hormuz-system", *command, *flags]:
                     raise SystemExit("unexpected Kubernetes arguments")
                 sys.stdout.write(response.get("stdout", ""))
@@ -171,6 +172,15 @@ class HelmRunnerDiagnosticsTests(unittest.TestCase):
     @staticmethod
     def pod_logs(pod: str, value: str, *, stderr: str = "", status: int = 0) -> dict[str, object]:
         return {"command": ["logs", f"pod/{pod}"], "stdout": value, "stderr": stderr, "status": status}
+
+    @staticmethod
+    def pod_observation(pod: str, *, present: bool = True) -> dict[str, object]:
+        return {
+            "command": ["get", f"pod/{pod}"],
+            "stdout": f"pod/{pod}\n" if present else "",
+            "stderr": "" if present else f'Error from server (NotFound): pods "{pod}" not found\n',
+            "status": 0 if present else 1,
+        }
 
     @staticmethod
     def pod_missing(pod: str) -> str:
@@ -220,6 +230,24 @@ class HelmRunnerDiagnosticsTests(unittest.TestCase):
                     self.assertEqual(result.stdout, "")
                     self.assertIn("exhausted pod disappearance retries", result.stderr)
 
+    def test_log_capture_retries_unknown_error_only_after_exact_pod_disappearance(self) -> None:
+        warning = 'Defaulted container "gateway" out of: gateway, configuration-preflight (init)\n'
+        result, calls, captured, delays = self.run_log_capture([
+            self.pod_list("pod/retiring\n"),
+            self.pod_logs("retiring", "retiring partial\n", stderr=warning, status=1),
+            self.pod_observation("retiring", present=False),
+            self.pod_list("pod/replacement\n"),
+            self.pod_logs("replacement", "replacement final\n"),
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 5)
+        self.assertEqual(delays, "1\n")
+        self.assertEqual(
+            captured["gateway-synthetic-checkpoint.log"],
+            "retiring partial\nreplacement final\n",
+        )
+        self.assertNotIn("gateway_log_capture_error", result.stderr)
+
     def test_log_capture_does_not_retry_unrelated_errors(self) -> None:
         failures = (
             (1, 'Error from server (Forbidden): pods "selected" is forbidden\n'),
@@ -256,12 +284,15 @@ class HelmRunnerDiagnosticsTests(unittest.TestCase):
         )
         for status, error, expected in scenarios:
             with self.subTest(status=status, expected=expected):
-                result, calls, _captured, delays = self.run_log_capture([
+                responses = [
                     self.pod_list("pod/selected\n"),
                     self.pod_logs("selected", "partial output\n", stderr=error, status=status),
-                ])
+                ]
+                if expected == "unknown" and status == 1:
+                    responses.append(self.pod_observation("selected"))
+                result, calls, _captured, delays = self.run_log_capture(responses)
                 self.assertEqual(result.returncode, 1)
-                self.assertEqual(len(calls), 2)
+                self.assertEqual(len(calls), len(responses))
                 self.assertEqual(delays, "")
                 self.assertEqual(result.stdout, "")
                 self.assertEqual(
