@@ -26,6 +26,7 @@ from ..finance_collection_repository import (
     FinanceCollectionRepository,
     create_finance_collection_repository,
 )
+from ..finance_reconciliation_coverage import FinanceCoveragePreviewError
 from ..finance_account_registration import (
     MAX_ACCOUNT_BINDING_REQUEST_BYTES,
     AccountBindingRequestError,
@@ -107,6 +108,18 @@ def add_finance_commands(
     import_command.add_argument("file", help="Strict finance collection file bundle")
     _collection_arguments(import_command)
 
+    report = commands.add_parser(
+        "report", help="Read a tenant-admin, provider-free finance coverage preview",
+    )
+    report.add_argument("binding_id")
+    report.add_argument("binding_version", type=int)
+    report.add_argument("collection_profile")
+    report.add_argument("query_start_at")
+    report.add_argument("query_end_at")
+    report.add_argument("--currency", required=True)
+    report.add_argument("--as-of-commit-sequence", type=int)
+    _auth_arguments(report)
+
 
 def _auth_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
@@ -180,9 +193,33 @@ def run(
                 dependencies,
                 environment,
             )
+        elif args.finance_command == "report":
+            repository = dependencies.create_repository(config, environ=environment)
+            preview, missing_sidecars, provenance, query_event_id = (
+                repository.coverage_report_evidence(
+                    principal,
+                    binding_id=args.binding_id,
+                    binding_version=args.binding_version,
+                    collection_profile=args.collection_profile,
+                    start_at=args.query_start_at,
+                    end_at=args.query_end_at,
+                    currency=args.currency,
+                    as_of_commit_sequence=args.as_of_commit_sequence,
+                )
+            )
+            result = {
+                "schema_id": "hormuz.finance-coverage-report",
+                "schema_version": 1,
+                "reader_role": "portfolio_admin",
+                "query_audit_event_id": query_event_id,
+                "terminal_attempts_missing_sidecar_count": missing_sidecars,
+                "selected_snapshot_provenance": provenance,
+                "preview": asdict(preview),
+            }
         else:
             raise FinanceCollectionError("invalid_request")
-        print(json.dumps(asdict(result), sort_keys=True, separators=(",", ":")))
+        print(json.dumps(result if isinstance(result, dict) else asdict(result),
+                         sort_keys=True, separators=(",", ":")))
         return 0
     except AuthenticationError:
         return _failure("unauthenticated")
@@ -192,6 +229,8 @@ def run(
         )
     except FinanceCollectionError as error:
         return _failure(error.code)
+    except FinanceCoveragePreviewError:
+        return _failure("unavailable")
     except AccountBindingRequestError:
         return _failure("invalid_request")
     except AccountBindingStorageError as error:

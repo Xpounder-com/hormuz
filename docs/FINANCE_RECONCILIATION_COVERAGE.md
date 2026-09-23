@@ -1,11 +1,59 @@
 # Offline finance coverage preview for #8
 
-`hormuz.finance_reconciliation_coverage` is a dormant, provider-free preview
-over an `AsOfCollectionView` from the authorized collection repository and a
-caller-supplied tuple of immutable finance-attempt sidecar events. It is not a
-CLI/API report, an account match, an invoice, or live-finance verification.
-The caller must authorize the tenant and obtain both selections before invoking
-it; this pure function does no database, provider, credential, or policy I/O.
+`hormuz.finance_reconciliation_coverage` builds a provider-free preview over an
+`AsOfCollectionView` and immutable finance-attempt sidecar events. The pure
+function still requires its caller to authorize and select both inputs. The
+`hormuz finance report` CLI now supplies a read-only, administrator-only path
+to that preview from durable evidence. It is not an account match, an invoice,
+or live-finance verification.
+
+For a selected cost profile, run:
+
+```console
+hormuz --config hormuz.json finance report SOURCE_BINDING_ID VERSION \
+  openai.organization-costs.v1 2026-09-01T00:00:00Z 2026-09-03T00:00:00Z \
+  --currency USD --as-of-commit-sequence 42
+```
+
+Omit `--as-of-commit-sequence` to pin the current tenant publication high-water
+mark in the response. The command authenticates the existing portfolio token
+from `HORMUZ_PORTFOLIO_TOKEN` or `--token-env`, then requires the exact current
+`portfolio_admin` binding for that token's tenant. It neither accepts a tenant
+argument nor reads a provider credential or fingerprint key. `finance_viewer`
+and other roles receive no report access in this slice. The selected daily
+window is at most 31 days, and more than 10,000 terminal attempts or selected
+cost rows fails closed. The repository reads the provider selection and
+terminal gateway attempt sidecars under one tenant transaction. It checks the
+sidecar's canonical stored event against its audit source and exposes the count
+of terminal attempts with no sidecar as an explicit coverage gap. Each selected
+snapshot also retains its stored `evidence_origin` and `scope_provenance` in
+`selected_snapshot_provenance`: customer file imports remain distinct from
+authenticated API collections, and both remain scope-unverified.
+
+The JSON response labels the `preview` as `offline_unverified_coverage_preview`.
+Its selected snapshot cutoff applies to provider collections; it is not a
+historical cutoff for gateway attempts, which are read at report time. Re-run
+can therefore include later terminal attempts even with the same collection
+cutoff. The response includes only metadata identities, digests, counts, and
+numeric subtotals. It does not emit native usage payload JSON, credentials,
+provider account identifiers, prompt or response content, or raw provider
+line items.
+
+Before returning a successful result, the repository builds the bounded preview
+and appends a strict `hormuz.finance-query-audit-event` plus its v2 audit-chain
+entry in the same tenant transaction. The event contains only the actor, fixed
+query class, source-binding coordinates, requested window and currency,
+collection cutoff, result counts, and occurrence time. The response returns the
+committed `query_audit_event_id` as a receipt. An audit-source mismatch, insert
+failure, authorization change, or chain failure rolls the transaction back and
+the CLI emits no report. The append-only table has forced PostgreSQL RLS and the
+runtime role has only `SELECT` and `INSERT`; SQLite and PostgreSQL both require
+the exact canonical source row before the chain entry can commit.
+
+This qualifies the `finance report` read only. Other finance, platform, team,
+pagination, export, and API reads required by issue
+[#223](https://github.com/Xpounder-com/hormuz/issues/223) still need their own
+bounded query contracts and commit-before-delivery audit proof.
 
 The preview keeps the selected provider cost aggregate and the original gateway
 configured-rate estimate in different fields with different cost-basis labels.
@@ -37,15 +85,18 @@ card.
 
 `all_selected_buckets_observed` describes only the supplied selected buckets;
 it does not prove complete provider-account coverage. Similarly,
-`all_supplied_attempts_priced` describes only supplied events, not every gateway
-attempt in the period. The preview has no team/actor/application attribution,
-independent bypass evidence, approved allocation, threshold policy, or invoice
-fact. Those requirements, the actual account binding and comparable period
-contract, PostgreSQL transition/recovery, live OpenAI finance evidence, #214,
-and #225 remain open before #8 or v1.3.0 can close.
+`all_supplied_attempts_priced` describes only sidecar events, and the CLI's
+`terminal_attempts_missing_sidecar_count` must be read alongside it. Pending
+attempts have no terminal cost and are outside both counts. The preview has no
+team, actor, or application attribution, independent bypass evidence, approved
+allocation, threshold policy, or invoice fact. Those requirements, an
+account-matched comparable-period
+contract, live OpenAI finance evidence, #214,
+[#223](https://github.com/Xpounder-com/hormuz/issues/223), and #225 remain
+open before #8 or v1.3.0 can close.
 
 Focused verification:
 
 ```console
-python -m unittest -v tests.test_finance_reconciliation_coverage
+python -m unittest -v tests.test_finance_reconciliation_coverage tests.test_finance_coverage_report_cli
 ```

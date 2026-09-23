@@ -37,6 +37,12 @@ from .postgres import PostgresConnectionPool, PostgresStorageError, postgres_tra
 from .store import StorageSchemaError
 
 
+FINANCE_COLLECTION_ACCOUNT_TABLES = {
+    **FINANCE_COLLECTION_TABLES,
+    **FINANCE_ACCOUNT_TABLES,
+}
+
+
 class PortfolioSQL:
     def __init__(self, connection, *, postgres: bool, tables=TABLE_DDL):
         self.connection = connection
@@ -121,13 +127,19 @@ def portfolio_transaction(
                         verify_postgres_outcomes(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is FINANCE_TABLES:
                         verify_postgres_finance(cursor, storage.postgres_schema, PostgresStorageError)
-                    if tables is FINANCE_COLLECTION_TABLES:
+                    if (
+                        tables is FINANCE_COLLECTION_TABLES
+                        or tables is FINANCE_COLLECTION_ACCOUNT_TABLES
+                    ):
                         verify_postgres_finance_collection(
                             cursor,
                             storage.postgres_schema,
                             PostgresStorageError,
                         )
-                    if tables is FINANCE_ACCOUNT_TABLES:
+                    if (
+                        tables is FINANCE_ACCOUNT_TABLES
+                        or tables is FINANCE_COLLECTION_ACCOUNT_TABLES
+                    ):
                         verify_postgres_finance_account_binding(
                             cursor,
                             storage.postgres_schema,

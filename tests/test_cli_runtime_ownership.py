@@ -74,6 +74,7 @@ EXPECTED_COMMAND_TREE = {
         "account": {"bind": None},
         "collect": None,
         "import": None,
+        "report": None,
         "source": {"bind": None},
     },
     "login": None,
