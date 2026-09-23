@@ -29,6 +29,10 @@ from ._linear_schema import (
     TABLE_DDL as LINEAR_TABLES,
     verify_postgres_linear,
 )
+from ._linear_snapshot_schema import (
+    TABLE_DDL as LINEAR_SNAPSHOT_TABLES,
+    verify_postgres_linear_snapshot,
+)
 from ._budget_schema import (
     ACTIVE_TABLE as BUDGET_ACTIVE_TABLE,
     TABLE_DDL as BUDGET_TABLES,
@@ -48,6 +52,7 @@ FINANCE_COLLECTION_ACCOUNT_TABLES = {
 OUTCOME_LINEAR_TABLES = {
     **OUTCOME_TABLES,
     **LINEAR_TABLES,
+    **LINEAR_SNAPSHOT_TABLES,
 }
 
 
@@ -155,6 +160,12 @@ def portfolio_transaction(
                         )
                     if tables is LINEAR_TABLES or tables is OUTCOME_LINEAR_TABLES:
                         verify_postgres_linear(cursor, storage.postgres_schema, PostgresStorageError)
+                    if tables is LINEAR_SNAPSHOT_TABLES or tables is OUTCOME_LINEAR_TABLES:
+                        verify_postgres_linear_snapshot(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
                     if tables is BUDGET_TABLES:
                         verify_postgres_budget(cursor, storage.postgres_schema, PostgresStorageError)
                 for table in tables:

@@ -137,6 +137,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         "hormuz/_finance_collection_schema.py",
         "hormuz/_finance_account_binding_schema.py",
         "hormuz/_linear_schema.py",
+        "hormuz/_linear_snapshot_schema.py",
         "hormuz/_budget_schema.py",
         "hormuz/_provider_reliability_schema.py",
     ):
@@ -161,6 +162,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
                 "hormuz/_finance_collection_schema.py",
                 "hormuz/_finance_account_binding_schema.py",
                 "hormuz/_linear_schema.py",
+                "hormuz/_linear_snapshot_schema.py",
             } or not isinstance(
                 declarations, ast.Dict
             ):
@@ -224,7 +226,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
             table_pattern = r"gateway_provider_[a-z_]+"
         elif path == "hormuz/_finance_account_binding_schema.py":
             table_pattern = r"(?:gateway|portfolio)_finance_[a-z_]+"
-        elif path == "hormuz/_linear_schema.py":
+        elif path in {"hormuz/_linear_schema.py", "hormuz/_linear_snapshot_schema.py"}:
             table_pattern = r"(?:gateway|portfolio)_linear_[a-z_]+"
         else:
             table_pattern = r"portfolio_[a-z_]+"

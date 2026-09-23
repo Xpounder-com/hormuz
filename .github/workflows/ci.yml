@@ -524,6 +524,8 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_postgres_linear_connector_runtime.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_postgres_linear_snapshot_runtime.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_registration_store.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_outcome_transition.py -v

@@ -596,11 +596,21 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 )
 
     def test_schema19_bootstrap_preserves_reviewed_linear_acl_boundary(self) -> None:
-        self._assert_managed_bootstrap_at_version(
+        self._assert_managed_bootstrap(
             19,
             (
                 213,
                 "337ece4276d5c36f5115f88c28c97818a3c653862a37c53f6a1590eb7c9e2f85",
+            ),
+            None,
+        )
+
+    def test_schema20_bootstrap_preserves_reviewed_linear_snapshot_acl_boundary(self) -> None:
+        self._assert_managed_bootstrap(
+            20,
+            (
+                219,
+                "a5aedcd593573c5d55f783904046d993bc6f2e0ddd03a48ed098c9498cd2adac",
             ),
             None,
         )

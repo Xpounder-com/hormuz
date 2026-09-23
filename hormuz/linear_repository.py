@@ -27,6 +27,8 @@ from .portfolio_wire import PortfolioError, canonical
 _BINDING_NAMESPACE = UUID("6268e321-02a7-4d31-80aa-32892546a4f8")
 _CONTEXT_NAMESPACE = UUID("8f00af3e-7df5-49c7-8f8c-5bc2901f79bc")
 _RECEIPT_NAMESPACE = UUID("d55b452c-a9fb-44e7-82d1-c2fc31b81762")
+_SNAPSHOT_CONTEXT_NAMESPACE = UUID("17fb85f2-7bbf-4928-ac35-2b17c6095b58")
+_SNAPSHOT_RECEIPT_NAMESPACE = UUID("54bd43cb-84e2-4e35-859b-8e508616a248")
 
 
 class LinearConnectorRepository:
@@ -163,6 +165,66 @@ class LinearConnectorRepository:
         self._authorize(channel, binding, verified)
         with self._transaction(binding.organization_id, deadline) as sql:
             row = self._body_row(sql, binding, verified)
+            return None if row is None else self._response(row)
+
+    def _authorize_snapshot(self, channel, binding, verified) -> None:
+        runtime = self.config.outcome_connectors
+        if (
+            self._read_only
+            or runtime is None
+            or channel not in runtime.linear
+            or channel.active_snapshot_secret is None
+            or registered_binding(
+                self.config,
+                binding.organization_id,
+                binding.connector_id,
+            ) != binding
+        ):
+            raise PortfolioError("forbidden")
+        validate_delivery(binding, verified)
+        if binding.workspace_id != verified.workspace_id:
+            raise PortfolioError("forbidden")
+
+    def _snapshot_row(self, sql, binding, verified):
+        organization, connector = binding.organization_id, binding.connector_id
+        row = sql.one(
+            "SELECT * FROM gateway_linear_snapshot_receipts "
+            "WHERE organization_id=? AND connector_id=? AND page_id=?",
+            (organization, connector, verified.page_id),
+        )
+        fingerprints = self._fingerprints(verified)
+        if row is not None:
+            expected = fingerprints.get(int(row["fingerprint_key_version"]))
+            if expected is None or not hmac.compare_digest(expected, row["body_fingerprint"]):
+                raise PortfolioError("idempotency_conflict")
+            return row
+        clauses = []
+        values: list[object] = [organization, connector]
+        for version, digest in fingerprints.items():
+            clauses.append("(fingerprint_key_version=? AND body_fingerprint=?)")
+            values.extend((version, digest))
+        rows = sql.execute(
+            "SELECT * FROM gateway_linear_snapshot_receipts "
+            "WHERE organization_id=? AND connector_id=? AND ("
+            + " OR ".join(clauses)
+            + ")",
+            tuple(values),
+        ).fetchall()
+        if len(rows) > 1:
+            raise PortfolioError("unavailable")
+        return dict(rows[0]) if rows else None
+
+    def replay_snapshot(
+        self,
+        *,
+        channel,
+        binding,
+        verified,
+        deadline,
+    ) -> dict | None:
+        self._authorize_snapshot(channel, binding, verified)
+        with self._transaction(binding.organization_id, deadline) as sql:
+            row = self._snapshot_row(sql, binding, verified)
             return None if row is None else self._response(row)
 
     @staticmethod
@@ -307,6 +369,9 @@ class LinearConnectorRepository:
                 context_event_id,
                 observed_at,
                 committed_at,
+                capture_kind="webhook",
+                object_kind=verified.object_kind,
+                object_id=verified.object_id,
             )
             sql.insert("portfolio_linear_context_events", {
                 "organization_id": binding.organization_id,
@@ -331,6 +396,278 @@ class LinearConnectorRepository:
             })
             self._append_audit(sql, receipt_evidence, "hormuz.linear-delivery-receipt")
             self._append_audit(sql, context, "hormuz.linear-context-event")
+            self._remaining_ms(deadline)
+            return response
+
+    @staticmethod
+    def _snapshot_fact_fingerprints(channel, binding, keys, projection):
+        return {
+            int(version): keys.metadata_digest(
+                version,
+                binding.organization_id,
+                binding.connector_id,
+                "linear-snapshot-context-fact-v1",
+                projection.source_fact,
+            )
+            for version in channel.identity_key_versions
+        }
+
+    @staticmethod
+    def _snapshot_fact_row(sql, binding, fingerprints):
+        clauses = []
+        values: list[object] = [binding.organization_id, binding.connector_id]
+        for version, digest in fingerprints.items():
+            clauses.append("(source_fact_key_version=? AND source_fact_fingerprint=?)")
+            values.extend((version, digest))
+        rows = sql.execute(
+            "SELECT * FROM portfolio_linear_snapshot_context_events "
+            "WHERE organization_id=? AND connector_id=? AND ("
+            + " OR ".join(clauses)
+            + ")",
+            tuple(values),
+        ).fetchall()
+        if len(rows) > 1:
+            raise PortfolioError("unavailable")
+        return dict(rows[0]) if rows else None
+
+    @staticmethod
+    def _semantic_context_duplicate(sql, binding, projection) -> bool:
+        context = projection.context
+        revision = context["revision"]
+        values = (
+            binding.organization_id,
+            binding.connector_id,
+            context["object"]["kind"],
+            context["object"]["id"],
+            revision["kind"],
+            revision["value"],
+        )
+        rows = sql.execute(
+            "SELECT evidence_json FROM portfolio_linear_context_events "
+            "WHERE organization_id=? AND connector_id=? AND object_kind=? AND object_id=? "
+            "AND revision_kind=? AND revision_value=? UNION ALL "
+            "SELECT evidence_json FROM portfolio_linear_snapshot_context_events "
+            "WHERE organization_id=? AND connector_id=? AND object_kind=? AND object_id=? "
+            "AND revision_kind=? AND revision_value=?",
+            values + values,
+        ).fetchall()
+        expected = {
+            "source_workspace_id": binding.workspace_id,
+            "source_team_ids": context["source_team_ids"],
+            "object": context["object"],
+            "lifecycle": context["lifecycle"],
+            "normalized_state": context["normalized_state"],
+            "relationships": context["relationships"],
+            "relationship_coverage": context["relationship_coverage"],
+            "revision": revision,
+            "event_at": context["event_at"],
+        }
+        for row in rows:
+            try:
+                evidence = json.loads(row["evidence_json"])
+                observed = {name: evidence[name] for name in expected}
+                if canonical(observed) == canonical(expected):
+                    return True
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError, PortfolioError):
+                raise PortfolioError("unavailable") from None
+        return False
+
+    def accept_snapshot(
+        self,
+        *,
+        channel,
+        binding,
+        verified,
+        keys,
+        projections,
+        deadline,
+    ) -> dict:
+        self._authorize_snapshot(channel, binding, verified)
+        if (
+            not isinstance(keys, OutcomeKeys)
+            or not isinstance(projections, tuple)
+            or not 1 <= len(projections) <= 100
+            or any(
+                not isinstance(projection, LinearProjection) or projection.outcome is not None
+                for projection in projections
+            )
+        ):
+            raise PortfolioError("invalid_request")
+        observed_at = verified.captured_at
+        received_at = datetime.fromtimestamp(
+            verified.received_timestamp_ms / 1000,
+            timezone.utc,
+        ).isoformat(timespec="microseconds").replace("+00:00", "Z")
+        with self._transaction(binding.organization_id, deadline) as sql:
+            replay = self._snapshot_row(sql, binding, verified)
+            if replay is not None:
+                return self._response(replay)
+            snapshot_shape = sql.execute(
+                "SELECT DISTINCT binding_version, reconciliation_id, page_count, captured_at "
+                "FROM gateway_linear_snapshot_receipts "
+                "WHERE organization_id=? AND connector_id=? AND snapshot_id=?",
+                (
+                    binding.organization_id,
+                    binding.connector_id,
+                    verified.snapshot_id,
+                ),
+            ).fetchall()
+            if len(snapshot_shape) > 1:
+                raise PortfolioError("unavailable")
+            if snapshot_shape:
+                existing = dict(snapshot_shape[0])
+                if (
+                    int(existing["binding_version"]) != channel.binding_version
+                    or existing["reconciliation_id"] != verified.reconciliation_id
+                    or int(existing["page_count"]) != verified.page_count
+                    or existing["captured_at"] != verified.captured_at
+                ):
+                    raise PortfolioError("idempotency_conflict")
+            page_conflict = sql.one(
+                "SELECT page_id FROM gateway_linear_snapshot_receipts "
+                "WHERE organization_id=? AND connector_id=? AND snapshot_id=? AND page_number=?",
+                (
+                    binding.organization_id,
+                    binding.connector_id,
+                    verified.snapshot_id,
+                    verified.page_number,
+                ),
+            )
+            if page_conflict is not None:
+                raise PortfolioError("idempotency_conflict")
+            binding_row = self._ensure_binding(sql, channel, binding, keys)
+            accepted = []
+            fact_version = int(channel.source_fact_key_version)
+            for index, projection in enumerate(projections):
+                fingerprints = self._snapshot_fact_fingerprints(
+                    channel,
+                    binding,
+                    keys,
+                    projection,
+                )
+                if (
+                    self._snapshot_fact_row(sql, binding, fingerprints) is not None
+                    or self._semantic_context_duplicate(sql, binding, projection)
+                ):
+                    continue
+                fact_digest = fingerprints[fact_version]
+                context_event_id = str(uuid5(
+                    _SNAPSHOT_CONTEXT_NAMESPACE,
+                    f"{binding.organization_id}:{binding.connector_id}:"
+                    f"{verified.page_id}:{index}:{fact_digest}",
+                ))
+                accepted.append((projection, fact_digest, context_event_id))
+
+            committed_at = sql.now()
+            body_fingerprint = self._fingerprints(verified)[
+                int(channel.body_fingerprint_key_version)
+            ]
+            receipt_id = str(uuid5(
+                _SNAPSHOT_RECEIPT_NAMESPACE,
+                f"{binding.organization_id}:{binding.connector_id}:"
+                f"{verified.page_id}:{body_fingerprint}",
+            ))
+            response = self.outcomes._public({
+                "schema_id": "hormuz.connector-ingest-receipt",
+                "schema_version": 1,
+                "organization_id": binding.organization_id,
+                "connector_id": binding.connector_id,
+                "source_delivery_id": verified.page_id,
+                "receipt_id": receipt_id,
+                "disposition": "accepted" if accepted else "duplicate",
+                "accepted_event_count": len(accepted),
+                "ingested_at": committed_at,
+            })
+            receipt_evidence = {
+                "schema_id": "hormuz.linear-snapshot-receipt",
+                "schema_version": 1,
+                "organization_id": binding.organization_id,
+                "connector_id": binding.connector_id,
+                "receipt_id": receipt_id,
+                "binding_version": channel.binding_version,
+                "reconciliation_id": verified.reconciliation_id,
+                "snapshot_id": verified.snapshot_id,
+                "page_id": verified.page_id,
+                "page_number": verified.page_number,
+                "page_count": verified.page_count,
+                "credential_version": verified.credential_version,
+                "body_fingerprint_key_version": int(channel.body_fingerprint_key_version),
+                "received_at": received_at,
+                "captured_at": verified.captured_at,
+                "committed_at": committed_at,
+                "accepted_context_count": len(accepted),
+                "response": response,
+            }
+            validate_linear_evidence("hormuz.linear-snapshot-receipt", receipt_evidence)
+            sql.insert("gateway_linear_snapshot_receipts", {
+                "organization_id": binding.organization_id,
+                "connector_id": binding.connector_id,
+                "receipt_id": receipt_id,
+                "binding_version": channel.binding_version,
+                "reconciliation_id": verified.reconciliation_id,
+                "snapshot_id": verified.snapshot_id,
+                "page_id": verified.page_id,
+                "page_number": verified.page_number,
+                "page_count": verified.page_count,
+                "credential_version": verified.credential_version,
+                "body_fingerprint": body_fingerprint,
+                "fingerprint_key_version": int(channel.body_fingerprint_key_version),
+                "received_at": received_at,
+                "captured_at": verified.captured_at,
+                "committed_at": committed_at,
+                "accepted_context_count": len(accepted),
+                "response_digest": hashlib.sha256(
+                    canonical(response).encode("ascii")
+                ).hexdigest(),
+                "evidence_json": canonical(receipt_evidence),
+            })
+            self._append_audit(
+                sql,
+                receipt_evidence,
+                "hormuz.linear-snapshot-receipt",
+            )
+            for projection, fact_digest, context_event_id in accepted:
+                object_value = projection.context["object"]
+                context = self._context(
+                    sql,
+                    channel,
+                    binding,
+                    verified,
+                    projection,
+                    binding_row,
+                    keys,
+                    receipt_id,
+                    context_event_id,
+                    observed_at,
+                    committed_at,
+                    capture_kind="authorized_snapshot",
+                    object_kind=object_value["kind"],
+                    object_id=object_value["id"],
+                )
+                sql.insert("portfolio_linear_snapshot_context_events", {
+                    "organization_id": binding.organization_id,
+                    "connector_id": binding.connector_id,
+                    "context_event_id": context_event_id,
+                    "snapshot_receipt_id": receipt_id,
+                    "object_kind": object_value["kind"],
+                    "object_id": object_value["id"],
+                    "lifecycle": context["lifecycle"],
+                    "normalized_state": context["normalized_state"],
+                    "relationship_coverage": context["relationship_coverage"],
+                    "revision_kind": context["revision"]["kind"],
+                    "revision_value": context["revision"]["value"],
+                    "ordering_state": context["ordering_state"],
+                    "scope_state": context["scope_state"],
+                    "event_at": context["event_at"],
+                    "observed_at": observed_at,
+                    "ingested_at": committed_at,
+                    "source_fact_fingerprint": fact_digest,
+                    "source_fact_key_version": fact_version,
+                    "provenance_digest": context["provenance_digest"],
+                    "commit_sequence": context["commit_sequence"],
+                    "evidence_json": canonical(context),
+                })
+                self._append_audit(sql, context, "hormuz.linear-context-event")
             self._remaining_ms(deadline)
             return response
 
@@ -435,23 +772,43 @@ class LinearConnectorRepository:
         context_event_id,
         observed_at,
         committed_at,
+        *,
+        capture_kind,
+        object_kind,
+        object_id,
     ):
         del receipt_id
         organization, connector = binding.organization_id, binding.connector_id
+        if (
+            capture_kind not in {"webhook", "authorized_snapshot"}
+            or projection.context["object"]
+                != {"kind": object_kind, "id": object_id}
+        ):
+            raise PortfolioError("invalid_request")
         sequence = int(sql.one(
-            "SELECT COALESCE(MAX(commit_sequence),0) AS sequence "
-            "FROM portfolio_linear_context_events WHERE organization_id=?",
-            (organization,),
+            "SELECT COALESCE(MAX(commit_sequence),0) AS sequence FROM ("
+            "SELECT commit_sequence FROM portfolio_linear_context_events "
+            "WHERE organization_id=? UNION ALL "
+            "SELECT commit_sequence FROM portfolio_linear_snapshot_context_events "
+            "WHERE organization_id=?) linear_contexts",
+            (organization, organization),
         )["sequence"]) + 1
         if sequence > 9223372036854775807:
             raise PortfolioError("unavailable")
         revision = projection.context["revision"]
         prior = sql.one(
-            "SELECT context_event_id,revision_kind,revision_value,ordering_state "
+            "SELECT context_event_id,revision_kind,revision_value,ordering_state,commit_sequence "
+            "FROM (SELECT context_event_id,revision_kind,revision_value,ordering_state,commit_sequence "
             "FROM portfolio_linear_context_events WHERE organization_id=? "
-            "AND connector_id=? AND object_kind=? AND object_id=? "
-            "AND ordering_state='current' ORDER BY commit_sequence DESC LIMIT 1",
-            (organization, connector, verified.object_kind, verified.object_id),
+            "AND connector_id=? AND object_kind=? AND object_id=? UNION ALL "
+            "SELECT context_event_id,revision_kind,revision_value,ordering_state,commit_sequence "
+            "FROM portfolio_linear_snapshot_context_events WHERE organization_id=? "
+            "AND connector_id=? AND object_kind=? AND object_id=?) linear_contexts "
+            "WHERE ordering_state='current' ORDER BY commit_sequence DESC LIMIT 1",
+            (
+                organization, connector, object_kind, object_id,
+                organization, connector, object_kind, object_id,
+            ),
         )
         ordering = "unknown"
         supersedes = None
@@ -479,7 +836,8 @@ class LinearConnectorRepository:
         scope_state, work_binding = self._work_binding(
             sql,
             binding,
-            verified,
+            object_kind,
+            object_id,
             projection,
             registry_sequence,
             observed_at,
@@ -493,8 +851,10 @@ class LinearConnectorRepository:
             "source_workspace_id": binding.workspace_id,
             "source_team_ids": projection.context["source_team_ids"],
             "object": projection.context["object"],
-            "capture_kind": "webhook",
-            "source_delivery_id": verified.provider_delivery_id,
+            "capture_kind": capture_kind,
+            "source_delivery_id": (
+                verified.provider_delivery_id if capture_kind == "webhook" else None
+            ),
             "authority_binding": {
                 "id": connector,
                 "version": channel.binding_version,
@@ -539,15 +899,16 @@ class LinearConnectorRepository:
     def _work_binding(
         sql,
         binding,
-        verified,
+        object_kind,
+        object_id,
         projection,
         registry_sequence,
         observed_at,
     ):
         project_id = None
-        if verified.object_kind == "project":
-            project_id = verified.object_id
-        elif verified.object_kind == "issue":
+        if object_kind == "project":
+            project_id = object_id
+        elif object_kind == "issue":
             for relationship in projection.context["relationships"]:
                 if relationship["kind"] == "project_issue":
                     project_id = relationship["parent"]["id"]

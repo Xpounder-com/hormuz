@@ -460,11 +460,11 @@ def verify_postgres_finance_account_binding(cursor, schema: str, error_factory) 
             custody_executor_role='"custody_executor_role"',
         )
         cursor.execute(
-            f"SELECT EXISTS (SELECT 1 FROM {quoted_schema}.hormuz_schema_migrations "
-            "WHERE version=19 AND state='applied')"
+            f"SELECT COALESCE(MAX(version),0) FROM "
+            f"{quoted_schema}.hormuz_schema_migrations WHERE state='applied'"
         )
         successor_row = cursor.fetchone()
-        successor_applied = bool(
+        successor_version = int(
             next(iter(successor_row.values()))
             if isinstance(successor_row, Mapping)
             else successor_row[0]
@@ -472,8 +472,10 @@ def verify_postgres_finance_account_binding(cursor, schema: str, error_factory) 
         audit_template = (
             resources.files("hormuz.migrations.postgresql")
             .joinpath(
-                "0019_linear_connector.sql"
-                if successor_applied
+                "0020_linear_snapshot.sql"
+                if successor_version >= 20
+                else "0019_linear_connector.sql"
+                if successor_version >= 19
                 else "0018_finance_account_binding_and_query_audit.sql"
             )
             .read_text(encoding="utf-8")

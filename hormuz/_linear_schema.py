@@ -302,14 +302,17 @@ def _statement_name(statement: str) -> str:
     return ""
 
 
-def verify_sqlite_linear(connection, error_factory) -> None:
+def verify_sqlite_linear(connection, error_factory, *, audit_trigger=None) -> None:
     observed = {
         str(row["name"]): " ".join(str(row["sql"]).split())
         for row in connection.execute(
             "SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL"
         ).fetchall()
     }
-    expected = [*sqlite_statements(), _LINEAR_AUDIT_SOURCE_TRIGGER]
+    expected = [
+        *sqlite_statements(),
+        _LINEAR_AUDIT_SOURCE_TRIGGER if audit_trigger is None else audit_trigger,
+    ]
     if any(
         observed.get(_statement_name(statement)) != " ".join(statement.split())
         for statement in expected

@@ -10,6 +10,7 @@ from unittest import mock
 
 from tools import verify_linear_transition_plan as verifier
 from tools import verify_linear_runtime_plan as runtime_verifier
+from tools import verify_linear_reconciliation_plan as reconciliation_verifier
 
 
 class LinearTransitionPlanTests(unittest.TestCase):
@@ -24,6 +25,11 @@ class LinearTransitionPlanTests(unittest.TestCase):
         )
         paths.update(runtime_verifier.REQUIRED_FILES)
         paths.update(runtime["source_sha256"])
+        reconciliation = json.loads(
+            (reconciliation_verifier.ROOT / reconciliation_verifier.PLAN_PATH).read_text()
+        )
+        paths.update(reconciliation_verifier.REQUIRED_FILES)
+        paths.update(reconciliation["source_sha256"])
         for relative in paths:
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)

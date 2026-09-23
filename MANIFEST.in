@@ -19,10 +19,12 @@ include docs/linear-context-wire-v1.json
 include docs/linear-connector-preflight-v1.json
 include docs/linear-transition-plan-v1.json
 include docs/linear-runtime-plan-v1.json
+include docs/linear-reconciliation-plan-v1.json
 include docs/linear-successor-schema-proposal.sqlite.sql
 include docs/linear-successor-schema-acl-proposal.sql
 include docs/LINEAR_CONNECTOR_TRANSITION.md
 include docs/LINEAR_CONNECTOR_RUNTIME.md
+include docs/LINEAR_RECONCILIATION.md
 include docs/registry-transition-plan-v1.json
 include docs/registry-transition-plan-v2.json
 include docs/attribution-transition-plan-v1.json
@@ -85,6 +87,7 @@ include tools/verify_v13_candidate_artifacts.py
 include tools/verify_linear_connector_preflight.py
 include tools/verify_linear_transition_plan.py
 include tools/verify_linear_runtime_plan.py
+include tools/verify_linear_reconciliation_plan.py
 include tools/verify_budget_transition_plan.py
 include tools/verify_core_wheel.py
 include tools/build_context_helper.sh

@@ -2242,6 +2242,31 @@ class UsageStore:
                     (source_schema_id, str(row[identity_column]), str(row["evidence_json"]))
                     for row in rows
                 )
+        linear_snapshot_ready = connection.execute(
+            "SELECT 1 FROM hormuz_schema_migrations WHERE version=15 AND state='applied'"
+        ).fetchone() is not None
+        if linear_snapshot_ready:
+            for source_schema_id, table, identity_column in (
+                (
+                    "hormuz.linear-snapshot-receipt",
+                    "gateway_linear_snapshot_receipts",
+                    "receipt_id",
+                ),
+                (
+                    "hormuz.linear-context-event",
+                    "portfolio_linear_snapshot_context_events",
+                    "context_event_id",
+                ),
+            ):
+                rows = connection.execute(
+                    f"SELECT {identity_column}, evidence_json FROM {table} "
+                    "WHERE organization_id = ?",
+                    (organization_id,),
+                ).fetchall()
+                collection_rows.extend(
+                    (source_schema_id, str(row[identity_column]), str(row["evidence_json"]))
+                    for row in rows
+                )
         for row in usage_rows:
             try:
                 event = usage_audit_event(dict(row))

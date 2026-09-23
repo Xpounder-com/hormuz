@@ -20,6 +20,7 @@ from .portfolio_wire import PortfolioError, canonical, validate
 LINEAR_SOURCE_SCHEMA_IDS = frozenset({
     "hormuz.linear-source-binding-version",
     "hormuz.linear-delivery-receipt",
+    "hormuz.linear-snapshot-receipt",
     "hormuz.linear-context-event",
     "hormuz.linear-context-retention",
 })
@@ -37,6 +38,13 @@ _RECEIPT_FIELDS = frozenset({
     "credential_version", "body_fingerprint_key_version",
     "source_fact_key_version", "received_at", "committed_at",
     "context_event_id", "outcome_source_delivery_id", "response",
+})
+_SNAPSHOT_RECEIPT_FIELDS = frozenset({
+    "schema_id", "schema_version", "organization_id", "connector_id",
+    "receipt_id", "binding_version", "reconciliation_id", "snapshot_id",
+    "page_id", "page_number", "page_count", "credential_version",
+    "body_fingerprint_key_version", "received_at", "captured_at", "committed_at",
+    "accepted_context_count", "response",
 })
 _CONTEXT_FIELDS = frozenset({
     "schema_id", "schema_version", "organization_id", "connector_id",
@@ -236,6 +244,44 @@ def _validate_receipt(event: Mapping[str, object]) -> None:
         _fail()
 
 
+def _validate_snapshot_receipt(event: Mapping[str, object]) -> None:
+    _exact(event, _SNAPSHOT_RECEIPT_FIELDS)
+    _common(event, "hormuz.linear-snapshot-receipt")
+    receipt_id = _uuid(event.get("receipt_id"))
+    _version(event.get("binding_version"))
+    _uuid(event.get("reconciliation_id"))
+    _uuid(event.get("snapshot_id"))
+    page_id = _uuid(event.get("page_id"))
+    page_number = _version(event.get("page_number"), 100)
+    page_count = _version(event.get("page_count"), 100)
+    if page_number > page_count:
+        _fail()
+    _opaque(event.get("credential_version"))
+    _version(event.get("body_fingerprint_key_version"))
+    _timestamp(event.get("received_at"))
+    _timestamp(event.get("captured_at"))
+    committed_at = _timestamp(event.get("committed_at"))
+    accepted = _count(event.get("accepted_context_count"))
+    if accepted > 100:
+        _fail()
+    response = event.get("response")
+    try:
+        validate(response, "hormuz.connector-ingest-receipt")
+    except PortfolioError:
+        _fail()
+    assert isinstance(response, dict)
+    if (
+        response.get("organization_id") != event.get("organization_id")
+        or response.get("connector_id") != event.get("connector_id")
+        or response.get("source_delivery_id") != page_id
+        or response.get("receipt_id") != receipt_id
+        or response.get("accepted_event_count") != accepted
+        or response.get("ingested_at") != committed_at
+        or response.get("disposition") != ("accepted" if accepted else "duplicate")
+    ):
+        _fail()
+
+
 def _version_ref(value: object) -> Mapping[str, object]:
     result = _exact(value, _VERSION_REF_FIELDS)
     _opaque(result.get("id"))
@@ -406,6 +452,8 @@ def validate_linear_evidence(schema_id: str, event: Mapping[str, object]) -> Non
         _validate_binding(event)
     elif schema_id == "hormuz.linear-delivery-receipt":
         _validate_receipt(event)
+    elif schema_id == "hormuz.linear-snapshot-receipt":
+        _validate_snapshot_receipt(event)
     elif schema_id == "hormuz.linear-context-event":
         _validate_context(event)
     else:
@@ -423,6 +471,7 @@ def linear_source_identity(
     field = {
         "hormuz.linear-source-binding-version": "binding_event_id",
         "hormuz.linear-delivery-receipt": "receipt_id",
+        "hormuz.linear-snapshot-receipt": "receipt_id",
         "hormuz.linear-context-event": "context_event_id",
         "hormuz.linear-context-retention": "retention_event_id",
     }.get(schema_id)

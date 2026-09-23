@@ -1,4 +1,4 @@
-"""Four-second bounded HTTP transport for Linear webhook deliveries."""
+"""Four-second bounded HTTP transport for Linear webhook and snapshot input."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import threading
 import time
 
 from .contracts import contract_header
+from .linear_snapshot import LINEAR_SNAPSHOTS_PATH
 from .outcome_wire import REQUEST_BYTES
 from .portfolio_wire import PortfolioError
 
@@ -52,13 +53,13 @@ def _read_body(handler, length: int, deadline: float) -> bytes:
     return b"".join(chunks)
 
 
-def handle_linear_webhook(handler) -> None:
+def _handle_linear(handler, *, receiver_name: str, required_headers: tuple[str, ...]) -> None:
     started = time.monotonic()
     deadline = started + _INTERNAL_BUDGET_SECONDS
     previous_timeout = handler.connection.gettimeout()
     acquired = False
     try:
-        receiver = handler.server.linear_outcome_receiver
+        receiver = getattr(handler.server, receiver_name)
         if receiver is None:
             raise PortfolioError("forbidden")
         if handler.headers.get_all("Transfer-Encoding", []):
@@ -76,10 +77,10 @@ def handle_linear_webhook(handler) -> None:
             not in {"application/json", "application/json;charset=utf-8"}
         ):
             raise PortfolioError("invalid_request")
-        for name in ("Linear-Signature", "Linear-Delivery", "Linear-Event"):
+        for name in required_headers:
             if len(handler.headers.get_all(name, [])) != 1:
                 raise PortfolioError(
-                    "unauthenticated" if name == "Linear-Signature" else "invalid_request"
+                    "unauthenticated" if "Signature" in name else "invalid_request"
                 )
         if not _TRANSPORT_SLOTS.acquire(blocking=False):
             raise PortfolioError("rate_limited")
@@ -105,4 +106,23 @@ def handle_linear_webhook(handler) -> None:
         status,
         result,
         contract_header_value=contract_header(result["schema_id"], result["schema_version"]),
+    )
+
+
+def handle_linear_webhook(handler) -> None:
+    _handle_linear(
+        handler,
+        receiver_name="linear_outcome_receiver",
+        required_headers=("Linear-Signature", "Linear-Delivery", "Linear-Event"),
+    )
+
+
+def handle_linear_snapshot(handler) -> None:
+    _handle_linear(
+        handler,
+        receiver_name="linear_snapshot_receiver",
+        required_headers=(
+            "X-Hormuz-Linear-Snapshot-Signature",
+            "X-Hormuz-Linear-Snapshot-Timestamp",
+        ),
     )
