@@ -121,6 +121,11 @@ class PostgresFinanceAccountBindingTransitionTests(PostgresTestCase):
     def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
         self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 19)
         self._drop_schema(self.schema)
+        # This historical transition deliberately leaves the schema at v18
+        # while it proves the account-binding successor. Restore the current
+        # v19 schema even when an assertion fails so later tests do not inherit
+        # a predecessor schema from this shared class fixture.
+        self.addCleanup(self.migrate)
         seed_postgres_collection_predecessor(
             owner_dsn=self.owner_dsn, runtime_dsn=self.runtime_dsn, schema=self.schema,
             runtime_role=self.runtime_role, policy_control_role=self.policy_control_role,
@@ -206,7 +211,7 @@ class PostgresFinanceAccountBindingTransitionTests(PostgresTestCase):
                 connection.execute(original)
 
 
-# These names determine the implemented six-grant ACL surface.
+# These names determine the implemented managed-deployment ACL surface.
 PROBE_TABLES = (
     "portfolio_finance_account_binding_versions",
     "gateway_finance_attempt_account_bindings",
@@ -224,8 +229,8 @@ POPULATED_TABLES = (
 )
 # Measured twice in independent disposable managed-role PostgreSQL bootstraps;
 # never derived as expectations from the database under test.
-PROPOSED_ACL = (205, "56dd1434aaf078fdcdb5ed38059ed9c0f4a57f82310dc4fdfa18dff650628e9f")
-INJECTED_ACL = (206, "5946c0c2303c3c824223a6558e6547dce0c5f282d10f45852d0356bbc3cc74ef")
+PROPOSED_ACL = (213, "337ece4276d5c36f5115f88c28c97818a3c653862a37c53f6a1590eb7c9e2f85")
+INJECTED_ACL = (214, "359652b011ea8fa04c43a69d007630bf3c24296de3635b0ede9c95916a841363")
 PINNED = bool(os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_PYTHON")
               and os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_SOURCE"))
 
@@ -356,7 +361,10 @@ class SQLitePublishedAccountBindingPreflightTests(unittest.TestCase):
     def assert_old_rows(self, after, *, allow_appended=False):
         for table, rows in self.before["rows"].items():
             if table == "hormuz_schema_migrations":
-                actual = [row for row in after["rows"][table] if row[0] != 13]
+                actual = [
+                    row for row in after["rows"][table]
+                    if row[0] not in {13, 14}
+                ]
             else:
                 actual = after["rows"][table]
             if allow_appended:
