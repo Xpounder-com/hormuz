@@ -128,9 +128,16 @@ it does not prove complete provider-account coverage. Similarly,
 `terminal_attempts_missing_sidecar_count` must be read alongside it. Pending
 attempts have no terminal cost and remain outside those preview counts; the
 account reconciliation separately exposes and blocks on
-`pending_account_gap_count`. The preview has no team, actor, or application
-attribution, independent bypass evidence, approved allocation, threshold policy,
-or invoice fact. Those requirements, an
+`pending_account_gap_count`. A second source-binding record with the same
+provider-account fingerprint, fingerprint-key version, scope kind, and scope
+fingerprints is a same-account gap even when its source ID, version, or digest
+differs. Fingerprints made with different key versions are not comparable;
+`uncomparable_account_identity_count` and
+`uncomparable_account_pending_attempt_count` expose those terminal and pending
+gaps and also block variance. Only comparable, different account/scope
+coordinates enter the `other_account` counters. The preview has no team, actor,
+or application attribution, independent bypass evidence, approved allocation,
+threshold policy, or invoice fact. Those requirements, an
 independently verified account/period authority, live OpenAI finance evidence,
 #214,
 [#223](https://github.com/Xpounder-com/hormuz/issues/223), and #225 remain

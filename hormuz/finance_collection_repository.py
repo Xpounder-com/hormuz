@@ -1307,9 +1307,11 @@ class FinanceCollectionRepository:
             unbound_attempts = 0
             historical_missing_account = 0
             same_account_other_binding = 0
+            uncomparable_account_identity = 0
             other_account_attempts = 0
             period_boundary_crossing_attempts = 0
             pending_account_gap = 0
+            uncomparable_account_pending = 0
             other_account_pending = 0
             unbound_reasons: dict[str, int] = {}
             for raw, in_audit_window in terminal_rows:
@@ -1346,15 +1348,24 @@ class FinanceCollectionRepository:
                         else:
                             account_class = "period_boundary_crossing"
                             period_boundary_crossing_attempts += 1
-                    elif (
-                        account_event["binding_id"] == selected_account["binding_id"]
-                        or _same_account_grain(account_event, selected_account)
-                    ):
-                        account_class = "same_account_other_binding"
-                        same_account_other_binding += 1
                     else:
-                        account_class = "other_account"
-                        other_account_attempts += 1
+                        grain_relation = _account_grain_relation(
+                            account_event,
+                            selected_account,
+                        )
+                        if grain_relation == "unknown":
+                            account_class = "uncomparable_account_identity"
+                            uncomparable_account_identity += 1
+                        elif (
+                            account_event["binding_id"]
+                            == selected_account["binding_id"]
+                            or grain_relation == "same"
+                        ):
+                            account_class = "same_account_other_binding"
+                            same_account_other_binding += 1
+                        else:
+                            account_class = "other_account"
+                            other_account_attempts += 1
 
                 finance_event: Mapping[str, object] | None = None
                 if row["evidence_event_id"] is None:
@@ -1392,15 +1403,23 @@ class FinanceCollectionRepository:
                     organization_id=principal.organization_id,
                     provider=profile.provider,
                 )
-                if (
-                    account_event is None
-                    or account_event["state"] == "unbound"
-                    or account_event["binding_id"] == selected_account["binding_id"]
-                    or _same_account_grain(account_event, selected_account)
-                ):
+                if account_event is None or account_event["state"] == "unbound":
                     pending_account_gap += 1
                 else:
-                    other_account_pending += 1
+                    grain_relation = _account_grain_relation(
+                        account_event,
+                        selected_account,
+                    )
+                    if grain_relation == "unknown":
+                        uncomparable_account_pending += 1
+                    elif (
+                        account_event["binding_id"]
+                        == selected_account["binding_id"]
+                        or grain_relation == "same"
+                    ):
+                        pending_account_gap += 1
+                    else:
+                        other_account_pending += 1
             view = AsOfCollectionView(
                 principal.organization_id, binding_id, binding_version,
                 collection_profile, cutoff, snapshots, coverage, observations,
@@ -1429,11 +1448,17 @@ class FinanceCollectionRepository:
                     unbound_attempt_count=unbound_attempts,
                     historical_missing_account_binding_count=historical_missing_account,
                     same_account_other_binding_count=same_account_other_binding,
+                    uncomparable_account_identity_count=(
+                        uncomparable_account_identity
+                    ),
                     other_account_attempt_count=other_account_attempts,
                     period_boundary_crossing_attempt_count=(
                         period_boundary_crossing_attempts
                     ),
                     pending_account_gap_count=pending_account_gap,
+                    uncomparable_account_pending_attempt_count=(
+                        uncomparable_account_pending
+                    ),
                     other_account_pending_attempt_count=other_account_pending,
                     unbound_reason_counts=unbound_reasons,
                 )
@@ -1811,23 +1836,29 @@ def _attempt_account_binding_event(
         raise FinanceCollectionError("unavailable") from None
 
 
-def _same_account_grain(
+def _account_grain_relation(
     attempt_event: Mapping[str, object],
     selected_account: Mapping[str, object],
-) -> bool:
-    return all(
+) -> str:
+    """Compare provider account/scope identity without source-binding identity.
+
+    Fingerprints generated under different key versions are not comparable,
+    so they must block reconciliation instead of proving another account.
+    """
+    if (
+        attempt_event["provider"] != selected_account["provider"]
+        or attempt_event["fingerprint_key_version"]
+        != selected_account["fingerprint_key_version"]
+    ):
+        return "unknown"
+    return "same" if all(
         attempt_event[field] == selected_account[field]
         for field in (
-            "source_binding_id",
-            "source_binding_version",
-            "source_binding_digest",
-            "provider",
             "provider_account_fingerprint",
             "scope_kind",
             "scope_fingerprints_json",
-            "fingerprint_key_version",
         )
-    )
+    ) else "different"
 
 
 def _account_reconciliation_result(
@@ -1842,9 +1873,11 @@ def _account_reconciliation_result(
     unbound_attempt_count: int,
     historical_missing_account_binding_count: int,
     same_account_other_binding_count: int,
+    uncomparable_account_identity_count: int,
     other_account_attempt_count: int,
     period_boundary_crossing_attempt_count: int,
     pending_account_gap_count: int,
+    uncomparable_account_pending_attempt_count: int,
     other_account_pending_attempt_count: int,
     unbound_reason_counts: Mapping[str, int],
 ) -> Mapping[str, object]:
@@ -1877,11 +1910,17 @@ def _account_reconciliation_result(
             historical_missing_account_binding_count
         ),
         "same_account_other_binding_count": same_account_other_binding_count,
+        "uncomparable_account_identity_count": (
+            uncomparable_account_identity_count
+        ),
         "other_account_attempt_count": other_account_attempt_count,
         "period_boundary_crossing_attempt_count": (
             period_boundary_crossing_attempt_count
         ),
         "pending_account_gap_count": pending_account_gap_count,
+        "uncomparable_account_pending_attempt_count": (
+            uncomparable_account_pending_attempt_count
+        ),
         "other_account_pending_attempt_count": (
             other_account_pending_attempt_count
         ),
@@ -1906,8 +1945,10 @@ def _account_reconciliation_result(
         + unbound_attempt_count
         + historical_missing_account_binding_count
         + same_account_other_binding_count
+        + uncomparable_account_identity_count
         + period_boundary_crossing_attempt_count
         + pending_account_gap_count
+        + uncomparable_account_pending_attempt_count
     )
     provider_complete = (
         preview.provider_cost.numeric_selection_state

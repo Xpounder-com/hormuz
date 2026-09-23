@@ -130,7 +130,14 @@ class FinanceAccountReconciliationCLITests(unittest.TestCase):
             "binding_version": 1,
         }
 
-    def _bind_source(self, binding_id: str, provider_account: str):
+    def _bind_source(
+        self,
+        binding_id: str,
+        provider_account: str,
+        *,
+        fingerprint_key: bytes = KEY,
+        fingerprint_key_version: int = 1,
+    ):
         return self.repository.bind_source(
             ADMIN,
             {
@@ -142,11 +149,11 @@ class FinanceAccountReconciliationCLITests(unittest.TestCase):
                 "provider_account_reference_id": provider_account,
                 "scope": {"kind": "organization", "ids": []},
                 "credential_reference_version": 1,
-                "fingerprint_key_version": 1,
+                "fingerprint_key_version": fingerprint_key_version,
                 "state": "active",
                 "reason_code": "created",
             },
-            fingerprint_key=KEY,
+            fingerprint_key=fingerprint_key,
         )
 
     def _register_account(self, *, config, binding_id, source, finance_identity):
@@ -413,6 +420,96 @@ class FinanceAccountReconciliationCLITests(unittest.TestCase):
         self.assertEqual(reconciliation["same_account_other_binding_count"], 0)
         self.assertEqual(reconciliation["variance_state"], "comparable_operator_attested")
         self.assertEqual(reconciliation["signed_variance"], "1.25")
+
+    def test_duplicate_source_binding_for_same_account_blocks_variance(self):
+        self._seed_cost()
+        duplicate_source = self._bind_source(
+            "source-duplicate",
+            "raw-primary-provider-account",
+        )
+        duplicate_identity = self._finance_identity("duplicate")
+        duplicate_upstream = replace(
+            self.config.upstreams["openai"],
+            finance_identity=duplicate_identity,
+        )
+        duplicate_config = replace(
+            self.config,
+            upstreams={**self.config.upstreams, "openai": duplicate_upstream},
+            finance_account_bindings=parse_finance_account_bindings(
+                [self._binding_config("duplicate-account", "openai-duplicate")]
+            ),
+        )
+        duplicate_account = self._register_account(
+            config=duplicate_config,
+            binding_id="duplicate-account",
+            source=duplicate_source,
+            finance_identity=duplicate_identity,
+        )
+        self._seed_attempt(duplicate_account)
+        self._seed_attempt(duplicate_account, finalize=False)
+
+        status, stdout, stderr = self.invoke()
+        self.assertEqual((status, stderr), (0, ""))
+        reconciliation = json.loads(stdout)["account_reconciliation"]
+        self.assertEqual(reconciliation["same_account_other_binding_count"], 1)
+        self.assertEqual(reconciliation["pending_account_gap_count"], 1)
+        self.assertEqual(reconciliation["other_account_attempt_count"], 0)
+        self.assertEqual(reconciliation["other_account_pending_attempt_count"], 0)
+        self.assertEqual(reconciliation["uncomparable_account_identity_count"], 0)
+        self.assertEqual(
+            reconciliation["uncomparable_account_pending_attempt_count"],
+            0,
+        )
+        self.assertEqual(
+            reconciliation["variance_state"],
+            "account_or_gateway_evidence_incomplete",
+        )
+        self.assertIsNone(reconciliation["signed_variance"])
+
+    def test_cross_key_account_identity_is_unknown_and_blocks_variance(self):
+        self._seed_cost()
+        cross_key_source = self._bind_source(
+            "source-cross-key",
+            "raw-other-provider-account",
+            fingerprint_key=b"synthetic-finance-fingerprint-key-v2",
+            fingerprint_key_version=2,
+        )
+        cross_key_identity = self._finance_identity("cross-key")
+        cross_key_upstream = replace(
+            self.config.upstreams["openai"],
+            finance_identity=cross_key_identity,
+        )
+        cross_key_config = replace(
+            self.config,
+            upstreams={**self.config.upstreams, "openai": cross_key_upstream},
+            finance_account_bindings=parse_finance_account_bindings(
+                [self._binding_config("cross-key-account", "openai-cross-key")]
+            ),
+        )
+        cross_key_account = self._register_account(
+            config=cross_key_config,
+            binding_id="cross-key-account",
+            source=cross_key_source,
+            finance_identity=cross_key_identity,
+        )
+        self._seed_attempt(cross_key_account)
+        self._seed_attempt(cross_key_account, finalize=False)
+
+        status, stdout, stderr = self.invoke()
+        self.assertEqual((status, stderr), (0, ""))
+        reconciliation = json.loads(stdout)["account_reconciliation"]
+        self.assertEqual(reconciliation["uncomparable_account_identity_count"], 1)
+        self.assertEqual(
+            reconciliation["uncomparable_account_pending_attempt_count"],
+            1,
+        )
+        self.assertEqual(reconciliation["other_account_attempt_count"], 0)
+        self.assertEqual(reconciliation["other_account_pending_attempt_count"], 0)
+        self.assertEqual(
+            reconciliation["variance_state"],
+            "account_or_gateway_evidence_incomplete",
+        )
+        self.assertIsNone(reconciliation["signed_variance"])
 
     def test_boundary_crossing_attempt_is_a_gap_outside_base_query_count(self):
         self._seed_cost()
