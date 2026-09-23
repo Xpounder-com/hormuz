@@ -150,7 +150,7 @@ def verify_finance_collection_runtime(
         validate_finance_sources(source_contract)
         native = verify_finance_native_attempt_transition_plan(
             root, allow_successor_schema=True,
-            successor_postgres_schema=19 if allow_successor_schema else 16,
+            successor_postgres_schema=20 if allow_successor_schema else 16,
         )
     except FinanceCollectionRuntimeError:
         raise
@@ -170,7 +170,7 @@ def verify_finance_collection_runtime(
         if allow_successor_schema:
             current_is_supported_successor = (
                 (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-                in {(12, 17), (13, 18), (14, 19)}
+                in {(12, 17), (13, 18), (14, 19), (15, 20)}
             )
         else:
             current_is_supported_successor = (

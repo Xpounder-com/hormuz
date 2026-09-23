@@ -8,6 +8,8 @@ team, entity type, and entity ID to an operator-owned route, and returns HTTP
 historical [preflight](LINEAR_CONNECTOR_PREFLIGHT.md) and
 [transition checkpoint](LINEAR_CONNECTOR_TRANSITION.md) remain frozen records
 of the earlier design and schema assignment.
+Provider-free snapshot reconciliation is documented separately in
+[LINEAR_RECONCILIATION.md](LINEAR_RECONCILIATION.md).
 
 This source checkpoint does not create a Linear webhook, install a credential,
 connect a workspace, run a provider backfill, or establish live delivery
@@ -17,7 +19,7 @@ workspace.
 ## Runtime enrollment
 
 `portfolio_control.connectors` owns the organization, connector, Linear
-workspace, and enrolled project IDs. `outcome_connectors` schema version 2
+workspace, and enrolled project IDs. `outcome_connectors` schema version 3
 activates the exact webhook route, team IDs, typed entity IDs, signing-secret
 versions, and keyed replay identities. Schema version 1 remains the unchanged
 GitHub-only shape.
@@ -26,7 +28,7 @@ GitHub-only shape.
 {
   "outcome_connectors": {
     "schema_id": "hormuz.outcome-connectors",
-    "schema_version": 2,
+    "schema_version": 3,
     "github": [],
     "linear": [
       {
@@ -52,6 +54,11 @@ GitHub-only shape.
           "environment_variable": "HORMUZ_LINEAR_WEBHOOK_SECRET_2026_09"
         },
         "previous_webhook_secret": null,
+        "active_snapshot_secret": {
+          "version": "linear-snapshot-2026-09",
+          "environment_variable": "HORMUZ_LINEAR_SNAPSHOT_SECRET_2026_09"
+        },
+        "previous_snapshot_secret": null,
         "identity_keys": [
           {
             "version": "1",
@@ -79,7 +86,8 @@ cannot read or write that table directly.
 
 Credential values are unique printable ASCII strings from 32 through 128
 bytes and belong only in the deployment secret manager. A process accepts one
-active signing secret and at most one expiring previous secret per route, plus
+active webhook secret and active snapshot secret, with at most one expiring
+previous secret of each kind per route, plus
 at most eight numeric identity-key versions. It accepts at most eight Linear
 routes. Secret values, raw payloads, plain payload hashes, and credential-value
 hashes never enter configuration files, logs, receipts, or audit evidence.
@@ -133,9 +141,10 @@ inconclusive.
 
 Names, titles, descriptions, comments, attachment data, label text, URLs,
 prompt/response content, and arbitrary fields are ignored and never persisted.
-The SQLite 14 and PostgreSQL 19 schemas contain four append-only evidence families:
+The SQLite 15 and PostgreSQL 20 schemas contain six append-only evidence families:
 immutable source-binding versions, committed delivery receipts, context events,
-and separate retention markers. PostgreSQL also has one private route-claim
+separate retention markers, snapshot receipts, and snapshot context events.
+PostgreSQL also has one private route-claim
 table used only by the binding trigger. Linear source facts are linked into the
 finite commit audit chain in the same transaction.
 
@@ -197,11 +206,13 @@ commit or exact replay completed before the response.
 
 ## Reconciliation, disablement, retention, and coverage
 
-This checkpoint does not include a provider API token, polling worker, or
-snapshot/backfill command. Until a separately authenticated and bounded
-reconciliation path is accepted, compare Linear's webhook administration view
-with content-free Hormuz receipt IDs and record any gap outside Hormuz. Never
-relabel a snapshot as a webhook delivery.
+The provider-free snapshot receiver is implemented at
+`POST /v1/connectors/linear/snapshots`; its exact wire contract, signing rules,
+page completeness query, and source-only runbook are in
+[LINEAR_RECONCILIATION.md](LINEAR_RECONCILIATION.md). It does not include a
+provider API token or polling worker. Never relabel a snapshot as a webhook
+delivery, and do not claim live completeness without separately authorized
+provider export evidence.
 
 To disable ingress, remove the route from `outcome_connectors.linear` and
 restart. Revoke both webhook secrets in Linear. Earlier binding versions,
@@ -226,14 +237,15 @@ Run the provider-free checks with:
 
 ```bash
 python -m unittest -v tests.test_linear_connector_runtime
+python -m unittest -v tests.test_linear_snapshot_runtime
 python tools/verify_linear_transition_plan.py
 python tools/verify_linear_runtime_plan.py
+python tools/verify_linear_reconciliation_plan.py
 ```
 
 PostgreSQL qualification must use an owned disposable schema with the restricted
-runtime role and reproduce the fixed schema-19 boundary of 213 canonical
+runtime role and reproduce the fixed schema-20 boundary of 222 canonical
 non-owner ACL entries at
-`337ece4276d5c36f5115f88c28c97818a3c653862a37c53f6a1590eb7c9e2f85`.
-The historical 233-entry proposal measurement included 20 default `PUBLIC`
-function grants; the managed bootstrap revokes them. Live Linear proof remains
-open until an owner-selected workspace and webhook are authorized.
+`cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d`.
+Live Linear proof remains open until an owner-selected workspace and webhook
+are authorized.

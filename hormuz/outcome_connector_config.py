@@ -80,6 +80,8 @@ class LinearOutcomeChannelConfig:
     typed_enrollment: Mapping[str, tuple[str, ...]]
     active_webhook_secret: LinearWebhookSecretReference
     previous_webhook_secret: LinearWebhookSecretReference | None
+    active_snapshot_secret: LinearWebhookSecretReference | None
+    previous_snapshot_secret: LinearWebhookSecretReference | None
     identity_keys: tuple[VersionedSecretReference, ...]
     current_key_version: str
     body_fingerprint_key_version: str
@@ -89,6 +91,20 @@ class LinearOutcomeChannelConfig:
     def resolved_webhook_secrets(self) -> Mapping[str, tuple[bytes, str | None]]:
         references = (self.active_webhook_secret,) + (
             (self.previous_webhook_secret,) if self.previous_webhook_secret is not None else ()
+        )
+        if any(reference.value is None for reference in references):
+            raise PortfolioError("unavailable")
+        return MappingProxyType({
+            reference.version: (reference.value, reference.expires_at)
+            for reference in references
+            if reference.value is not None
+        })
+
+    def resolved_snapshot_secrets(self) -> Mapping[str, tuple[bytes, str | None]]:
+        if self.active_snapshot_secret is None:
+            return MappingProxyType({})
+        references = (self.active_snapshot_secret,) + (
+            (self.previous_snapshot_secret,) if self.previous_snapshot_secret is not None else ()
         )
         if any(reference.value is None for reference in references):
             raise PortfolioError("unavailable")
@@ -134,6 +150,9 @@ class OutcomeConnectorConfig:
             for reference in (channel.active_webhook_secret, channel.previous_webhook_secret):
                 if reference is not None and reference.value is not None:
                     values.append(("linear_webhook_secret", reference.value.decode("ascii")))
+            for reference in (channel.active_snapshot_secret, channel.previous_snapshot_secret):
+                if reference is not None and reference.value is not None:
+                    values.append(("linear_snapshot_secret", reference.value.decode("ascii")))
             values.extend(
                 ("outcome_identity_key", reference.value.decode("ascii"))
                 for reference in channel.identity_keys
@@ -190,7 +209,7 @@ def build_outcome_connector_config(
     if not isinstance(value, dict):
         fail()
     version = value.get("schema_version")
-    if value.get("schema_id") != "hormuz.outcome-connectors" or version not in (1, 2):
+    if value.get("schema_id") != "hormuz.outcome-connectors" or version not in (1, 2, 3):
         fail()
     if version == 1:
         root = exact(value, {"schema_id", "schema_version", "github"})
@@ -282,13 +301,16 @@ def build_outcome_connector_config(
                 fail()
     webhook_ids: set[str] = set()
     for item in linear_values:
-        channel = exact(item, {
+        linear_fields = {
             "organization_id", "connector_id", "binding_version",
             "source_webhook_id", "source_team_ids", "typed_enrollment",
             "active_webhook_secret", "previous_webhook_secret", "identity_keys",
             "current_key_version", "body_fingerprint_key_version",
             "source_fact_key_version", "registered_by",
-        })
+        }
+        if version == 3:
+            linear_fields.update({"active_snapshot_secret", "previous_snapshot_secret"})
+        channel = exact(item, linear_fields)
         organization = opaque(channel["organization_id"])
         connector = opaque(channel["connector_id"])
         channel_id = (organization, connector)
@@ -361,6 +383,36 @@ def build_outcome_connector_config(
             if previous.version == active.version:
                 fail()
 
+        snapshot_active = None
+        snapshot_previous = None
+        if version == 3:
+            snapshot_active_raw = exact(
+                channel["active_snapshot_secret"],
+                {"version", "environment_variable"},
+            )
+            snapshot_active = LinearWebhookSecretReference(
+                opaque(snapshot_active_raw["version"]),
+                variable(snapshot_active_raw["environment_variable"]),
+                None,
+            )
+            snapshot_previous_raw = channel["previous_snapshot_secret"]
+            if snapshot_previous_raw is not None:
+                snapshot_previous_value = exact(
+                    snapshot_previous_raw,
+                    {"version", "environment_variable", "expires_at"},
+                )
+                try:
+                    snapshot_expires_at = timestamp(snapshot_previous_value["expires_at"])
+                except (PortfolioError, TypeError):
+                    fail()
+                snapshot_previous = LinearWebhookSecretReference(
+                    opaque(snapshot_previous_value["version"]),
+                    variable(snapshot_previous_value["environment_variable"]),
+                    snapshot_expires_at,
+                )
+                if snapshot_previous.version == snapshot_active.version:
+                    fail()
+
         identity_keys: list[VersionedSecretReference] = []
         identity_versions: set[str] = set()
         for raw in bounded_list(channel["identity_keys"], 1, 8):
@@ -387,6 +439,8 @@ def build_outcome_connector_config(
             typed_enrollment=MappingProxyType(typed),
             active_webhook_secret=active,
             previous_webhook_secret=previous,
+            active_snapshot_secret=snapshot_active,
+            previous_snapshot_secret=snapshot_previous,
             identity_keys=tuple(identity_keys),
             current_key_version=current,
             body_fingerprint_key_version=body_version,
@@ -433,6 +487,16 @@ def resolve_outcome_connector_credentials(
             previous_webhook_secret=(
                 resolve(channel.previous_webhook_secret)
                 if channel.previous_webhook_secret is not None
+                else None
+            ),
+            active_snapshot_secret=(
+                resolve(channel.active_snapshot_secret)
+                if channel.active_snapshot_secret is not None
+                else None
+            ),
+            previous_snapshot_secret=(
+                resolve(channel.previous_snapshot_secret)
+                if channel.previous_snapshot_secret is not None
                 else None
             ),
             identity_keys=tuple(resolve(reference) for reference in channel.identity_keys),

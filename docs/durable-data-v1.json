@@ -105,15 +105,21 @@
       "contains_prompt_or_response_body": false,
       "sqlite_tables": [
         "gateway_linear_delivery_receipts",
+        "gateway_linear_snapshot_receipts",
         "portfolio_linear_context_events",
         "portfolio_linear_context_retention_events",
+        "portfolio_linear_snapshot_context_events",
+        "portfolio_linear_snapshot_context_retention_events",
         "portfolio_linear_source_binding_versions"
       ],
       "postgresql_tables": [
         "gateway_linear_delivery_receipts",
         "gateway_linear_route_claims",
+        "gateway_linear_snapshot_receipts",
         "portfolio_linear_context_events",
         "portfolio_linear_context_retention_events",
+        "portfolio_linear_snapshot_context_events",
+        "portfolio_linear_snapshot_context_retention_events",
         "portfolio_linear_source_binding_versions"
       ]
     },

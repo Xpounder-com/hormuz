@@ -18,7 +18,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 19
+POSTGRES_SCHEMA_VERSION = 20
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 # Each tuple is the count and SHA-256 digest of the canonical non-owner ACL
@@ -54,6 +54,13 @@ _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION = {
     19: (
         213,
         "337ece4276d5c36f5115f88c28c97818a3c653862a37c53f6a1590eb7c9e2f85",
+    ),
+    # Twice measured from independent clean managed-role schema-20 bootstraps
+    # after snapshot retention support and revocation of PostgreSQL's default
+    # PUBLIC function grants.
+    20: (
+        222,
+        "cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d",
     ),
 }
 
@@ -1308,6 +1315,9 @@ def migrate_postgres(
                     if max(states) >= 19:
                         from ._linear_schema import verify_postgres_linear
                         verify_postgres_linear(cursor, schema, PostgresStorageError)
+                    if max(states) >= 20:
+                        from ._linear_snapshot_schema import verify_postgres_linear_snapshot
+                        verify_postgres_linear_snapshot(cursor, schema, PostgresStorageError)
                 for version in range(1, POSTGRES_SCHEMA_VERSION + 1):
                     if version in states:
                         continue
@@ -1369,6 +1379,9 @@ def migrate_postgres(
                 if POSTGRES_SCHEMA_VERSION >= 19:
                     from ._linear_schema import verify_postgres_linear
                     verify_postgres_linear(cursor, schema, PostgresStorageError)
+                if POSTGRES_SCHEMA_VERSION >= 20:
+                    from ._linear_snapshot_schema import verify_postgres_linear_snapshot
+                    verify_postgres_linear_snapshot(cursor, schema, PostgresStorageError)
                 _verify_postgres_migration_ownership(
                     cursor,
                     schema=schema,
@@ -1521,6 +1534,9 @@ def _schema_migration_rows(
                 if max(states) >= 19:
                     from ._linear_schema import verify_postgres_linear
                     verify_postgres_linear(cursor, schema, PostgresStorageError)
+                if max(states) >= 20:
+                    from ._linear_snapshot_schema import verify_postgres_linear_snapshot
+                    verify_postgres_linear_snapshot(cursor, schema, PostgresStorageError)
             if (
                 verify_custody_schema
                 and states
@@ -2432,6 +2448,7 @@ def _migration_sql(
         17: "0017_finance_collection_runtime.sql",
         18: "0018_finance_account_binding_and_query_audit.sql",
         19: "0019_linear_connector.sql",
+        20: "0020_linear_snapshot.sql",
     }
     filename = filenames.get(version)
     if filename is None:

@@ -78,9 +78,9 @@ class SQLiteFinanceNativeAttemptTransitionTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
         # This is a retained v10-to-v11 predecessor proof.  The current
-        # checkout is v13; pin the fixture's starting point explicitly while
+        # checkout is v15; pin the fixture's starting point explicitly while
         # keeping the predecessor transition itself isolated below.
-        self.assertEqual(UsageStore.schema_version, 14)
+        self.assertEqual(UsageStore.schema_version, 15)
         with mock.patch.object(UsageStore, "schema_version", 10):
             store = UsageStore(self.path)
             seed_registry_ledger(store)
@@ -287,11 +287,11 @@ class SQLiteFinanceNativeAttemptPredecessorTests(unittest.TestCase):
 
     def test_post_checkpoint_write_requires_forward_recovery(self):
         self.probe()
-        # The candidate now includes the v14 Linear successor on top of the
-        # v13 finance-account-binding migration.
+        # The candidate now includes the v15 Linear reconciliation successor
+        # on top of the v14 Linear connector migration.
         # Keep the write/recovery probe on the candidate binary rather than
         # pretending it is still the v11 intermediate.
-        with mock.patch.object(UsageStore, "schema_version", 14):
+        with mock.patch.object(UsageStore, "schema_version", 15):
             attempt_id = _candidate_write(self.path)
         after_write = sqlite_snapshot(self.path)
         self.assertEqual(
@@ -306,7 +306,7 @@ class SQLiteFinanceNativeAttemptPredecessorTests(unittest.TestCase):
         restored = self.root / "forward-recovered.sqlite3"
         sqlite_backup(self.path, retained)
         sqlite_backup(retained, restored)
-        with mock.patch.object(UsageStore, "schema_version", 14):
+        with mock.patch.object(UsageStore, "schema_version", 15):
             UsageStore(restored, read_only=True).verify_ready()
         self.assertEqual(sqlite_snapshot(restored), after_write)
         self.assertEqual(

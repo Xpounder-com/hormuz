@@ -2412,6 +2412,18 @@ class PostgresUsageStore:
                     "hormuz.linear-context-retention",
                 )
             cursor.execute(
+                f"SELECT EXISTS (SELECT 1 FROM {self._table('hormuz_schema_migrations')} "
+                "WHERE version=20 AND state='applied') AS linear_snapshot_ready"
+            )
+            linear_snapshot_ready_row = cursor.fetchone()
+            linear_snapshot_ready = bool(
+                next(iter(linear_snapshot_ready_row.values()))
+                if isinstance(linear_snapshot_ready_row, Mapping)
+                else linear_snapshot_ready_row[0]
+            )
+            if linear_snapshot_ready:
+                collection_source_ids += ("hormuz.linear-snapshot-receipt",)
+            cursor.execute(
                 f"SELECT source_schema_id, source_event_id "
                 f"FROM {self._table('gateway_audit_chain_entries')} "
                 "WHERE organization_id = %s AND entry_schema_version = 2 "

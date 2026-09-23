@@ -41,8 +41,8 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
         return {name: rows for name, rows in sqlite_snapshot(self.config.database_path)["rows"].items() if name not in TABLE_DDL}
 
     def test_sqlite_finance_real_schema_and_append_only_guards(self):
-        self.assertEqual(self.store.schema_version, 14)
-        self.assertEqual(len(sqlite_snapshot(self.config.database_path)["rows"]), 53)
+        self.assertEqual(self.store.schema_version, 15)
+        self.assertEqual(len(sqlite_snapshot(self.config.database_path)["rows"]), 56)
         self.register()
         before = self.finance_rows()
         with managed_sqlite_connection(self.config.database_path) as connection:

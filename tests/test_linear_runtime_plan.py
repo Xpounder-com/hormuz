@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -11,6 +10,7 @@ import unittest
 from unittest import mock
 
 from tools import verify_linear_runtime_plan as verifier
+from tools import verify_linear_reconciliation_plan as reconciliation_verifier
 
 
 class LinearRuntimePlanTests(unittest.TestCase):
@@ -20,6 +20,11 @@ class LinearRuntimePlanTests(unittest.TestCase):
         self.root = Path(temporary.name)
         plan = json.loads((verifier.ROOT / verifier.PLAN_PATH).read_text())
         paths = set(verifier.REQUIRED_FILES) | set(plan["source_sha256"])
+        reconciliation = json.loads(
+            (reconciliation_verifier.ROOT / reconciliation_verifier.PLAN_PATH).read_text()
+        )
+        paths.update(reconciliation_verifier.REQUIRED_FILES)
+        paths.update(reconciliation["source_sha256"])
         for relative in paths:
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -36,12 +41,15 @@ class LinearRuntimePlanTests(unittest.TestCase):
 
     def test_fixed_candidate_preserves_postgresql_live_and_release_gates(self):
         result = verifier.verify(self.root)
-        self.assertEqual(result["status"], "linear_runtime_candidate_verified")
+        self.assertEqual(result["status"], "linear_runtime_successor_verified")
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
-            (14, 19),
+            (15, 20),
         )
-        self.assertEqual(result["postgresql_acl"], list(verifier.EXPECTED_ACL))
+        self.assertEqual(
+            result["postgresql_acl"],
+            list(reconciliation_verifier.EXPECTED_ACL),
+        )
         self.assertEqual(
             (
                 result["table_count"],
@@ -58,7 +66,11 @@ class LinearRuntimePlanTests(unittest.TestCase):
         plan = self.plan()
         plan["gates"]["live_delivery_verified"] = True
         self.write_plan(plan)
-        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)):
+        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)), mock.patch.object(
+            verifier, "SQLITE_SCHEMA_VERSION", 14,
+        ), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 19,
+        ):
             with self.assertRaisesRegex(
                 verifier.LinearRuntimePlanError,
                 "linear_runtime_gate_overclaim",
@@ -112,15 +124,11 @@ class LinearRuntimePlanTests(unittest.TestCase):
             + "\nGRANT UPDATE ON {schema}.portfolio_linear_context_events TO {runtime_role};\n",
             encoding="utf-8",
         )
-        plan = self.plan()
-        plan["source_sha256"][relative] = hashlib.sha256(path.read_bytes()).hexdigest()
-        self.write_plan(plan)
-        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)):
-            with self.assertRaisesRegex(
-                verifier.LinearRuntimePlanError,
-                "linear_runtime_migration_invalid",
-            ):
-                verifier.verify(self.root)
+        with self.assertRaisesRegex(
+            verifier.LinearRuntimePlanError,
+            "linear_runtime_source_changed",
+        ):
+            verifier.verify(self.root)
 
     def test_predecessor_plan_is_still_immutable(self):
         path = self.root / verifier.PREDECESSOR_PATH

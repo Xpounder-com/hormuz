@@ -22,6 +22,7 @@ from hormuz._linear_schema import (
     POSTGRES_CLAIM_TABLE as LINEAR_CLAIM_TABLE,
     TABLE_DDL as LINEAR_TABLES,
 )
+from hormuz._linear_snapshot_schema import TABLE_DDL as LINEAR_SNAPSHOT_TABLES
 from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
 from hormuz._portfolio_schema import TABLE_DDL as REGISTRY_TABLES
 from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_RELIABILITY_TABLES
@@ -321,6 +322,7 @@ class PostgresTestCase(unittest.TestCase):
                     *FINANCE_TABLES, *BUDGET_TABLES, *PROVIDER_RELIABILITY_TABLES,
                     FINANCE_ATTEMPT_TABLE, *FINANCE_COLLECTION_TABLES,
                     *FINANCE_ACCOUNT_TABLES, *LINEAR_TABLES,
+                    *LINEAR_SNAPSHOT_TABLES,
                     LINEAR_CLAIM_TABLE,
                 ) if table in present)
                 immutable_tables = tuple(table for table in (
@@ -328,6 +330,7 @@ class PostgresTestCase(unittest.TestCase):
                     *BUDGET_TABLES, *PROVIDER_RELIABILITY_TABLES,
                     FINANCE_ATTEMPT_TABLE, *FINANCE_COLLECTION_TABLES,
                     *FINANCE_ACCOUNT_TABLES, *LINEAR_TABLES,
+                    *LINEAR_SNAPSHOT_TABLES,
                     LINEAR_CLAIM_TABLE,
                 ) if table in present)
                 # This class owns its unique disposable schema. Reset the exact

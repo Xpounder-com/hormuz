@@ -591,7 +591,9 @@ def verify_postgres_finance_collection(cursor, schema: str, error_factory) -> No
             else successor_row[0]
         )
         migration_name = (
-            "0019_linear_connector.sql"
+            "0020_linear_snapshot.sql"
+            if successor_version >= 20
+            else "0019_linear_connector.sql"
             if successor_version >= 19
             else "0018_finance_account_binding_and_query_audit.sql"
             if successor_version >= 18

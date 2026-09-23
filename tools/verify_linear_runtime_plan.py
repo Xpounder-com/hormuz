@@ -180,6 +180,43 @@ def _validate_migration(root: Path, plan: dict) -> None:
 
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
+    versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
+    if versions == (15, 20):
+        try:
+            from tools.verify_linear_reconciliation_plan import (
+                EXPECTED_ACL as RECONCILIATION_ACL,
+                LinearReconciliationPlanError,
+                verify as verify_reconciliation,
+            )
+
+            successor = verify_reconciliation(root)
+        except LinearReconciliationPlanError as error:
+            mapping = {
+                "linear_reconciliation_source_kit_incomplete": "linear_runtime_source_kit_incomplete",
+                "linear_reconciliation_source_changed": "linear_runtime_source_changed",
+                "linear_reconciliation_predecessor_changed": "linear_runtime_predecessor_changed",
+            }
+            _fail(mapping.get(error.code, "linear_runtime_successor_invalid"))
+        return {
+            "status": "linear_runtime_successor_verified",
+            "plan_sha256": PLAN_SHA256,
+            "sqlite_schema_version": SQLITE_SCHEMA_VERSION,
+            "postgresql_schema_version": POSTGRES_SCHEMA_VERSION,
+            "postgresql_acl": list(RECONCILIATION_ACL),
+            "table_count": len(TABLES),
+            "enforcement_table_count": len(ENFORCEMENT_TABLES),
+            "audit_source_count": len(AUDIT_SOURCES),
+            "runtime_implemented": True,
+            "reconciliation_implemented": successor["reconciliation_implemented"],
+            "live_workspace_authorized": False,
+            "released": False,
+            "gates": successor["gates"],
+        }
+    if (
+        versions != (14, 19)
+        or _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(19) != EXPECTED_ACL
+    ):
+        _fail("linear_runtime_schema_boundary_changed")
     if any(not (root / relative).is_file() for relative in REQUIRED_FILES):
         _fail("linear_runtime_source_kit_incomplete")
     plan = _read_json(root / PLAN_PATH)
@@ -299,11 +336,6 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         if actual != expected:
             _fail("linear_runtime_source_changed")
 
-    if (
-        (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != (14, 19)
-        or _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(19) != EXPECTED_ACL
-    ):
-        _fail("linear_runtime_schema_boundary_changed")
     _validate_migration(root, plan)
     return {
         "status": "linear_runtime_candidate_verified",

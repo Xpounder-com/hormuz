@@ -262,6 +262,20 @@ REQUIRED_FINANCE_ACCOUNT_REGISTRATION_SDIST_PATHS = (
     "tests/test_finance_account_registration_request.py",
     "tests/test_finance_account_registration_store.py",
 )
+REQUIRED_LINEAR_RECONCILIATION_WHEEL_PATHS = (
+    "hormuz/_linear_snapshot_schema.py",
+    "hormuz/linear_snapshot.py",
+    "hormuz/migrations/postgresql/0020_linear_snapshot.sql",
+)
+REQUIRED_LINEAR_RECONCILIATION_SDIST_PATHS = (
+    *REQUIRED_LINEAR_RECONCILIATION_WHEEL_PATHS,
+    "docs/LINEAR_RECONCILIATION.md",
+    "docs/linear-reconciliation-plan-v1.json",
+    "tools/verify_linear_reconciliation_plan.py",
+    "tests/test_linear_reconciliation_plan.py",
+    "tests/test_linear_snapshot_runtime.py",
+    "tests/test_postgres_linear_snapshot_runtime.py",
+)
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
     "docs/work-budget-reports-wire-v1.json",
@@ -441,6 +455,18 @@ def main(argv: list[str] | None = None) -> int:
         _sdist_members,
         REQUIRED_FINANCE_ACCOUNT_REGISTRATION_SDIST_PATHS,
         "Finance account registration source kit",
+    )
+    _assert_required_archive_paths(
+        wheel,
+        _wheel_members,
+        REQUIRED_LINEAR_RECONCILIATION_WHEEL_PATHS,
+        "Linear reconciliation wheel",
+    )
+    _assert_required_archive_paths(
+        sdist,
+        _sdist_members,
+        REQUIRED_LINEAR_RECONCILIATION_SDIST_PATHS,
+        "Linear reconciliation source kit",
     )
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)

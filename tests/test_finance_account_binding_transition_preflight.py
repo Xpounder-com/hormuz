@@ -46,7 +46,7 @@ else:
 
 class SQLiteFinanceAccountBindingTransitionTests(unittest.TestCase):
     def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
-        self.assertEqual(UsageStore.schema_version, 14)
+        self.assertEqual(UsageStore.schema_version, 15)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "synthetic.sqlite3"
             with (
@@ -119,11 +119,11 @@ class PostgresFinanceAccountBindingTransitionTests(PostgresTestCase):
     runtime = previous.PostgresFinanceCollectionTransitionTests.runtime
 
     def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 19)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 20)
         self._drop_schema(self.schema)
         # This historical transition deliberately leaves the schema at v18
         # while it proves the account-binding successor. Restore the current
-        # v19 schema even when an assertion fails so later tests do not inherit
+        # v20 schema even when an assertion fails so later tests do not inherit
         # a predecessor schema from this shared class fixture.
         self.addCleanup(self.migrate)
         seed_postgres_collection_predecessor(
@@ -228,9 +228,11 @@ POPULATED_TABLES = (
     "portfolio_finance_usage_observations", "portfolio_finance_cost_observations",
 )
 # Measured twice in independent disposable managed-role PostgreSQL bootstraps;
-# never derived as expectations from the database under test.
-PROPOSED_ACL = (213, "337ece4276d5c36f5115f88c28c97818a3c653862a37c53f6a1590eb7c9e2f85")
-INJECTED_ACL = (214, "359652b011ea8fa04c43a69d007630bf3c24296de3635b0ede9c95916a841363")
+# never derived as expectations from the database under test.  This cumulative
+# deployment probe follows the current schema-20 baseline after the Linear
+# reconciliation migration rather than freezing the historical schema-19 ACL.
+PROPOSED_ACL = (222, "cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d")
+INJECTED_ACL = (223, "012a3b9915df3000feab05f408ee27a1fae18e6f14cf773d665f8ee498dcbb11")
 PINNED = bool(os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_PYTHON")
               and os.environ.get("HORMUZ_TEST_ACCOUNT_BINDING_SOURCE"))
 
@@ -363,7 +365,7 @@ class SQLitePublishedAccountBindingPreflightTests(unittest.TestCase):
             if table == "hormuz_schema_migrations":
                 actual = [
                     row for row in after["rows"][table]
-                    if row[0] not in {13, 14}
+                    if row[0] not in {13, 14, 15}
                 ]
             else:
                 actual = after["rows"][table]
@@ -465,7 +467,7 @@ class PostgresPublishedAccountBindingPreflightTests(PostgresTestCase):
     restore = previous.PostgresFinanceCollectionTransitionTests.restore
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 19)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 20)
         version_patch = mock.patch.object(
             postgres_module, "POSTGRES_SCHEMA_VERSION", 18
         )

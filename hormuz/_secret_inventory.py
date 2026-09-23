@@ -172,6 +172,10 @@ _IDENTITY_CONNECTOR_HASH_MATERIALS = {
         "LinearWebhookAuthenticator.authenticate",
     ): "identity_connector_secret",
     (
+        "hormuz/linear_snapshot.py",
+        "LinearSnapshotAuthenticator.authenticate",
+    ): "identity_connector_secret",
+    (
         "hormuz/outcome_wire.py",
         "OutcomeKeys._digest",
     ): "tenant_fingerprint_key",

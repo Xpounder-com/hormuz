@@ -64,7 +64,13 @@ from .finance_account_binding import (
 from .github_connector import GitHubOutcomeReceiver
 from .github_http import GITHUB_EVENTS_PATH, handle_github_webhook
 from .linear_connector import LinearOutcomeReceiver
-from .linear_http import LINEAR_EVENTS_PATH, handle_linear_webhook
+from .linear_http import (
+    LINEAR_EVENTS_PATH,
+    LINEAR_SNAPSHOTS_PATH,
+    handle_linear_snapshot,
+    handle_linear_webhook,
+)
+from .linear_snapshot import LinearSnapshotReceiver
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
@@ -343,6 +349,15 @@ class GatewayServer(ThreadingHTTPServer):
             self.linear_outcome_receiver = (
                 LinearOutcomeReceiver(config, portfolio.linear)
                 if config.outcome_connectors is not None and config.outcome_connectors.linear
+                else None
+            )
+            self.linear_snapshot_receiver = (
+                LinearSnapshotReceiver(config, portfolio.linear)
+                if config.outcome_connectors is not None
+                and any(
+                    channel.active_snapshot_secret is not None
+                    for channel in config.outcome_connectors.linear
+                )
                 else None
             )
             self.attribution_repository = portfolio.attributions
@@ -718,6 +733,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         if path == LINEAR_EVENTS_PATH:
             handle_linear_webhook(self)
+            return
+        if path == LINEAR_SNAPSHOTS_PATH:
+            handle_linear_snapshot(self)
             return
         if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
             handle_console_request(self)
