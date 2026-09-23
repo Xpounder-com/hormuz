@@ -1,4 +1,4 @@
-"""Synthetic, offline witnesses for the dormant GitHub App auth boundary."""
+"""Synthetic, offline witnesses for the GitHub App auth boundary."""
 
 from __future__ import annotations
 
@@ -127,8 +127,8 @@ class GitHubWebhookAuthTests(unittest.TestCase):
             self.assertNotIn(marker, repr(old))
 
     def test_existing_atomic_replay_seam_uses_signed_body_identity(self):
-        # No production normalizer or receiver exists. This adapter is test-only
-        # and proves the inherited receipt seam can consume the auth metadata.
+        # This deliberately unsupported adapter isolates the inherited receipt
+        # seam from the production normalizer tested by the runtime suite.
         class UnsupportedFixtureAdapter:
             def __init__(self, authenticator):
                 self.authenticator = authenticator

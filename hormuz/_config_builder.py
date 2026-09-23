@@ -31,6 +31,10 @@ from ._config_policy import (
 from ._config_routing import build_model_route_domain, build_upstream_domain
 from ._config_values import _integer
 from .portfolio_config import build_portfolio_config
+from .outcome_connector_config import (
+    build_outcome_connector_config,
+    resolve_outcome_connector_credentials,
+)
 from .attribution_config import build_attribution_config
 from .finance_account_binding import parse_finance_account_bindings
 from ._config_session import build_session_broker, resolve_session_credentials, validate_session_references
@@ -176,6 +180,10 @@ def _build_gateway_config(
 
     policy_domain = build_policy_domain(raw, policy_control_mode=policy_control_mode)
 
+    portfolio_control = build_portfolio_config(
+        raw.get("portfolio_control"),
+        (*static_identities, *identities_by_subject.values()),
+    )
     config = cls(
         source_path=source_path,
         listen=ingress_domain.listen,
@@ -207,9 +215,10 @@ def _build_gateway_config(
         custody_executor=custody_control_domain.executor,
         custody_retention=custody_control_domain.retention,
         custody_lifecycle=custody_lifecycle,
-        portfolio_control=build_portfolio_config(
-            raw.get("portfolio_control"),
-            (*static_identities, *identities_by_subject.values()),
+        portfolio_control=portfolio_control,
+        outcome_connectors=build_outcome_connector_config(
+            raw.get("outcome_connectors"),
+            portfolio_control,
         ),
         attribution_control=build_attribution_config(
             raw.get("attribution_control"),
@@ -238,4 +247,5 @@ def _build_gateway_config(
         ingress=resolved_ingress,
         identities_by_token=identities_by_token,
         secret_controls=resolve_secret_controls(config.secret_controls, env),
+        outcome_connectors=resolve_outcome_connector_credentials(config.outcome_connectors, env),
     ), env)

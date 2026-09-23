@@ -1,5 +1,12 @@
 # GitHub outcome connector: offline v1.3 preflight proposal
 
+> **Historical checkpoint.** This frozen preimplementation proposal records
+> the questions and red-first requirements that preceded the opt-in runtime.
+> The current source behavior and operations are documented in
+> [GITHUB_WEBHOOK_AUTH.md](GITHUB_WEBHOOK_AUTH.md). Its machine-readable plan
+> intentionally remains unchanged as provenance and is not current runtime
+> state or live GitHub.com acceptance.
+
 This is a proposed #219 feature checkpoint under #214, based on public main
 `7c8e5296329255bca35ef5e7d2cda9735885e7df`. It is not an accepted
 compatibility decision, a GitHub App, a live webhook, a release candidate, or

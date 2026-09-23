@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
 import json
 import io
 import threading
@@ -14,6 +16,8 @@ from uuid import uuid4
 
 from hormuz._outcome_schema import TABLE_DDL
 from hormuz._portfolio_sql import PortfolioSQL
+from hormuz.github_connector import GitHubOutcomeAdapter
+from hormuz.github_webhook_auth import GitHubWebhookAuthenticator
 from hormuz.outcome_ingest import AuthenticatedDelivery, OutcomeIngestor
 from hormuz.outcome_wire import OutcomeKeys, validate_context, validate_coverage
 from hormuz.portfolio_repository import create_portfolio_repository
@@ -128,6 +132,49 @@ class OutcomeAssertions:
         raw = canonical({"observations": observations if observations is not None else [self.source()]}).encode() if raw is None else raw
         delivery = str(uuid4()) if delivery is None else delivery
         return (ingestor or self.ingestor).ingest({"synthetic-signature": "verified-test-only", "delivery": delivery}, raw)
+
+    def check_github_runtime_adapter_uses_real_repository_path(self):
+        webhook = b"synthetic-github-adapter-webhook-secret-123"
+        keys = OutcomeKeys("github-runtime-v1", {"github-runtime-v1": b"g" * 32})
+        authenticator = GitHubWebhookAuthenticator(
+            self.config,
+            "acme",
+            "github-one",
+            {"webhook-v1": webhook},
+            keys,
+            "github-runtime-v1",
+        )
+        ingestor = OutcomeIngestor(
+            self.config,
+            self.repository,
+            "acme",
+            "github-one",
+            GitHubOutcomeAdapter(authenticator),
+            keys,
+        )
+        body = {
+            "action": "opened",
+            "installation": {"id": 123},
+            "repository": {"id": 456, "name": "SYNTHETIC_EXCLUDED_REPOSITORY"},
+            "pull_request": {
+                "id": 7101,
+                "created_at": self.clock(),
+                "title": "SYNTHETIC_EXCLUDED_TITLE",
+                "body": "SYNTHETIC_EXCLUDED_BODY",
+                "head": {"sha": "a" * 40, "ref": "SYNTHETIC_EXCLUDED_BRANCH"},
+            },
+        }
+        raw = canonical(body).encode()
+        signature = "sha256=" + hmac.new(webhook, raw, hashlib.sha256).hexdigest()
+        receipt = ingestor.ingest({
+            "X-Hub-Signature-256": signature,
+            "X-GitHub-Event": "changed-unsigned-event",
+            "X-GitHub-Delivery": "changed-unsigned-delivery",
+        }, raw)
+        self.assertEqual((receipt["disposition"], receipt["accepted_event_count"]), ("accepted", 1))
+        event = next(item for item in self.page()["items"] if item["external_object_id"] == "7101")
+        self.assertEqual((event["event_type"], event["quality_state"]), ("created", "unknown"))
+        self.assertNotIn("SYNTHETIC_EXCLUDED", canonical(self.outcome_rows()))
 
     def page(self, query="", *, token=ADMIN):
         status, page = self.service.dispatch(token, "GET", OUTCOMES, query=query)
