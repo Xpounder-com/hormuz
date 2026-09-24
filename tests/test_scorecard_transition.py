@@ -137,7 +137,11 @@ class PostgresScorecardTransitionTests(PostgresTestCase):
         )
 
     def setUp(self) -> None:
-        super().setUp()
+        # Transition cases deliberately leave this class-owned schema at the
+        # scorecard successor (22), while the installed runtime may already
+        # require a later schema. Rebuild the predecessor directly instead of
+        # asking the current-runtime fixture to open the previous test's
+        # intentionally older ledger first.
         self._drop_schema(self.schema)
         with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 21):
             self.assertEqual(self.migrate().version, 21)
