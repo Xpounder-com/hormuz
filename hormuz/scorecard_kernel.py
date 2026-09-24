@@ -704,13 +704,24 @@ def _parse_cohort(value, *, context, policy, required_strata, metric_rules):
         latencies.append(cluster_latency)
 
     spend = coverage_output["eligible_governed_spend"]
+    spend_ratio = spend["ratio"]
+    spend_below_threshold = (
+        spend_ratio is not None
+        and policy.minimum_coverage is not None
+        and Decimal(str(spend_ratio)) < Decimal(policy.minimum_coverage)
+    )
+    spend_eligible = qualification.status == "eligible" and spend_ratio is not None
     spend_metric = _metric(
         metric_rules["spend_coverage"],
-        value=None if spend["ratio"] is None else _decimal_text(Decimal(str(spend["ratio"]))),
+        value=None if spend_ratio is None else _decimal_text(Decimal(str(spend_ratio))),
         numerator=spend["numerator"],
         denominator=spend["denominator"], unit="ratio",
-        status="eligible" if qualification.status == "eligible" and spend["ratio"] is not None else "inconclusive",
-        reason="eligible" if qualification.status == "eligible" and spend["ratio"] is not None else "below_threshold",
+        status="eligible" if spend_eligible else "inconclusive",
+        reason=(
+            "eligible" if spend_eligible
+            else "below_threshold" if spend_below_threshold
+            else "missing_evidence"
+        ),
     )
     total_cost = sum(selected_costs, Decimal(0))
     cost_point = _divide(total_cost, Decimal(accepted_count))
@@ -796,6 +807,7 @@ def _parse_cohort(value, *, context, policy, required_strata, metric_rules):
         "cost_basis": cost_basis,
         "cost_components": cost_components,
         "connector_coverage": connector_coverage,
+        "excluded_coverage": coverage_output["excluded"],
         "association_rule": association_rule,
         "eligibility": eligibility,
         "metrics": {
@@ -835,6 +847,7 @@ def _parse_cohort(value, *, context, policy, required_strata, metric_rules):
         "latency_uncertainty": latency_uncertainty,
         "cohort_digest": cohort_digest, "source_digests": source_digests,
         "currency": currency, "strata": tuple(sorted(value["stratum_id"] for value in parsed_strata)),
+        "work_item_ids": frozenset(work_ids), "attempt_ids": frozenset(attempt_ids),
     }
 
 
@@ -964,6 +977,10 @@ def _build_scorecard_evaluation(value: Mapping[str, object]) -> dict[str, object
     all_sources = [digest for cohort in cohorts for digest in cohort["source_digests"]]
     if len(set(all_sources)) != len(all_sources):
         _invalid()
+    all_work_items = [identity for cohort in cohorts for identity in cohort["work_item_ids"]]
+    all_attempts = [identity for cohort in cohorts for identity in cohort["attempt_ids"]]
+    if len(set(all_work_items)) != len(all_work_items) or len(set(all_attempts)) != len(all_attempts):
+        _invalid()
 
     baseline = cohorts[ids.index(baseline_id)]
     baseline_cost = baseline["output"]["metrics"]["quality_qualified_cost_per_accepted_work_item"]
@@ -1046,6 +1063,7 @@ def _build_scorecard_evaluation(value: Mapping[str, object]) -> dict[str, object
         "eligible_association_candidates": aggregate["association"],
         "pricing": aggregate["pricing"], "connector": aggregate["connector"],
         "association": aggregate["association"],
+        "excluded": aggregate["excluded"],
     }
     scorecard = {
         "schema_id": "hormuz.model-scorecard", "schema_version": 1,

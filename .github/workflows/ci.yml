@@ -558,7 +558,8 @@ jobs:
             -s "$RUNNER_TEMP/postgres_installed_association_tests" -t "$RUNNER_TEMP" \
             -p test_postgres_scorecard_runtime.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
-            -s "$GITHUB_WORKSPACE/tests" -p test_scorecard_transition.py -v
+            -s "$RUNNER_TEMP/postgres_installed_association_tests" -t "$RUNNER_TEMP" \
+            -p test_scorecard_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_registration_store.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \

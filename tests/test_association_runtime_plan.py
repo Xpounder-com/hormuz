@@ -85,6 +85,19 @@ class AssociationRuntimePlanTests(unittest.TestCase):
         self.assertFalse(result["live_connectors_authorized"])
         self.assertFalse(result["released"])
 
+    def test_scorecard_successor_rechecks_association_owned_sources(self):
+        with mock.patch.object(
+            verifier, "PLAN_SHA256", self.historical_plan_sha256
+        ):
+            verifier._validate_successor_predecessor(self.root)
+            path = self.root / "hormuz/association_repository.py"
+            path.write_bytes(path.read_bytes() + b"\n")
+            with self.assertRaisesRegex(
+                verifier.AssociationRuntimePlanError,
+                "association_runtime_source_changed",
+            ):
+                verifier._validate_successor_predecessor(self.root)
+
     def test_duplicate_plan_member_is_rejected(self):
         path = self.root / verifier.PLAN_PATH
         payload = path.read_text(encoding="utf-8")

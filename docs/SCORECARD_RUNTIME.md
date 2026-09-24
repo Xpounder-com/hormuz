@@ -24,7 +24,9 @@ The primary readiness KPI is **use-case-attributed spend coverage**:
 The scorecard also reports separate pricing, attribution, linked-outcome,
 association, connector, excluded, governed-attempt, governed-spend, and
 external-outcome coverage. Missing evidence and a zero denominator remain
-inconclusive; neither becomes a fabricated numeric zero.
+inconclusive; neither becomes a fabricated numeric zero. Excluded evidence is
+retained for each cohort and in the aggregate so a reviewer can see what was
+removed from the eligible population.
 
 The primary economics KPI is **quality-qualified cost per accepted work item**:
 
@@ -85,6 +87,8 @@ digest. The frozen fixture at
 `tests/fixtures/scorecard/runtime-v1.json` contains the full input and expected
 evaluation. Reordering cohorts, strata, work items, attempts, or connector IDs
 does not change the result or lineage digest.
+Work-item and attempt identities are unique across the complete scorecard, so
+the same governed evidence cannot be counted in two cohorts.
 
 Adversarial tests cover missing and zero coverage, duplicate source facts,
 duplicate attempt identities, non-contiguous retries, pooled actual models,
@@ -102,9 +106,10 @@ Only a configured `portfolio_admin` may build a snapshot. Authorization occurs
 before parsing input or opening storage. The referenced use-case version must
 exist, be active, and belong to the authorized organization. A scorecard family
 cannot change its use-case version; each successor must increment exactly one
-version and name the prior version. Replaying the exact input returns the
-existing snapshot without appending a second audit fact. Reusing a version for
-different input fails closed.
+version and name the prior version. Replaying the same normalized evidence
+returns the existing snapshot without appending a second audit fact, even when
+permitted input lists arrive in a different order. Reusing a version for
+different evidence fails closed.
 
 The tenant-keyed tables are:
 
@@ -113,7 +118,9 @@ The tenant-keyed tables are:
 
 They store the canonical metadata-only input and evaluation, their digests,
 source-set digest, scope/window identity, state, expiry, decision owner, and
-version lineage. This makes a stored result independently recomputable. SQLite
+version lineage. Timestamp columns are normalized to fixed-width UTC text
+before the database applies chronological checks. This makes a stored result
+independently recomputable. SQLite
 triggers reject update and delete. PostgreSQL enables and forces tenant RLS,
 revokes PUBLIC, grants the runtime role only `SELECT` and `INSERT`, and rejects
 update, delete, and truncate. The accepted complete schema-22 ACL boundary is

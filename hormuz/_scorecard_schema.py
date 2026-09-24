@@ -52,6 +52,12 @@ TABLE_DDL = {
             REFERENCES {prefix}portfolio_model_scorecard_snapshots (organization_id, scorecard_id, version),
         FOREIGN KEY (organization_id, sequence)
             REFERENCES {prefix}portfolio_scorecard_audit_events (organization_id, sequence),
+        CHECK (length(window_start_at) = 27 AND substr(window_start_at, 20, 1) = '.' AND substr(window_start_at, 27, 1) = 'Z'),
+        CHECK (length(window_end_at) = 27 AND substr(window_end_at, 20, 1) = '.' AND substr(window_end_at, 27, 1) = 'Z'),
+        CHECK (length(evaluated_at) = 27 AND substr(evaluated_at, 20, 1) = '.' AND substr(evaluated_at, 27, 1) = 'Z'),
+        CHECK (length(generated_at) = 27 AND substr(generated_at, 20, 1) = '.' AND substr(generated_at, 27, 1) = 'Z'),
+        CHECK (length(expires_at) = 27 AND substr(expires_at, 20, 1) = '.' AND substr(expires_at, 27, 1) = 'Z'),
+        CHECK (length(review_after) = 27 AND substr(review_after, 20, 1) = '.' AND substr(review_after, 27, 1) = 'Z'),
         CHECK (window_start_at < window_end_at),
         CHECK (window_end_at <= evaluated_at AND evaluated_at <= generated_at),
         CHECK (generated_at < expires_at AND generated_at < review_after),

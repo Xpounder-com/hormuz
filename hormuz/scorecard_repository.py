@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 from typing import Mapping
@@ -81,6 +81,12 @@ class ScorecardRepository:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             raise PortfolioError("unavailable") from None
+
+    @classmethod
+    def _canonical_timestamp(cls, value: object) -> str:
+        return cls._timestamp(value).astimezone(timezone.utc).isoformat(
+            timespec="microseconds"
+        ).replace("+00:00", "Z")
 
     @staticmethod
     def _evaluation_digest(value: Mapping[str, object]) -> str:
@@ -164,7 +170,10 @@ class ScorecardRepository:
                 (organization, scorecard_id, version),
             )
             if exact is not None:
-                if exact["input_json"] != input_json:
+                # Replay identity follows the kernel's normalized digest.  Raw
+                # list order is retained for provenance but cannot turn the
+                # same semantic evidence into a version conflict.
+                if exact["input_digest"] != input_digest:
                     raise PortfolioError("version_conflict")
                 return self._stored(exact)
 
@@ -215,12 +224,12 @@ class ScorecardRepository:
                 "version": version,
                 "work_scope_id": scope["work_scope_id"],
                 "work_scope_version": scope["version"],
-                "window_start_at": scorecard["window"]["start_at"],
-                "window_end_at": scorecard["window"]["end_at"],
-                "evaluated_at": value["evaluated_at"],
-                "generated_at": scorecard["generated_at"],
-                "expires_at": scorecard["expires_at"],
-                "review_after": scorecard["review_after"],
+                "window_start_at": self._canonical_timestamp(scorecard["window"]["start_at"]),
+                "window_end_at": self._canonical_timestamp(scorecard["window"]["end_at"]),
+                "evaluated_at": self._canonical_timestamp(value["evaluated_at"]),
+                "generated_at": self._canonical_timestamp(scorecard["generated_at"]),
+                "expires_at": self._canonical_timestamp(scorecard["expires_at"]),
+                "review_after": self._canonical_timestamp(scorecard["review_after"]),
                 "state": scorecard["state"],
                 "evidence_level": scorecard["evidence_level"],
                 "decision_owner_id": scorecard["decision_owner_id"],

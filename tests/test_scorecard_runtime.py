@@ -160,6 +160,38 @@ class SQLiteScorecardRuntimeTests(unittest.TestCase):
         self.assertEqual(len(rows["portfolio_model_scorecard_snapshots"]), 1)
         self.assertEqual(len(rows["portfolio_scorecard_audit_events"]), 1)
 
+    def test_semantic_replay_is_independent_of_input_list_order(self):
+        value = self.request(scorecard_id="order-independent-scorecard")
+        expected = self.repositories.scorecards.build(self.principal, value)
+        reordered = deepcopy(value)
+        reordered["cohorts"].reverse()
+        for cohort in reordered["cohorts"]:
+            cohort["connector_ids"].reverse()
+            cohort["strata"].reverse()
+            for stratum in cohort["strata"]:
+                stratum["work_items"].reverse()
+                for work_item in stratum["work_items"]:
+                    work_item["attempts"].reverse()
+                    for attempt in work_item["attempts"]:
+                        attempt["cost_components"].reverse()
+        self.assertNotEqual(canonical(value), canonical(reordered))
+        self.assertEqual(
+            self.repositories.scorecards.build(self.principal, reordered), expected
+        )
+        rows = self.rows()
+        self.assertEqual(len(rows["portfolio_model_scorecard_snapshots"]), 1)
+        self.assertEqual(len(rows["portfolio_scorecard_audit_events"]), 1)
+
+    def test_fractional_timestamps_are_normalized_before_storage_order_checks(self):
+        value = self.request(scorecard_id="fractional-time-scorecard")
+        value["window"]["end_at"] = "2026-09-08T12:00:00Z"
+        value["evaluated_at"] = "2026-09-08T12:00:00.1Z"
+        self.repositories.scorecards.build(self.principal, value)
+        stored = self.rows()["portfolio_model_scorecard_snapshots"][0]
+        self.assertEqual(stored["window_end_at"], "2026-09-08T12:00:00.000000Z")
+        self.assertEqual(stored["evaluated_at"], "2026-09-08T12:00:00.100000Z")
+        self.assertLess(stored["window_end_at"], stored["evaluated_at"])
+
 
 if __name__ == "__main__":
     unittest.main()

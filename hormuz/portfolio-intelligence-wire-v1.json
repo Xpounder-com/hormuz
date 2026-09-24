@@ -482,6 +482,10 @@
         "association": {
           "$ref": "#/$defs/coverage",
           "description": "Coverage for association."
+        },
+        "excluded": {
+          "$ref": "#/$defs/coverage",
+          "description": "Evidence deliberately excluded from the eligible population; reported without counting as successful coverage."
         }
       },
       "required": [
@@ -491,7 +495,8 @@
         "eligible_association_candidates",
         "pricing",
         "connector",
-        "association"
+        "association",
+        "excluded"
       ],
       "description": "Coverage dimensions are all present; unavailable evidence is explicit, not omitted."
     },
@@ -1051,6 +1056,10 @@
           "$ref": "#/$defs/coverage",
           "description": "Coverage for the connector evidence used by this cohort."
         },
+        "excluded_coverage": {
+          "$ref": "#/$defs/coverage",
+          "description": "Evidence deliberately excluded from this cohort's eligible population."
+        },
         "association_rule": {
           "anyOf": [
             {
@@ -1083,6 +1092,7 @@
         "cost_basis",
         "cost_components",
         "connector_coverage",
+        "excluded_coverage",
         "association_rule",
         "eligibility",
         "metrics",

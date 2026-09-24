@@ -177,6 +177,66 @@ class ScorecardKernelTests(unittest.TestCase):
                 self.assertEqual(efficient["eligibility"]["status"], "inconclusive")
                 self.assertIsNone(result["scorecard"]["coverage"]["pricing"]["ratio"])
 
+    def test_spend_coverage_distinguishes_missing_from_below_threshold(self):
+        for numerator, denominator in ((None, None), ("0", "0")):
+            with self.subTest(numerator=numerator, denominator=denominator):
+                selected = deepcopy(self.fixture["input"])
+                selected["cohorts"][0]["coverage"]["eligible_governed_spend"].update({
+                    "numerator": numerator,
+                    "denominator": denominator,
+                })
+                metric = self.build(selected)["scorecard"]["cohorts"][0]["metrics"][
+                    "use_case_attributed_spend_coverage"
+                ]
+                self.assertIsNone(metric["value"])
+                self.assertEqual(metric["reason_code"], "missing_evidence")
+
+        selected = deepcopy(self.fixture["input"])
+        selected["cohorts"][0]["coverage"]["eligible_governed_spend"].update({
+            "numerator": "1",
+            "denominator": "10",
+        })
+        metric = self.build(selected)["scorecard"]["cohorts"][0]["metrics"][
+            "use_case_attributed_spend_coverage"
+        ]
+        self.assertEqual(metric["value"], "0.1")
+        self.assertEqual(metric["reason_code"], "below_threshold")
+
+    def test_excluded_coverage_remains_visible_per_cohort_and_in_aggregate(self):
+        result = self.build(deepcopy(self.fixture["input"]))
+        self.assertEqual(
+            result["scorecard"]["coverage"]["excluded"],
+            {
+                "numerator": "3",
+                "denominator": "30",
+                "ratio": 0.1,
+                "reason_code": "eligible",
+            },
+        )
+        for cohort in result["scorecard"]["cohorts"]:
+            expected = next(
+                item for item in self.fixture["input"]["cohorts"]
+                if item["cohort_id"] == cohort["cohort_id"]
+            )["coverage"]["excluded"]
+            self.assertEqual(
+                cohort["excluded_coverage"]["numerator"], expected["numerator"]
+            )
+            self.assertEqual(
+                cohort["excluded_coverage"]["denominator"], expected["denominator"]
+            )
+
+    def test_work_and_attempt_identities_cannot_cross_cohorts(self):
+        for identity in ("work_item_id", "attempt_id"):
+            with self.subTest(identity=identity):
+                selected = deepcopy(self.fixture["input"])
+                baseline = selected["cohorts"][0]["strata"][0]["work_items"][0]
+                comparison = selected["cohorts"][1]["strata"][0]["work_items"][0]
+                if identity == "work_item_id":
+                    comparison[identity] = baseline[identity]
+                else:
+                    comparison["attempts"][0][identity] = baseline["attempts"][0][identity]
+                self.invalid(selected)
+
     def test_zero_crossing_baseline_cost_interval_makes_lift_inconclusive(self):
         selected = deepcopy(self.fixture["input"])
         baseline = next(

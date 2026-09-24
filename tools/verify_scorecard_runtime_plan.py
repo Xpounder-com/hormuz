@@ -25,7 +25,7 @@ from hormuz.scorecard_kernel import ScorecardKernelError, build_scorecard_evalua
 
 
 PLAN_PATH = "docs/scorecard-runtime-plan-v1.json"
-PLAN_SHA256 = "bfc405becc230e7fa95e09ecd51372a855321415fb3eaabfcb43e495d55a8deb"
+PLAN_SHA256 = "72e7ad360f825cc5125488209da3843119eff856bf0fcf2f466e0be255c9af46"
 PREDECESSOR_PATH = "docs/association-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "45e6d5eb87c3763d5b53a4c86189b9e5ed68fa320390f17e965f356f62769921"

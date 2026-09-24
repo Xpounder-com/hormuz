@@ -121,6 +121,19 @@ SOURCE_PATHS = (
     "tools/verify_linear_runtime_plan.py",
     "tools/verify_linear_transition_plan.py",
 )
+SUCCESSOR_PROTECTED_SOURCE_PATHS = (
+    "docs/ASSOCIATION_RUNTIME.md",
+    "hormuz/_association_schema.py",
+    "hormuz/association_evidence.py",
+    "hormuz/association_metrics.py",
+    "hormuz/association_repository.py",
+    "hormuz/migrations/postgresql/0021_run_outcome_association.sql",
+    "hormuz/portfolio-association-wire-v1.json",
+    "tests/fixtures/association/runtime-multisource-v1.json",
+    "tests/test_association_metrics.py",
+    "tests/test_association_runtime.py",
+    "tests/test_postgres_association_runtime.py",
+)
 REQUIRED_FILES = (
     PLAN_PATH,
     PREDECESSOR_PATH,
@@ -327,10 +340,37 @@ def _validate_wire_and_fixture(root: Path) -> None:
             _fail("association_runtime_content_boundary_invalid")
 
 
+def _validate_successor_predecessor(root: Path) -> None:
+    """Re-prove immutable association-owned evidence under a successor schema."""
+
+    if any(not (root / relative).is_file() for relative in REQUIRED_FILES):
+        _fail("association_runtime_source_kit_incomplete")
+    plan = _read_json(root / PLAN_PATH)
+    if canonical_digest(plan) != PLAN_SHA256:
+        _fail("association_runtime_plan_changed")
+    sources = plan.get("source_sha256")
+    if not isinstance(sources, dict):
+        _fail("association_runtime_plan_invalid")
+    for relative in SUCCESSOR_PROTECTED_SOURCE_PATHS:
+        expected = sources.get(relative)
+        if not isinstance(expected, str):
+            _fail("association_runtime_plan_invalid")
+        try:
+            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+        except OSError:
+            _fail("association_runtime_source_kit_incomplete")
+        if actual != expected:
+            _fail("association_runtime_source_changed")
+    _validate_predecessor(root)
+    _validate_migration(root, plan)
+    _validate_wire_and_fixture(root)
+
+
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
     versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
     if versions == (17, 22):
+        _validate_successor_predecessor(root)
         try:
             from tools.verify_scorecard_runtime_plan import (
                 ScorecardRuntimePlanError,

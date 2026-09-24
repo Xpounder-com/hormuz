@@ -1,6 +1,4 @@
 {
-  "schema_id": "hormuz.scorecard-runtime-fixture",
-  "schema_version": 1,
   "expected": {
     "cohort_dimensions": [
       {
@@ -113,11 +111,11 @@
         "version": 1
       },
       "cohort_digests": [
-        "e39adae28464372cc2f4c254730775acc031e3afeb3d16715b89dcc366cc14cf",
-        "8e1bf949ab80124cba8e9f980c50bd4056b668b449351771dedef895d32ee7d4",
-        "5d34bd832fb19f941d5e9fea67b8b76a6c5dcf58ee4cbc481a6b0f2792d7cec9"
+        "1c519c24de6c60b424dd5de84cc95ad3f9b18d961a9fbf4434853aa100ea1747",
+        "a3f50c37fc7c6f9838f59eee93d32931df9fc29d16860fb88e12b7a2d6cd8f05",
+        "3313d85c4e12923d98700375613614742c28618def1c36cc98ab87f6002211a3"
       ],
-      "input_digest": "8e97894b949235115165f74150cc256173e5ffa15fb98ad137efe11552d6c1e3",
+      "input_digest": "4a682e3d0c33f83cccf7d193a1d333b0d12f1c31252faae91e80a7610106a123",
       "source_digests": [
         "01c7997ae32098c9abc437bf7c940ee49918ad02711e4059f556479bb5ff3b2c",
         "0254d6b76f1d61a09d4df2c8a6def4f5e373d774fbd02eb30be0d1f2d9a6c915",
@@ -321,6 +319,12 @@
             },
             "sample_count": 6,
             "status": "eligible"
+          },
+          "excluded_coverage": {
+            "denominator": "10",
+            "numerator": "1",
+            "ratio": 0.1,
+            "reason_code": "eligible"
           },
           "guardrails": {
             "budget": {
@@ -548,6 +552,12 @@
             "sample_count": 6,
             "status": "eligible"
           },
+          "excluded_coverage": {
+            "denominator": "10",
+            "numerator": "1",
+            "ratio": 0.1,
+            "reason_code": "eligible"
+          },
           "guardrails": {
             "budget": {
               "reason_code": "eligible",
@@ -774,6 +784,12 @@
             "sample_count": 6,
             "status": "inconclusive"
           },
+          "excluded_coverage": {
+            "denominator": "10",
+            "numerator": "1",
+            "ratio": 0.1,
+            "reason_code": "eligible"
+          },
           "guardrails": {
             "budget": {
               "reason_code": "eligible",
@@ -886,7 +902,7 @@
             "use_case_attributed_spend_coverage": {
               "denominator": "10",
               "numerator": "9",
-              "reason_code": "below_threshold",
+              "reason_code": "missing_evidence",
               "rule": {
                 "digest": "3e4847ed14ca4787109b3ea3b8cd4b0a0b74a8b6b93faa8ccdbd42a1f0b67157",
                 "rule_id": "spend-coverage",
@@ -943,6 +959,12 @@
           "denominator": "30",
           "numerator": "27",
           "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "excluded": {
+          "denominator": "30",
+          "numerator": "3",
+          "ratio": 0.1,
           "reason_code": "eligible"
         },
         "pricing": {
@@ -2832,5 +2854,7 @@
       "version": 3,
       "work_scope_id": "use-case-a"
     }
-  }
+  },
+  "schema_id": "hormuz.scorecard-runtime-fixture",
+  "schema_version": 1
 }
