@@ -12,6 +12,7 @@ from hormuz.portfolio_config import PortfolioPrincipal
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import PortfolioError, ROLE_VIEWS
+from hormuz.portfolio_wire import query_parameters
 from hormuz.store import UsageStore
 
 from ._portfolio_fixture import ADMIN as ADMIN_TOKEN
@@ -24,6 +25,8 @@ from ._role_view_fixture import (
     create_budget,
     create_scorecard,
     create_scope,
+    reactivate_budget,
+    revise_budget,
     role_view_config,
 )
 
@@ -242,6 +245,125 @@ class SQLitePortfolioRoleViewTests(unittest.TestCase):
         original = next(row for row in cursors if row["cursor_id"] == first["next_cursor"])
         self.assertEqual(original["page_limit"], 1)
         self.assertEqual(json.loads(original["filters_json"]), {})
+
+    def test_frozen_budget_cursor_survives_later_reactivation(self):
+        sales_current = revise_budget(
+            self.repositories,
+            self.sales_plan,
+            self.sales,
+            amount="225",
+        )
+        engineering_current = revise_budget(
+            self.repositories,
+            self.engineering_plan,
+            self.engineering,
+            amount="125",
+        )
+        first = self.call(FINANCE_TOKEN, "finance", "budgets", "limit=1")
+        self.assertTrue(first["has_more"])
+        self.assertEqual(
+            first["items"][0]["payload"]["plan"]["id"],
+            engineering_current["budget_plan_id"],
+        )
+        reactivate_budget(
+            self.repositories,
+            self.sales_plan,
+            current_version=sales_current["version"],
+            generation=2,
+        )
+
+        continuation = self.call(
+            FINANCE_TOKEN,
+            "finance",
+            "budgets",
+            "cursor=" + first["next_cursor"],
+        )
+        self.assertEqual(continuation["result_count"], 1)
+        self.assertEqual(
+            continuation["items"][0]["payload"]["plan"]["id"],
+            sales_current["budget_plan_id"],
+        )
+        self.assertEqual(
+            continuation["items"][0]["payload"]["plan"]["version"],
+            sales_current["version"],
+        )
+        self.assertEqual(
+            continuation["items"][0]["payload"]["activation_generation"],
+            2,
+        )
+
+    def test_team_plan_change_redacts_prior_scope_after_team_move(self):
+        moved = revise_budget(
+            self.repositories,
+            self.engineering_plan,
+            self.sales,
+            amount="150",
+        )
+        sales = self.call(SALES_TOKEN, "team", "budgets")
+        item = next(
+            item for item in sales["items"]
+            if item["payload"]["plan"]["id"] == moved["budget_plan_id"]
+        )
+        change = item["payload"]["plan_change"]
+        self.assertEqual(
+            (change["kind"], change["comparison_status"]),
+            ("not_comparable", "missing_evidence"),
+        )
+        for field in (
+            "previous_plan",
+            "previous_amount",
+            "previous_currency",
+            "previous_work_scope",
+            "previous_window",
+            "amount_delta",
+            "percent_delta",
+        ):
+            self.assertIsNone(change[field])
+        self.assertEqual(change["comparison_reasons"], [])
+        self.assertNotIn(
+            self.engineering["work_scope_id"],
+            json.dumps(item, sort_keys=True),
+        )
+
+        finance = self.call(FINANCE_TOKEN, "finance", "budgets")
+        finance_item = next(
+            item for item in finance["items"]
+            if item["payload"]["plan"]["id"] == moved["budget_plan_id"]
+        )
+        self.assertEqual(
+            finance_item["payload"]["plan_change"]["previous_work_scope"],
+            {
+                "work_scope_id": self.engineering["work_scope_id"],
+                "version": self.engineering["version"],
+            },
+        )
+
+    def test_team_scope_is_applied_before_candidate_cap(self):
+        with mock.patch("hormuz.role_view_repository._MAX_CANDIDATES", 1):
+            budgets = self.call(TEAM_TOKEN, "team", "budgets")
+            scorecards = self.call(TEAM_TOKEN, "team", "scorecards")
+        self.assertEqual(budgets["result_count"], 1)
+        self.assertEqual(scorecards["result_count"], 1)
+        self.assertEqual(
+            budgets["items"][0]["work_scope"]["work_scope_id"],
+            self.engineering["work_scope_id"],
+        )
+        self.assertEqual(
+            scorecards["items"][0]["work_scope"]["work_scope_id"],
+            self.engineering["work_scope_id"],
+        )
+
+    def test_window_limit_is_role_view_specific(self):
+        query = (
+            "start_at=2024-01-01T00%3A00%3A00.000000Z&"
+            "end_at=2026-01-01T00%3A00%3A00.000000Z"
+        )
+        parsed = query_parameters(query, "list_scopes")
+        self.assertEqual(parsed["start_at"], "2024-01-01T00:00:00.000000Z")
+        self.error(
+            "invalid_request",
+            lambda: query_parameters(query, "list_team_budgets"),
+        )
 
     def test_every_read_is_atomically_audited_and_partial_provenance_is_counted(self):
         page = self.call(FINANCE_TOKEN, "finance", "budgets", "limit=1")

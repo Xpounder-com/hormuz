@@ -171,6 +171,64 @@ class RoleViewRuntimePlanTests(unittest.TestCase):
             ):
                 verifier.verify(self.root)
 
+    def test_budget_transport_cannot_return_to_planned_only_metadata(self):
+        relatives = (
+            "docs/work-budget-reports-wire-v2.json",
+            "hormuz/work-budget-reports-wire-v2.json",
+        )
+        plan = self.plan()
+        for relative in relatives:
+            path = self.root / relative
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["x-hormuz-route-query-fields"] = {}
+            value["x-hormuz-transport"] = {
+                "response_maximum_bytes": 1048576,
+                "runtime_enabled": False,
+                "new_http_routes": [],
+                "delivery": "separate_planned_cli_or_internal_records",
+            }
+            path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+            plan["source_sha256"][relative] = hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+        self.write_plan(plan)
+        with mock.patch.object(
+            verifier,
+            "PLAN_SHA256",
+            verifier.canonical_digest(plan),
+        ):
+            with self.assertRaisesRegex(
+                verifier.RoleViewRuntimePlanError,
+                "role_view_runtime_wire_invalid",
+            ):
+                verifier.verify(self.root)
+
+    def test_resource_payload_pairing_cannot_be_removed(self):
+        relatives = (
+            "docs/portfolio-role-views-wire-v1.json",
+            "hormuz/portfolio-role-views-wire-v1.json",
+        )
+        plan = self.plan()
+        for relative in relatives:
+            path = self.root / relative
+            value = json.loads(path.read_text(encoding="utf-8"))
+            del value["$defs"]["hormuz.portfolio-role-view-item"]["allOf"]
+            path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+            plan["source_sha256"][relative] = hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+        self.write_plan(plan)
+        with mock.patch.object(
+            verifier,
+            "PLAN_SHA256",
+            verifier.canonical_digest(plan),
+        ):
+            with self.assertRaisesRegex(
+                verifier.RoleViewRuntimePlanError,
+                "role_view_runtime_wire_invalid",
+            ):
+                verifier.verify(self.root)
+
     def test_scorecard_runtime_predecessor_is_immutable(self):
         path = self.root / verifier.PREDECESSOR_PATH
         path.write_bytes(path.read_bytes() + b"\n")

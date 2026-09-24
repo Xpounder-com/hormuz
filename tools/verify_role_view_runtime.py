@@ -34,7 +34,7 @@ from tools import verify_scorecard_runtime_plan as scorecard_verifier
 
 
 PLAN_PATH = "docs/role-view-runtime-plan-v1.json"
-PLAN_SHA256 = "e5d28bf59f1482eb46ae34618af4fb2504208bf3ecc7b5e4d262e84889bf9715"
+PLAN_SHA256 = "29bbb0e0a371abcfe18e12d4f235ab62993f09dcd4fa8e91e557a15d2321fb17"
 PREDECESSOR_PATH = "docs/scorecard-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "b5ad84161eb9d5f2ac109cc25856a041fca5f905bd0f1d415d112b055e7fafb2"
@@ -57,6 +57,47 @@ ROUTES = (
     "GET /v1/admin/portfolio/views/team/budgets",
     "GET /v1/admin/portfolio/views/team/scorecards",
 )
+BUDGET_ROUTES = (ROUTES[0], ROUTES[2])
+BUDGET_ROUTE_QUERY_FIELDS = {
+    route: ["cursor", "end_at", "limit", "start_at", "work_scope_id"]
+    for route in BUDGET_ROUTES
+}
+BUDGET_TRANSPORT = {
+    "response_maximum_bytes": RESPONSE_BYTES,
+    "runtime_enabled": True,
+    "new_http_routes": list(BUDGET_ROUTES),
+    "delivery": "role_scoped_http_and_portfolio_view_cli",
+}
+ROLE_ITEM_PAYLOAD_CONDITIONS = [
+    {
+        "if": {
+            "properties": {"resource": {"const": "budget"}},
+            "required": ["resource"],
+        },
+        "then": {
+            "properties": {
+                "payload": {
+                    "$ref": "work-budget-reports-wire-v2.json#/$defs/hormuz.work-budget-report"
+                }
+            },
+            "required": ["payload"],
+        },
+    },
+    {
+        "if": {
+            "properties": {"resource": {"const": "scorecard"}},
+            "required": ["resource"],
+        },
+        "then": {
+            "properties": {
+                "payload": {
+                    "$ref": "portfolio-intelligence-wire-v1.json#/$defs/hormuz.model-scorecard"
+                }
+            },
+            "required": ["payload"],
+        },
+    },
+]
 ROLE_BINDINGS = {
     "finance_budgets": "finance_viewer",
     "platform_scorecards": "platform_viewer",
@@ -97,6 +138,7 @@ SOURCE_PATHS = (
     "tests/test_budget_schema.py",
     "tests/test_cli_runtime_ownership.py",
     "tests/test_durable_data_inventory.py",
+    "tests/test_finance_account_binding_preflight.py",
     "tests/test_finance_account_binding_transition_preflight.py",
     "tests/test_finance_collection_postgres_runtime_plan.py",
     "tests/test_finance_collection_runtime_plan.py",
@@ -111,6 +153,7 @@ SOURCE_PATHS = (
     "tests/test_postgres_linear_snapshot_runtime.py",
     "tests/test_postgres_role_view_runtime.py",
     "tests/test_postgres_scorecard_runtime.py",
+    "tests/test_portfolio_display_examples.py",
     "tests/test_role_view_api_cli.py",
     "tests/test_role_view_runtime.py",
     "tests/test_role_view_runtime_plan.py",
@@ -127,10 +170,13 @@ SOURCE_PATHS = (
     "tests/test_sqlite_outcome_transition.py",
     "tests/test_sqlite_registry_transition.py",
     "tests/test_store.py",
+    "tools/render_portfolio_display_examples.py",
     "tools/verify_association_runtime_plan.py",
     "tools/verify_association_transition_plan.py",
+    "tools/verify_budget_transition_plan.py",
     "tools/verify_core_wheel.py",
     "tools/verify_durable_data_inventory.py",
+    "tools/verify_finance_account_binding_preflight.py",
     "tools/verify_finance_collection_postgres_runtime.py",
     "tools/verify_finance_collection_runtime.py",
     "tools/verify_finance_native_attempt_transition_plan.py",
@@ -353,6 +399,11 @@ def _validate_wire_and_fixtures(root: Path) -> None:
     wire = _read_json(root / pairs[0][0])
     budget = _read_json(root / pairs[1][0])
     definitions = wire.get("$defs") if isinstance(wire, dict) else None
+    item = (
+        definitions.get("hormuz.portfolio-role-view-item")
+        if isinstance(definitions, dict)
+        else None
+    )
     if (
         wire.get("x-hormuz-schema-ids")
         != ["hormuz.portfolio-role-view-item", "hormuz.portfolio-role-view-page"]
@@ -363,9 +414,14 @@ def _validate_wire_and_fixtures(root: Path) -> None:
             "provenance",
             "freshness",
         }.issubset(definitions)
+        or not isinstance(item, dict)
+        or item.get("allOf") != ROLE_ITEM_PAYLOAD_CONDITIONS
         or budget.get("x-hormuz-schema-versions", {}).get(
             "hormuz.work-budget-report"
         ) != 2
+        or budget.get("x-hormuz-route-query-fields")
+        != BUDGET_ROUTE_QUERY_FIELDS
+        or budget.get("x-hormuz-transport") != BUDGET_TRANSPORT
         or FORBIDDEN_INSTANCE_FIELDS.intersection(_declared_property_names(wire))
     ):
         _fail("role_view_runtime_wire_invalid")

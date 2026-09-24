@@ -280,7 +280,10 @@ class PortfolioRoleViewRepository:
         snapshot: int,
         filters: Mapping[str, object],
         after: tuple[str, str] | None,
+        work_scopes: set[tuple[str, int]] | None = None,
     ) -> list[dict[str, object]]:
+        if work_scopes is not None and not work_scopes:
+            return []
         where = [
             "e.organization_id=?",
             "e.committed_at<=?",
@@ -303,6 +306,14 @@ class PortfolioRoleViewRepository:
         if "start_at" in filters:
             where.extend(("p.window_start_at>=?", "p.window_end_at<=?"))
             values.extend((filters["start_at"], filters["end_at"]))
+        if work_scopes is not None:
+            ordered_scopes = sorted(work_scopes)
+            where.append(
+                "(p.work_scope_id,p.work_scope_version) IN ("
+                + ",".join("(?,?)" for _ in ordered_scopes)
+                + ")"
+            )
+            values.extend(value for scope in ordered_scopes for value in scope)
         if after is not None:
             where.append("(e.committed_at<? OR (e.committed_at=? AND e.budget_plan_id<?))")
             values.extend((after[0], after[0], after[1]))
@@ -327,7 +338,10 @@ class PortfolioRoleViewRepository:
         snapshot: int,
         filters: Mapping[str, object],
         after: tuple[str, str] | None,
+        work_scopes: set[tuple[str, int]] | None = None,
     ) -> list[dict[str, object]]:
+        if work_scopes is not None and not work_scopes:
+            return []
         where = [
             "s.organization_id=?",
             "s.sequence<=?",
@@ -342,6 +356,14 @@ class PortfolioRoleViewRepository:
         if "start_at" in filters:
             where.extend(("s.window_start_at>=?", "s.window_end_at<=?"))
             values.extend((filters["start_at"], filters["end_at"]))
+        if work_scopes is not None:
+            ordered_scopes = sorted(work_scopes)
+            where.append(
+                "(s.work_scope_id,s.work_scope_version) IN ("
+                + ",".join("(?,?)" for _ in ordered_scopes)
+                + ")"
+            )
+            values.extend(value for scope in ordered_scopes for value in scope)
         if after is not None:
             where.append("(s.generated_at<? OR (s.generated_at=? AND s.scorecard_id<?))")
             values.extend((after[0], after[0], after[1]))
@@ -369,6 +391,7 @@ class PortfolioRoleViewRepository:
             as_of,
             snapshot,
             {"work_scope_id": work_scope[0]},
+            None,
             None,
         )
         result = []
@@ -941,16 +964,13 @@ class PortfolioRoleViewRepository:
             if resource == "budget":
                 candidates = self._budget_rows(
                     sql, principal.organization_id, as_of, snapshot, filters, after,
+                    team_scopes,
                 )
             else:
                 candidates = self._scorecard_rows(
                     sql, principal.organization_id, snapshot, filters, after,
+                    team_scopes,
                 )
-            if team_scopes is not None:
-                candidates = [
-                    row for row in candidates
-                    if (row["work_scope_id"], row["work_scope_version"]) in team_scopes
-                ]
             selected, has_more = candidates[:limit], len(candidates) > limit
             items = []
             configured_connectors = {
@@ -969,6 +989,8 @@ class PortfolioRoleViewRepository:
                             as_of=as_of,
                             generated_at=as_of,
                             reader_role=reader_role,
+                            plan_version=row["current_version"],
+                            activation_generation=row["activation_generation"],
                             report_id=hashlib.sha256(canonical({
                                 "organization_id": principal.organization_id,
                                 "actor_id": principal.actor_id,

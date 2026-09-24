@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import http.client
 import io
 import json
@@ -14,7 +14,9 @@ from unittest import mock
 
 from hormuz.cli import main
 from hormuz.commands.portfolio import _csv_rows, _print_view, _spreadsheet_cell
-from hormuz.portfolio_wire import ROLE_VIEWS
+from hormuz.config import ConfigError
+from hormuz.portfolio_config import authorize, build_portfolio_config
+from hormuz.portfolio_wire import PortfolioError, ROLE_VIEWS
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
 
@@ -124,6 +126,28 @@ class PortfolioRoleViewAPITests(unittest.TestCase):
             self.request(ROLE_VIEWS + "/finance/budgets?limit=101", FINANCE_TOKEN)[0],
             400,
         )
+
+    def test_team_lead_requires_a_bounded_opaque_team_id(self):
+        document, _ = configuration_document(self.config)
+        identities = tuple(self.config.identities_by_token.values())
+        team_identity = self.config.identities_by_token[TEAM_TOKEN]
+        for team_id in (None, "bad team", "x" * 129):
+            invalid = replace(team_identity, team_id=team_id)
+            changed = tuple(
+                invalid if identity is team_identity else identity
+                for identity in identities
+            )
+            with self.subTest(team_id=team_id):
+                with self.assertRaisesRegex(
+                    ConfigError,
+                    "^portfolio_configuration_invalid$",
+                ):
+                    build_portfolio_config(
+                        document["portfolio_control"],
+                        changed,
+                    )
+                with self.assertRaisesRegex(PortfolioError, "^forbidden$"):
+                    authorize(self.config.portfolio_control, invalid)
 
 
 class PortfolioRoleViewCLITests(unittest.TestCase):

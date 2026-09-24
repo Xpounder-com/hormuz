@@ -64,6 +64,11 @@ def authorize(config: PortfolioConfig | None, identity: Identity) -> PortfolioPr
     if config is not None:
         for binding in config.role_bindings:
             if (identity.organization_id, identity.actor_id) == (binding.organization_id, binding.actor_id):
+                if "team_lead" in binding.roles:
+                    try:
+                        validate(identity.team_id, "opaque_id")
+                    except PortfolioError:
+                        raise PortfolioError("forbidden") from None
                 return PortfolioPrincipal(
                     binding.organization_id,
                     binding.actor_id,
@@ -102,7 +107,11 @@ def build_portfolio_config(value: object, identities: tuple[Identity, ...]) -> P
         fail()
     bounded_list(value["role_bindings"], 1000)
     bounded_list(value["connectors"], 1000)
-    known = {(identity.organization_id, identity.actor_id) for identity in identities}
+    identity_by_key = {
+        (identity.organization_id, identity.actor_id): identity
+        for identity in identities
+    }
+    known = set(identity_by_key)
     organizations = {identity.organization_id for identity in identities}
     roles, connectors, seen_roles, seen_connectors = [], [], set(), set()
     for item in value["role_bindings"]:
@@ -115,6 +124,8 @@ def build_portfolio_config(value: object, identities: tuple[Identity, ...]) -> P
             fail()
         if key not in known or key in seen_roles or len(set(item["roles"])) != len(item["roles"]):
             fail()
+        if "team_lead" in item["roles"]:
+            opaque(identity_by_key[key].team_id)
         seen_roles.add(key)
         roles.append(PortfolioRoleBinding(*key, tuple(sorted(item["roles"]))))
     for item in value["connectors"]:

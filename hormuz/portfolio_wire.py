@@ -279,6 +279,9 @@ def query_parameters(raw: str, operation: str) -> dict[str, Any]:
             end = datetime.fromisoformat(result["end_at"])
         except ValueError:
             raise PortfolioError("invalid_request") from None
-        if start >= end or (end - start).total_seconds() > 366 * 86400:
+        if start >= end or (
+            operation in ROLE_VIEW_OPERATIONS
+            and (end - start).total_seconds() > 366 * 86400
+        ):
             raise PortfolioError("invalid_request")
     return result

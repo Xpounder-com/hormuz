@@ -470,13 +470,25 @@ class WorkBudgetRepository:
         return verified[0], verified[1], verified[2], history
 
     @staticmethod
-    def _activation_history(sql, organization: str, plan_id: str,
-                            observed_at: str) -> tuple[tuple[dict[str, Any], dict[str, Any]], ...]:
+    def _activation_history(
+        sql,
+        organization: str,
+        plan_id: str,
+        observed_at: str,
+        *,
+        through_generation: int | None = None,
+    ) -> tuple[tuple[dict[str, Any], dict[str, Any]], ...]:
+        where = "WHERE organization_id=? AND budget_plan_id=?"
+        values: list[object] = [organization, plan_id]
+        if through_generation is not None:
+            where += " AND activation_generation<=?"
+            values.append(through_generation)
         rows = sql.execute(
             "SELECT * FROM portfolio_work_budget_activation_events "
-            "WHERE organization_id=? AND budget_plan_id=? "
+            + where
+            + " "
             "ORDER BY activation_generation LIMIT ?",
-            (organization, plan_id, MAX_BUDGET_ACTIVATIONS_PER_PLAN + 1),
+            (*values, MAX_BUDGET_ACTIVATIONS_PER_PLAN + 1),
         ).fetchall()
         if len(rows) > MAX_BUDGET_ACTIVATIONS_PER_PLAN:
             raise BudgetRepositoryError("unavailable")
@@ -833,6 +845,25 @@ class WorkBudgetRepository:
         }
 
     @staticmethod
+    def _missing_plan_change(activation: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "kind": "not_comparable",
+            "changed_at": activation["committed_at"],
+            "percentage_scale": 6,
+            "percentage_rounding": "half_even",
+            "comparison_reasons": [],
+            "comparison_basis": "immediately_prior_active_plan",
+            "previous_plan": None,
+            "previous_amount": None,
+            "previous_currency": None,
+            "previous_work_scope": None,
+            "previous_window": None,
+            "amount_delta": None,
+            "percent_delta": None,
+            "comparison_status": "missing_evidence",
+        }
+
+    @staticmethod
     def _attempt_rows(sql, organization: str, plan: Mapping[str, Any], as_of: str) -> list[dict[str, Any]]:
         rows = sql.execute(
             "SELECT b.*, e.state AS attempt_state, u.cost_microusd AS committed_cost_microusd "
@@ -1055,6 +1086,8 @@ class WorkBudgetRepository:
         as_of: str,
         generated_at: str,
         reader_role: str,
+        plan_version: int | None = None,
+        activation_generation: int | None = None,
         report_id: str | None = None,
     ) -> dict[str, Any]:
         """Build one report inside an already authorized aggregate-read unit.
@@ -1073,20 +1106,54 @@ class WorkBudgetRepository:
                 "portfolio_admin", "finance_viewer", "platform_viewer", "team_lead",
             }
             or selected_as_of > generated
+            or (plan_version is None) != (activation_generation is None)
         ):
             raise BudgetRepositoryError("invalid_request")
-        active = self._active_budget(
-            sql, principal.organization_id, plan_id, generated,
-        )
-        if active is None:
-            raise BudgetRepositoryError("not_found")
-        selected = self._effective_activation(active[3], selected_as_of)
+        if plan_version is None:
+            active = self._active_budget(
+                sql, principal.organization_id, plan_id, generated,
+            )
+            if active is None:
+                raise BudgetRepositoryError("not_found")
+            history = active[3]
+        else:
+            exact_version = _version(plan_version)
+            exact_generation = _count(activation_generation)
+            if exact_generation < 1:
+                raise BudgetRepositoryError("invalid_request")
+            history = self._activation_history(
+                sql,
+                principal.organization_id,
+                plan_id,
+                selected_as_of,
+                through_generation=exact_generation,
+            )
+            if (
+                not history
+                or history[-1][0]["version"] != exact_version
+                or history[-1][1]["activation_generation"] != exact_generation
+            ):
+                raise BudgetRepositoryError("unavailable")
+        selected = self._effective_activation(history, selected_as_of)
         if selected is None:
             raise BudgetRepositoryError("not_found")
         plan, activation = selected
-        previous = None if activation["previous_version"] is None else self._plan(
-            sql, principal.organization_id, plan_id, activation["previous_version"],
-        )
+        if plan_version is not None and (
+            plan["version"] != exact_version
+            or activation["activation_generation"] != exact_generation
+        ):
+            raise BudgetRepositoryError("unavailable")
+        if activation["previous_version"] is None:
+            previous = None
+            plan_change = self._plan_change(plan, previous, activation)
+        elif reader_role == "team_lead":
+            previous = None
+            plan_change = self._missing_plan_change(activation)
+        else:
+            previous = self._plan(
+                sql, principal.organization_id, plan_id, activation["previous_version"],
+            )
+            plan_change = self._plan_change(plan, previous, activation)
         if selected_as_of < activation["committed_at"]:
             raise BudgetRepositoryError("invalid_request")
         try:
@@ -1104,7 +1171,6 @@ class WorkBudgetRepository:
             ValueError,
         ):
             raise BudgetRepositoryError("unavailable") from None
-        plan_change = self._plan_change(plan, previous, activation)
         facts = {
             "plan": dict(plan), "previous_plan": None if previous is None else dict(previous),
             "activation": dict(activation), "plan_change": plan_change,

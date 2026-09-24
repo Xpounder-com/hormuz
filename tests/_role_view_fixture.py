@@ -32,13 +32,19 @@ def _timestamp(value: datetime) -> str:
     ).replace("+00:00", "Z")
 
 
-def _plan_request(scope, *, amount: str) -> dict[str, object]:
+def _plan_request(
+    scope,
+    *,
+    amount: str,
+    budget_plan_id: str | None = None,
+    expected_version: int | None = None,
+) -> dict[str, object]:
     now = datetime.now(timezone.utc)
     return {
         "schema_id": "hormuz.work-budget-plan-request",
         "schema_version": 1,
-        "budget_plan_id": None,
-        "expected_version": None,
+        "budget_plan_id": budget_plan_id,
+        "expected_version": expected_version,
         "work_scope": {
             "work_scope_id": scope["work_scope_id"],
             "version": scope["version"],
@@ -52,18 +58,24 @@ def _plan_request(scope, *, amount: str) -> dict[str, object]:
         "allowed_models": None,
         "output_token_cap": None,
         "per_request_cost_cap": None,
-        "reason_code": "created",
+        "reason_code": "created" if budget_plan_id is None else "corrected",
     }
 
 
-def _activation_request(version: int) -> dict[str, object]:
+def _activation_request(
+    version: int,
+    *,
+    expected_active_version: int | None = None,
+    expected_activation_generation: int = 0,
+    reason_code: str = "accepted",
+) -> dict[str, object]:
     return {
         "schema_id": "hormuz.work-budget-plan-activation-request",
         "schema_version": 1,
         "version": version,
-        "expected_active_version": None,
-        "expected_activation_generation": 0,
-        "reason_code": "accepted",
+        "expected_active_version": expected_active_version,
+        "expected_activation_generation": expected_activation_generation,
+        "reason_code": reason_code,
     }
 
 
@@ -161,6 +173,47 @@ def create_budget(repositories, scope, *, amount: str = "100"):
         _activation_request(plan["version"]),
     )
     return plan
+
+
+def revise_budget(repositories, plan, scope, *, amount: str):
+    revised = repositories.budgets.create_plan(
+        ADMIN,
+        _plan_request(
+            scope,
+            amount=amount,
+            budget_plan_id=plan["budget_plan_id"],
+            expected_version=plan["version"],
+        ),
+    )
+    repositories.budgets.activate_plan(
+        ADMIN,
+        revised["budget_plan_id"],
+        _activation_request(
+            revised["version"],
+            expected_active_version=plan["version"],
+            expected_activation_generation=plan["version"],
+        ),
+    )
+    return revised
+
+
+def reactivate_budget(
+    repositories,
+    plan,
+    *,
+    current_version: int,
+    generation: int,
+):
+    repositories.budgets.activate_plan(
+        ADMIN,
+        plan["budget_plan_id"],
+        _activation_request(
+            plan["version"],
+            expected_active_version=current_version,
+            expected_activation_generation=generation,
+            reason_code="reactivated",
+        ),
+    )
 
 
 def create_scorecard(repositories, scope, *, scorecard_id: str):

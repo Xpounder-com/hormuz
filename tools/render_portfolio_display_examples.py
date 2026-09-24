@@ -29,7 +29,7 @@ FILES = {
     ),
     "budget_v2": (
         "docs/work-budget-reports-wire-v2.json",
-        "1e09eb42bedc8d91dc5ec230adb1f21360832940b237e38c8a88b86285a2c6d2",
+        "c84d182f93894fec1a1eca0d057311cb52fa2c288e3470e119e65f9565f08168",
     ),
     "budget_examples": (
         "tests/fixtures/portfolio_intelligence/budget-report-v2-examples.json",

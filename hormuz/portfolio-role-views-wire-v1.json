@@ -353,6 +353,36 @@
         "provenance",
         "exclusions",
         "payload"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "resource": {"const": "budget"}
+            },
+            "required": ["resource"]
+          },
+          "then": {
+            "properties": {
+              "payload": {"$ref": "work-budget-reports-wire-v2.json#/$defs/hormuz.work-budget-report"}
+            },
+            "required": ["payload"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "resource": {"const": "scorecard"}
+            },
+            "required": ["resource"]
+          },
+          "then": {
+            "properties": {
+              "payload": {"$ref": "portfolio-intelligence-wire-v1.json#/$defs/hormuz.model-scorecard"}
+            },
+            "required": ["payload"]
+          }
+        }
       ]
     },
     "hormuz.portfolio-role-view-page": {

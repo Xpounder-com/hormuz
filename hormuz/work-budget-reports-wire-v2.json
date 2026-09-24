@@ -1014,15 +1014,21 @@
     "hormuz.work-budget-preview": 1,
     "hormuz.work-budget-report": 2
   },
-  "x-hormuz-route-query-fields": {},
+  "x-hormuz-route-query-fields": {
+    "GET /v1/admin/portfolio/views/finance/budgets": ["cursor", "end_at", "limit", "start_at", "work_scope_id"],
+    "GET /v1/admin/portfolio/views/team/budgets": ["cursor", "end_at", "limit", "start_at", "work_scope_id"]
+  },
   "x-hormuz-transport": {
     "response_maximum_bytes": 1048576,
-    "runtime_enabled": false,
-    "new_http_routes": [],
-    "delivery": "separate_planned_cli_or_internal_records"
+    "runtime_enabled": true,
+    "new_http_routes": [
+      "GET /v1/admin/portfolio/views/finance/budgets",
+      "GET /v1/admin/portfolio/views/team/budgets"
+    ],
+    "delivery": "role_scoped_http_and_portfolio_view_cli"
   },
   "x-hormuz-domain-rules": {
-    "authorization": "Server-resolved tenant and current role before lookup, join, aggregation or expensive work; privileged read audit before delivery. Preview is portfolio_admin only. Viewer/team capabilities remain #223 implementation work; no raw peer/source access.",
+    "authorization": "Server-resolved tenant and current role before lookup, join, aggregation or expensive work; privileged read audit before delivery. Preview is portfolio_admin only. Issue #223 role-scoped viewer/team delivery is enabled; no raw peer/source access.",
     "compatibility": "Frozen work-budget-plan/request/activation, version-1 report bundle, v1 manifest, routes, errors, CLI behavior and immutable usage remain unchanged. Report version 2 is a separately selected successor; no existing response gains a required field and no version-1 client is silently upgraded.",
     "atomicity_gate": "Before #217 runtime acceptance, one transaction must cover every old and work-scope ceiling with deterministic organization/period/scope lock order. Preserve off-path facades and driver/pool ownership. Prove independent PostgreSQL replicas, failure/retry and unknown holds; shared helpers alone are not atomicity.",
     "financial_evidence": "Never reveal or apportion broader provider-account totals through work-scope observations. Final cost needs authoritative finalized evidence matching exact scope. No allocation algorithm, FX, invoice settlement or automatic rate change is approved. Reservations remain separate from financial observations.",
@@ -1030,7 +1036,7 @@
     "forecast": "Optional linear committed-estimate projection: committed_amount * full_period_seconds / elapsed_seconds; complete covered/priced population, matching currency, 0 < elapsed < period. Pin rule/version and inputs. Exact 18/18 without implicit rounding; otherwise unavailable. Excludes reservations, promises no prediction/confidence and never activates policy.",
     "preview": "Existing policy comparison/scenario boundary; candidate/policy/work-scope/input bindings, eight ceiling classes, maximum 900-second expiry, explicit counts/inconclusive evidence. Activation separately revalidates authority, digests, generation and caps; preview is not a permit. Compatible means a nonempty complete all-allowed simulation with no restriction reasons; would_restrict requires known denials and reasons. Reports require a positive historical activation generation; never-activated candidates belong to preview.",
     "plan_change": "The first activation is established with no previous plan or percentage. Every complete prior comparison carries its exact work scope, window, currency and amount so an old amount is never mislabeled with current units. Comparable activations require identical work scope, window and currency, exact signed amount delta and a six-place decimal half-even display percentage. A zero prior amount keeps the exact amount delta but has no percentage. Changed_at is the activation commit time. All non-comparability reasons are explicit; missing evidence never becomes zero or a guessed percentage.",
-    "bounds": "One work-scope report, maximum 100 observations and 1 MiB output; no truncation disguised as complete coverage. Fixed resource-limit failure before delivery. Query/CLI activation and execution-time budgets remain #214/#217/#223 work.",
+    "bounds": "One work-scope report, maximum 100 observations and 1 MiB output; no truncation disguised as complete coverage. Fixed resource-limit failure before delivery. Role-view query, cursor, response and execution-time limits are fixed by the issue #223 runtime contract; final release acceptance remains #214 work.",
     "claims": "No procurement, causal productivity, employee ranking, guaranteed savings, automatic policy activation, live finance verification, populated recovery or final-candidate proof."
   }
 }

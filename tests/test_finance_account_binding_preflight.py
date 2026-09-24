@@ -88,7 +88,14 @@ class FinanceAccountBindingPreflightTests(unittest.TestCase):
             shutil.copytree(ROOT / "hormuz", root / "hormuz", ignore=shutil.ignore_patterns("__pycache__"))
             verifier.verify(root, historical_plan_only=True)
             path = root / "docs/finance-transition-plan-v7.json"
-            path.write_bytes(path.read_bytes() + b"\n")
+            original = path.read_bytes()
+            path.write_bytes(original + b"\n")
+            with self.assertRaisesRegex(ValueError, "frozen_history_changed"):
+                verifier.verify(root, historical_plan_only=True)
+            path.write_bytes(original)
+
+            path = root / verifier.BUDGET_REPORT_V2_PATH
+            path.write_bytes((ROOT / verifier.BUDGET_REPORT_V2_PATH).read_bytes() + b"\n")
             with self.assertRaisesRegex(ValueError, "frozen_history_changed"):
                 verifier.verify(root, historical_plan_only=True)
 
