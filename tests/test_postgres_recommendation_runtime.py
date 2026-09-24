@@ -35,9 +35,26 @@ if __package__:
     from ._postgres_fixture import PostgresTestCase
     from .test_recommendation_runtime import NOW, SCORECARD_FIXTURE, _policy_mapping
 else:  # The PostgreSQL boundary audit imports test modules from the tests root.
+    import sys
+
     from _portfolio_fixture import ADMIN, OTHER, create_request, registry_config
     from _postgres_fixture import PostgresTestCase
-    from tests.test_recommendation_runtime import NOW, SCORECARD_FIXTURE, _policy_mapping
+
+    # Isolated discovery places only ``tests/`` on sys.path, so the package
+    # import needed by the SQLite recommendation helper is otherwise
+    # unavailable. Add the repository root only while resolving that helper;
+    # the PostgreSQL fixture itself remains the top-level module imported
+    # above, preserving the boundary audit's exact class identity.
+    _tests_parent = str(Path(__file__).resolve().parents[1])
+    sys.path.insert(0, _tests_parent)
+    try:
+        from tests.test_recommendation_runtime import (
+            NOW,
+            SCORECARD_FIXTURE,
+            _policy_mapping,
+        )
+    finally:
+        sys.path.remove(_tests_parent)
 
 
 class PostgresRecommendationRuntimeTests(PostgresTestCase):

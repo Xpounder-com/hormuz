@@ -184,7 +184,7 @@
     "tests/test_postgres_linear_snapshot_runtime.py": "246c09d43c72e9ab22e69f7963481d706be0ed42b0d930c6ab7219be8e09c0a6",
     "tests/test_postgres_migration_rls.py": "b0bf045d5ac964c40a72443b2d6e8a4c4ad6c80bdbc2b65ccc10f190b29575e4",
     "tests/test_postgres_outcome_transition.py": "a411205176ce5f3220ce9c2c3615bf49f08eff0063eefa37e1c74ab2cc6f0e9f",
-    "tests/test_postgres_recommendation_runtime.py": "628841c40ce971cf5ef61af7f4cae4758b4e10f510f79a2c0b6ef4a23c9d63c2",
+    "tests/test_postgres_recommendation_runtime.py": "18b3963705c2b972ba1c5fc80a1ea934fc0f34b4f474f74b094407cae3a27959",
     "tests/test_postgres_role_view_runtime.py": "6e484111204c1cd06e7a26e4a97a140350a20285fe656cdaec2448c8deb9060a",
     "tests/test_postgres_scorecard_runtime.py": "0e7958616dcead3c94d3ae70c2cb618d61e944d6dd3f1df16eb491298b155a0e",
     "tests/test_postgres_test_boundaries.py": "a2f855bd67f319bdef9db8d674a0e3c2e3b718a764561d95a05e44e21ea40ce3",
