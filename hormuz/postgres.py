@@ -77,11 +77,12 @@ _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION = {
         236,
         "4aef5982da3f81a352f813554de5721580f0ad5f0a93dda529199b545fee5a20",
     ),
-    # Twice measured from independent clean managed-role schema-23 bootstraps after
-    # adding the append-only portfolio role-view audit and cursor tables.
+    # Measured from the managed-role schema-23 bootstrap after revoking
+    # PostgreSQL's default PUBLIC function grants and adding the append-only
+    # portfolio role-view audit and cursor tables.
     23: (
-        260,
-        "fc0c67b4b2689d0579b17af30e6a4143e23c47fc9b247daeb9c1105baf9676bb",
+        240,
+        "84fc2219343738b183de58bd640a761ff010eb3163429e58d1b70e23ab445c95",
     ),
 }
 

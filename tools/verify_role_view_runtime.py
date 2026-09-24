@@ -34,7 +34,7 @@ from tools import verify_scorecard_runtime_plan as scorecard_verifier
 
 
 PLAN_PATH = "docs/role-view-runtime-plan-v1.json"
-PLAN_SHA256 = "7f4e2d4cecc2dca7240e588978274a6c807ed02c365c849e9b2a67ddbcb2f87e"
+PLAN_SHA256 = "e5d28bf59f1482eb46ae34618af4fb2504208bf3ecc7b5e4d262e84889bf9715"
 PREDECESSOR_PATH = "docs/scorecard-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "b5ad84161eb9d5f2ac109cc25856a041fca5f905bd0f1d415d112b055e7fafb2"
@@ -44,8 +44,8 @@ PREDECESSOR_CANONICAL_SHA256 = (
 )
 BASE_MAIN_COMMIT = "108d952b4426be74f11306d30a4955807e8fe766"
 EXPECTED_ACL = (
-    260,
-    "fc0c67b4b2689d0579b17af30e6a4143e23c47fc9b247daeb9c1105baf9676bb",
+    240,
+    "84fc2219343738b183de58bd640a761ff010eb3163429e58d1b70e23ab445c95",
 )
 TABLES = (
     "portfolio_role_view_audit_events",

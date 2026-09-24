@@ -22,8 +22,8 @@
     }
   },
   "postgresql_acl": {
-    "entry_count": 260,
-    "sha256": "fc0c67b4b2689d0579b17af30e6a4143e23c47fc9b247daeb9c1105baf9676bb",
+    "entry_count": 240,
+    "sha256": "84fc2219343738b183de58bd640a761ff010eb3163429e58d1b70e23ab445c95",
     "mode": "fixed_literal_two_clean_managed_role_measurements"
   },
   "runtime": {
@@ -127,14 +127,14 @@
     "hormuz/portfolio_repository.py": "5b86ae5ec77fcc0ac507b5bf5bfdb43db92755978a32d87a0133f5855fec81b6",
     "hormuz/portfolio_service.py": "7b31cb91423cb28b11499d5ff7c26432bdbccd05a67b005186e436b9cb0885ad",
     "hormuz/portfolio_wire.py": "cd0077cd51b4cdbe2dc7be90e0825263333caac548b0634c11b84fbd0b94b45e",
-    "hormuz/postgres.py": "a9b66b4c35d3e61fa9041d31054e8c6463ef0a9f4bc3124d48419e730b97fc18",
+    "hormuz/postgres.py": "a8957e1cd6f8eee5a099b92c57239449a849779dc5df025629c27f286e99ccc9",
     "hormuz/role_view_repository.py": "987d7d11788561c2ae6a8595bd3009fe97e6861c939a8f5100d024cf848d486e",
     "hormuz/work-budget-reports-wire-v2.json": "1e09eb42bedc8d91dc5ec230adb1f21360832940b237e38c8a88b86285a2c6d2",
     "pyproject.toml": "b1a5f1e71829ed37f38dbbb37fb53e4b537f097ad761d14b148733bebd95b205",
     "tests/_postgres_fixture.py": "49e6cda45b92b66dbe76b7d68c3267c4998a0d31aabc8a7517d0d0e3d86699b3",
-    "tests/_role_view_fixture.py": "9864328445e24369d3b5947ae926af76a49b4b26aedce4fe1014a5082ded38a3",
+    "tests/_role_view_fixture.py": "9b202eb64c440e07e3ac47cf53f44a573bcfd8cacbc4a66763e46443ab6cfdab",
     "tests/fixtures/portfolio_role_views/wire-v1-examples.json": "a2fa30be4c1849a48b2dc40bce910c4d66e57e090b7eb1b72cdd66d5d1bb7c2b",
-    "tests/test_association_runtime_plan.py": "7829b4c41005838a845211335e64bb49cc19c731f7712fe3ec943ed6ddff2747",
+    "tests/test_association_runtime_plan.py": "5db6cbf0e5ad33f8000486d0949a95b4bda0e4fdecbaff45ccfc2cef44aa1c5f",
     "tests/test_association_transition_plan.py": "fd8cccc14dd474b318f0f2ea9a3095d8900c1828d7a2992014d03d0ae9be35fd",
     "tests/test_association_transition_preflight.py": "0ab55afb890d7125f67642ff0b20bcd3265e9b7892bf93daa214b39d2af42bb7",
     "tests/test_attribution_schema.py": "7245263307d93e6f89148d2ce5af304aed18df39fd6abd41886fe18d776213da",

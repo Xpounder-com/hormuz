@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
 from hormuz.config import Identity
-from hormuz.portfolio_config import PortfolioRoleBinding
+from hormuz.portfolio_config import PortfolioPrincipal, PortfolioRoleBinding
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import SCOPES, canonical
 
-from ._budget_fixture import ADMIN, activation_request, plan_request
 from ._portfolio_fixture import ADMIN as ADMIN_TOKEN, create_request, registry_config
 
 
@@ -23,6 +23,48 @@ SALES_TOKEN = "synthetic-role-view-sales-token"
 SCORECARD_FIXTURE = (
     Path(__file__).parent / "fixtures" / "scorecard" / "runtime-v1.json"
 )
+ADMIN = PortfolioPrincipal("acme", "alice", ("portfolio_admin",))
+
+
+def _timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(
+        timespec="microseconds"
+    ).replace("+00:00", "Z")
+
+
+def _plan_request(scope, *, amount: str) -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    return {
+        "schema_id": "hormuz.work-budget-plan-request",
+        "schema_version": 1,
+        "budget_plan_id": None,
+        "expected_version": None,
+        "work_scope": {
+            "work_scope_id": scope["work_scope_id"],
+            "version": scope["version"],
+        },
+        "window": {
+            "start_at": _timestamp(now - timedelta(days=1)),
+            "end_at": _timestamp(now + timedelta(days=1)),
+        },
+        "currency": "USD",
+        "amount": amount,
+        "allowed_models": None,
+        "output_token_cap": None,
+        "per_request_cost_cap": None,
+        "reason_code": "created",
+    }
+
+
+def _activation_request(version: int) -> dict[str, object]:
+    return {
+        "schema_id": "hormuz.work-budget-plan-activation-request",
+        "schema_version": 1,
+        "version": version,
+        "expected_active_version": None,
+        "expected_activation_generation": 0,
+        "reason_code": "accepted",
+    }
 
 
 def role_view_config(root: Path):
@@ -111,12 +153,12 @@ def create_scope(
 def create_budget(repositories, scope, *, amount: str = "100"):
     plan = repositories.budgets.create_plan(
         ADMIN,
-        plan_request(scope, amount=amount),
+        _plan_request(scope, amount=amount),
     )
     repositories.budgets.activate_plan(
         ADMIN,
         plan["budget_plan_id"],
-        activation_request(plan["version"]),
+        _activation_request(plan["version"]),
     )
     return plan
 
