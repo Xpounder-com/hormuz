@@ -1,4 +1,4 @@
-"""Atomic SQLite 17-to-18 and PostgreSQL 22-to-23 role-view transitions."""
+"""Atomic SQLite 18-to-19 and PostgreSQL 23-to-24 recommendation transitions."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 import hormuz.postgres as postgres_module
-from hormuz._role_view_schema import TABLE_DDL
+from hormuz._recommendation_schema import TABLE_DDL
 from hormuz.postgres import PostgresStorageError, migrate_postgres
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.store import StorageSchemaError, UsageStore
@@ -21,32 +21,29 @@ from ._registry_transition_fixture import seed_registry_ledger, sqlite_snapshot
 from ._sqlite import managed_sqlite_connection
 
 
-class SQLiteRoleViewTransitionTests(unittest.TestCase):
+class SQLiteRecommendationTransitionTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.path = Path(temporary.name) / "usage.sqlite3"
-        with mock.patch.object(UsageStore, "schema_version", 17):
+        with mock.patch.object(UsageStore, "schema_version", 18):
             seed_registry_ledger(UsageStore(self.path))
         self.before = sqlite_snapshot(self.path)
         self.predecessor_versions = {
             row[0] for row in self.before["rows"]["hormuz_schema_migrations"]
         }
-        self.assertEqual(max(self.predecessor_versions), 17)
+        self.assertEqual(max(self.predecessor_versions), 18)
 
     def upgrade(self, *, fail: bool = False) -> None:
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            self.assertEqual(version, 18)
+            self.assertEqual(version, 19)
             original(connection, version)
             if fail:
-                raise RuntimeError("synthetic_role_view_migration_failure")
+                raise RuntimeError("synthetic_recommendation_migration_failure")
 
-        with (
-            mock.patch.object(UsageStore, "schema_version", 18),
-            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
-        ):
+        with mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
             UsageStore(self.path).verify_ready()
 
     def assert_predecessor_preserved(self) -> None:
@@ -79,7 +76,7 @@ class SQLiteRoleViewTransitionTests(unittest.TestCase):
 
     def test_partial_ddl_failure_rolls_back_and_retry_is_idempotent(self):
         with self.assertRaisesRegex(
-            RuntimeError, "synthetic_role_view_migration_failure"
+            RuntimeError, "synthetic_recommendation_migration_failure"
         ):
             self.upgrade(fail=True)
         self.assertEqual(sqlite_snapshot(self.path), self.before)
@@ -89,7 +86,7 @@ class SQLiteRoleViewTransitionTests(unittest.TestCase):
     def test_predecessor_refuses_successor_without_mutation(self):
         self.upgrade()
         current = sqlite_snapshot(self.path)
-        with mock.patch.object(UsageStore, "schema_version", 17):
+        with mock.patch.object(UsageStore, "schema_version", 18):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path, read_only=True)
         self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
@@ -99,10 +96,10 @@ class SQLiteRoleViewTransitionTests(unittest.TestCase):
         with managed_sqlite_connection(self.path) as connection:
             connection.execute(
                 "INSERT INTO hormuz_schema_migrations (version,state) "
-                "VALUES (18,'applying')"
+                "VALUES (19,'applying')"
             )
         partial = sqlite_snapshot(self.path)
-        for schema_version in (17, 18):
+        for schema_version in (18, 19):
             with self.subTest(schema_version=schema_version), mock.patch.object(
                 UsageStore, "schema_version", schema_version
             ):
@@ -116,7 +113,7 @@ class SQLiteRoleViewTransitionTests(unittest.TestCase):
     os.environ.get("HORMUZ_TEST_POSTGRES_DSN"),
     "requires disposable PostgreSQL",
 )
-class PostgresRoleViewTransitionTests(PostgresTestCase):
+class PostgresRecommendationTransitionTests(PostgresTestCase):
     def migrate(self):
         return migrate_postgres(
             self.owner_dsn,
@@ -136,19 +133,17 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
         )
 
     def setUp(self) -> None:
-        # Each case deliberately leaves this class-owned schema at 23. Build
-        # the predecessor directly so a newer installed runtime does not try
-        # to open the prior test's intentionally historical ledger first.
+        super().setUp()
         self._drop_schema(self.schema)
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 22):
-            self.assertEqual(self.migrate().version, 22)
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 23):
+            self.assertEqual(self.migrate().version, 23)
             seed_registry_ledger(self.runtime())
         self.before = self.snapshot()
         self.predecessor_versions = {
             json.loads(row[0])["version"]
             for row in self.before["rows"]["hormuz_schema_migrations"]
         }
-        self.assertEqual(max(self.predecessor_versions), 22)
+        self.assertEqual(max(self.predecessor_versions), 23)
 
     def snapshot(self) -> dict[str, object]:
         with self.psycopg.connect(self.owner_dsn) as connection:
@@ -180,7 +175,7 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            self.assertEqual(version, 23)
+            self.assertEqual(version, 24)
             ddl = original(version, schema, *roles)
             if fail:
                 return ddl.split(";", 1)[0] + "; SELECT 1 / 0;"
@@ -188,10 +183,8 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
 
         with mock.patch.object(
             postgres_module, "_migration_sql", side_effect=migration
-        ), mock.patch.object(
-            postgres_module, "POSTGRES_SCHEMA_VERSION", 23
         ):
-            self.assertEqual(self.migrate().version, 23)
+            self.assertEqual(self.migrate().version, 24)
 
     def assert_predecessor_preserved(self) -> None:
         current = copy.deepcopy(self.snapshot())
@@ -205,7 +198,9 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
         current["shape"] = [
             row
             for row in current["shape"]
-            if not str(row[0]).startswith("portfolio_role_view_")
+            if not str(row[0]).startswith(
+                ("portfolio_policy_recommend", "portfolio_recommendation_")
+            )
         ]
         self.assertEqual(current, self.before)
 
@@ -234,7 +229,7 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
     def test_predecessor_refuses_the_successor_without_mutation(self):
         self.upgrade()
         current = self.snapshot()
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 22):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 23):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
             self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
@@ -248,12 +243,12 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
             connection.execute(
                 self.sql.SQL(
                     "INSERT INTO {}.hormuz_schema_migrations (version,state) "
-                    "VALUES (23,'applying')"
+                    "VALUES (24,'applying')"
                 ).format(self.sql.Identifier(self.schema))
             )
         partial = self.snapshot()
         try:
-            for schema_version in (22, 23):
+            for schema_version in (23, 24):
                 with self.subTest(schema_version=schema_version), mock.patch.object(
                     postgres_module, "POSTGRES_SCHEMA_VERSION", schema_version
                 ):
@@ -267,7 +262,7 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
             with self.psycopg.connect(self.owner_dsn) as connection:
                 connection.execute(
                     self.sql.SQL(
-                        "DELETE FROM {}.hormuz_schema_migrations WHERE version=23"
+                        "DELETE FROM {}.hormuz_schema_migrations WHERE version=24"
                     ).format(self.sql.Identifier(self.schema))
                 )
             self.upgrade()

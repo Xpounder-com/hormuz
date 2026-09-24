@@ -1,0 +1,471 @@
+{
+  "accepted_decision": {
+    "decision": "accepted",
+    "expected_version": 1,
+    "pre_apply_evidence": {
+      "request_preview": {
+        "digest": "b841c9c690153422705f6143b514ea9eb2377e1a2ed6c426509338db2fe34f45",
+        "evidence_id": "request-preview-b841c9c690153422705f6143b514ea9eb2377e1a2ed6c426509338db2fe34f45"
+      },
+      "rollback_plan": {
+        "digest": "c2811a2e13c5ae4e88133a8dbd4be0b77dc7c4e16e46f9f5a5f19557a31d70f2",
+        "evidence_id": "rollback-plan-c2811a2e13c5ae4e88133a8dbd4be0b77dc7c4e16e46f9f5a5f19557a31d70f2"
+      },
+      "saved_scenario_evaluation": {
+        "digest": "a3f02be63350657273792c061f00cf30f78bf3e63b0cda53ab8d0cd6b2a3b6f2",
+        "evidence_id": "scenario-evaluation-a3f02be63350657273792c061f00cf30f78bf3e63b0cda53ab8d0cd6b2a3b6f2"
+      },
+      "semantic_compare": {
+        "digest": "f6c33a2184a9b570d10194aba621d9cf863e703c54eba8bdf9695fc32c775951",
+        "evidence_id": "semantic-compare-f6c33a2184a9b570d10194aba621d9cf863e703c54eba8bdf9695fc32c775951"
+      }
+    },
+    "reason_code": "accepted",
+    "schema_id": "hormuz.policy-recommendation-decision-request",
+    "schema_version": 1
+  },
+  "baseline_policy": {
+    "egress_controls": {
+      "openai": {
+        "allow_background": false,
+        "allow_response_storage": false
+      },
+      "secrets": {
+        "mode": "redact"
+      }
+    },
+    "organization_id": "acme",
+    "policies": {
+      "actors": {},
+      "organization": {
+        "allowed_clients": [
+          "codex"
+        ],
+        "allowed_models": [
+          "synthetic"
+        ],
+        "max_output_tokens": 1000
+      },
+      "teams": {}
+    },
+    "schema_id": "hormuz.policy-document",
+    "schema_version": 1
+  },
+  "candidate_policy": {
+    "egress_controls": {
+      "openai": {
+        "allow_background": false,
+        "allow_response_storage": false
+      },
+      "secrets": {
+        "mode": "redact"
+      }
+    },
+    "organization_id": "acme",
+    "policies": {
+      "actors": {},
+      "organization": {
+        "allowed_clients": [
+          "codex"
+        ],
+        "allowed_models": [
+          "synthetic"
+        ],
+        "max_output_tokens": 500
+      },
+      "teams": {}
+    },
+    "schema_id": "hormuz.policy-document",
+    "schema_version": 1
+  },
+  "created_at": "2026-09-24T12:00:00.000000Z",
+  "expected_evaluation": {
+    "bindings": {
+      "active_policy_version": "sha256:bde928bd312be1f9eef7bea7d560dfa4a9cb308a7e447a0b700b0f354cf05f37",
+      "actual_models": [
+        {
+          "model_id": "model-baseline",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        {
+          "model_id": "model-efficient",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        {
+          "model_id": "model-guarded",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        }
+      ],
+      "budget_bindings": [],
+      "candidate_budget_digest": null,
+      "candidate_policy_digest": "a88aaac4e8edd921b4f32fc9ae384aafe50b29123ea0846636762d5b11c40952",
+      "metric_rules": [
+        {
+          "digest": "047b147972baef94ef75f3247ed7bfce6207184f154757b4506494a007070121",
+          "rule_id": "quality-cost",
+          "version": 3
+        },
+        {
+          "digest": "3e4847ed14ca4787109b3ea3b8cd4b0a0b74a8b6b93faa8ccdbd42a1f0b67157",
+          "rule_id": "spend-coverage",
+          "version": 2
+        },
+        {
+          "digest": "505cb70c8b881098c3a897defa55a9a7bfcb0d8e763edd313f8ba0d5e0e01774",
+          "rule_id": "optimization-lift",
+          "version": 2
+        }
+      ],
+      "policy_digest": "bde928bd312be1f9eef7bea7d560dfa4a9cb308a7e447a0b700b0f354cf05f37",
+      "policy_version_id": "sha256:bde928bd312be1f9eef7bea7d560dfa4a9cb308a7e447a0b700b0f354cf05f37",
+      "rate_cards": [
+        {
+          "id": "rate-a",
+          "version": 2
+        }
+      ],
+      "request_preview_context": {
+        "actor": {
+          "actor_id": "alice",
+          "authentication_source": "static",
+          "clearance": "internal",
+          "identity_type": "human",
+          "organization_id": "acme",
+          "team_id": "engineering"
+        },
+        "client": "codex",
+        "protocol": "openai",
+        "requested_model": "synthetic",
+        "requested_output_tokens": 750,
+        "usage_basis": "current",
+        "usage_period": {
+          "ends_before": "2026-10-01T00:00:00.000000Z",
+          "starts_at": "2026-09-01T00:00:00.000000Z"
+        },
+        "usage_snapshot_sha256": "462961121c25deb10e3ff521bf496f54999b70cadf91fd8e7a20a7cb747d9b69"
+      },
+      "scorecard_evaluation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scorecard_input_digest": "4a682e3d0c33f83cccf7d193a1d333b0d12f1c31252faae91e80a7610106a123"
+    },
+    "explanation": {
+      "affected_scopes": [
+        {
+          "version": 3,
+          "work_scope_id": "use-case-a"
+        }
+      ],
+      "confidence": {
+        "evidence_level": "associated",
+        "reason_code": "eligible",
+        "state": "eligible"
+      },
+      "expected_direction": "lower_cost_with_guardrails",
+      "losing_alternatives": [
+        {
+          "cohort_id": "guarded",
+          "reason_code": "below_threshold"
+        }
+      ],
+      "observed_tradeoff": {
+        "baseline_cohort_id": "baseline",
+        "candidate_cohort_id": "efficient",
+        "cost_direction": "lower",
+        "quality_guardrail": "pass",
+        "reliability_guardrail": "pass"
+      }
+    },
+    "pre_apply_evidence": {
+      "request_preview": {
+        "digest": "b841c9c690153422705f6143b514ea9eb2377e1a2ed6c426509338db2fe34f45",
+        "evidence_id": "request-preview-b841c9c690153422705f6143b514ea9eb2377e1a2ed6c426509338db2fe34f45"
+      },
+      "rollback_plan": {
+        "digest": "c2811a2e13c5ae4e88133a8dbd4be0b77dc7c4e16e46f9f5a5f19557a31d70f2",
+        "evidence_id": "rollback-plan-c2811a2e13c5ae4e88133a8dbd4be0b77dc7c4e16e46f9f5a5f19557a31d70f2"
+      },
+      "saved_scenario_evaluation": {
+        "digest": "a3f02be63350657273792c061f00cf30f78bf3e63b0cda53ab8d0cd6b2a3b6f2",
+        "evidence_id": "scenario-evaluation-a3f02be63350657273792c061f00cf30f78bf3e63b0cda53ab8d0cd6b2a3b6f2"
+      },
+      "semantic_compare": {
+        "digest": "f6c33a2184a9b570d10194aba621d9cf863e703c54eba8bdf9695fc32c775951",
+        "evidence_id": "semantic-compare-f6c33a2184a9b570d10194aba621d9cf863e703c54eba8bdf9695fc32c775951"
+      }
+    },
+    "recommendation": {
+      "actual_models": [
+        {
+          "model_id": "model-baseline",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        {
+          "model_id": "model-efficient",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        {
+          "model_id": "model-guarded",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        }
+      ],
+      "automatic_application": false,
+      "coverage": {
+        "association": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "connector": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "eligible_association_candidates": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "eligible_external_outcome_events": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "eligible_governed_attempts": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "eligible_governed_spend": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "excluded": {
+          "denominator": "30",
+          "numerator": "3",
+          "ratio": 0.1,
+          "reason_code": "eligible"
+        },
+        "pricing": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        }
+      },
+      "created_at": "2026-09-24T12:00:00.000000Z",
+      "evidence_level": "associated",
+      "expires_at": "2026-10-01T00:00:00.000000Z",
+      "guardrails": {
+        "budget": {
+          "reason_code": "eligible",
+          "rule": {
+            "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+            "rule_id": "guard-budget",
+            "version": 1
+          },
+          "state": "pass",
+          "value": null
+        },
+        "comparability": {
+          "reason_code": "eligible",
+          "rule": {
+            "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+            "rule_id": "guard-comparability",
+            "version": 1
+          },
+          "state": "pass",
+          "value": null
+        },
+        "coverage_and_sample_eligibility": {
+          "reason_code": "eligible",
+          "rule": {
+            "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+            "rule_id": "guard-coverage_and_sample_eligibility",
+            "version": 1
+          },
+          "state": "pass",
+          "value": null
+        },
+        "freshness": {
+          "reason_code": "eligible",
+          "rule": {
+            "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+            "rule_id": "guard-freshness",
+            "version": 1
+          },
+          "state": "pass",
+          "value": null
+        },
+        "privacy": {
+          "reason_code": "eligible",
+          "rule": {
+            "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+            "rule_id": "guard-privacy",
+            "version": 1
+          },
+          "state": "pass",
+          "value": null
+        },
+        "quality": {
+          "reason_code": "eligible",
+          "rule": {
+            "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+            "rule_id": "guard-quality",
+            "version": 1
+          },
+          "state": "pass",
+          "value": null
+        },
+        "reliability": {
+          "reason_code": "eligible",
+          "rule": {
+            "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+            "rule_id": "guard-reliability",
+            "version": 1
+          },
+          "state": "pass",
+          "value": null
+        },
+        "reversion_or_defect": {
+          "reason_code": "eligible",
+          "rule": {
+            "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+            "rule_id": "guard-reversion_or_defect",
+            "version": 1
+          },
+          "state": "pass",
+          "value": null
+        }
+      },
+      "latest_decision_event_id": null,
+      "organization_id": "acme",
+      "policy": {
+        "id": "policy-a",
+        "version": 4
+      },
+      "policy_digest": "bde928bd312be1f9eef7bea7d560dfa4a9cb308a7e447a0b700b0f354cf05f37",
+      "proposal": {
+        "candidate_budget_plan": null,
+        "candidate_policy_digest": "a88aaac4e8edd921b4f32fc9ae384aafe50b29123ea0846636762d5b11c40952",
+        "change_type": "output_or_cost_cap_change"
+      },
+      "rate_cards": [
+        {
+          "id": "rate-a",
+          "version": 2
+        }
+      ],
+      "reason_code": "eligible",
+      "recommendation_id": "recommendation-fixture",
+      "schema_id": "hormuz.policy-recommendation",
+      "schema_version": 1,
+      "scorecard": {
+        "id": "scorecard-use-case-a",
+        "version": 1
+      },
+      "state": "pending",
+      "supersedes_version": null,
+      "version": 1,
+      "window": {
+        "end_at": "2026-09-08T00:00:00Z",
+        "start_at": "2026-09-01T00:00:00Z"
+      },
+      "work_scope": {
+        "version": 3,
+        "work_scope_id": "use-case-a"
+      }
+    },
+    "schema_id": "hormuz.recommendation-evaluation",
+    "schema_version": 1,
+    "verification_summary": {
+      "automatic_application": false,
+      "preview_behavior_changed": true,
+      "scenario_changed_count": 1,
+      "scenario_count": 1,
+      "semantic_change_count": 1
+    }
+  },
+  "generation_request": {
+    "expires_at": "2026-10-01T00:00:00Z",
+    "proposal": {
+      "candidate_budget_plan": null,
+      "candidate_policy_digest": "a88aaac4e8edd921b4f32fc9ae384aafe50b29123ea0846636762d5b11c40952",
+      "change_type": "output_or_cost_cap_change"
+    },
+    "recommendation_id": "recommendation-fixture",
+    "scorecard": {
+      "id": "scorecard-use-case-a",
+      "version": 1
+    },
+    "selected_cohort_id": "efficient",
+    "supersedes_version": null,
+    "version": 1
+  },
+  "preview_request": {
+    "actor_id": "alice",
+    "client": "codex",
+    "protocol": "openai",
+    "requested_model": "synthetic",
+    "requested_output_tokens": 750
+  },
+  "rejected_decision": {
+    "decision": "rejected",
+    "expected_version": 1,
+    "pre_apply_evidence": null,
+    "reason_code": "rejected",
+    "schema_id": "hormuz.policy-recommendation-decision-request",
+    "schema_version": 1
+  },
+  "scenario_suite": {
+    "organization_id": "acme",
+    "scenarios": [
+      {
+        "actor_id": "alice",
+        "client": "codex",
+        "id": "synthetic-request",
+        "protocol": "openai",
+        "requested_model": "synthetic",
+        "requested_output_tokens": 750
+      }
+    ],
+    "schema_id": "hormuz.policy-scenario-suite",
+    "schema_version": 1
+  },
+  "schema_id": "hormuz.recommendation-decision-fixture",
+  "schema_version": 1,
+  "scorecard_evaluation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scorecard_fixture": {
+    "path": "tests/fixtures/scorecard/runtime-v1.json",
+    "sha256": "34ca5f778b61feb1ca3db434165ec607e9c21b2a7bc8fb22152cc6056ee38224"
+  },
+  "suppression_cases": {
+    "coverage_fields": [
+      "eligible_governed_attempts",
+      "eligible_governed_spend",
+      "eligible_external_outcome_events",
+      "eligible_association_candidates",
+      "pricing",
+      "connector",
+      "association"
+    ],
+    "guardrails": [
+      "comparability",
+      "coverage_and_sample_eligibility",
+      "freshness",
+      "quality"
+    ],
+    "sample_eligibility": true
+  }
+}

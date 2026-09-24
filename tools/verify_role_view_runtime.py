@@ -185,6 +185,18 @@ SOURCE_PATHS = (
     "tools/verify_linear_transition_plan.py",
     "tools/verify_scorecard_runtime_plan.py",
 )
+SUCCESSOR_PROTECTED_SOURCE_PATHS = (
+    "docs/PORTFOLIO_ROLE_VIEWS.md",
+    "docs/portfolio-role-views-wire-v1.json",
+    "docs/work-budget-reports-wire-v2.json",
+    "hormuz/_role_view_schema.py",
+    "hormuz/migrations/postgresql/0023_portfolio_role_views.sql",
+    "hormuz/portfolio-role-views-wire-v1.json",
+    "hormuz/role_view_repository.py",
+    "hormuz/work-budget-reports-wire-v2.json",
+    "tests/_role_view_fixture.py",
+    "tests/fixtures/portfolio_role_views/wire-v1-examples.json",
+)
 REQUIRED_FILES = tuple(dict.fromkeys((
     PLAN_PATH,
     PREDECESSOR_PATH,
@@ -524,8 +536,69 @@ def _validate_distribution_and_ci(root: Path) -> None:
             _fail("role_view_runtime_ci_invalid")
 
 
+def _validate_successor_predecessor(root: Path) -> None:
+    """Re-prove immutable role-view-owned evidence under a successor schema."""
+
+    if any(not (root / relative).is_file() for relative in REQUIRED_FILES):
+        _fail("role_view_runtime_source_kit_incomplete")
+    plan = _read_json(root / PLAN_PATH)
+    if canonical_digest(plan) != PLAN_SHA256:
+        _fail("role_view_runtime_plan_changed")
+    sources = plan.get("source_sha256")
+    if not isinstance(sources, dict):
+        _fail("role_view_runtime_plan_invalid")
+    for relative in SUCCESSOR_PROTECTED_SOURCE_PATHS:
+        expected = sources.get(relative)
+        if not isinstance(expected, str):
+            _fail("role_view_runtime_plan_invalid")
+        try:
+            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+        except OSError:
+            _fail("role_view_runtime_source_kit_incomplete")
+        if actual != expected:
+            _fail("role_view_runtime_source_changed")
+    _validate_predecessor(root)
+    _validate_migration(root, plan)
+    _validate_wire_and_fixtures(root)
+
+
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
+    versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
+    if versions == (19, 24):
+        _validate_successor_predecessor(root)
+        try:
+            from tools.verify_recommendation_runtime import (
+                RecommendationRuntimePlanError,
+                verify as verify_recommendation_runtime,
+            )
+
+            successor = verify_recommendation_runtime(root)
+        except RecommendationRuntimePlanError as error:
+            mapping = {
+                "recommendation_runtime_source_kit_incomplete": "role_view_runtime_source_kit_incomplete",
+                "recommendation_runtime_source_changed": "role_view_runtime_source_changed",
+                "recommendation_runtime_predecessor_changed": "role_view_runtime_predecessor_changed",
+                "recommendation_runtime_schema_boundary_changed": "role_view_runtime_schema_boundary_changed",
+            }
+            _fail(mapping.get(error.code, "role_view_runtime_successor_invalid"))
+        return {
+            "status": "role_view_runtime_successor_verified",
+            "plan_sha256": PLAN_SHA256,
+            "sqlite_schema_version": SQLITE_SCHEMA_VERSION,
+            "postgresql_schema_version": POSTGRES_SCHEMA_VERSION,
+            "postgresql_acl": successor["postgresql_acl"],
+            "table_count": len(TABLES),
+            "route_count": len(ROUTES),
+            "roles": sorted(set(ROLE_BINDINGS.values())),
+            "role_scoped_decision_views_implemented": True,
+            "live_connectors_authorized": False,
+            "recommendations_implemented": True,
+            "released": False,
+            "gates": successor["gates"],
+        }
+    if versions != (18, 23):
+        _fail("role_view_runtime_schema_boundary_changed")
     if any(not (root / relative).is_file() for relative in REQUIRED_FILES):
         _fail("role_view_runtime_source_kit_incomplete")
     plan = _read_json(root / PLAN_PATH)
