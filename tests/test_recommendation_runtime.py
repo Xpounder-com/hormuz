@@ -785,8 +785,6 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
                 repositories.recommendations,
                 "_active_policy",
                 return_value=active,
-            ), mock.patch(
-                "hormuz._portfolio_sql.PortfolioSQL.now", return_value=NOW
             ):
                 barrier.wait(timeout=10)
                 try:
@@ -800,7 +798,9 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
                 except PortfolioError as error:
                     return error.code
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        with mock.patch(
+            "hormuz._portfolio_sql.PortfolioSQL.now", return_value=NOW
+        ), ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(accept, (
                 ("race-a", first, "race-a-accept"),
                 ("race-b", second, "race-b-accept"),

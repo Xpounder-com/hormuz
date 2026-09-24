@@ -145,6 +145,19 @@ wait_for_deployment() {
     || fail "deployment did not become ready: ${namespace}/${deployment}"
 }
 
+wait_for_cnpg_admission() {
+  local manifest=$1
+  local attempt
+  for attempt in $(seq 1 120); do
+    if kubectl apply --dry-run=server --filename "${manifest}" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 1
+  done
+  kubectl apply --dry-run=server --filename "${manifest}" >&2 || true
+  fail "CloudNativePG admission webhook did not become ready"
+}
+
 wait_for_pod() {
   local namespace=$1
   local pod=$2
@@ -780,6 +793,7 @@ kubectl --namespace hormuz-dependencies create secret generic hormuz-postgres-ow
 kubectl --namespace hormuz-dependencies patch secret hormuz-postgres-owner \
   --type=merge --patch '{"immutable":true}' >/dev/null
 
+wait_for_cnpg_admission "${HA_ROOT}/cluster.yaml"
 kubectl apply --filename "${HA_ROOT}/cluster.yaml" >/dev/null
 wait_for_cnpg_ready
 kubectl --namespace hormuz-dependencies get pod \
