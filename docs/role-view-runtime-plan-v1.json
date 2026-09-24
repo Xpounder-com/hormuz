@@ -109,7 +109,7 @@
   ],
   "source_sha256": {
     ".github/workflows/ci.yml": "de9f04b6c1606229b4c9d9897331d6939a2f7516c03d4fda2f2b70878f75b338",
-    "MANIFEST.in": "c964b05011c95a0cab2d7961917206fcb9956448dcfd597e9963128d39ddfdc7",
+    "MANIFEST.in": "ee7fdfb4c96698e25970b09b051941ca417f6c3ada97f0852316bbdf4cb204b1",
     "docs/DURABLE_DATA.md": "65445a3cd6e9962c51b6641efeb87476c869704b5fb807294e4ed6b87f4d13e5",
     "docs/PORTFOLIO_ROLE_VIEWS.md": "6ca33edddd0bade564102deff319820e88749bee94b258c96046fbcad5eae065",
     "docs/durable-data-v1.json": "c3f50ca43f820eb4a3a8e813872c72b71160a2709dcaf430fa1129856e848661",
@@ -177,7 +177,7 @@
     "tools/verify_association_runtime_plan.py": "be9381e61898a0e54541b97988877f8cb78578d3af7136d8da80608976976f95",
     "tools/verify_association_transition_plan.py": "ea4ce71dfbe92539c61b0dcbed71ae534669982cb34a873c82e04c5f910bfc33",
     "tools/verify_budget_transition_plan.py": "d47eddc9ece732f3c5e4b4338029828f5cf30534cfd0ccc094b6b4728a13ff8c",
-    "tools/verify_core_wheel.py": "404482783c124f019a1d4dbe0b2b3eb6f05e239cedcb864772ca0bc14bf81b91",
+    "tools/verify_core_wheel.py": "324840ed2fcd012f70dbe8b650491a67ff40658917baf0d3a3632758770bfad9",
     "tools/verify_durable_data_inventory.py": "6d1a2a507d4f2751efe902de206d66b112cd1956c30a2e3642a35db7f2d08916",
     "tools/verify_finance_account_binding_preflight.py": "43d7f16ed61f0339df45be1efced58d936ba014c864f436bfa755c53e3b94c6d",
     "tools/verify_finance_collection_postgres_runtime.py": "eb7a9d76a42327ee0f5e6cfa844077e77fec34a030ed1be2f2848cdca03cf235",

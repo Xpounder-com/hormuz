@@ -338,6 +338,7 @@ REQUIRED_ROLE_VIEW_RUNTIME_SDIST_PATHS = (
     "docs/PORTFOLIO_ROLE_VIEWS.md",
     "docs/portfolio-role-views-wire-v1.json",
     "docs/role-view-runtime-plan-v1.json",
+    "tools/render_portfolio_display_examples.py",
     "tools/verify_role_view_runtime.py",
     "tests/_role_view_fixture.py",
     "tests/fixtures/portfolio_role_views/wire-v1-examples.json",
