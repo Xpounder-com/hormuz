@@ -46,7 +46,7 @@ else:
 
 class SQLiteFinanceAccountBindingTransitionTests(unittest.TestCase):
     def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
-        self.assertEqual(UsageStore.schema_version, 15)
+        self.assertEqual(UsageStore.schema_version, 16)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "synthetic.sqlite3"
             with (
@@ -119,11 +119,11 @@ class PostgresFinanceAccountBindingTransitionTests(PostgresTestCase):
     runtime = previous.PostgresFinanceCollectionTransitionTests.runtime
 
     def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 20)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 21)
         self._drop_schema(self.schema)
         # This historical transition deliberately leaves the schema at v18
         # while it proves the account-binding successor. Restore the current
-        # v20 schema even when an assertion fails so later tests do not inherit
+        # v21 schema even when an assertion fails so later tests do not inherit
         # a predecessor schema from this shared class fixture.
         self.addCleanup(self.migrate)
         seed_postgres_collection_predecessor(
@@ -363,9 +363,10 @@ class SQLitePublishedAccountBindingPreflightTests(unittest.TestCase):
     def assert_old_rows(self, after, *, allow_appended=False):
         for table, rows in self.before["rows"].items():
             if table == "hormuz_schema_migrations":
+                predecessor_versions = {row[0] for row in rows}
                 actual = [
                     row for row in after["rows"][table]
-                    if row[0] not in {13, 14, 15}
+                    if row[0] in predecessor_versions
                 ]
             else:
                 actual = after["rows"][table]
@@ -467,7 +468,7 @@ class PostgresPublishedAccountBindingPreflightTests(PostgresTestCase):
     restore = previous.PostgresFinanceCollectionTransitionTests.restore
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 20)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 21)
         version_patch = mock.patch.object(
             postgres_module, "POSTGRES_SCHEMA_VERSION", 18
         )
@@ -635,16 +636,17 @@ class PostgresAccountBindingACLPreflightTests(PostgresTestCase):
                 entries = postgres_module._postgres_acl_entries(cursor, schema=schema, migration_login=owner)
             return postgres_module._postgres_acl_boundary(entries, schema=schema, migration_login=owner, role_names=roles)
 
-        first = bootstrap()
-        with self.psycopg.connect(self.owner_dsn) as connection:
-            self.assertEqual(acl(connection), PROPOSED_ACL)
-        self.assertEqual(bootstrap(), first)
-        verify_runtime()
-        with self.psycopg.connect(self.owner_dsn) as connection:
-            connection.execute(self.sql.SQL("GRANT DELETE ON {}.gateway_provider_attempt_metrics TO {}")
-                               .format(self.sql.Identifier(schema), self.sql.Identifier(roles[0])))
-            injected = acl(connection)
-        for operation in (bootstrap, verify_runtime):
-            with self.assertRaisesRegex(PostgresStorageError, "acl_boundary_invalid"):
-                operation()
-        self.assertEqual(injected, INJECTED_ACL)
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 20):
+            first = bootstrap()
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                self.assertEqual(acl(connection), PROPOSED_ACL)
+            self.assertEqual(bootstrap(), first)
+            verify_runtime()
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                connection.execute(self.sql.SQL("GRANT DELETE ON {}.gateway_provider_attempt_metrics TO {}")
+                                   .format(self.sql.Identifier(schema), self.sql.Identifier(roles[0])))
+                injected = acl(connection)
+            for operation in (bootstrap, verify_runtime):
+                with self.assertRaisesRegex(PostgresStorageError, "acl_boundary_invalid"):
+                    operation()
+            self.assertEqual(injected, INJECTED_ACL)

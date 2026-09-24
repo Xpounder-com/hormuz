@@ -44,13 +44,20 @@ class LinearTransitionPlanTests(unittest.TestCase):
         )
 
     def test_verifies_assigned_versions_and_preserves_runtime_gates(self):
-        result = verifier.verify(self.root)
+        with mock.patch.object(verifier, "SQLITE_SCHEMA_VERSION", 13), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 18,
+        ):
+            result = verifier.verify(self.root)
         self.assertEqual(result["sqlite_transition"], [13, 14])
         self.assertEqual(result["postgresql_transition"], [18, 19])
         self.assertEqual(result["proposal_tables"], 4)
         self.assertFalse(result["runtime_implemented"])
-        self.assertTrue(result["runtime_successor_verified"])
+        self.assertFalse(result["runtime_successor_verified"])
         self.assertFalse(result["live_workspace_authorized"])
+
+    def test_current_association_successor_chain_is_verified(self):
+        result = verifier.verify(verifier.ROOT)
+        self.assertTrue(result["runtime_successor_verified"])
 
     def test_duplicate_plan_member_is_rejected(self):
         path = self.root / verifier.PLAN_PATH

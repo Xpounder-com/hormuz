@@ -1,0 +1,649 @@
+{
+  "schema_ids": [
+    "hormuz.run-work-link-request",
+    "hormuz.run-work-link-event",
+    "hormuz.run-work-link-page",
+    "hormuz.run-outcome-association-evaluation-request",
+    "hormuz.run-outcome-association-event",
+    "hormuz.run-outcome-association-page"
+  ],
+  "$defs": {
+    "opaque_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*(?![\\s\\S])",
+      "description": "Opaque server-issued or server-registered identifier, never a name, path, free-text label, or authority. Resolve within the authenticated organization; do not infer access from syntax."
+    },
+    "external_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:=+-]*(?![\\s\\S])",
+      "description": "Verified connector source identifier. The connector must select the source ID field, never encode a title, path, URL, body, or actor name as an ID."
+    },
+    "opaque_cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[A-Za-z0-9_-]+(?![\\s\\S])",
+      "description": "Server-authenticated opaque cursor, never a raw SQL offset or tenant selector."
+    },
+    "timestamp": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 27,
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])",
+      "description": "Valid UTC RFC3339 instant with at most microsecond precision. Invalid calendar dates are rejected; no local or client-implied time zone."
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Non-negative JSON-safe exact count. Unknown is represented by explicit null only where the containing field permits it."
+    },
+    "digest": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[a-f0-9]{64}(?![\\s\\S])",
+      "description": "Lowercase SHA-256 digest of approved canonical metadata or a tenant-keyed provenance digest. Never a raw content hash substituted for retained work content."
+    },
+    "reason_code": {
+      "type": "string",
+      "enum": [
+        "created",
+        "corrected",
+        "reparented",
+        "archived",
+        "reactivated",
+        "tombstoned",
+        "bound",
+        "voided",
+        "accepted",
+        "rejected",
+        "superseded",
+        "expired",
+        "policy_drift",
+        "scorecard_drift",
+        "observed",
+        "duplicate",
+        "unsupported",
+        "unmatched",
+        "ambiguous",
+        "excluded",
+        "missing_evidence",
+        "below_threshold",
+        "eligible",
+        "not_applicable"
+      ],
+      "description": "Fixed content-free classification, never caller free text or the rejected value."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647,
+      "description": "Positive immutable entity or rule version; never a mutable latest alias."
+    },
+    "outcome_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authenticated server-bound connector ID."
+        },
+        "source_event_id": {
+          "$ref": "#/$defs/external_id",
+          "description": "Stable verified source event identity."
+        }
+      },
+      "required": [
+        "connector_id",
+        "source_event_id"
+      ],
+      "description": "Tenant-qualified normalized source event reference."
+    },
+    "work_scope_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Canonical work scope in the authenticated organization."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Event-time version; do not rebind historical facts to the current version."
+        }
+      },
+      "required": [
+        "work_scope_id",
+        "version"
+      ],
+      "description": "Tenant-qualified versioned work scope; a primary analytic binding must resolve to kind use_case."
+    },
+    "rule_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rule_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Registered rule or metric ID."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Frozen rule version."
+        },
+        "digest": {
+          "$ref": "#/$defs/digest",
+          "description": "Digest of the predeclared rule metadata."
+        }
+      },
+      "required": [
+        "rule_id",
+        "version",
+        "digest"
+      ],
+      "description": "Immutable rule reference. Resolve its formula, eligibility, and thresholds rather than executing caller text."
+    },
+    "association_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "end_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "required": [
+        "start_at",
+        "end_at"
+      ]
+    },
+    "hormuz.run-work-link-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.run-work-link-request"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "request_attempt_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "outcome": {
+          "$ref": "#/$defs/outcome_ref"
+        },
+        "expected_prior_link_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "explicit_link",
+            "corrected",
+            "tombstoned"
+          ]
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "request_attempt_id",
+        "outcome",
+        "expected_prior_link_event_id",
+        "reason_code"
+      ]
+    },
+    "hormuz.run-work-link-event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.run-work-link-event"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "link_event_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "request_attempt_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "attribution_event_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "outcome": {
+          "$ref": "#/$defs/outcome_ref"
+        },
+        "external_object_id": {
+          "$ref": "#/$defs/external_id"
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/external_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref"
+        },
+        "binding_event_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "tombstoned"
+          ]
+        },
+        "evidence_level": {
+          "type": "string",
+          "const": "associated"
+        },
+        "supersedes_link_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actor_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "explicit_link",
+            "corrected",
+            "tombstoned"
+          ]
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "link_event_id",
+        "request_attempt_id",
+        "attribution_event_id",
+        "outcome",
+        "external_object_id",
+        "source_revision",
+        "work_scope",
+        "binding_event_id",
+        "state",
+        "evidence_level",
+        "supersedes_link_event_id",
+        "actor_id",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ]
+    },
+    "hormuz.run-work-link-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.run-work-link-page"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.run-work-link-event"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ]
+    },
+    "hormuz.run-outcome-association-evaluation-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.run-outcome-association-evaluation-request"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "outcome": {
+          "$ref": "#/$defs/outcome_ref"
+        },
+        "window": {
+          "$ref": "#/$defs/association_window"
+        },
+        "expected_prior_association_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "outcome",
+        "window",
+        "expected_prior_association_event_id"
+      ]
+    },
+    "hormuz.run-outcome-association-event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.run-outcome-association-event",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "association_event_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Immutable association event."
+        },
+        "outcome": {
+          "$ref": "#/$defs/outcome_ref"
+        },
+        "request_attempt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Existing v1 attempt, or null when unmatched."
+        },
+        "work_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/work_scope_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact primary use case, or null when no authorized unambiguous binding exists."
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rule_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Deterministic versioned join rule, never temporal-proximity causality."
+        },
+        "candidate_count": {
+          "$ref": "#/$defs/count",
+          "description": "All eligible candidates, including ambiguous/unmatched evidence."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "unmatched",
+            "ambiguous",
+            "associated",
+            "excluded",
+            "superseded"
+          ],
+          "description": "Association lifecycle with excluded/ambiguous evidence retained."
+        },
+        "evidence_level": {
+          "type": "string",
+          "enum": [
+            "descriptive",
+            "associated"
+          ],
+          "description": "Deterministic association never upgrades to controlled."
+        },
+        "supersedes_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prior immutable association event."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Source/domain event time as observed; never scope authority."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Connector/server observation time, preserved separately."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Database commit time authoritative for receipt and retention."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "association_event_id",
+        "outcome",
+        "request_attempt_id",
+        "work_scope",
+        "rule",
+        "candidate_count",
+        "state",
+        "evidence_level",
+        "supersedes_event_id",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ],
+      "description": "Metadata-only observational linkage with explicit ambiguity, fixed rule version, and no employee ranking."
+    },
+    "hormuz.run-outcome-association-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.run-outcome-association-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.run-outcome-association-event"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.association-query": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "#/$defs/opaque_cursor"
+        },
+        "start_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "end_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "source_event_id": {
+          "$ref": "#/$defs/external_id"
+        },
+        "request_attempt_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "tombstoned",
+            "unmatched",
+            "ambiguous",
+            "associated",
+            "excluded"
+          ]
+        }
+      },
+      "required": [],
+      "dependentRequired": {
+        "start_at": [
+          "end_at"
+        ],
+        "end_at": [
+          "start_at"
+        ]
+      }
+    }
+  }
+}

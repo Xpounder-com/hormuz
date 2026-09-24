@@ -24,13 +24,13 @@ from hormuz.postgres import (
 
 PLAN_PATH = "docs/linear-reconciliation-plan-v1.json"
 CI_PATH = ".github/workflows/ci.yml"
-PLAN_SHA256 = "8435db5727fe480f1f155a5491847615a48178eebc47d6dd327b51038c9eefa7"
+PLAN_SHA256 = "eb29f697af4bd9d44ad2ffc28e511a9178ec06396333e22ce5112a15b195cf94"
 PREDECESSOR_PATH = "docs/linear-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
-    "0440419441a88b9405bf35c986edf91c02ba80fba99203df63d309e2fb9603e2"
+    "f401bb88c13e084c3b3c286a4366eaa94e948408735392afb96b376b404da2e6"
 )
 PREDECESSOR_CANONICAL_SHA256 = (
-    "ad8f6448ea791a1890d67a6a8f1dc76684bbf94c1e86df7f329e9700dc59fbfe"
+    "6c3f6782928e4181964b45cda6cee2d3272f2fda81c70c78ed539f520af572aa"
 )
 PREDECESSOR_SOURCE_COMMIT = "5ccadb542f96238b654b22c9a8f34b96673fad71"
 EXPECTED_ACL = (
@@ -231,6 +231,36 @@ def _validate_predecessor(root: Path) -> None:
 
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
+    versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
+    if versions == (16, 21):
+        try:
+            from tools.verify_association_transition_plan import (
+                AssociationTransitionPlanError,
+                verify as verify_association_transition,
+            )
+
+            successor = verify_association_transition(root)
+        except AssociationTransitionPlanError as error:
+            mapping = {
+                "association_transition_source_kit_incomplete": "linear_reconciliation_source_kit_incomplete",
+                "association_transition_frozen_file_changed": "linear_reconciliation_source_changed",
+            }
+            _fail(mapping.get(error.code, "linear_reconciliation_successor_invalid"))
+        return {
+            "status": "linear_reconciliation_successor_verified",
+            "plan_sha256": PLAN_SHA256,
+            "sqlite_schema_version": SQLITE_SCHEMA_VERSION,
+            "postgresql_schema_version": POSTGRES_SCHEMA_VERSION,
+            "postgresql_acl": successor["postgresql_acl"],
+            "table_count": len(TABLES),
+            "audit_source_count": len(AUDIT_SOURCES),
+            "reconciliation_implemented": True,
+            "association_runtime_implemented": successor["runtime_implemented"],
+            "live_workspace_authorized": False,
+            "live_reconciliation_verified": False,
+            "released": False,
+            "gates": successor["gates"],
+        }
     if any(not (root / relative).is_file() for relative in REQUIRED_FILES):
         _fail("linear_reconciliation_source_kit_incomplete")
     plan = _read_json(root / PLAN_PATH)
@@ -350,7 +380,7 @@ def verify(root: Path = ROOT) -> dict[str, object]:
     _validate_ci(root)
 
     if (
-        (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != (15, 20)
+        versions != (15, 20)
         or _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(20) != EXPECTED_ACL
     ):
         _fail("linear_reconciliation_schema_boundary_changed")

@@ -286,6 +286,26 @@ REQUIRED_ASSOCIATION_TRANSITION_SDIST_PATHS = (
     "tests/test_association_transition_plan.py",
     "tests/test_association_transition_preflight.py",
 )
+REQUIRED_ASSOCIATION_RUNTIME_WHEEL_PATHS = (
+    "hormuz/_association_schema.py",
+    "hormuz/association_evidence.py",
+    "hormuz/association_metrics.py",
+    "hormuz/association_repository.py",
+    "hormuz/portfolio-association-wire-v1.json",
+    "hormuz/migrations/postgresql/0021_run_outcome_association.sql",
+)
+REQUIRED_ASSOCIATION_RUNTIME_SDIST_PATHS = (
+    *REQUIRED_ASSOCIATION_TRANSITION_SDIST_PATHS,
+    *REQUIRED_ASSOCIATION_RUNTIME_WHEEL_PATHS,
+    "docs/ASSOCIATION_RUNTIME.md",
+    "docs/association-runtime-plan-v1.json",
+    "tools/verify_association_runtime_plan.py",
+    "tests/fixtures/association/runtime-multisource-v1.json",
+    "tests/test_association_metrics.py",
+    "tests/test_association_runtime.py",
+    "tests/test_association_runtime_plan.py",
+    "tests/test_postgres_association_runtime.py",
+)
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
     "docs/work-budget-reports-wire-v1.json",
@@ -483,6 +503,18 @@ def main(argv: list[str] | None = None) -> int:
         _sdist_members,
         REQUIRED_ASSOCIATION_TRANSITION_SDIST_PATHS,
         "Association transition source kit",
+    )
+    _assert_required_archive_paths(
+        wheel,
+        _wheel_members,
+        REQUIRED_ASSOCIATION_RUNTIME_WHEEL_PATHS,
+        "Association runtime wheel",
+    )
+    _assert_required_archive_paths(
+        sdist,
+        _sdist_members,
+        REQUIRED_ASSOCIATION_RUNTIME_SDIST_PATHS,
+        "Association runtime source kit",
     )
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)

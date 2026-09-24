@@ -1,0 +1,185 @@
+{
+  "schema_id": "hormuz.association-runtime-plan",
+  "schema_version": 1,
+  "stage": "provider_free_runtime_candidate",
+  "target_release": "1.3.0",
+  "feature_issue": 221,
+  "gate_issue": 214,
+  "base_main_commit": "dea44f07b41973c6f6e4ac9b7c71016923b10993",
+  "predecessor": {
+    "path": "docs/association-transition-plan-v1.json",
+    "file_sha256": "261ccd15e629f7beb58e76a12ad2ed206ed6b8222414e6409beb40e9af6c79f3",
+    "canonical_sha256": "36dc6f8b2b0b355e3a940b6e791732fab285ea515caf805d502bbd130c59f4d5"
+  },
+  "transitions": {
+    "sqlite": {
+      "from": 15,
+      "to": 16
+    },
+    "postgresql": {
+      "from": 20,
+      "to": 21
+    }
+  },
+  "postgresql_acl": {
+    "entry_count": 232,
+    "sha256": "038e670f801c9b1a0d6b96829d8cdfbb89a66eaf8114f69cb1a9909b98cd1859",
+    "mode": "fixed_literal_two_clean_managed_role_measurements"
+  },
+  "runtime": {
+    "routes": [
+      "POST /v1/admin/portfolio/run-work-links",
+      "GET /v1/admin/portfolio/run-work-links",
+      "POST /v1/admin/portfolio/associations",
+      "GET /v1/admin/portfolio/associations"
+    ],
+    "authorization": "typed_portfolio_admin_and_configured_connector_before_storage",
+    "link_evidence": "exact_attempt_attribution_source_revision_scope_and_historical_binding",
+    "rule_id": "explicit-run-work-link-v1",
+    "rule_version": 1,
+    "association_states": [
+      "unmatched",
+      "ambiguous",
+      "associated",
+      "excluded"
+    ],
+    "source_authority": "connector_ordered_current_revision_equal_or_incomparable_conflict_is_ambiguous",
+    "correction_model": "append_only_compare_and_set_successor",
+    "idempotency": "tenant_actor_key_versioned_domain_separated_HMAC",
+    "cursor": "opaque_authority_and_filter_bound_snapshot_cursor_expires_after_one_hour",
+    "internal_metric_reference": true,
+    "public_scorecard_route": false,
+    "causal_claim": false
+  },
+  "storage": {
+    "tables": [
+      "portfolio_association_audit_events",
+      "portfolio_run_work_link_events",
+      "portfolio_run_work_link_idempotency",
+      "portfolio_run_outcome_association_events",
+      "portfolio_run_outcome_association_cursors"
+    ],
+    "append_only": true,
+    "tenant_keyed": true,
+    "audit_chain_sources": [
+      "hormuz.run-work-link-event",
+      "hormuz.run-outcome-association-event"
+    ],
+    "raw_provider_payload_storage": false,
+    "work_content_storage": false,
+    "credential_storage": false
+  },
+  "accounting": {
+    "attempt_grain": "unique_request_attempt",
+    "outcome_grain": "unique_external_work_object_at_authoritative_snapshot",
+    "cost_bases": [
+      "provider_final",
+      "configured_rate_card_estimate",
+      "allocated_estimate",
+      "provider_aggregate",
+      "credit_or_discount",
+      "not_available"
+    ],
+    "provider_aggregate_or_credit_assigned_to_attempt": false,
+    "undefined_denominator": "unavailable_never_numeric_zero",
+    "history_dependent_metrics_require_declared_complete_connector_history": true,
+    "frozen_fixture": "tests/fixtures/association/runtime-multisource-v1.json",
+    "fixture_connectors": [
+      "github-one",
+      "linear-one"
+    ]
+  },
+  "source_sha256": {
+    ".github/workflows/ci.yml": "779efaceae535705b45ffa21c395d05e7bd23af87f605105b1f13317dee9dbcd",
+    "MANIFEST.in": "c64c87206c8b0eccd9beb1701180680ccad6238e1ef4956d32b34ad8138ed31f",
+    "docs/ASSOCIATION_RUNTIME.md": "91dc2483153f192b83c8f37cc5b68b285d61b7d52dd4fd7a576a2c2938f0863b",
+    "docs/DURABLE_DATA.md": "a1f640fb47589b5456e1570d2a143195196f5d92ee4acad806e6d0860b12ce6b",
+    "docs/durable-data-v1.json": "5a24ab16afacc84948546811cc2569e1d1a5479a236e95b5e82a89ae88182ea1",
+    "hormuz/_association_schema.py": "4bf001bfd4b24d55cde571d821a42b545801deb31b9abd6aebf0ea2db50c5259",
+    "hormuz/_contract_schemas/audit.py": "2814e18cc4f1191aedeed57195eaea236a035ff40e1f9e64b417244e1ca65c5d",
+    "hormuz/_finance_account_binding_schema.py": "20604efb22ef026948fb67b36bddacaa28c21b0b779054fd0125dc875b8e1242",
+    "hormuz/_finance_collection_schema.py": "e1a668ea602268d272be43ffa531829d92e1300a9df1a320a34bbdca6bbea686",
+    "hormuz/_portfolio_sql.py": "56b94a4f3577c78e436c82db261cce9464b22b764b5f0f38d8b5c277ff298ed4",
+    "hormuz/_sqlite_schema.py": "72eea0676a3cfb4214a40b3bc8257e11a2b6b6c98db618a12b29f43e2ad2ed98",
+    "hormuz/association_evidence.py": "0edf9bbeb2e8d4ab50a0d2d599eb1d9e52942e061be86c2041dcb5e3d3f16b60",
+    "hormuz/association_metrics.py": "7ddc8d1bb9c772bcefc9da823de19385b6aee55acaca71526390c6890954a1c6",
+    "hormuz/association_repository.py": "7e08481b4f9be58e6f549901b37e2f2a84b17457aed18e2937c5e4624b016f12",
+    "hormuz/audit_chain.py": "860998d2b1374e3ec127c380ef5a4b1dcf4d9874d9206345ed22894274743452",
+    "hormuz/migrations/postgresql/0021_run_outcome_association.sql": "600a98fb13dc3ca11bd2372440d29a04e6abdd15ceba49861a4811cd707c5570",
+    "hormuz/portfolio-association-wire-v1.json": "1a4901a3f9a269b9dd8e67a4fbc3befd6483d3ca83c1ac79e626015f6b6787c8",
+    "hormuz/portfolio_repository.py": "4924db44944e925c81180d2adfe6bb7199c76bd931f44328d09d2dae4965ca59",
+    "hormuz/portfolio_wire.py": "fb406faa00419ff2957b087f564ee7b92aa871da53b2c898f425c49436d71824",
+    "hormuz/postgres.py": "5bd3c19e13f2977bd0504a537566c6f9a8ec1120a70aaebf77526455421d2eec",
+    "pyproject.toml": "788786f2488635411d7d277415be9f642899e886f80e3a4c5bfef0a5ae466a5e",
+    "tests/_postgres_fixture.py": "21bfa9fea65e6edbe5ebb7827a048256da750330bfc97a3a1582d952010ec4b4",
+    "tests/fixtures/association/runtime-multisource-v1.json": "af14bd8eac03d63be21e612e80cdb5f1b9118ace6cb5e9b7686119712dfb2caf",
+    "tests/test_association_metrics.py": "18787ac29e4d8f6f9e0de2530540103fc9812786c6346be421d4a618c63a9b4c",
+    "tests/test_association_runtime.py": "207fbdaafab074a8ab7078637ca6f4bb4a2e046956c1170f712f041ffcb6c668",
+    "tests/test_association_runtime_plan.py": "5bb85712bab9571c2c7d5acb71be6cc1eb75983e49a96f3454c042865a43ae09",
+    "tests/test_association_transition_preflight.py": "68426d399d6a6b9c547ffa5ff519b14eaa6af008322eeee09d197ff39b8e1611",
+    "tests/test_attribution_schema.py": "e6401e9ac03fd9dce09031056044b04348a91c6e277a4808d39ee6b7757b923b",
+    "tests/test_budget_schema.py": "7f4553bffd0ab133f24756463513e0d1ab991dcbcf3dbf8a8082fe969f9d263d",
+    "tests/test_durable_data_inventory.py": "1a7006cda510e7c9a181ef2873f91bd760c1d35fa2d4bdba2f6c7fcb1fd9ac13",
+    "tests/test_finance_account_binding_transition_preflight.py": "2d22ea40bf257d03d746c6be1f559c0c4d367fc2479f906424c23885a1e00860",
+    "tests/test_finance_collection_postgres_runtime_plan.py": "9856d3bf3eacc7edf515f92c3908080feb3dd0ebbd675e7e0cae9d43bd1cbf48",
+    "tests/test_finance_collection_runtime_plan.py": "69e29ffd246fa1fd2572cdc1055e390e7c52daff156e807bd8815c839828d926",
+    "tests/test_linear_reconciliation_plan.py": "0f0099f2127ddde08f93ce46c3523e50ad0cd4a90d1f42ed0af19f0b3f25c6d6",
+    "tests/test_linear_runtime_plan.py": "b5ab55b1e8dc8fe2a6df0056903470116ae02daa5f1e24898319be34689b619d",
+    "tests/test_linear_transition_plan.py": "1b55ba49f6f0b5e8db07d8771c853c4c1604df223846483c4c7d535fca90c395",
+    "tests/test_linear_transition_preflight.py": "effc483026f55dc5970928416d55c264565ce5838ce082b8b78c124403aa2c98",
+    "tests/test_outcome_schema.py": "11f67f6a07e003345c2bf3416ec66ced0eefd71f588586e8716aba15bf7b1c53",
+    "tests/test_postgres_association_runtime.py": "d63395dabbb2a5db24be7fdb1b991adb0f7faee1e87520d3eb1ddca43eb7f5f0",
+    "tests/test_postgres_budget.py": "944900af7e70b764bb35f5d670109516487531d4531c2747784b453f0067cd37",
+    "tests/test_postgres_finance.py": "3f05a513c2641f2ef82c78a0c7514e0dd4dd201a1552fa7598aa3317e5bba0da",
+    "tests/test_postgres_finance_collection_runtime_transition.py": "2303c5d46ebf8ad92785aca330d1a19d6d83da29694e9582ef1b0da0b57a2457",
+    "tests/test_postgres_linear_connector_runtime.py": "9e978903848b28e7fa67daaa68cf7aab584362795627051b1d419e3335b978f9",
+    "tests/test_postgres_linear_snapshot_runtime.py": "cc6b0284b383ee3232e16d8af9fbf7a9864169106e8a0902ea9b8ccbfe6a022d",
+    "tests/test_postgres_migration_rls.py": "6aa561615d876f02380cea9f52f6c8a3c79a48279a502363cd558f6933ced9f3",
+    "tests/test_postgres_test_boundaries.py": "82350e725bee84864f2a13ddfafbfa1bae325a59b2781a5e5abb3718a01d5228",
+    "tests/test_sqlite_budget_transition.py": "faa8917931106138ff35fa2b92ef347584b71a93db15987253c39ba52c1baac7",
+    "tests/test_sqlite_attribution_transition.py": "6e8234f89e505d5c20b7b5d6452ebb0ffc2c344a5c9aac66ef0b8b0ae3df4486",
+    "tests/test_sqlite_finance.py": "62f5cdf656a91b30e5117076935719e820e4702cd742fb7762bdca20d55aa217",
+    "tests/test_sqlite_finance_collection_transition.py": "ffead64897866cc304fc174b2fa7ec6dfa462b81757c5437ec4a056e856f036b",
+    "tests/test_sqlite_finance_native_attempt_transition.py": "a17a266bcc1b17656612ddf982423c23b6e019bfc754130a5bd40d747340e656",
+    "tests/test_sqlite_finance_transition.py": "f9a69eb0df6b83e7a45bcaf8cab228916534f6e6abf8302cf7ca0e5a780a26d0",
+    "tests/test_sqlite_outcome_transition.py": "5c920c5be27bc901e6750014825a332a14501311aec842535478217d0e7ed818",
+    "tests/test_sqlite_registry_transition.py": "e070afece2c16b843c5a75affc3fc478e66ef6d045a1d48e9e7f6f5a458ca46e",
+    "tests/test_store.py": "aeca216a78e11fa0ac87d759365ae741e74a8d0c9e4d26344fa1943601a262d6",
+    "tools/verify_association_transition_plan.py": "d57a01a3300d1cda0e69710f1db72d537536dc9f6e99175e987293e86fd28952",
+    "tools/verify_core_wheel.py": "71951f560c0e00f4667ad6a9882993f7af6f7a9f32e24f5841f8b0af843d9290",
+    "tools/verify_durable_data_inventory.py": "101f60c21dfd6c8b413f0e68f4c85a9547b917ed53ff2356662d9d7a00f1fce2",
+    "tools/verify_finance_collection_postgres_runtime.py": "337d9875bb650fbd612a5f12c19c22ca87504cf9f94b229bcb3369638bfb1984",
+    "tools/verify_finance_collection_runtime.py": "1e9ac53dcdaf82a776316ef292662e038f80b7514dcfe5343630c3cdffc0294f",
+    "tools/verify_finance_native_attempt_transition_plan.py": "c8d415d2a4b3ca7ec214d81f2af118fd972f0c929d2dd6d670a4ed3a797c7d4e",
+    "tools/verify_linear_reconciliation_plan.py": "1912166af709819bd8157f005c7935468263e9a4bc9b0fa4098e094b76bb9e3f",
+    "tools/verify_linear_runtime_plan.py": "903d089e21612a87875cddb6c80fe96b20c32b4769579cfc1a286038cc494b14",
+    "tools/verify_linear_transition_plan.py": "f2cb7526f8f42385db0ff9394338d1f2cf76bca27c72abfa5d4b5c61aa398567"
+  },
+  "gates": {
+    "transition_checkpoint_accepted": true,
+    "exact_storage_wire_and_audit_contract_frozen": true,
+    "explicit_link_runtime_proven": true,
+    "deterministic_association_runtime_proven": true,
+    "coverage_and_cost_vectors_proven": true,
+    "metadata_content_scans_proven": true,
+    "sqlite_runtime_tests_implemented": true,
+    "postgresql_runtime_tests_implemented": true,
+    "provider_free_source_verified": true,
+    "provider_free_wheel_verified": true,
+    "exact_main_ci_verified": false,
+    "live_connectors_authorized": false,
+    "live_multi_source_evidence_verified": false,
+    "final_candidate_accepted": false,
+    "released": false
+  },
+  "nonclaims": [
+    "authorized_live_GitHub_or_Linear_workspace",
+    "causal_model_to_work_outcome_attribution",
+    "complete_live_connector_history",
+    "exact_main_CI",
+    "final_candidate_acceptance",
+    "realized_savings_or_business_outcome",
+    "scorecard_or_recommendation_API",
+    "v1.3.0_release"
+  ]
+}

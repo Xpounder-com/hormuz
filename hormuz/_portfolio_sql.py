@@ -33,6 +33,10 @@ from ._linear_snapshot_schema import (
     TABLE_DDL as LINEAR_SNAPSHOT_TABLES,
     verify_postgres_linear_snapshot,
 )
+from ._association_schema import (
+    TABLE_DDL as ASSOCIATION_TABLES,
+    verify_postgres_association,
+)
 from ._budget_schema import (
     ACTIVE_TABLE as BUDGET_ACTIVE_TABLE,
     TABLE_DDL as BUDGET_TABLES,
@@ -162,6 +166,12 @@ def portfolio_transaction(
                         verify_postgres_linear(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is LINEAR_SNAPSHOT_TABLES or tables is OUTCOME_LINEAR_TABLES:
                         verify_postgres_linear_snapshot(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
+                    if tables is ASSOCIATION_TABLES:
+                        verify_postgres_association(
                             cursor,
                             storage.postgres_schema,
                             PostgresStorageError,
