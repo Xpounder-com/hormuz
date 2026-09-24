@@ -995,37 +995,37 @@
         "cluster_count": 6,
         "cohort_id": "baseline",
         "confidence_level": "0.95",
-        "lower": "9.326647999",
+        "lower": "9.326647998",
         "method": "work_item_cluster_jackknife_95",
         "metric": "quality_qualified_cost_per_accepted_work_item",
         "point": "15.6",
         "reason_code": "eligible",
         "status": "eligible",
-        "upper": "21.873352001"
+        "upper": "21.873352002"
       },
       {
         "cluster_count": 6,
         "cohort_id": "baseline",
         "confidence_level": "0.95",
-        "lower": "0.436497178",
+        "lower": "0.436497177",
         "method": "work_item_wilson_95",
         "metric": "accepted_work_item_rate",
         "point": "0.833333333",
         "reason_code": "eligible",
         "status": "eligible",
-        "upper": "0.96994663"
+        "upper": "0.969946631"
       },
       {
         "cluster_count": 6,
         "cohort_id": "baseline",
         "confidence_level": "0.95",
-        "lower": "0.436497178",
+        "lower": "0.436497177",
         "method": "work_item_wilson_95",
         "metric": "first_pass_success",
         "point": "0.833333333",
         "reason_code": "eligible",
         "status": "eligible",
-        "upper": "0.96994663"
+        "upper": "0.969946631"
       },
       {
         "cluster_count": 6,
@@ -1055,37 +1055,37 @@
         "cluster_count": 6,
         "cohort_id": "efficient",
         "confidence_level": "0.95",
-        "lower": "6.404991967",
+        "lower": "6.404991966",
         "method": "work_item_cluster_jackknife_95",
         "metric": "quality_qualified_cost_per_accepted_work_item",
         "point": "9.4",
         "reason_code": "eligible",
         "status": "eligible",
-        "upper": "12.395008033"
+        "upper": "12.395008034"
       },
       {
         "cluster_count": 6,
         "cohort_id": "efficient",
         "confidence_level": "0.95",
-        "lower": "0.436497178",
+        "lower": "0.436497177",
         "method": "work_item_wilson_95",
         "metric": "accepted_work_item_rate",
         "point": "0.833333333",
         "reason_code": "eligible",
         "status": "eligible",
-        "upper": "0.96994663"
+        "upper": "0.969946631"
       },
       {
         "cluster_count": 6,
         "cohort_id": "efficient",
         "confidence_level": "0.95",
-        "lower": "0.436497178",
+        "lower": "0.436497177",
         "method": "work_item_wilson_95",
         "metric": "first_pass_success",
         "point": "0.833333333",
         "reason_code": "eligible",
         "status": "eligible",
-        "upper": "0.96994663"
+        "upper": "0.969946631"
       },
       {
         "cluster_count": 6,
@@ -1127,7 +1127,7 @@
         "cluster_count": 6,
         "cohort_id": "guarded",
         "confidence_level": "0.95",
-        "lower": "0.609665712",
+        "lower": "0.609665711",
         "method": "work_item_wilson_95",
         "metric": "accepted_work_item_rate",
         "point": "1",
@@ -1139,7 +1139,7 @@
         "cluster_count": 6,
         "cohort_id": "guarded",
         "confidence_level": "0.95",
-        "lower": "0.609665712",
+        "lower": "0.609665711",
         "method": "work_item_wilson_95",
         "metric": "first_pass_success",
         "point": "1",
@@ -1163,25 +1163,25 @@
         "cluster_count": 6,
         "cohort_id": "baseline",
         "confidence_level": "0.95",
-        "lower": "-0.573606825",
+        "lower": "-1.345253301",
         "method": "independent_cluster_interval_propagation_95",
         "metric": "optimization_lift_vs_declared_baseline",
         "point": "0",
         "reason_code": "eligible",
         "status": "eligible",
-        "upper": "1.3452533"
+        "upper": "0.573606826"
       },
       {
         "cluster_count": 6,
         "cohort_id": "efficient",
         "confidence_level": "0.95",
-        "lower": "-0.140278455",
+        "lower": "-0.328988511",
         "method": "independent_cluster_interval_propagation_95",
         "metric": "optimization_lift_vs_declared_baseline",
         "point": "0.397435897",
         "reason_code": "eligible",
         "status": "eligible",
-        "upper": "1.658512258"
+        "upper": "0.707178307"
       },
       {
         "cluster_count": null,

@@ -11,7 +11,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import (
+    Context,
+    Decimal,
+    InvalidOperation,
+    ROUND_CEILING,
+    ROUND_FLOOR,
+    ROUND_HALF_EVEN,
+    localcontext,
+)
 import hashlib
 import json
 import re
@@ -124,7 +132,26 @@ def _decimal_text(value: Decimal) -> str:
         context.prec = 50
         value = value.quantize(Decimal("0.000000001"))
     text = format(value, "f").rstrip("0").rstrip(".")
-    return "0" if text in {"", "-0"} else text
+    text = "0" if text in {"", "-0"} else text
+    if _SIGNED_DECIMAL.fullmatch(text) is None:
+        _invalid()
+    return text
+
+
+def _interval_text(value: Decimal, *, lower: bool) -> str:
+    if not value.is_finite():
+        _invalid()
+    with localcontext() as context:
+        context.prec = 50
+        value = value.quantize(
+            Decimal("0.000000001"),
+            rounding=ROUND_FLOOR if lower else ROUND_CEILING,
+        )
+    text = format(value, "f").rstrip("0").rstrip(".")
+    text = "0" if text in {"", "-0"} else text
+    if _SIGNED_DECIMAL.fullmatch(text) is None:
+        _invalid()
+    return text
 
 
 def _divide(numerator: Decimal, denominator: Decimal) -> Decimal | None:
@@ -294,8 +321,8 @@ def _wilson(metric: str, cohort_id: str, successes: int, count: int):
         "method": "work_item_wilson_95",
         "confidence_level": "0.95",
         "point": _decimal_text(point),
-        "lower": _decimal_text(lower),
-        "upper": _decimal_text(upper),
+        "lower": _interval_text(lower, lower=True),
+        "upper": _interval_text(upper, lower=False),
         "cluster_count": count,
         "status": "eligible",
         "reason_code": "eligible",
@@ -321,6 +348,7 @@ def _jackknife_ratio(cohort_id: str, clusters: list[tuple[Decimal, int]]):
                 _decimal_text(point),
             )
         estimates.append((total_cost - cost) / Decimal(denominator))
+    estimates.sort()
     with localcontext() as context:
         context.prec = 50
         count = Decimal(len(estimates))
@@ -337,8 +365,8 @@ def _jackknife_ratio(cohort_id: str, clusters: list[tuple[Decimal, int]]):
         "method": "work_item_cluster_jackknife_95",
         "confidence_level": "0.95",
         "point": _decimal_text(point),
-        "lower": _decimal_text(lower),
-        "upper": _decimal_text(upper),
+        "lower": _interval_text(lower, lower=True),
+        "upper": _interval_text(upper, lower=False),
         "cluster_count": len(clusters),
         "status": "eligible",
         "reason_code": "eligible",
@@ -379,8 +407,8 @@ def _latency_uncertainty(cohort_id: str, clusters: list[list[Decimal]]):
         "method": "work_item_delete_one_range",
         "confidence_level": "0.95",
         "point": _decimal_text(point),
-        "lower": _decimal_text(min(estimates)),
-        "upper": _decimal_text(max(estimates)),
+        "lower": _interval_text(min(estimates), lower=True),
+        "upper": _interval_text(max(estimates), lower=False),
         "cluster_count": len(clusters),
         "status": "eligible",
         "reason_code": "eligible",
@@ -572,7 +600,13 @@ def _parse_cohort(value, *, context, policy, required_strata, metric_rules):
                 if type(raw_components) is not list or not 1 <= len(raw_components) <= 100:
                     _invalid()
                 parsed_components = [_cost_component(value, rate_card) for value in raw_components]
-                if len([value for value in parsed_components if value["basis"] == cost_basis]) != 1:
+                selected_components = [
+                    value for value in parsed_components if value["basis"] == cost_basis
+                ]
+                if (
+                    len(selected_components) != 1
+                    or selected_components[0]["currency"] != currency
+                ):
                     _invalid()
                 components.extend(parsed_components)
                 source_digests.extend(value["provenance_digest"] for value in parsed_components)
@@ -839,6 +873,12 @@ def _dominates(left, right) -> bool:
 def build_scorecard_evaluation(value: Mapping[str, object]) -> dict[str, object]:
     """Build one immutable scorecard evaluation from authorized metadata facts."""
 
+    with localcontext(Context(prec=50, rounding=ROUND_HALF_EVEN)):
+        return _build_scorecard_evaluation(value)
+
+
+def _build_scorecard_evaluation(value: Mapping[str, object]) -> dict[str, object]:
+
     fields = {
         "schema_id", "schema_version", "organization_id", "scorecard_id", "version",
         "work_scope", "window", "evaluated_at", "generated_at", "expires_at",
@@ -846,6 +886,8 @@ def build_scorecard_evaluation(value: Mapping[str, object]) -> dict[str, object]
         "eligibility_policy", "metric_rules", "cohorts",
     }
     item = _closed(value, fields)
+    if len(_canonical(item).encode("ascii")) > MAX_DOCUMENT_BYTES:
+        _invalid()
     if item["schema_id"] != "hormuz.scorecard-evaluation-input" or item["schema_version"] != 1:
         _invalid()
     organization = _identifier(item["organization_id"])
@@ -929,12 +971,22 @@ def build_scorecard_evaluation(value: Mapping[str, object]) -> dict[str, object]
     lift_uncertainty = []
     for cohort in cohorts:
         metric = cohort["output"]["metrics"]["quality_qualified_cost_per_accepted_work_item"]
+        base_interval = baseline["cost_uncertainty"]
+        current_interval = cohort["cost_uncertainty"]
         comparable = (
             cohort["currency"] == baseline["currency"]
             and cohort["strata"] == baseline["strata"]
+            and cohort["output"]["cost_basis"] == baseline["output"]["cost_basis"]
+            and (
+                cohort["output"]["cost_basis"] == "provider_final"
+                or cohort["output"]["rate_card"] == baseline["output"]["rate_card"]
+            )
             and metric["status"] == "eligible"
             and baseline_cost["status"] == "eligible"
             and _decimal(baseline_cost["value"]) > 0
+            and base_interval["status"] == "eligible"
+            and current_interval["status"] == "eligible"
+            and _decimal(base_interval["lower"]) > 0
         )
         if comparable:
             baseline_value, current_value = _decimal(baseline_cost["value"]), _decimal(metric["value"])
@@ -944,14 +996,18 @@ def build_scorecard_evaluation(value: Mapping[str, object]) -> dict[str, object]
                 numerator=_decimal_text(baseline_value - current_value), denominator=_decimal_text(baseline_value),
                 unit="relative_lift", status="eligible", reason="eligible",
             )
-            base_interval = baseline["cost_uncertainty"]
-            current_interval = cohort["cost_uncertainty"]
-            lower = (_decimal(base_interval["lower"]) - _decimal(current_interval["upper"])) / _decimal(base_interval["upper"])
-            upper = (_decimal(base_interval["upper"]) - _decimal(current_interval["lower"])) / _decimal(base_interval["lower"])
+            lower = Decimal(1) - (
+                _decimal(current_interval["upper"]) / _decimal(base_interval["lower"])
+            )
+            upper = Decimal(1) - (
+                _decimal(current_interval["lower"]) / _decimal(base_interval["upper"])
+            )
             uncertainty = {
                 "cohort_id": cohort["output"]["cohort_id"], "metric": "optimization_lift_vs_declared_baseline",
                 "method": "independent_cluster_interval_propagation_95", "confidence_level": "0.95",
-                "point": _decimal_text(lift), "lower": _decimal_text(lower), "upper": _decimal_text(upper),
+                "point": _decimal_text(lift),
+                "lower": _interval_text(lower, lower=True),
+                "upper": _interval_text(upper, lower=False),
                 "cluster_count": min(base_interval["cluster_count"], current_interval["cluster_count"]),
                 "status": "eligible", "reason_code": "eligible",
             }
@@ -999,7 +1055,9 @@ def build_scorecard_evaluation(value: Mapping[str, object]) -> dict[str, object]
         "generated_at": item["generated_at"], "expires_at": item["expires_at"],
         "state": state, "evidence_level": "associated", "controlled_design": None,
         "coverage": public_coverage, "cohorts": [value["output"] for value in cohorts],
-        "baseline_cohort_id": baseline_id if baseline_cost["status"] == "eligible" else None,
+        "baseline_cohort_id": baseline_id if baseline["output"]["metrics"][
+            "optimization_lift_vs_declared_baseline"
+        ]["status"] == "eligible" else None,
         "pareto_cohort_ids": pareto, "decision_owner_id": decision_owner,
         "review_after": item["review_after"], "supersedes_version": supersedes,
         "reason_code": reason,

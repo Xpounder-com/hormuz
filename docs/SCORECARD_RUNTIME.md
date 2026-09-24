@@ -42,8 +42,9 @@ The primary decision KPI is **optimization lift versus the declared baseline**:
 `(baseline quality-qualified cost - cohort quality-qualified cost) / baseline quality-qualified cost`
 
 The baseline is versioned input, and lift is emitted only when both cohorts
-clear their evidence policy, currency and stratum comparability, cost
-denominator, and uncertainty requirements. The result is always labelled
+clear their evidence policy, currency, cost-basis and stratum comparability,
+share the same rate-card version when using estimated costs, and clear cost
+denominator and uncertainty requirements. The result is always labelled
 `associated`. `controlled_design` is null; this runtime never upgrades
 observational evidence to verified causal lift.
 
@@ -66,8 +67,9 @@ items. Cost per accepted work item uses a work-item cluster jackknife that
 keeps all retries and failures inside their source item. Latency uses a
 work-item delete-one range. Coverage ratios retain exact source numerators and
 denominators. Optimization-lift bounds conservatively propagate the two cost
-intervals. Fewer than three independent work-item clusters produces an
-inconclusive interval.
+intervals. A baseline interval that reaches zero makes lift inconclusive rather
+than dividing by an unsupported denominator. Fewer than three independent
+work-item clusters produces an inconclusive interval.
 
 The Pareto set covers cost, accepted-work quality, p95 latency, and first-pass
 reliability. One cohort dominates another only when its complete 95% interval
@@ -86,10 +88,12 @@ does not change the result or lineage digest.
 
 Adversarial tests cover missing and zero coverage, duplicate source facts,
 duplicate attempt identities, non-contiguous retries, pooled actual models,
-missing model versions, cost-basis relabelling, failed guarded strata,
+missing model versions, mixed currencies, cost bases and rate cards, failed
+guarded strata, zero-crossing baseline intervals, nonconservative rounding,
+financial overflow, caller decimal contexts, document-size limits,
 noncanonical finance values, late/out-of-window attempts, invalid version
-lineage, and forbidden content/person fields. Earlier association fixtures
-cover duplicate deliveries, retries, reopenings, reversions, late evidence,
+lineage, and forbidden content/person fields. Earlier association fixtures cover
+duplicate deliveries, retries, reopenings, reversions, late evidence,
 unsupported events, and corrected decisions before facts reach this kernel.
 
 ## Storage and authorization
