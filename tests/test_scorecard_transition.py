@@ -44,7 +44,10 @@ class SQLiteScorecardTransitionTests(unittest.TestCase):
             if fail:
                 raise RuntimeError("synthetic_scorecard_migration_failure")
 
-        with mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
+        with (
+            mock.patch.object(UsageStore, "schema_version", 17),
+            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
+        ):
             UsageStore(self.path).verify_ready()
 
     def assert_predecessor_preserved(self) -> None:
@@ -69,7 +72,7 @@ class SQLiteScorecardTransitionTests(unittest.TestCase):
         self.upgrade()
         self.assertEqual(sqlite_snapshot(self.path), current)
 
-        with mock.patch.object(UsageStore, "schema_version", 18):
+        with mock.patch.object(UsageStore, "schema_version", 19):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
@@ -134,7 +137,11 @@ class PostgresScorecardTransitionTests(PostgresTestCase):
         )
 
     def setUp(self) -> None:
-        super().setUp()
+        # Transition cases deliberately leave this class-owned schema at the
+        # scorecard successor (22), while the installed runtime may already
+        # require a later schema. Rebuild the predecessor directly instead of
+        # asking the current-runtime fixture to open the previous test's
+        # intentionally older ledger first.
         self._drop_schema(self.schema)
         with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 21):
             self.assertEqual(self.migrate().version, 21)
@@ -184,6 +191,8 @@ class PostgresScorecardTransitionTests(PostgresTestCase):
 
         with mock.patch.object(
             postgres_module, "_migration_sql", side_effect=migration
+        ), mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 22
         ):
             self.assertEqual(self.migrate().version, 22)
 
@@ -217,7 +226,7 @@ class PostgresScorecardTransitionTests(PostgresTestCase):
         self.upgrade()
         self.assertEqual(self.snapshot(), current)
 
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 23):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 24):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

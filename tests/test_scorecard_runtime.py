@@ -28,7 +28,7 @@ class SQLiteScorecardRuntimeTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.config = registry_config(self.root)
-        self.assertEqual(UsageStore.schema_version, 17)
+        self.assertEqual(UsageStore.schema_version, 18)
         UsageStore(self.config.database_path)
         self.repositories = create_portfolio_repository(self.config)
         self.service = PortfolioService(self.config, self.repositories)

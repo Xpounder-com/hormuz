@@ -181,6 +181,12 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$RUNNER_TEMP/installed_association_tests" -t "$RUNNER_TEMP" \
             -p test_scorecard_runtime.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$RUNNER_TEMP/installed_association_tests" -t "$RUNNER_TEMP" \
+            -p test_role_view_runtime.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$RUNNER_TEMP/installed_association_tests" -t "$RUNNER_TEMP" \
+            -p test_role_view_api_cli.py -v
       - name: Verify additive portfolio, budget, finance, Linear, and association preflights from the source distribution
         run: |
           hormuz_extension_source="$(mktemp -d "$RUNNER_TEMP/hormuz-extensions.XXXXXX")"
@@ -200,6 +206,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_association_transition_plan.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_association_runtime_plan.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_scorecard_runtime_plan.py
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_role_view_runtime.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I docs/evidence/reconciliation_scope_probe.py --current-runtime
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest -v \
             tests.test_portfolio_extensions tests.test_portfolio_extension_packaging \
@@ -211,6 +218,7 @@ jobs:
             tests.test_finance_account_registration_request tests.test_finance_account_registration_store \
             tests.test_finance_variance_reference tests.test_finance_reconciliation_coverage \
             tests.test_scorecard_evidence_reference tests.test_scorecard_kernel tests.test_scorecard_runtime tests.test_scorecard_runtime_plan tests.test_scorecard_transition \
+            tests.test_role_view_api_cli tests.test_role_view_runtime tests.test_role_view_runtime_plan tests.test_role_view_transition \
             tests.test_linear_connector_preflight tests.test_linear_connector_fixtures \
             tests.test_linear_transition_plan tests.test_linear_transition_preflight \
             tests.test_linear_runtime_plan tests.test_linear_connector_runtime \
@@ -449,6 +457,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_association_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_association_runtime_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_scorecard_runtime_plan.py
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_role_view_runtime.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I docs/evidence/reconciliation_scope_probe.py --current-runtime
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest -v \
             tests.test_registry_transition_plan tests.test_attribution_transition_plan tests.test_outcome_transition_plan \
@@ -461,6 +470,7 @@ jobs:
             tests.test_finance_account_registration_request tests.test_finance_account_registration_store \
             tests.test_finance_variance_reference tests.test_finance_reconciliation_coverage \
             tests.test_scorecard_evidence_reference tests.test_scorecard_kernel tests.test_scorecard_runtime tests.test_scorecard_runtime_plan tests.test_scorecard_transition \
+            tests.test_role_view_api_cli tests.test_role_view_runtime tests.test_role_view_runtime_plan tests.test_role_view_transition \
             tests.test_github_connector_preflight tests.test_github_connector_fixtures \
             tests.test_github_webhook_auth tests.test_github_connector_runtime \
             tests.test_linear_transition_plan tests.test_linear_transition_preflight \
@@ -560,6 +570,12 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$RUNNER_TEMP/postgres_installed_association_tests" -t "$RUNNER_TEMP" \
             -p test_scorecard_transition.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$RUNNER_TEMP/postgres_installed_association_tests" -t "$RUNNER_TEMP" \
+            -p test_postgres_role_view_runtime.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$RUNNER_TEMP/postgres_installed_association_tests" -t "$RUNNER_TEMP" \
+            -p test_role_view_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_registration_store.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \

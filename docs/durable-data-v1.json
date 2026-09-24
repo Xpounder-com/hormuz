@@ -132,6 +132,19 @@
       ]
     },
     {
+      "id": "portfolio_role_view_control",
+      "content_boundary": "operational_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "portfolio_role_view_audit_events",
+        "portfolio_role_view_cursors"
+      ],
+      "postgresql_tables": [
+        "portfolio_role_view_audit_events",
+        "portfolio_role_view_cursors"
+      ]
+    },
+    {
       "id": "linear_connector_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

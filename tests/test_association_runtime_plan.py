@@ -73,9 +73,9 @@ class AssociationRuntimePlanTests(unittest.TestCase):
         self.assertEqual(result["status"], "association_runtime_successor_verified")
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
-            (17, 22),
+            (18, 23),
         )
-        self.assertEqual(result["postgresql_acl"][0], 236)
+        self.assertEqual(result["postgresql_acl"][0], 240)
         self.assertEqual((result["table_count"], result["audit_source_count"]), (5, 2))
         self.assertTrue(result["runtime_implemented"])
         self.assertTrue(result["metric_reference_implemented"])

@@ -334,6 +334,11 @@ class UsageStoreMigrationTests(unittest.TestCase):
                     self.assertIn("portfolio_run_outcome_association_events", names)
                     self.assertNotIn("portfolio_model_scorecard_snapshots", names)
                     self.assertNotIn("portfolio_scorecard_audit_events", names)
+                elif version == 18:
+                    self.assertIn("portfolio_model_scorecard_snapshots", names)
+                    self.assertIn("portfolio_scorecard_audit_events", names)
+                    self.assertNotIn("portfolio_role_view_audit_events", names)
+                    self.assertNotIn("portfolio_role_view_cursors", names)
                 else:
                     self.fail(f"unexpected migration version: {version}")
                 original_apply_migration(connection, version)
@@ -342,7 +347,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 store = UsageStore(path)
             self.assertEqual(
                 [call.args[1] for call in applied.call_args_list],
-                [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+                [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
             )
             store.verify_ready()
             connection = sqlite3.connect(path)
@@ -363,7 +368,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
             self.assertEqual(tables, {"gateway_request_attempts", "gateway_request_attempt_events"})
             self.assertEqual(
                 migrations,
-                [(version, "applied") for version in range(1, 18)],
+                [(version, "applied") for version in range(1, 19)],
             )
             self.assertEqual(store.active_budget_reservations(organization_id="acme"), 1)
             self.assertEqual(

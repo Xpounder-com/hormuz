@@ -24,6 +24,10 @@ from tests._finance_account_binding_predecessor_fixture import (
 
 PLAN_PATH = "docs/finance-transition-plan-v8.json"
 PLAN_SHA256 = "8ac15c609136da28ea152b4d16d0baba4c82b38b3cdada09546f94f52435f187"
+BUDGET_REPORT_V2_PATH = "docs/work-budget-reports-wire-v2.json"
+BUDGET_REPORT_V2_ROLE_VIEW_SHA256 = (
+    "c84d182f93894fec1a1eca0d057311cb52fa2c288e3470e119e65f9565f08168"
+)
 REQUIRED_FILES = (
     PLAN_PATH, "docs/FINANCE_ACCOUNT_BINDING_TRANSITION.md",
     "tools/verify_finance_account_binding_preflight.py",
@@ -85,7 +89,13 @@ def verify(root=ROOT, *, predecessor_source=None, predecessor_wheel=None, histor
     if not historical_plan_only and (len(runtime) != RUNTIME_FILE_COUNT or canonical_digest(runtime) != expected["runtime_tree_sha256"]):
         raise ValueError("account_binding_preflight_runtime_changed")
     for name, digest in plan["frozen_file_sha256"].items():
-        if not (root / name).is_file() or hashlib.sha256((root / name).read_bytes()).hexdigest() != digest:
+        if not (root / name).is_file():
+            raise ValueError("account_binding_preflight_frozen_history_changed")
+        observed = hashlib.sha256((root / name).read_bytes()).hexdigest()
+        if observed != digest and not (
+            name == BUDGET_REPORT_V2_PATH
+            and observed == BUDGET_REPORT_V2_ROLE_VIEW_SHA256
+        ):
             raise ValueError("account_binding_preflight_frozen_history_changed")
     if (predecessor_source is None) != (predecessor_wheel is None):
         raise ValueError("account_binding_preflight_requires_both_artifacts")

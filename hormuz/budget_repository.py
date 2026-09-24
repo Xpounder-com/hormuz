@@ -470,13 +470,25 @@ class WorkBudgetRepository:
         return verified[0], verified[1], verified[2], history
 
     @staticmethod
-    def _activation_history(sql, organization: str, plan_id: str,
-                            observed_at: str) -> tuple[tuple[dict[str, Any], dict[str, Any]], ...]:
+    def _activation_history(
+        sql,
+        organization: str,
+        plan_id: str,
+        observed_at: str,
+        *,
+        through_generation: int | None = None,
+    ) -> tuple[tuple[dict[str, Any], dict[str, Any]], ...]:
+        where = "WHERE organization_id=? AND budget_plan_id=?"
+        values: list[object] = [organization, plan_id]
+        if through_generation is not None:
+            where += " AND activation_generation<=?"
+            values.append(through_generation)
         rows = sql.execute(
             "SELECT * FROM portfolio_work_budget_activation_events "
-            "WHERE organization_id=? AND budget_plan_id=? "
+            + where
+            + " "
             "ORDER BY activation_generation LIMIT ?",
-            (organization, plan_id, MAX_BUDGET_ACTIVATIONS_PER_PLAN + 1),
+            (*values, MAX_BUDGET_ACTIVATIONS_PER_PLAN + 1),
         ).fetchall()
         if len(rows) > MAX_BUDGET_ACTIVATIONS_PER_PLAN:
             raise BudgetRepositoryError("unavailable")
@@ -833,6 +845,25 @@ class WorkBudgetRepository:
         }
 
     @staticmethod
+    def _missing_plan_change(activation: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "kind": "not_comparable",
+            "changed_at": activation["committed_at"],
+            "percentage_scale": 6,
+            "percentage_rounding": "half_even",
+            "comparison_reasons": [],
+            "comparison_basis": "immediately_prior_active_plan",
+            "previous_plan": None,
+            "previous_amount": None,
+            "previous_currency": None,
+            "previous_work_scope": None,
+            "previous_window": None,
+            "amount_delta": None,
+            "percent_delta": None,
+            "comparison_status": "missing_evidence",
+        }
+
+    @staticmethod
     def _attempt_rows(sql, organization: str, plan: Mapping[str, Any], as_of: str) -> list[dict[str, Any]]:
         rows = sql.execute(
             "SELECT b.*, e.state AS attempt_state, u.cost_microusd AS committed_cost_microusd "
@@ -1046,6 +1077,125 @@ class WorkBudgetRepository:
             "reason_code": "known",
         }
 
+    def _current_report_in_transaction(
+        self,
+        sql,
+        principal: PortfolioPrincipal,
+        plan_id: str,
+        *,
+        as_of: str,
+        generated_at: str,
+        reader_role: str,
+        plan_version: int | None = None,
+        activation_generation: int | None = None,
+        report_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Build one report inside an already authorized aggregate-read unit.
+
+        The caller owns authorization and the metadata-only privileged-read
+        audit. This helper performs no connection acquisition and no audit
+        write, so a role-view page and its cursor commit atomically.
+        """
+
+        plan_id = _identifier(plan_id)
+        selected_as_of = _timestamp(as_of)
+        generated = _timestamp(generated_at)
+        selected_report_id = uuid4().hex if report_id is None else _identifier(report_id)
+        if (
+            reader_role not in {
+                "portfolio_admin", "finance_viewer", "platform_viewer", "team_lead",
+            }
+            or selected_as_of > generated
+            or (plan_version is None) != (activation_generation is None)
+        ):
+            raise BudgetRepositoryError("invalid_request")
+        if plan_version is None:
+            active = self._active_budget(
+                sql, principal.organization_id, plan_id, generated,
+            )
+            if active is None:
+                raise BudgetRepositoryError("not_found")
+            history = active[3]
+        else:
+            exact_version = _version(plan_version)
+            exact_generation = _count(activation_generation)
+            if exact_generation < 1:
+                raise BudgetRepositoryError("invalid_request")
+            history = self._activation_history(
+                sql,
+                principal.organization_id,
+                plan_id,
+                selected_as_of,
+                through_generation=exact_generation,
+            )
+            if (
+                not history
+                or history[-1][0]["version"] != exact_version
+                or history[-1][1]["activation_generation"] != exact_generation
+            ):
+                raise BudgetRepositoryError("unavailable")
+        selected = self._effective_activation(history, selected_as_of)
+        if selected is None:
+            raise BudgetRepositoryError("not_found")
+        plan, activation = selected
+        if plan_version is not None and (
+            plan["version"] != exact_version
+            or activation["activation_generation"] != exact_generation
+        ):
+            raise BudgetRepositoryError("unavailable")
+        if activation["previous_version"] is None:
+            previous = None
+            plan_change = self._plan_change(plan, previous, activation)
+        elif reader_role == "team_lead":
+            previous = None
+            plan_change = self._missing_plan_change(activation)
+        else:
+            previous = self._plan(
+                sql, principal.organization_id, plan_id, activation["previous_version"],
+            )
+            plan_change = self._plan_change(plan, previous, activation)
+        if selected_as_of < activation["committed_at"]:
+            raise BudgetRepositoryError("invalid_request")
+        try:
+            enforcement, observations, forecast, coverage = self._accounting(
+                sql, plan, selected_as_of,
+            )
+        except BudgetRepositoryError:
+            raise
+        except (
+            ArithmeticError,
+            FinanceValueError,
+            KeyError,
+            RecursionError,
+            TypeError,
+            ValueError,
+        ):
+            raise BudgetRepositoryError("unavailable") from None
+        facts = {
+            "plan": dict(plan), "previous_plan": None if previous is None else dict(previous),
+            "activation": dict(activation), "plan_change": plan_change,
+            "enforcement": enforcement,
+            "observations": observations, "forecast": forecast, "coverage": coverage,
+            "as_of": selected_as_of,
+        }
+        return {
+            "schema_id": "hormuz.work-budget-report", "schema_version": 2,
+            "organization_id": principal.organization_id, "report_id": selected_report_id,
+            "reader_role": reader_role,
+            "reader_scope_digest": hashlib.sha256(principal.cursor_authority.encode()).hexdigest(),
+            "work_scope": {"work_scope_id": plan["work_scope_id"], "version": plan["work_scope_version"]},
+            "plan": _version_ref(plan_id, plan["version"], plan["content_digest"]),
+            "activation_generation": activation["activation_generation"],
+            "policy": {"version": activation["policy_version"], "content_digest": activation["policy_digest"]},
+            "window": {"start_at": plan["window_start_at"], "end_at": plan["window_end_at"]},
+            "as_of": selected_as_of, "generated_at": generated, "input_snapshot_digest": _sha256(facts),
+            "plan_amount": plan["amount"], "currency": plan["currency"],
+            "plan_change": plan_change,
+            "enforcement": enforcement, "financial_observations": observations,
+            "observation_combination": "separate_bases_do_not_sum_overlapping_observations",
+            "forecast": forecast, "coverage": coverage,
+        }
+
     def current_report(self, principal: PortfolioPrincipal, plan_id: str, *, as_of: str | None = None) -> dict[str, Any]:
         self._authorize(principal)
         plan_id = _identifier(plan_id)
@@ -1053,63 +1203,23 @@ class WorkBudgetRepository:
         with self._transaction(principal) as sql:
             generated = sql.now()
             selected_as_of = generated if selected_as_of is None else selected_as_of
-            if selected_as_of > generated:
-                raise BudgetRepositoryError("invalid_request")
-            active = self._active_budget(
-                sql, principal.organization_id, plan_id, generated,
+            report = self._current_report_in_transaction(
+                sql,
+                principal,
+                plan_id,
+                as_of=selected_as_of,
+                generated_at=generated,
+                reader_role="portfolio_admin",
             )
-            if active is None:
-                raise BudgetRepositoryError("not_found")
-            selected = self._effective_activation(active[3], selected_as_of)
-            if selected is None:
-                raise BudgetRepositoryError("not_found")
-            plan, activation = selected
-            previous = None if activation["previous_version"] is None else self._plan(
-                sql, principal.organization_id, plan_id, activation["previous_version"],
+            self._audit(
+                sql,
+                principal,
+                "report",
+                plan_id,
+                report["plan"]["version"],
+                "observed",
+                now=generated,
             )
-            if selected_as_of < activation["committed_at"]:
-                raise BudgetRepositoryError("invalid_request")
-            try:
-                enforcement, observations, forecast, coverage = self._accounting(
-                    sql, plan, selected_as_of,
-                )
-            except BudgetRepositoryError:
-                raise
-            except (
-                ArithmeticError,
-                FinanceValueError,
-                KeyError,
-                RecursionError,
-                TypeError,
-                ValueError,
-            ):
-                raise BudgetRepositoryError("unavailable") from None
-            plan_change = self._plan_change(plan, previous, activation)
-            facts = {
-                "plan": dict(plan), "previous_plan": None if previous is None else dict(previous),
-                "activation": dict(activation), "plan_change": plan_change,
-                "enforcement": enforcement,
-                "observations": observations, "forecast": forecast, "coverage": coverage,
-                "as_of": selected_as_of,
-            }
-            report = {
-                "schema_id": "hormuz.work-budget-report", "schema_version": 2,
-                "organization_id": principal.organization_id, "report_id": uuid4().hex,
-                "reader_role": "portfolio_admin",
-                "reader_scope_digest": hashlib.sha256(principal.cursor_authority.encode()).hexdigest(),
-                "work_scope": {"work_scope_id": plan["work_scope_id"], "version": plan["work_scope_version"]},
-                "plan": _version_ref(plan_id, plan["version"], plan["content_digest"]),
-                "activation_generation": activation["activation_generation"],
-                "policy": {"version": activation["policy_version"], "content_digest": activation["policy_digest"]},
-                "window": {"start_at": plan["window_start_at"], "end_at": plan["window_end_at"]},
-                "as_of": selected_as_of, "generated_at": generated, "input_snapshot_digest": _sha256(facts),
-                "plan_amount": plan["amount"], "currency": plan["currency"],
-                "plan_change": plan_change,
-                "enforcement": enforcement, "financial_observations": observations,
-                "observation_combination": "separate_bases_do_not_sum_overlapping_observations",
-                "forecast": forecast, "coverage": coverage,
-            }
-            self._audit(sql, principal, "report", plan_id, plan["version"], "observed", now=generated)
         return report
 
     def _scenario_policy_projection(

@@ -48,19 +48,35 @@ class PortfolioPrincipal:
     organization_id: str
     actor_id: str
     roles: tuple[str, ...]
+    team_id: str | None = None
 
     @property
     def cursor_authority(self) -> str:
-        return canonical([self.organization_id, self.actor_id, self.roles])
+        return canonical([
+            self.organization_id,
+            self.actor_id,
+            self.roles,
+            self.team_id,
+        ])
 
 
 def authorize(config: PortfolioConfig | None, identity: Identity) -> PortfolioPrincipal:
     if config is not None:
         for binding in config.role_bindings:
             if (identity.organization_id, identity.actor_id) == (binding.organization_id, binding.actor_id):
-                if "portfolio_admin" in binding.roles:
-                    return PortfolioPrincipal(binding.organization_id, binding.actor_id, binding.roles)
-    # Aggregate viewers and team leads gain no raw registry capability in #215.
+                if "team_lead" in binding.roles:
+                    try:
+                        validate(identity.team_id, "opaque_id")
+                    except PortfolioError:
+                        raise PortfolioError("forbidden") from None
+                return PortfolioPrincipal(
+                    binding.organization_id,
+                    binding.actor_id,
+                    binding.roles,
+                    identity.team_id,
+                )
+    # Repository owners still enforce operation-specific roles. Authentication
+    # alone never grants raw registry or aggregate-view capability.
     raise PortfolioError("forbidden")
 
 
@@ -91,7 +107,11 @@ def build_portfolio_config(value: object, identities: tuple[Identity, ...]) -> P
         fail()
     bounded_list(value["role_bindings"], 1000)
     bounded_list(value["connectors"], 1000)
-    known = {(identity.organization_id, identity.actor_id) for identity in identities}
+    identity_by_key = {
+        (identity.organization_id, identity.actor_id): identity
+        for identity in identities
+    }
+    known = set(identity_by_key)
     organizations = {identity.organization_id for identity in identities}
     roles, connectors, seen_roles, seen_connectors = [], [], set(), set()
     for item in value["role_bindings"]:
@@ -104,6 +124,8 @@ def build_portfolio_config(value: object, identities: tuple[Identity, ...]) -> P
             fail()
         if key not in known or key in seen_roles or len(set(item["roles"])) != len(item["roles"]):
             fail()
+        if "team_lead" in item["roles"]:
+            opaque(identity_by_key[key].team_id)
         seen_roles.add(key)
         roles.append(PortfolioRoleBinding(*key, tuple(sorted(item["roles"]))))
     for item in value["connectors"]:

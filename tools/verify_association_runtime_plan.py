@@ -369,7 +369,7 @@ def _validate_successor_predecessor(root: Path) -> None:
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
     versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-    if versions == (17, 22):
+    if versions in {(17, 22), (18, 23)}:
         _validate_successor_predecessor(root)
         try:
             from tools.verify_scorecard_runtime_plan import (

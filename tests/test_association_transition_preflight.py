@@ -211,7 +211,7 @@ class SQLitePublishedAssociationTransitionTests(unittest.TestCase):
         self.seeded = predecessor_call(self.request(mode="seed"))
         self.assertEqual(self.seeded["status"], "ready")
         self.published = sqlite_snapshot(self.path)
-        self.assertEqual(UsageStore.schema_version, 17)
+        self.assertEqual(UsageStore.schema_version, 18)
 
     def request(self, path=None, mode="ready"):
         return {"backend": "sqlite", "path": str(path or self.path), "mode": mode}
@@ -351,7 +351,7 @@ class PostgresPublishedAssociationTransitionTests(PostgresTestCase):
         self.seeded = predecessor_call(self.request(mode="seed"))
         self.assertEqual(self.seeded["status"], "ready")
         self.published = self.snapshot()
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 22)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 23)
         if self._testMethodName in {
             "test_quiesced_published_pair_restore_replays_original_receipt",
             "test_post_checkpoint_witness_requires_retained_forward_recovery",

@@ -29,8 +29,17 @@ from .outcome_repository import OutcomeRepository
 from .linear_repository import LinearConnectorRepository
 from .association_repository import AssociationRepository
 from .scorecard_repository import ScorecardRepository
+from .role_view_repository import PortfolioRoleViewRepository
 from .portfolio_config import PortfolioPrincipal
-from .portfolio_wire import PortfolioError, RESPONSE_BYTES, canonical, query_parameters, route, validate
+from .portfolio_wire import (
+    ROLE_VIEW_OPERATIONS,
+    PortfolioError,
+    RESPONSE_BYTES,
+    canonical,
+    query_parameters,
+    route,
+    validate,
+)
 from .postgres import PostgresConnectionPool
 
 
@@ -332,11 +341,41 @@ class PortfolioRepositories:
     linear: LinearConnectorRepository | None = None
     associations: AssociationRepository | None = None
     scorecards: ScorecardRepository | None = None
+    views: PortfolioRoleViewRepository | None = None
+
+    def authorize_operation(
+        self, principal: PortfolioPrincipal, operation: str
+    ) -> None:
+        owner = (
+            self.views
+            if operation in ROLE_VIEW_OPERATIONS
+            else self.associations
+            if operation in {
+                "link_run", "list_links", "evaluate_association", "list_associations",
+            }
+            else self.outcomes
+            if operation == "list_outcomes"
+            else self.attributions
+            if operation in {"attribute", "list_attributions"}
+            else self.registry
+        )
+        if owner is None:
+            raise PortfolioError("not_found")
+        if operation in ROLE_VIEW_OPERATIONS:
+            owner.authorize_operation(principal, operation)
+            return
+        authorize_owner = getattr(owner, "_authorize", None)
+        if authorize_owner is None:
+            raise PortfolioError("forbidden")
+        authorize_owner(principal)
 
     def execute(self, principal: PortfolioPrincipal, operation: str, *, path: str,
                 scope_id: str | None, query: dict[str, Any], body: dict[str, Any] | None,
                 idempotency_key: str | None) -> tuple[int, dict[str, Any]]:
         owner = (
+            self.views
+            if operation in ROLE_VIEW_OPERATIONS
+            else
             self.associations
             if operation in {"link_run", "list_links", "evaluate_association", "list_associations"}
             else self.outcomes
@@ -361,7 +400,19 @@ def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, 
         connection_pool=connection_pool,
         read_only=read_only,
     )
-    return PortfolioRepositories(
+    budgets = create_budget_repository(
+        config,
+        environ=environ,
+        connection_pool=connection_pool,
+        read_only=read_only,
+    )
+    scorecards = ScorecardRepository(
+        config,
+        dsn=registry._dsn,
+        connection_pool=connection_pool,
+        read_only=read_only,
+    )
+    repositories = PortfolioRepositories(
         registry=registry,
         attributions=AttributionRepository(
             config,
@@ -370,12 +421,7 @@ def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, 
             read_only=read_only,
         ),
         outcomes=outcomes,
-        budgets=create_budget_repository(
-            config,
-            environ=environ,
-            connection_pool=connection_pool,
-            read_only=read_only,
-        ),
+        budgets=budgets,
         linear=LinearConnectorRepository(
             config,
             dsn=registry._dsn,
@@ -389,10 +435,14 @@ def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, 
             connection_pool=connection_pool,
             read_only=read_only,
         ),
-        scorecards=ScorecardRepository(
-            config,
-            dsn=registry._dsn,
-            connection_pool=connection_pool,
-            read_only=read_only,
-        ),
+        scorecards=scorecards,
     )
+    repositories.views = PortfolioRoleViewRepository(
+        config,
+        dsn=registry._dsn,
+        budgets=budgets,
+        scorecards=scorecards,
+        connection_pool=connection_pool,
+        read_only=read_only,
+    )
+    return repositories

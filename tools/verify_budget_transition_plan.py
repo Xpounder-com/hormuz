@@ -36,11 +36,30 @@ FIXTURE_PATH = "tests/fixtures/portfolio_intelligence/budget-report-v2-examples.
 PLAN_CANONICAL_SHA256 = "a07f9bd1a42084ce361090e3c53f7c4540a1264b8cccce7264af81d633aefaa2"
 IMPLEMENTATION_CANONICAL_SHA256 = "d3448aa7b80e6fe3f08d4c3e9dae64f05e6c46edde08922715ca096529969f31"
 REPORT_V1_SHA256 = "6a45a010de84273be45da85115d8d41267d5689addd29df592c47e8704a29cbf"
-REPORT_V2_SHA256 = "1e09eb42bedc8d91dc5ec230adb1f21360832940b237e38c8a88b86285a2c6d2"
+REPORT_V2_PLANNED_SHA256 = "1e09eb42bedc8d91dc5ec230adb1f21360832940b237e38c8a88b86285a2c6d2"
+REPORT_V2_SHA256 = "c84d182f93894fec1a1eca0d057311cb52fa2c288e3470e119e65f9565f08168"
 FIXTURE_SHA256 = "2a51eeadbe3d7cce38ee94ed3b23933672bbd5c29d40315010e5fecbb110e3d6"
 FINANCE_SOURCE_COMMIT = "1dd6c9f561ee70880d6e68b7aa2d2ab17852d207"
 FINANCE_ARCHIVE_SHA256 = "31622ab69ee74daa4be92b4f1a8d57808304d1c4916600a17f7afe499a721910"
 MAX_JSON_BYTES = 256 * 1024
+BUDGET_ROLE_VIEW_ROUTES = (
+    "GET /v1/admin/portfolio/views/finance/budgets",
+    "GET /v1/admin/portfolio/views/team/budgets",
+)
+BUDGET_ROLE_VIEW_QUERY_FIELDS = {
+    route: ["cursor", "end_at", "limit", "start_at", "work_scope_id"]
+    for route in BUDGET_ROLE_VIEW_ROUTES
+}
+BUDGET_ROLE_VIEW_TRANSPORT = {
+    "response_maximum_bytes": 1048576,
+    "runtime_enabled": True,
+    "new_http_routes": list(BUDGET_ROLE_VIEW_ROUTES),
+    "delivery": "role_scoped_http_and_portfolio_view_cli",
+}
+BUDGET_ROLE_VIEW_DOMAIN_RULES = {
+    "authorization": "Server-resolved tenant and current role before lookup, join, aggregation or expensive work; privileged read audit before delivery. Preview is portfolio_admin only. Issue #223 role-scoped viewer/team delivery is enabled; no raw peer/source access.",
+    "bounds": "One work-scope report, maximum 100 observations and 1 MiB output; no truncation disguised as complete coverage. Fixed resource-limit failure before delivery. Role-view query, cursor, response and execution-time limits are fixed by the issue #223 runtime contract; final release acceptance remains #214 work.",
+}
 REQUIRED_FILES = (
     PLAN_PATH,
     REPORT_V1_PATH,
@@ -275,11 +294,22 @@ def validate_budget_report_v2(
         _fail("budget_report_v2_not_additive")
     if successor != v1_definitions["hormuz.work-budget-report"]:
         _fail("budget_report_v2_not_additive")
-    for field in (
-        "oneOf", "x-hormuz-schema-ids", "x-hormuz-route-query-fields", "x-hormuz-transport",
-    ):
+    for field in ("oneOf", "x-hormuz-schema-ids"):
         if report_v2.get(field) != report_v1.get(field):
             _fail("budget_report_v2_not_additive")
+    historical_transport = (
+        report_v2.get("x-hormuz-route-query-fields")
+        == report_v1.get("x-hormuz-route-query-fields")
+        and report_v2.get("x-hormuz-transport")
+        == report_v1.get("x-hormuz-transport")
+    )
+    role_view_transport = (
+        report_v2.get("x-hormuz-route-query-fields")
+        == BUDGET_ROLE_VIEW_QUERY_FIELDS
+        and report_v2.get("x-hormuz-transport") == BUDGET_ROLE_VIEW_TRANSPORT
+    )
+    if not historical_transport and not role_view_transport:
+        _fail("budget_report_v2_not_additive")
     v1_rules = report_v1.get("x-hormuz-domain-rules")
     v2_rules = report_v2.get("x-hormuz-domain-rules")
     if (
@@ -287,7 +317,12 @@ def validate_budget_report_v2(
         or not isinstance(v2_rules, dict)
         or set(v2_rules) != set(v1_rules) | {"plan_change"}
         or any(
-            v2_rules.get(name) != rule
+            v2_rules.get(name)
+            != (
+                BUDGET_ROLE_VIEW_DOMAIN_RULES[name]
+                if role_view_transport and name in BUDGET_ROLE_VIEW_DOMAIN_RULES
+                else rule
+            )
             for name, rule in v1_rules.items()
             if name != "compatibility"
         )
@@ -350,7 +385,15 @@ def verify_budget_transition_plan(root: Path = ROOT) -> dict[str, object]:
     except FinanceTransitionError:
         _fail("budget_finance_predecessor_invalid")
     report_v1 = _read(root, REPORT_V1_PATH, expected_sha256=REPORT_V1_SHA256)
-    report_v2 = _read(root, REPORT_V2_PATH, expected_sha256=REPORT_V2_SHA256)
+    report_v2 = _read(root, REPORT_V2_PATH)
+    try:
+        report_v2_digest = hashlib.sha256(
+            (root / REPORT_V2_PATH).read_bytes()
+        ).hexdigest()
+    except OSError:
+        _fail("budget_file_unreadable")
+    if report_v2_digest not in {REPORT_V2_PLANNED_SHA256, REPORT_V2_SHA256}:
+        _fail("budget_file_digest_mismatch")
     fixtures = _read(root, FIXTURE_PATH, expected_sha256=FIXTURE_SHA256)
     validate_budget_report_v2(report_v1, report_v2, fixtures)
     return {

@@ -177,6 +177,8 @@ def run(
     environment = os.environ if environ is None else environ
     try:
         principal = _principal(config, args.token_env, environment, dependencies)
+        if "portfolio_admin" not in principal.roles:
+            raise PortfolioError("forbidden")
         if args.finance_command == "account" and args.finance_account_command == "bind":
             account_repository = dependencies.create_account_repository(
                 config,

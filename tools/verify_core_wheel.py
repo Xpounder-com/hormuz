@@ -326,6 +326,28 @@ REQUIRED_SCORECARD_RUNTIME_SDIST_PATHS = (
     "tests/test_scorecard_transition.py",
     "tests/test_postgres_scorecard_runtime.py",
 )
+REQUIRED_ROLE_VIEW_RUNTIME_WHEEL_PATHS = (
+    "hormuz/_role_view_schema.py",
+    "hormuz/role_view_repository.py",
+    "hormuz/portfolio-role-views-wire-v1.json",
+    "hormuz/work-budget-reports-wire-v2.json",
+    "hormuz/migrations/postgresql/0023_portfolio_role_views.sql",
+)
+REQUIRED_ROLE_VIEW_RUNTIME_SDIST_PATHS = (
+    *REQUIRED_ROLE_VIEW_RUNTIME_WHEEL_PATHS,
+    "docs/PORTFOLIO_ROLE_VIEWS.md",
+    "docs/portfolio-role-views-wire-v1.json",
+    "docs/role-view-runtime-plan-v1.json",
+    "tools/render_portfolio_display_examples.py",
+    "tools/verify_role_view_runtime.py",
+    "tests/_role_view_fixture.py",
+    "tests/fixtures/portfolio_role_views/wire-v1-examples.json",
+    "tests/test_role_view_api_cli.py",
+    "tests/test_role_view_runtime.py",
+    "tests/test_role_view_runtime_plan.py",
+    "tests/test_role_view_transition.py",
+    "tests/test_postgres_role_view_runtime.py",
+)
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
     "docs/work-budget-reports-wire-v1.json",
@@ -547,6 +569,18 @@ def main(argv: list[str] | None = None) -> int:
         _sdist_members,
         REQUIRED_SCORECARD_RUNTIME_SDIST_PATHS,
         "Scorecard runtime source kit",
+    )
+    _assert_required_archive_paths(
+        wheel,
+        _wheel_members,
+        REQUIRED_ROLE_VIEW_RUNTIME_WHEEL_PATHS,
+        "Portfolio role-view runtime wheel",
+    )
+    _assert_required_archive_paths(
+        sdist,
+        _sdist_members,
+        REQUIRED_ROLE_VIEW_RUNTIME_SDIST_PATHS,
+        "Portfolio role-view runtime source kit",
     )
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)

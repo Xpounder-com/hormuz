@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class FinanceCollectionPostgresRuntimePlanTests(unittest.TestCase):
     def test_fixed_candidate_preserves_open_acceptance_gates(self):
         result = verifier.verify(ROOT)
-        self.assertEqual(result["current_sqlite_schema_version"], 17)
-        self.assertEqual(result["current_postgresql_schema_version"], 22)
+        self.assertEqual(result["current_sqlite_schema_version"], 18)
+        self.assertEqual(result["current_postgresql_schema_version"], 23)
         self.assertEqual(result["postgresql_acl_current"][0], 199)
         self.assertEqual(result["postgresql_acl_injected_rejected"][0], 200)
         self.assertTrue(result["gates"]["owner_approved_acl_implementation"])
