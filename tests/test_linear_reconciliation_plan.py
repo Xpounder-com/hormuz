@@ -25,6 +25,13 @@ class LinearReconciliationPlanTests(unittest.TestCase):
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(verifier.ROOT / relative, target)
+        plan = self.plan()
+        for relative in plan["source_sha256"]:
+            plan["source_sha256"][relative] = hashlib.sha256(
+                (self.root / relative).read_bytes()
+            ).hexdigest()
+        self.write_plan(plan)
+        self.baseline_plan_sha256 = verifier.canonical_digest(plan)
 
     def plan(self):
         return json.loads((self.root / verifier.PLAN_PATH).read_text())
@@ -35,8 +42,18 @@ class LinearReconciliationPlanTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def verify_baseline(self):
+        with mock.patch.object(
+            verifier, "PLAN_SHA256", self.baseline_plan_sha256
+        ), mock.patch.object(
+            verifier, "SQLITE_SCHEMA_VERSION", 15
+        ), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 20
+        ):
+            return verifier.verify(self.root)
+
     def test_fixed_candidate_preserves_live_wheel_and_release_gates(self):
-        result = verifier.verify(self.root)
+        result = self.verify_baseline()
         self.assertEqual(result["status"], "linear_reconciliation_candidate_verified")
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
@@ -49,11 +66,24 @@ class LinearReconciliationPlanTests(unittest.TestCase):
         self.assertFalse(result["live_reconciliation_verified"])
         self.assertFalse(result["released"])
 
+    def test_current_association_successor_chain_is_verified(self):
+        result = verifier.verify(verifier.ROOT)
+        self.assertEqual(result["status"], "linear_reconciliation_successor_verified")
+        self.assertEqual(
+            (result["sqlite_schema_version"], result["postgresql_schema_version"]),
+            (16, 21),
+        )
+        self.assertTrue(result["association_runtime_implemented"])
+
     def test_gate_overclaim_is_rejected_even_when_repinned(self):
         plan = self.plan()
         plan["gates"]["live_reconciliation_verified"] = True
         self.write_plan(plan)
-        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)):
+        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)), mock.patch.object(
+            verifier, "SQLITE_SCHEMA_VERSION", 15,
+        ), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 20,
+        ):
             with self.assertRaisesRegex(
                 verifier.LinearReconciliationPlanError,
                 "linear_reconciliation_gate_overclaim",
@@ -68,13 +98,13 @@ class LinearReconciliationPlanTests(unittest.TestCase):
             verifier.LinearReconciliationPlanError,
             "linear_reconciliation_source_changed",
         ):
-            verifier.verify(self.root)
+            self.verify_baseline()
         path.unlink()
         with self.assertRaisesRegex(
             verifier.LinearReconciliationPlanError,
             "linear_reconciliation_source_kit_incomplete",
         ):
-            verifier.verify(self.root)
+            self.verify_baseline()
 
     def test_schema_or_acl_boundary_change_is_rejected(self):
         for sqlite_version, postgres_version, acl in (
@@ -96,6 +126,8 @@ class LinearReconciliationPlanTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     verifier.LinearReconciliationPlanError,
                     "linear_reconciliation_schema_boundary_changed",
+                ), mock.patch.object(
+                    verifier, "PLAN_SHA256", self.baseline_plan_sha256
                 ):
                     verifier.verify(self.root)
 
@@ -106,7 +138,11 @@ class LinearReconciliationPlanTests(unittest.TestCase):
         )
         plan["source_sha256"].pop(verifier.CUMULATIVE_TRANSITION_FILES[0])
         self.write_plan(plan)
-        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)):
+        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)), mock.patch.object(
+            verifier, "SQLITE_SCHEMA_VERSION", 15,
+        ), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 20,
+        ):
             with self.assertRaisesRegex(
                 verifier.LinearReconciliationPlanError,
                 "linear_reconciliation_plan_invalid",
@@ -124,7 +160,11 @@ class LinearReconciliationPlanTests(unittest.TestCase):
         plan = self.plan()
         plan["source_sha256"][relative] = hashlib.sha256(path.read_bytes()).hexdigest()
         self.write_plan(plan)
-        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)):
+        with mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan)), mock.patch.object(
+            verifier, "SQLITE_SCHEMA_VERSION", 15,
+        ), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 20,
+        ):
             with self.assertRaisesRegex(
                 verifier.LinearReconciliationPlanError,
                 "linear_reconciliation_migration_invalid",
@@ -147,6 +187,10 @@ class LinearReconciliationPlanTests(unittest.TestCase):
         self.write_plan(plan)
         with mock.patch.object(
             verifier, "PLAN_SHA256", verifier.canonical_digest(plan)
+        ), mock.patch.object(
+            verifier, "SQLITE_SCHEMA_VERSION", 15,
+        ), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 20,
         ):
             with self.assertRaisesRegex(
                 verifier.LinearReconciliationPlanError,
@@ -161,7 +205,7 @@ class LinearReconciliationPlanTests(unittest.TestCase):
             verifier.LinearReconciliationPlanError,
             "linear_reconciliation_predecessor_changed",
         ):
-            verifier.verify(self.root)
+            self.verify_baseline()
 
     def test_distribution_requires_complete_reconciliation_kit(self):
         for required, label in (

@@ -54,5 +54,5 @@ hormuz = "hormuz.cli:main"
 include = ["hormuz*"]
 
 [tool.setuptools.package-data]
-"hormuz" = ["secret-inventory-v1.json", "portfolio-registry-wire-v1.json", "portfolio-attribution-wire-v1.json", "portfolio-outcome-wire-v1.json", "context-tool-mappings-v1.json", "console.css", "policy.css"]
+"hormuz" = ["secret-inventory-v1.json", "portfolio-registry-wire-v1.json", "portfolio-attribution-wire-v1.json", "portfolio-outcome-wire-v1.json", "portfolio-association-wire-v1.json", "context-tool-mappings-v1.json", "console.css", "policy.css"]
 "hormuz.migrations.postgresql" = ["*.sql"]

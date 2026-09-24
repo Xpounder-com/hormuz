@@ -181,10 +181,9 @@ def _validate_migration(root: Path, plan: dict) -> None:
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
     versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-    if versions == (15, 20):
+    if versions in {(15, 20), (16, 21)}:
         try:
             from tools.verify_linear_reconciliation_plan import (
-                EXPECTED_ACL as RECONCILIATION_ACL,
                 LinearReconciliationPlanError,
                 verify as verify_reconciliation,
             )
@@ -202,12 +201,15 @@ def verify(root: Path = ROOT) -> dict[str, object]:
             "plan_sha256": PLAN_SHA256,
             "sqlite_schema_version": SQLITE_SCHEMA_VERSION,
             "postgresql_schema_version": POSTGRES_SCHEMA_VERSION,
-            "postgresql_acl": list(RECONCILIATION_ACL),
+            "postgresql_acl": successor["postgresql_acl"],
             "table_count": len(TABLES),
             "enforcement_table_count": len(ENFORCEMENT_TABLES),
             "audit_source_count": len(AUDIT_SOURCES),
             "runtime_implemented": True,
             "reconciliation_implemented": successor["reconciliation_implemented"],
+            "association_runtime_implemented": successor.get(
+                "association_runtime_implemented", False
+            ),
             "live_workspace_authorized": False,
             "released": False,
             "gates": successor["gates"],

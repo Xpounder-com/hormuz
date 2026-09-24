@@ -25,6 +25,8 @@ SCOPES = PREFIX + "/work-scopes"
 BINDINGS = PREFIX + "/work-bindings"
 ATTRIBUTIONS = PREFIX + "/attributions"
 OUTCOMES = PREFIX + "/outcomes"
+RUN_WORK_LINKS = PREFIX + "/run-work-links"
+ASSOCIATIONS = PREFIX + "/associations"
 ERRORS = {
     "invalid_request": (400, "invalid_shape"),
     "unauthenticated": (401, "unauthorized_scope"),
@@ -115,12 +117,19 @@ def outcome_catalogue() -> dict[str, Any]:
     return json.loads(resources.files("hormuz").joinpath("portfolio-outcome-wire-v1.json").read_text("utf-8"))
 
 
+@lru_cache(maxsize=1)
+def association_catalogue() -> dict[str, Any]:
+    return json.loads(resources.files("hormuz").joinpath("portfolio-association-wire-v1.json").read_text("utf-8"))
+
+
 def validate(value: object, name: str) -> None:
     definitions = catalogue()["$defs"]
     if name not in definitions:
         definitions = attribution_catalogue()["$defs"]
     if name not in definitions:
         definitions = outcome_catalogue()["$defs"]
+    if name not in definitions:
+        definitions = association_catalogue()["$defs"]
     if name not in definitions:
         raise PortfolioError("invalid_request")
 
@@ -190,6 +199,10 @@ def validate(value: object, name: str) -> None:
 
 
 def route(method: str, path: str) -> tuple[str, str | None]:
+    if path == RUN_WORK_LINKS and method in {"GET", "POST"}:
+        return ("list_links" if method == "GET" else "link_run", None)
+    if path == ASSOCIATIONS and method in {"GET", "POST"}:
+        return ("list_associations" if method == "GET" else "evaluate_association", None)
     if path == OUTCOMES and method == "GET":
         return "list_outcomes", None
     if path == ATTRIBUTIONS and method in {"GET", "POST"}:
@@ -214,10 +227,13 @@ def query_parameters(raw: str, operation: str) -> dict[str, Any]:
         pairs = parse_qsl(raw, keep_blank_values=True, strict_parsing=True, max_num_fields=12, errors="strict")
     except (ValueError, UnicodeError):
         raise PortfolioError("invalid_request") from None
+    association_read = operation in {"list_links", "list_associations"}
     allowed = {"version"} if operation == "show_scope" else {"limit", "cursor", "start_at", "end_at", "work_scope_id"}
     if operation in {"list_bindings", "list_outcomes"}:
         allowed.add("connector_id")
-    if operation not in {"show_scope", "list_scopes", "list_bindings", "list_attributions", "list_outcomes"}:
+    if association_read:
+        allowed.update({"connector_id", "source_event_id", "request_attempt_id", "state"})
+    if operation not in {"show_scope", "list_scopes", "list_bindings", "list_attributions", "list_outcomes", "list_links", "list_associations"}:
         allowed = set()
     result = {}
     for key, value in pairs:
@@ -228,8 +244,12 @@ def query_parameters(raw: str, operation: str) -> dict[str, Any]:
                 raise PortfolioError("invalid_request")
             value = int(value)
         result[key] = value
-    validate(result, "hormuz.portfolio-query")
-    if "cursor" in result and set(result) - {"cursor", "limit"}:
+    validate(result, "hormuz.association-query" if association_read else "hormuz.portfolio-query")
+    if operation == "list_links" and result.get("state") not in {None, "active", "tombstoned"}:
+        raise PortfolioError("invalid_request")
+    if operation == "list_associations" and result.get("state") not in {None, "unmatched", "ambiguous", "associated", "excluded"}:
+        raise PortfolioError("invalid_request")
+    if "cursor" in result and not association_read and set(result) - {"cursor", "limit"}:
         raise PortfolioError("cursor_invalid")
     if "start_at" in result and datetime.fromisoformat(result["start_at"]) >= datetime.fromisoformat(result["end_at"]):
         raise PortfolioError("invalid_request")

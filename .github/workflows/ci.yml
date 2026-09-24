@@ -168,6 +168,13 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_github_connector_runtime.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_linear_connector_runtime.py -v
+          cp -R "$GITHUB_WORKSPACE/tests" "$RUNNER_TEMP/installed_association_tests"
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$RUNNER_TEMP/installed_association_tests" -t "$RUNNER_TEMP" \
+            -p test_association_runtime.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$RUNNER_TEMP/installed_association_tests" -t "$RUNNER_TEMP" \
+            -p test_association_metrics.py -v
       - name: Verify additive portfolio, budget, finance, Linear, and association preflights from the source distribution
         run: |
           hormuz_extension_source="$(mktemp -d "$RUNNER_TEMP/hormuz-extensions.XXXXXX")"
@@ -185,6 +192,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_linear_transition_plan.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_linear_runtime_plan.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_association_transition_plan.py
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_association_runtime_plan.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I docs/evidence/reconciliation_scope_probe.py --current-runtime
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest -v \
             tests.test_portfolio_extensions tests.test_portfolio_extension_packaging \
@@ -200,6 +208,7 @@ jobs:
             tests.test_linear_transition_plan tests.test_linear_transition_preflight \
             tests.test_linear_runtime_plan tests.test_linear_connector_runtime \
             tests.test_association_transition_plan tests.test_association_transition_preflight \
+            tests.test_association_runtime_plan tests.test_association_runtime tests.test_association_metrics \
             tests.test_portfolio_wire_contract
       - name: Verify the resolved license boundary for every declared extra
         run: |
@@ -431,6 +440,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_linear_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_linear_runtime_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_association_transition_plan.py
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I tools/verify_association_runtime_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I docs/evidence/reconciliation_scope_probe.py --current-runtime
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest -v \
             tests.test_registry_transition_plan tests.test_attribution_transition_plan tests.test_outcome_transition_plan \
@@ -448,6 +458,7 @@ jobs:
             tests.test_linear_transition_plan tests.test_linear_transition_preflight \
             tests.test_linear_runtime_plan tests.test_linear_connector_runtime \
             tests.test_association_transition_plan tests.test_association_transition_preflight \
+            tests.test_association_runtime_plan tests.test_association_runtime tests.test_association_metrics \
             tests.test_portfolio_wire_contract
       - name: Prove PostgreSQL migration and repository compatibility
         env:
@@ -531,6 +542,10 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_postgres_linear_connector_runtime.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_postgres_linear_snapshot_runtime.py -v
+          cp -R "$GITHUB_WORKSPACE/tests" "$RUNNER_TEMP/postgres_installed_association_tests"
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$RUNNER_TEMP/postgres_installed_association_tests" -t "$RUNNER_TEMP" \
+            -p test_postgres_association_runtime.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_registration_store.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \

@@ -211,7 +211,7 @@ def verify(root: Path = ROOT) -> dict[str, object]:
     _proposal_boundary(root, POSTGRES_PROPOSAL, postgresql=True)
     runtime_successor_verified = False
     versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-    if versions in {(14, 19), (15, 20)}:
+    if versions in {(14, 19), (15, 20), (16, 21)}:
         try:
             from tools.verify_linear_runtime_plan import verify as verify_runtime
 

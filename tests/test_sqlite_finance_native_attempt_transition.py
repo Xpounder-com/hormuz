@@ -78,9 +78,9 @@ class SQLiteFinanceNativeAttemptTransitionTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
         # This is a retained v10-to-v11 predecessor proof.  The current
-        # checkout is v15; pin the fixture's starting point explicitly while
+        # checkout is v16; pin the fixture's starting point explicitly while
         # keeping the predecessor transition itself isolated below.
-        self.assertEqual(UsageStore.schema_version, 15)
+        self.assertEqual(UsageStore.schema_version, 16)
         with mock.patch.object(UsageStore, "schema_version", 10):
             store = UsageStore(self.path)
             seed_registry_ledger(store)

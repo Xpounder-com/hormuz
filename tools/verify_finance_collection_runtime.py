@@ -143,21 +143,6 @@ def verify_finance_collection_runtime(
     source_contract = _read_json(root, SOURCE_CONTRACT_PATH)
     validate_finance_collection_runtime_plan(plan)
     try:
-        validate_finance_collection_plan(preflight)
-        validate_finance_collection_contract(collection_contract)
-        if _canonical_digest(source_contract) != SOURCE_CONTRACT_CANONICAL_SHA256:
-            _fail("finance_collection_source_contract_changed")
-        validate_finance_sources(source_contract)
-        native = verify_finance_native_attempt_transition_plan(
-            root, allow_successor_schema=True,
-            successor_postgres_schema=20 if allow_successor_schema else 16,
-        )
-    except FinanceCollectionRuntimeError:
-        raise
-    except (FinanceCollectionTransitionError, FinanceNativeAttemptTransitionError, FinanceTransitionError):
-        _fail("finance_collection_runtime_predecessor_invalid")
-
-    try:
         from hormuz._sqlite_schema import SQLITE_SCHEMA_VERSION
         from hormuz.finance_collection_repository import (
             POSTGRES_FINANCE_COLLECTION_RUNTIME_ACCEPTED,
@@ -167,10 +152,29 @@ def verify_finance_collection_runtime(
             _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
         )
 
+        validate_finance_collection_plan(preflight)
+        validate_finance_collection_contract(collection_contract)
+        if _canonical_digest(source_contract) != SOURCE_CONTRACT_CANONICAL_SHA256:
+            _fail("finance_collection_source_contract_changed")
+        validate_finance_sources(source_contract)
+        native = verify_finance_native_attempt_transition_plan(
+            root, allow_successor_schema=True,
+            successor_postgres_schema=(
+                POSTGRES_SCHEMA_VERSION if allow_successor_schema else 16
+            ),
+        )
+    except FinanceCollectionRuntimeError:
+        raise
+    except (FinanceCollectionTransitionError, FinanceNativeAttemptTransitionError, FinanceTransitionError):
+        _fail("finance_collection_runtime_predecessor_invalid")
+    except ImportError:
+        _fail("finance_collection_runtime_source_invalid")
+
+    try:
         if allow_successor_schema:
             current_is_supported_successor = (
                 (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-                in {(12, 17), (13, 18), (14, 19), (15, 20)}
+                in {(12, 17), (13, 18), (14, 19), (15, 20), (16, 21)}
             )
         else:
             current_is_supported_successor = (

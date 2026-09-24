@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -29,6 +30,13 @@ class LinearRuntimePlanTests(unittest.TestCase):
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(verifier.ROOT / relative, target)
+        plan = self.plan()
+        for relative in plan["source_sha256"]:
+            plan["source_sha256"][relative] = hashlib.sha256(
+                (self.root / relative).read_bytes()
+            ).hexdigest()
+        self.write_plan(plan)
+        self.baseline_plan_sha256 = verifier.canonical_digest(plan)
 
     def plan(self):
         return json.loads((self.root / verifier.PLAN_PATH).read_text())
@@ -39,17 +47,24 @@ class LinearRuntimePlanTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def verify_baseline(self):
+        with mock.patch.object(
+            verifier, "PLAN_SHA256", self.baseline_plan_sha256
+        ), mock.patch.object(
+            verifier, "SQLITE_SCHEMA_VERSION", 14
+        ), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 19
+        ):
+            return verifier.verify(self.root)
+
     def test_fixed_candidate_preserves_postgresql_live_and_release_gates(self):
-        result = verifier.verify(self.root)
-        self.assertEqual(result["status"], "linear_runtime_successor_verified")
+        result = self.verify_baseline()
+        self.assertEqual(result["status"], "linear_runtime_candidate_verified")
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
-            (15, 20),
+            (14, 19),
         )
-        self.assertEqual(
-            result["postgresql_acl"],
-            list(reconciliation_verifier.EXPECTED_ACL),
-        )
+        self.assertEqual(result["postgresql_acl"], list(verifier.EXPECTED_ACL))
         self.assertEqual(
             (
                 result["table_count"],
@@ -61,6 +76,15 @@ class LinearRuntimePlanTests(unittest.TestCase):
         self.assertTrue(result["runtime_implemented"])
         self.assertFalse(result["live_workspace_authorized"])
         self.assertFalse(result["released"])
+
+    def test_current_association_successor_chain_is_verified(self):
+        result = verifier.verify(verifier.ROOT)
+        self.assertEqual(result["status"], "linear_runtime_successor_verified")
+        self.assertEqual(
+            (result["sqlite_schema_version"], result["postgresql_schema_version"]),
+            (16, 21),
+        )
+        self.assertTrue(result["association_runtime_implemented"])
 
     def test_plan_gate_overclaim_is_rejected_even_when_repinned(self):
         plan = self.plan()
@@ -85,13 +109,13 @@ class LinearRuntimePlanTests(unittest.TestCase):
             verifier.LinearRuntimePlanError,
             "linear_runtime_source_changed",
         ):
-            verifier.verify(self.root)
+            self.verify_baseline()
         path.unlink()
         with self.assertRaisesRegex(
             verifier.LinearRuntimePlanError,
             "linear_runtime_source_kit_incomplete",
         ):
-            verifier.verify(self.root)
+            self.verify_baseline()
 
     def test_schema_or_acl_boundary_change_is_rejected(self):
         for sqlite_version, postgres_version, acl in (
@@ -113,6 +137,8 @@ class LinearRuntimePlanTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     verifier.LinearRuntimePlanError,
                     "linear_runtime_schema_boundary_changed",
+                ), mock.patch.object(
+                    verifier, "PLAN_SHA256", self.baseline_plan_sha256
                 ):
                     verifier.verify(self.root)
 
@@ -128,7 +154,7 @@ class LinearRuntimePlanTests(unittest.TestCase):
             verifier.LinearRuntimePlanError,
             "linear_runtime_source_changed",
         ):
-            verifier.verify(self.root)
+            self.verify_baseline()
 
     def test_predecessor_plan_is_still_immutable(self):
         path = self.root / verifier.PREDECESSOR_PATH
@@ -137,7 +163,7 @@ class LinearRuntimePlanTests(unittest.TestCase):
             verifier.LinearRuntimePlanError,
             "linear_runtime_predecessor_changed",
         ):
-            verifier.verify(self.root)
+            self.verify_baseline()
 
 
 if __name__ == "__main__":

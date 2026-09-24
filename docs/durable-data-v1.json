@@ -100,6 +100,25 @@
       ]
     },
     {
+      "id": "run_outcome_association_metadata",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "portfolio_association_audit_events",
+        "portfolio_run_outcome_association_cursors",
+        "portfolio_run_outcome_association_events",
+        "portfolio_run_work_link_events",
+        "portfolio_run_work_link_idempotency"
+      ],
+      "postgresql_tables": [
+        "portfolio_association_audit_events",
+        "portfolio_run_outcome_association_cursors",
+        "portfolio_run_outcome_association_events",
+        "portfolio_run_work_link_events",
+        "portfolio_run_work_link_idempotency"
+      ]
+    },
+    {
       "id": "linear_connector_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

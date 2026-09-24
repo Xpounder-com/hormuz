@@ -27,6 +27,7 @@ from .attribution_repository import AttributionRepository
 from .budget_repository import WorkBudgetRepository, create_budget_repository
 from .outcome_repository import OutcomeRepository
 from .linear_repository import LinearConnectorRepository
+from .association_repository import AssociationRepository
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import PortfolioError, RESPONSE_BYTES, canonical, query_parameters, route, validate
 from .postgres import PostgresConnectionPool
@@ -328,11 +329,20 @@ class PortfolioRepositories:
     outcomes: OutcomeRepository | None = None
     budgets: WorkBudgetRepository | None = None
     linear: LinearConnectorRepository | None = None
+    associations: AssociationRepository | None = None
 
     def execute(self, principal: PortfolioPrincipal, operation: str, *, path: str,
                 scope_id: str | None, query: dict[str, Any], body: dict[str, Any] | None,
                 idempotency_key: str | None) -> tuple[int, dict[str, Any]]:
-        owner = self.outcomes if operation == "list_outcomes" else self.attributions if operation in {"attribute", "list_attributions"} else self.registry
+        owner = (
+            self.associations
+            if operation in {"link_run", "list_links", "evaluate_association", "list_associations"}
+            else self.outcomes
+            if operation == "list_outcomes"
+            else self.attributions
+            if operation in {"attribute", "list_attributions"}
+            else self.registry
+        )
         if owner is None:
             raise PortfolioError("not_found")
         return owner.execute(principal, operation, path=path, scope_id=scope_id, query=query,
@@ -370,5 +380,11 @@ def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, 
             connection_pool=connection_pool,
             read_only=read_only,
             outcomes=outcomes,
+        ),
+        associations=AssociationRepository(
+            config,
+            dsn=registry._dsn,
+            connection_pool=connection_pool,
+            read_only=read_only,
         ),
     )

@@ -141,7 +141,8 @@ class SQLiteAssociationProposalBoundaryTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.path = Path(temporary.name) / "proposal.sqlite3"
-        UsageStore(self.path).verify_ready()
+        with mock.patch.object(UsageStore, "schema_version", 15):
+            UsageStore(self.path).verify_ready()
         with managed_sqlite_connection(self.path) as connection:
             _apply_sqlite_proposal(connection)
 
@@ -223,13 +224,14 @@ class SQLitePublishedAssociationTransitionTests(unittest.TestCase):
         self.seeded = predecessor_call(self.request(mode="seed"))
         self.assertEqual(self.seeded["status"], "ready")
         self.published = sqlite_snapshot(self.path)
-        self.assertEqual(UsageStore.schema_version, 15)
+        self.assertEqual(UsageStore.schema_version, 16)
 
     def request(self, path=None, mode="ready"):
         return {"backend": "sqlite", "path": str(path or self.path), "mode": mode}
 
     def advance_integrated_baseline(self):
-        UsageStore(self.path).verify_ready()
+        with mock.patch.object(UsageStore, "schema_version", 15):
+            UsageStore(self.path).verify_ready()
         self.baseline = sqlite_snapshot(self.path)
         self.assertIn(
             (15, "applied"),
@@ -362,13 +364,14 @@ class PostgresPublishedAssociationTransitionTests(PostgresTestCase):
         self.seeded = predecessor_call(self.request(mode="seed"))
         self.assertEqual(self.seeded["status"], "ready")
         self.published = self.snapshot()
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 20)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 21)
         if self._testMethodName in {
             "test_quiesced_published_pair_restore_replays_original_receipt",
             "test_post_checkpoint_witness_requires_retained_forward_recovery",
         }:
             self.published_checkpoint = self.backup()
-        self.migrate()
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 20):
+            self.migrate()
         self.baseline = self.snapshot()
 
     def request(self, dsn=None, mode="ready"):
@@ -536,14 +539,15 @@ class PostgresAssociationProposalACLTests(PostgresTestCase):
     def bootstrap_clean_proposal(self):
         schema = "association_acl_" + uuid4().hex[:12]
         self.addCleanup(self._drop_schema, schema)
-        status = postgres_module.migrate_postgres(
-            self.owner_dsn,
-            schema=schema,
-            runtime_role=self.runtime_role,
-            policy_control_role=self.policy_control_role,
-            custody_control_role=self.custody_control_role,
-            custody_executor_role=self.custody_executor_role,
-        )
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 20):
+            status = postgres_module.migrate_postgres(
+                self.owner_dsn,
+                schema=schema,
+                runtime_role=self.runtime_role,
+                policy_control_role=self.policy_control_role,
+                custody_control_role=self.custody_control_role,
+                custody_executor_role=self.custody_executor_role,
+            )
         self.assertEqual(status.version, 20)
         proposal = POSTGRES_PROPOSAL.read_text(encoding="utf-8").format(
             schema=postgres_module._quote_identifier(schema),

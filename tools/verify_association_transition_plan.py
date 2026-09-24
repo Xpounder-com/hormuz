@@ -339,7 +339,38 @@ def verify(root: Path = ROOT) -> dict[str, object]:
             )
     _proposal_boundary(root, SQLITE_PROPOSAL, postgresql=False)
     _proposal_boundary(root, POSTGRES_PROPOSAL, postgresql=True)
-    if (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != (15, 20):
+    versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
+    if versions == (16, 21):
+        try:
+            from tools.verify_association_runtime_plan import (
+                AssociationRuntimePlanError,
+                verify as verify_runtime,
+            )
+
+            successor = verify_runtime(root)
+        except AssociationRuntimePlanError as error:
+            mapping = {
+                "association_runtime_source_kit_incomplete": "association_transition_source_kit_incomplete",
+                "association_runtime_source_changed": "association_transition_frozen_file_changed",
+                "association_runtime_predecessor_changed": "association_transition_plan_changed",
+            }
+            raise AssociationTransitionPlanError(
+                mapping.get(error.code, "association_transition_successor_invalid")
+            ) from None
+        return {
+            "status": "association_transition_successor_verified",
+            "plan_sha256": PLAN_SHA256,
+            "sqlite_transition": [15, 16],
+            "postgresql_transition": [20, 21],
+            "sqlite_schema_version": SQLITE_SCHEMA_VERSION,
+            "postgresql_schema_version": POSTGRES_SCHEMA_VERSION,
+            "postgresql_acl": successor["postgresql_acl"],
+            "proposal_tables": len(PROPOSAL_TABLES),
+            "runtime_implemented": successor["runtime_implemented"],
+            "live_connectors_authorized": False,
+            "gates": successor["gates"],
+        }
+    if versions != (15, 20):
         raise AssociationTransitionPlanError("association_transition_baseline_changed")
     return {
         "status": "association_transition_plan_verified",

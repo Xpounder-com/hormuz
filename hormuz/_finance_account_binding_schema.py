@@ -472,7 +472,9 @@ def verify_postgres_finance_account_binding(cursor, schema: str, error_factory) 
         audit_template = (
             resources.files("hormuz.migrations.postgresql")
             .joinpath(
-                "0020_linear_snapshot.sql"
+                "0021_run_outcome_association.sql"
+                if successor_version >= 21
+                else "0020_linear_snapshot.sql"
                 if successor_version >= 20
                 else "0019_linear_connector.sql"
                 if successor_version >= 19

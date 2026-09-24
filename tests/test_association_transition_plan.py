@@ -32,12 +32,24 @@ class AssociationTransitionPlanTests(unittest.TestCase):
         )
 
     def test_verifies_assigned_versions_and_preserves_runtime_gates(self):
-        result = verifier.verify(self.root)
+        with mock.patch.object(verifier, "SQLITE_SCHEMA_VERSION", 15), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 20,
+        ):
+            result = verifier.verify(self.root)
         self.assertEqual(result["sqlite_transition"], [15, 16])
         self.assertEqual(result["postgresql_transition"], [20, 21])
         self.assertEqual(result["proposal_tables"], 5)
         self.assertFalse(result["runtime_implemented"])
         self.assertFalse(result["live_connectors_authorized"])
+
+    def test_current_runtime_successor_chain_is_verified(self):
+        result = verifier.verify(verifier.ROOT)
+        self.assertEqual(result["status"], "association_transition_successor_verified")
+        self.assertTrue(result["runtime_implemented"])
+        self.assertEqual(
+            (result["sqlite_schema_version"], result["postgresql_schema_version"]),
+            (16, 21),
+        )
 
     def test_duplicate_plan_member_is_rejected(self):
         path = self.root / verifier.PLAN_PATH
@@ -151,13 +163,13 @@ class AssociationTransitionPlanTests(unittest.TestCase):
             ):
                 verifier.verify(self.root)
 
-    def test_runtime_schema_advance_requires_a_superseding_plan(self):
+    def test_runtime_schema_advance_requires_the_successor_source_kit(self):
         with mock.patch.object(verifier, "SQLITE_SCHEMA_VERSION", 16), mock.patch.object(
             verifier, "POSTGRES_SCHEMA_VERSION", 21
         ):
             with self.assertRaisesRegex(
                 verifier.AssociationTransitionPlanError,
-                "association_transition_baseline_changed",
+                "association_transition_source_kit_incomplete",
             ):
                 verifier.verify(self.root)
 

@@ -27,7 +27,9 @@ include docs/LINEAR_CONNECTOR_RUNTIME.md
 include docs/LINEAR_RECONCILIATION.md
 include docs/ASSOCIATION_LINKAGE_PREFLIGHT.md
 include docs/ASSOCIATION_TRANSITION.md
+include docs/ASSOCIATION_RUNTIME.md
 include docs/association-transition-plan-v1.json
+include docs/association-runtime-plan-v1.json
 include docs/association-successor-schema-proposal.sqlite.sql
 include docs/association-successor-schema-acl-proposal.sql
 include docs/registry-transition-plan-v1.json
@@ -58,6 +60,7 @@ include docs/WORK_BUDGETS.md
 include hormuz/portfolio-registry-wire-v1.json
 include hormuz/portfolio-attribution-wire-v1.json
 include hormuz/portfolio-outcome-wire-v1.json
+include hormuz/portfolio-association-wire-v1.json
 include hormuz/secret-inventory-v1.json
 include hormuz/console.css
 include tools/_verification_runtime.py
@@ -94,6 +97,7 @@ include tools/verify_linear_transition_plan.py
 include tools/verify_linear_runtime_plan.py
 include tools/verify_linear_reconciliation_plan.py
 include tools/verify_association_transition_plan.py
+include tools/verify_association_runtime_plan.py
 include tools/verify_budget_transition_plan.py
 include tools/verify_core_wheel.py
 include tools/build_context_helper.sh
