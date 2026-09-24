@@ -1,0 +1,147 @@
+{
+  "schema_id": "hormuz.scorecard-runtime-plan",
+  "schema_version": 1,
+  "stage": "provider_free_scorecard_candidate",
+  "target_release": "1.3.0",
+  "feature_issue": 222,
+  "gate_issue": 214,
+  "base_main_commit": "bea79349cc29d9cf83622c47c3f31e82fdc621ae",
+  "predecessor": {
+    "path": "docs/association-runtime-plan-v1.json",
+    "file_sha256": "0d31c8c72777d51489c7ec7547b1727973385b8316ca767937a87e7e61b974e1",
+    "canonical_sha256": "e35c48b9fd8dbb802c9340af69fa44449af3348d046a69b5a3cdd0baae5d8c6b"
+  },
+  "transitions": {
+    "sqlite": {
+      "from": 16,
+      "to": 17
+    },
+    "postgresql": {
+      "from": 21,
+      "to": 22
+    }
+  },
+  "postgresql_acl": {
+    "entry_count": 236,
+    "sha256": "4aef5982da3f81a352f813554de5721580f0ad5f0a93dda529199b545fee5a20",
+    "mode": "fixed_literal_two_clean_managed_role_measurements"
+  },
+  "runtime": {
+    "input_schema_id": "hormuz.scorecard-evaluation-input",
+    "output_schema_id": "hormuz.model-scorecard",
+    "authorization": "configured_portfolio_admin_before_parse_or_storage",
+    "scope": "one_active_use_case_version",
+    "evidence_level": "associated",
+    "controlled_design": null,
+    "public_routes": [],
+    "public_scorecard_route": false
+  },
+  "storage": {
+    "tables": [
+      "portfolio_scorecard_audit_events",
+      "portfolio_model_scorecard_snapshots"
+    ],
+    "append_only": true,
+    "tenant_keyed": true,
+    "canonical_input_and_evaluation": true,
+    "exact_replay_without_duplicate_audit": true,
+    "strict_version_lineage": true,
+    "raw_provider_payload_storage": false,
+    "work_content_storage": false,
+    "person_scoring_storage": false,
+    "credential_storage": false
+  },
+  "kpis": {
+    "primary_readiness": "use_case_attributed_spend_coverage",
+    "primary_economics": "quality_qualified_cost_per_accepted_work_item",
+    "primary_decision": "optimization_lift_vs_declared_baseline",
+    "cost_bases": [
+      "provider_final",
+      "configured_rate_card_estimate",
+      "allocated_estimate",
+      "provider_aggregate",
+      "credit_or_discount",
+      "not_available"
+    ],
+    "item_cost_bases": [
+      "provider_final",
+      "configured_rate_card_estimate",
+      "allocated_estimate"
+    ],
+    "requested_routed_actual_models_distinct": true,
+    "work_item_cluster_is_independent_sample": true,
+    "mandatory_guardrails": true,
+    "stratum_failure_cannot_be_pooled_away": true,
+    "uncertainty_methods": [
+      "exact_source_ratio",
+      "work_item_wilson_95",
+      "work_item_cluster_jackknife_95",
+      "work_item_delete_one_range",
+      "independent_cluster_interval_propagation_95"
+    ],
+    "pareto_axes": [
+      "cost",
+      "quality",
+      "latency",
+      "reliability"
+    ],
+    "composite_rank": false,
+    "causal_claim": false,
+    "frozen_fixture": "tests/fixtures/scorecard/runtime-v1.json"
+  },
+  "source_sha256": {
+    ".github/workflows/ci.yml": "451b2e719b78098876975b35362910a4a6597cf1117fce1ceb05c0f695cb97fa",
+    "MANIFEST.in": "cf28d185ce2728374412067f5af9ea9ba94ff54cd261f1ea15ca4630cc70e002",
+    "docs/DURABLE_DATA.md": "3afd23c064446b5325a653952fa927654e5f6fbe700624df34b0dcca858a6f95",
+    "docs/SCORECARD_RUNTIME.md": "5b53fb3cfa162c709561bc28d09e4b7c2318e9e93fa0a18ea29f86d4fc4e670e",
+    "docs/durable-data-v1.json": "8d9a9f06b6b406092e2320fed77eabd5c0c650707dcc7c8cb0cdc2f872fd359d",
+    "hormuz/_portfolio_sql.py": "b3b1cc6e8593f92fa1b51c4eb0db5a91dfba9c9d33d1caa8570ff6b4b7dfc990",
+    "hormuz/_scorecard_schema.py": "459c455b5558c451f145eed1a93d20a722a7bef78ce8eee149356210e62e11f6",
+    "hormuz/_sqlite_schema.py": "6e33e334a10f32e286d61339f939c1b48d737a89d50c11235ab544934d3e7d8f",
+    "hormuz/migrations/postgresql/0022_model_scorecards.sql": "13566c86f371a39d2bc426e79ffdc4a3ff48f9a3aed87ae4d86f4992781a3810",
+    "hormuz/portfolio-intelligence-wire-v1.json": "26ef36b12d475d5b8354e45abfc92c76187ca6ff5aafb4b0ebce6fab439feb80",
+    "hormuz/portfolio_repository.py": "30bd40c06cd01d06a170a2f43c38ea39b060e3bfa3fd9c95399038952d481579",
+    "hormuz/portfolio_wire.py": "405d23b7fb22cbb36cceba3dbcd215195a951260cbb54b0a42d8a9c2dd293bd7",
+    "hormuz/postgres.py": "c9dcdaed6816901a1b6a404bda0050e97d9735aa3fbcd88525cffad2c5646ae3",
+    "hormuz/scorecard_evidence_reference.py": "3b8897892ebb6a7449d77066c0f51a5228cb232018cf482afa39b2a846bdbc9b",
+    "hormuz/scorecard_kernel.py": "61e73d7413d51d4caa53515ca60de518335964c1a4fdd5307bb9b3e832a44cf4",
+    "hormuz/scorecard_repository.py": "1044bd717315530181544d336daaa224d40034eb8c75c7dde1e864caec7ac57a",
+    "pyproject.toml": "e8c86e5c3a3686603dadfa52e28a8a1807559bab24423a48b7a7ebd4dd80e1f8",
+    "tests/_postgres_fixture.py": "5fa2a62a46e15a31f0df36062bf9e46e45bdf9c04a7e6ec0ca0ed96b447ffd10",
+    "tests/fixtures/scorecard/runtime-v1.json": "0d9714d6ec72d52913665a4322cd5feb255f0987c2463c51104022edcf24aea5",
+    "tests/test_durable_data_inventory.py": "e245d5ec671c99cad27c06f319aa6e36dc1c8f29af88f0e6b23e675d5b507256",
+    "tests/test_postgres_scorecard_runtime.py": "cd41a61702728eec2e2986ad5d9fd8d233340e99f2e8617c33233209ea5e83d8",
+    "tests/test_scorecard_evidence_reference.py": "c232026d5dd2d2fa446341397e3a45ba523271046224c372529958a28593cd5e",
+    "tests/test_scorecard_kernel.py": "91aa1a80adca814d96e66cdc813ce8689c37602d35f8fb1caff019e6f6efda45",
+    "tests/test_scorecard_runtime.py": "002aa5398df306b7db82911a4bbfa4dcc66a2e832b0f8bf244b5c928c9cdc237",
+    "tests/test_scorecard_runtime_plan.py": "af4970e567e6b60d5c5af6dc25c651c48b6cb81760a1d8f4ab75459d32348cd4",
+    "tools/verify_association_runtime_plan.py": "6405d6864ec884572c5ae6db03601ca20b2843048ddc0681973fdec585be8675",
+    "tools/verify_core_wheel.py": "507a47fb1f6bdb2f1cc470dc99b9c0bfec7540ff3d6735c5ad5b4a63bd417126",
+    "tools/verify_durable_data_inventory.py": "1ec094934a2e7447a56840f839316ca3c0ee031f6dd7f132da81fdb5784dd924"
+  },
+  "gates": {
+    "association_runtime_predecessor_verified": true,
+    "frozen_reference_vector_proven": true,
+    "metadata_content_boundary_proven": true,
+    "sqlite_runtime_tests_implemented": true,
+    "postgresql_runtime_tests_implemented": true,
+    "provider_free_source_verified": true,
+    "provider_free_wheel_verified": true,
+    "exact_main_ci_verified": false,
+    "live_connectors_authorized": false,
+    "role_scoped_decision_views_implemented": false,
+    "recommendations_implemented": false,
+    "final_candidate_accepted": false,
+    "released": false
+  },
+  "nonclaims": [
+    "authorized_live_connector_or_customer_workspace",
+    "causal_model_to_outcome_effect",
+    "complete_live_external_history",
+    "exact_main_CI",
+    "final_candidate_acceptance",
+    "public_scorecard_or_recommendation_route",
+    "realized_savings_or_business_outcome",
+    "v1.3.0_release"
+  ]
+}

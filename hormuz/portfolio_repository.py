@@ -28,6 +28,7 @@ from .budget_repository import WorkBudgetRepository, create_budget_repository
 from .outcome_repository import OutcomeRepository
 from .linear_repository import LinearConnectorRepository
 from .association_repository import AssociationRepository
+from .scorecard_repository import ScorecardRepository
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import PortfolioError, RESPONSE_BYTES, canonical, query_parameters, route, validate
 from .postgres import PostgresConnectionPool
@@ -330,6 +331,7 @@ class PortfolioRepositories:
     budgets: WorkBudgetRepository | None = None
     linear: LinearConnectorRepository | None = None
     associations: AssociationRepository | None = None
+    scorecards: ScorecardRepository | None = None
 
     def execute(self, principal: PortfolioPrincipal, operation: str, *, path: str,
                 scope_id: str | None, query: dict[str, Any], body: dict[str, Any] | None,
@@ -382,6 +384,12 @@ def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, 
             outcomes=outcomes,
         ),
         associations=AssociationRepository(
+            config,
+            dsn=registry._dsn,
+            connection_pool=connection_pool,
+            read_only=read_only,
+        ),
+        scorecards=ScorecardRepository(
             config,
             dsn=registry._dsn,
             connection_pool=connection_pool,

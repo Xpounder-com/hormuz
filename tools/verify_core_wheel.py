@@ -306,6 +306,25 @@ REQUIRED_ASSOCIATION_RUNTIME_SDIST_PATHS = (
     "tests/test_association_runtime_plan.py",
     "tests/test_postgres_association_runtime.py",
 )
+REQUIRED_SCORECARD_RUNTIME_WHEEL_PATHS = (
+    "hormuz/_scorecard_schema.py",
+    "hormuz/scorecard_evidence_reference.py",
+    "hormuz/scorecard_kernel.py",
+    "hormuz/scorecard_repository.py",
+    "hormuz/portfolio-intelligence-wire-v1.json",
+    "hormuz/migrations/postgresql/0022_model_scorecards.sql",
+)
+REQUIRED_SCORECARD_RUNTIME_SDIST_PATHS = (
+    *REQUIRED_SCORECARD_RUNTIME_WHEEL_PATHS,
+    "docs/SCORECARD_RUNTIME.md",
+    "docs/scorecard-runtime-plan-v1.json",
+    "tools/verify_scorecard_runtime_plan.py",
+    "tests/fixtures/scorecard/runtime-v1.json",
+    "tests/test_scorecard_kernel.py",
+    "tests/test_scorecard_runtime.py",
+    "tests/test_scorecard_runtime_plan.py",
+    "tests/test_postgres_scorecard_runtime.py",
+)
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
     "docs/work-budget-reports-wire-v1.json",
@@ -515,6 +534,18 @@ def main(argv: list[str] | None = None) -> int:
         _sdist_members,
         REQUIRED_ASSOCIATION_RUNTIME_SDIST_PATHS,
         "Association runtime source kit",
+    )
+    _assert_required_archive_paths(
+        wheel,
+        _wheel_members,
+        REQUIRED_SCORECARD_RUNTIME_WHEEL_PATHS,
+        "Scorecard runtime wheel",
+    )
+    _assert_required_archive_paths(
+        sdist,
+        _sdist_members,
+        REQUIRED_SCORECARD_RUNTIME_SDIST_PATHS,
+        "Scorecard runtime source kit",
     )
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)

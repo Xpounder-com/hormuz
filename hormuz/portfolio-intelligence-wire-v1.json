@@ -1,0 +1,3535 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hormuz:portfolio-intelligence-wire:v1",
+  "title": "Planned Hormuz v1.1.0 portfolio wire contracts",
+  "description": "Field-level version-1 contracts supporting ADR 0010 and issue #212. Planned schemas are not registered runtime endpoints. Every object is closed and every unbounded-domain scalar/array is bounded. JSON Schema assertions cover serialized structure; the normative domain rules below remain implementation and authorization gates.",
+  "x-hormuz-schema-ids": [
+    "hormuz.connector-ingest-receipt",
+    "hormuz.external-work-binding-event",
+    "hormuz.external-work-binding-page",
+    "hormuz.external-work-binding-request",
+    "hormuz.governed-run-attribution-event",
+    "hormuz.governed-run-attribution-page",
+    "hormuz.governed-run-attribution-request",
+    "hormuz.model-scorecard",
+    "hormuz.model-scorecard-page",
+    "hormuz.policy-recommendation",
+    "hormuz.policy-recommendation-decision-request",
+    "hormuz.policy-recommendation-page",
+    "hormuz.portfolio-error",
+    "hormuz.portfolio-query",
+    "hormuz.run-outcome-association-event",
+    "hormuz.run-outcome-association-page",
+    "hormuz.work-budget-plan",
+    "hormuz.work-budget-plan-activation-request",
+    "hormuz.work-budget-plan-page",
+    "hormuz.work-budget-plan-request",
+    "hormuz.work-outcome-event",
+    "hormuz.work-outcome-page",
+    "hormuz.work-scope-create-request",
+    "hormuz.work-scope-page",
+    "hormuz.work-scope-version",
+    "hormuz.work-scope-version-request"
+  ],
+  "x-hormuz-route-query-fields": {
+    "GET /v1/admin/portfolio/associations": [
+      "limit",
+      "cursor",
+      "start_at",
+      "end_at",
+      "work_scope_id",
+      "connector_id",
+      "evidence_level"
+    ],
+    "GET /v1/admin/portfolio/attributions": [
+      "limit",
+      "cursor",
+      "start_at",
+      "end_at",
+      "work_scope_id"
+    ],
+    "GET /v1/admin/portfolio/budget-plans": [
+      "limit",
+      "cursor",
+      "start_at",
+      "end_at",
+      "work_scope_id"
+    ],
+    "GET /v1/admin/portfolio/budget-plans/{budget_plan_id}": [
+      "version"
+    ],
+    "GET /v1/admin/portfolio/outcomes": [
+      "limit",
+      "cursor",
+      "start_at",
+      "end_at",
+      "work_scope_id",
+      "connector_id"
+    ],
+    "GET /v1/admin/portfolio/recommendations": [
+      "limit",
+      "cursor",
+      "start_at",
+      "end_at",
+      "work_scope_id",
+      "evidence_level"
+    ],
+    "GET /v1/admin/portfolio/recommendations/{recommendation_id}": [
+      "version"
+    ],
+    "GET /v1/admin/portfolio/scorecards": [
+      "limit",
+      "cursor",
+      "start_at",
+      "end_at",
+      "work_scope_id",
+      "provider_id",
+      "model_id",
+      "cost_basis",
+      "evidence_level"
+    ],
+    "GET /v1/admin/portfolio/scorecards/{scorecard_id}": [
+      "version"
+    ],
+    "GET /v1/admin/portfolio/work-bindings": [
+      "limit",
+      "cursor",
+      "start_at",
+      "end_at",
+      "work_scope_id",
+      "connector_id"
+    ],
+    "GET /v1/admin/portfolio/work-scopes": [
+      "limit",
+      "cursor",
+      "start_at",
+      "end_at",
+      "work_scope_id"
+    ],
+    "GET /v1/admin/portfolio/work-scopes/{work_scope_id}": [
+      "version"
+    ]
+  },
+  "x-hormuz-transport": {
+    "json_encoding": "UTF-8 object; duplicate members, non-finite numbers, BOM, unknown fields, and trailing data rejected",
+    "request_maximum_bytes": 262144,
+    "response_maximum_bytes": 1048576,
+    "maximum_json_depth": 32,
+    "success_http_status": "GET=200; a new immutable mutation result=201; exact idempotent replay returns its original status/body; connector receipt=200 after durable commit; no 204 responses",
+    "error_http_status": {
+      "invalid_request": 400,
+      "unauthenticated": 401,
+      "forbidden": 403,
+      "not_found": 404,
+      "idempotency_conflict": 409,
+      "version_conflict": 409,
+      "cursor_invalid": 400,
+      "evidence_inconclusive": 422,
+      "recommendation_stale": 409,
+      "rate_limited": 429,
+      "unavailable": 503
+    },
+    "retry_classification": "retryable may be true only for rate_limited or unavailable; retry_after_seconds is null otherwise; a retry still requires safe-read or verified-idempotency semantics",
+    "mutation_idempotency": "Idempotency-Key header: 1-128 ASCII letters, digits, underscore, dot, colon, or hyphen; server binds tenant, actor, method, route, and canonical request; conflict fails closed",
+    "query_decoding": "single occurrence per key; integer parameters are canonical unsigned decimal; no implicit boolean/string coercion; unknown or route-inapplicable parameters rejected",
+    "cursor_continuation": "cursor may be combined only with limit; filters and window are authenticated cursor state",
+    "collection_order": "event_at or created_at/generated_at as appropriate, then immutable opaque ID; descending; as_of is fixed on the first page",
+    "body_identity": "organization_id, actor_id, roles, and authorization scope are server-owned; request references may only narrow existing authorized scope",
+    "schema_markers": "JSON mutation and response envelopes carry schema_id and integer schema_version; GET queries carry no schema markers",
+    "connector_input": "GitHub and Linear signature-verified raw provider bytes are not Hormuz request schemas; normalize through the closed work-outcome-event only",
+    "planned_only": "No handler, migration, provider call, schema registration, or activation is enabled by this catalogue"
+  },
+  "x-hormuz-domain-rules": {
+    "timestamps": "Parse valid UTC instants; start_at < end_at. Event, observation and ingestion times remain separate; source time never authorizes scope.",
+    "hierarchy": "Resolve parent and owner references within authenticated scope, enforce nearest configured ancestor, immutable kind, acyclicity, and no cross-organization parents.",
+    "updates": "Compare expected version/event/generation atomically; create appends version, not mutation. Existing plan creation requires matching ID/version; new plan creation requires both null.",
+    "attribution": "active requires an authorized use_case reference; voided requires null. Commit at most one active primary attribution per attempt; preserve all old records.",
+    "budgets": "POST budget-plans persists without activation; state is null before its first activation lifecycle. Explicit activation alone updates active_version/generation. Enforce all organization/team/actor/application/work scopes, denies, model intersections, and lowest numeric ceilings.",
+    "cost": "Preserve basis/currency/rate-card provenance. not_available has null amount/currency; negative amount only for credit_or_discount. Never turn aggregates into final granular cost or silently convert currency.",
+    "outcomes": "Extract only verified opaque source IDs and fixed lifecycle/quality metadata. Never copy titles, paths, names, comments, source, raw payloads, or arbitrary labels into allowed identifier fields.",
+    "coverage": "Retain eligible denominator members, including unmatched, unsupported, failed, retried, and excluded evidence as declared. Undefined denominator means null ratio/value and inconclusive, not zero.",
+    "eligibility": "eligible requires non-null rule, declared_at, both thresholds, sample_count and observed_coverage; declaration precedes window; observed sample/coverage meet thresholds; guardrails, freshness and comparability pass. Unknown evidence remains null and inconclusive. No global numeric defaults.",
+    "evidence": "Only a separately approved predeclared controlled_design may support controlled scorecard/lift. Connector observations stay descriptive; deterministic associations stay associated.",
+    "scorecard": "Cohort IDs are unique and all baseline/Pareto references resolve within the same use-case snapshot. Unknown actual model/policy/rate-card evidence remains explicit and may invalidate eligibility; no employee cohort or universal rank.",
+    "recommendation": "Source scorecard must be eligible and unexpired. Policy/plan/scorecard/model/rate-card drift or expiry invalidates recommendation. Proposal requires typed budget reference for budget change or candidate policy digest for other types; no arbitrary patch.",
+    "decision": "Accepted decision requires matching accepted reason and all server-validated pre_apply_evidence; rejected reason must match rejected decision. Decision alone cannot apply policy; actual activation retains existing authorized workflow.",
+    "pagination": "has_more is true iff next_cursor is non-null; continuation cannot widen server roles/scope or alter bound filters/window/schema. Size budgets may shorten pages below limit.",
+    "role_views": "Schemas describe maximum structural shapes, not access grants. Finance/platform remain aggregate-only, team leads remain team/descendant-scoped, self access cannot query these routes; raw entity endpoints require separately authorized capabilities from #223.",
+    "evidence_exports": "display_name exists only for authorized registry display. Routine logs, exported release/pilot evidence, errors and diagnostics exclude labels and all work content."
+  },
+  "$defs": {
+    "opaque_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*(?![\\s\\S])",
+      "description": "Opaque server-issued or server-registered identifier, never a name, path, free-text label, or authority. Resolve within the authenticated organization; do not infer access from syntax."
+    },
+    "external_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:=+-]*(?![\\s\\S])",
+      "description": "Verified connector source identifier. The connector must select the source ID field, never encode a title, path, URL, body, or actor name as an ID."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647,
+      "description": "Positive immutable entity or rule version; never a mutable latest alias."
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Non-negative JSON-safe exact count. Unknown is represented by explicit null only where the containing field permits it."
+    },
+    "timestamp": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 27,
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])",
+      "description": "Valid UTC RFC3339 instant with at most microsecond precision. Invalid calendar dates are rejected; no local or client-implied time zone."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]*(?![\\s\\S])",
+      "description": "Administrator-entered registry label, at most 120 Unicode code points. Never copied from external work content and never included in routine logs or release evidence."
+    },
+    "decimal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 28,
+      "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,9})?(?![\\s\\S])",
+      "description": "Exact non-negative base-10 quantity with at most 18 integral and 9 fractional digits. Not a binary float, scientific notation, or implicit currency conversion."
+    },
+    "signed_decimal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 29,
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,9})?(?![\\s\\S])",
+      "description": "Exact signed base-10 quantity. Negative cost is allowed only for separately identified credits/discounts; lift may also be negative."
+    },
+    "fraction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Finite ratio in [0,1]; a missing or zero denominator is inconclusive, not a fabricated zero."
+    },
+    "currency": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 3,
+      "pattern": "^[A-Z]{3}(?![\\s\\S])",
+      "description": "Source or plan currency code. Different currencies are never summed without a separately versioned conversion basis."
+    },
+    "digest": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[a-f0-9]{64}(?![\\s\\S])",
+      "description": "Lowercase SHA-256 digest of approved canonical metadata or a tenant-keyed provenance digest. Never a raw content hash substituted for retained work content."
+    },
+    "cost_basis": {
+      "type": "string",
+      "enum": [
+        "provider_final",
+        "provider_aggregate",
+        "configured_rate_card_estimate",
+        "allocated_estimate",
+        "credit_or_discount",
+        "not_available"
+      ],
+      "description": "Original cost evidence basis. No aggregate or estimate can be relabeled as final granular invoice evidence."
+    },
+    "evidence_level": {
+      "type": "string",
+      "enum": [
+        "descriptive",
+        "associated",
+        "controlled"
+      ],
+      "description": "Controlled requires separately approved predeclared design; connectors are descriptive and deterministic joins associated."
+    },
+    "reason_code": {
+      "type": "string",
+      "enum": [
+        "created",
+        "corrected",
+        "reparented",
+        "archived",
+        "reactivated",
+        "tombstoned",
+        "bound",
+        "voided",
+        "accepted",
+        "rejected",
+        "superseded",
+        "expired",
+        "policy_drift",
+        "scorecard_drift",
+        "observed",
+        "duplicate",
+        "unsupported",
+        "unmatched",
+        "ambiguous",
+        "excluded",
+        "missing_evidence",
+        "below_threshold",
+        "eligible",
+        "not_applicable"
+      ],
+      "description": "Fixed content-free classification, never caller free text or the rejected value."
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Inclusive measurement-window start."
+        },
+        "end_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Exclusive measurement-window end."
+        }
+      },
+      "required": [
+        "start_at",
+        "end_at"
+      ],
+      "description": "UTC half-open window; start must precede end. Domain validation enforces the endpoint window/resource bound."
+    },
+    "version_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Tenant-qualified immutable object ID."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Exact version of that object."
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "description": "Reference resolved inside server-authorized scope."
+    },
+    "work_scope_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Canonical work scope in the authenticated organization."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Event-time version; do not rebind historical facts to the current version."
+        }
+      },
+      "required": [
+        "work_scope_id",
+        "version"
+      ],
+      "description": "Tenant-qualified versioned work scope; a primary analytic binding must resolve to kind use_case."
+    },
+    "model_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Registered actual provider, distinct from requested provider."
+        },
+        "model_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Registered actual model, distinct from requested or routed model."
+        },
+        "model_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provider-reported version, or null when unknown; never guess a version."
+        }
+      },
+      "required": [
+        "provider_id",
+        "model_id",
+        "model_version"
+      ],
+      "description": "Actual provider/model dimension. Missing actual identity keeps comparison eligibility explicit."
+    },
+    "outcome_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authenticated server-bound connector ID."
+        },
+        "source_event_id": {
+          "$ref": "#/$defs/external_id",
+          "description": "Stable verified source event identity."
+        }
+      },
+      "required": [
+        "connector_id",
+        "source_event_id"
+      ],
+      "description": "Tenant-qualified normalized source event reference."
+    },
+    "rule_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rule_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Registered rule or metric ID."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Frozen rule version."
+        },
+        "digest": {
+          "$ref": "#/$defs/digest",
+          "description": "Digest of the predeclared rule metadata."
+        }
+      },
+      "required": [
+        "rule_id",
+        "version",
+        "digest"
+      ],
+      "description": "Immutable rule reference. Resolve its formula, eligibility, and thresholds rather than executing caller text."
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "numerator": {
+          "anyOf": [{"$ref": "#/$defs/decimal"}, {"type": "null"}],
+          "description": "Eligible included quantity, or null when not known; never fabricate zero."
+        },
+        "denominator": {
+          "anyOf": [{"$ref": "#/$defs/decimal"}, {"type": "null"}],
+          "description": "Full applicable eligible quantity, including unmatched and excluded members as declared; null when unknown, never fabricate zero."
+        },
+        "ratio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fraction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Numerator divided by denominator; null for an undefined denominator."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code",
+          "description": "Why coverage is available or inconclusive."
+        }
+      },
+      "required": [
+        "numerator",
+        "denominator",
+        "ratio",
+        "reason_code"
+      ],
+      "description": "Coverage with an auditable denominator; never silently drop failures, retries, or unsupported evidence."
+    },
+    "coverage_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eligible_governed_attempts": {
+          "$ref": "#/$defs/coverage",
+          "description": "Coverage for eligible_governed_attempts."
+        },
+        "eligible_governed_spend": {
+          "$ref": "#/$defs/coverage",
+          "description": "Coverage for eligible_governed_spend."
+        },
+        "eligible_external_outcome_events": {
+          "$ref": "#/$defs/coverage",
+          "description": "Coverage for eligible_external_outcome_events."
+        },
+        "eligible_association_candidates": {
+          "$ref": "#/$defs/coverage",
+          "description": "Coverage for eligible_association_candidates."
+        },
+        "pricing": {
+          "$ref": "#/$defs/coverage",
+          "description": "Coverage for pricing."
+        },
+        "connector": {
+          "$ref": "#/$defs/coverage",
+          "description": "Coverage for connector."
+        },
+        "association": {
+          "$ref": "#/$defs/coverage",
+          "description": "Coverage for association."
+        }
+      },
+      "required": [
+        "eligible_governed_attempts",
+        "eligible_governed_spend",
+        "eligible_external_outcome_events",
+        "eligible_association_candidates",
+        "pricing",
+        "connector",
+        "association"
+      ],
+      "description": "Coverage dimensions are all present; unavailable evidence is explicit, not omitted."
+    },
+    "guardrail": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "inconclusive",
+            "not_applicable"
+          ],
+          "description": "Result under the bound guardrail rule."
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rule_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Versioned guardrail definition, null only when missing evidence is reported."
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/signed_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact observed measure, null when unavailable."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code",
+          "description": "Content-free guardrail result explanation."
+        }
+      },
+      "required": [
+        "state",
+        "rule",
+        "value",
+        "reason_code"
+      ],
+      "description": "One versioned guardrail observation; missing rules cannot produce a pass."
+    },
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "quality": {
+          "$ref": "#/$defs/guardrail",
+          "description": "Mandatory quality guardrail."
+        },
+        "reversion_or_defect": {
+          "$ref": "#/$defs/guardrail",
+          "description": "Mandatory reversion_or_defect guardrail."
+        },
+        "reliability": {
+          "$ref": "#/$defs/guardrail",
+          "description": "Mandatory reliability guardrail."
+        },
+        "privacy": {
+          "$ref": "#/$defs/guardrail",
+          "description": "Mandatory privacy guardrail."
+        },
+        "budget": {
+          "$ref": "#/$defs/guardrail",
+          "description": "Mandatory budget guardrail."
+        },
+        "coverage_and_sample_eligibility": {
+          "$ref": "#/$defs/guardrail",
+          "description": "Mandatory coverage_and_sample_eligibility guardrail."
+        },
+        "freshness": {
+          "$ref": "#/$defs/guardrail",
+          "description": "Mandatory freshness guardrail."
+        },
+        "comparability": {
+          "$ref": "#/$defs/guardrail",
+          "description": "Mandatory comparability guardrail."
+        }
+      },
+      "required": [
+        "quality",
+        "reversion_or_defect",
+        "reliability",
+        "privacy",
+        "budget",
+        "coverage_and_sample_eligibility",
+        "freshness",
+        "comparability"
+      ],
+      "description": "Mandatory ADR 0010 guardrails, including freshness and cohort comparability."
+    },
+    "eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rule_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Predeclared per-use-case metric eligibility rule; null is inconclusive."
+        },
+        "declared_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Must precede the measurement window when status is eligible."
+        },
+        "minimum_coverage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fraction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit owner threshold; no global default."
+        },
+        "minimum_sample": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit owner threshold; no global default."
+        },
+        "sample_count": {
+          "anyOf": [{"$ref": "#/$defs/count"}, {"type": "null"}],
+          "description": "All eligible samples under the frozen rule, or null when unknown."
+        },
+        "observed_coverage": {
+          "anyOf": [{"$ref": "#/$defs/fraction"}, {"type": "null"}],
+          "description": "Observed eligible coverage, or null for missing/undefined evidence; never fabricate zero."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "eligible",
+            "inconclusive"
+          ],
+          "description": "Missing or unmet thresholds produce inconclusive."
+        }
+      },
+      "required": [
+        "rule",
+        "declared_at",
+        "minimum_coverage",
+        "minimum_sample",
+        "sample_count",
+        "observed_coverage",
+        "status"
+      ],
+      "description": "Versioned eligibility and thresholds. Structural validation is not proof of predeclaration or underlying data."
+    },
+    "cost_component": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "$ref": "#/$defs/cost_basis",
+          "description": "Preserved original cost basis."
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/signed_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact source amount or null if unavailable; negative only for credit_or_discount."
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Source currency; null only for unavailable cost."
+        },
+        "rate_card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact configured rate-card version for estimates."
+        },
+        "provenance_digest": {
+          "$ref": "#/$defs/digest",
+          "description": "Tenant-keyed safe provenance digest; no source payload."
+        }
+      },
+      "required": [
+        "basis",
+        "amount",
+        "currency",
+        "rate_card",
+        "provenance_digest"
+      ],
+      "description": "A cost component, never an unlabeled mixture of final, aggregate, and estimated values."
+    },
+    "metric_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rule_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Predeclared formula/eligibility definition."
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/signed_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Qualified value; undefined denominators or missing evidence produce null."
+        },
+        "numerator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/signed_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact numerator under the bound formula."
+        },
+        "denominator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact eligible denominator, including supported failed/retried work."
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "ratio",
+            "currency_per_accepted_item",
+            "relative_lift"
+          ],
+          "description": "Metric unit; currency is inherited from the cohort cost components."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "eligible",
+            "inconclusive"
+          ],
+          "description": "Do not report a winner from inconclusive evidence."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code",
+          "description": "Fixed explanation of metric eligibility."
+        }
+      },
+      "required": [
+        "rule",
+        "value",
+        "numerator",
+        "denominator",
+        "unit",
+        "status",
+        "reason_code"
+      ],
+      "description": "One of the three approved primary metrics; no employee score."
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "use_case_attributed_spend_coverage": {
+          "$ref": "#/$defs/metric_result",
+          "description": "Result for use_case_attributed_spend_coverage."
+        },
+        "quality_qualified_cost_per_accepted_work_item": {
+          "$ref": "#/$defs/metric_result",
+          "description": "Result for quality_qualified_cost_per_accepted_work_item."
+        },
+        "optimization_lift_vs_declared_baseline": {
+          "$ref": "#/$defs/metric_result",
+          "description": "Result for optimization_lift_vs_declared_baseline."
+        }
+      },
+      "required": [
+        "use_case_attributed_spend_coverage",
+        "quality_qualified_cost_per_accepted_work_item",
+        "optimization_lift_vs_declared_baseline"
+      ],
+      "description": "All three primary metrics remain explicit, including inconclusive ones."
+    },
+    "driver_observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actual_model_mix": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "model": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/model_ref"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Actual model or explicitly unknown."
+              },
+              "attempt_count": {
+                "$ref": "#/$defs/count",
+                "description": "All attempts in this model bucket."
+              }
+            },
+            "required": [
+              "model",
+              "attempt_count"
+            ],
+            "description": "One actual-model usage bucket."
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Actual-model mix, without actor grouping."
+        },
+        "cache_and_token_mix": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "input_tokens": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/count"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact input_tokens or null when unsupported."
+            },
+            "output_tokens": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/count"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact output_tokens or null when unsupported."
+            },
+            "cached_input_tokens": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/count"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact cached_input_tokens or null when unsupported."
+            },
+            "reasoning_tokens": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/count"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact reasoning_tokens or null when unsupported."
+            }
+          },
+          "required": [
+            "input_tokens",
+            "output_tokens",
+            "cached_input_tokens",
+            "reasoning_tokens"
+          ],
+          "description": "Distinct provider token categories; unsupported is not zero."
+        },
+        "latency": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "p50_ms": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Median duration in milliseconds."
+            },
+            "p95_ms": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "95th percentile duration in milliseconds."
+            }
+          },
+          "required": [
+            "p50_ms",
+            "p95_ms"
+          ],
+          "description": "Versioned eligible latency sample, not only successful requests."
+        },
+        "retries": {
+          "anyOf": [{"$ref": "#/$defs/count"}, {"type": "null"}],
+          "description": "All eligible retries, not automatically replayed requests; null when retry attribution is unavailable."
+        },
+        "first_pass_success": {
+          "$ref": "#/$defs/coverage",
+          "description": "Source-qualified first-pass success rate."
+        },
+        "fallback_and_denial_rate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fallback": {
+              "$ref": "#/$defs/coverage",
+              "description": "Eligible fallback rate."
+            },
+            "denial": {
+              "$ref": "#/$defs/coverage",
+              "description": "Eligible policy/provider denial rate."
+            }
+          },
+          "required": [
+            "fallback",
+            "denial"
+          ],
+          "description": "Failures and denials remain visible."
+        }
+      },
+      "required": [
+        "actual_model_mix",
+        "cache_and_token_mix",
+        "latency",
+        "retries",
+        "first_pass_success",
+        "fallback_and_denial_rate"
+      ],
+      "description": "Fixed driver dimensions for the scorecard; no arbitrary metric-name map."
+    },
+    "cohort": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cohort_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Opaque cohort ID, scoped to this scorecard."
+        },
+        "actual_model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/model_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Actual provider/model or explicitly unknown."
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact pinned policy version, or unknown."
+        },
+        "rate_card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact estimate rate-card version, or unavailable."
+        },
+        "cost_basis": {
+          "$ref": "#/$defs/cost_basis",
+          "description": "Dimension retained for this cohort."
+        },
+        "cost_components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/cost_component"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Exact supported cost components, preserving every basis and currency."
+        },
+        "connector_coverage": {
+          "$ref": "#/$defs/coverage",
+          "description": "Coverage for the connector evidence used by this cohort."
+        },
+        "association_rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rule_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact deterministic join rule version, or explicitly missing."
+        },
+        "eligibility": {
+          "$ref": "#/$defs/eligibility"
+        },
+        "metrics": {
+          "$ref": "#/$defs/metrics"
+        },
+        "drivers": {
+          "$ref": "#/$defs/driver_observations"
+        },
+        "guardrails": {
+          "$ref": "#/$defs/guardrails"
+        }
+      },
+      "required": [
+        "cohort_id",
+        "actual_model",
+        "policy",
+        "rate_card",
+        "cost_basis",
+        "cost_components",
+        "connector_coverage",
+        "association_rule",
+        "eligibility",
+        "metrics",
+        "drivers",
+        "guardrails"
+      ],
+      "description": "One comparable model/policy cohort; no person dimension."
+    },
+    "verification_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Content-free verification evidence identity."
+        },
+        "digest": {
+          "$ref": "#/$defs/digest",
+          "description": "Digest of immutable evidence bound to the candidate policy."
+        }
+      },
+      "required": [
+        "evidence_id",
+        "digest"
+      ],
+      "description": "Reference to a server-validated pre-apply proof, not a client assertion that a check passed."
+    },
+    "pre_apply_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "semantic_compare": {
+          "$ref": "#/$defs/verification_ref",
+          "description": "Verified semantic_compare proof."
+        },
+        "request_preview": {
+          "$ref": "#/$defs/verification_ref",
+          "description": "Verified request_preview proof."
+        },
+        "saved_scenario_evaluation": {
+          "$ref": "#/$defs/verification_ref",
+          "description": "Verified saved_scenario_evaluation proof."
+        },
+        "rollback_plan": {
+          "$ref": "#/$defs/verification_ref",
+          "description": "Verified rollback_plan proof."
+        }
+      },
+      "required": [
+        "semantic_compare",
+        "request_preview",
+        "saved_scenario_evaluation",
+        "rollback_plan"
+      ],
+      "description": "All existing policy checks must be rerun or matched to the exact policy/candidate/scorecard state."
+    },
+    "recommendation_proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "change_type": {
+          "type": "string",
+          "enum": [
+            "budget_plan_change",
+            "model_allowlist_change",
+            "model_fallback_change",
+            "output_or_cost_cap_change",
+            "routing_policy_change"
+          ],
+          "description": "Exact allowed recommendation type."
+        },
+        "candidate_policy_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Existing typed candidate policy artifact, not an arbitrary JSON patch; required for policy changes."
+        },
+        "candidate_budget_plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Existing immutable plan version; required for budget_plan_change."
+        }
+      },
+      "required": [
+        "change_type",
+        "candidate_policy_digest",
+        "candidate_budget_plan"
+      ],
+      "description": "References to typed policy or budget artifacts. No executable text, generic patch, or automatic application."
+    },
+    "hormuz.portfolio-query": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50,
+          "description": "Maximum page size. Server applies 50 when omitted; a smaller page may be returned."
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "^[A-Za-z0-9_-]+(?![\\s\\S])",
+          "description": "Opaque authenticated frozen-window cursor; never decoded as client authority."
+        },
+        "start_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Inclusive event/creation-time filter; requires end_at."
+        },
+        "end_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Exclusive event/creation-time filter; requires start_at."
+        },
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Optional scope filter intersected with server authorization."
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Optional connector filter, never connector authority."
+        },
+        "provider_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Optional actual-provider filter."
+        },
+        "model_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Optional actual-model filter."
+        },
+        "cost_basis": {
+          "$ref": "#/$defs/cost_basis",
+          "description": "Optional cost-basis filter."
+        },
+        "evidence_level": {
+          "$ref": "#/$defs/evidence_level",
+          "description": "Optional evidence filter; cannot upgrade evidence."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Exact version for a versioned singleton; omitted means current authorized version."
+        }
+      },
+      "required": [],
+      "description": "Typed query parameters after bounded single-value parsing. No organization, actor, team, arbitrary sort, or free-text filters. Identity/version markers are catalogue metadata, not query parameters.",
+      "dependentRequired": {
+        "start_at": [
+          "end_at"
+        ],
+        "end_at": [
+          "start_at"
+        ]
+      },
+      "x-hormuz-schema-id": "hormuz.portfolio-query",
+      "x-hormuz-schema-version": 1
+    },
+    "hormuz.work-scope-create-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-scope-create-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "portfolio",
+            "initiative",
+            "use_case"
+          ],
+          "description": "Immutable scope kind."
+        },
+        "parent_work_scope_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nearest configured authorized ancestor; null means organization root."
+        },
+        "owner_team_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authorized existing owner-team reference, not a grant of team access."
+        },
+        "display_name": {
+          "$ref": "#/$defs/display_name"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "kind",
+        "parent_work_scope_id",
+        "owner_team_id",
+        "display_name"
+      ],
+      "description": "Create an organization-local scope. IDs, version, actor, and times are server-assigned. No external titles or body-supplied tenant."
+    },
+    "hormuz.work-scope-version-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-scope-version-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "expected_version": {
+          "$ref": "#/$defs/version",
+          "description": "Optimistic compare-and-set guard; mismatch fails without mutation."
+        },
+        "parent_work_scope_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authorized nearest ancestor reference, or organization root."
+        },
+        "owner_team_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authorized existing team ownership reference."
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/display_name"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null for a tombstoned label; not deletion of linked facts."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "archived",
+            "tombstoned"
+          ],
+          "description": "Requested scope lifecycle transition."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "corrected",
+            "reparented",
+            "archived",
+            "reactivated",
+            "tombstoned"
+          ],
+          "description": "Fixed reason for a full replacement version."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "expected_version",
+        "parent_work_scope_id",
+        "owner_team_id",
+        "display_name",
+        "state",
+        "reason_code"
+      ],
+      "description": "Append a full replacement scope version, never mutate old rows. The URL owns work_scope_id; kind cannot change."
+    },
+    "hormuz.external-work-binding-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.external-work-binding-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authorized server-side connector reference."
+        },
+        "external_object_id": {
+          "$ref": "#/$defs/external_id"
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref",
+          "description": "Exact authorized work-scope version."
+        },
+        "expected_binding_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Current binding event for compare-and-set; null means no prior binding."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "tombstoned"
+          ],
+          "description": "Append binding or tombstone, not payload mutation."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "bound",
+            "corrected",
+            "tombstoned"
+          ],
+          "description": "Fixed binding change classification."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "connector_id",
+        "external_object_id",
+        "work_scope",
+        "expected_binding_event_id",
+        "state",
+        "reason_code"
+      ],
+      "description": "Bind verified opaque source metadata to one authorized scope. Connector/body identifiers never provide tenant authority."
+    },
+    "hormuz.governed-run-attribution-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.governed-run-attribution-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "request_attempt_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Existing immutable tenant-local v1 request attempt."
+        },
+        "work_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/work_scope_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authorized primary use_case; null only for voided attribution."
+        },
+        "expected_attribution_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Current primary attribution for atomic compare-and-set."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "voided"
+          ],
+          "description": "Append or void primary attribution; never rewrite v1 evidence."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "bound",
+            "corrected",
+            "voided"
+          ],
+          "description": "Fixed post-run attribution reason."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "request_attempt_id",
+        "work_scope",
+        "expected_attribution_event_id",
+        "state",
+        "reason_code"
+      ],
+      "description": "Authorized post-run attribution. Source/confidence/actor/tenant are server-derived; at most one primary use case may be active."
+    },
+    "hormuz.work-budget-plan-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-budget-plan-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "budget_plan_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null creates a new server-issued plan ID; an existing ID appends a version."
+        },
+        "expected_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null only for a new plan; otherwise an exact compare-and-set guard."
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref",
+          "description": "Exact work-scope version; all other applicable budget scopes still apply."
+        },
+        "window": {
+          "$ref": "#/$defs/window",
+          "description": "Budget accounting period, not a source-supplied authorization time."
+        },
+        "currency": {
+          "$ref": "#/$defs/currency",
+          "description": "One plan currency; no implied conversion."
+        },
+        "amount": {
+          "$ref": "#/$defs/decimal",
+          "description": "Non-negative budget ceiling, including zero to deny spend."
+        },
+        "allowed_models": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/model_ref"
+              },
+              "minItems": 0,
+              "maxItems": 100,
+              "description": "Additional model restriction; empty denies all."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null adds no model restriction; an explicit list intersects all existing allowlists and never widens them."
+        },
+        "output_token_cap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Additional output-token ceiling; null adds no ceiling."
+        },
+        "per_request_cost_cap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Additional conservative request-time cost ceiling; null adds none."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "created",
+            "corrected"
+          ],
+          "description": "Fixed version-creation reason."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "budget_plan_id",
+        "expected_version",
+        "work_scope",
+        "window",
+        "currency",
+        "amount",
+        "allowed_models",
+        "output_token_cap",
+        "per_request_cost_cap",
+        "reason_code"
+      ],
+      "description": "Persist a new immutable plan version, not an enforcement change. Only a separate authorized activation updates the active pointer."
+    },
+    "hormuz.work-budget-plan-activation-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-budget-plan-activation-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Existing immutable plan version to activate."
+        },
+        "expected_active_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Current active plan version, or null for first activation."
+        },
+        "expected_activation_generation": {
+          "$ref": "#/$defs/count",
+          "description": "Server-resolved activation generation; zero only when never activated."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "reactivated"
+          ],
+          "description": "Fixed authorized activation reason."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "version",
+        "expected_active_version",
+        "expected_activation_generation",
+        "reason_code"
+      ],
+      "description": "Explicit compare-and-set activation. Revalidate all ceiling/model intersections; no automatic activation or provider replay."
+    },
+    "hormuz.policy-recommendation-decision-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.policy-recommendation-decision-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "expected_version": {
+          "$ref": "#/$defs/version",
+          "description": "Exact immutable recommendation version."
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "rejected"
+          ],
+          "description": "Explicit authorized decision, not an automatic policy application."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "rejected"
+          ],
+          "description": "Fixed decision classification matching decision."
+        },
+        "pre_apply_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/pre_apply_evidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Required and server-validated for acceptance; null for rejection."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "expected_version",
+        "decision",
+        "reason_code",
+        "pre_apply_evidence"
+      ],
+      "description": "Record an explicit administrator decision. Acceptance must validate all pre-apply checks; actual policy activation stays on the existing separately authorized path."
+    },
+    "hormuz.work-scope-version": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-scope-version",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Stable organization-local scope ID."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Immutable scope version."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "portfolio",
+            "initiative",
+            "use_case"
+          ],
+          "description": "Immutable canonical hierarchy kind."
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/work_scope_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Versioned nearest configured ancestor; null means organization root."
+        },
+        "owner_team_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Existing owner-team reference, not actor performance metadata."
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/display_name"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authorized registry display only; null after label tombstone. Never included in routine evidence."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "archived",
+            "tombstoned"
+          ],
+          "description": "Current version lifecycle."
+        },
+        "supersedes_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prior immutable scope version, or null for creation."
+        },
+        "actor_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authenticated administrator responsible for this version."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Source/domain event time as observed; never scope authority."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Connector/server observation time, preserved separately."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Database commit time authoritative for receipt and retention."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "work_scope_id",
+        "version",
+        "kind",
+        "parent",
+        "owner_team_id",
+        "display_name",
+        "state",
+        "supersedes_version",
+        "actor_id",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ],
+      "description": "Immutable bounded registry version. Labels are excluded from release/evaluation evidence even though this authorized resource permits them."
+    },
+    "hormuz.external-work-binding-event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.external-work-binding-event",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "binding_event_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Immutable append-only binding event."
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-bound connector ID."
+        },
+        "external_object_id": {
+          "$ref": "#/$defs/external_id"
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "superseded",
+            "tombstoned"
+          ],
+          "description": "Binding lifecycle."
+        },
+        "supersedes_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Previous binding event, not an overwritten row."
+        },
+        "actor_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authorized actor resolved server-side."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Source/domain event time as observed; never scope authority."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Connector/server observation time, preserved separately."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Database commit time authoritative for receipt and retention."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "binding_event_id",
+        "connector_id",
+        "external_object_id",
+        "work_scope",
+        "state",
+        "supersedes_event_id",
+        "actor_id",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ],
+      "description": "Content-free source binding event; no repository/workspace name, URL, title, or body."
+    },
+    "hormuz.governed-run-attribution-event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.governed-run-attribution-event",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "attribution_event_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Immutable attribution event."
+        },
+        "request_attempt_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Existing immutable v1 request attempt."
+        },
+        "work_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/work_scope_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact primary use-case version, or explicitly unattributed/voided."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "explicit_authorized",
+            "server_side_default",
+            "authorized_post_run",
+            "unattributed",
+            "ambiguous"
+          ],
+          "description": "Binding-source quality, not causal probability."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "superseded",
+            "voided"
+          ],
+          "description": "Append-only attribution lifecycle."
+        },
+        "supersedes_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prior attribution event."
+        },
+        "actor_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authenticated actor for a manual correction, otherwise server-owned system event."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Source/domain event time as observed; never scope authority."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Connector/server observation time, preserved separately."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Database commit time authoritative for receipt and retention."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "attribution_event_id",
+        "request_attempt_id",
+        "work_scope",
+        "confidence",
+        "state",
+        "supersedes_event_id",
+        "actor_id",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ],
+      "description": "One current primary attribution per request attempt; no mutation or backfill of the v1 ledger."
+    },
+    "hormuz.work-budget-plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-budget-plan",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "budget_plan_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Stable plan identity."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Immutable plan version."
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref",
+          "description": "Exact work-scope version; all other applicable budget scopes still apply."
+        },
+        "window": {
+          "$ref": "#/$defs/window",
+          "description": "Budget accounting period, not a source-supplied authorization time."
+        },
+        "currency": {
+          "$ref": "#/$defs/currency",
+          "description": "One plan currency; no implied conversion."
+        },
+        "amount": {
+          "$ref": "#/$defs/decimal",
+          "description": "Non-negative budget ceiling, including zero to deny spend."
+        },
+        "allowed_models": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/model_ref"
+              },
+              "minItems": 0,
+              "maxItems": 100,
+              "description": "Additional model restriction; empty denies all."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null adds no model restriction; an explicit list intersects all existing allowlists and never widens them."
+        },
+        "output_token_cap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Additional output-token ceiling; null adds no ceiling."
+        },
+        "per_request_cost_cap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Additional conservative request-time cost ceiling; null adds none."
+        },
+        "active_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Separate current active pointer; null if no version has ever been activated."
+        },
+        "activation_generation": {
+          "$ref": "#/$defs/count",
+          "description": "Monotonic active-pointer compare-and-set generation."
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "active",
+                "superseded",
+                "expired",
+                "tombstoned"
+              ],
+              "description": "Recorded activation lifecycle."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null before this immutable version has an activation lifecycle. Creation alone never makes a plan active."
+        },
+        "supersedes_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prior immutable plan version."
+        },
+        "actor_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authenticated plan author."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Source/domain event time as observed; never scope authority."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Connector/server observation time, preserved separately."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Database commit time authoritative for receipt and retention."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "budget_plan_id",
+        "version",
+        "work_scope",
+        "window",
+        "currency",
+        "amount",
+        "allowed_models",
+        "output_token_cap",
+        "per_request_cost_cap",
+        "active_version",
+        "activation_generation",
+        "state",
+        "supersedes_version",
+        "actor_id",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ],
+      "description": "Immutable financial/policy plan plus explicitly derived activation metadata. No new draft lifecycle enum and no implicit enforcement on create."
+    },
+    "hormuz.work-outcome-event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-outcome-event",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authenticated installation/workspace binding."
+        },
+        "source_event_id": {
+          "$ref": "#/$defs/external_id"
+        },
+        "source_delivery_id": {
+          "$ref": "#/$defs/external_id",
+          "description": "Verified signed delivery identity for idempotency."
+        },
+        "external_object_id": {
+          "$ref": "#/$defs/external_id",
+          "description": "Opaque source issue or pull-request ID."
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/external_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Verified source revision, or explicit unknown; never order guessed from content."
+        },
+        "object_type": {
+          "type": "string",
+          "enum": [
+            "issue",
+            "pull_request"
+          ],
+          "description": "Accepted source work-object categories."
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "created",
+            "started",
+            "completed",
+            "reopened",
+            "accepted",
+            "reverted",
+            "defect_reported",
+            "canceled",
+            "deleted",
+            "unsupported"
+          ],
+          "description": "Normalized lifecycle/quality observation; unsupported observations remain explicit."
+        },
+        "quality_state": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "rejected",
+            "reverted",
+            "defect",
+            "unknown",
+            "not_applicable"
+          ],
+          "description": "Source-qualified quality state, never a model or employee quality inference."
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Source-supported duration only; null if absent or unsupported."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "superseded",
+            "tombstoned"
+          ],
+          "description": "Append-only observation lifecycle."
+        },
+        "evidence_level": {
+          "type": "string",
+          "const": "descriptive",
+          "description": "Connectors cannot emit associated or controlled evidence."
+        },
+        "supersedes_source_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/external_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Previous source observation identity."
+        },
+        "provenance_digest": {
+          "$ref": "#/$defs/digest",
+          "description": "Tenant-keyed metadata provenance; no raw webhook stored."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Source/domain event time as observed; never scope authority."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Connector/server observation time, preserved separately."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Database commit time authoritative for receipt and retention."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "connector_id",
+        "source_event_id",
+        "source_delivery_id",
+        "external_object_id",
+        "source_revision",
+        "object_type",
+        "event_type",
+        "quality_state",
+        "duration_ms",
+        "state",
+        "evidence_level",
+        "supersedes_source_event_id",
+        "provenance_digest",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ],
+      "description": "Strict normalized connector observation. Source names, text, URLs, comments, labels, patches, and raw payloads are excluded."
+    },
+    "hormuz.run-outcome-association-event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.run-outcome-association-event",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "association_event_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Immutable association event."
+        },
+        "outcome": {
+          "$ref": "#/$defs/outcome_ref"
+        },
+        "request_attempt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Existing v1 attempt, or null when unmatched."
+        },
+        "work_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/work_scope_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact primary use case, or null when no authorized unambiguous binding exists."
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rule_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Deterministic versioned join rule, never temporal-proximity causality."
+        },
+        "candidate_count": {
+          "$ref": "#/$defs/count",
+          "description": "All eligible candidates, including ambiguous/unmatched evidence."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "unmatched",
+            "ambiguous",
+            "associated",
+            "excluded",
+            "superseded"
+          ],
+          "description": "Association lifecycle with excluded/ambiguous evidence retained."
+        },
+        "evidence_level": {
+          "type": "string",
+          "enum": [
+            "descriptive",
+            "associated"
+          ],
+          "description": "Deterministic association never upgrades to controlled."
+        },
+        "supersedes_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prior immutable association event."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Source/domain event time as observed; never scope authority."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Connector/server observation time, preserved separately."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Database commit time authoritative for receipt and retention."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "association_event_id",
+        "outcome",
+        "request_attempt_id",
+        "work_scope",
+        "rule",
+        "candidate_count",
+        "state",
+        "evidence_level",
+        "supersedes_event_id",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ],
+      "description": "Metadata-only observational linkage with explicit ambiguity, fixed rule version, and no employee ranking."
+    },
+    "hormuz.model-scorecard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.model-scorecard",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "scorecard_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Immutable scorecard family ID."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Immutable snapshot version."
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref",
+          "description": "One primary use_case, not a cross-use-case model ranking."
+        },
+        "window": {
+          "$ref": "#/$defs/window"
+        },
+        "generated_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Snapshot creation time."
+        },
+        "expires_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Freshness expiry."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "eligible",
+            "inconclusive",
+            "expired",
+            "superseded"
+          ],
+          "description": "Insufficient evidence is inconclusive."
+        },
+        "evidence_level": {
+          "$ref": "#/$defs/evidence_level"
+        },
+        "controlled_design": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rule_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Separately approved predeclared design; required only for controlled evidence."
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage_set"
+        },
+        "cohorts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/cohort"
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "description": "Versioned comparable cohorts; unknown dimensions remain explicit."
+        },
+        "baseline_cohort_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Declared comparable baseline cohort, or null when lift is inconclusive."
+        },
+        "pareto_cohort_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaque_id"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Eligible Pareto set within this use case; no universal scalar rank.",
+          "uniqueItems": true
+        },
+        "decision_owner_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Accountable owner of the predeclared metric policy, not a person being scored."
+        },
+        "review_after": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Owner review cadence deadline."
+        },
+        "supersedes_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prior immutable scorecard snapshot."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "scorecard_id",
+        "version",
+        "work_scope",
+        "window",
+        "generated_at",
+        "expires_at",
+        "state",
+        "evidence_level",
+        "controlled_design",
+        "coverage",
+        "cohorts",
+        "baseline_cohort_id",
+        "pareto_cohort_ids",
+        "decision_owner_id",
+        "review_after",
+        "supersedes_version",
+        "reason_code"
+      ],
+      "description": "Use-case economics across cost, quality, latency, reliability, eligibility, and provenance. No actor cohort dimension or employee score."
+    },
+    "hormuz.policy-recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.policy-recommendation",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "recommendation_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Stable immutable recommendation identity."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Recommendation snapshot version."
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref"
+        },
+        "scorecard": {
+          "$ref": "#/$defs/version_ref",
+          "description": "Exact eligible source scorecard."
+        },
+        "policy": {
+          "$ref": "#/$defs/version_ref",
+          "description": "Exact policy used when deriving the recommendation."
+        },
+        "policy_digest": {
+          "$ref": "#/$defs/digest",
+          "description": "Current policy digest; drift invalidates the proposal."
+        },
+        "proposal": {
+          "$ref": "#/$defs/recommendation_proposal"
+        },
+        "evidence_level": {
+          "$ref": "#/$defs/evidence_level"
+        },
+        "window": {
+          "$ref": "#/$defs/window"
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage_set"
+        },
+        "guardrails": {
+          "$ref": "#/$defs/guardrails"
+        },
+        "actual_models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/model_ref"
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "description": "Actual model versions bound to the source evidence."
+        },
+        "rate_cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/version_ref"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Exact rate-card versions; empty only when no estimated cost is used."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "accepted",
+            "rejected",
+            "expired",
+            "invalidated",
+            "superseded"
+          ],
+          "description": "Append-only decision/status lifecycle."
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Immutable proposal creation time."
+        },
+        "expires_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Required decision expiry."
+        },
+        "latest_decision_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Immutable append-only decision/status event ID."
+        },
+        "supersedes_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prior immutable recommendation version."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "automatic_application": {
+          "type": "boolean",
+          "const": false,
+          "description": "Decision support cannot activate a budget, model, route, cap, or policy automatically."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "recommendation_id",
+        "version",
+        "work_scope",
+        "scorecard",
+        "policy",
+        "policy_digest",
+        "proposal",
+        "evidence_level",
+        "window",
+        "coverage",
+        "guardrails",
+        "actual_models",
+        "rate_cards",
+        "state",
+        "created_at",
+        "expires_at",
+        "latest_decision_event_id",
+        "supersedes_version",
+        "reason_code",
+        "automatic_application"
+      ],
+      "description": "Expiring reviewable proposal. Acceptance records a decision; explicit existing policy activation remains separately authorized."
+    },
+    "hormuz.connector-ingest-receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.connector-ingest-receipt",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved connector scope."
+        },
+        "source_delivery_id": {
+          "$ref": "#/$defs/external_id",
+          "description": "Verified signature-bound delivery identity."
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-issued immutable ingestion receipt."
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "duplicate",
+            "unsupported"
+          ],
+          "description": "A valid receipt never represents a forged, conflicting, or unauthorized delivery."
+        },
+        "accepted_event_count": {
+          "$ref": "#/$defs/count",
+          "description": "Normalized metadata events committed atomically for the delivery."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Original durable receipt commit time, retained on exact duplicate replay."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "connector_id",
+        "source_delivery_id",
+        "receipt_id",
+        "disposition",
+        "accepted_event_count",
+        "ingested_at"
+      ],
+      "description": "Content-free receipt only after verified signature, tenant binding, and durable commit. Replay returns the original receipt."
+    },
+    "hormuz.portfolio-error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.portfolio-error",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "invalid_request",
+            "unauthenticated",
+            "forbidden",
+            "not_found",
+            "idempotency_conflict",
+            "version_conflict",
+            "cursor_invalid",
+            "evidence_inconclusive",
+            "recommendation_stale",
+            "rate_limited",
+            "unavailable"
+          ],
+          "description": "Stable portfolio-only error classification; existing provider errors remain unchanged."
+        },
+        "request_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-issued content-free diagnostic correlation ID."
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Only safe read/idempotent retry is permitted; never authorizes provider replay."
+        },
+        "retry_after_seconds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional server backoff encoded as explicit null if absent."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "invalid_shape",
+            "unknown_field",
+            "invalid_reference",
+            "unauthorized_scope",
+            "conflicting_identity",
+            "stale_version",
+            "invalid_cursor",
+            "insufficient_evidence",
+            "expired",
+            "capacity",
+            "dependency_unavailable"
+          ],
+          "description": "Allowlisted content-free detail; never echo the rejected field value, body, secret, or work content."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "code",
+        "request_id",
+        "retryable",
+        "retry_after_seconds",
+        "reason_code"
+      ],
+      "description": "Versioned content-free administrator error. Caller renders localized fixed messages from code; there is no free-text reflection field."
+    },
+    "hormuz.work-scope-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-scope-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.work-scope-version"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.external-work-binding-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.external-work-binding-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.external-work-binding-event"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.governed-run-attribution-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.governed-run-attribution-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.governed-run-attribution-event"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.work-budget-plan-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-budget-plan-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.work-budget-plan"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.work-outcome-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-outcome-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.work-outcome-event"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.run-outcome-association-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.run-outcome-association-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.run-outcome-association-event"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.model-scorecard-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.model-scorecard-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.model-scorecard"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.policy-recommendation-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.policy-recommendation-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.policy-recommendation"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "opaque_cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[A-Za-z0-9_-]+(?![\\s\\S])",
+      "description": "Server-authenticated opaque cursor, never a raw SQL offset or tenant selector."
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/hormuz.connector-ingest-receipt"
+    },
+    {
+      "$ref": "#/$defs/hormuz.external-work-binding-event"
+    },
+    {
+      "$ref": "#/$defs/hormuz.external-work-binding-page"
+    },
+    {
+      "$ref": "#/$defs/hormuz.external-work-binding-request"
+    },
+    {
+      "$ref": "#/$defs/hormuz.governed-run-attribution-event"
+    },
+    {
+      "$ref": "#/$defs/hormuz.governed-run-attribution-page"
+    },
+    {
+      "$ref": "#/$defs/hormuz.governed-run-attribution-request"
+    },
+    {
+      "$ref": "#/$defs/hormuz.model-scorecard"
+    },
+    {
+      "$ref": "#/$defs/hormuz.model-scorecard-page"
+    },
+    {
+      "$ref": "#/$defs/hormuz.policy-recommendation"
+    },
+    {
+      "$ref": "#/$defs/hormuz.policy-recommendation-decision-request"
+    },
+    {
+      "$ref": "#/$defs/hormuz.policy-recommendation-page"
+    },
+    {
+      "$ref": "#/$defs/hormuz.portfolio-error"
+    },
+    {
+      "$ref": "#/$defs/hormuz.portfolio-query"
+    },
+    {
+      "$ref": "#/$defs/hormuz.run-outcome-association-event"
+    },
+    {
+      "$ref": "#/$defs/hormuz.run-outcome-association-page"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-budget-plan"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-budget-plan-activation-request"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-budget-plan-page"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-budget-plan-request"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-outcome-event"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-outcome-page"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-scope-create-request"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-scope-page"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-scope-version"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-scope-version-request"
+    }
+  ]
+}

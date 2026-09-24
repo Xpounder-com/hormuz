@@ -37,6 +37,10 @@ from ._association_schema import (
     TABLE_DDL as ASSOCIATION_TABLES,
     verify_postgres_association,
 )
+from ._scorecard_schema import (
+    TABLE_DDL as SCORECARD_TABLES,
+    verify_postgres_scorecards,
+)
 from ._budget_schema import (
     ACTIVE_TABLE as BUDGET_ACTIVE_TABLE,
     TABLE_DDL as BUDGET_TABLES,
@@ -172,6 +176,12 @@ def portfolio_transaction(
                         )
                     if tables is ASSOCIATION_TABLES:
                         verify_postgres_association(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
+                    if tables is SCORECARD_TABLES:
+                        verify_postgres_scorecards(
                             cursor,
                             storage.postgres_schema,
                             PostgresStorageError,

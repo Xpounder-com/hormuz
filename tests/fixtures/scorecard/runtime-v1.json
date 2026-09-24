@@ -1,0 +1,2836 @@
+{
+  "schema_id": "hormuz.scorecard-runtime-fixture",
+  "schema_version": 1,
+  "expected": {
+    "cohort_dimensions": [
+      {
+        "actual_model": {
+          "model_id": "model-baseline",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        "association_rule": {
+          "digest": "cebdaa3d8326df0d54109ed0b7009b023ebe2ed1ae9da1fc409b1d49c8ce15d6",
+          "rule_id": "association-reference",
+          "version": 1
+        },
+        "client_id": "codex-app",
+        "cohort_id": "baseline",
+        "connector_ids": [
+          "github-one",
+          "linear-one"
+        ],
+        "cost_basis": "provider_final",
+        "currency": "USD",
+        "policy": {
+          "id": "policy-a",
+          "version": 4
+        },
+        "rate_card": {
+          "id": "rate-a",
+          "version": 2
+        },
+        "requested_model_ids": [
+          "requested-model-baseline"
+        ],
+        "routed_model_ids": [
+          "routed-model-baseline"
+        ]
+      },
+      {
+        "actual_model": {
+          "model_id": "model-efficient",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        "association_rule": {
+          "digest": "cebdaa3d8326df0d54109ed0b7009b023ebe2ed1ae9da1fc409b1d49c8ce15d6",
+          "rule_id": "association-reference",
+          "version": 1
+        },
+        "client_id": "codex-app",
+        "cohort_id": "efficient",
+        "connector_ids": [
+          "github-one",
+          "linear-one"
+        ],
+        "cost_basis": "provider_final",
+        "currency": "USD",
+        "policy": {
+          "id": "policy-a",
+          "version": 4
+        },
+        "rate_card": {
+          "id": "rate-a",
+          "version": 2
+        },
+        "requested_model_ids": [
+          "requested-model-efficient"
+        ],
+        "routed_model_ids": [
+          "routed-model-efficient"
+        ]
+      },
+      {
+        "actual_model": {
+          "model_id": "model-guarded",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        "association_rule": {
+          "digest": "cebdaa3d8326df0d54109ed0b7009b023ebe2ed1ae9da1fc409b1d49c8ce15d6",
+          "rule_id": "association-reference",
+          "version": 1
+        },
+        "client_id": "codex-app",
+        "cohort_id": "guarded",
+        "connector_ids": [
+          "github-one",
+          "linear-one"
+        ],
+        "cost_basis": "provider_final",
+        "currency": "USD",
+        "policy": {
+          "id": "policy-a",
+          "version": 4
+        },
+        "rate_card": {
+          "id": "rate-a",
+          "version": 2
+        },
+        "requested_model_ids": [
+          "requested-model-guarded"
+        ],
+        "routed_model_ids": [
+          "routed-model-guarded"
+        ]
+      }
+    ],
+    "lineage": {
+      "aggregation_rule": {
+        "digest": "3ae670bcb5542d9792b364d43882d4e823e396b0b436c5ade6ba8e7177e0674c",
+        "rule_id": "clustered-aggregation",
+        "version": 1
+      },
+      "cohort_digests": [
+        "e39adae28464372cc2f4c254730775acc031e3afeb3d16715b89dcc366cc14cf",
+        "8e1bf949ab80124cba8e9f980c50bd4056b668b449351771dedef895d32ee7d4",
+        "5d34bd832fb19f941d5e9fea67b8b76a6c5dcf58ee4cbc481a6b0f2792d7cec9"
+      ],
+      "input_digest": "8e97894b949235115165f74150cc256173e5ffa15fb98ad137efe11552d6c1e3",
+      "source_digests": [
+        "01c7997ae32098c9abc437bf7c940ee49918ad02711e4059f556479bb5ff3b2c",
+        "0254d6b76f1d61a09d4df2c8a6def4f5e373d774fbd02eb30be0d1f2d9a6c915",
+        "08e895cfe8befcdd2bfc5829362295613db573681e37e2f10cab1d8f18f76f48",
+        "0e3e65013291db9e0a818f331fc4fe07bb961049c61c8c2b7e06d1f644ac6153",
+        "1193811be2510d1be544583eafeff1e62b424385175548535da99432073adf2b",
+        "123bfdbd636e3f35da477f8c101b2ff2c957e811d863e5273fa7035f898de795",
+        "1402e6a2c090f3ae0a049bbf55e0037f4ac9488a8c7d3769eaa59823ef209d1f",
+        "178fc84340656f4270cf45e97949d8f92313ddbbbeeae37182e6b5435e386bdb",
+        "1b94535848089630f7f9ae0902d275f5e6b56ce1f08928349c331cdc70820a3d",
+        "1e744e3cc6f4bdfae40ead0de4e0c08e3a42c0c36337524fac0453f799fe5a01",
+        "225c8e4dddc1c460a40ce7903e70381a084ef059e4219bd5e8c790735debcf33",
+        "23d454295005078df60f6f1d33bed910d83db9f66cf7bcb0d370d16db54fa028",
+        "273f053cadb53075aa19194bcfc6321596ec191b15ef7f6fba3d54c8765fe6cb",
+        "2759806c0be65e91bb89e729d0a37e7e05e919cced4261b7c47d49f338903537",
+        "2a462e11ff35e8d93fccaf830c21924d1b2954afe761b55d0225cdf1fc5cc8f8",
+        "2c36315ef47a6aa6577034b9eea2ba93c3d1829eb2eab2702e30d06eb2d8ab25",
+        "32a84f39f45c7448234e5c989955dc0beb076bcbe9a918c23c19c7da5dd85c6e",
+        "341c1bfe65707631ba2bb96a7c54895b07c25363caf6c69b04b1953651a1c02d",
+        "355b88902398007f6f81a2878a4695d4449ab4ca7f1cd6e61c236e7c78659a39",
+        "396ee17a1ff691aff3497aa60106f5bd249f6b38bdc5e353bd4599c700023067",
+        "39ab4217f0ae3e95ee24c5c15b7235f761e6407aedf468b3cc260e1362485a52",
+        "39f4a02d134b2fdf26204163c31422d1971237ae0846e53e6d3e07ff8e4c302c",
+        "3ae2d60940d631cfb0f902c0a24e6778138ecd7511605ad7c8d9611d19fdb247",
+        "3b1095328f7a160ed6bfa10e086bd35e1d2aba0b20b4e144473d3a087a1cb19b",
+        "3beae4c957e2737f850bcb938344c677650a96ad0c6490c20da6f2774583f8b1",
+        "3ec55b0cc77880036b71353798973e916665ec5db775b7d67a1377ecb585dd66",
+        "409cb3906e10e12160ce925dcf80bd3f889941a0673141a21d9022a2ea687e0c",
+        "41167e1f8d3bd814c04fe8a57f6589b855f3bbdb23bb47b77177af0bfbd1bee6",
+        "46bd7206291ed789458fb8176d74dd6556c6e15bf505eb17b0ee7d620d4c5a31",
+        "492b208218c05b6506ec429046f009ce2cf7d5cbd951fd8c43d6c8bf0f0b40be",
+        "4aeb3a7d064611388e27041f43e07a44f8c3ef0656a531f5465eebbc8a0ca6c5",
+        "4cf6e46a204af7438dca4d72ec4c695e73fd3e86261d285c9df0b449d50029e6",
+        "4d5bae09ed361b57e8006d9c5bada77ee89cf69693dcf52e5d4286b58cfc91e1",
+        "4ee5175cc8cc5c2eba250ab3c3e4c27a1309275add77afd6360cf07d22797f93",
+        "56c80e8e850afbea1facf43436353750ceb4a9571b933a2641303d65d48e1edc",
+        "58d8994b4e3a3dd0c321faffc0a05a25b77fc42725b420b37f47bcd1f077d2a2",
+        "5dd8b0f6f2ec22d6bb4032cb591b11c9b8880ff57cdee03a1d8cc3743d6d549b",
+        "629296d0dea31295180187b4a3cb29a8d65cd357c83472d9389c58d659d2cea7",
+        "62d98c55b383baa4672563e85fd14fb21ad00c87d3868d7b64996a6f6ce7bd53",
+        "631c30c079c428d1bf41a9207497f34512b20113f339a9a16c10ae4f272e1572",
+        "6402f07465a9122938a1759b6bdd5b076157ec0e26472bf0e6a328875a430a90",
+        "65a5e3f764e3d8e4991bdca3e7045cdda63913f7562977daa912829fbee4e657",
+        "6d0bc0cc2ebd4cb7fa3b635e75d97d1b7424713729ce4cdb820afe8722c351de",
+        "6d52d01fdcab58fa0e970d927932eb25a6586acf3f5e77c0fed95a592ad05f49",
+        "6df8e4e46c7a899d7f15970be06b4f67324b65effa6494d655fb050837a1ffc0",
+        "71f533b411b9387437fa7073cc82866363142d236dbd38e0f0421e94d4fe4a97",
+        "72fcefdb6d567c7a4326f2f3d39371d6d4a8c07de770e7e325de7e8b66ebe98c",
+        "75b91fb5ab97397f786c9717f2fed0df86b0c7edeca2e978752705caef511d23",
+        "781060bfa2e6c7730d426933d7589e8c3ee9c890b9c07c7019b632a3a3f30c91",
+        "7a8bb97f8dc7e00f8a11d8345027bcf78bd12924e3b8bc2448f06b3b78f91984",
+        "7b8645896090a67d3d9c7c2512e0acc79a775429743eff8161bb3f818c2d9e0d",
+        "806efa8b290b5e60082cffa87f372857df3b07b670d22a89dd59f5a03c24ae86",
+        "820223b523fc21d234f82de29873d116f38052a9b246ff30b9af51f5dc11ccff",
+        "823c346a074b00dfd641c68f6f43ecedc0a29c5c309659e73a479ecc9293bf20",
+        "84dff78968378aba8cca4d4803afcf9fcd721f7b6916cce064137bac94e8178e",
+        "855e195165ac7222f74b5741c1d9ba45e7a78176c87d4d30538eaa76d2c1c77c",
+        "8754614ca66e2dab035f434b67914a208300aaa8e2c9f423266c152d02bc2fe4",
+        "8a2f80d2870c154d144aa67ad3b5e456fe2181c664272927117b17d9bb726e2a",
+        "8d58c798cc3106c62c9fed5944792546798cf43b561962717254231160e8599c",
+        "91bc6eaa14292c2eab9def27e89b764f0571efedd5aea38f7adb17e8754d0468",
+        "92dd993a729c7a3a95de928547528c7e9b350bbb5a867347e5db2d706ccff273",
+        "939319c25e9e89bb926f098e8d7c21d7008e719bfbbef4d7cba8ad988c58f5d6",
+        "97be74845d255443a902580da66cf27da6d9fff422a8b12cce9119072686480a",
+        "99e4dd89d212dcdc1212df903beead33c6626228fc12f551a36d6b001ab55175",
+        "9a8b64ef02260fdbfc0470dacb1feb03cda43724d6302ed98b1d5d91f9d7b8d4",
+        "a2809d8e9163577c39210019754dae6818c47f440f77d16138475f5381ea16c2",
+        "a5bba356ed4d2376b7c1e3ccb3d3fc8a8d283089eda64f74632a6a8231baef80",
+        "a8043937195974e382bc11dc0aae2817e795f2b9c7c73e14f5c5e19fb38eeaf5",
+        "a83b7a128a75435a355ce78b13f9b48553b41a78af4c0014736b9d4f089103c3",
+        "ab6bd2d924912aa9680350dc254a1caa92d4922193b8ad95e4201063c80677ce",
+        "af0dbf3e3ce49fdd90eb2b6fc83f1c0d4cdfbbbbead9b08818190f6b70fdb7a9",
+        "b19b6f093d2b4178505427fe4b8e30947ab40136db2165a9f5a87c98366aad37",
+        "b29a33e5d8bc5ea1932239991b6092d59db55bf22eb7ca7ad99423f6767d1c8a",
+        "b5cdea9cd035ae63cf0ff1edce470914cca83092edcfa5ee5c5b2a4267e5db37",
+        "b968cdebf4c231280dcc304cd2218b267398343a767306ae1c1dc293bb9ece7a",
+        "b9c7ad7d3ee2c20fcec91f2c24b2f5293046c92171fcb6c7abd07a35f90ffd1c",
+        "bb139a77952a6b1e5f89e78d15309654f9a5dbcb1526e09e1026316bfa700c62",
+        "be3a7f598ef77c5eec6c4564dd2e3519182ba33e49b703e292dff7d39accb4b4",
+        "c04b138bc222d1cd6ff58975bece982322ef2bf1561db1946554d1a4c7d647d0",
+        "c0634fb4babcbada5f4d925ab8cdca680a98164b7d01ca71cf5089fb919332e9",
+        "cb4ebd3961775c7df5da922623e7bf7d0471a7e6d449fa0c00e9654f5fa28241",
+        "cc26c536002b68f04ac69ca1d7a91e9d4f486783517f987eeffe9a8339903ffe",
+        "d4403b729edced9179ee75a42c47ef4012735cc21c8b2a581f6b838b65f87a01",
+        "d9c1620959a89093835525c481bec2f777ed063a713e1926fbdf42dd43973a0c",
+        "db14501f88bc09f805b081c3492f82da9feb15dd7d0009f5b5d1216c5a2d4f3e",
+        "db67537db011cc6d34d4cfb67a029db5cabe4f5b8bfd2b390e7e3909da20dd4f",
+        "dc61ae3fcd99e137405bcdc6ae4d56895909343dc4068afca212fabf485250e9",
+        "dff122078da0c6805ebb697983148b2cf5ab2cbded68fe43b8b16ec6026770c6",
+        "e1d1aacaa434e8f9a0b0dbef3fb30ec6aaf1dc8fdb03ab6ed2c2175dab067a2f",
+        "e2200660d30abb863e6907c7a23d71e5e38dcfc17709486015097106674efbac",
+        "e5d30b4ed9c9b7174d192d16c7a06717786e373ee8ac884e49df13d11e84a146",
+        "e5e21f27df92cce5df3bee127f691322287d4545abdcc464e5eedfbb3f4c4341",
+        "e7f2dd8be1051253bb7e07376e9a95b524eade0ed4a1ef7efe453000770103bf",
+        "eef3e611f5a78d87403cdbfecc084313dad32e01d2396dbed0c62b6dcd3603c0",
+        "ef19491301a25c5fbd769d947f5a4395767f6a378f6783ab2c4351465ed9d65b",
+        "f1269c3af04a4f029f4f9edc33fcfb07d90bb659d31060a0dc4444af41a0d486",
+        "f18d165aacfb523abe487bd3acbcff30d7d09d4ed4a03eb046351687244b7277",
+        "f33acdec6601f4706dee52b7f45cec649eeb3f940971ba00eeb57bb707019edd",
+        "f4fbda6589676f6efbfd91fdcfc1e9d13b224b09d82b71d91f4bfa850a75f4bc",
+        "f6188253b6fb01ff7a55714fbb4344fe5c28354a90088abacfedb50beb78b0b2",
+        "fad79aa4aca3484ad586b016d87455cd66fc170ee684170b453896e12093e434",
+        "fbfec46dac08a498dfd12f7c6310be5dd316affdcfffd97421353be964033d34"
+      ]
+    },
+    "schema_id": "hormuz.scorecard-evaluation",
+    "schema_version": 1,
+    "scorecard": {
+      "baseline_cohort_id": "baseline",
+      "cohorts": [
+        {
+          "actual_model": {
+            "model_id": "model-baseline",
+            "model_version": "2026-08-01",
+            "provider_id": "provider-a"
+          },
+          "association_rule": {
+            "digest": "cebdaa3d8326df0d54109ed0b7009b023ebe2ed1ae9da1fc409b1d49c8ce15d6",
+            "rule_id": "association-reference",
+            "version": 1
+          },
+          "cohort_id": "baseline",
+          "connector_coverage": {
+            "denominator": "10",
+            "numerator": "9",
+            "ratio": 0.9,
+            "reason_code": "eligible"
+          },
+          "cost_basis": "provider_final",
+          "cost_components": [
+            {
+              "amount": "85",
+              "basis": "configured_rate_card_estimate",
+              "currency": "USD",
+              "provenance_digest": "c9a988d6e2929feeb61965a9af5bfb97950a26105ad5f93f35b3a06ba6498f3c",
+              "rate_card": {
+                "id": "rate-a",
+                "version": 2
+              }
+            },
+            {
+              "amount": "78",
+              "basis": "provider_final",
+              "currency": "USD",
+              "provenance_digest": "480264674c90586d10b045d5433a6822c90f7e327f27c718b04e2029ad3819a6",
+              "rate_card": null
+            }
+          ],
+          "drivers": {
+            "actual_model_mix": [
+              {
+                "attempt_count": 7,
+                "model": {
+                  "model_id": "model-baseline",
+                  "model_version": "2026-08-01",
+                  "provider_id": "provider-a"
+                }
+              }
+            ],
+            "cache_and_token_mix": {
+              "cached_input_tokens": 70,
+              "input_tokens": 716,
+              "output_tokens": 156,
+              "reasoning_tokens": 35
+            },
+            "fallback_and_denial_rate": {
+              "denial": {
+                "denominator": "7",
+                "numerator": "0",
+                "ratio": 0.0,
+                "reason_code": "eligible"
+              },
+              "fallback": {
+                "denominator": "7",
+                "numerator": "1",
+                "ratio": 0.142857143,
+                "reason_code": "eligible"
+              }
+            },
+            "first_pass_success": {
+              "denominator": "6",
+              "numerator": "5",
+              "ratio": 0.833333333,
+              "reason_code": "eligible"
+            },
+            "latency": {
+              "p50_ms": "130",
+              "p95_ms": "150"
+            },
+            "retries": 1
+          },
+          "eligibility": {
+            "declared_at": "2026-08-01T00:00:00Z",
+            "minimum_coverage": 0.8,
+            "minimum_sample": 4,
+            "observed_coverage": 0.9,
+            "rule": {
+              "digest": "58f88786706379fa4e0401a487b0c604c27b5238f47af91b7a8ba22de3a1f227",
+              "rule_id": "scorecard-eligibility",
+              "version": 2
+            },
+            "sample_count": 6,
+            "status": "eligible"
+          },
+          "guardrails": {
+            "budget": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+                "rule_id": "guard-budget",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "comparability": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+                "rule_id": "guard-comparability",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "coverage_and_sample_eligibility": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+                "rule_id": "guard-coverage_and_sample_eligibility",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "freshness": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+                "rule_id": "guard-freshness",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "privacy": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+                "rule_id": "guard-privacy",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "quality": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+                "rule_id": "guard-quality",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "reliability": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+                "rule_id": "guard-reliability",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "reversion_or_defect": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+                "rule_id": "guard-reversion_or_defect",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            }
+          },
+          "metrics": {
+            "optimization_lift_vs_declared_baseline": {
+              "denominator": "15.6",
+              "numerator": "0",
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "505cb70c8b881098c3a897defa55a9a7bfcb0d8e763edd313f8ba0d5e0e01774",
+                "rule_id": "optimization-lift",
+                "version": 2
+              },
+              "status": "eligible",
+              "unit": "relative_lift",
+              "value": "0"
+            },
+            "quality_qualified_cost_per_accepted_work_item": {
+              "denominator": "5",
+              "numerator": "78",
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "047b147972baef94ef75f3247ed7bfce6207184f154757b4506494a007070121",
+                "rule_id": "quality-cost",
+                "version": 3
+              },
+              "status": "eligible",
+              "unit": "currency_per_accepted_item",
+              "value": "15.6"
+            },
+            "use_case_attributed_spend_coverage": {
+              "denominator": "10",
+              "numerator": "9",
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "3e4847ed14ca4787109b3ea3b8cd4b0a0b74a8b6b93faa8ccdbd42a1f0b67157",
+                "rule_id": "spend-coverage",
+                "version": 2
+              },
+              "status": "eligible",
+              "unit": "ratio",
+              "value": "0.9"
+            }
+          },
+          "policy": {
+            "id": "policy-a",
+            "version": 4
+          },
+          "rate_card": {
+            "id": "rate-a",
+            "version": 2
+          }
+        },
+        {
+          "actual_model": {
+            "model_id": "model-efficient",
+            "model_version": "2026-08-01",
+            "provider_id": "provider-a"
+          },
+          "association_rule": {
+            "digest": "cebdaa3d8326df0d54109ed0b7009b023ebe2ed1ae9da1fc409b1d49c8ce15d6",
+            "rule_id": "association-reference",
+            "version": 1
+          },
+          "cohort_id": "efficient",
+          "connector_coverage": {
+            "denominator": "10",
+            "numerator": "9",
+            "ratio": 0.9,
+            "reason_code": "eligible"
+          },
+          "cost_basis": "provider_final",
+          "cost_components": [
+            {
+              "amount": "54",
+              "basis": "configured_rate_card_estimate",
+              "currency": "USD",
+              "provenance_digest": "b337234630c6123182601eb3e48a3f429bc2bd0b3dac39d0c7f2c3c8f64476fd",
+              "rate_card": {
+                "id": "rate-a",
+                "version": 2
+              }
+            },
+            {
+              "amount": "47",
+              "basis": "provider_final",
+              "currency": "USD",
+              "provenance_digest": "204dbf516f5aa09257ac74ada1f5f756b49a2a5b1d6af93ecb699af7bfb7a480",
+              "rate_card": null
+            }
+          ],
+          "drivers": {
+            "actual_model_mix": [
+              {
+                "attempt_count": 7,
+                "model": {
+                  "model_id": "model-efficient",
+                  "model_version": "2026-08-01",
+                  "provider_id": "provider-a"
+                }
+              }
+            ],
+            "cache_and_token_mix": {
+              "cached_input_tokens": 70,
+              "input_tokens": 716,
+              "output_tokens": 156,
+              "reasoning_tokens": 35
+            },
+            "fallback_and_denial_rate": {
+              "denial": {
+                "denominator": "7",
+                "numerator": "0",
+                "ratio": 0.0,
+                "reason_code": "eligible"
+              },
+              "fallback": {
+                "denominator": "7",
+                "numerator": "1",
+                "ratio": 0.142857143,
+                "reason_code": "eligible"
+              }
+            },
+            "first_pass_success": {
+              "denominator": "6",
+              "numerator": "5",
+              "ratio": 0.833333333,
+              "reason_code": "eligible"
+            },
+            "latency": {
+              "p50_ms": "80",
+              "p95_ms": "90"
+            },
+            "retries": 1
+          },
+          "eligibility": {
+            "declared_at": "2026-08-01T00:00:00Z",
+            "minimum_coverage": 0.8,
+            "minimum_sample": 4,
+            "observed_coverage": 0.9,
+            "rule": {
+              "digest": "58f88786706379fa4e0401a487b0c604c27b5238f47af91b7a8ba22de3a1f227",
+              "rule_id": "scorecard-eligibility",
+              "version": 2
+            },
+            "sample_count": 6,
+            "status": "eligible"
+          },
+          "guardrails": {
+            "budget": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+                "rule_id": "guard-budget",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "comparability": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+                "rule_id": "guard-comparability",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "coverage_and_sample_eligibility": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+                "rule_id": "guard-coverage_and_sample_eligibility",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "freshness": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+                "rule_id": "guard-freshness",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "privacy": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+                "rule_id": "guard-privacy",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "quality": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+                "rule_id": "guard-quality",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "reliability": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+                "rule_id": "guard-reliability",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "reversion_or_defect": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+                "rule_id": "guard-reversion_or_defect",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            }
+          },
+          "metrics": {
+            "optimization_lift_vs_declared_baseline": {
+              "denominator": "15.6",
+              "numerator": "6.2",
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "505cb70c8b881098c3a897defa55a9a7bfcb0d8e763edd313f8ba0d5e0e01774",
+                "rule_id": "optimization-lift",
+                "version": 2
+              },
+              "status": "eligible",
+              "unit": "relative_lift",
+              "value": "0.397435897"
+            },
+            "quality_qualified_cost_per_accepted_work_item": {
+              "denominator": "5",
+              "numerator": "47",
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "047b147972baef94ef75f3247ed7bfce6207184f154757b4506494a007070121",
+                "rule_id": "quality-cost",
+                "version": 3
+              },
+              "status": "eligible",
+              "unit": "currency_per_accepted_item",
+              "value": "9.4"
+            },
+            "use_case_attributed_spend_coverage": {
+              "denominator": "10",
+              "numerator": "9",
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "3e4847ed14ca4787109b3ea3b8cd4b0a0b74a8b6b93faa8ccdbd42a1f0b67157",
+                "rule_id": "spend-coverage",
+                "version": 2
+              },
+              "status": "eligible",
+              "unit": "ratio",
+              "value": "0.9"
+            }
+          },
+          "policy": {
+            "id": "policy-a",
+            "version": 4
+          },
+          "rate_card": {
+            "id": "rate-a",
+            "version": 2
+          }
+        },
+        {
+          "actual_model": {
+            "model_id": "model-guarded",
+            "model_version": "2026-08-01",
+            "provider_id": "provider-a"
+          },
+          "association_rule": {
+            "digest": "cebdaa3d8326df0d54109ed0b7009b023ebe2ed1ae9da1fc409b1d49c8ce15d6",
+            "rule_id": "association-reference",
+            "version": 1
+          },
+          "cohort_id": "guarded",
+          "connector_coverage": {
+            "denominator": "10",
+            "numerator": "9",
+            "ratio": 0.9,
+            "reason_code": "eligible"
+          },
+          "cost_basis": "provider_final",
+          "cost_components": [
+            {
+              "amount": "29",
+              "basis": "configured_rate_card_estimate",
+              "currency": "USD",
+              "provenance_digest": "47e9e271f5730dbe1bf5052f596fe3aa99393e9c43631df0224ec03eb1fc7fa8",
+              "rate_card": {
+                "id": "rate-a",
+                "version": 2
+              }
+            },
+            {
+              "amount": "22",
+              "basis": "provider_final",
+              "currency": "USD",
+              "provenance_digest": "f0aace2fe482e76d676a4fa5e5d3d91985e11db6f2b931041f23eefa1a8aee15",
+              "rate_card": null
+            }
+          ],
+          "drivers": {
+            "actual_model_mix": [
+              {
+                "attempt_count": 7,
+                "model": {
+                  "model_id": "model-guarded",
+                  "model_version": "2026-08-01",
+                  "provider_id": "provider-a"
+                }
+              }
+            ],
+            "cache_and_token_mix": {
+              "cached_input_tokens": 70,
+              "input_tokens": 716,
+              "output_tokens": 156,
+              "reasoning_tokens": 35
+            },
+            "fallback_and_denial_rate": {
+              "denial": {
+                "denominator": "7",
+                "numerator": "0",
+                "ratio": 0.0,
+                "reason_code": "eligible"
+              },
+              "fallback": {
+                "denominator": "7",
+                "numerator": "1",
+                "ratio": 0.142857143,
+                "reason_code": "eligible"
+              }
+            },
+            "first_pass_success": {
+              "denominator": "6",
+              "numerator": "6",
+              "ratio": 1.0,
+              "reason_code": "eligible"
+            },
+            "latency": {
+              "p50_ms": "40",
+              "p95_ms": "47"
+            },
+            "retries": 1
+          },
+          "eligibility": {
+            "declared_at": "2026-08-01T00:00:00Z",
+            "minimum_coverage": 0.8,
+            "minimum_sample": 4,
+            "observed_coverage": 0.9,
+            "rule": {
+              "digest": "58f88786706379fa4e0401a487b0c604c27b5238f47af91b7a8ba22de3a1f227",
+              "rule_id": "scorecard-eligibility",
+              "version": 2
+            },
+            "sample_count": 6,
+            "status": "inconclusive"
+          },
+          "guardrails": {
+            "budget": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+                "rule_id": "guard-budget",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "comparability": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+                "rule_id": "guard-comparability",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "coverage_and_sample_eligibility": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+                "rule_id": "guard-coverage_and_sample_eligibility",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "freshness": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+                "rule_id": "guard-freshness",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "privacy": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+                "rule_id": "guard-privacy",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "quality": {
+              "reason_code": "below_threshold",
+              "rule": {
+                "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+                "rule_id": "guard-quality",
+                "version": 1
+              },
+              "state": "fail",
+              "value": null
+            },
+            "reliability": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+                "rule_id": "guard-reliability",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            },
+            "reversion_or_defect": {
+              "reason_code": "eligible",
+              "rule": {
+                "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+                "rule_id": "guard-reversion_or_defect",
+                "version": 1
+              },
+              "state": "pass",
+              "value": null
+            }
+          },
+          "metrics": {
+            "optimization_lift_vs_declared_baseline": {
+              "denominator": null,
+              "numerator": null,
+              "reason_code": "missing_evidence",
+              "rule": {
+                "digest": "505cb70c8b881098c3a897defa55a9a7bfcb0d8e763edd313f8ba0d5e0e01774",
+                "rule_id": "optimization-lift",
+                "version": 2
+              },
+              "status": "inconclusive",
+              "unit": "relative_lift",
+              "value": null
+            },
+            "quality_qualified_cost_per_accepted_work_item": {
+              "denominator": "6",
+              "numerator": "22",
+              "reason_code": "missing_evidence",
+              "rule": {
+                "digest": "047b147972baef94ef75f3247ed7bfce6207184f154757b4506494a007070121",
+                "rule_id": "quality-cost",
+                "version": 3
+              },
+              "status": "inconclusive",
+              "unit": "currency_per_accepted_item",
+              "value": "3.666666667"
+            },
+            "use_case_attributed_spend_coverage": {
+              "denominator": "10",
+              "numerator": "9",
+              "reason_code": "below_threshold",
+              "rule": {
+                "digest": "3e4847ed14ca4787109b3ea3b8cd4b0a0b74a8b6b93faa8ccdbd42a1f0b67157",
+                "rule_id": "spend-coverage",
+                "version": 2
+              },
+              "status": "inconclusive",
+              "unit": "ratio",
+              "value": "0.9"
+            }
+          },
+          "policy": {
+            "id": "policy-a",
+            "version": 4
+          },
+          "rate_card": {
+            "id": "rate-a",
+            "version": 2
+          }
+        }
+      ],
+      "controlled_design": null,
+      "coverage": {
+        "association": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "connector": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "eligible_association_candidates": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "eligible_external_outcome_events": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "eligible_governed_attempts": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "eligible_governed_spend": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        },
+        "pricing": {
+          "denominator": "30",
+          "numerator": "27",
+          "ratio": 0.9,
+          "reason_code": "eligible"
+        }
+      },
+      "decision_owner_id": "portfolio-owner",
+      "evidence_level": "associated",
+      "expires_at": "2026-10-10T00:00:00Z",
+      "generated_at": "2026-09-10T00:00:00Z",
+      "organization_id": "acme",
+      "pareto_cohort_ids": [
+        "baseline",
+        "efficient"
+      ],
+      "reason_code": "eligible",
+      "review_after": "2026-10-15T00:00:00Z",
+      "schema_id": "hormuz.model-scorecard",
+      "schema_version": 1,
+      "scorecard_id": "scorecard-use-case-a",
+      "state": "eligible",
+      "supersedes_version": null,
+      "version": 1,
+      "window": {
+        "end_at": "2026-09-08T00:00:00Z",
+        "start_at": "2026-09-01T00:00:00Z"
+      },
+      "work_scope": {
+        "version": 3,
+        "work_scope_id": "use-case-a"
+      }
+    },
+    "uncertainty": [
+      {
+        "cluster_count": null,
+        "cohort_id": "baseline",
+        "confidence_level": "0.95",
+        "lower": "0.9",
+        "method": "exact_source_ratio",
+        "metric": "use_case_attributed_spend_coverage",
+        "point": "0.9",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "0.9"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "baseline",
+        "confidence_level": "0.95",
+        "lower": "9.326647999",
+        "method": "work_item_cluster_jackknife_95",
+        "metric": "quality_qualified_cost_per_accepted_work_item",
+        "point": "15.6",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "21.873352001"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "baseline",
+        "confidence_level": "0.95",
+        "lower": "0.436497178",
+        "method": "work_item_wilson_95",
+        "metric": "accepted_work_item_rate",
+        "point": "0.833333333",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "0.96994663"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "baseline",
+        "confidence_level": "0.95",
+        "lower": "0.436497178",
+        "method": "work_item_wilson_95",
+        "metric": "first_pass_success",
+        "point": "0.833333333",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "0.96994663"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "baseline",
+        "confidence_level": "0.95",
+        "lower": "146",
+        "method": "work_item_delete_one_range",
+        "metric": "latency_p95_ms",
+        "point": "150",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "150"
+      },
+      {
+        "cluster_count": null,
+        "cohort_id": "efficient",
+        "confidence_level": "0.95",
+        "lower": "0.9",
+        "method": "exact_source_ratio",
+        "metric": "use_case_attributed_spend_coverage",
+        "point": "0.9",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "0.9"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "efficient",
+        "confidence_level": "0.95",
+        "lower": "6.404991967",
+        "method": "work_item_cluster_jackknife_95",
+        "metric": "quality_qualified_cost_per_accepted_work_item",
+        "point": "9.4",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "12.395008033"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "efficient",
+        "confidence_level": "0.95",
+        "lower": "0.436497178",
+        "method": "work_item_wilson_95",
+        "metric": "accepted_work_item_rate",
+        "point": "0.833333333",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "0.96994663"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "efficient",
+        "confidence_level": "0.95",
+        "lower": "0.436497178",
+        "method": "work_item_wilson_95",
+        "metric": "first_pass_success",
+        "point": "0.833333333",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "0.96994663"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "efficient",
+        "confidence_level": "0.95",
+        "lower": "87.5",
+        "method": "work_item_delete_one_range",
+        "metric": "latency_p95_ms",
+        "point": "90",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "90"
+      },
+      {
+        "cluster_count": null,
+        "cohort_id": "guarded",
+        "confidence_level": "0.95",
+        "lower": "0.9",
+        "method": "exact_source_ratio",
+        "metric": "use_case_attributed_spend_coverage",
+        "point": "0.9",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "0.9"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "guarded",
+        "confidence_level": "0.95",
+        "lower": "3.013345338",
+        "method": "work_item_cluster_jackknife_95",
+        "metric": "quality_qualified_cost_per_accepted_work_item",
+        "point": "3.666666667",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "4.319987995"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "guarded",
+        "confidence_level": "0.95",
+        "lower": "0.609665712",
+        "method": "work_item_wilson_95",
+        "metric": "accepted_work_item_rate",
+        "point": "1",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "1"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "guarded",
+        "confidence_level": "0.95",
+        "lower": "0.609665712",
+        "method": "work_item_wilson_95",
+        "metric": "first_pass_success",
+        "point": "1",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "1"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "guarded",
+        "confidence_level": "0.95",
+        "lower": "40",
+        "method": "work_item_delete_one_range",
+        "metric": "latency_p95_ms",
+        "point": "47",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "47.5"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "baseline",
+        "confidence_level": "0.95",
+        "lower": "-0.573606825",
+        "method": "independent_cluster_interval_propagation_95",
+        "metric": "optimization_lift_vs_declared_baseline",
+        "point": "0",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "1.3452533"
+      },
+      {
+        "cluster_count": 6,
+        "cohort_id": "efficient",
+        "confidence_level": "0.95",
+        "lower": "-0.140278455",
+        "method": "independent_cluster_interval_propagation_95",
+        "metric": "optimization_lift_vs_declared_baseline",
+        "point": "0.397435897",
+        "reason_code": "eligible",
+        "status": "eligible",
+        "upper": "1.658512258"
+      },
+      {
+        "cluster_count": null,
+        "cohort_id": "guarded",
+        "confidence_level": "0.95",
+        "lower": null,
+        "method": "not_available",
+        "metric": "optimization_lift_vs_declared_baseline",
+        "point": null,
+        "reason_code": "missing_evidence",
+        "status": "inconclusive",
+        "upper": null
+      }
+    ]
+  },
+  "input": {
+    "baseline_cohort_id": "baseline",
+    "cohorts": [
+      {
+        "actual_model": {
+          "model_id": "model-baseline",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        "association_rule": {
+          "digest": "cebdaa3d8326df0d54109ed0b7009b023ebe2ed1ae9da1fc409b1d49c8ce15d6",
+          "rule_id": "association-reference",
+          "version": 1
+        },
+        "client_id": "codex-app",
+        "cohort_id": "baseline",
+        "connector_ids": [
+          "github-one",
+          "linear-one"
+        ],
+        "cost_basis": "provider_final",
+        "coverage": {
+          "association": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "629296d0dea31295180187b4a3cb29a8d65cd357c83472d9389c58d659d2cea7"
+          },
+          "connector": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "8d58c798cc3106c62c9fed5944792546798cf43b561962717254231160e8599c"
+          },
+          "eligible_governed_attempts": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "b19b6f093d2b4178505427fe4b8e30947ab40136db2165a9f5a87c98366aad37"
+          },
+          "eligible_governed_spend": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "56c80e8e850afbea1facf43436353750ceb4a9571b933a2641303d65d48e1edc"
+          },
+          "excluded": {
+            "denominator": "10",
+            "numerator": "1",
+            "provenance_digest": "72fcefdb6d567c7a4326f2f3d39371d6d4a8c07de770e7e325de7e8b66ebe98c"
+          },
+          "linked_outcome": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "a2809d8e9163577c39210019754dae6818c47f440f77d16138475f5381ea16c2"
+          },
+          "pricing": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "a83b7a128a75435a355ce78b13f9b48553b41a78af4c0014736b9d4f089103c3"
+          }
+        },
+        "currency": "USD",
+        "last_observed_at": "2026-09-08T12:00:00Z",
+        "policy": {
+          "id": "policy-a",
+          "version": 4
+        },
+        "rate_card": {
+          "id": "rate-a",
+          "version": 2
+        },
+        "strata": [
+          {
+            "guardrails": {
+              "budget": {
+                "rule": {
+                  "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+                  "rule_id": "guard-budget",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "comparability": {
+                "rule": {
+                  "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+                  "rule_id": "guard-comparability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "coverage_and_sample_eligibility": {
+                "rule": {
+                  "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+                  "rule_id": "guard-coverage_and_sample_eligibility",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "freshness": {
+                "rule": {
+                  "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+                  "rule_id": "guard-freshness",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "privacy": {
+                "rule": {
+                  "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+                  "rule_id": "guard-privacy",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "quality": {
+                "rule": {
+                  "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+                  "rule_id": "guard-quality",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reliability": {
+                "rule": {
+                  "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+                  "rule_id": "guard-reliability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reversion_or_defect": {
+                "rule": {
+                  "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+                  "rule_id": "guard-reversion_or_defect",
+                  "version": 1
+                },
+                "state": "pass"
+              }
+            },
+            "stratum_id": "core",
+            "work_items": [
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-baseline",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "baseline-attempt-0-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "12",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "4ee5175cc8cc5c2eba250ab3c3e4c27a1309275add77afd6360cf07d22797f93",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "13",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "631c30c079c428d1bf41a9207497f34512b20113f339a9a16c10ae4f272e1572",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 100,
+                    "latency_ms": "120",
+                    "occurred_at": "2026-09-01T12:00:00Z",
+                    "output_tokens": 20,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-baseline",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-baseline",
+                    "source_digest": "6df8e4e46c7a899d7f15970be06b4f67324b65effa6494d655fb050837a1ffc0",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "178fc84340656f4270cf45e97949d8f92313ddbbbeeae37182e6b5435e386bdb",
+                "work_item_id": "baseline-work-0"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-baseline",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "baseline-attempt-1-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "14",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "91bc6eaa14292c2eab9def27e89b764f0571efedd5aea38f7adb17e8754d0468",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "15",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "3ec55b0cc77880036b71353798973e916665ec5db775b7d67a1377ecb585dd66",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 101,
+                    "latency_ms": "140",
+                    "occurred_at": "2026-09-02T12:00:00Z",
+                    "output_tokens": 21,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-baseline",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-baseline",
+                    "source_digest": "01c7997ae32098c9abc437bf7c940ee49918ad02711e4059f556479bb5ff3b2c",
+                    "status": "succeeded"
+                  },
+                  {
+                    "actual_model": {
+                      "model_id": "model-baseline",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "baseline-attempt-1-1",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "1",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "409cb3906e10e12160ce925dcf80bd3f889941a0673141a21d9022a2ea687e0c",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "2",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "1193811be2510d1be544583eafeff1e62b424385175548535da99432073adf2b",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": true,
+                    "input_tokens": 101,
+                    "latency_ms": "150",
+                    "occurred_at": "2026-09-02T12:00:01Z",
+                    "output_tokens": 21,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-baseline",
+                    "retry_ordinal": 1,
+                    "routed_model_id": "routed-model-baseline",
+                    "source_digest": "1b94535848089630f7f9ae0902d275f5e6b56ce1f08928349c331cdc70820a3d",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "b9c7ad7d3ee2c20fcec91f2c24b2f5293046c92171fcb6c7abd07a35f90ffd1c",
+                "work_item_id": "baseline-work-1"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-baseline",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "baseline-attempt-2-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "11",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "4aeb3a7d064611388e27041f43e07a44f8c3ef0656a531f5465eebbc8a0ca6c5",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "12",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "855e195165ac7222f74b5741c1d9ba45e7a78176c87d4d30538eaa76d2c1c77c",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 102,
+                    "latency_ms": "110",
+                    "occurred_at": "2026-09-03T12:00:00Z",
+                    "output_tokens": 22,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-baseline",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-baseline",
+                    "source_digest": "fad79aa4aca3484ad586b016d87455cd66fc170ee684170b453896e12093e434",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "db14501f88bc09f805b081c3492f82da9feb15dd7d0009f5b5d1216c5a2d4f3e",
+                "work_item_id": "baseline-work-2"
+              }
+            ]
+          },
+          {
+            "guardrails": {
+              "budget": {
+                "rule": {
+                  "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+                  "rule_id": "guard-budget",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "comparability": {
+                "rule": {
+                  "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+                  "rule_id": "guard-comparability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "coverage_and_sample_eligibility": {
+                "rule": {
+                  "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+                  "rule_id": "guard-coverage_and_sample_eligibility",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "freshness": {
+                "rule": {
+                  "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+                  "rule_id": "guard-freshness",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "privacy": {
+                "rule": {
+                  "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+                  "rule_id": "guard-privacy",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "quality": {
+                "rule": {
+                  "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+                  "rule_id": "guard-quality",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reliability": {
+                "rule": {
+                  "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+                  "rule_id": "guard-reliability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reversion_or_defect": {
+                "rule": {
+                  "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+                  "rule_id": "guard-reversion_or_defect",
+                  "version": 1
+                },
+                "state": "pass"
+              }
+            },
+            "stratum_id": "edge",
+            "work_items": [
+              {
+                "accepted": false,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-baseline",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "baseline-attempt-3-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "15",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "97be74845d255443a902580da66cf27da6d9fff422a8b12cce9119072686480a",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "16",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "3beae4c957e2737f850bcb938344c677650a96ad0c6490c20da6f2774583f8b1",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 103,
+                    "latency_ms": "150",
+                    "occurred_at": "2026-09-04T12:00:00Z",
+                    "output_tokens": 23,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-baseline",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-baseline",
+                    "source_digest": "f1269c3af04a4f029f4f9edc33fcfb07d90bb659d31060a0dc4444af41a0d486",
+                    "status": "failed"
+                  }
+                ],
+                "source_digest": "db67537db011cc6d34d4cfb67a029db5cabe4f5b8bfd2b390e7e3909da20dd4f",
+                "work_item_id": "baseline-work-3"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-baseline",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "baseline-attempt-4-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "13",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "0e3e65013291db9e0a818f331fc4fe07bb961049c61c8c2b7e06d1f644ac6153",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "14",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "d9c1620959a89093835525c481bec2f777ed063a713e1926fbdf42dd43973a0c",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 104,
+                    "latency_ms": "130",
+                    "occurred_at": "2026-09-05T12:00:00Z",
+                    "output_tokens": 24,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-baseline",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-baseline",
+                    "source_digest": "41167e1f8d3bd814c04fe8a57f6589b855f3bbdb23bb47b77177af0bfbd1bee6",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "939319c25e9e89bb926f098e8d7c21d7008e719bfbbef4d7cba8ad988c58f5d6",
+                "work_item_id": "baseline-work-4"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-baseline",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "baseline-attempt-5-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "12",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "8a2f80d2870c154d144aa67ad3b5e456fe2181c664272927117b17d9bb726e2a",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "13",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "123bfdbd636e3f35da477f8c101b2ff2c957e811d863e5273fa7035f898de795",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 105,
+                    "latency_ms": "120",
+                    "occurred_at": "2026-09-06T12:00:00Z",
+                    "output_tokens": 25,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-baseline",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-baseline",
+                    "source_digest": "823c346a074b00dfd641c68f6f43ecedc0a29c5c309659e73a479ecc9293bf20",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "75b91fb5ab97397f786c9717f2fed0df86b0c7edeca2e978752705caef511d23",
+                "work_item_id": "baseline-work-5"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "actual_model": {
+          "model_id": "model-efficient",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        "association_rule": {
+          "digest": "cebdaa3d8326df0d54109ed0b7009b023ebe2ed1ae9da1fc409b1d49c8ce15d6",
+          "rule_id": "association-reference",
+          "version": 1
+        },
+        "client_id": "codex-app",
+        "cohort_id": "efficient",
+        "connector_ids": [
+          "github-one",
+          "linear-one"
+        ],
+        "cost_basis": "provider_final",
+        "coverage": {
+          "association": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "781060bfa2e6c7730d426933d7589e8c3ee9c890b9c07c7019b632a3a3f30c91"
+          },
+          "connector": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "341c1bfe65707631ba2bb96a7c54895b07c25363caf6c69b04b1953651a1c02d"
+          },
+          "eligible_governed_attempts": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "84dff78968378aba8cca4d4803afcf9fcd721f7b6916cce064137bac94e8178e"
+          },
+          "eligible_governed_spend": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "46bd7206291ed789458fb8176d74dd6556c6e15bf505eb17b0ee7d620d4c5a31"
+          },
+          "excluded": {
+            "denominator": "10",
+            "numerator": "1",
+            "provenance_digest": "5dd8b0f6f2ec22d6bb4032cb591b11c9b8880ff57cdee03a1d8cc3743d6d549b"
+          },
+          "linked_outcome": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "2c36315ef47a6aa6577034b9eea2ba93c3d1829eb2eab2702e30d06eb2d8ab25"
+          },
+          "pricing": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "fbfec46dac08a498dfd12f7c6310be5dd316affdcfffd97421353be964033d34"
+          }
+        },
+        "currency": "USD",
+        "last_observed_at": "2026-09-08T12:00:00Z",
+        "policy": {
+          "id": "policy-a",
+          "version": 4
+        },
+        "rate_card": {
+          "id": "rate-a",
+          "version": 2
+        },
+        "strata": [
+          {
+            "guardrails": {
+              "budget": {
+                "rule": {
+                  "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+                  "rule_id": "guard-budget",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "comparability": {
+                "rule": {
+                  "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+                  "rule_id": "guard-comparability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "coverage_and_sample_eligibility": {
+                "rule": {
+                  "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+                  "rule_id": "guard-coverage_and_sample_eligibility",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "freshness": {
+                "rule": {
+                  "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+                  "rule_id": "guard-freshness",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "privacy": {
+                "rule": {
+                  "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+                  "rule_id": "guard-privacy",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "quality": {
+                "rule": {
+                  "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+                  "rule_id": "guard-quality",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reliability": {
+                "rule": {
+                  "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+                  "rule_id": "guard-reliability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reversion_or_defect": {
+                "rule": {
+                  "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+                  "rule_id": "guard-reversion_or_defect",
+                  "version": 1
+                },
+                "state": "pass"
+              }
+            },
+            "stratum_id": "core",
+            "work_items": [
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-efficient",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "efficient-attempt-0-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "7",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "39f4a02d134b2fdf26204163c31422d1971237ae0846e53e6d3e07ff8e4c302c",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "8",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "a5bba356ed4d2376b7c1e3ccb3d3fc8a8d283089eda64f74632a6a8231baef80",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 100,
+                    "latency_ms": "70",
+                    "occurred_at": "2026-09-01T12:00:00Z",
+                    "output_tokens": 20,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-efficient",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-efficient",
+                    "source_digest": "e7f2dd8be1051253bb7e07376e9a95b524eade0ed4a1ef7efe453000770103bf",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "6d0bc0cc2ebd4cb7fa3b635e75d97d1b7424713729ce4cdb820afe8722c351de",
+                "work_item_id": "efficient-work-0"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-efficient",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "efficient-attempt-1-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "8",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "8754614ca66e2dab035f434b67914a208300aaa8e2c9f423266c152d02bc2fe4",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "9",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "bb139a77952a6b1e5f89e78d15309654f9a5dbcb1526e09e1026316bfa700c62",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 101,
+                    "latency_ms": "80",
+                    "occurred_at": "2026-09-02T12:00:00Z",
+                    "output_tokens": 21,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-efficient",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-efficient",
+                    "source_digest": "7a8bb97f8dc7e00f8a11d8345027bcf78bd12924e3b8bc2448f06b3b78f91984",
+                    "status": "succeeded"
+                  },
+                  {
+                    "actual_model": {
+                      "model_id": "model-efficient",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "efficient-attempt-1-1",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "1",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "99e4dd89d212dcdc1212df903beead33c6626228fc12f551a36d6b001ab55175",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "2",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "62d98c55b383baa4672563e85fd14fb21ad00c87d3868d7b64996a6f6ce7bd53",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": true,
+                    "input_tokens": 101,
+                    "latency_ms": "90",
+                    "occurred_at": "2026-09-02T12:00:01Z",
+                    "output_tokens": 21,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-efficient",
+                    "retry_ordinal": 1,
+                    "routed_model_id": "routed-model-efficient",
+                    "source_digest": "c04b138bc222d1cd6ff58975bece982322ef2bf1561db1946554d1a4c7d647d0",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "08e895cfe8befcdd2bfc5829362295613db573681e37e2f10cab1d8f18f76f48",
+                "work_item_id": "efficient-work-1"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-efficient",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "efficient-attempt-2-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "7",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "b968cdebf4c231280dcc304cd2218b267398343a767306ae1c1dc293bb9ece7a",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "8",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "dc61ae3fcd99e137405bcdc6ae4d56895909343dc4068afca212fabf485250e9",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 102,
+                    "latency_ms": "70",
+                    "occurred_at": "2026-09-03T12:00:00Z",
+                    "output_tokens": 22,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-efficient",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-efficient",
+                    "source_digest": "af0dbf3e3ce49fdd90eb2b6fc83f1c0d4cdfbbbbead9b08818190f6b70fdb7a9",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "d4403b729edced9179ee75a42c47ef4012735cc21c8b2a581f6b838b65f87a01",
+                "work_item_id": "efficient-work-2"
+              }
+            ]
+          },
+          {
+            "guardrails": {
+              "budget": {
+                "rule": {
+                  "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+                  "rule_id": "guard-budget",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "comparability": {
+                "rule": {
+                  "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+                  "rule_id": "guard-comparability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "coverage_and_sample_eligibility": {
+                "rule": {
+                  "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+                  "rule_id": "guard-coverage_and_sample_eligibility",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "freshness": {
+                "rule": {
+                  "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+                  "rule_id": "guard-freshness",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "privacy": {
+                "rule": {
+                  "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+                  "rule_id": "guard-privacy",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "quality": {
+                "rule": {
+                  "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+                  "rule_id": "guard-quality",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reliability": {
+                "rule": {
+                  "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+                  "rule_id": "guard-reliability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reversion_or_defect": {
+                "rule": {
+                  "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+                  "rule_id": "guard-reversion_or_defect",
+                  "version": 1
+                },
+                "state": "pass"
+              }
+            },
+            "stratum_id": "edge",
+            "work_items": [
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-efficient",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "efficient-attempt-3-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "9",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "225c8e4dddc1c460a40ce7903e70381a084ef059e4219bd5e8c790735debcf33",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "10",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "eef3e611f5a78d87403cdbfecc084313dad32e01d2396dbed0c62b6dcd3603c0",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 103,
+                    "latency_ms": "90",
+                    "occurred_at": "2026-09-04T12:00:00Z",
+                    "output_tokens": 23,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-efficient",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-efficient",
+                    "source_digest": "1e744e3cc6f4bdfae40ead0de4e0c08e3a42c0c36337524fac0453f799fe5a01",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "e5d30b4ed9c9b7174d192d16c7a06717786e373ee8ac884e49df13d11e84a146",
+                "work_item_id": "efficient-work-3"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-efficient",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "efficient-attempt-4-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "8",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "cc26c536002b68f04ac69ca1d7a91e9d4f486783517f987eeffe9a8339903ffe",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "9",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "be3a7f598ef77c5eec6c4564dd2e3519182ba33e49b703e292dff7d39accb4b4",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 104,
+                    "latency_ms": "80",
+                    "occurred_at": "2026-09-05T12:00:00Z",
+                    "output_tokens": 24,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-efficient",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-efficient",
+                    "source_digest": "c0634fb4babcbada5f4d925ab8cdca680a98164b7d01ca71cf5089fb919332e9",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "396ee17a1ff691aff3497aa60106f5bd249f6b38bdc5e353bd4599c700023067",
+                "work_item_id": "efficient-work-4"
+              },
+              {
+                "accepted": false,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-efficient",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "efficient-attempt-5-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "7",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "ab6bd2d924912aa9680350dc254a1caa92d4922193b8ad95e4201063c80677ce",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "8",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "e1d1aacaa434e8f9a0b0dbef3fb30ec6aaf1dc8fdb03ab6ed2c2175dab067a2f",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 105,
+                    "latency_ms": "70",
+                    "occurred_at": "2026-09-06T12:00:00Z",
+                    "output_tokens": 25,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-efficient",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-efficient",
+                    "source_digest": "e2200660d30abb863e6907c7a23d71e5e38dcfc17709486015097106674efbac",
+                    "status": "failed"
+                  }
+                ],
+                "source_digest": "23d454295005078df60f6f1d33bed910d83db9f66cf7bcb0d370d16db54fa028",
+                "work_item_id": "efficient-work-5"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "actual_model": {
+          "model_id": "model-guarded",
+          "model_version": "2026-08-01",
+          "provider_id": "provider-a"
+        },
+        "association_rule": {
+          "digest": "cebdaa3d8326df0d54109ed0b7009b023ebe2ed1ae9da1fc409b1d49c8ce15d6",
+          "rule_id": "association-reference",
+          "version": 1
+        },
+        "client_id": "codex-app",
+        "cohort_id": "guarded",
+        "connector_ids": [
+          "github-one",
+          "linear-one"
+        ],
+        "cost_basis": "provider_final",
+        "coverage": {
+          "association": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "f18d165aacfb523abe487bd3acbcff30d7d09d4ed4a03eb046351687244b7277"
+          },
+          "connector": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "492b208218c05b6506ec429046f009ce2cf7d5cbd951fd8c43d6c8bf0f0b40be"
+          },
+          "eligible_governed_attempts": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "0254d6b76f1d61a09d4df2c8a6def4f5e373d774fbd02eb30be0d1f2d9a6c915"
+          },
+          "eligible_governed_spend": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "f33acdec6601f4706dee52b7f45cec649eeb3f940971ba00eeb57bb707019edd"
+          },
+          "excluded": {
+            "denominator": "10",
+            "numerator": "1",
+            "provenance_digest": "58d8994b4e3a3dd0c321faffc0a05a25b77fc42725b420b37f47bcd1f077d2a2"
+          },
+          "linked_outcome": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "3ae2d60940d631cfb0f902c0a24e6778138ecd7511605ad7c8d9611d19fdb247"
+          },
+          "pricing": {
+            "denominator": "10",
+            "numerator": "9",
+            "provenance_digest": "6d52d01fdcab58fa0e970d927932eb25a6586acf3f5e77c0fed95a592ad05f49"
+          }
+        },
+        "currency": "USD",
+        "last_observed_at": "2026-09-08T12:00:00Z",
+        "policy": {
+          "id": "policy-a",
+          "version": 4
+        },
+        "rate_card": {
+          "id": "rate-a",
+          "version": 2
+        },
+        "strata": [
+          {
+            "guardrails": {
+              "budget": {
+                "rule": {
+                  "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+                  "rule_id": "guard-budget",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "comparability": {
+                "rule": {
+                  "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+                  "rule_id": "guard-comparability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "coverage_and_sample_eligibility": {
+                "rule": {
+                  "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+                  "rule_id": "guard-coverage_and_sample_eligibility",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "freshness": {
+                "rule": {
+                  "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+                  "rule_id": "guard-freshness",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "privacy": {
+                "rule": {
+                  "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+                  "rule_id": "guard-privacy",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "quality": {
+                "rule": {
+                  "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+                  "rule_id": "guard-quality",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reliability": {
+                "rule": {
+                  "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+                  "rule_id": "guard-reliability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reversion_or_defect": {
+                "rule": {
+                  "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+                  "rule_id": "guard-reversion_or_defect",
+                  "version": 1
+                },
+                "state": "pass"
+              }
+            },
+            "stratum_id": "core",
+            "work_items": [
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-guarded",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "guarded-attempt-0-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "3",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "a8043937195974e382bc11dc0aae2817e795f2b9c7c73e14f5c5e19fb38eeaf5",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "4",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "b29a33e5d8bc5ea1932239991b6092d59db55bf22eb7ca7ad99423f6767d1c8a",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 100,
+                    "latency_ms": "30",
+                    "occurred_at": "2026-09-01T12:00:00Z",
+                    "output_tokens": 20,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-guarded",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-guarded",
+                    "source_digest": "32a84f39f45c7448234e5c989955dc0beb076bcbe9a918c23c19c7da5dd85c6e",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "2a462e11ff35e8d93fccaf830c21924d1b2954afe761b55d0225cdf1fc5cc8f8",
+                "work_item_id": "guarded-work-0"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-guarded",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "guarded-attempt-1-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "4",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "7b8645896090a67d3d9c7c2512e0acc79a775429743eff8161bb3f818c2d9e0d",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "5",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "71f533b411b9387437fa7073cc82866363142d236dbd38e0f0421e94d4fe4a97",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 101,
+                    "latency_ms": "40",
+                    "occurred_at": "2026-09-02T12:00:00Z",
+                    "output_tokens": 21,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-guarded",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-guarded",
+                    "source_digest": "cb4ebd3961775c7df5da922623e7bf7d0471a7e6d449fa0c00e9654f5fa28241",
+                    "status": "succeeded"
+                  },
+                  {
+                    "actual_model": {
+                      "model_id": "model-guarded",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "guarded-attempt-1-1",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "1",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "39ab4217f0ae3e95ee24c5c15b7235f761e6407aedf468b3cc260e1362485a52",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "2",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "b5cdea9cd035ae63cf0ff1edce470914cca83092edcfa5ee5c5b2a4267e5db37",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": true,
+                    "input_tokens": 101,
+                    "latency_ms": "50",
+                    "occurred_at": "2026-09-02T12:00:01Z",
+                    "output_tokens": 21,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-guarded",
+                    "retry_ordinal": 1,
+                    "routed_model_id": "routed-model-guarded",
+                    "source_digest": "f4fbda6589676f6efbfd91fdcfc1e9d13b224b09d82b71d91f4bfa850a75f4bc",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "e5e21f27df92cce5df3bee127f691322287d4545abdcc464e5eedfbb3f4c4341",
+                "work_item_id": "guarded-work-1"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-guarded",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "guarded-attempt-2-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "3",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "9a8b64ef02260fdbfc0470dacb1feb03cda43724d6302ed98b1d5d91f9d7b8d4",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "4",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "806efa8b290b5e60082cffa87f372857df3b07b670d22a89dd59f5a03c24ae86",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 102,
+                    "latency_ms": "30",
+                    "occurred_at": "2026-09-03T12:00:00Z",
+                    "output_tokens": 22,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-guarded",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-guarded",
+                    "source_digest": "f6188253b6fb01ff7a55714fbb4344fe5c28354a90088abacfedb50beb78b0b2",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "2759806c0be65e91bb89e729d0a37e7e05e919cced4261b7c47d49f338903537",
+                "work_item_id": "guarded-work-2"
+              }
+            ]
+          },
+          {
+            "guardrails": {
+              "budget": {
+                "rule": {
+                  "digest": "c53b6a1b2e922fc4fab423d9b64953d0ff7256bb7fcdf2636ef1f89906e8045b",
+                  "rule_id": "guard-budget",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "comparability": {
+                "rule": {
+                  "digest": "22d56b056a9a0253345a04ebaf5126741f982af659692bd5b9001d62b56482e3",
+                  "rule_id": "guard-comparability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "coverage_and_sample_eligibility": {
+                "rule": {
+                  "digest": "de0bab5a56420db6e44a9dba862b83e7f4a7c516c20de337d97ba83d4d10aabd",
+                  "rule_id": "guard-coverage_and_sample_eligibility",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "freshness": {
+                "rule": {
+                  "digest": "4e7f6316836cb3cf9261db1727fefd42493ee0eb0ec9dbe79011a40d85ce7ff3",
+                  "rule_id": "guard-freshness",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "privacy": {
+                "rule": {
+                  "digest": "65376cd3b5956ff1d1717275c5c6dffef449a5945e0367dd30a762596b8a12c5",
+                  "rule_id": "guard-privacy",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "quality": {
+                "rule": {
+                  "digest": "cc4d1eab1c10dc98394ff545d0457b192114427fc613956bb61426982e02d446",
+                  "rule_id": "guard-quality",
+                  "version": 1
+                },
+                "state": "fail"
+              },
+              "reliability": {
+                "rule": {
+                  "digest": "ec038d4cf310a74f35d13583d9dadee964595cc0861bf94c750d1ef00dfaf629",
+                  "rule_id": "guard-reliability",
+                  "version": 1
+                },
+                "state": "pass"
+              },
+              "reversion_or_defect": {
+                "rule": {
+                  "digest": "61af292ccfd84c0dbf84fbe3b5406f288f6cc40a3e9bc250194e1c7813d39f2e",
+                  "rule_id": "guard-reversion_or_defect",
+                  "version": 1
+                },
+                "state": "pass"
+              }
+            },
+            "stratum_id": "edge",
+            "work_items": [
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-guarded",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "guarded-attempt-3-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "4",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "273f053cadb53075aa19194bcfc6321596ec191b15ef7f6fba3d54c8765fe6cb",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "5",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "4cf6e46a204af7438dca4d72ec4c695e73fd3e86261d285c9df0b449d50029e6",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 103,
+                    "latency_ms": "40",
+                    "occurred_at": "2026-09-04T12:00:00Z",
+                    "output_tokens": 23,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-guarded",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-guarded",
+                    "source_digest": "ef19491301a25c5fbd769d947f5a4395767f6a378f6783ab2c4351465ed9d65b",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "1402e6a2c090f3ae0a049bbf55e0037f4ac9488a8c7d3769eaa59823ef209d1f",
+                "work_item_id": "guarded-work-3"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-guarded",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "guarded-attempt-4-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "3",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "4d5bae09ed361b57e8006d9c5bada77ee89cf69693dcf52e5d4286b58cfc91e1",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "4",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "355b88902398007f6f81a2878a4695d4449ab4ca7f1cd6e61c236e7c78659a39",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 104,
+                    "latency_ms": "30",
+                    "occurred_at": "2026-09-05T12:00:00Z",
+                    "output_tokens": 24,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-guarded",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-guarded",
+                    "source_digest": "92dd993a729c7a3a95de928547528c7e9b350bbb5a867347e5db2d706ccff273",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "6402f07465a9122938a1759b6bdd5b076157ec0e26472bf0e6a328875a430a90",
+                "work_item_id": "guarded-work-4"
+              },
+              {
+                "accepted": true,
+                "attempts": [
+                  {
+                    "actual_model": {
+                      "model_id": "model-guarded",
+                      "model_version": "2026-08-01",
+                      "provider_id": "provider-a"
+                    },
+                    "attempt_id": "guarded-attempt-5-0",
+                    "cached_input_tokens": 10,
+                    "cost_components": [
+                      {
+                        "amount": "4",
+                        "basis": "provider_final",
+                        "currency": "USD",
+                        "provenance_digest": "820223b523fc21d234f82de29873d116f38052a9b246ff30b9af51f5dc11ccff",
+                        "rate_card": null
+                      },
+                      {
+                        "amount": "5",
+                        "basis": "configured_rate_card_estimate",
+                        "currency": "USD",
+                        "provenance_digest": "dff122078da0c6805ebb697983148b2cf5ab2cbded68fe43b8b16ec6026770c6",
+                        "rate_card": {
+                          "id": "rate-a",
+                          "version": 2
+                        }
+                      }
+                    ],
+                    "fallback": false,
+                    "input_tokens": 105,
+                    "latency_ms": "40",
+                    "occurred_at": "2026-09-06T12:00:00Z",
+                    "output_tokens": 25,
+                    "reasoning_tokens": 5,
+                    "requested_model_id": "requested-model-guarded",
+                    "retry_ordinal": 0,
+                    "routed_model_id": "routed-model-guarded",
+                    "source_digest": "65a5e3f764e3d8e4991bdca3e7045cdda63913f7562977daa912829fbee4e657",
+                    "status": "succeeded"
+                  }
+                ],
+                "source_digest": "3b1095328f7a160ed6bfa10e086bd35e1d2aba0b20b4e144473d3a087a1cb19b",
+                "work_item_id": "guarded-work-5"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "decision_owner_id": "portfolio-owner",
+    "eligibility_policy": {
+      "declared_at": "2026-08-01T00:00:00Z",
+      "maximum_staleness_seconds": 172800,
+      "minimum_coverage": "0.8",
+      "minimum_sample": 4,
+      "required_strata": [
+        "core",
+        "edge"
+      ],
+      "rule": {
+        "digest": "58f88786706379fa4e0401a487b0c604c27b5238f47af91b7a8ba22de3a1f227",
+        "rule_id": "scorecard-eligibility",
+        "version": 2
+      }
+    },
+    "evaluated_at": "2026-09-09T00:00:00Z",
+    "expires_at": "2026-10-10T00:00:00Z",
+    "generated_at": "2026-09-10T00:00:00Z",
+    "metric_rules": {
+      "aggregation": {
+        "digest": "3ae670bcb5542d9792b364d43882d4e823e396b0b436c5ade6ba8e7177e0674c",
+        "rule_id": "clustered-aggregation",
+        "version": 1
+      },
+      "cost_per_accepted": {
+        "digest": "047b147972baef94ef75f3247ed7bfce6207184f154757b4506494a007070121",
+        "rule_id": "quality-cost",
+        "version": 3
+      },
+      "optimization_lift": {
+        "digest": "505cb70c8b881098c3a897defa55a9a7bfcb0d8e763edd313f8ba0d5e0e01774",
+        "rule_id": "optimization-lift",
+        "version": 2
+      },
+      "spend_coverage": {
+        "digest": "3e4847ed14ca4787109b3ea3b8cd4b0a0b74a8b6b93faa8ccdbd42a1f0b67157",
+        "rule_id": "spend-coverage",
+        "version": 2
+      }
+    },
+    "organization_id": "acme",
+    "review_after": "2026-10-15T00:00:00Z",
+    "schema_id": "hormuz.scorecard-evaluation-input",
+    "schema_version": 1,
+    "scorecard_id": "scorecard-use-case-a",
+    "supersedes_version": null,
+    "version": 1,
+    "window": {
+      "end_at": "2026-09-08T00:00:00Z",
+      "start_at": "2026-09-01T00:00:00Z"
+    },
+    "work_scope": {
+      "version": 3,
+      "work_scope_id": "use-case-a"
+    }
+  }
+}
