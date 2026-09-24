@@ -133,6 +133,7 @@ class PolicyAnalysisTests(unittest.TestCase):
         self.assertTrue(preview.baseline_decision.allowed)
         self.assertFalse(preview.candidate_decision.allowed)
         self.assertEqual(preview.usage_basis, "current")
+        self.assertRegex(preview.usage_snapshot_sha256, r"\A[0-9a-f]{64}\Z")
         self.assertEqual(preview.evaluated_at, evaluated_at)
         self.assertEqual(preview.usage_period.starts_at.isoformat(), "2026-08-01T00:00:00+00:00")
         self.assertEqual(preview.usage_period.ends_before.isoformat(), "2026-09-01T00:00:00+00:00")

@@ -21,8 +21,8 @@ class FinanceCollectionRuntimePlanTests(unittest.TestCase):
     def test_candidate_is_verified_but_runtime_and_postgres_access_remain_gated(self):
         result = verifier.verify_finance_collection_runtime(ROOT, allow_successor_schema=True)
         self.assertEqual(result["status"], "finance_collection_runtime_candidate_verified")
-        self.assertEqual(result["current_sqlite_schema_version"], 18)
-        self.assertEqual(result["current_postgresql_schema_version"], 23)
+        self.assertEqual(result["current_sqlite_schema_version"], 19)
+        self.assertEqual(result["current_postgresql_schema_version"], 24)
         self.assertTrue(result["collection_preflight_accepted"])
         self.assertFalse(result["provider_collection_runtime_accepted"])
         self.assertFalse(result["postgresql_collection_runtime_accepted"])

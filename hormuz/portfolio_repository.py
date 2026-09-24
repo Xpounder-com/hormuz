@@ -30,9 +30,11 @@ from .linear_repository import LinearConnectorRepository
 from .association_repository import AssociationRepository
 from .scorecard_repository import ScorecardRepository
 from .role_view_repository import PortfolioRoleViewRepository
+from .recommendation_repository import RecommendationRepository
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import (
     ROLE_VIEW_OPERATIONS,
+    RECOMMENDATION_OPERATIONS,
     PortfolioError,
     RESPONSE_BYTES,
     canonical,
@@ -342,6 +344,7 @@ class PortfolioRepositories:
     associations: AssociationRepository | None = None
     scorecards: ScorecardRepository | None = None
     views: PortfolioRoleViewRepository | None = None
+    recommendations: RecommendationRepository | None = None
 
     def authorize_operation(
         self, principal: PortfolioPrincipal, operation: str
@@ -349,6 +352,8 @@ class PortfolioRepositories:
         owner = (
             self.views
             if operation in ROLE_VIEW_OPERATIONS
+            else self.recommendations
+            if operation in RECOMMENDATION_OPERATIONS
             else self.associations
             if operation in {
                 "link_run", "list_links", "evaluate_association", "list_associations",
@@ -375,8 +380,9 @@ class PortfolioRepositories:
         owner = (
             self.views
             if operation in ROLE_VIEW_OPERATIONS
-            else
-            self.associations
+            else self.recommendations
+            if operation in RECOMMENDATION_OPERATIONS
+            else self.associations
             if operation in {"link_run", "list_links", "evaluate_association", "list_associations"}
             else self.outcomes
             if operation == "list_outcomes"
@@ -436,6 +442,13 @@ def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, 
             read_only=read_only,
         ),
         scorecards=scorecards,
+        recommendations=RecommendationRepository(
+            config,
+            dsn=registry._dsn,
+            environ=environ,
+            connection_pool=connection_pool,
+            read_only=read_only,
+        ),
     )
     repositories.views = PortfolioRoleViewRepository(
         config,

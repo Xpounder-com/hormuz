@@ -248,7 +248,7 @@ class SQLitePublishedLinearTransitionTests(unittest.TestCase):
         self.seeded = predecessor_call(self.request(mode="seed"))
         self.assertEqual(self.seeded["status"], "ready")
         self.published = sqlite_snapshot(self.path)
-        self.assertEqual(UsageStore.schema_version, 18)
+        self.assertEqual(UsageStore.schema_version, 19)
         version_patch = mock.patch.object(UsageStore, "schema_version", 13)
         version_patch.start()
         self.addCleanup(version_patch.stop)
@@ -381,7 +381,7 @@ class PostgresPublishedLinearTransitionTests(PostgresTestCase):
         self.seeded = predecessor_call(self.request(mode="seed"))
         self.assertEqual(self.seeded["status"], "ready")
         self.published = self.snapshot()
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 23)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 24)
         version_patch = mock.patch.object(
             postgres_module, "POSTGRES_SCHEMA_VERSION", 18
         )

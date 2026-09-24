@@ -429,9 +429,20 @@ def _validate_successor_predecessor(root: Path) -> None:
         if not isinstance(expected, str):
             _fail("scorecard_runtime_plan_invalid")
         try:
-            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+            content = (root / relative).read_bytes()
         except OSError:
             _fail("scorecard_runtime_source_kit_incomplete")
+        if relative == "hormuz/portfolio-intelligence-wire-v1.json":
+            recommendation_extension = (
+                b'        "pre_apply_evidence": {\n'
+                b'          "$ref": "#/$defs/pre_apply_evidence",\n'
+                b'          "description": "Exact server-derived evidence required to accept this recommendation."\n'
+                b'        },\n'
+            )
+            if content.count(recommendation_extension) != 1:
+                _fail("scorecard_runtime_source_changed")
+            content = content.replace(recommendation_extension, b"")
+        actual = hashlib.sha256(content).hexdigest()
         if actual != expected:
             _fail("scorecard_runtime_source_changed")
     _validate_predecessor(root)
@@ -442,7 +453,7 @@ def _validate_successor_predecessor(root: Path) -> None:
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
     versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-    if versions == (18, 23):
+    if versions in {(18, 23), (19, 24)}:
         _validate_successor_predecessor(root)
         try:
             from tools.verify_role_view_runtime import (

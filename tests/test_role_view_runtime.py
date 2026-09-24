@@ -37,7 +37,7 @@ class SQLitePortfolioRoleViewTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.config = role_view_config(self.root)
-        self.assertEqual(UsageStore.schema_version, 18)
+        self.assertEqual(UsageStore.schema_version, 19)
         UsageStore(self.config.database_path)
         self.repositories = create_portfolio_repository(self.config)
         self.service = PortfolioService(self.config, self.repositories)

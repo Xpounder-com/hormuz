@@ -509,7 +509,7 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 18)
+        self.assertEqual(UsageStore.schema_version, 19)
         # Build the exact v11 predecessor with the still-supported migration
         # code, then let the current binary perform the real 11-to-12 step.
         with (

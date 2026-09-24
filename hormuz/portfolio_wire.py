@@ -27,6 +27,7 @@ ATTRIBUTIONS = PREFIX + "/attributions"
 OUTCOMES = PREFIX + "/outcomes"
 RUN_WORK_LINKS = PREFIX + "/run-work-links"
 ASSOCIATIONS = PREFIX + "/associations"
+RECOMMENDATIONS = PREFIX + "/recommendations"
 ROLE_VIEWS = PREFIX + "/views"
 ROLE_VIEW_ROUTES = {
     ROLE_VIEWS + "/finance/budgets": "list_finance_budgets",
@@ -35,6 +36,11 @@ ROLE_VIEW_ROUTES = {
     ROLE_VIEWS + "/team/scorecards": "list_team_scorecards",
 }
 ROLE_VIEW_OPERATIONS = frozenset(ROLE_VIEW_ROUTES.values())
+RECOMMENDATION_OPERATIONS = frozenset({
+    "list_recommendations",
+    "show_recommendation",
+    "decide_recommendation",
+})
 ERRORS = {
     "invalid_request": (400, "invalid_shape"),
     "unauthenticated": (401, "unauthorized_scope"),
@@ -220,6 +226,18 @@ def route(method: str, path: str) -> tuple[str, str | None]:
         return ("list_links" if method == "GET" else "link_run", None)
     if path == ASSOCIATIONS and method in {"GET", "POST"}:
         return ("list_associations" if method == "GET" else "evaluate_association", None)
+    if path == RECOMMENDATIONS and method == "GET":
+        return "list_recommendations", None
+    recommendation = re.fullmatch(
+        re.escape(RECOMMENDATIONS)
+        + r"/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(/decisions)?",
+        path,
+    )
+    if recommendation:
+        if method == "GET" and recommendation[2] is None:
+            return "show_recommendation", recommendation[1]
+        if method == "POST" and recommendation[2] == "/decisions":
+            return "decide_recommendation", recommendation[1]
     if path == OUTCOMES and method == "GET":
         return "list_outcomes", None
     if path == ATTRIBUTIONS and method in {"GET", "POST"}:
@@ -245,14 +263,20 @@ def query_parameters(raw: str, operation: str) -> dict[str, Any]:
     except (ValueError, UnicodeError):
         raise PortfolioError("invalid_request") from None
     association_read = operation in {"list_links", "list_associations"}
-    allowed = {"version"} if operation == "show_scope" else {"limit", "cursor", "start_at", "end_at", "work_scope_id"}
+    singleton = operation in {"show_scope", "show_recommendation"}
+    allowed = {"version"} if singleton else {"limit", "cursor", "start_at", "end_at", "work_scope_id"}
     if operation in {"list_bindings", "list_outcomes"}:
         allowed.add("connector_id")
     if association_read:
         allowed.update({"connector_id", "source_event_id", "request_attempt_id", "state"})
+    if operation == "list_recommendations":
+        allowed.add("evidence_level")
+    if operation == "decide_recommendation":
+        allowed = set()
     if operation not in {
         "show_scope", "list_scopes", "list_bindings", "list_attributions",
         "list_outcomes", "list_links", "list_associations", *ROLE_VIEW_OPERATIONS,
+        *RECOMMENDATION_OPERATIONS,
     }:
         allowed = set()
     result = {}

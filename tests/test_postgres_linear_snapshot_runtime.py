@@ -96,14 +96,14 @@ class PostgresLinearSnapshotRuntimeTests(PostgresTestCase):
             now_ms=now_ms,
         )
 
-    def test_schema23_restricted_commit_replay_rls_audit_and_no_outcome(self):
-        self.assertEqual(POSTGRES_SCHEMA_VERSION, 23)
+    def test_schema24_restricted_commit_replay_rls_audit_and_no_outcome(self):
+        self.assertEqual(POSTGRES_SCHEMA_VERSION, 24)
         status = verify_postgres_schema(
             self.runtime_dsn,
             schema=self.schema,
             runtime_role=self.runtime_role,
         )
-        self.assertEqual((status.version, status.complete), (23, True))
+        self.assertEqual((status.version, status.complete), (24, True))
 
         original_raw = encoded(snapshot_payload())
         original_headers = snapshot_headers(original_raw)

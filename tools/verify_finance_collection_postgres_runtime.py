@@ -71,6 +71,7 @@ def verify(root=ROOT, *, predecessor_archive=None):
             (16, 21),
             (17, 22),
             (18, 23),
+            (19, 24),
         }
         or _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(17) != EXPECTED_ACL
         or POSTGRES_FINANCE_COLLECTION_RUNTIME_ENABLED is not True

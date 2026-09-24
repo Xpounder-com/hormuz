@@ -60,6 +60,14 @@ current management report. Its accepted evidence remains a prerequisite for
 the open finance, association, scorecard, API, recommendation, and pilot gates;
 it does not make the v1.3.0 portfolio milestone complete.
 
+The issue #224 source candidate is specified in
+[Portfolio policy recommendations](PORTFOLIO_RECOMMENDATIONS.md). It adds a
+provider-free, review-only recommendation kernel, audited administrator reads
+and decisions, explicit expiry and drift handling, and separate application
+evidence. Source, migration, and package checks for that candidate remain
+feature evidence; they do not close #214, authorize the #225 external gate, or
+establish a v1.3.0 release.
+
 Every issue inherits the release gates in #226: authorization before access,
 strict versioned schemas, metadata-only persistence and evidence, tenant
 isolation, bounded resources, additive v1 compatibility, migration and

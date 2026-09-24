@@ -103,6 +103,7 @@ EXPECTED_OWNERS = {
             "test_schema19_bootstrap_preserves_reviewed_linear_acl_boundary",
             "test_schema20_bootstrap_preserves_reviewed_linear_snapshot_acl_boundary",
             "test_schema21_bootstrap_preserves_reviewed_association_acl_boundary",
+            "test_schema24_bootstrap_preserves_reviewed_recommendation_acl_boundary",
         },
     ),
     "test_postgres_linear_connector_runtime": (
@@ -112,7 +113,7 @@ EXPECTED_OWNERS = {
             "test_binding_version_cannot_roll_back_after_successor_commit",
             "test_concurrent_replay_commits_one_receipt",
             "test_runtime_verifier_rejects_missing_cardinality_trigger",
-            "test_schema23_restricted_commit_replay_rls_and_content_exclusion",
+            "test_schema24_restricted_commit_replay_rls_and_content_exclusion",
             "test_staged_failure_and_storage_outage_publish_nothing",
         },
     ),
@@ -122,7 +123,7 @@ EXPECTED_OWNERS = {
             "test_concurrent_pages_commit_one_context_and_all_receipts",
             "test_cross_capture_sequence_and_identity_are_storage_enforced",
             "test_runtime_verifier_rejects_missing_retention_identity_trigger",
-            "test_schema23_restricted_commit_replay_rls_audit_and_no_outcome",
+            "test_schema24_restricted_commit_replay_rls_audit_and_no_outcome",
             "test_snapshot_context_retention_is_fk_bound_and_auditable",
             "test_snapshot_page_set_consistency_is_storage_enforced",
         },
@@ -136,6 +137,17 @@ EXPECTED_OWNERS = {
             "test_policy_bootstrap_cannot_drift_and_non_administrator_cannot_change_policy",
             "test_explicit_oidc_administrator_is_separate_from_runtime_entitlement",
             "test_policy_roles_are_separated_and_break_glass_requires_admin_loss",
+        },
+    ),
+    "test_postgres_recommendation_runtime": (
+        "PostgresRecommendationRuntimeTests",
+        {
+            "test_restricted_runtime_replay_decision_local_receipt_boundary_and_rls",
+            "test_managed_policy_application_uses_authoritative_activation_receipt",
+            "test_concurrent_conflicting_acceptance_has_one_winner",
+            "test_drift_expiry_and_weak_evidence_fail_closed",
+            "test_post_acceptance_scorecard_drift_invalidates_application",
+            "test_schema24_shape_acl_and_immutable_migration",
         },
     ),
     "test_postgres_custody_control": (
@@ -252,7 +264,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 128)
+        self.assertEqual(len(owned), 135)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

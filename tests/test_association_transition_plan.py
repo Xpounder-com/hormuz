@@ -48,7 +48,7 @@ class AssociationTransitionPlanTests(unittest.TestCase):
         self.assertTrue(result["runtime_implemented"])
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
-            (18, 23),
+            (19, 24),
         )
 
     def test_duplicate_plan_member_is_rejected(self):
