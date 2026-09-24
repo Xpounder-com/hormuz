@@ -7,8 +7,8 @@
   "gate_issue": 214,
   "predecessor": {
     "path": "docs/linear-runtime-plan-v1.json",
-    "file_sha256": "0440419441a88b9405bf35c986edf91c02ba80fba99203df63d309e2fb9603e2",
-    "canonical_sha256": "ad8f6448ea791a1890d67a6a8f1dc76684bbf94c1e86df7f329e9700dc59fbfe",
+    "file_sha256": "f401bb88c13e084c3b3c286a4366eaa94e948408735392afb96b376b404da2e6",
+    "canonical_sha256": "6c3f6782928e4181964b45cda6cee2d3272f2fda81c70c78ed539f520af572aa",
     "source_commit": "5ccadb542f96238b654b22c9a8f34b96673fad71"
   },
   "transitions": {
@@ -123,7 +123,7 @@
     "tests/test_sqlite_budget_transition.py": "bac0d8e58e3ed19dbc02192752af1f4e1410625eb2d56458e0cb2935d9f98cf9",
     "tests/test_sqlite_finance.py": "d3cf60c10ddf2a9ca017e2f32e6508439dcf8e1667633cb81fd4cce548e24f41",
     "tests/test_sqlite_finance_collection_transition.py": "f904939d200433078bdf87a3bbb88ad7431507f4745b29616a96dbe711ad81be",
-    "tests/test_sqlite_finance_native_attempt_transition.py": "4b7a162bda85229b0220b51b2757f47761f305db9dd8f54fdaebe547b938387e",
+    "tests/test_sqlite_finance_native_attempt_transition.py": "a17a266bcc1b17656612ddf982423c23b6e019bfc754130a5bd40d747340e656",
     "tests/test_sqlite_finance_transition.py": "7190847aea134469ff9095b73e31e72908cd9d6322c3089c1f4c4c28573dd76d",
     "tests/test_sqlite_outcome_transition.py": "75e8a944d5eeb243754ddcdc9669afcd1b5776ad8be0fd5d728e7a474f35d50c",
     "tests/test_sqlite_registry_transition.py": "90175eadf6931ba71be5b006658aa2430bb3e59bab0f971b46680b436200e6e1",
@@ -133,7 +133,7 @@
     "tools/verify_finance_collection_postgres_runtime.py": "2cb3e815bd708f17be7d2ecee85ef7837d740ff62cb5604a78caf23abca1771f",
     "tools/verify_finance_collection_runtime.py": "7fc7f9f42c2cfa266517d8e78988a6a2879fe325e73fbb189d1d81aec93c003a",
     "tools/verify_finance_native_attempt_transition_plan.py": "ad733bc4883e7d07379176f73cd20b74f27d36217ba2c2bbf27b8ff855897b44",
-    "tools/verify_linear_runtime_plan.py": "4d99d7f83d9816aabdff51c280646da3426006d8ee1a4f761a98eb1ec8c607b4",
+    "tools/verify_linear_runtime_plan.py": "903d089e21612a87875cddb6c80fe96b20c32b4769579cfc1a286038cc494b14",
     "tools/verify_linear_transition_plan.py": "40b6a840a21d89491e9afa517ce55d10f8e796e860bbfd71df7606b847f59fa6"
   },
   "gates": {

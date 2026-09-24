@@ -287,12 +287,10 @@ class SQLiteFinanceNativeAttemptPredecessorTests(unittest.TestCase):
 
     def test_post_checkpoint_write_requires_forward_recovery(self):
         self.probe()
-        # The candidate now includes the v16 association successor on top of
-        # the v15 Linear reconciliation migration.
-        # Keep the write/recovery probe on the candidate binary rather than
-        # pretending it is still the v11 intermediate.
-        with mock.patch.object(UsageStore, "schema_version", 16):
-            attempt_id = _candidate_write(self.path)
+        # Keep the write/recovery probe on the current candidate binary rather
+        # than pinning a historical intermediate schema. Successor migrations
+        # must not require rewriting this retained recovery proof.
+        attempt_id = _candidate_write(self.path)
         after_write = sqlite_snapshot(self.path)
         self.assertEqual(
             len(after_write["rows"]["gateway_finance_attempt_evidence"]),
@@ -306,8 +304,7 @@ class SQLiteFinanceNativeAttemptPredecessorTests(unittest.TestCase):
         restored = self.root / "forward-recovered.sqlite3"
         sqlite_backup(self.path, retained)
         sqlite_backup(retained, restored)
-        with mock.patch.object(UsageStore, "schema_version", 16):
-            UsageStore(restored, read_only=True).verify_ready()
+        UsageStore(restored, read_only=True).verify_ready()
         self.assertEqual(sqlite_snapshot(restored), after_write)
         self.assertEqual(
             finance_native_predecessor_call(
