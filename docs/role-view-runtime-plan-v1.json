@@ -149,7 +149,7 @@
     "tests/test_linear_runtime_plan.py": "3766e439dbd0523cd517b7de19d7bc47c2992c216d23af67ccdb47ca709492bd",
     "tests/test_linear_transition_preflight.py": "bbc55033c141f4c2d570684a49fa2df3a883223ed031da37d209be56e3407444",
     "tests/test_outcome_schema.py": "d2460af3feab718f3d81d4b2887092da8926bd3de4709fd85630e1fb1f60dc09",
-    "tests/test_postgres_budget.py": "2f7e4a64a76267e673f6baaf29d39023b973ba2436d2efa3965879b146b7e22c",
+    "tests/test_postgres_budget.py": "f19364dbbfbdf215ca7631654ec16a7bc4e00f1295923797b719be183272a9ed",
     "tests/test_postgres_finance.py": "c2da9deb40bd74432cb62c55f54d7ce75b2400cceff59897fd30954bd8c22b53",
     "tests/test_postgres_finance_collection_runtime_transition.py": "f2dc21ff9a32599e68ccae9c69f63d2482cdd87356e1eafae98af1b8baf60a5c",
     "tests/test_postgres_linear_connector_runtime.py": "2a219fddd62b13dd5422d0f0a29a251ff428e4327b362e2adf0127e0340fa825",
