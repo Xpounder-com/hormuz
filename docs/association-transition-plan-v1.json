@@ -1,0 +1,189 @@
+{
+  "schema_id": "hormuz.association-transition-plan",
+  "schema_version": 1,
+  "stage": "assigned_successor_transition_preflight",
+  "target_release": "1.3.0",
+  "feature_issue": 221,
+  "gate_issue": 214,
+  "base_main_commit": "8a2da39f03af3dd8ed2160b2b95286d829fdb40d",
+  "base_main_ci": "https://github.com/Xpounder-com/hormuz/actions/runs/35940004002",
+  "published_predecessor": {
+    "release": "v1.2.0",
+    "source_commit": "d854a5a453fcbe20cb3f4c1e261e146f2da93855",
+    "source_asset": "hormuz-1.2.0.tar.gz",
+    "source_sha256": "257c99b99af891838a1a0f1ba77bcc9c6baa74fba586d99381adab9f7b1af909",
+    "wheel_asset": "hormuz-1.2.0-py3-none-any.whl",
+    "wheel_sha256": "5519df553d4a9c330e6cf1fa822d6f8efc956e8eb5a7ac178eee01a89ffaa2bb",
+    "sqlite_schema_version": 12,
+    "postgresql_schema_version": 17
+  },
+  "integrated_baseline": {
+    "commit": "8a2da39f03af3dd8ed2160b2b95286d829fdb40d",
+    "package_version": "1.2.0",
+    "sqlite_schema_version": 15,
+    "postgresql_schema_version": 20,
+    "postgresql_acl_boundary": {
+      "entry_count": 222,
+      "sha256": "cd86c395bea316873e11e175563cbf31563212c45ca6cb6b6fb066f2f8f1e64d"
+    },
+    "status": "linear_snapshot_and_reconciliation_runtime_merged_and_exact_main_ci_green"
+  },
+  "transitions": {
+    "sqlite": {
+      "from": 15,
+      "to": 16
+    },
+    "postgresql": {
+      "from": 20,
+      "to": 21
+    }
+  },
+  "version_policy": "assigned_next_versions_for_association_only_no_bundled_migration_replan_if_consumed_before_implementation",
+  "frozen_file_sha256": {
+    "docs/ASSOCIATION_LINKAGE_PREFLIGHT.md": "fafc56f14077b74aec6baf5aa5a93b0be571254fb00ce6ea590a0d3dec728155",
+    "docs/portfolio-extension-contract-v1.json": "8ff2069fc5dec957a9ec1980087c94fbc259f61f5b07ec71f51357af8453fda4",
+    "docs/portfolio-intelligence-wire-v1.json": "26ef36b12d475d5b8354e45abfc92c76187ca6ff5aafb4b0ebce6fab439feb80",
+    "hormuz/portfolio-attribution-wire-v1.json": "999c62ac8d3dde96b4fd961632cba0e2b196e2a9bce62d9693757c256ed8e3f4",
+    "hormuz/portfolio-outcome-wire-v1.json": "0716c5483b6be72736d357f4ff318c89eeac10fa3f3ae86d3f3bdb9eb99f53a2",
+    "docs/association-successor-schema-proposal.sqlite.sql": "3bb9e4cb5db5be29fee372c5cc9ffed4ae848e2b1a88e94f499043df86dbee2b",
+    "docs/association-successor-schema-acl-proposal.sql": "d43d7d83474eb87641668328828494fb36f1b46876704ae25d7d099f2ccf81ad"
+  },
+  "proposed_storage": {
+    "status": "review_only_test_only_DDL_not_bundled_runtime_schema",
+    "tables": [
+      "portfolio_association_audit_events",
+      "portfolio_run_work_link_events",
+      "portfolio_run_work_link_idempotency",
+      "portfolio_run_outcome_association_events",
+      "portfolio_run_outcome_association_cursors"
+    ],
+    "append_only": true,
+    "tenant_key": "organization_id_on_every_primary_and_foreign_key",
+    "explicit_link_identity": "request_attempt_attribution_connector_exact_source_event_external_object_revision_scope_and_historical_binding",
+    "correction_model": "single_root_and_single_successor_per_link_or_association_event_no_in_place_rewrite",
+    "rule_window_identity": "non_null_rule_id_version_window_digest_bounds_evaluation_as_of_and_snapshot_sequence",
+    "idempotency_identity": "tenant_actor_key_plus_versioned_domain_separated_HMAC_of_canonical_request",
+    "cursor_identity": "opaque_cursor_plus_authority_and_filter_digests_no_authority_or_filter_payload_storage",
+    "raw_payload_storage": false,
+    "free_text_storage": false,
+    "credentials_or_credential_hashes": false,
+    "audit": "future_runtime_must_extend_the_finite_commit_chain_source_union_in_the_same_transaction",
+    "proposal_limit": "column_constraint_RLS_and_ACL_review_surface_only_not_exact_runtime_acceptance"
+  },
+  "association_rules": {
+    "eligible_evidence": "one_explicit_tenant_qualified_link_with_exact_attempt_attribution_historical_binding_connector_source_event_object_and_verified_revision",
+    "zero_candidates": "unmatched",
+    "one_candidate": "associated",
+    "multiple_candidates": "ambiguous",
+    "unsupported_tombstoned_or_out_of_policy": "excluded",
+    "temporal_or_scope_only_guessing": false,
+    "production_evidence_ceiling": "associated",
+    "authoritative_revision": "connector_approved_revision_order_only_equal_or_incomparable_conflicts_remain_ambiguous",
+    "corrections": "append_superseding_events_only"
+  },
+  "accounting": {
+    "attempt_grain": "unique_request_attempt_within_one_versioned_work_scope",
+    "outcome_grain": "unique_external_work_object_at_selected_authoritative_snapshot",
+    "cost_double_counting": false,
+    "provider_reported_estimated_allocated_and_unavailable_cost_bases": "separate",
+    "undefined_denominator": "unavailable_never_numeric_zero",
+    "required_denominators": [
+      "eligible_attempts",
+      "priced_attempts",
+      "eligible_outcome_events",
+      "unique_work_objects",
+      "eligible_association_candidates",
+      "associated",
+      "unmatched",
+      "ambiguous",
+      "excluded",
+      "connector_health"
+    ]
+  },
+  "postgresql_acl": {
+    "tables": [
+      "portfolio_association_audit_events",
+      "portfolio_run_work_link_events",
+      "portfolio_run_work_link_idempotency",
+      "portfolio_run_outcome_association_events",
+      "portfolio_run_outcome_association_cursors"
+    ],
+    "runtime_privileges": [
+      "SELECT",
+      "INSERT"
+    ],
+    "row_level_security": "enabled_and_forced_organization_id_current_setting",
+    "mutation_guard": "statement_trigger_rejects_update_delete_truncate",
+    "public_privileges": [],
+    "grant_option": false,
+    "successor_complete_acl_boundary": {
+      "entry_count": 252,
+      "sha256": "a0296c1b3bdad58acfc2bd89c4c020fa6a0af75fba7ef895a798fb3ec4fcd3dc"
+    },
+    "measurement": "measured_twice_in_independent_clean_disposable_role_bound_schema_21_bootstraps_tenant_RLS_hides_rows_and_runtime_mutation_is_denied"
+  },
+  "required_transition_cases": {
+    "missing_successor_refusal": "populated_real_15_20_baseline_refuses_missing_16_21_without_change",
+    "ddl_failure_rollback_retry": "test_only_exact_proposal_DDL_failure_rolls_back_then_retry_applies_once",
+    "old_binary_partial_newer_refusal": "published_12_17_and_current_15_20_binaries_refuse_partial_or_newer_candidate_state",
+    "quiesced_old_pair_restore": "verified_zero_post_checkpoint_writes_restore_exact_published_app_config_database_pair_in_separate_destination_and_replay_original_receipts",
+    "post_checkpoint_forward_recovery": "candidate_witness_write_retained_in_separate_forward_restore_old_pair_never_overwrites_candidate",
+    "explicit_link_idempotency_and_CAS": "required_runtime_test_not_satisfied_by_transition_DDL",
+    "deterministic_association_replay": "required_runtime_test_not_satisfied_by_transition_DDL",
+    "late_conflict_retry_reopen_revert": "required_runtime_test_not_satisfied_by_transition_DDL",
+    "coverage_cost_and_content_scan": "required_runtime_test_not_satisfied_by_transition_DDL"
+  },
+  "matrix": {
+    "source_and_wheel": true,
+    "published_predecessor_required": true,
+    "sqlite_case_ids": [
+      "test_missing_association_successor_preserves_integrated_baseline",
+      "test_test_only_association_ddl_failure_rolls_back_and_retry_is_idempotent",
+      "test_published_and_current_binaries_refuse_partial_and_newer_without_repair",
+      "test_quiesced_published_pair_restore_replays_original_receipt",
+      "test_post_checkpoint_witness_requires_retained_forward_recovery"
+    ],
+    "postgresql_case_ids": [
+      "test_missing_association_successor_preserves_integrated_baseline",
+      "test_test_only_association_ddl_failure_rolls_back_and_retry_is_idempotent",
+      "test_published_and_current_binaries_refuse_partial_and_newer_without_repair",
+      "test_quiesced_published_pair_restore_replays_original_receipt",
+      "test_post_checkpoint_witness_requires_retained_forward_recovery"
+    ],
+    "skips_allowed": false
+  },
+  "rollout": {
+    "preflight": "stop_all_writers_and_pools_verify_exact_old_pair_and_schema_assignment",
+    "migration": "serialized_existing_migrator_only_after_separate_exact_storage_and_wire_review",
+    "startup": "fresh_process_schema_shape_RLS_ACL_link_idempotency_association_and_audit_checks_before_traffic",
+    "downgrade": "no_in_place_downgrade_or_ledger_edit",
+    "restore": "old_pair_only_with_verified_zero_post_checkpoint_writes_otherwise_forward_recover",
+    "external_activation": "requires_separate_owner_selected_GitHub_and_Linear_test_organizations_and_connector_authority"
+  },
+  "gates": {
+    "association_design_preflight_accepted": true,
+    "schema_versions_assigned": true,
+    "transition_harness_implemented": true,
+    "published_predecessor_source_wheel_matrix_passed": true,
+    "successor_acl_measured": true,
+    "exact_storage_wire_and_audit_contract_frozen": false,
+    "explicit_link_runtime_proven": false,
+    "deterministic_association_runtime_proven": false,
+    "coverage_and_cost_vectors_proven": false,
+    "metadata_content_scans_proven": false,
+    "runtime_implemented": false,
+    "live_connectors_authorized": false,
+    "live_multi_source_evidence_verified": false,
+    "final_candidate_accepted": false,
+    "released": false
+  },
+  "nonclaims": [
+    "bundled_SQLite_16_or_PostgreSQL_21_migration",
+    "association_API_CLI_or_runtime",
+    "accepted_exact_link_or_association_wire",
+    "production_connector_authority_or_causal_proof",
+    "employee_ranking_or_work_content_storage",
+    "live_GitHub_or_Linear_evidence",
+    "v1_3_release_or_external_pilot"
+  ]
+}
