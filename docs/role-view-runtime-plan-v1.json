@@ -164,7 +164,7 @@
     "tests/test_scorecard_runtime.py": "515e0f34467f7ec2ea8d25bc5b7fc18bca77dfc4d2ebf493e8dd642b4e4da14f",
     "tests/test_scorecard_runtime_plan.py": "395401f67e6c588a248fff729a848aedc0357a2d1baccb6173799a63e71e365b",
     "tests/test_scorecard_transition.py": "419f9ab0d15541cebcd07ea26d7427f4378372a3333800816fb5dbb44cd5b7c3",
-    "tests/test_sqlite_attribution_transition.py": "cdb8ded1c5c7056dc621ef8e0aa84db96c74e8dbab4003d81b9f988f464d7770",
+    "tests/test_sqlite_attribution_transition.py": "a1f77f62751fb42fbdba741a8a2bd67f681d217bb84cb9dcb895459faee000ed",
     "tests/test_sqlite_budget_transition.py": "4eb8cfe5bad6b4ba3414fbace4490be7178f0e97fd6027d431f6a58ee704d300",
     "tests/test_sqlite_finance.py": "b159b837d61ea960178db3f223fd6faec7ef82f0aee79e804c04818ff326d641",
     "tests/test_sqlite_finance_collection_transition.py": "1ceeea3321e9c945a3aed95c1b1d4e0763a5509aed1840c7b2f91291295c1874",

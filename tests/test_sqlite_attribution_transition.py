@@ -26,6 +26,7 @@ from hormuz._linear_schema import TABLE_DDL as LINEAR_TABLES
 from hormuz._linear_snapshot_schema import TABLE_DDL as LINEAR_SNAPSHOT_TABLES
 from hormuz._association_schema import TABLE_DDL as ASSOCIATION_TABLES
 from hormuz._scorecard_schema import TABLE_DDL as SCORECARD_TABLES
+from hormuz._role_view_schema import TABLE_DDL as ROLE_VIEW_TABLES
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_wire import ATTRIBUTIONS, canonical
 if __package__:
@@ -81,7 +82,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         def apply(connection, version):
             self.assertIn(
                 version,
-                (6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
+                (6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18),
             )
             original(connection, version)
             if fail and version == 6:
@@ -107,6 +108,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
             | set(LINEAR_SNAPSHOT_TABLES)
             | set(ASSOCIATION_TABLES)
             | set(SCORECARD_TABLES)
+            | set(ROLE_VIEW_TABLES)
         )
         current["objects"] = [
             row for row in current["objects"]
@@ -116,7 +118,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         current["rows"]["hormuz_schema_migrations"] = [
             row
             for row in current["rows"]["hormuz_schema_migrations"]
-            if row[0] not in {6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}
+            if row[0] not in {6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}
         ]
         self.assertEqual(current, before)
 
@@ -124,12 +126,13 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         for _ in range(2):
             self.probe()
             current = sqlite_snapshot(self.path)
-            self.assertEqual(len(current["rows"]), 63)
+            self.assertEqual(len(current["rows"]), 65)
             self.assertTrue(all(not current["rows"][table] for table in ACCOUNT_BINDING_TABLES))
             self.assertTrue(all(not current["rows"][table] for table in LINEAR_TABLES))
             self.assertTrue(all(not current["rows"][table] for table in LINEAR_SNAPSHOT_TABLES))
             self.assertTrue(all(not current["rows"][table] for table in ASSOCIATION_TABLES))
             self.assertTrue(all(not current["rows"][table] for table in SCORECARD_TABLES))
+            self.assertTrue(all(not current["rows"][table] for table in ROLE_VIEW_TABLES))
             self.assert_prior_state_preserved()
 
     def test_sqlite_attribution_failure_and_retry_preserve_populated_registry(self):
