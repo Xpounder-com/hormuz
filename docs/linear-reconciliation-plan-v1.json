@@ -71,8 +71,8 @@
     "live_provider_export_verified": false
   },
   "source_sha256": {
-    ".github/workflows/ci.yml": "bf631972a7843fe867b61e7826121ce1a2e9b3cfcfd3974eeca5e23275a83267",
-    "MANIFEST.in": "2bf9c6702d012d10dc4510747688b0d534b5463691204e5b660bdead6488a5b5",
+    ".github/workflows/ci.yml": "92b8714107e69ebca4253c78b59b4f2502283debcbc37be8ecf015a4c0f010f1",
+    "MANIFEST.in": "d58047c0a4d512a2b593e2c5fd6f8c1c460414865bc7c6bddd9003df4c7ac815",
     "docs/DURABLE_DATA.md": "18fac5d7702a5ccf9d3f7534e241b600d13c44f7597e53d24fc903cc48db0445",
     "docs/LINEAR_CONNECTOR_RUNTIME.md": "a3722701587baa2f44ebd405b3d3bdbc67ad86e1b98b42a17ee2a8672f31656b",
     "docs/LINEAR_RECONCILIATION.md": "c831fb0b1513e2e04949b8f3e2902cd1c08cd4071eae965906ebd9180639f442",
@@ -128,7 +128,7 @@
     "tests/test_sqlite_outcome_transition.py": "75e8a944d5eeb243754ddcdc9669afcd1b5776ad8be0fd5d728e7a474f35d50c",
     "tests/test_sqlite_registry_transition.py": "90175eadf6931ba71be5b006658aa2430bb3e59bab0f971b46680b436200e6e1",
     "tests/test_store.py": "ff1402f75e303c81e7816fe7e66d33f0fd5ec98a7dc2ee30d80d57e28cebac0a",
-    "tools/verify_core_wheel.py": "489a48c8cd162a136a28c94da3f41f6861ecfc2d422e8d0563d9a76fe9186c41",
+    "tools/verify_core_wheel.py": "27274d7acba7395f966a5a259a0415bc92027500d022eb8becb3fda366fe5d59",
     "tools/verify_durable_data_inventory.py": "eaae4ecdeece7b876f1ee5e75fd78d7a64aee01164bbbe72b2055348340461a6",
     "tools/verify_finance_collection_postgres_runtime.py": "2cb3e815bd708f17be7d2ecee85ef7837d740ff62cb5604a78caf23abca1771f",
     "tools/verify_finance_collection_runtime.py": "7fc7f9f42c2cfa266517d8e78988a6a2879fe325e73fbb189d1d81aec93c003a",
