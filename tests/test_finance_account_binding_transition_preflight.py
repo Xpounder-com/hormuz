@@ -363,9 +363,10 @@ class SQLitePublishedAccountBindingPreflightTests(unittest.TestCase):
     def assert_old_rows(self, after, *, allow_appended=False):
         for table, rows in self.before["rows"].items():
             if table == "hormuz_schema_migrations":
+                predecessor_versions = {row[0] for row in rows}
                 actual = [
                     row for row in after["rows"][table]
-                    if row[0] not in {13, 14, 15}
+                    if row[0] in predecessor_versions
                 ]
             else:
                 actual = after["rows"][table]

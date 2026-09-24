@@ -120,7 +120,7 @@
     "tests/test_attribution_schema.py": "e6401e9ac03fd9dce09031056044b04348a91c6e277a4808d39ee6b7757b923b",
     "tests/test_budget_schema.py": "7f4553bffd0ab133f24756463513e0d1ab991dcbcf3dbf8a8082fe969f9d263d",
     "tests/test_durable_data_inventory.py": "1a7006cda510e7c9a181ef2873f91bd760c1d35fa2d4bdba2f6c7fcb1fd9ac13",
-    "tests/test_finance_account_binding_transition_preflight.py": "d7d647a0daf922cd14802239a23cacad38798103073e5903a502aa46717f1312",
+    "tests/test_finance_account_binding_transition_preflight.py": "2d22ea40bf257d03d746c6be1f559c0c4d367fc2479f906424c23885a1e00860",
     "tests/test_finance_collection_postgres_runtime_plan.py": "9856d3bf3eacc7edf515f92c3908080feb3dd0ebbd675e7e0cae9d43bd1cbf48",
     "tests/test_finance_collection_runtime_plan.py": "69e29ffd246fa1fd2572cdc1055e390e7c52daff156e807bd8815c839828d926",
     "tests/test_linear_reconciliation_plan.py": "0f0099f2127ddde08f93ce46c3523e50ad0cd4a90d1f42ed0af19f0b3f25c6d6",
