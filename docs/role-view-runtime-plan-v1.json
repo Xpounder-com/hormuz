@@ -170,7 +170,7 @@
     "tests/test_sqlite_finance_collection_transition.py": "1ceeea3321e9c945a3aed95c1b1d4e0763a5509aed1840c7b2f91291295c1874",
     "tests/test_sqlite_finance_native_attempt_transition.py": "90f41854015b589fad6c0d9f2de34eaac7e604e4809c2de53f36fa6ed29ec233",
     "tests/test_sqlite_finance_transition.py": "7859e2940ba18866e1b126665f7fc875693410abc7eaf00046b5a043a169287d",
-    "tests/test_sqlite_outcome_transition.py": "983c3d3c88e03665a5b4de33b8f2d6829aa3d84c5d149fcdd04b6be958c1b40e",
+    "tests/test_sqlite_outcome_transition.py": "beb925a662d99a145f7e43fa821bbbb1b9ae67ae8dd78c85871b67160b4ce574",
     "tests/test_sqlite_registry_transition.py": "24ea0640b27e8cfa5a5552dc6f1b2a4109ea6ce034e3a77bd5c6f3fa132d1827",
     "tests/test_store.py": "6d056b6f27b5aec94474b05e5013850b9f330907d9b5ef121be5b0d19dc38be8",
     "tools/render_portfolio_display_examples.py": "07fe80f75a187c460ba99092911f80feb2b743aded4cab87894381188c7ff055",
