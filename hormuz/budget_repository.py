@@ -1046,6 +1046,90 @@ class WorkBudgetRepository:
             "reason_code": "known",
         }
 
+    def _current_report_in_transaction(
+        self,
+        sql,
+        principal: PortfolioPrincipal,
+        plan_id: str,
+        *,
+        as_of: str,
+        generated_at: str,
+        reader_role: str,
+        report_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Build one report inside an already authorized aggregate-read unit.
+
+        The caller owns authorization and the metadata-only privileged-read
+        audit. This helper performs no connection acquisition and no audit
+        write, so a role-view page and its cursor commit atomically.
+        """
+
+        plan_id = _identifier(plan_id)
+        selected_as_of = _timestamp(as_of)
+        generated = _timestamp(generated_at)
+        selected_report_id = uuid4().hex if report_id is None else _identifier(report_id)
+        if (
+            reader_role not in {
+                "portfolio_admin", "finance_viewer", "platform_viewer", "team_lead",
+            }
+            or selected_as_of > generated
+        ):
+            raise BudgetRepositoryError("invalid_request")
+        active = self._active_budget(
+            sql, principal.organization_id, plan_id, generated,
+        )
+        if active is None:
+            raise BudgetRepositoryError("not_found")
+        selected = self._effective_activation(active[3], selected_as_of)
+        if selected is None:
+            raise BudgetRepositoryError("not_found")
+        plan, activation = selected
+        previous = None if activation["previous_version"] is None else self._plan(
+            sql, principal.organization_id, plan_id, activation["previous_version"],
+        )
+        if selected_as_of < activation["committed_at"]:
+            raise BudgetRepositoryError("invalid_request")
+        try:
+            enforcement, observations, forecast, coverage = self._accounting(
+                sql, plan, selected_as_of,
+            )
+        except BudgetRepositoryError:
+            raise
+        except (
+            ArithmeticError,
+            FinanceValueError,
+            KeyError,
+            RecursionError,
+            TypeError,
+            ValueError,
+        ):
+            raise BudgetRepositoryError("unavailable") from None
+        plan_change = self._plan_change(plan, previous, activation)
+        facts = {
+            "plan": dict(plan), "previous_plan": None if previous is None else dict(previous),
+            "activation": dict(activation), "plan_change": plan_change,
+            "enforcement": enforcement,
+            "observations": observations, "forecast": forecast, "coverage": coverage,
+            "as_of": selected_as_of,
+        }
+        return {
+            "schema_id": "hormuz.work-budget-report", "schema_version": 2,
+            "organization_id": principal.organization_id, "report_id": selected_report_id,
+            "reader_role": reader_role,
+            "reader_scope_digest": hashlib.sha256(principal.cursor_authority.encode()).hexdigest(),
+            "work_scope": {"work_scope_id": plan["work_scope_id"], "version": plan["work_scope_version"]},
+            "plan": _version_ref(plan_id, plan["version"], plan["content_digest"]),
+            "activation_generation": activation["activation_generation"],
+            "policy": {"version": activation["policy_version"], "content_digest": activation["policy_digest"]},
+            "window": {"start_at": plan["window_start_at"], "end_at": plan["window_end_at"]},
+            "as_of": selected_as_of, "generated_at": generated, "input_snapshot_digest": _sha256(facts),
+            "plan_amount": plan["amount"], "currency": plan["currency"],
+            "plan_change": plan_change,
+            "enforcement": enforcement, "financial_observations": observations,
+            "observation_combination": "separate_bases_do_not_sum_overlapping_observations",
+            "forecast": forecast, "coverage": coverage,
+        }
+
     def current_report(self, principal: PortfolioPrincipal, plan_id: str, *, as_of: str | None = None) -> dict[str, Any]:
         self._authorize(principal)
         plan_id = _identifier(plan_id)
@@ -1053,63 +1137,23 @@ class WorkBudgetRepository:
         with self._transaction(principal) as sql:
             generated = sql.now()
             selected_as_of = generated if selected_as_of is None else selected_as_of
-            if selected_as_of > generated:
-                raise BudgetRepositoryError("invalid_request")
-            active = self._active_budget(
-                sql, principal.organization_id, plan_id, generated,
+            report = self._current_report_in_transaction(
+                sql,
+                principal,
+                plan_id,
+                as_of=selected_as_of,
+                generated_at=generated,
+                reader_role="portfolio_admin",
             )
-            if active is None:
-                raise BudgetRepositoryError("not_found")
-            selected = self._effective_activation(active[3], selected_as_of)
-            if selected is None:
-                raise BudgetRepositoryError("not_found")
-            plan, activation = selected
-            previous = None if activation["previous_version"] is None else self._plan(
-                sql, principal.organization_id, plan_id, activation["previous_version"],
+            self._audit(
+                sql,
+                principal,
+                "report",
+                plan_id,
+                report["plan"]["version"],
+                "observed",
+                now=generated,
             )
-            if selected_as_of < activation["committed_at"]:
-                raise BudgetRepositoryError("invalid_request")
-            try:
-                enforcement, observations, forecast, coverage = self._accounting(
-                    sql, plan, selected_as_of,
-                )
-            except BudgetRepositoryError:
-                raise
-            except (
-                ArithmeticError,
-                FinanceValueError,
-                KeyError,
-                RecursionError,
-                TypeError,
-                ValueError,
-            ):
-                raise BudgetRepositoryError("unavailable") from None
-            plan_change = self._plan_change(plan, previous, activation)
-            facts = {
-                "plan": dict(plan), "previous_plan": None if previous is None else dict(previous),
-                "activation": dict(activation), "plan_change": plan_change,
-                "enforcement": enforcement,
-                "observations": observations, "forecast": forecast, "coverage": coverage,
-                "as_of": selected_as_of,
-            }
-            report = {
-                "schema_id": "hormuz.work-budget-report", "schema_version": 2,
-                "organization_id": principal.organization_id, "report_id": uuid4().hex,
-                "reader_role": "portfolio_admin",
-                "reader_scope_digest": hashlib.sha256(principal.cursor_authority.encode()).hexdigest(),
-                "work_scope": {"work_scope_id": plan["work_scope_id"], "version": plan["work_scope_version"]},
-                "plan": _version_ref(plan_id, plan["version"], plan["content_digest"]),
-                "activation_generation": activation["activation_generation"],
-                "policy": {"version": activation["policy_version"], "content_digest": activation["policy_digest"]},
-                "window": {"start_at": plan["window_start_at"], "end_at": plan["window_end_at"]},
-                "as_of": selected_as_of, "generated_at": generated, "input_snapshot_digest": _sha256(facts),
-                "plan_amount": plan["amount"], "currency": plan["currency"],
-                "plan_change": plan_change,
-                "enforcement": enforcement, "financial_observations": observations,
-                "observation_combination": "separate_bases_do_not_sum_overlapping_observations",
-                "forecast": forecast, "coverage": coverage,
-            }
-            self._audit(sql, principal, "report", plan_id, plan["version"], "observed", now=generated)
         return report
 
     def _scenario_policy_projection(

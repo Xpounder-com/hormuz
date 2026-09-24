@@ -40,7 +40,7 @@ class PostgresFinanceCollectionRuntimeTransitionTests(PostgresTestCase):
     bind = collection.FinanceCollectionSQLiteRepositoryTests.bind
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 22)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 23)
         version_patch = mock.patch.object(
             postgres_module,
             "POSTGRES_SCHEMA_VERSION",

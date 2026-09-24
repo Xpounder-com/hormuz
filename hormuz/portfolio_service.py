@@ -30,6 +30,11 @@ class PortfolioService:
 
     def dispatch_authorized(self, principal, method, path, *, query="", body=b"", idempotency_key=None):
         operation, scope_id = route(method, path)
+        authorize_operation = getattr(self.repository, "authorize_operation", None)
+        if authorize_operation is not None:
+            # Aggregate readers are authorized before query parsing or any
+            # repository can acquire storage.
+            authorize_operation(principal, operation)
         parameters = query_parameters(query, operation)
         if method == "GET" and body:
             raise PortfolioError("invalid_request")

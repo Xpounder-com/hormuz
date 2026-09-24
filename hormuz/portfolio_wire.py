@@ -27,6 +27,14 @@ ATTRIBUTIONS = PREFIX + "/attributions"
 OUTCOMES = PREFIX + "/outcomes"
 RUN_WORK_LINKS = PREFIX + "/run-work-links"
 ASSOCIATIONS = PREFIX + "/associations"
+ROLE_VIEWS = PREFIX + "/views"
+ROLE_VIEW_ROUTES = {
+    ROLE_VIEWS + "/finance/budgets": "list_finance_budgets",
+    ROLE_VIEWS + "/platform/scorecards": "list_platform_scorecards",
+    ROLE_VIEWS + "/team/budgets": "list_team_budgets",
+    ROLE_VIEWS + "/team/scorecards": "list_team_scorecards",
+}
+ROLE_VIEW_OPERATIONS = frozenset(ROLE_VIEW_ROUTES.values())
 ERRORS = {
     "invalid_request": (400, "invalid_shape"),
     "unauthenticated": (401, "unauthorized_scope"),
@@ -206,6 +214,8 @@ def validate(value: object, name: str) -> None:
 
 
 def route(method: str, path: str) -> tuple[str, str | None]:
+    if method == "GET" and path in ROLE_VIEW_ROUTES:
+        return ROLE_VIEW_ROUTES[path], None
     if path == RUN_WORK_LINKS and method in {"GET", "POST"}:
         return ("list_links" if method == "GET" else "link_run", None)
     if path == ASSOCIATIONS and method in {"GET", "POST"}:
@@ -240,7 +250,10 @@ def query_parameters(raw: str, operation: str) -> dict[str, Any]:
         allowed.add("connector_id")
     if association_read:
         allowed.update({"connector_id", "source_event_id", "request_attempt_id", "state"})
-    if operation not in {"show_scope", "list_scopes", "list_bindings", "list_attributions", "list_outcomes", "list_links", "list_associations"}:
+    if operation not in {
+        "show_scope", "list_scopes", "list_bindings", "list_attributions",
+        "list_outcomes", "list_links", "list_associations", *ROLE_VIEW_OPERATIONS,
+    }:
         allowed = set()
     result = {}
     for key, value in pairs:
@@ -258,6 +271,14 @@ def query_parameters(raw: str, operation: str) -> dict[str, Any]:
         raise PortfolioError("invalid_request")
     if "cursor" in result and not association_read and set(result) - {"cursor", "limit"}:
         raise PortfolioError("cursor_invalid")
-    if "start_at" in result and datetime.fromisoformat(result["start_at"]) >= datetime.fromisoformat(result["end_at"]):
+    if ("start_at" in result) != ("end_at" in result):
         raise PortfolioError("invalid_request")
+    if "start_at" in result:
+        try:
+            start = datetime.fromisoformat(result["start_at"])
+            end = datetime.fromisoformat(result["end_at"])
+        except ValueError:
+            raise PortfolioError("invalid_request") from None
+        if start >= end or (end - start).total_seconds() > 366 * 86400:
+            raise PortfolioError("invalid_request")
     return result

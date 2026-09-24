@@ -59,7 +59,7 @@ class SQLiteFinanceTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 17)
+        self.assertEqual(UsageStore.schema_version, 18)
         self.predecessor_request = {"backend": "sqlite", "path": str(self.path)}
         self.seeded = outcome_predecessor_call({**self.predecessor_request, "mode": "seed"})
         self.assertEqual(self.seeded["status"], "ready")

@@ -1,0 +1,86 @@
+{
+  "schema_id": "hormuz.portfolio-role-view-examples",
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "finance-budgets-empty",
+      "route": "GET /v1/admin/portfolio/views/finance/budgets",
+      "value": {
+        "schema_id": "hormuz.portfolio-role-view-page",
+        "schema_version": 1,
+        "organization_id": "example-org",
+        "reader_role": "finance_viewer",
+        "view": "finance",
+        "resource": "budget",
+        "scope": {"kind": "organization", "id": "example-org"},
+        "grouping": "work_scope",
+        "as_of": "2026-09-23T00:00:00.000000Z",
+        "snapshot": {"primary_sequence": 0, "companion_sequence": 0},
+        "items": [],
+        "result_count": 0,
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "platform-scorecards-empty",
+      "route": "GET /v1/admin/portfolio/views/platform/scorecards",
+      "value": {
+        "schema_id": "hormuz.portfolio-role-view-page",
+        "schema_version": 1,
+        "organization_id": "example-org",
+        "reader_role": "platform_viewer",
+        "view": "platform",
+        "resource": "scorecard",
+        "scope": {"kind": "organization", "id": "example-org"},
+        "grouping": "work_scope",
+        "as_of": "2026-09-23T00:00:00.000000Z",
+        "snapshot": {"primary_sequence": 0, "companion_sequence": 0},
+        "items": [],
+        "result_count": 0,
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "team-budgets-empty",
+      "route": "GET /v1/admin/portfolio/views/team/budgets",
+      "value": {
+        "schema_id": "hormuz.portfolio-role-view-page",
+        "schema_version": 1,
+        "organization_id": "example-org",
+        "reader_role": "team_lead",
+        "view": "team",
+        "resource": "budget",
+        "scope": {"kind": "team", "id": "example-team"},
+        "grouping": "work_scope",
+        "as_of": "2026-09-23T00:00:00.000000Z",
+        "snapshot": {"primary_sequence": 0, "companion_sequence": 0},
+        "items": [],
+        "result_count": 0,
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "team-scorecards-empty",
+      "route": "GET /v1/admin/portfolio/views/team/scorecards",
+      "value": {
+        "schema_id": "hormuz.portfolio-role-view-page",
+        "schema_version": 1,
+        "organization_id": "example-org",
+        "reader_role": "team_lead",
+        "view": "team",
+        "resource": "scorecard",
+        "scope": {"kind": "team", "id": "example-team"},
+        "grouping": "work_scope",
+        "as_of": "2026-09-23T00:00:00.000000Z",
+        "snapshot": {"primary_sequence": 0, "companion_sequence": 0},
+        "items": [],
+        "result_count": 0,
+        "has_more": false,
+        "next_cursor": null
+      }
+    }
+  ]
+}

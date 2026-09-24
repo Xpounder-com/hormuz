@@ -97,7 +97,7 @@ class PostgresLinearSnapshotRuntimeTests(PostgresTestCase):
         )
 
     def test_schema22_restricted_commit_replay_rls_audit_and_no_outcome(self):
-        self.assertEqual(POSTGRES_SCHEMA_VERSION, 22)
+        self.assertEqual(POSTGRES_SCHEMA_VERSION, 23)
         status = verify_postgres_schema(
             self.runtime_dsn,
             schema=self.schema,

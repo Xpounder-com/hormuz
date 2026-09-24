@@ -27,7 +27,7 @@ class PostgresScorecardRuntimeTests(PostgresTestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        self.assertEqual(POSTGRES_SCHEMA_VERSION, 22)
+        self.assertEqual(POSTGRES_SCHEMA_VERSION, 23)
         self.config = replace(
             registry_config(self.root),
             usage_storage=UsageStorageConfig(

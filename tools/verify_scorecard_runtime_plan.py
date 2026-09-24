@@ -123,6 +123,18 @@ SOURCE_PATHS = (
     "tools/verify_linear_runtime_plan.py",
     "tools/verify_linear_transition_plan.py",
 )
+SUCCESSOR_PROTECTED_SOURCE_PATHS = (
+    "docs/SCORECARD_RUNTIME.md",
+    "hormuz/_scorecard_schema.py",
+    "hormuz/migrations/postgresql/0022_model_scorecards.sql",
+    "hormuz/portfolio-intelligence-wire-v1.json",
+    "hormuz/scorecard_evidence_reference.py",
+    "hormuz/scorecard_kernel.py",
+    "hormuz/scorecard_repository.py",
+    "tests/fixtures/scorecard/runtime-v1.json",
+    "tests/test_scorecard_evidence_reference.py",
+    "tests/test_scorecard_kernel.py",
+)
 DURABLE_INVENTORY_DEPENDENCIES = (
     "hormuz/_association_schema.py",
     "hormuz/_attribution_schema.py",
@@ -308,7 +320,7 @@ def _forbidden_key(value: object) -> bool:
     return False
 
 
-def _validate_wire_fixture_and_inventory(root: Path) -> None:
+def _validate_wire_and_fixture(root: Path) -> None:
     wire = _read_json(root / "hormuz/portfolio-intelligence-wire-v1.json")
     definitions = wire.get("$defs") if isinstance(wire, dict) else None
     if (
@@ -338,6 +350,9 @@ def _validate_wire_fixture_and_inventory(root: Path) -> None:
         or _forbidden_key(fixture)
     ):
         _fail("scorecard_runtime_fixture_invalid")
+
+
+def _validate_inventory(root: Path) -> None:
     try:
         from tools.verify_durable_data_inventory import validate_durable_data_inventory
 
@@ -398,8 +413,69 @@ def _validate_distribution_and_ci(root: Path) -> None:
             _fail("scorecard_runtime_ci_invalid")
 
 
+def _validate_successor_predecessor(root: Path) -> None:
+    """Re-prove immutable scorecard-owned evidence under a successor schema."""
+
+    if any(not (root / relative).is_file() for relative in REQUIRED_FILES):
+        _fail("scorecard_runtime_source_kit_incomplete")
+    plan = _read_json(root / PLAN_PATH)
+    if canonical_digest(plan) != PLAN_SHA256:
+        _fail("scorecard_runtime_plan_changed")
+    sources = plan.get("source_sha256")
+    if not isinstance(sources, dict):
+        _fail("scorecard_runtime_plan_invalid")
+    for relative in SUCCESSOR_PROTECTED_SOURCE_PATHS:
+        expected = sources.get(relative)
+        if not isinstance(expected, str):
+            _fail("scorecard_runtime_plan_invalid")
+        try:
+            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+        except OSError:
+            _fail("scorecard_runtime_source_kit_incomplete")
+        if actual != expected:
+            _fail("scorecard_runtime_source_changed")
+    _validate_predecessor(root)
+    _validate_migration(root, plan)
+    _validate_wire_and_fixture(root)
+
+
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
+    versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
+    if versions == (18, 23):
+        _validate_successor_predecessor(root)
+        try:
+            from tools.verify_role_view_runtime import (
+                RoleViewRuntimePlanError,
+                verify as verify_role_view_runtime,
+            )
+
+            successor = verify_role_view_runtime(root)
+        except RoleViewRuntimePlanError as error:
+            mapping = {
+                "role_view_runtime_source_kit_incomplete": "scorecard_runtime_source_kit_incomplete",
+                "role_view_runtime_source_changed": "scorecard_runtime_source_changed",
+                "role_view_runtime_predecessor_changed": "scorecard_runtime_predecessor_changed",
+                "role_view_runtime_schema_boundary_changed": "scorecard_runtime_schema_boundary_changed",
+            }
+            _fail(mapping.get(error.code, "scorecard_runtime_successor_invalid"))
+        return {
+            "status": "scorecard_runtime_successor_verified",
+            "plan_sha256": PLAN_SHA256,
+            "sqlite_schema_version": SQLITE_SCHEMA_VERSION,
+            "postgresql_schema_version": POSTGRES_SCHEMA_VERSION,
+            "postgresql_acl": successor["postgresql_acl"],
+            "table_count": len(TABLES),
+            "kernel_implemented": True,
+            "runtime_implemented": True,
+            "public_scorecard_route": False,
+            "role_scoped_decision_views_implemented": True,
+            "live_connectors_authorized": False,
+            "released": False,
+            "gates": successor["gates"],
+        }
+    if versions != (17, 22):
+        _fail("scorecard_runtime_schema_boundary_changed")
     if any(not (root / relative).is_file() for relative in REQUIRED_FILES):
         _fail("scorecard_runtime_source_kit_incomplete")
     plan = _read_json(root / PLAN_PATH)
@@ -501,14 +577,12 @@ def verify(root: Path = ROOT) -> dict[str, object]:
             _fail("scorecard_runtime_source_kit_incomplete")
         if actual != expected:
             _fail("scorecard_runtime_source_changed")
-    if (
-        (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION) != (17, 22)
-        or _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(22) != EXPECTED_ACL
-    ):
+    if _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(22) != EXPECTED_ACL:
         _fail("scorecard_runtime_schema_boundary_changed")
     _validate_predecessor(root)
     _validate_migration(root, plan)
-    _validate_wire_fixture_and_inventory(root)
+    _validate_wire_and_fixture(root)
+    _validate_inventory(root)
     _validate_distribution_and_ci(root)
     return {
         "status": "scorecard_runtime_candidate_verified",

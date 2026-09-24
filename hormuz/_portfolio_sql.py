@@ -41,6 +41,10 @@ from ._scorecard_schema import (
     TABLE_DDL as SCORECARD_TABLES,
     verify_postgres_scorecards,
 )
+from ._role_view_schema import (
+    TABLE_DDL as ROLE_VIEW_OWNED_TABLES,
+    verify_postgres_role_views,
+)
 from ._budget_schema import (
     ACTIVE_TABLE as BUDGET_ACTIVE_TABLE,
     TABLE_DDL as BUDGET_TABLES,
@@ -61,6 +65,11 @@ OUTCOME_LINEAR_TABLES = {
     **OUTCOME_TABLES,
     **LINEAR_TABLES,
     **LINEAR_SNAPSHOT_TABLES,
+}
+ROLE_VIEW_TABLES = {
+    **ROLE_VIEW_OWNED_TABLES,
+    **BUDGET_TABLES,
+    **SCORECARD_TABLES,
 }
 
 
@@ -188,6 +197,22 @@ def portfolio_transaction(
                         )
                     if tables is BUDGET_TABLES:
                         verify_postgres_budget(cursor, storage.postgres_schema, PostgresStorageError)
+                    if tables is ROLE_VIEW_TABLES:
+                        verify_postgres_role_views(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
+                        verify_postgres_budget(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
+                        verify_postgres_scorecards(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
                 for table in tables:
                     qualified = f'"{storage.postgres_schema}".{table}'
                     excessive_privileges = "DELETE,TRUNCATE" if table in mutable_tables else "UPDATE,DELETE,TRUNCATE"

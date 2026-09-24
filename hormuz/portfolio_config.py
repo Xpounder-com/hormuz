@@ -48,19 +48,30 @@ class PortfolioPrincipal:
     organization_id: str
     actor_id: str
     roles: tuple[str, ...]
+    team_id: str | None = None
 
     @property
     def cursor_authority(self) -> str:
-        return canonical([self.organization_id, self.actor_id, self.roles])
+        return canonical([
+            self.organization_id,
+            self.actor_id,
+            self.roles,
+            self.team_id,
+        ])
 
 
 def authorize(config: PortfolioConfig | None, identity: Identity) -> PortfolioPrincipal:
     if config is not None:
         for binding in config.role_bindings:
             if (identity.organization_id, identity.actor_id) == (binding.organization_id, binding.actor_id):
-                if "portfolio_admin" in binding.roles:
-                    return PortfolioPrincipal(binding.organization_id, binding.actor_id, binding.roles)
-    # Aggregate viewers and team leads gain no raw registry capability in #215.
+                return PortfolioPrincipal(
+                    binding.organization_id,
+                    binding.actor_id,
+                    binding.roles,
+                    identity.team_id,
+                )
+    # Repository owners still enforce operation-specific roles. Authentication
+    # alone never grants raw registry or aggregate-view capability.
     raise PortfolioError("forbidden")
 
 

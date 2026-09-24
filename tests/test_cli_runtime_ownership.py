@@ -231,7 +231,8 @@ if loaded:
         self.assertEqual(tree.pop("portfolio"), {
             "attribute": None, "attributions": None,
             "archive": None, "bind": None, "bindings": None, "create": None,
-            "list": None, "outcomes": None, "show": None, "tombstone": None, "version": None,
+            "list": None, "outcomes": None, "show": None, "tombstone": None,
+            "version": None, "view": None,
         })
         self.assertEqual(tree.pop("team"), {
             "administrators": {"grant": None, "list": None, "revoke": None},

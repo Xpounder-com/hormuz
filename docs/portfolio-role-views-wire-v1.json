@@ -1,0 +1,439 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usehormuz.com/schemas/portfolio-role-views-wire-v1.json",
+  "title": "Hormuz portfolio role views v1",
+  "description": "Additive aggregate-only response contracts for issue 223. Authentication and scope authorization happen before this structural contract is selected.",
+  "x-hormuz-schema-ids": [
+    "hormuz.portfolio-role-view-item",
+    "hormuz.portfolio-role-view-page"
+  ],
+  "$defs": {
+    "opaque_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["organization", "team"]
+        },
+        "id": {
+          "$ref": "#/$defs/opaque_id"
+        }
+      },
+      "required": ["kind", "id"]
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "primary_sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "companion_sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": ["primary_sequence", "companion_sequence"]
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "generated_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "review_after": {
+          "anyOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": ["current", "expired", "historical"]
+        }
+      },
+      "required": ["generated_at", "expires_at", "review_after", "state"]
+    },
+    "connector_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "authority_state": {
+          "type": "string",
+          "enum": ["configured", "declared_unverified"]
+        }
+      },
+      "required": ["id", "authority_state"]
+    },
+    "content_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "version": {
+          "anyOf": [
+            {"type": "integer", "minimum": 1, "maximum": 2147483647},
+            {"$ref": "#/$defs/opaque_id"}
+          ]
+        },
+        "content_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": ["id", "version"]
+    },
+    "policy_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "version": {
+          "anyOf": [
+            {"type": "integer", "minimum": 1, "maximum": 2147483647},
+            {"$ref": "#/$defs/opaque_id"}
+          ]
+        },
+        "content_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": ["version"]
+    },
+    "metric_definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "rule": {
+          "type": "object",
+          "minProperties": 3,
+          "maxProperties": 3,
+          "description": "Either the scorecard rule_id/version/digest shape or the budget id/version/content_digest shape."
+        }
+      },
+      "required": ["metric", "rule"]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "portfolio-intelligence-wire-v1.json#/$defs/model_ref"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "policies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/policy_ref"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "budget_plans": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/content_ref"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "rate_cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/content_ref"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "connectors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/connector_ref"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "association_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "portfolio-intelligence-wire-v1.json#/$defs/rule_ref"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "cost_bases": {
+          "type": "array",
+          "items": {
+            "$ref": "portfolio-intelligence-wire-v1.json#/$defs/cost_basis"
+          },
+          "minItems": 0,
+          "maxItems": 6,
+          "uniqueItems": true
+        },
+        "metric_definitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/metric_definition"
+          },
+          "minItems": 0,
+          "maxItems": 1200,
+          "uniqueItems": true
+        },
+        "scorecard": {
+          "anyOf": [
+            {"$ref": "#/$defs/content_ref"},
+            {"type": "null"}
+          ]
+        },
+        "snapshot_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["complete", "partial"]
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "missing_budget_plan",
+              "missing_scorecard",
+              "missing_connector_provenance",
+              "missing_association_rule",
+              "unverified_connector_authority"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 5,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "models",
+        "policies",
+        "budget_plans",
+        "rate_cards",
+        "connectors",
+        "association_rules",
+        "cost_bases",
+        "metric_definitions",
+        "snapshot_digest",
+        "state",
+        "reason_codes"
+      ]
+    },
+    "hormuz.portfolio-role-view-item": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.portfolio-role-view-item"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "view": {
+          "type": "string",
+          "enum": ["finance", "platform", "team"]
+        },
+        "resource": {
+          "type": "string",
+          "enum": ["budget", "scorecard"]
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "team_id": {
+          "anyOf": [
+            {"$ref": "#/$defs/opaque_id"},
+            {"type": "null"}
+          ]
+        },
+        "work_scope": {
+          "$ref": "portfolio-intelligence-wire-v1.json#/$defs/work_scope_ref"
+        },
+        "window": {
+          "$ref": "portfolio-intelligence-wire-v1.json#/$defs/window"
+        },
+        "delivery_state": {
+          "type": "string",
+          "enum": ["complete", "partial", "inconclusive"]
+        },
+        "evidence_level": {
+          "$ref": "portfolio-intelligence-wire-v1.json#/$defs/evidence_level"
+        },
+        "freshness": {
+          "$ref": "#/$defs/freshness"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "prompts",
+              "responses",
+              "work_item_titles",
+              "work_item_bodies",
+              "comments",
+              "code",
+              "filenames",
+              "credentials",
+              "employee_rankings",
+              "person_comparisons"
+            ]
+          },
+          "minItems": 10,
+          "maxItems": 10,
+          "uniqueItems": true
+        },
+        "payload": {
+          "oneOf": [
+            {"$ref": "work-budget-reports-wire-v2.json#/$defs/hormuz.work-budget-report"},
+            {"$ref": "portfolio-intelligence-wire-v1.json#/$defs/hormuz.model-scorecard"}
+          ]
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "view",
+        "resource",
+        "organization_id",
+        "team_id",
+        "work_scope",
+        "window",
+        "delivery_state",
+        "evidence_level",
+        "freshness",
+        "provenance",
+        "exclusions",
+        "payload"
+      ]
+    },
+    "hormuz.portfolio-role-view-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.portfolio-role-view-page"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "reader_role": {
+          "type": "string",
+          "enum": ["finance_viewer", "platform_viewer", "team_lead"]
+        },
+        "view": {
+          "type": "string",
+          "enum": ["finance", "platform", "team"]
+        },
+        "resource": {
+          "type": "string",
+          "enum": ["budget", "scorecard"]
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "grouping": {
+          "type": "string",
+          "const": "work_scope"
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.portfolio-role-view-item"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "result_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "reader_role",
+        "view",
+        "resource",
+        "scope",
+        "grouping",
+        "as_of",
+        "snapshot",
+        "items",
+        "result_count",
+        "has_more",
+        "next_cursor"
+      ]
+    }
+  }
+}

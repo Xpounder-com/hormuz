@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 
 from tools import verify_core_wheel as packaging
+from tools import verify_role_view_runtime as successor_verifier
 from tools import verify_scorecard_runtime_plan as verifier
 
 
@@ -20,7 +21,15 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         plan = json.loads((verifier.ROOT / verifier.PLAN_PATH).read_text())
-        paths = set(verifier.REQUIRED_FILES) | set(plan["source_sha256"])
+        successor_plan = json.loads(
+            (successor_verifier.ROOT / successor_verifier.PLAN_PATH).read_text()
+        )
+        paths = (
+            set(verifier.REQUIRED_FILES)
+            | set(plan["source_sha256"])
+            | set(successor_verifier.REQUIRED_FILES)
+            | set(successor_plan["source_sha256"])
+        )
         for relative in paths:
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -43,15 +52,18 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
 
     def test_fixed_runtime_preserves_public_view_and_release_gates(self):
         result = verifier.verify(self.root)
-        self.assertEqual(result["status"], "scorecard_runtime_candidate_verified")
+        self.assertEqual(result["status"], "scorecard_runtime_successor_verified")
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
-            (17, 22),
+            (18, 23),
         )
-        self.assertEqual(result["postgresql_acl"], list(verifier.EXPECTED_ACL))
+        self.assertEqual(
+            result["postgresql_acl"], list(successor_verifier.EXPECTED_ACL)
+        )
         self.assertEqual(result["table_count"], 2)
         self.assertTrue(result["kernel_implemented"])
         self.assertTrue(result["runtime_implemented"])
+        self.assertTrue(result["role_scoped_decision_views_implemented"])
         self.assertFalse(result["public_scorecard_route"])
         self.assertFalse(result["live_connectors_authorized"])
         self.assertFalse(result["released"])
@@ -79,6 +91,10 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
         self.write_plan(plan)
         with mock.patch.object(
             verifier, "PLAN_SHA256", verifier.canonical_digest(plan)
+        ), mock.patch.object(
+            verifier, "SQLITE_SCHEMA_VERSION", 17
+        ), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 22
         ):
             with self.assertRaisesRegex(
                 verifier.ScorecardRuntimePlanError,
@@ -104,9 +120,9 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
 
     def test_schema_or_acl_boundary_change_is_rejected(self):
         for sqlite_version, postgres_version, acl in (
-            (16, 22, verifier.EXPECTED_ACL),
-            (17, 21, verifier.EXPECTED_ACL),
-            (17, 22, (237, "0" * 64)),
+            (17, 23, successor_verifier.EXPECTED_ACL),
+            (18, 22, successor_verifier.EXPECTED_ACL),
+            (18, 23, (261, "0" * 64)),
         ):
             with self.subTest(
                 sqlite=sqlite_version, postgres=postgres_version
@@ -116,7 +132,7 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
                 verifier, "POSTGRES_SCHEMA_VERSION", postgres_version
             ), mock.patch.dict(
                 verifier._POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
-                {22: acl},
+                {23: acl},
             ):
                 with self.assertRaisesRegex(
                     verifier.ScorecardRuntimePlanError,
@@ -138,7 +154,7 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
                 verifier.ScorecardRuntimePlanError,
                 "scorecard_runtime_migration_invalid",
             ):
-                verifier.verify(self.root)
+                verifier._validate_successor_predecessor(self.root)
 
     def test_frozen_scorecard_vector_cannot_be_rewritten(self):
         relative = "tests/fixtures/scorecard/runtime-v1.json"
@@ -152,7 +168,7 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
                 verifier.ScorecardRuntimePlanError,
                 "scorecard_runtime_fixture_invalid",
             ):
-                verifier.verify(self.root)
+                verifier._validate_successor_predecessor(self.root)
 
     def test_forbidden_person_or_content_field_cannot_be_repinned(self):
         relative = "tests/fixtures/scorecard/runtime-v1.json"
@@ -166,7 +182,7 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
                 verifier.ScorecardRuntimePlanError,
                 "scorecard_runtime_fixture_invalid",
             ):
-                verifier.verify(self.root)
+                verifier._validate_successor_predecessor(self.root)
 
     def test_association_runtime_predecessor_is_immutable(self):
         path = self.root / verifier.PREDECESSOR_PATH
