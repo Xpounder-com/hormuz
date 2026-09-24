@@ -232,7 +232,7 @@ def _validate_predecessor(root: Path) -> None:
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
     versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-    if versions == (16, 21):
+    if versions in {(16, 21), (17, 22)}:
         try:
             from tools.verify_association_transition_plan import (
                 AssociationTransitionPlanError,

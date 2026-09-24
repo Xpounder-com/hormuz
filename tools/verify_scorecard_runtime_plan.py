@@ -25,15 +25,15 @@ from hormuz.scorecard_kernel import ScorecardKernelError, build_scorecard_evalua
 
 
 PLAN_PATH = "docs/scorecard-runtime-plan-v1.json"
-PLAN_SHA256 = "831b0ae21afbaf3b8e8df8165b639ce2e752a3487e4986ac3bf49f8bb19e41dc"
+PLAN_SHA256 = "bfc405becc230e7fa95e09ecd51372a855321415fb3eaabfcb43e495d55a8deb"
 PREDECESSOR_PATH = "docs/association-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
-    "0d31c8c72777d51489c7ec7547b1727973385b8316ca767937a87e7e61b974e1"
+    "45e6d5eb87c3763d5b53a4c86189b9e5ed68fa320390f17e965f356f62769921"
 )
 PREDECESSOR_CANONICAL_SHA256 = (
-    "e35c48b9fd8dbb802c9340af69fa44449af3348d046a69b5a3cdd0baae5d8c6b"
+    "c1bfb6af710ae09fab4ecfd43c652462d297620c3aba3ac360ee45f041ff43a8"
 )
-BASE_MAIN_COMMIT = "bea79349cc29d9cf83622c47c3f31e82fdc621ae"
+BASE_MAIN_COMMIT = "b770ae140e01aa07a0baed4a449dff453b4ae843"
 EXPECTED_ACL = (
     236,
     "4aef5982da3f81a352f813554de5721580f0ad5f0a93dda529199b545fee5a20",
@@ -76,16 +76,94 @@ SOURCE_PATHS = (
     "tests/_postgres_fixture.py",
     "tests/fixtures/scorecard/runtime-v1.json",
     "tests/test_association_runtime_plan.py",
+    "tests/test_association_transition_plan.py",
+    "tests/test_association_transition_preflight.py",
+    "tests/test_attribution_schema.py",
+    "tests/test_budget_schema.py",
     "tests/test_durable_data_inventory.py",
+    "tests/test_finance_account_binding_transition_preflight.py",
+    "tests/test_finance_collection_postgres_runtime_plan.py",
+    "tests/test_finance_collection_runtime_plan.py",
+    "tests/test_linear_reconciliation_plan.py",
+    "tests/test_linear_runtime_plan.py",
+    "tests/test_linear_transition_preflight.py",
+    "tests/test_outcome_schema.py",
+    "tests/test_postgres_budget.py",
+    "tests/test_postgres_budget_transition.py",
+    "tests/test_postgres_finance.py",
+    "tests/test_postgres_finance_collection_runtime_transition.py",
+    "tests/test_postgres_finance_transition.py",
+    "tests/test_postgres_linear_connector_runtime.py",
+    "tests/test_postgres_linear_snapshot_runtime.py",
+    "tests/test_postgres_outcome_transition.py",
     "tests/test_postgres_scorecard_runtime.py",
+    "tests/test_postgres_test_boundaries.py",
     "tests/test_scorecard_evidence_reference.py",
     "tests/test_scorecard_kernel.py",
     "tests/test_scorecard_runtime.py",
     "tests/test_scorecard_runtime_plan.py",
     "tests/test_scorecard_transition.py",
+    "tests/test_sqlite_attribution_transition.py",
+    "tests/test_sqlite_budget_transition.py",
+    "tests/test_sqlite_finance.py",
+    "tests/test_sqlite_finance_collection_transition.py",
+    "tests/test_sqlite_finance_native_attempt_transition.py",
+    "tests/test_sqlite_finance_transition.py",
+    "tests/test_sqlite_outcome_transition.py",
+    "tests/test_sqlite_registry_transition.py",
+    "tests/test_store.py",
+    "tools/verify_association_transition_plan.py",
     "tools/verify_association_runtime_plan.py",
     "tools/verify_core_wheel.py",
     "tools/verify_durable_data_inventory.py",
+    "tools/verify_finance_collection_postgres_runtime.py",
+    "tools/verify_finance_collection_runtime.py",
+    "tools/verify_finance_native_attempt_transition_plan.py",
+    "tools/verify_linear_reconciliation_plan.py",
+    "tools/verify_linear_runtime_plan.py",
+    "tools/verify_linear_transition_plan.py",
+)
+DURABLE_INVENTORY_DEPENDENCIES = (
+    "hormuz/_association_schema.py",
+    "hormuz/_attribution_schema.py",
+    "hormuz/_budget_schema.py",
+    "hormuz/_console_schema.py",
+    "hormuz/_finance_account_binding_schema.py",
+    "hormuz/_finance_attempt_schema.py",
+    "hormuz/_finance_collection_schema.py",
+    "hormuz/_finance_schema.py",
+    "hormuz/_linear_schema.py",
+    "hormuz/_linear_snapshot_schema.py",
+    "hormuz/_onboarding_schema.py",
+    "hormuz/_outcome_schema.py",
+    "hormuz/_portfolio_schema.py",
+    "hormuz/_provider_reliability_schema.py",
+    "hormuz/policy_impact.py",
+    "hormuz/session_store.py",
+    *(f"hormuz/migrations/postgresql/{version:04d}_{name}.sql" for version, name in (
+        (1, "usage_evidence"),
+        (2, "policy_control"),
+        (3, "request_attempts"),
+        (4, "commit_audit_chain"),
+        (5, "custody_control"),
+        (6, "custody_executor"),
+        (7, "custody_lifecycle"),
+        (8, "custody_evidence_retention"),
+        (9, "portfolio_registry"),
+        (10, "governed_run_attribution"),
+        (11, "work_outcomes"),
+        (12, "finance_rate_cards"),
+        (13, "work_budgets"),
+        (14, "provider_reliability"),
+        (15, "finance_attempt_evidence"),
+        (16, "finance_collection"),
+        (17, "finance_collection_runtime"),
+        (18, "finance_account_binding_and_query_audit"),
+        (19, "linear_connector"),
+        (20, "linear_snapshot"),
+        (21, "run_outcome_association"),
+        (22, "model_scorecards"),
+    )),
 )
 REQUIRED_FILES = (
     PLAN_PATH,
@@ -94,6 +172,7 @@ REQUIRED_FILES = (
     "docs/portfolio-intelligence-wire-v1.json",
     "tools/verify_scorecard_runtime_plan.py",
     *SOURCE_PATHS,
+    *DURABLE_INVENTORY_DEPENDENCIES,
 )
 EXPECTED_GATES = {
     "association_runtime_predecessor_verified": True,

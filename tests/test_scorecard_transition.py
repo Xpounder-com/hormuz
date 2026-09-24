@@ -19,6 +19,7 @@ from hormuz.store import StorageSchemaError, UsageStore
 
 from ._postgres_fixture import PostgresTestCase
 from ._registry_transition_fixture import seed_registry_ledger, sqlite_snapshot
+from ._sqlite import managed_sqlite_connection
 
 
 class SQLiteScorecardTransitionTests(unittest.TestCase):
@@ -93,7 +94,7 @@ class SQLiteScorecardTransitionTests(unittest.TestCase):
         self.assertEqual(sqlite_snapshot(self.path), current)
 
     def test_partial_ledger_refuses_before_any_schema_repair(self):
-        with sqlite3.connect(self.path) as connection:
+        with managed_sqlite_connection(self.path) as connection:
             connection.execute(
                 "INSERT INTO hormuz_schema_migrations (version,state) "
                 "VALUES (17,'applying')"

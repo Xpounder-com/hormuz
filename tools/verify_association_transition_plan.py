@@ -340,7 +340,7 @@ def verify(root: Path = ROOT) -> dict[str, object]:
     _proposal_boundary(root, SQLITE_PROPOSAL, postgresql=False)
     _proposal_boundary(root, POSTGRES_PROPOSAL, postgresql=True)
     versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-    if versions == (16, 21):
+    if versions in {(16, 21), (17, 22)}:
         try:
             from tools.verify_association_runtime_plan import (
                 AssociationRuntimePlanError,
