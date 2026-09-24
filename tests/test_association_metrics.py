@@ -158,6 +158,31 @@ class AssociationMetricReferenceTests(unittest.TestCase):
         conflict["supersedes_source_event_id"] = "gh-conflict-a"
         self.assertEqual(self.build(selected), self.build())
 
+    def test_late_successor_does_not_displace_authoritative_object_state(self):
+        selected = deepcopy(self.fixture["input"])
+        authoritative = next(
+            row for row in selected["outcomes"]
+            if row["source_event_id"] == "lin-issue1-v1"
+        )
+        late = deepcopy(authoritative)
+        late.update({
+            "source_event_id": "lin-issue1-late",
+            "source_revision": "0",
+            "revision_order": 0,
+            "ordering_state": "late",
+            "event_type": "reopened",
+            "quality_state": "unknown",
+            "supersedes_source_event_id": authoritative["source_event_id"],
+            "event_at": "2026-09-02T11:01:00Z",
+            "observed_at": "2026-09-02T11:01:00Z",
+        })
+        selected["outcomes"].append(late)
+
+        result = self.build(selected)
+        self.assertEqual(result["denominators"]["associated"], 2)
+        self.assertEqual(result["denominators"]["excluded"], 2)
+        self.assertEqual(result["coverage"]["linked_work_objects"]["numerator"], 2)
+
     def test_corrected_association_does_not_count_the_superseded_attempt_as_retry(self):
         selected = deepcopy(self.fixture["input"])
         original = next(

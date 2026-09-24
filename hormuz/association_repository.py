@@ -663,10 +663,6 @@ class AssociationRepository:
             "AND event.external_object_id=? AND event.object_type=? "
             "AND context.ordering_state='authoritative' "
             "AND event.event_type<>'unsupported' "
-            "AND NOT EXISTS (SELECT 1 FROM portfolio_outcome_events successor "
-            "WHERE successor.organization_id=event.organization_id "
-            "AND successor.connector_id=event.connector_id "
-            "AND successor.supersedes_source_event_id=event.source_event_id) "
             "ORDER BY context.revision_order DESC,event.sequence DESC,event.source_event_id DESC LIMIT 1",
             (organization, connector, external_object_id, object_type),
         )
@@ -820,10 +816,33 @@ class AssociationRepository:
             )
             if scope is None or scope["kind"] != "use_case":
                 raise PortfolioError("not_found")
-            attempts = self._metric_attempts(sql, organization, start, end)
+            associations = self._metric_associations(
+                sql,
+                organization,
+                work_scope_id,
+                work_scope_version,
+                start,
+                end,
+                evaluated,
+            )
             costs = self._metric_costs(sql, organization, start, end)
-            outcomes = self._metric_outcomes(sql, organization, evaluated)
-            associations = self._metric_associations(sql, organization, start, end, evaluated)
+            referenced_attempts = tuple(
+                row["request_attempt_id"]
+                for row in (*associations, *costs)
+                if row["request_attempt_id"] is not None
+            )
+            attempts = self._metric_attempts(
+                sql, organization, start, end, referenced_attempts
+            )
+            outcomes = self._metric_outcomes(
+                sql,
+                organization,
+                work_scope_id,
+                work_scope_version,
+                start,
+                end,
+                evaluated,
+            )
             deliveries = self._metric_deliveries(
                 sql, organization, start, end, evaluated
             )
@@ -872,7 +891,7 @@ class AssociationRepository:
         return [dict(row) for row in rows]
 
     @classmethod
-    def _metric_attempts(cls, sql, organization, start, end):
+    def _metric_attempts(cls, sql, organization, start, end, referenced_attempts=()):
         rows = cls._bounded_rows(sql.execute(
             "SELECT root.organization_id,root.attempt_id AS request_attempt_id,"
             "root.created_at AS occurred_at,attribution.state AS attribution_state,"
@@ -887,6 +906,28 @@ class AssociationRepository:
             "ORDER BY root.attempt_id LIMIT 10001",
             (organization, start, end),
         ))
+        loaded = {row["request_attempt_id"] for row in rows}
+        missing = sorted(set(referenced_attempts) - loaded)
+        for offset in range(0, len(missing), 500):
+            selected = missing[offset:offset + 500]
+            placeholders = ",".join("?" for _ in selected)
+            rows.extend(dict(row) for row in sql.execute(
+                "SELECT root.organization_id,root.attempt_id AS request_attempt_id,"
+                "root.created_at AS occurred_at,attribution.state AS attribution_state,"
+                "attribution.work_scope_id,attribution.work_scope_version "
+                "FROM gateway_request_attempts root LEFT JOIN portfolio_attribution_events attribution ON "
+                "attribution.organization_id=root.organization_id "
+                "AND attribution.request_attempt_id=root.attempt_id "
+                "AND NOT EXISTS (SELECT 1 FROM portfolio_attribution_events successor "
+                "WHERE successor.organization_id=attribution.organization_id "
+                "AND successor.supersedes_event_id=attribution.attribution_event_id) "
+                f"WHERE root.organization_id=? AND root.attempt_id IN ({placeholders}) "
+                "ORDER BY root.attempt_id",
+                (organization, *selected),
+            ).fetchall())
+            if len(rows) > 10_000:
+                raise PortfolioError("unavailable")
+        rows.sort(key=lambda row: row["request_attempt_id"])
         for row in rows:
             row["occurred_at"] = cls._timestamp(row["occurred_at"])
             row["attribution_state"] = (
@@ -922,26 +963,49 @@ class AssociationRepository:
         return result
 
     @classmethod
-    def _metric_outcomes(cls, sql, organization, evaluated):
+    def _metric_outcomes(
+        cls, sql, organization, work_scope_id, work_scope_version,
+        start, end, evaluated,
+    ):
         rows = cls._bounded_rows(sql.execute(
+            "WITH cohort_objects AS ("
+            "SELECT DISTINCT cohort_event.organization_id,cohort_event.connector_id,"
+            "cohort_event.external_object_id,cohort_event.object_type "
+            "FROM portfolio_outcome_events cohort_event "
+            "JOIN portfolio_outcome_contexts cohort_context ON "
+            "cohort_context.organization_id=cohort_event.organization_id "
+            "AND cohort_context.connector_id=cohort_event.connector_id "
+            "AND cohort_context.source_event_id=cohort_event.source_event_id "
+            "WHERE cohort_event.organization_id=? AND cohort_event.observed_at<=? "
+            "AND cohort_event.event_at>=? AND cohort_event.event_at<? "
+            "AND cohort_context.scope_state='matched' "
+            "AND cohort_context.work_scope_id=? AND cohort_context.work_scope_version=?"
+            ") "
             "SELECT event.organization_id,event.connector_id,event.source_event_id,"
             "event.external_object_id,event.object_type,event.source_revision,"
             "context.ordering_domain,context.revision_order,context.ordering_state,"
             "event.event_type,event.quality_state,event.duration_ms,event.state,"
             "context.scope_state,context.work_scope_id,context.work_scope_version,"
             "event.supersedes_source_event_id,event.event_at,event.observed_at,"
-            "CASE WHEN retained.retention_event_id IS NULL THEN 0 ELSE 1 END AS retained "
+            "CASE WHEN EXISTS (SELECT 1 FROM portfolio_outcome_retention_events retained "
+            "WHERE retained.organization_id=event.organization_id "
+            "AND retained.connector_id=event.connector_id "
+            "AND retained.source_event_id=event.source_event_id "
+            "AND retained.observed_at<=?) THEN 1 ELSE 0 END AS retained "
             "FROM portfolio_outcome_events event JOIN portfolio_outcome_contexts context ON "
             "context.organization_id=event.organization_id "
             "AND context.connector_id=event.connector_id "
             "AND context.source_event_id=event.source_event_id "
-            "LEFT JOIN portfolio_outcome_retention_events retained ON "
-            "retained.organization_id=event.organization_id "
-            "AND retained.connector_id=event.connector_id "
-            "AND retained.source_event_id=event.source_event_id "
+            "JOIN cohort_objects cohort ON cohort.organization_id=event.organization_id "
+            "AND cohort.connector_id=event.connector_id "
+            "AND cohort.external_object_id=event.external_object_id "
+            "AND cohort.object_type=event.object_type "
             "WHERE event.organization_id=? AND event.observed_at<=? "
             "ORDER BY event.connector_id,event.source_event_id LIMIT 10001",
-            (organization, evaluated),
+            (
+                organization, evaluated, start, end, work_scope_id,
+                work_scope_version, evaluated, organization, evaluated,
+            ),
         ))
         for row in rows:
             row["retained"] = bool(row["retained"])
@@ -950,16 +1014,48 @@ class AssociationRepository:
         return rows
 
     @classmethod
-    def _metric_associations(cls, sql, organization, start, end, evaluated):
+    def _metric_associations(
+        cls, sql, organization, work_scope_id, work_scope_version,
+        start, end, evaluated,
+    ):
         rows = cls._bounded_rows(sql.execute(
-            "SELECT organization_id,association_event_id,connector_id,source_event_id,"
-            "request_attempt_id,state,candidate_count,rule_id,rule_version,rule_digest,"
-            "window_start_at,window_end_at,sequence "
-            "FROM portfolio_run_outcome_association_events WHERE organization_id=? "
-            "AND rule_id=? AND rule_version=? AND rule_digest=? "
-            "AND window_start_at=? AND window_end_at=? AND evaluation_as_of<=? "
-            "ORDER BY sequence LIMIT 10001",
-            (organization, RULE_ID, RULE_VERSION, RULE_DIGEST, start, end, evaluated),
+            "WITH cohort_objects AS ("
+            "SELECT DISTINCT cohort_event.organization_id,cohort_event.connector_id,"
+            "cohort_event.external_object_id,cohort_event.object_type "
+            "FROM portfolio_outcome_events cohort_event "
+            "JOIN portfolio_outcome_contexts cohort_context ON "
+            "cohort_context.organization_id=cohort_event.organization_id "
+            "AND cohort_context.connector_id=cohort_event.connector_id "
+            "AND cohort_context.source_event_id=cohort_event.source_event_id "
+            "WHERE cohort_event.organization_id=? AND cohort_event.observed_at<=? "
+            "AND cohort_event.event_at>=? AND cohort_event.event_at<? "
+            "AND cohort_context.scope_state='matched' "
+            "AND cohort_context.work_scope_id=? AND cohort_context.work_scope_version=?"
+            ") "
+            "SELECT association.organization_id,association.association_event_id,"
+            "association.connector_id,association.source_event_id,"
+            "association.request_attempt_id,association.state,association.candidate_count,"
+            "association.rule_id,association.rule_version,association.rule_digest,"
+            "association.window_start_at,association.window_end_at,association.sequence "
+            "FROM portfolio_run_outcome_association_events association "
+            "JOIN portfolio_outcome_events associated_event ON "
+            "associated_event.organization_id=association.organization_id "
+            "AND associated_event.connector_id=association.connector_id "
+            "AND associated_event.source_event_id=association.source_event_id "
+            "JOIN cohort_objects cohort ON cohort.organization_id=associated_event.organization_id "
+            "AND cohort.connector_id=associated_event.connector_id "
+            "AND cohort.external_object_id=associated_event.external_object_id "
+            "AND cohort.object_type=associated_event.object_type "
+            "WHERE association.organization_id=? "
+            "AND association.rule_id=? AND association.rule_version=? "
+            "AND association.rule_digest=? AND association.window_start_at=? "
+            "AND association.window_end_at=? AND association.evaluation_as_of<=? "
+            "ORDER BY association.sequence LIMIT 10001",
+            (
+                organization, evaluated, start, end, work_scope_id,
+                work_scope_version, organization, RULE_ID, RULE_VERSION,
+                RULE_DIGEST, start, end, evaluated,
+            ),
         ))
         for row in rows:
             row["window_start_at"] = cls._timestamp(row["window_start_at"])

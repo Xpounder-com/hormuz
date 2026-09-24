@@ -383,6 +383,48 @@ class SQLiteAssociationRuntimeTests(unittest.TestCase):
             ("associated", second_attempt.attempt_id, "eligible"),
         )
 
+    def test_late_successor_preserves_current_authority_and_valid_links(self):
+        first_attempt, _ = self.attempt()
+        authoritative = self.outcome(
+            source_revision="10",
+            revision_order="10",
+            event_type="accepted",
+            quality_state="accepted",
+        )
+        self.post(
+            RUN_WORK_LINKS,
+            self.link_request(first_attempt, authoritative),
+            key="late-authority-first-link",
+        )
+        evaluation = self.evaluation_request(authoritative)
+        associated = self.post(ASSOCIATIONS, evaluation)
+
+        self.outcome(
+            source_revision="9",
+            revision_order="9",
+            event_type="reopened",
+            quality_state="unknown",
+            supersedes_source_event_id=authoritative["source_event_id"],
+            reason_code="corrected",
+        )
+        reevaluation = self.evaluation_request(
+            authoritative,
+            prior=associated["association_event_id"],
+        )
+        current = self.post(ASSOCIATIONS, reevaluation)
+        self.assertEqual(
+            (current["state"], current["request_attempt_id"], current["reason_code"]),
+            ("associated", first_attempt.attempt_id, "eligible"),
+        )
+
+        second_attempt, _ = self.attempt()
+        second_link = self.post(
+            RUN_WORK_LINKS,
+            self.link_request(second_attempt, authoritative),
+            key="late-authority-second-link",
+        )
+        self.assertEqual(second_link["state"], "active")
+
     def test_authorized_metric_reference_joins_once_and_keeps_completeness_inconclusive(self):
         attempt, _ = self.attempt()
         source = self.outcome(
@@ -462,6 +504,176 @@ class SQLiteAssociationRuntimeTests(unittest.TestCase):
                 evaluated_at=evaluated.isoformat().replace("+00:00", "Z"),
             ),
         )
+
+    def test_metric_cutoff_ignores_later_retention_until_its_observation(self):
+        attempt, _ = self.attempt()
+        real_now = datetime.now(timezone.utc)
+        with self.clock_lock:
+            self.clock_instant = real_now
+        source = self.outcome(
+            event_type="accepted",
+            quality_state="accepted",
+        )
+        self.post(
+            RUN_WORK_LINKS,
+            self.link_request(attempt, source),
+            key="metric-retention-link",
+        )
+        start = real_now - timedelta(hours=1)
+        end = real_now + timedelta(hours=1)
+        evaluation = self.evaluation_request(source)
+        evaluation["window"] = {
+            "start_at": start.isoformat().replace("+00:00", "Z"),
+            "end_at": end.isoformat().replace("+00:00", "Z"),
+        }
+        self.assertEqual(self.post(ASSOCIATIONS, evaluation)["state"], "associated")
+
+        cutoff = real_now + timedelta(hours=2)
+        with self.clock_lock:
+            self.clock_instant = real_now + timedelta(hours=3)
+        self.repositories.outcomes.tombstone(
+            self.principal,
+            "github-one",
+            source["source_event_id"],
+            idempotency_key="metric-retention-after-cutoff",
+            keys=self.keys,
+        )
+        with self.clock_lock:
+            self.clock_instant = real_now + timedelta(hours=5)
+        arguments = dict(
+            principal=self.principal,
+            work_scope_id=self.scope["work_scope_id"],
+            work_scope_version=1,
+            start_at=evaluation["window"]["start_at"],
+            end_at=evaluation["window"]["end_at"],
+        )
+        before_retention = self.repositories.associations.metric_reference(
+            evaluated_at=cutoff.isoformat().replace("+00:00", "Z"),
+            **arguments,
+        )
+        after_retention = self.repositories.associations.metric_reference(
+            evaluated_at=(real_now + timedelta(hours=4)).isoformat().replace("+00:00", "Z"),
+            **arguments,
+        )
+        self.assertEqual(
+            (before_retention["denominators"]["associated"], before_retention["denominators"]["excluded"]),
+            (1, 0),
+        )
+        self.assertEqual(
+            (after_retention["denominators"]["associated"], after_retention["denominators"]["excluded"]),
+            (0, 1),
+        )
+
+    def test_metric_loads_referenced_attempt_outside_run_window(self):
+        attempt, _ = self.attempt()
+        real_now = datetime.now(timezone.utc)
+        start = real_now + timedelta(hours=1)
+        end = real_now + timedelta(hours=3)
+        with self.clock_lock:
+            self.clock_instant = real_now + timedelta(hours=2)
+        source = self.outcome(
+            event_type="accepted",
+            quality_state="accepted",
+        )
+        self.post(
+            RUN_WORK_LINKS,
+            self.link_request(attempt, source),
+            key="metric-prior-attempt-link",
+        )
+        evaluation = self.evaluation_request(source)
+        evaluation["window"] = {
+            "start_at": start.isoformat().replace("+00:00", "Z"),
+            "end_at": end.isoformat().replace("+00:00", "Z"),
+        }
+        self.assertEqual(self.post(ASSOCIATIONS, evaluation)["state"], "associated")
+
+        with self.clock_lock:
+            self.clock_instant = real_now + timedelta(hours=6)
+        vector = self.repositories.associations.metric_reference(
+            self.principal,
+            work_scope_id=self.scope["work_scope_id"],
+            work_scope_version=1,
+            start_at=evaluation["window"]["start_at"],
+            end_at=evaluation["window"]["end_at"],
+            evaluated_at=(real_now + timedelta(hours=5)).isoformat().replace("+00:00", "Z"),
+        )
+        self.assertEqual(vector["denominators"]["eligible_attempts"], 0)
+        self.assertEqual(vector["denominators"]["unique_work_objects"], 1)
+        self.assertEqual(vector["denominators"]["associated"], 0)
+        self.assertEqual(vector["denominators"]["excluded"], 1)
+
+    def test_metric_outcome_cap_applies_after_scope_window_cohort_selection(self):
+        if self.config.usage_storage.backend != "sqlite":
+            self.skipTest("bulk unrelated-history fixture is SQLite-specific")
+        attempt, _ = self.attempt()
+        real_now = datetime.now(timezone.utc)
+        with self.clock_lock:
+            self.clock_instant = real_now
+        source = self.outcome(
+            event_type="accepted",
+            quality_state="accepted",
+        )
+        self.post(
+            RUN_WORK_LINKS,
+            self.link_request(attempt, source),
+            key="metric-bounded-cohort-link",
+        )
+        start = real_now - timedelta(hours=1)
+        end = real_now + timedelta(hours=1)
+        evaluation = self.evaluation_request(source)
+        evaluation["window"] = {
+            "start_at": start.isoformat().replace("+00:00", "Z"),
+            "end_at": end.isoformat().replace("+00:00", "Z"),
+        }
+        self.assertEqual(self.post(ASSOCIATIONS, evaluation)["state"], "associated")
+
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute(
+                "WITH RECURSIVE noise(value) AS ("
+                "SELECT 1 UNION ALL SELECT value+1 FROM noise WHERE value<10001"
+                ") INSERT INTO portfolio_outcome_events ("
+                "organization_id,connector_id,source_event_id,source_delivery_id,schema_version,"
+                "external_object_id,source_revision,object_type,event_type,quality_state,duration_ms,"
+                "state,evidence_level,supersedes_source_event_id,provenance_digest,reason_code,"
+                "event_at,observed_at,ingested_at,sequence"
+                ") SELECT organization_id,connector_id,printf('noise-%05d',value),source_delivery_id,"
+                "schema_version,printf('noise-object-%05d',value),source_revision,object_type,event_type,"
+                "quality_state,duration_ms,state,evidence_level,NULL,provenance_digest,reason_code,"
+                "'2020-01-01T00:00:00.000000Z','2020-01-01T00:00:00.000000Z',ingested_at,sequence "
+                "FROM portfolio_outcome_events CROSS JOIN noise "
+                "WHERE organization_id='acme' AND connector_id='github-one' AND source_event_id=?",
+                (source["source_event_id"],),
+            )
+            connection.execute(
+                "WITH RECURSIVE noise(value) AS ("
+                "SELECT 1 UNION ALL SELECT value+1 FROM noise WHERE value<10001"
+                ") INSERT INTO portfolio_outcome_contexts ("
+                "organization_id,connector_id,source_event_id,schema_version,provider,authority_id,"
+                "source_container_id,actor_id,authentication_kind,work_scope_id,work_scope_version,"
+                "binding_event_id,registry_sequence,key_version,credential_version,source_time_known,"
+                "ordering_domain,revision_order,ordering_state,scope_state"
+                ") SELECT organization_id,connector_id,printf('noise-%05d',value),schema_version,provider,"
+                "authority_id,source_container_id,actor_id,authentication_kind,work_scope_id,"
+                "work_scope_version,binding_event_id,registry_sequence,key_version,credential_version,"
+                "source_time_known,ordering_domain,revision_order,ordering_state,scope_state "
+                "FROM portfolio_outcome_contexts CROSS JOIN noise "
+                "WHERE organization_id='acme' AND connector_id='github-one' AND source_event_id=?",
+                (source["source_event_id"],),
+            )
+
+        with self.clock_lock:
+            self.clock_instant = real_now + timedelta(hours=4)
+        vector = self.repositories.associations.metric_reference(
+            self.principal,
+            work_scope_id=self.scope["work_scope_id"],
+            work_scope_version=1,
+            start_at=evaluation["window"]["start_at"],
+            end_at=evaluation["window"]["end_at"],
+            evaluated_at=(real_now + timedelta(hours=3)).isoformat().replace("+00:00", "Z"),
+        )
+        self.assertEqual(vector["denominators"]["unique_work_objects"], 1)
+        self.assertEqual(vector["denominators"]["associated"], 1)
 
     def test_metric_delivery_health_prefers_recovered_receipt_over_dead_letter(self):
         anchor = self.outcome(external_object_id="901")

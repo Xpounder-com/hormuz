@@ -587,18 +587,19 @@ def _effective_object(rows, outcomes, associations, eligible_attempts, start, en
         and row["event_type"] != "unsupported"
         and not row["retained"]
     ]
+    # Lineage and ordering authority are separate facts.  A lower revision can
+    # name the authoritative row as its predecessor while remaining late, so
+    # select authority from every comparable row rather than lineage tips.
     authoritative = [
-        row for row in tips
+        row for row in rows
         if row["ordering_state"] == "authoritative" and row["event_type"] != "unsupported"
     ]
     if not authoritative:
-        authoritative = [
-            row for row in rows
-            if row["ordering_state"] == "authoritative"
-            and row["event_type"] != "unsupported"
-        ]
-        if not conflicts or not authoritative:
-            return {"state": "excluded", "candidate_count": 0, "outcome": max(rows, key=lambda row: row["observed_at_value"])}
+        return {
+            "state": "excluded",
+            "candidate_count": 0,
+            "outcome": max(rows, key=lambda row: row["observed_at_value"]),
+        }
     selected = max(
         authoritative,
         key=lambda row: (row["revision_order"], row["observed_at_value"], row["source_event_id"]),
@@ -626,7 +627,9 @@ def _effective_object(rows, outcomes, associations, eligible_attempts, start, en
     if state == "associated" and conflicts:
         state, candidates = "ambiguous", max(2, candidates)
     if state == "associated" and decision["request_attempt_id"] not in eligible_attempts:
-        _invalid()
+        # The association is valid evidence, but it cannot pair this outcome
+        # with the metric's in-window run cohort.
+        state, candidates = "excluded", 0
     return {
         "state": state,
         "candidate_count": candidates,
