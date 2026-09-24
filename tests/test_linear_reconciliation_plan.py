@@ -71,7 +71,7 @@ class LinearReconciliationPlanTests(unittest.TestCase):
         self.assertEqual(result["status"], "linear_reconciliation_successor_verified")
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
-            (16, 21),
+            (17, 22),
         )
         self.assertTrue(result["association_runtime_implemented"])
 

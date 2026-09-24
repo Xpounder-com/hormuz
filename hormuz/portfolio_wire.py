@@ -122,6 +122,11 @@ def association_catalogue() -> dict[str, Any]:
     return json.loads(resources.files("hormuz").joinpath("portfolio-association-wire-v1.json").read_text("utf-8"))
 
 
+@lru_cache(maxsize=1)
+def scorecard_catalogue() -> dict[str, Any]:
+    return json.loads(resources.files("hormuz").joinpath("portfolio-intelligence-wire-v1.json").read_text("utf-8"))
+
+
 def validate(value: object, name: str) -> None:
     definitions = catalogue()["$defs"]
     if name not in definitions:
@@ -130,6 +135,8 @@ def validate(value: object, name: str) -> None:
         definitions = outcome_catalogue()["$defs"]
     if name not in definitions:
         definitions = association_catalogue()["$defs"]
+    if name not in definitions:
+        definitions = scorecard_catalogue()["$defs"]
     if name not in definitions:
         raise PortfolioError("invalid_request")
 

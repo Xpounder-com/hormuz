@@ -46,7 +46,7 @@ else:
 
 class SQLiteFinanceAccountBindingTransitionTests(unittest.TestCase):
     def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
-        self.assertEqual(UsageStore.schema_version, 16)
+        self.assertEqual(UsageStore.schema_version, 17)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "synthetic.sqlite3"
             with (
@@ -119,11 +119,11 @@ class PostgresFinanceAccountBindingTransitionTests(PostgresTestCase):
     runtime = previous.PostgresFinanceCollectionTransitionTests.runtime
 
     def test_real_successor_preserves_populated_predecessor_and_starts_empty(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 21)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 22)
         self._drop_schema(self.schema)
         # This historical transition deliberately leaves the schema at v18
         # while it proves the account-binding successor. Restore the current
-        # v21 schema even when an assertion fails so later tests do not inherit
+        # v22 schema even when an assertion fails so later tests do not inherit
         # a predecessor schema from this shared class fixture.
         self.addCleanup(self.migrate)
         seed_postgres_collection_predecessor(
@@ -468,7 +468,7 @@ class PostgresPublishedAccountBindingPreflightTests(PostgresTestCase):
     restore = previous.PostgresFinanceCollectionTransitionTests.restore
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 21)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 22)
         version_patch = mock.patch.object(
             postgres_module, "POSTGRES_SCHEMA_VERSION", 18
         )

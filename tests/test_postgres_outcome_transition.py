@@ -143,10 +143,10 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
         self.assert_prior_state_preserved()
         self.assertEqual(len(self.snapshot()["rows"]), 61)
         before = self.snapshot()
-        # The candidate now includes schemas through 21. Probe absent schema 22
+        # The candidate now includes schemas through 22. Probe absent schema 23
         # so the upgraded v15 database exercises the unsupported-following
         # guard after all real later migrations are found.
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 22):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 23):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

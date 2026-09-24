@@ -139,6 +139,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         "hormuz/_linear_schema.py",
         "hormuz/_linear_snapshot_schema.py",
         "hormuz/_association_schema.py",
+        "hormuz/_scorecard_schema.py",
         "hormuz/_budget_schema.py",
         "hormuz/_provider_reliability_schema.py",
     ):
@@ -165,6 +166,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
                 "hormuz/_linear_schema.py",
                 "hormuz/_linear_snapshot_schema.py",
                 "hormuz/_association_schema.py",
+                "hormuz/_scorecard_schema.py",
             } or not isinstance(
                 declarations, ast.Dict
             ):

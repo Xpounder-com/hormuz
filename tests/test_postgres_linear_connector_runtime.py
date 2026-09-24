@@ -127,20 +127,20 @@ class PostgresLinearConnectorRuntimeTests(PostgresTestCase):
             now_ms=now_ms,
         )
 
-    def test_schema21_restricted_commit_replay_rls_and_content_exclusion(self):
-        self.assertEqual(POSTGRES_SCHEMA_VERSION, 21)
+    def test_schema22_restricted_commit_replay_rls_and_content_exclusion(self):
+        self.assertEqual(POSTGRES_SCHEMA_VERSION, 22)
         status = verify_postgres_schema(
             self.runtime_dsn,
             schema=self.schema,
             runtime_role=self.runtime_role,
         )
-        self.assertEqual((status.version, status.complete), (21, True))
+        self.assertEqual((status.version, status.complete), (22, True))
         with self.psycopg.connect(self.owner_dsn) as connection:
             table_count = connection.execute(
                 "SELECT count(*) FROM pg_tables WHERE schemaname=%s",
                 (self.schema,),
             ).fetchone()[0]
-        self.assertEqual(table_count, 84)
+        self.assertEqual(table_count, 86)
 
         accepted = self.ingest()
         self.assertEqual(

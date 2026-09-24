@@ -119,6 +119,19 @@
       ]
     },
     {
+      "id": "model_scorecard_metadata",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "portfolio_model_scorecard_snapshots",
+        "portfolio_scorecard_audit_events"
+      ],
+      "postgresql_tables": [
+        "portfolio_model_scorecard_snapshots",
+        "portfolio_scorecard_audit_events"
+      ]
+    },
+    {
       "id": "linear_connector_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

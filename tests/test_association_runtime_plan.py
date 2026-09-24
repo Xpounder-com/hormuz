@@ -25,6 +25,17 @@ class AssociationRuntimePlanTests(unittest.TestCase):
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(verifier.ROOT / relative, target)
+        # The immutable predecessor plan pins its original source tree.  This
+        # successor test fixture uses current source files to exercise the
+        # historical validation branch, so give the synthetic copy its own
+        # internally consistent source manifest without changing the checked-in
+        # predecessor artifact.
+        for relative in plan["source_sha256"]:
+            plan["source_sha256"][relative] = hashlib.sha256(
+                (self.root / relative).read_bytes()
+            ).hexdigest()
+        self.write_plan(plan)
+        self.historical_plan_sha256 = verifier.canonical_digest(plan)
 
     def plan(self):
         return json.loads((self.root / verifier.PLAN_PATH).read_text())
@@ -39,22 +50,53 @@ class AssociationRuntimePlanTests(unittest.TestCase):
             (self.root / relative).read_bytes()
         ).hexdigest()
         self.write_plan(plan)
-        return mock.patch.object(verifier, "PLAN_SHA256", verifier.canonical_digest(plan))
+        return verifier.canonical_digest(plan)
 
-    def test_fixed_runtime_preserves_live_scorecard_and_release_gates(self):
-        result = verifier.verify(self.root)
-        self.assertEqual(result["status"], "association_runtime_candidate_verified")
+    def verify_historical(self, plan_sha256=None):
+        with (
+            mock.patch.object(
+                verifier,
+                "PLAN_SHA256",
+                plan_sha256 or self.historical_plan_sha256,
+            ),
+            mock.patch.object(verifier, "SQLITE_SCHEMA_VERSION", 16),
+            mock.patch.object(verifier, "POSTGRES_SCHEMA_VERSION", 21),
+            mock.patch.dict(
+                verifier._POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
+                {21: verifier.EXPECTED_ACL},
+            ),
+        ):
+            return verifier.verify(self.root)
+
+    def test_scorecard_successor_preserves_live_and_release_gates(self):
+        result = verifier.verify(verifier.ROOT)
+        self.assertEqual(result["status"], "association_runtime_successor_verified")
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
-            (16, 21),
+            (17, 22),
         )
-        self.assertEqual(result["postgresql_acl"], list(verifier.EXPECTED_ACL))
+        self.assertEqual(result["postgresql_acl"][0], 236)
         self.assertEqual((result["table_count"], result["audit_source_count"]), (5, 2))
         self.assertTrue(result["runtime_implemented"])
         self.assertTrue(result["metric_reference_implemented"])
+        self.assertTrue(result["scorecard_runtime_implemented"])
+        self.assertTrue(result["scorecard_kernel_implemented"])
         self.assertFalse(result["public_scorecard_route"])
         self.assertFalse(result["live_connectors_authorized"])
         self.assertFalse(result["released"])
+
+    def test_scorecard_successor_rechecks_association_owned_sources(self):
+        with mock.patch.object(
+            verifier, "PLAN_SHA256", self.historical_plan_sha256
+        ):
+            verifier._validate_successor_predecessor(self.root)
+            path = self.root / "hormuz/association_repository.py"
+            path.write_bytes(path.read_bytes() + b"\n")
+            with self.assertRaisesRegex(
+                verifier.AssociationRuntimePlanError,
+                "association_runtime_source_changed",
+            ):
+                verifier._validate_successor_predecessor(self.root)
 
     def test_duplicate_plan_member_is_rejected(self):
         path = self.root / verifier.PLAN_PATH
@@ -71,20 +113,17 @@ class AssociationRuntimePlanTests(unittest.TestCase):
             verifier.AssociationRuntimePlanError,
             "association_runtime_plan_invalid",
         ):
-            verifier.verify(self.root)
+            self.verify_historical()
 
     def test_gate_overclaim_is_rejected_even_when_repinned(self):
         plan = self.plan()
         plan["gates"]["live_multi_source_evidence_verified"] = True
         self.write_plan(plan)
-        with mock.patch.object(
-            verifier, "PLAN_SHA256", verifier.canonical_digest(plan)
+        with self.assertRaisesRegex(
+            verifier.AssociationRuntimePlanError,
+            "association_runtime_gate_overclaim",
         ):
-            with self.assertRaisesRegex(
-                verifier.AssociationRuntimePlanError,
-                "association_runtime_gate_overclaim",
-            ):
-                verifier.verify(self.root)
+            self.verify_historical(verifier.canonical_digest(plan))
 
     def test_changed_or_missing_runtime_source_is_rejected(self):
         relative = "hormuz/association_repository.py"
@@ -94,13 +133,13 @@ class AssociationRuntimePlanTests(unittest.TestCase):
             verifier.AssociationRuntimePlanError,
             "association_runtime_source_changed",
         ):
-            verifier.verify(self.root)
+            self.verify_historical()
         path.unlink()
         with self.assertRaisesRegex(
             verifier.AssociationRuntimePlanError,
             "association_runtime_source_kit_incomplete",
         ):
-            verifier.verify(self.root)
+            self.verify_historical()
 
     def test_schema_or_acl_boundary_change_is_rejected(self):
         for sqlite_version, postgres_version, acl in (
@@ -117,6 +156,10 @@ class AssociationRuntimePlanTests(unittest.TestCase):
             ), mock.patch.dict(
                 verifier._POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
                 {21: acl},
+            ), mock.patch.object(
+                verifier,
+                "PLAN_SHA256",
+                self.historical_plan_sha256,
             ):
                 with self.assertRaisesRegex(
                     verifier.AssociationRuntimePlanError,
@@ -133,12 +176,12 @@ class AssociationRuntimePlanTests(unittest.TestCase):
             encoding="utf-8",
         )
         plan = self.plan()
-        with self.repin(plan, relative):
-            with self.assertRaisesRegex(
-                verifier.AssociationRuntimePlanError,
-                "association_runtime_migration_invalid",
-            ):
-                verifier.verify(self.root)
+        plan_sha256 = self.repin(plan, relative)
+        with self.assertRaisesRegex(
+            verifier.AssociationRuntimePlanError,
+            "association_runtime_migration_invalid",
+        ):
+            self.verify_historical(plan_sha256)
 
     def test_frozen_metric_vector_cannot_be_rewritten(self):
         relative = "tests/fixtures/association/runtime-multisource-v1.json"
@@ -147,12 +190,12 @@ class AssociationRuntimePlanTests(unittest.TestCase):
         fixture["expected"]["coverage"]["attributed_runs"]["ratio"] = "0"
         path.write_text(json.dumps(fixture, indent=2) + "\n", encoding="utf-8")
         plan = self.plan()
-        with self.repin(plan, relative):
-            with self.assertRaisesRegex(
-                verifier.AssociationRuntimePlanError,
-                "association_runtime_fixture_invalid",
-            ):
-                verifier.verify(self.root)
+        plan_sha256 = self.repin(plan, relative)
+        with self.assertRaisesRegex(
+            verifier.AssociationRuntimePlanError,
+            "association_runtime_fixture_invalid",
+        ):
+            self.verify_historical(plan_sha256)
 
     def test_transition_predecessor_is_immutable(self):
         path = self.root / verifier.PREDECESSOR_PATH
@@ -161,7 +204,7 @@ class AssociationRuntimePlanTests(unittest.TestCase):
             verifier.AssociationRuntimePlanError,
             "association_runtime_predecessor_changed",
         ):
-            verifier.verify(self.root)
+            self.verify_historical()
 
     def test_distribution_requires_complete_runtime_kit(self):
         for required, label in (

@@ -63,7 +63,14 @@ def verify(root=ROOT, *, predecessor_archive=None):
     )
     if (
         (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-        not in {(12, 17), (13, 18), (14, 19), (15, 20), (16, 21)}
+        not in {
+            (12, 17),
+            (13, 18),
+            (14, 19),
+            (15, 20),
+            (16, 21),
+            (17, 22),
+        }
         or _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION.get(17) != EXPECTED_ACL
         or POSTGRES_FINANCE_COLLECTION_RUNTIME_ENABLED is not True
         or POSTGRES_FINANCE_COLLECTION_RUNTIME_ACCEPTED is not False

@@ -181,7 +181,7 @@ def _validate_migration(root: Path, plan: dict) -> None:
 def verify(root: Path = ROOT) -> dict[str, object]:
     root = Path(root)
     versions = (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-    if versions in {(15, 20), (16, 21)}:
+    if versions in {(15, 20), (16, 21), (17, 22)}:
         try:
             from tools.verify_linear_reconciliation_plan import (
                 LinearReconciliationPlanError,

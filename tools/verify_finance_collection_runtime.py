@@ -174,7 +174,14 @@ def verify_finance_collection_runtime(
         if allow_successor_schema:
             current_is_supported_successor = (
                 (SQLITE_SCHEMA_VERSION, POSTGRES_SCHEMA_VERSION)
-                in {(12, 17), (13, 18), (14, 19), (15, 20), (16, 21)}
+                in {
+                    (12, 17),
+                    (13, 18),
+                    (14, 19),
+                    (15, 20),
+                    (16, 21),
+                    (17, 22),
+                }
             )
         else:
             current_is_supported_successor = (
