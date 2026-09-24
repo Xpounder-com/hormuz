@@ -34,7 +34,7 @@ from tools import verify_scorecard_runtime_plan as scorecard_verifier
 
 
 PLAN_PATH = "docs/role-view-runtime-plan-v1.json"
-PLAN_SHA256 = "fbd949fd0d42ae5a6e93345fc7b7af6355579014279586d2a27ab3d368ee3021"
+PLAN_SHA256 = "6813b2115a4df6f32175df487431a3dd82dc775f3dd53717089f52a030dc13cb"
 PREDECESSOR_PATH = "docs/scorecard-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "b5ad84161eb9d5f2ac109cc25856a041fca5f905bd0f1d415d112b055e7fafb2"
