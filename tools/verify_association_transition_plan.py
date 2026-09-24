@@ -18,9 +18,9 @@ from hormuz.postgres import POSTGRES_SCHEMA_VERSION
 
 
 PLAN_PATH = "docs/association-transition-plan-v1.json"
-PLAN_SHA256 = "be2fe47b6efdfe6c0162404f66a6cf29724a222bee260a9dc814b8cfaf310467"
-BASE_MAIN_COMMIT = "794de6dcd300f76236a101eb3c904986c2046c38"
-BASE_MAIN_CI = "https://github.com/Xpounder-com/hormuz/actions/runs/35936276457"
+PLAN_SHA256 = "36dc6f8b2b0b355e3a940b6e791732fab285ea515caf805d502bbd130c59f4d5"
+BASE_MAIN_COMMIT = "8a2da39f03af3dd8ed2160b2b95286d829fdb40d"
+BASE_MAIN_CI = "https://github.com/Xpounder-com/hormuz/actions/runs/35940004002"
 SQLITE_PROPOSAL = "docs/association-successor-schema-proposal.sqlite.sql"
 POSTGRES_PROPOSAL = "docs/association-successor-schema-acl-proposal.sql"
 REQUIRED_FILES = (

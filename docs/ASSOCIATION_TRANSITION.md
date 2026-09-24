@@ -1,8 +1,8 @@
 # Run-to-outcome association transition checkpoint for #221 and #214
 
 This checkpoint reserves SQLite 16 and PostgreSQL 21 for the run-to-outcome
-association work. It starts from merged main `794de6dcd300f76236a101eb3c904986c2046c38`, whose
-exact-main CI run is `https://github.com/Xpounder-com/hormuz/actions/runs/35936276457`. That baseline has the Linear snapshot
+association work. It starts from merged main `8a2da39f03af3dd8ed2160b2b95286d829fdb40d`, whose
+exact-main CI run is `https://github.com/Xpounder-com/hormuz/actions/runs/35940004002`. That baseline has the Linear snapshot
 and reconciliation storage at SQLite 15 and PostgreSQL 20. The machine-readable
 record is [association-transition-plan-v1.json](association-transition-plan-v1.json).
 
