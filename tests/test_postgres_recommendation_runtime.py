@@ -37,7 +37,7 @@ if __package__:
 else:  # The PostgreSQL boundary audit imports test modules from the tests root.
     from _portfolio_fixture import ADMIN, OTHER, create_request, registry_config
     from _postgres_fixture import PostgresTestCase
-    from test_recommendation_runtime import NOW, SCORECARD_FIXTURE, _policy_mapping
+    from tests.test_recommendation_runtime import NOW, SCORECARD_FIXTURE, _policy_mapping
 
 
 class PostgresRecommendationRuntimeTests(PostgresTestCase):
