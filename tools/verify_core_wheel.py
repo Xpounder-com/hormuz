@@ -323,6 +323,7 @@ REQUIRED_SCORECARD_RUNTIME_SDIST_PATHS = (
     "tests/test_scorecard_kernel.py",
     "tests/test_scorecard_runtime.py",
     "tests/test_scorecard_runtime_plan.py",
+    "tests/test_scorecard_transition.py",
     "tests/test_postgres_scorecard_runtime.py",
 )
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (

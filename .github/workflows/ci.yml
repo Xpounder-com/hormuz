@@ -210,7 +210,7 @@ jobs:
             tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
             tests.test_finance_account_registration_request tests.test_finance_account_registration_store \
             tests.test_finance_variance_reference tests.test_finance_reconciliation_coverage \
-            tests.test_scorecard_evidence_reference tests.test_scorecard_kernel tests.test_scorecard_runtime tests.test_scorecard_runtime_plan \
+            tests.test_scorecard_evidence_reference tests.test_scorecard_kernel tests.test_scorecard_runtime tests.test_scorecard_runtime_plan tests.test_scorecard_transition \
             tests.test_linear_connector_preflight tests.test_linear_connector_fixtures \
             tests.test_linear_transition_plan tests.test_linear_transition_preflight \
             tests.test_linear_runtime_plan tests.test_linear_connector_runtime \
@@ -460,7 +460,7 @@ jobs:
             tests.test_finance_account_binding_contract tests.test_finance_account_binding_preflight tests.test_finance_account_selection \
             tests.test_finance_account_registration_request tests.test_finance_account_registration_store \
             tests.test_finance_variance_reference tests.test_finance_reconciliation_coverage \
-            tests.test_scorecard_evidence_reference tests.test_scorecard_kernel tests.test_scorecard_runtime tests.test_scorecard_runtime_plan \
+            tests.test_scorecard_evidence_reference tests.test_scorecard_kernel tests.test_scorecard_runtime tests.test_scorecard_runtime_plan tests.test_scorecard_transition \
             tests.test_github_connector_preflight tests.test_github_connector_fixtures \
             tests.test_github_webhook_auth tests.test_github_connector_runtime \
             tests.test_linear_transition_plan tests.test_linear_transition_preflight \
@@ -557,6 +557,8 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$RUNNER_TEMP/postgres_installed_association_tests" -t "$RUNNER_TEMP" \
             -p test_postgres_scorecard_runtime.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_scorecard_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_account_registration_store.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \

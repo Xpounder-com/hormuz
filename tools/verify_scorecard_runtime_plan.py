@@ -82,6 +82,7 @@ SOURCE_PATHS = (
     "tests/test_scorecard_kernel.py",
     "tests/test_scorecard_runtime.py",
     "tests/test_scorecard_runtime_plan.py",
+    "tests/test_scorecard_transition.py",
     "tools/verify_association_runtime_plan.py",
     "tools/verify_core_wheel.py",
     "tools/verify_durable_data_inventory.py",
@@ -293,6 +294,7 @@ def _validate_distribution_and_ci(root: Path) -> None:
         "tests/test_scorecard_kernel.py",
         "tests/test_scorecard_runtime.py",
         "tests/test_scorecard_runtime_plan.py",
+        "tests/test_scorecard_transition.py",
         "tests/test_postgres_scorecard_runtime.py",
     }
     if (
@@ -309,7 +311,9 @@ def _validate_distribution_and_ci(root: Path) -> None:
         "tests.test_scorecard_kernel",
         "tests.test_scorecard_runtime",
         "tests.test_scorecard_runtime_plan",
+        "tests.test_scorecard_transition",
         "test_postgres_scorecard_runtime.py",
+        "test_scorecard_transition.py",
     ):
         if required not in ci:
             _fail("scorecard_runtime_ci_invalid")
