@@ -116,7 +116,7 @@
     "tests/test_association_metrics.py": "b98a87ef57c6908f09ab8251213b6b0b4890949580be90ec117750c82f613fac",
     "tests/test_association_runtime.py": "c370033ba21b9e4952903695a3e0c0214277dd5d0589ab45c273ec3af9859e19",
     "tests/test_association_runtime_plan.py": "5bb85712bab9571c2c7d5acb71be6cc1eb75983e49a96f3454c042865a43ae09",
-    "tests/test_association_transition_preflight.py": "19d393c030a63c36bbe8e6ee234051b1921a60d85e1c1393f23cf24cb0a43b27",
+    "tests/test_association_transition_preflight.py": "68426d399d6a6b9c547ffa5ff519b14eaa6af008322eeee09d197ff39b8e1611",
     "tests/test_attribution_schema.py": "e6401e9ac03fd9dce09031056044b04348a91c6e277a4808d39ee6b7757b923b",
     "tests/test_budget_schema.py": "7f4553bffd0ab133f24756463513e0d1ab991dcbcf3dbf8a8082fe969f9d263d",
     "tests/test_durable_data_inventory.py": "1a7006cda510e7c9a181ef2873f91bd760c1d35fa2d4bdba2f6c7fcb1fd9ac13",

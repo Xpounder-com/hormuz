@@ -74,14 +74,11 @@ def sqlite_association_candidate(*, fail: bool = False):
     original = UsageStore._apply_migration
 
     def migration(connection, version):
-        if version == 16:
-            _apply_sqlite_proposal(connection)
-            if fail:
-                connection.execute(
-                    "INSERT INTO deliberately_absent_association_probe VALUES (1)"
-                )
-            return
         original(connection, version)
+        if fail and version == 16:
+            connection.execute(
+                "INSERT INTO deliberately_absent_association_probe VALUES (1)"
+            )
 
     with (
         mock.patch.object(UsageStore, "schema_version", 16),
@@ -95,24 +92,14 @@ def postgres_association_candidate(*, fail: bool = False):
     original = postgres_module._migration_sql
 
     def migration(version, schema, *roles):
-        if version == 21:
-            statement = POSTGRES_PROPOSAL.read_text(encoding="utf-8").format(
-                schema=schema,
-                runtime_role=roles[0],
-            )
-            return statement + ("\nSELECT 1 / 0;" if fail else "")
-        return original(version, schema, *roles)
+        statement = original(version, schema, *roles)
+        if fail and version == 21:
+            return statement + "\nSELECT 1 / 0;"
+        return statement
 
-    boundaries = dict(postgres_module._POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION)
-    boundaries[21] = PROPOSED_ACL
     with (
         mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 21),
         mock.patch.object(postgres_module, "_migration_sql", side_effect=migration),
-        mock.patch.object(
-            postgres_module,
-            "_POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION",
-            boundaries,
-        ),
     ):
         yield
 
