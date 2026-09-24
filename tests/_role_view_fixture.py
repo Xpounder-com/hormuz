@@ -13,7 +13,10 @@ from hormuz.portfolio_config import PortfolioPrincipal, PortfolioRoleBinding
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import SCOPES, canonical
 
-from ._portfolio_fixture import ADMIN as ADMIN_TOKEN, create_request, registry_config
+if __package__:
+    from ._portfolio_fixture import ADMIN as ADMIN_TOKEN, create_request, registry_config
+else:  # PostgreSQL ownership discovery imports fixtures from the tests root.
+    from _portfolio_fixture import ADMIN as ADMIN_TOKEN, create_request, registry_config
 
 
 FINANCE_TOKEN = "synthetic-role-view-finance-token"

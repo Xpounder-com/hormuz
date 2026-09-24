@@ -25,9 +25,14 @@ from hormuz.portfolio_wire import (
 )
 from hormuz.store import MonthlyTotals, UsageStore
 
-from ._portfolio_fixture import ADMIN, OTHER, VIEWER, create_request, registry_config
-from ._role_view_fixture import _activation_request, _plan_request
-from ._sqlite import managed_sqlite_connection
+if __package__:
+    from ._portfolio_fixture import ADMIN, OTHER, VIEWER, create_request, registry_config
+    from ._role_view_fixture import _activation_request, _plan_request
+    from ._sqlite import managed_sqlite_connection
+else:  # PostgreSQL ownership discovery imports dependencies from the tests root.
+    from _portfolio_fixture import ADMIN, OTHER, VIEWER, create_request, registry_config
+    from _role_view_fixture import _activation_request, _plan_request
+    from _sqlite import managed_sqlite_connection
 
 
 SCORECARD_FIXTURE = (

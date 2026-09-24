@@ -30,9 +30,14 @@ from hormuz.postgres import (
 )
 from hormuz.store import MonthlyTotals
 
-from ._portfolio_fixture import ADMIN, OTHER, create_request, registry_config
-from ._postgres_fixture import PostgresTestCase
-from .test_recommendation_runtime import NOW, SCORECARD_FIXTURE, _policy_mapping
+if __package__:
+    from ._portfolio_fixture import ADMIN, OTHER, create_request, registry_config
+    from ._postgres_fixture import PostgresTestCase
+    from .test_recommendation_runtime import NOW, SCORECARD_FIXTURE, _policy_mapping
+else:  # The PostgreSQL boundary audit imports test modules from the tests root.
+    from _portfolio_fixture import ADMIN, OTHER, create_request, registry_config
+    from _postgres_fixture import PostgresTestCase
+    from test_recommendation_runtime import NOW, SCORECARD_FIXTURE, _policy_mapping
 
 
 class PostgresRecommendationRuntimeTests(PostgresTestCase):
