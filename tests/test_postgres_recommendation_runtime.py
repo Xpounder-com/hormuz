@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
+from importlib.resources import files
 import json
 from pathlib import Path
 import tempfile
@@ -534,8 +535,8 @@ class PostgresRecommendationRuntimeTests(PostgresTestCase):
             boundary, _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION[24]
         )
         self.assertEqual(policy_receipt_privileges, (False, True))
-        migration = Path(
-            "hormuz/migrations/postgresql/0024_policy_recommendations.sql"
+        migration = files("hormuz.migrations.postgresql").joinpath(
+            "0024_policy_recommendations.sql"
         ).read_text(encoding="utf-8")
         for table in TABLE_DDL:
             self.assertIn(f"CREATE TABLE {{schema}}.{table}", migration)
