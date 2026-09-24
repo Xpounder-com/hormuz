@@ -491,11 +491,21 @@ mod tests {
             run_with_executable(&profile, credential, Optimization::Off, executable)
         });
         let deadline = Instant::now() + Duration::from_secs(5);
-        while !address_file.exists() && Instant::now() < deadline {
+        let address: SocketAddr = loop {
+            if let Ok(origin) = fs::read_to_string(&address_file) {
+                if let Some(address) = origin
+                    .strip_prefix("http://")
+                    .and_then(|value| value.parse().ok())
+                {
+                    break address;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "relay address was not published before the deadline"
+            );
             thread::sleep(Duration::from_millis(10));
-        }
-        let origin = fs::read_to_string(&address_file).unwrap();
-        let address: SocketAddr = origin.strip_prefix("http://").unwrap().parse().unwrap();
+        };
         assert!(TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok());
         fs::write(&release_file, b"").unwrap();
         assert_eq!(handle.join().unwrap().unwrap(), 7);
