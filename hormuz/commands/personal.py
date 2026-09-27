@@ -32,6 +32,7 @@ from ..personal_profiles import (
     PersonalProfileError,
     PersonalProfileStore,
     PersonalRemovalState,
+    new_personal_profile_generation,
     validate_personal_endpoint,
     validate_personal_key,
 )
@@ -202,6 +203,10 @@ def _connect_locked(
     state: Path,
     store: PersonalProfileStore,
 ) -> int:
+    if store.load_removal_state(key) is not None:
+        raise PersonalCommandError("personal_removal_incomplete")
+    if store.entry_exists(key):
+        raise PersonalProfileError("personal_profile_exists")
     preference = ContextPreferenceStore(state, key)
     try:
         preference.path.lstat()
@@ -213,6 +218,7 @@ def _connect_locked(
         previous_preference_enabled = preference.load().enabled
     credentials: ProviderCredentialStore | None = None
     secret: str | None = None
+    generation = new_personal_profile_generation()
     if args.mode == "managed":
         if any((args.provider, args.endpoint, args.model, args.credential_env, args.allow_loopback_http)):
             raise PersonalCommandError("managed_profile_arguments_conflict", 2)
@@ -224,6 +230,7 @@ def _connect_locked(
             provider="hormuz",
             endpoint=managed.gateway,
             model=managed.model,
+            generation=generation,
             allow_insecure_http=managed.allow_insecure_http,
             managed_profile=managed.key,
             previous_preference_enabled=previous_preference_enabled,
@@ -248,17 +255,29 @@ def _connect_locked(
                 endpoint, allow_insecure_http=args.allow_loopback_http
             ),
             model=args.model,
+            generation=generation,
             allow_insecure_http=args.allow_loopback_http,
             credential_env=environment_name,
             previous_preference_enabled=previous_preference_enabled,
         )
         credentials = ProviderCredentialStore()
     profile_created = False
+    removal_state_saved = False
     credential_write_attempted = False
     previous_secret = credentials.get(key) if credentials is not None else None
+    removal_state = _removal_state_for_profile(
+        profile,
+        credential_cleanup_required=(
+            credentials is not None and previous_secret is None
+        ),
+    )
     try:
-        # Create-only persistence prevents replacement inside the transaction;
-        # the profile lock also serializes this work with complete removal.
+        # Make the conservative recovery plan durable before any credential or
+        # preference mutation. The profile generation binds that plan to this
+        # exact lifetime even if a process exits between the following steps.
+        store.save_removal_state(removal_state)
+        removal_state_saved = True
+        # Create-only persistence prevents replacement inside the transaction.
         store.save(profile)
         profile_created = True
         if credentials is not None:
@@ -266,20 +285,33 @@ def _connect_locked(
             credential_write_attempted = True
             credentials.set(key, secret)
         preference.save(True)
-    except (Exception, KeyboardInterrupt):
+        store.clear_removal_state(key)
+        removal_state_saved = False
+    except (Exception, KeyboardInterrupt) as connect_error:
         if not profile_created:
+            rollback_errors: list[Exception] = []
+            try:
+                profile_present = store.entry_exists(key)
+            except Exception as cleanup_error:
+                profile_present = True
+                rollback_errors.append(cleanup_error)
+            if removal_state_saved and not profile_present:
+                try:
+                    store.clear_removal_state(key)
+                except Exception as cleanup_error:
+                    rollback_errors.append(cleanup_error)
+            if rollback_errors or profile_present:
+                if not rollback_errors:
+                    raise PersonalCommandError(
+                        "personal_connect_rollback_failed"
+                    ) from connect_error
+                raise PersonalCommandError(
+                    "personal_connect_rollback_failed"
+                ) from ExceptionGroup(
+                    "personal connect rollback failures", rollback_errors
+                )
             raise
         rollback_errors: list[Exception] = []
-        removal_state = _removal_state_for_profile(
-            profile,
-            credential_cleanup_required=(
-                credentials is not None and credential_write_attempted
-            ),
-        )
-        try:
-            store.save_removal_state(removal_state)
-        except Exception as cleanup_error:
-            rollback_errors.append(cleanup_error)
         preference_rollback_failed = False
         try:
             if previous_preference_enabled is None:
@@ -310,6 +342,7 @@ def _connect_locked(
                 if preference_rollback_failed
                 else "preserve"
             ),
+            profile_generation=removal_state.profile_generation,
         )
         residual_state_saved = False
         try:
@@ -353,7 +386,12 @@ def _connect_locked(
 
 def _run_profile(profile: PersonalProfile, state: Path) -> int:
     if profile.mode == "direct":
-        credential = direct_credential_reader(ProviderCredentialStore(), profile.key)
+        credential = direct_credential_reader(
+            ProviderCredentialStore(),
+            profile.key,
+            state_directory=state,
+            profile_generation=profile.generation,
+        )
     else:
         managed = load_saved_profile(state, profile.managed_profile or "")
         if (
@@ -441,13 +479,24 @@ def _remove_locked(
             removal_state,
             removed=False,
         )
+    existing_removal_state = profile_store.load_removal_state(key)
     try:
         profile = profile_store.load(key)
     except PersonalProfileError as error:
         if error.code not in {"personal_profile_invalid", "personal_profile_unavailable"}:
             raise
         profile = None
-    removal_state = _removal_state_for_profile(profile, fallback_key=key)
+    if profile is not None and existing_removal_state is not None:
+        if existing_removal_state.profile_generation not in {
+            None,
+            profile.generation,
+        }:
+            raise PersonalProfileError("personal_removal_state_invalid")
+        removal_state = existing_removal_state
+    elif existing_removal_state is not None:
+        removal_state = existing_removal_state
+    else:
+        removal_state = _removal_state_for_profile(profile, fallback_key=key)
     # Persist only content-free cleanup instructions before unlinking the
     # create-only guard. A process interruption can therefore resume cleanup
     # without guessing whether a managed profile ever owned a provider secret.
@@ -491,6 +540,7 @@ def _removal_state_for_profile(
             key=validate_personal_key(fallback_key),
             credential_cleanup_required=True,
             preference_action="preserve",
+            profile_generation=None,
         )
     if profile.previous_preference_enabled is None:
         preference_action = "clear"
@@ -506,6 +556,7 @@ def _removal_state_for_profile(
             else credential_cleanup_required
         ),
         preference_action=preference_action,
+        profile_generation=profile.generation,
     )
 
 

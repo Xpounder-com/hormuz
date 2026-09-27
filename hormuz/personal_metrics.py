@@ -21,6 +21,7 @@ from .personal_profiles import (
     PERSONAL_RELEASE_VERSION,
     PersonalProfileError,
     PersonalProfileStore,
+    validate_personal_profile_generation,
 )
 
 
@@ -161,7 +162,7 @@ class PersonalMetricsStore:
         state_directory: Path,
         profile: str,
         *,
-        require_profile: bool = False,
+        profile_generation: str | None = None,
     ):
         try:
             validate_profile(profile)
@@ -173,9 +174,17 @@ class PersonalMetricsStore:
         self.lock_path = self.directory / (".metrics-" + digest + ".lock")
         self.profile = profile
         self._thread_lock = threading.Lock()
-        self._profile_store = (
-            PersonalProfileStore(state_directory) if require_profile else None
-        )
+        if profile_generation is None:
+            self.profile_generation = None
+            self._profile_store = None
+        else:
+            try:
+                self.profile_generation = validate_personal_profile_generation(
+                    profile_generation
+                )
+            except PersonalProfileError as error:
+                raise PersonalMetricsError("invalid_profile_generation") from error
+            self._profile_store = PersonalProfileStore(state_directory)
 
     def record_session(self, *, completed: bool = False) -> None:
         with self._exclusive():
@@ -458,15 +467,29 @@ class PersonalMetricsStore:
     def _load_for_record(self) -> dict[str, object]:
         # This check occurs while the metrics lock is held. Removal unlinks the
         # profile before acquiring that same lock to clear the ledger, so a
-        # write either finishes before the final clear or observes the missing
-        # profile and cannot recreate the file afterward.
+        # write either finishes before the final clear or observes removal. A
+        # generation mismatch additionally rejects an old process after the
+        # same profile key has been removed and connected again.
         if self._profile_store is not None:
             try:
-                profile_present = self._profile_store.entry_exists(self.profile)
+                current_profile = self._profile_store.load(self.profile)
             except PersonalProfileError as error:
+                if error.code == "personal_profile_unavailable":
+                    try:
+                        profile_present = self._profile_store.entry_exists(
+                            self.profile
+                        )
+                    except PersonalProfileError as state_error:
+                        raise PersonalMetricsError(
+                            "metrics_profile_unavailable"
+                        ) from state_error
+                    if not profile_present:
+                        raise PersonalMetricsError(
+                            "metrics_profile_removed"
+                        ) from error
                 raise PersonalMetricsError("metrics_profile_unavailable") from error
-            if not profile_present:
-                raise PersonalMetricsError("metrics_profile_removed")
+            if current_profile.generation != self.profile_generation:
+                raise PersonalMetricsError("metrics_profile_replaced")
         return self._load_or_empty(create=True)
 
 

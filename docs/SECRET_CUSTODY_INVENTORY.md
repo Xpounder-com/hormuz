@@ -69,8 +69,13 @@ The active core has seven custody categories:
    it under a distinct service in the operating-system secure store, and then
    uses it only for the fixed direct-provider origin. There is no plaintext-file
    fallback. The profile retains only the non-secret source environment-variable
-   name so the launcher can scrub it even if its shell value later changes; the
-   profile and metrics stores never contain the credential. The user rotates it
+   name and a random content-free generation so the launcher can scrub the
+   variable even if its shell value later changes. Credential reads and metric
+   writes must match that generation, so an old relay cannot acquire a newly
+   connected profile's credential or write into its ledger. A private cleanup
+   record binds only cleanup booleans and preference action to that generation;
+   the profile, cleanup, and metrics stores never contain the credential. The
+   user rotates it
    from that same named variable with `hormuz personal credential` and a
    provider-issued replacement, and can delete it with `hormuz personal remove`.
 7. **GitHub connector signing and identity keys.** The opt-in outcome receiver

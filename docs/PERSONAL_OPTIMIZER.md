@@ -41,9 +41,11 @@ Provider credentials are read from an explicitly named environment variable
 and moved into the operating-system keyring. They are never accepted as a CLI
 argument and never written to the profile or metrics files. The profile keeps
 only the non-secret variable name so a later shell value under that name is
-also removed from the launched agent environment. Personal profile names use
-one canonical lowercase ASCII form: a letter or digit followed by up to 63
-letters, digits, periods, underscores, or hyphens.
+also removed from the launched agent environment. Each new profile gets a
+random, content-free 256-bit generation identity; schema-v1 and schema-v2
+profiles receive a stable locally derived compatibility identity when loaded.
+Personal profile names use one canonical lowercase ASCII form: a letter or
+digit followed by up to 63 letters, digits, periods, underscores, or hyphens.
 
 ```sh
 export OPENAI_API_KEY='your-provider-key'
@@ -132,26 +134,34 @@ tool output. `clear` deletes measurements. `remove` removes the personal profile
 guard first, then deletes the direct credential and measurements. It restores a
 preference that existed before `connect`, or removes the preference owned by the
 personal profile when none existed. Unsafe ancillary state is never followed;
-cleanup failure is reported while the removed profile no longer blocks a new
-connection. Before unlinking the profile, Hormuz writes a private, content-free
-cleanup record containing only whether direct-credential cleanup is required
-and the exact preference restoration action. A repeated `remove` resumes that
-record after interruption or a transient cleanup failure; a completed managed
-or never-created profile has no record and does not open the provider keyring.
+cleanup failure is reported and a new connection is refused until a repeated
+`remove` finishes the pending work. Before any connect-time credential or
+preference mutation, and again before unlinking a profile, Hormuz writes a
+private, content-free cleanup record containing only the matching profile
+generation, whether direct-credential cleanup is required, and the exact
+preference restoration action. A repeated `remove` resumes that record after
+interruption or a transient cleanup failure; it rejects a record bound to a
+different live generation. A completed managed or never-created profile has no
+record and does not open the provider keyring.
 Credential replacement, preference changes, and removal share one per-profile
 transaction, so a stale command cannot recreate credentials or overwrite a
-managed preference after removal. If a damaged profile cannot disclose whether
-it was direct or managed, removal deletes its profile, credential, and
-measurements but leaves the shared preference unchanged rather than guessing at
-managed state. Failed `connect` rollback attempts preference, credential, and
-profile cleanup independently. It unlinks the failed profile only after the
-record has been durably narrowed to the exact recovery work that remains, and
-retains the record until all recovery steps succeed. Runtime measurement writes
-verify the profile while holding the metrics lock. Because removal unlinks the
-profile before taking that lock to clear measurements, an active run either
-finishes its write before the clear or observes removal and cannot recreate the
-ledger. Since agent configuration was never changed, successful removal restores
-the ordinary setup by construction.
+managed preference after removal. Direct credential reads use the same
+transaction and generation check: rotation remains visible within one profile
+lifetime, while an old relay cannot acquire a replacement profile's credential
+for its old endpoint. If a damaged profile cannot disclose whether it was
+direct or managed, removal deletes its profile, credential, and measurements
+but leaves the shared preference unchanged rather than guessing at managed
+state. Failed `connect` rollback attempts preference, credential, and profile
+cleanup independently. It unlinks the failed profile only after the record has
+been durably narrowed to the exact recovery work that remains, and retains the
+record until all recovery steps succeed. Runtime measurement writes
+verify both the profile key and its immutable generation while holding the
+metrics lock. Because removal unlinks the profile before taking that lock to
+clear measurements, an active run either finishes its write before the clear or
+observes removal. If the same key is connected again before that process exits,
+the old process observes a generation mismatch and cannot write into the new
+ledger. Since agent configuration was never changed, successful removal
+restores the ordinary setup by construction.
 
 ## Caching and regression guard
 

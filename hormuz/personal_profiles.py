@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import stat
 import tempfile
 import threading
@@ -22,8 +23,8 @@ from .credential_store import CredentialStoreError, validate_profile
 
 
 PERSONAL_RELEASE_VERSION = "0.1.0"
-PERSONAL_PROFILE_SCHEMA_VERSION = 2
-PERSONAL_REMOVAL_STATE_SCHEMA_VERSION = 1
+PERSONAL_PROFILE_SCHEMA_VERSION = 3
+PERSONAL_REMOVAL_STATE_SCHEMA_VERSION = 2
 MAX_PROFILE_BYTES = 16 * 1024
 MAX_REMOVAL_STATE_BYTES = 1024
 Mode = Literal["direct", "managed"]
@@ -49,6 +50,7 @@ class PersonalProfile:
     provider: Provider
     endpoint: str
     model: str
+    generation: str
     allow_insecure_http: bool = False
     managed_profile: str | None = None
     credential_env: str | None = None
@@ -65,6 +67,7 @@ class PersonalProfile:
             "provider": self.provider,
             "endpoint": self.endpoint,
             "model": self.model,
+            "generation": self.generation,
             "allow_insecure_http": self.allow_insecure_http,
             "managed_profile": self.managed_profile,
             "credential_env": self.credential_env,
@@ -80,6 +83,7 @@ class PersonalRemovalState:
     key: str
     credential_cleanup_required: bool
     preference_action: PreferenceAction
+    profile_generation: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -87,6 +91,7 @@ class PersonalRemovalState:
             "key": self.key,
             "credential_cleanup_required": self.credential_cleanup_required,
             "preference_action": self.preference_action,
+            "profile_generation": self.profile_generation,
         }
 
 
@@ -430,16 +435,25 @@ def parse_personal_removal_state(value: object) -> PersonalRemovalState:
     }
     if (
         not isinstance(value, dict)
-        or set(value) != expected
-        or value.get("schema_version") != PERSONAL_REMOVAL_STATE_SCHEMA_VERSION
         or not isinstance(value.get("credential_cleanup_required"), bool)
     ):
+        raise PersonalProfileError("personal_removal_state_invalid")
+    schema_version = value.get("schema_version")
+    if schema_version == 1:
+        profile_generation = None
+    elif schema_version == PERSONAL_REMOVAL_STATE_SCHEMA_VERSION:
+        expected.add("profile_generation")
+        profile_generation = value.get("profile_generation")
+    else:
+        raise PersonalProfileError("personal_removal_state_invalid")
+    if set(value) != expected:
         raise PersonalProfileError("personal_removal_state_invalid")
     try:
         state = PersonalRemovalState(
             key=validate_personal_key(value.get("key")),
             credential_cleanup_required=value["credential_cleanup_required"],
             preference_action=value.get("preference_action"),  # type: ignore[arg-type]
+            profile_generation=profile_generation,  # type: ignore[arg-type]
         )
         return validate_personal_removal_state(state)
     except (TypeError, CredentialStoreError, PersonalProfileError) as error:
@@ -456,6 +470,10 @@ def validate_personal_removal_state(
     if (
         not isinstance(state.credential_cleanup_required, bool)
         or state.preference_action not in {"clear", "enable", "disable", "preserve"}
+        or (
+            state.profile_generation is not None
+            and not _is_profile_generation(state.profile_generation)
+        )
     ):
         raise PersonalProfileError("personal_removal_state_invalid")
     return state
@@ -484,9 +502,15 @@ def parse_personal_profile(value: object) -> PersonalProfile:
     schema_version = value.get("schema_version")
     if schema_version == 1:
         previous_preference_enabled = None
-    elif schema_version == PERSONAL_PROFILE_SCHEMA_VERSION:
+        generation = _legacy_profile_generation(value)
+    elif schema_version == 2:
         expected.add("previous_preference_enabled")
         previous_preference_enabled = value.get("previous_preference_enabled")
+        generation = _legacy_profile_generation(value)
+    elif schema_version == PERSONAL_PROFILE_SCHEMA_VERSION:
+        expected.update({"previous_preference_enabled", "generation"})
+        previous_preference_enabled = value.get("previous_preference_enabled")
+        generation = value.get("generation")
     else:
         raise PersonalProfileError("personal_profile_invalid")
     if set(value) != expected:
@@ -499,6 +523,7 @@ def parse_personal_profile(value: object) -> PersonalProfile:
             provider=value.get("provider"),  # type: ignore[arg-type]
             endpoint=value.get("endpoint"),  # type: ignore[arg-type]
             model=value.get("model"),  # type: ignore[arg-type]
+            generation=generation,  # type: ignore[arg-type]
             allow_insecure_http=value.get("allow_insecure_http"),  # type: ignore[arg-type]
             managed_profile=value.get("managed_profile"),  # type: ignore[arg-type]
             credential_env=value.get("credential_env"),  # type: ignore[arg-type]
@@ -521,6 +546,7 @@ def validate_personal_profile(profile: PersonalProfile) -> PersonalProfile:
         or profile.provider not in {"openai", "anthropic", "hormuz"}
         or not isinstance(profile.model, str)
         or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}", profile.model) is None
+        or not _is_profile_generation(profile.generation)
         or not isinstance(profile.allow_insecure_http, bool)
         or (
             profile.previous_preference_enabled is not None
@@ -560,6 +586,34 @@ def validate_personal_profile(profile: PersonalProfile) -> PersonalProfile:
     if profile.provider == "anthropic" and "anthropic" not in adapter.capabilities.protocols:
         raise PersonalProfileError("provider_protocol_mismatch")
     return profile
+
+
+def new_personal_profile_generation() -> str:
+    """Return a content-free immutable identity for one profile lifetime."""
+
+    return secrets.token_hex(32)
+
+
+def validate_personal_profile_generation(value: object) -> str:
+    if not _is_profile_generation(value):
+        raise PersonalProfileError("personal_profile_invalid")
+    return value
+
+
+def _is_profile_generation(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _legacy_profile_generation(value: dict[str, object]) -> str:
+    """Derive a stable identity for strict schema-v1/v2 profile documents."""
+
+    try:
+        canonical = json.dumps(value, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    except (TypeError, ValueError) as error:
+        raise PersonalProfileError("personal_profile_invalid") from error
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def validate_personal_key(value: object) -> str:

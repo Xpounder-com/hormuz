@@ -19,7 +19,7 @@ from .client_relay import (
 from .client_versions import SUPPORTED_CLIENT_VERSIONS
 from .compaction_runtime import ContextPreferenceStore
 from .personal_metrics import PersonalMetricsError, PersonalMetricsStore
-from .personal_profiles import PersonalProfile
+from .personal_profiles import PersonalProfile, PersonalProfileError, PersonalProfileStore
 
 
 def run_personal_client(
@@ -68,7 +68,7 @@ def run_personal_client(
     metrics_candidate = PersonalMetricsStore(
         state_directory,
         profile.key,
-        require_profile=True,
+        profile_generation=profile.generation,
     )
     try:
         metrics_candidate.record_session()
@@ -135,9 +135,28 @@ def run_personal_client(
                 pass
 
 
-def direct_credential_reader(store, profile: str) -> Callable[[], str]:
+def direct_credential_reader(
+    store,
+    profile: str,
+    *,
+    state_directory: Path,
+    profile_generation: str,
+) -> Callable[[], str]:
+    profiles = PersonalProfileStore(state_directory)
+
     def read() -> str:
-        value = store.get(profile)
+        try:
+            # Credential rotation, removal, and reconnect use this same
+            # transaction. A read therefore belongs wholly to one profile
+            # generation and cannot pair a replacement secret with an old
+            # relay endpoint.
+            with profiles.transaction(profile, create=False):
+                current = profiles.load(profile)
+                if current.generation != profile_generation:
+                    raise ClientRelayError("provider_credential_unavailable")
+                value = store.get(profile)
+        except PersonalProfileError as error:
+            raise ClientRelayError("provider_credential_unavailable") from error
         if value is None:
             raise ClientRelayError("provider_credential_unavailable")
         return value

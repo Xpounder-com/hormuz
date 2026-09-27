@@ -20,7 +20,12 @@ from unittest import mock
 import hormuz.commands.personal as personal_commands
 import hormuz.execution_methods as execution_methods
 from hormuz.adapters import adapter_for, conformance_report
-from hormuz.client_relay import LocalRelayServer, RelayOptimizer, SavedClientProfile
+from hormuz.client_relay import (
+    ClientRelayError,
+    LocalRelayServer,
+    RelayOptimizer,
+    SavedClientProfile,
+)
 from hormuz.client_versions import SUPPORTED_CLIENT_VERSIONS
 from hormuz.compaction_runtime import ContextPreferenceStore, ContextRuntimeError
 from hormuz.credential_store import CredentialStoreError, ProviderCredentialStore
@@ -57,7 +62,7 @@ from hormuz.personal_profiles import (
     PersonalProfileStore,
     PersonalRemovalState,
 )
-from hormuz.personal_runtime import run_personal_client
+from hormuz.personal_runtime import direct_credential_reader, run_personal_client
 
 
 LOCAL_TOKEN = "hox_l_" + "l" * 43
@@ -200,6 +205,7 @@ class PersonalContractTests(unittest.TestCase):
             "provider": "openai",
             "endpoint": "https://api.openai.com",
             "model": "qualified-model",
+            "generation": "1" * 64,
             "credential_env": "OPENAI_API_KEY",
         }
         values.update(changes)
@@ -243,12 +249,29 @@ class PersonalContractTests(unittest.TestCase):
         legacy = self.profile().to_dict()
         legacy["schema_version"] = 1
         legacy.pop("previous_preference_enabled")
+        legacy.pop("generation")
         path = store.path_for("personal-a")
         path.write_text(json.dumps(legacy), encoding="utf-8")
         path.chmod(0o600)
         loaded = store.load("personal-a")
         self.assertIsNone(loaded.previous_preference_enabled)
+        self.assertRegex(loaded.generation, r"^[0-9a-f]{64}$")
         self.assertTrue(store.remove("personal-a"))
+
+    def test_profile_schema_two_gets_a_stable_legacy_generation(self) -> None:
+        store = PersonalProfileStore(self.state)
+        store.directory.mkdir(parents=True, mode=0o700)
+        legacy = self.profile(previous_preference_enabled=False).to_dict()
+        legacy["schema_version"] = 2
+        legacy.pop("generation")
+        path = store.path_for("personal-a")
+        path.write_text(json.dumps(legacy), encoding="utf-8")
+        path.chmod(0o600)
+        first = store.load("personal-a")
+        second = store.load("personal-a")
+        self.assertFalse(first.previous_preference_enabled)
+        self.assertEqual(first.generation, second.generation)
+        self.assertRegex(first.generation, r"^[0-9a-f]{64}$")
 
     def test_profile_save_removes_the_link_after_a_post_link_failure(self) -> None:
         store = PersonalProfileStore(self.state)
@@ -275,6 +298,7 @@ class PersonalContractTests(unittest.TestCase):
             key="personal-a",
             credential_cleanup_required=True,
             preference_action="disable",
+            profile_generation="1" * 64,
         )
         store.save_removal_state(state)
         path = store.removal_state_path_for("personal-a")
@@ -283,6 +307,22 @@ class PersonalContractTests(unittest.TestCase):
         self.assertEqual(store.load_removal_state("personal-a"), state)
         serialized = path.read_text(encoding="utf-8")
         self.assertNotIn(DIRECT_TOKEN, serialized)
+        self.assertIn('"profile_generation"', serialized)
+        path.write_text(
+            '{"schema_version":1,"key":"personal-a",'
+            '"credential_cleanup_required":true,"preference_action":"disable"}',
+            encoding="utf-8",
+        )
+        path.chmod(0o600)
+        self.assertEqual(
+            store.load_removal_state("personal-a"),
+            PersonalRemovalState(
+                key="personal-a",
+                credential_cleanup_required=True,
+                preference_action="disable",
+                profile_generation=None,
+            ),
+        )
         path.write_text(
             '{"schema_version":1,"key":"personal-a",'
             '"credential_cleanup_required":true,"preference_action":"guess"}',
@@ -598,6 +638,11 @@ class PersonalContractTests(unittest.TestCase):
         self.assertEqual(removal_state.preference_action, "disable")
         self.assertEqual(credentials.get(key), previous_secret)
 
+        retry_errors = io.StringIO()
+        with contextlib.redirect_stderr(retry_errors):
+            self.assertEqual(personal_commands.run(connect), 1)
+        self.assertIn("personal_removal_incomplete", retry_errors.getvalue())
+
         with (
             mock.patch.object(
                 personal_commands,
@@ -610,6 +655,33 @@ class PersonalContractTests(unittest.TestCase):
         self.assertFalse(preference.load().enabled)
         self.assertEqual(credentials.get(key), previous_secret)
         self.assertFalse(profiles.removal_state_path_for(key).exists())
+
+    def test_remove_rejects_cleanup_state_from_another_profile_generation(self) -> None:
+        profiles = PersonalProfileStore(self.state)
+        profiles.save(self.profile())
+        profiles.save_removal_state(
+            PersonalRemovalState(
+                key="personal-a",
+                credential_cleanup_required=False,
+                preference_action="preserve",
+                profile_generation="2" * 64,
+            )
+        )
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            self.assertEqual(
+                personal_commands.run(
+                    argparse.Namespace(
+                        personal_command="remove",
+                        profile="personal-a",
+                        state_directory=self.state,
+                    )
+                ),
+                1,
+            )
+        self.assertIn("personal_removal_state_invalid", errors.getvalue())
+        self.assertTrue(profiles.entry_exists("personal-a"))
+        self.assertTrue(profiles.removal_state_path_for("personal-a").exists())
 
     def test_connect_keeps_profile_when_narrowed_retry_state_is_not_durable(self) -> None:
         key = "personal-a"
@@ -630,6 +702,11 @@ class PersonalContractTests(unittest.TestCase):
             model="qualified-model",
             credential_env="PERSONAL_TEST_PROVIDER_KEY",
             allow_loopback_http=False,
+        )
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile=key,
+            state_directory=self.state,
         )
         original_preference_save = ContextPreferenceStore.save
         preference_save_calls = 0
@@ -687,8 +764,29 @@ class PersonalContractTests(unittest.TestCase):
         removal_state = profiles.load_removal_state(key)
         self.assertIsNotNone(removal_state)
         assert removal_state is not None
-        self.assertTrue(removal_state.credential_cleanup_required)
+        retained_profile = profiles.load(key)
+        self.assertFalse(removal_state.credential_cleanup_required)
         self.assertEqual(removal_state.preference_action, "disable")
+        self.assertEqual(
+            removal_state.profile_generation,
+            retained_profile.generation,
+        )
+        self.assertEqual(credentials.get(key), previous_secret)
+
+        with (
+            mock.patch.object(
+                personal_commands,
+                "ProviderCredentialStore",
+                side_effect=AssertionError(
+                    "safe retained-state cleanup must preserve the old credential"
+                ),
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 0)
+        self.assertFalse(profiles.entry_exists(key))
+        self.assertFalse(profiles.removal_state_path_for(key).exists())
+        self.assertFalse(preference.load().enabled)
         self.assertEqual(credentials.get(key), previous_secret)
 
     def test_preference_change_serializes_with_managed_profile_removal(self) -> None:
@@ -1804,10 +1902,28 @@ class PersonalContractTests(unittest.TestCase):
         backend = _MemoryKeyring()
         credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
         credentials.set(profile.key, DIRECT_TOKEN)
+        stale_credential = direct_credential_reader(
+            credentials,
+            profile.key,
+            state_directory=self.state,
+            profile_generation=profile.generation,
+        )
         remove = argparse.Namespace(
             personal_command="remove",
             profile=profile.key,
             state_directory=self.state,
+        )
+        reconnect = argparse.Namespace(
+            personal_command="connect",
+            profile=profile.key,
+            state_directory=self.state,
+            mode="direct",
+            agent="codex",
+            provider="openai",
+            endpoint=profile.endpoint,
+            model=profile.model,
+            credential_env=profile.credential_env,
+            allow_loopback_http=True,
         )
         launched = threading.Event()
         release_launch = threading.Event()
@@ -1838,8 +1954,9 @@ class PersonalContractTests(unittest.TestCase):
         guarded_metrics = PersonalMetricsStore(
             self.state,
             profile.key,
-            require_profile=True,
+            profile_generation=profile.generation,
         )
+        replacement_metrics: PersonalMetricsStore | None = None
         with (
             mock.patch(
                 "hormuz.personal_runtime.subprocess.run", side_effect=block_agent
@@ -1851,7 +1968,7 @@ class PersonalContractTests(unittest.TestCase):
         ):
             try:
                 agent_thread.start()
-                self.assertTrue(launched.wait(5))
+                self.assertTrue(launched.wait(5), failures)
                 self.assertTrue(guarded_metrics.path.exists())
                 self.assertEqual(personal_commands.run(remove), 0)
                 self.assertFalse(guarded_metrics.path.exists())
@@ -1859,8 +1976,39 @@ class PersonalContractTests(unittest.TestCase):
                     PersonalMetricsError, "metrics_profile_removed"
                 ):
                     guarded_metrics.record_session(completed=True)
+                with mock.patch.dict(
+                    os.environ,
+                    {"PERSONAL_TEST_PROVIDER_KEY": "sk-reconnected-test-only"},
+                    clear=False,
+                ):
+                    self.assertEqual(personal_commands.run(reconnect), 0)
+                replacement = profiles.load(profile.key)
+                self.assertNotEqual(replacement.generation, profile.generation)
                 with self.assertRaisesRegex(
-                    PersonalMetricsError, "metrics_profile_removed"
+                    ClientRelayError, "provider_credential_unavailable"
+                ):
+                    stale_credential()
+                self.assertEqual(
+                    direct_credential_reader(
+                        credentials,
+                        profile.key,
+                        state_directory=self.state,
+                        profile_generation=replacement.generation,
+                    )(),
+                    "sk-reconnected-test-only",
+                )
+                replacement_metrics = PersonalMetricsStore(
+                    self.state,
+                    profile.key,
+                    profile_generation=replacement.generation,
+                )
+                replacement_metrics.record_session()
+                with self.assertRaisesRegex(
+                    PersonalMetricsError, "metrics_profile_replaced"
+                ):
+                    guarded_metrics.record_session(completed=True)
+                with self.assertRaisesRegex(
+                    PersonalMetricsError, "metrics_profile_replaced"
                 ):
                     guarded_metrics.record_optimization(
                         OptimizationMeasurement(
@@ -1881,7 +2029,11 @@ class PersonalContractTests(unittest.TestCase):
         self.assertFalse(agent_thread.is_alive())
         self.assertEqual(failures, [])
         self.assertEqual(outcomes, [0])
-        self.assertFalse(guarded_metrics.path.exists())
+        self.assertIsNotNone(replacement_metrics)
+        assert replacement_metrics is not None
+        replacement_counters = replacement_metrics.snapshot()["counters"]
+        self.assertEqual(replacement_counters["sessions_started"], 1)
+        self.assertEqual(replacement_counters["sessions_completed"], 0)
 
     def test_execution_router_uses_exact_code_and_preserves_call_contract(self) -> None:
         request = MethodRequest(
