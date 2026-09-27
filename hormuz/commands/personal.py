@@ -31,6 +31,7 @@ from ..personal_profiles import (
     PersonalProfile,
     PersonalProfileError,
     PersonalProfileStore,
+    PersonalRemovalState,
     validate_personal_endpoint,
     validate_personal_key,
 )
@@ -146,15 +147,12 @@ def run(args: argparse.Namespace) -> int:
             return _remove(key, state)
         if command == "credential":
             return _replace_credential(args, key, state)
+        if command in {"on", "off"}:
+            return _set_optimization(key, state, enabled=command == "on")
         profile = PersonalProfileStore(state).load(key)
         if command == "run":
             return _run_profile(profile, state)
         preference = ContextPreferenceStore(state, profile.key)
-        if command in {"on", "off"}:
-            enabled = command == "on"
-            preference.save(enabled)
-            print(f"personal_optimization profile={profile.key} setting={'on' if enabled else 'off'}")
-            return 0
         metrics = PersonalMetricsStore(state, profile.key)
         if command == "benefit":
             document = metrics.benefit(enabled=preference.load().enabled)
@@ -272,13 +270,28 @@ def _connect_locked(
         if not profile_created:
             raise
         rollback_errors: list[Exception] = []
+        removal_state = _removal_state_for_profile(
+            profile,
+            credential_cleanup_required=(
+                credentials is not None and credential_write_attempted
+            ),
+        )
+        removal_state_saved = False
+        try:
+            store.save_removal_state(removal_state)
+            removal_state_saved = True
+        except Exception as cleanup_error:
+            rollback_errors.append(cleanup_error)
+        preference_rollback_failed = False
         try:
             if previous_preference_enabled is None:
                 preference.clear()
             else:
                 preference.save(previous_preference_enabled)
         except Exception as cleanup_error:
+            preference_rollback_failed = True
             rollback_errors.append(cleanup_error)
+        credential_rollback_failed = False
         try:
             if credentials is not None and credential_write_attempted:
                 if previous_secret is None:
@@ -286,11 +299,41 @@ def _connect_locked(
                 else:
                     credentials.set(key, previous_secret)
         except Exception as cleanup_error:
+            credential_rollback_failed = True
             rollback_errors.append(cleanup_error)
+        # Narrow the durable retry instructions to cleanup that actually
+        # remains. In particular, never let a later preference retry delete a
+        # pre-existing credential that this rollback already restored.
+        residual_state = PersonalRemovalState(
+            key=removal_state.key,
+            credential_cleanup_required=credential_rollback_failed,
+            preference_action=(
+                removal_state.preference_action
+                if preference_rollback_failed
+                else "preserve"
+            ),
+        )
+        try:
+            store.save_removal_state(residual_state)
+            removal_state_saved = True
+        except Exception as cleanup_error:
+            rollback_errors.append(cleanup_error)
+        profile_absent = False
         try:
             store.remove(key)
         except Exception as cleanup_error:
             rollback_errors.append(cleanup_error)
+            try:
+                profile_absent = not store.entry_exists(key)
+            except Exception as state_error:
+                rollback_errors.append(state_error)
+        else:
+            profile_absent = True
+        if not rollback_errors and profile_absent and removal_state_saved:
+            try:
+                store.clear_removal_state(key)
+            except Exception as cleanup_error:
+                rollback_errors.append(cleanup_error)
         if rollback_errors:
             raise PersonalCommandError("personal_connect_rollback_failed") from ExceptionGroup(
                 "personal connect rollback failures", rollback_errors
@@ -349,6 +392,21 @@ def _replace_credential(args: argparse.Namespace, key: str, state: Path) -> int:
     return 0
 
 
+def _set_optimization(key: str, state: Path, *, enabled: bool) -> int:
+    profile_store = PersonalProfileStore(state)
+    # Preference mutation shares the profile transaction with remove so a
+    # stale on/off command cannot overwrite the preference restored after the
+    # profile guard is unlinked.
+    with profile_store.transaction(key, create=False):
+        profile = profile_store.load(key)
+        ContextPreferenceStore(state, profile.key).save(enabled)
+    print(
+        f"personal_optimization profile={profile.key} "
+        f"setting={'on' if enabled else 'off'}"
+    )
+    return 0
+
+
 def _remove(key: str, state: Path) -> int:
     profile_store = PersonalProfileStore(state)
     with profile_store.transaction(key, create=False):
@@ -363,35 +421,34 @@ def _remove_locked(
     # Remove the create-only guard first. Ancillary state is independently
     # protected and may be unsafe or unavailable; such failures must be
     # reported without stranding a profile that blocks a subsequent connect.
-    cleanup_error: Exception | None = None
     if not profile_store.entry_exists(key):
-        # A previous removal may have unlinked the profile before credential or
-        # metrics cleanup failed. Retry those idempotent actions while leaving
-        # the shared preference untouched: for a managed profile it may already
-        # have been restored to its pre-personal value.
-        absent_cleanup_errors: list[Exception] = []
-        try:
-            ProviderCredentialStore().delete(key)
-        except CredentialStoreError as error:
-            absent_cleanup_errors.append(error)
-        try:
-            PersonalMetricsStore(state, key).clear()
-        except PersonalMetricsError as error:
-            absent_cleanup_errors.append(error)
-        if absent_cleanup_errors:
-            raise absent_cleanup_errors[0]
-        print(
-            "personal_removed "
-            f"profile={key} removed=false "
-            "agent_configuration=unchanged managed_session=preserved"
+        removal_state = profile_store.load_removal_state(key)
+        if removal_state is None:
+            print(
+                "personal_removed "
+                f"profile={key} removed=false "
+                "agent_configuration=unchanged managed_session=preserved"
+            )
+            return 0
+        return _complete_removal_cleanup(
+            key,
+            state,
+            profile_store,
+            removal_state,
+            removed=False,
         )
-        return 0
     try:
         profile = profile_store.load(key)
     except PersonalProfileError as error:
         if error.code not in {"personal_profile_invalid", "personal_profile_unavailable"}:
             raise
         profile = None
+    removal_state = _removal_state_for_profile(profile, fallback_key=key)
+    # Persist only content-free cleanup instructions before unlinking the
+    # create-only guard. A process interruption can therefore resume cleanup
+    # without guessing whether a managed profile ever owned a provider secret.
+    profile_store.save_removal_state(removal_state)
+    cleanup_errors: list[Exception] = []
     try:
         removed = profile_store.remove(key)
     except PersonalProfileError as error:
@@ -402,31 +459,89 @@ def _remove_locked(
             profile_store.path_for(key).lstat()
         except FileNotFoundError:
             removed = True
-            cleanup_error = error
+            cleanup_errors.append(error)
         except OSError:
             raise error
         else:
             raise
-    if profile is None or profile.mode == "direct":
+    return _complete_removal_cleanup(
+        key,
+        state,
+        profile_store,
+        removal_state,
+        removed=removed,
+        initial_errors=cleanup_errors,
+    )
+
+
+def _removal_state_for_profile(
+    profile: PersonalProfile | None,
+    *,
+    fallback_key: str | None = None,
+    credential_cleanup_required: bool | None = None,
+) -> PersonalRemovalState:
+    if profile is None:
+        if fallback_key is None:
+            raise PersonalProfileError("personal_removal_state_invalid")
+        return PersonalRemovalState(
+            key=validate_personal_key(fallback_key),
+            credential_cleanup_required=True,
+            preference_action="preserve",
+        )
+    if profile.previous_preference_enabled is None:
+        preference_action = "clear"
+    elif profile.previous_preference_enabled:
+        preference_action = "enable"
+    else:
+        preference_action = "disable"
+    return PersonalRemovalState(
+        key=profile.key,
+        credential_cleanup_required=(
+            profile.mode == "direct"
+            if credential_cleanup_required is None
+            else credential_cleanup_required
+        ),
+        preference_action=preference_action,
+    )
+
+
+def _complete_removal_cleanup(
+    key: str,
+    state: Path,
+    profile_store: PersonalProfileStore,
+    removal_state: PersonalRemovalState,
+    *,
+    removed: bool,
+    initial_errors: list[Exception] | None = None,
+) -> int:
+    if removal_state.key != key:
+        raise PersonalProfileError("personal_removal_state_invalid")
+    cleanup_errors = list(initial_errors or ())
+    if removal_state.credential_cleanup_required:
         try:
             ProviderCredentialStore().delete(key)
         except CredentialStoreError as error:
-            cleanup_error = cleanup_error or error
+            cleanup_errors.append(error)
     preference = ContextPreferenceStore(state, key)
-    if profile is not None:
+    if removal_state.preference_action != "preserve":
         try:
-            if profile.previous_preference_enabled is None:
+            if removal_state.preference_action == "clear":
                 preference.clear()
             else:
-                preference.save(profile.previous_preference_enabled)
+                preference.save(removal_state.preference_action == "enable")
         except ContextRuntimeError as error:
-            cleanup_error = cleanup_error or error
+            cleanup_errors.append(error)
     try:
         PersonalMetricsStore(state, key).clear()
     except PersonalMetricsError as error:
-        cleanup_error = cleanup_error or error
-    if cleanup_error is not None:
-        raise cleanup_error
+        cleanup_errors.append(error)
+    if not cleanup_errors:
+        try:
+            profile_store.clear_removal_state(key)
+        except PersonalProfileError as error:
+            cleanup_errors.append(error)
+    if cleanup_errors:
+        raise cleanup_errors[0]
     print(
         "personal_removed "
         f"profile={key} removed={str(removed).lower()} "

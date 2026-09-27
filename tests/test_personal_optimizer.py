@@ -54,6 +54,7 @@ from hormuz.personal_profiles import (
     PersonalProfile,
     PersonalProfileError,
     PersonalProfileStore,
+    PersonalRemovalState,
 )
 from hormuz.personal_runtime import run_personal_client
 
@@ -267,6 +268,32 @@ class PersonalContractTests(unittest.TestCase):
             store.save(self.profile())
         self.assertFalse(store.path_for("personal-a").exists())
 
+    def test_removal_state_is_private_strict_and_content_free(self) -> None:
+        store = PersonalProfileStore(self.state)
+        state = PersonalRemovalState(
+            key="personal-a",
+            credential_cleanup_required=True,
+            preference_action="disable",
+        )
+        store.save_removal_state(state)
+        path = store.removal_state_path_for("personal-a")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn("personal-a", path.name)
+        self.assertEqual(store.load_removal_state("personal-a"), state)
+        serialized = path.read_text(encoding="utf-8")
+        self.assertNotIn(DIRECT_TOKEN, serialized)
+        path.write_text(
+            '{"schema_version":1,"key":"personal-a",'
+            '"credential_cleanup_required":true,"preference_action":"guess"}',
+            encoding="utf-8",
+        )
+        path.chmod(0o600)
+        with self.assertRaisesRegex(
+            PersonalProfileError, "personal_removal_state_invalid"
+        ):
+            store.load_removal_state("personal-a")
+        self.assertTrue(store.clear_removal_state("personal-a"))
+
     def test_profile_modes_are_closed_and_managed_cannot_use_aider(self) -> None:
         store = PersonalProfileStore(self.state)
         store.save(self.profile())
@@ -419,6 +446,11 @@ class PersonalContractTests(unittest.TestCase):
         )
         with (
             mock.patch.object(personal_commands, "load_saved_profile", return_value=managed),
+            mock.patch.object(
+                personal_commands,
+                "ProviderCredentialStore",
+                side_effect=AssertionError("managed removal must not open a keyring"),
+            ),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             self.assertEqual(personal_commands.run(connect), 0)
@@ -429,6 +461,226 @@ class PersonalContractTests(unittest.TestCase):
             self.assertFalse(preference.load().enabled)
             self.assertEqual(personal_commands.run(remove), 0)
         self.assertFalse(preference.load().enabled)
+
+    def test_failed_managed_connect_keeps_retryable_preference_restoration(self) -> None:
+        preference = ContextPreferenceStore(self.state, "managed-source")
+        preference.save(False)
+        managed = SavedClientProfile(
+            key="managed-source",
+            gateway="https://gateway.example",
+            client="codex",
+            model="qualified-model",
+            allow_insecure_http=False,
+        )
+        connect = argparse.Namespace(
+            personal_command="connect",
+            profile="managed-source",
+            state_directory=self.state,
+            mode="managed",
+            agent="codex",
+            provider=None,
+            endpoint=None,
+            model=None,
+            credential_env=None,
+            allow_loopback_http=False,
+        )
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="managed-source",
+            state_directory=self.state,
+        )
+        original_save = ContextPreferenceStore.save
+        save_calls = 0
+
+        def fail_connect_and_rollback(
+            preference_store: ContextPreferenceStore, enabled: bool
+        ) -> None:
+            nonlocal save_calls
+            save_calls += 1
+            if save_calls == 1:
+                original_save(preference_store, enabled)
+                raise ContextRuntimeError("settings_write_failed")
+            if save_calls == 2:
+                raise ContextRuntimeError("settings_write_failed")
+            original_save(preference_store, enabled)
+
+        with (
+            mock.patch.object(personal_commands, "load_saved_profile", return_value=managed),
+            mock.patch.object(
+                ContextPreferenceStore,
+                "save",
+                autospec=True,
+                side_effect=fail_connect_and_rollback,
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(connect), 1)
+        profiles = PersonalProfileStore(self.state)
+        self.assertFalse(profiles.path_for("managed-source").exists())
+        self.assertTrue(profiles.removal_state_path_for("managed-source").exists())
+        self.assertTrue(preference.load().enabled)
+        with (
+            mock.patch.object(
+                personal_commands,
+                "ProviderCredentialStore",
+                side_effect=AssertionError("managed recovery must not open a keyring"),
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 0)
+        self.assertFalse(preference.load().enabled)
+        self.assertFalse(profiles.removal_state_path_for("managed-source").exists())
+
+    def test_preference_retry_preserves_a_restored_preexisting_credential(self) -> None:
+        key = "personal-a"
+        preference = ContextPreferenceStore(self.state, key)
+        preference.save(False)
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        previous_secret = "sk-preexisting-test-only"
+        credentials.set(key, previous_secret)
+        connect = argparse.Namespace(
+            personal_command="connect",
+            profile=key,
+            state_directory=self.state,
+            mode="direct",
+            agent="codex",
+            provider="openai",
+            endpoint="https://api.openai.com",
+            model="qualified-model",
+            credential_env="PERSONAL_TEST_PROVIDER_KEY",
+            allow_loopback_http=False,
+        )
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile=key,
+            state_directory=self.state,
+        )
+        original_save = ContextPreferenceStore.save
+        save_calls = 0
+
+        def fail_connect_and_preference_rollback(
+            preference_store: ContextPreferenceStore, enabled: bool
+        ) -> None:
+            nonlocal save_calls
+            save_calls += 1
+            if save_calls == 1:
+                original_save(preference_store, enabled)
+            if save_calls <= 2:
+                raise ContextRuntimeError("settings_write_failed")
+            original_save(preference_store, enabled)
+
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            mock.patch.object(
+                ContextPreferenceStore,
+                "save",
+                autospec=True,
+                side_effect=fail_connect_and_preference_rollback,
+            ),
+            mock.patch.dict(
+                os.environ,
+                {"PERSONAL_TEST_PROVIDER_KEY": "sk-replacement-test-only"},
+                clear=False,
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(connect), 1)
+        profiles = PersonalProfileStore(self.state)
+        self.assertFalse(profiles.entry_exists(key))
+        removal_state = profiles.load_removal_state(key)
+        self.assertIsNotNone(removal_state)
+        assert removal_state is not None
+        self.assertFalse(removal_state.credential_cleanup_required)
+        self.assertEqual(removal_state.preference_action, "disable")
+        self.assertEqual(credentials.get(key), previous_secret)
+
+        with (
+            mock.patch.object(
+                personal_commands,
+                "ProviderCredentialStore",
+                side_effect=AssertionError("preference retry must not open a keyring"),
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 0)
+        self.assertFalse(preference.load().enabled)
+        self.assertEqual(credentials.get(key), previous_secret)
+        self.assertFalse(profiles.removal_state_path_for(key).exists())
+
+    def test_preference_change_serializes_with_managed_profile_removal(self) -> None:
+        profiles = PersonalProfileStore(self.state)
+        profiles.save(
+            self.profile(
+                mode="managed",
+                provider="hormuz",
+                endpoint="https://gateway.example",
+                managed_profile="managed-source",
+                credential_env=None,
+                previous_preference_enabled=True,
+            )
+        )
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(True)
+        off = argparse.Namespace(
+            personal_command="off",
+            profile="personal-a",
+            state_directory=self.state,
+        )
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="personal-a",
+            state_directory=self.state,
+        )
+        off_started = threading.Event()
+        release_off = threading.Event()
+        original_save = ContextPreferenceStore.save
+
+        def blocking_save(
+            preference_store: ContextPreferenceStore, enabled: bool
+        ) -> None:
+            if not enabled:
+                off_started.set()
+                if not release_off.wait(5):
+                    raise AssertionError("test did not release preference update")
+            original_save(preference_store, enabled)
+
+        results: dict[str, int] = {}
+        off_thread = threading.Thread(
+            target=lambda: results.setdefault("off", personal_commands.run(off))
+        )
+        remove_thread = threading.Thread(
+            target=lambda: results.setdefault("remove", personal_commands.run(remove))
+        )
+        with (
+            mock.patch.object(
+                ContextPreferenceStore,
+                "save",
+                autospec=True,
+                side_effect=blocking_save,
+            ),
+            mock.patch.object(
+                personal_commands,
+                "ProviderCredentialStore",
+                side_effect=AssertionError("managed removal must not open a keyring"),
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            off_thread.start()
+            self.assertTrue(off_started.wait(5))
+            remove_thread.start()
+            remove_thread.join(timeout=0.2)
+            self.assertTrue(remove_thread.is_alive())
+            release_off.set()
+            off_thread.join(timeout=5)
+            remove_thread.join(timeout=5)
+        self.assertFalse(off_thread.is_alive())
+        self.assertFalse(remove_thread.is_alive())
+        self.assertEqual(results, {"off": 0, "remove": 0})
+        self.assertFalse(profiles.path_for("personal-a").exists())
+        self.assertTrue(preference.load().enabled)
 
     def test_repeated_remove_retries_credential_cleanup_without_touching_preference(self) -> None:
         backend = _MemoryKeyring()
@@ -462,12 +714,65 @@ class PersonalContractTests(unittest.TestCase):
         ):
             self.assertEqual(personal_commands.run(remove), 1)
             self.assertFalse(PersonalProfileStore(self.state).path_for("personal-a").exists())
+            self.assertTrue(
+                PersonalProfileStore(self.state)
+                .removal_state_path_for("personal-a")
+                .exists()
+            )
             self.assertEqual(credentials.get("personal-a"), DIRECT_TOKEN)
             self.assertFalse(preference.load().enabled)
             self.assertEqual(personal_commands.run(remove), 0)
         self.assertEqual(delete_calls, 2)
         self.assertIsNone(credentials.get("personal-a"))
         self.assertFalse(preference.load().enabled)
+        self.assertFalse(
+            PersonalProfileStore(self.state)
+            .removal_state_path_for("personal-a")
+            .exists()
+        )
+
+    def test_interrupted_remove_resumes_from_content_free_state(self) -> None:
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        credentials.set("personal-a", DIRECT_TOKEN)
+        PersonalProfileStore(self.state).save(
+            self.profile(previous_preference_enabled=False)
+        )
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(True)
+        PersonalMetricsStore(self.state, "personal-a").record_session()
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="personal-a",
+            state_directory=self.state,
+        )
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            mock.patch.object(
+                personal_commands,
+                "_complete_removal_cleanup",
+                side_effect=KeyboardInterrupt,
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 130)
+        profiles = PersonalProfileStore(self.state)
+        self.assertFalse(profiles.path_for("personal-a").exists())
+        self.assertTrue(profiles.removal_state_path_for("personal-a").exists())
+        self.assertEqual(credentials.get("personal-a"), DIRECT_TOKEN)
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 0)
+        self.assertIsNone(credentials.get("personal-a"))
+        self.assertFalse(preference.load().enabled)
+        self.assertFalse(PersonalMetricsStore(self.state, "personal-a").path.exists())
+        self.assertFalse(profiles.removal_state_path_for("personal-a").exists())
 
     def test_credential_update_serializes_with_profile_removal(self) -> None:
         backend = _MemoryKeyring()
@@ -605,10 +910,10 @@ class PersonalContractTests(unittest.TestCase):
         real_fsync = os.fsync
         fsync_calls = 0
 
-        def fail_first_fsync(descriptor: int) -> None:
+        def fail_profile_unlink_fsync(descriptor: int) -> None:
             nonlocal fsync_calls
             fsync_calls += 1
-            if fsync_calls == 1:
+            if fsync_calls == 3:
                 raise OSError("post-unlink directory sync failed")
             real_fsync(descriptor)
 
@@ -616,7 +921,10 @@ class PersonalContractTests(unittest.TestCase):
             mock.patch.object(
                 personal_commands, "ProviderCredentialStore", return_value=credentials
             ),
-            mock.patch("hormuz.personal_profiles.os.fsync", side_effect=fail_first_fsync),
+            mock.patch(
+                "hormuz.personal_profiles.os.fsync",
+                side_effect=fail_profile_unlink_fsync,
+            ),
             contextlib.redirect_stderr(io.StringIO()),
         ):
             self.assertEqual(personal_commands.run(remove), 1)
@@ -885,6 +1193,11 @@ class PersonalContractTests(unittest.TestCase):
         self.assertFalse(
             PersonalProfileStore(self.state).path_for("rollback-cleanup").exists()
         )
+        self.assertTrue(
+            PersonalProfileStore(self.state)
+            .removal_state_path_for("rollback-cleanup")
+            .exists()
+        )
         self.assertEqual(credentials.get("rollback-cleanup"), "sk-new-test-only")
         with (
             mock.patch.object(
@@ -894,6 +1207,11 @@ class PersonalContractTests(unittest.TestCase):
         ):
             self.assertEqual(personal_commands.run(remove), 0)
         self.assertIsNone(credentials.get("rollback-cleanup"))
+        self.assertFalse(
+            PersonalProfileStore(self.state)
+            .removal_state_path_for("rollback-cleanup")
+            .exists()
+        )
 
     def test_interrupted_connect_rolls_back_profile_and_credential(self) -> None:
         class InterruptingKeyring(_MemoryKeyring):

@@ -23,9 +23,12 @@ from .credential_store import CredentialStoreError, validate_profile
 
 PERSONAL_RELEASE_VERSION = "0.1.0"
 PERSONAL_PROFILE_SCHEMA_VERSION = 2
+PERSONAL_REMOVAL_STATE_SCHEMA_VERSION = 1
 MAX_PROFILE_BYTES = 16 * 1024
+MAX_REMOVAL_STATE_BYTES = 1024
 Mode = Literal["direct", "managed"]
 Provider = Literal["openai", "anthropic", "hormuz"]
+PreferenceAction = Literal["clear", "enable", "disable", "preserve"]
 
 
 _PROFILE_THREAD_LOCKS: dict[str, threading.Lock] = {}
@@ -70,6 +73,23 @@ class PersonalProfile:
         }
 
 
+@dataclass(frozen=True)
+class PersonalRemovalState:
+    """Content-free state needed to finish an interrupted profile removal."""
+
+    key: str
+    credential_cleanup_required: bool
+    preference_action: PreferenceAction
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": PERSONAL_REMOVAL_STATE_SCHEMA_VERSION,
+            "key": self.key,
+            "credential_cleanup_required": self.credential_cleanup_required,
+            "preference_action": self.preference_action,
+        }
+
+
 class PersonalProfileStore:
     def __init__(self, state_directory: Path):
         self.state_directory = Path(os.path.abspath(state_directory.expanduser()))
@@ -77,6 +97,11 @@ class PersonalProfileStore:
 
     def path_for(self, key: str) -> Path:
         return self.directory / (validate_personal_key(key) + ".json")
+
+    def removal_state_path_for(self, key: str) -> Path:
+        validated = validate_personal_key(key)
+        digest = hashlib.sha256(validated.encode("utf-8")).hexdigest()
+        return self.directory / (".removal-" + digest + ".json")
 
     def entry_exists(self, key: str) -> bool:
         """Return whether the validated profile entry itself is present.
@@ -155,6 +180,100 @@ class PersonalProfileStore:
                     os.unlink(temporary)
                 except OSError:
                     pass
+
+    def save_removal_state(self, state: PersonalRemovalState) -> None:
+        validate_personal_removal_state(state)
+        self._prepare(create=True)
+        destination = self.removal_state_path_for(state.key)
+        data = json.dumps(
+            state.to_dict(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        if len(data) > MAX_REMOVAL_STATE_BYTES:
+            raise PersonalProfileError("personal_removal_state_invalid")
+        temporary: str | None = None
+        try:
+            descriptor, temporary = tempfile.mkstemp(
+                prefix=".personal-removal-", dir=self.directory
+            )
+            with os.fdopen(descriptor, "wb") as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, destination)
+            temporary = None
+            directory_fd = os.open(self.directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError as error:
+            raise PersonalProfileError("personal_removal_state_write_failed") from error
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+
+    def load_removal_state(self, key: str) -> PersonalRemovalState | None:
+        self._prepare(create=False)
+        path = self.removal_state_path_for(key)
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            )
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise PersonalProfileError("personal_removal_state_unavailable") from error
+        try:
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+                or info.st_mode & 0o077
+                or info.st_size > MAX_REMOVAL_STATE_BYTES
+            ):
+                raise PersonalProfileError("personal_removal_state_invalid")
+            chunks: list[bytes] = []
+            remaining = MAX_REMOVAL_STATE_BYTES + 1
+            while remaining:
+                chunk = os.read(descriptor, remaining)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            data = b"".join(chunks)
+        finally:
+            os.close(descriptor)
+        if len(data) > MAX_REMOVAL_STATE_BYTES:
+            raise PersonalProfileError("personal_removal_state_invalid")
+        try:
+            value = strict_json_loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as error:
+            raise PersonalProfileError("personal_removal_state_invalid") from error
+        state = parse_personal_removal_state(value)
+        if state.key != key:
+            raise PersonalProfileError("personal_removal_state_invalid")
+        return state
+
+    def clear_removal_state(self, key: str) -> bool:
+        self._prepare(create=False)
+        try:
+            self.removal_state_path_for(key).unlink()
+            directory_fd = os.open(self.directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise PersonalProfileError("personal_removal_state_remove_failed") from error
 
     def load(self, key: str) -> PersonalProfile:
         self._prepare(create=False)
@@ -300,6 +419,46 @@ def _unlock_profile_stream(stream) -> None:
         import fcntl
 
         fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def parse_personal_removal_state(value: object) -> PersonalRemovalState:
+    expected = {
+        "schema_version",
+        "key",
+        "credential_cleanup_required",
+        "preference_action",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected
+        or value.get("schema_version") != PERSONAL_REMOVAL_STATE_SCHEMA_VERSION
+        or not isinstance(value.get("credential_cleanup_required"), bool)
+    ):
+        raise PersonalProfileError("personal_removal_state_invalid")
+    try:
+        state = PersonalRemovalState(
+            key=validate_personal_key(value.get("key")),
+            credential_cleanup_required=value["credential_cleanup_required"],
+            preference_action=value.get("preference_action"),  # type: ignore[arg-type]
+        )
+        return validate_personal_removal_state(state)
+    except (TypeError, CredentialStoreError, PersonalProfileError) as error:
+        raise PersonalProfileError("personal_removal_state_invalid") from error
+
+
+def validate_personal_removal_state(
+    state: PersonalRemovalState,
+) -> PersonalRemovalState:
+    try:
+        validate_personal_key(state.key)
+    except PersonalProfileError as error:
+        raise PersonalProfileError("personal_removal_state_invalid") from error
+    if (
+        not isinstance(state.credential_cleanup_required, bool)
+        or state.preference_action not in {"clear", "enable", "disable", "preserve"}
+    ):
+        raise PersonalProfileError("personal_removal_state_invalid")
+    return state
 
 
 def parse_personal_profile(value: object) -> PersonalProfile:
