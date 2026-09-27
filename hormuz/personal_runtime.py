@@ -65,7 +65,11 @@ def run_personal_client(
         environment=probe_values,
     )
     preference = ContextPreferenceStore(state_directory, profile.key)
-    metrics_candidate = PersonalMetricsStore(state_directory, profile.key)
+    metrics_candidate = PersonalMetricsStore(
+        state_directory,
+        profile.key,
+        require_profile=True,
+    )
     try:
         metrics_candidate.record_session()
     except PersonalMetricsError:

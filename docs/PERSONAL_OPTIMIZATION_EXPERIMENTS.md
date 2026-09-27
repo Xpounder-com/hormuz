@@ -59,6 +59,9 @@ developer selects TypeSafe and supplies a credential. Promotion requires
 Hormuz-owned fixture success, a probability threshold, a measured token benefit
 after Jev usage, and a latency ceiling; confidence alone never routes work.
 Failure or inconclusive net benefit uses the ordinary model path.
+The built-in transport pins the exact HTTPS endpoint and rejects every redirect
+before a bearer credential can be forwarded to a different origin or downgraded
+to plaintext HTTP.
 
 The H16 Jev fixture uses an injected fake transport; no credential, external
 state, or TypeSafe call is used. Live qualification and economic comparison

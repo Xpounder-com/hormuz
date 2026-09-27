@@ -276,10 +276,8 @@ def _connect_locked(
                 credentials is not None and credential_write_attempted
             ),
         )
-        removal_state_saved = False
         try:
             store.save_removal_state(removal_state)
-            removal_state_saved = True
         except Exception as cleanup_error:
             rollback_errors.append(cleanup_error)
         preference_rollback_failed = False
@@ -313,23 +311,29 @@ def _connect_locked(
                 else "preserve"
             ),
         )
+        residual_state_saved = False
         try:
             store.save_removal_state(residual_state)
-            removal_state_saved = True
+            residual_state_saved = True
         except Exception as cleanup_error:
             rollback_errors.append(cleanup_error)
         profile_absent = False
-        try:
-            store.remove(key)
-        except Exception as cleanup_error:
-            rollback_errors.append(cleanup_error)
+        # The initial marker is deliberately conservative. Do not unlink the
+        # profile unless the marker narrowed after the independent rollback
+        # attempts is durable; otherwise a later retry could perform cleanup
+        # that already succeeded (including deleting a restored credential).
+        if residual_state_saved:
             try:
-                profile_absent = not store.entry_exists(key)
-            except Exception as state_error:
-                rollback_errors.append(state_error)
-        else:
-            profile_absent = True
-        if not rollback_errors and profile_absent and removal_state_saved:
+                store.remove(key)
+            except Exception as cleanup_error:
+                rollback_errors.append(cleanup_error)
+                try:
+                    profile_absent = not store.entry_exists(key)
+                except Exception as state_error:
+                    rollback_errors.append(state_error)
+            else:
+                profile_absent = True
+        if not rollback_errors and profile_absent:
             try:
                 store.clear_removal_state(key)
             except Exception as cleanup_error:

@@ -144,9 +144,14 @@ managed preference after removal. If a damaged profile cannot disclose whether
 it was direct or managed, removal deletes its profile, credential, and
 measurements but leaves the shared preference unchanged rather than guessing at
 managed state. Failed `connect` rollback attempts preference, credential, and
-profile cleanup independently and retains the same record until all recovery
-steps succeed. Since agent configuration was never changed, successful removal
-restores the ordinary setup by construction.
+profile cleanup independently. It unlinks the failed profile only after the
+record has been durably narrowed to the exact recovery work that remains, and
+retains the record until all recovery steps succeed. Runtime measurement writes
+verify the profile while holding the metrics lock. Because removal unlinks the
+profile before taking that lock to clear measurements, an active run either
+finishes its write before the clear or observes removal and cannot recreate the
+ledger. Since agent configuration was never changed, successful removal restores
+the ordinary setup by construction.
 
 ## Caching and regression guard
 

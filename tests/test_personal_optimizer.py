@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 import hormuz.commands.personal as personal_commands
+import hormuz.execution_methods as execution_methods
 from hormuz.adapters import adapter_for, conformance_report
 from hormuz.client_relay import LocalRelayServer, RelayOptimizer, SavedClientProfile
 from hormuz.client_versions import SUPPORTED_CLIENT_VERSIONS
@@ -609,6 +610,86 @@ class PersonalContractTests(unittest.TestCase):
         self.assertFalse(preference.load().enabled)
         self.assertEqual(credentials.get(key), previous_secret)
         self.assertFalse(profiles.removal_state_path_for(key).exists())
+
+    def test_connect_keeps_profile_when_narrowed_retry_state_is_not_durable(self) -> None:
+        key = "personal-a"
+        preference = ContextPreferenceStore(self.state, key)
+        preference.save(False)
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        previous_secret = "sk-preexisting-test-only"
+        credentials.set(key, previous_secret)
+        connect = argparse.Namespace(
+            personal_command="connect",
+            profile=key,
+            state_directory=self.state,
+            mode="direct",
+            agent="codex",
+            provider="openai",
+            endpoint="https://api.openai.com",
+            model="qualified-model",
+            credential_env="PERSONAL_TEST_PROVIDER_KEY",
+            allow_loopback_http=False,
+        )
+        original_preference_save = ContextPreferenceStore.save
+        preference_save_calls = 0
+
+        def fail_connect_and_preference_rollback(
+            preference_store: ContextPreferenceStore, enabled: bool
+        ) -> None:
+            nonlocal preference_save_calls
+            preference_save_calls += 1
+            if preference_save_calls == 1:
+                original_preference_save(preference_store, enabled)
+            if preference_save_calls <= 2:
+                raise ContextRuntimeError("settings_write_failed")
+            original_preference_save(preference_store, enabled)
+
+        original_state_save = PersonalProfileStore.save_removal_state
+        state_save_calls = 0
+
+        def fail_narrowed_state_save(
+            profile_store: PersonalProfileStore, state: PersonalRemovalState
+        ) -> None:
+            nonlocal state_save_calls
+            state_save_calls += 1
+            if state_save_calls == 2:
+                raise PersonalProfileError("personal_removal_state_write_failed")
+            original_state_save(profile_store, state)
+
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            mock.patch.object(
+                ContextPreferenceStore,
+                "save",
+                autospec=True,
+                side_effect=fail_connect_and_preference_rollback,
+            ),
+            mock.patch.object(
+                PersonalProfileStore,
+                "save_removal_state",
+                autospec=True,
+                side_effect=fail_narrowed_state_save,
+            ),
+            mock.patch.dict(
+                os.environ,
+                {"PERSONAL_TEST_PROVIDER_KEY": "sk-replacement-test-only"},
+                clear=False,
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(connect), 1)
+
+        profiles = PersonalProfileStore(self.state)
+        self.assertTrue(profiles.entry_exists(key))
+        removal_state = profiles.load_removal_state(key)
+        self.assertIsNotNone(removal_state)
+        assert removal_state is not None
+        self.assertTrue(removal_state.credential_cleanup_required)
+        self.assertEqual(removal_state.preference_action, "disable")
+        self.assertEqual(credentials.get(key), previous_secret)
 
     def test_preference_change_serializes_with_managed_profile_removal(self) -> None:
         profiles = PersonalProfileStore(self.state)
@@ -1712,6 +1793,96 @@ class PersonalContractTests(unittest.TestCase):
                 0,
             )
 
+    def test_active_run_cannot_recreate_metrics_after_remove(self) -> None:
+        profile = self.profile(
+            endpoint="http://127.0.0.1:9",
+            allow_insecure_http=True,
+            credential_env="PERSONAL_TEST_PROVIDER_KEY",
+        )
+        profiles = PersonalProfileStore(self.state)
+        profiles.save(profile)
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        credentials.set(profile.key, DIRECT_TOKEN)
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile=profile.key,
+            state_directory=self.state,
+        )
+        launched = threading.Event()
+        release_launch = threading.Event()
+        outcomes: list[int] = []
+        failures: list[BaseException] = []
+
+        def block_agent(*_args, **_kwargs):
+            launched.set()
+            if not release_launch.wait(5):
+                raise AssertionError("test did not release the active agent")
+            return mock.Mock(returncode=0)
+
+        def run_agent() -> None:
+            try:
+                outcomes.append(
+                    run_personal_client(
+                        profile=profile,
+                        state_directory=self.state,
+                        upstream_credential=lambda: DIRECT_TOKEN,
+                        counters=COUNTERS,
+                        executable="/usr/bin/true",
+                    )
+                )
+            except BaseException as error:  # pragma: no cover - asserted below
+                failures.append(error)
+
+        agent_thread = threading.Thread(target=run_agent)
+        guarded_metrics = PersonalMetricsStore(
+            self.state,
+            profile.key,
+            require_profile=True,
+        )
+        with (
+            mock.patch(
+                "hormuz.personal_runtime.subprocess.run", side_effect=block_agent
+            ),
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            try:
+                agent_thread.start()
+                self.assertTrue(launched.wait(5))
+                self.assertTrue(guarded_metrics.path.exists())
+                self.assertEqual(personal_commands.run(remove), 0)
+                self.assertFalse(guarded_metrics.path.exists())
+                with self.assertRaisesRegex(
+                    PersonalMetricsError, "metrics_profile_removed"
+                ):
+                    guarded_metrics.record_session(completed=True)
+                with self.assertRaisesRegex(
+                    PersonalMetricsError, "metrics_profile_removed"
+                ):
+                    guarded_metrics.record_optimization(
+                        OptimizationMeasurement(
+                            eligible=False,
+                            applied=False,
+                            reason="disabled",
+                            before_bytes=2,
+                            after_bytes=2,
+                            before_tokens={"cl100k_base": 2, "o200k_base": 2},
+                            after_tokens={"cl100k_base": 2, "o200k_base": 2},
+                            overhead_us=0,
+                        )
+                    )
+            finally:
+                release_launch.set()
+                agent_thread.join(timeout=5)
+
+        self.assertFalse(agent_thread.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(outcomes, [0])
+        self.assertFalse(guarded_metrics.path.exists())
+
     def test_execution_router_uses_exact_code_and_preserves_call_contract(self) -> None:
         request = MethodRequest(
             "step-1", "call-1", "json_get",
@@ -1781,6 +1952,61 @@ class PersonalContractTests(unittest.TestCase):
             ).method,
             "model",
         )
+
+    def test_jev_transport_rejects_redirects_before_forwarding_authorization(self) -> None:
+        destination_authorizations: list[str | None] = []
+
+        class DestinationHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                destination_authorizations.append(self.headers.get("Authorization"))
+                self.send_response(204)
+                self.end_headers()
+
+            def do_POST(self) -> None:  # noqa: N802
+                self.do_GET()
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        destination = ThreadingHTTPServer(("127.0.0.1", 0), DestinationHandler)
+        destination_url = f"http://127.0.0.1:{destination.server_port}/capture"
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(302)
+                self.send_header("Location", destination_url)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        redirect_url = f"http://127.0.0.1:{redirect.server_port}/redirect"
+        destination_thread = threading.Thread(target=destination.serve_forever)
+        redirect_thread = threading.Thread(target=redirect.serve_forever)
+        destination_thread.start()
+        redirect_thread.start()
+        try:
+            with (
+                mock.patch.object(execution_methods, "JEV_ENDPOINT", redirect_url),
+                self.assertRaisesRegex(ExecutionMethodError, "jev_unavailable"),
+            ):
+                execution_methods._http_transport(
+                    redirect_url,
+                    {"Authorization": "Bearer jev-test-credential"},
+                    b"{}",
+                    2,
+                )
+            self.assertEqual(destination_authorizations, [])
+        finally:
+            redirect.shutdown()
+            destination.shutdown()
+            redirect.server_close()
+            destination.server_close()
+            redirect_thread.join(timeout=5)
+            destination_thread.join(timeout=5)
 
     def test_semantic_experiment_preserves_constraints_questions_state_and_recovers(self) -> None:
         recovery = RecoveryBuffer()

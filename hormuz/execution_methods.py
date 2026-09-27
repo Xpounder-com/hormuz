@@ -25,6 +25,13 @@ class ExecutionMethodError(RuntimeError):
         self.code = code
 
 
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never forward a credential-bearing Jev request to another URL."""
+
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
 @dataclass(frozen=True)
 class MethodRequest:
     step_id: str
@@ -430,8 +437,9 @@ def _http_transport(
     request = urllib.request.Request(
         endpoint, data=body, method="POST", headers=dict(headers)
     )
+    opener = urllib.request.build_opener(_RejectRedirectHandler())
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             if response.status != 200:
                 raise ExecutionMethodError("jev_unavailable")
             value = response.read(MAX_EXECUTION_INPUT_BYTES + 1)

@@ -17,7 +17,11 @@ from typing import Mapping
 
 from .compaction_formats import strict_json_loads
 from .credential_store import CredentialStoreError, validate_profile
-from .personal_profiles import PERSONAL_RELEASE_VERSION
+from .personal_profiles import (
+    PERSONAL_RELEASE_VERSION,
+    PersonalProfileError,
+    PersonalProfileStore,
+)
 
 
 METRICS_SCHEMA_VERSION = 1
@@ -152,7 +156,13 @@ class ResponseUsageAccumulator:
 
 
 class PersonalMetricsStore:
-    def __init__(self, state_directory: Path, profile: str):
+    def __init__(
+        self,
+        state_directory: Path,
+        profile: str,
+        *,
+        require_profile: bool = False,
+    ):
         try:
             validate_profile(profile)
         except CredentialStoreError as error:
@@ -163,10 +173,13 @@ class PersonalMetricsStore:
         self.lock_path = self.directory / (".metrics-" + digest + ".lock")
         self.profile = profile
         self._thread_lock = threading.Lock()
+        self._profile_store = (
+            PersonalProfileStore(state_directory) if require_profile else None
+        )
 
     def record_session(self, *, completed: bool = False) -> None:
         with self._exclusive():
-            value = self._load_or_empty(create=True)
+            value = self._load_for_record()
             value["counters"]["sessions_completed" if completed else "sessions_started"] += 1
             _record_active_day(value)
             self._write(value)
@@ -175,7 +188,7 @@ class PersonalMetricsStore:
         if measurement.reason not in _REASONS:
             raise PersonalMetricsError("invalid_measurement")
         with self._exclusive():
-            value = self._load_or_empty(create=True)
+            value = self._load_for_record()
             counters = value["counters"]
             counters["requests_total"] += 1
             counters["eligible_requests"] += int(measurement.eligible)
@@ -205,7 +218,7 @@ class PersonalMetricsStore:
 
     def record_provider(self, measurement: ProviderMeasurement) -> None:
         with self._exclusive():
-            value = self._load_or_empty(create=True)
+            value = self._load_for_record()
             counters = value["counters"]
             counters["provider_attempts"] += 1
             counters["provider_responses"] += int(measurement.response_received)
@@ -227,7 +240,7 @@ class PersonalMetricsStore:
 
     def record_intervention(self, *, applied: bool) -> None:
         with self._exclusive():
-            value = self._load_or_empty(create=True)
+            value = self._load_for_record()
             value["counters"]["interventions_detected"] += 1
             value["counters"]["interventions_applied"] += int(applied)
             _record_active_day(value)
@@ -441,6 +454,20 @@ class PersonalMetricsStore:
                     os.unlink(temporary)
                 except OSError:
                     pass
+
+    def _load_for_record(self) -> dict[str, object]:
+        # This check occurs while the metrics lock is held. Removal unlinks the
+        # profile before acquiring that same lock to clear the ledger, so a
+        # write either finishes before the final clear or observes the missing
+        # profile and cannot recreate the file afterward.
+        if self._profile_store is not None:
+            try:
+                profile_present = self._profile_store.entry_exists(self.profile)
+            except PersonalProfileError as error:
+                raise PersonalMetricsError("metrics_profile_unavailable") from error
+            if not profile_present:
+                raise PersonalMetricsError("metrics_profile_removed")
+        return self._load_or_empty(create=True)
 
 
 def extract_provider_usage(body: bytes, protocol: str, content_type: str) -> dict[str, int | None]:
