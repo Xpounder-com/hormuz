@@ -351,6 +351,31 @@ class PersonalContractTests(unittest.TestCase):
                 )
             )
 
+    def test_remove_before_profile_directory_exists_is_an_idempotent_noop(self) -> None:
+        profiles = PersonalProfileStore(self.state)
+        self.assertFalse(profiles.directory.exists())
+        output = io.StringIO()
+        with (
+            mock.patch.object(
+                personal_commands,
+                "ProviderCredentialStore",
+                side_effect=AssertionError("empty removal must not open a keyring"),
+            ),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(
+                personal_commands.run(
+                    argparse.Namespace(
+                        personal_command="remove",
+                        profile="never-created",
+                        state_directory=self.state,
+                    )
+                ),
+                0,
+            )
+        self.assertIn("removed=false", output.getvalue())
+        self.assertFalse(profiles.directory.exists())
+
     def test_connect_is_create_only_and_remove_restores_transient_setup(self) -> None:
         backend = _MemoryKeyring()
         credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
@@ -1602,6 +1627,112 @@ class PersonalContractTests(unittest.TestCase):
         with self.assertRaisesRegex(PersonalMetricsError, "metrics_invalid"):
             store.clear()
         self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
+
+    def test_measurement_clear_serializes_with_profile_replacement(self) -> None:
+        profile = self.profile()
+        profiles = PersonalProfileStore(self.state)
+        profiles.save(profile)
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        credentials.set(profile.key, DIRECT_TOKEN)
+        PersonalMetricsStore(
+            self.state,
+            profile.key,
+            profile_generation=profile.generation,
+        ).record_session()
+        clear = argparse.Namespace(
+            personal_command="clear",
+            profile=profile.key,
+            state_directory=self.state,
+        )
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile=profile.key,
+            state_directory=self.state,
+        )
+        reconnect = argparse.Namespace(
+            personal_command="connect",
+            profile=profile.key,
+            state_directory=self.state,
+            mode="direct",
+            agent="codex",
+            provider="openai",
+            endpoint=profile.endpoint,
+            model=profile.model,
+            credential_env=profile.credential_env,
+            allow_loopback_http=False,
+        )
+        clear_started = threading.Event()
+        release_clear = threading.Event()
+        original_clear = PersonalMetricsStore.clear
+        results: dict[str, int] = {}
+        failures: list[BaseException] = []
+
+        def blocking_clear(store: PersonalMetricsStore) -> bool:
+            if not clear_started.is_set():
+                clear_started.set()
+                if not release_clear.wait(5):
+                    raise AssertionError("test did not release measurement clear")
+            return original_clear(store)
+
+        def replace_profile() -> None:
+            try:
+                results["remove"] = personal_commands.run(remove)
+                results["connect"] = personal_commands.run(reconnect)
+                replacement = profiles.load(profile.key)
+                PersonalMetricsStore(
+                    self.state,
+                    replacement.key,
+                    profile_generation=replacement.generation,
+                ).record_session()
+            except BaseException as error:  # pragma: no cover - asserted below
+                failures.append(error)
+
+        clear_thread = threading.Thread(
+            target=lambda: results.setdefault("clear", personal_commands.run(clear))
+        )
+        replacement_thread = threading.Thread(target=replace_profile)
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            mock.patch.object(
+                PersonalMetricsStore,
+                "clear",
+                autospec=True,
+                side_effect=blocking_clear,
+            ),
+            mock.patch.dict(
+                os.environ,
+                {"OPENAI_API_KEY": "sk-reconnected-test-only"},
+                clear=False,
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            clear_thread.start()
+            self.assertTrue(clear_started.wait(5))
+            replacement_thread.start()
+            try:
+                replacement_thread.join(timeout=0.2)
+                self.assertTrue(replacement_thread.is_alive())
+            finally:
+                release_clear.set()
+                clear_thread.join(timeout=5)
+                replacement_thread.join(timeout=5)
+        self.assertFalse(clear_thread.is_alive())
+        self.assertFalse(replacement_thread.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(results, {"clear": 0, "remove": 0, "connect": 0})
+        replacement = profiles.load(profile.key)
+        self.assertNotEqual(replacement.generation, profile.generation)
+        self.assertEqual(
+            PersonalMetricsStore(
+                self.state,
+                replacement.key,
+                profile_generation=replacement.generation,
+            ).snapshot()["counters"]["sessions_started"],
+            1,
+        )
 
     def test_measurement_failure_does_not_block_the_ordinary_relay_path(self) -> None:
         class FailingMetrics:

@@ -229,6 +229,32 @@ class ContextCommandTests(unittest.TestCase):
         self.assertIn("resource_directory_unsafe", stderr)
         self.assertEqual(list(actual.iterdir()), [])
 
+    @unittest.skipIf(os.name == "nt", "POSIX state-directory mode contract")
+    def test_default_resource_install_leaves_shared_state_root_private(self) -> None:
+        state = self.root / "fresh-state"
+        previous_umask = os.umask(0o022)
+        try:
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"HORMUZ_CLIENT_STATE_DIRECTORY": str(state)},
+                    clear=False,
+                ),
+                mock.patch("hormuz.commands.context.ENCODING_URLS", {}),
+            ):
+                code, stdout, stderr = self._run(
+                    "context", "resources", "install"
+                )
+        finally:
+            os.umask(previous_umask)
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn("context_resources ready", stdout)
+        self.assertEqual(state.stat().st_mode & 0o777, 0o700)
+        tokenizer_directories = list(state.glob("context-tokenizers-*"))
+        self.assertEqual(len(tokenizer_directories), 1)
+        self.assertEqual(tokenizer_directories[0].stat().st_mode & 0o777, 0o700)
+
 
 if __name__ == "__main__":
     unittest.main()

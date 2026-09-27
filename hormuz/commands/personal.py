@@ -150,6 +150,8 @@ def run(args: argparse.Namespace) -> int:
             return _replace_credential(args, key, state)
         if command in {"on", "off"}:
             return _set_optimization(key, state, enabled=command == "on")
+        if command == "clear":
+            return _clear_measurements(key, state)
         profile = PersonalProfileStore(state).load(key)
         if command == "run":
             return _run_profile(profile, state)
@@ -158,10 +160,6 @@ def run(args: argparse.Namespace) -> int:
         if command == "benefit":
             document = metrics.benefit(enabled=preference.load().enabled)
             _print_document(document, as_json=args.json)
-            return 0
-        if command == "clear":
-            cleared = metrics.clear()
-            print(f"personal_measurements profile={profile.key} cleared={str(cleared).lower()}")
             return 0
         if command == "feedback" and args.personal_feedback_command == "export":
             document = metrics.benefit(enabled=preference.load().enabled)
@@ -449,8 +447,42 @@ def _set_optimization(key: str, state: Path, *, enabled: bool) -> int:
     return 0
 
 
+def _clear_measurements(key: str, state: Path) -> int:
+    profile_store = PersonalProfileStore(state)
+    # Keep the profile load and destructive metrics mutation in the same
+    # transaction as remove/connect. A clear that began against an old profile
+    # generation must finish before that key can be removed and recreated.
+    with profile_store.transaction(key, create=False):
+        profile = profile_store.load(key)
+        cleared = PersonalMetricsStore(
+            state,
+            profile.key,
+            profile_generation=profile.generation,
+        ).clear()
+    print(
+        f"personal_measurements profile={profile.key} "
+        f"cleared={str(cleared).lower()}"
+    )
+    return 0
+
+
 def _remove(key: str, state: Path) -> int:
     profile_store = PersonalProfileStore(state)
+    try:
+        profile_store.directory.lstat()
+    except FileNotFoundError:
+        # No profile or removal marker can exist without this directory. Treat
+        # the absent namespace as an empty store without creating lock state or
+        # opening the credential backend. A concurrent connect linearizes
+        # after this no-op if it creates the directory once this check returns.
+        print(
+            "personal_removed "
+            f"profile={key} removed=false "
+            "agent_configuration=unchanged managed_session=preserved"
+        )
+        return 0
+    except OSError as error:
+        raise PersonalProfileError("personal_state_unavailable") from error
     with profile_store.transaction(key, create=False):
         return _remove_locked(key, state, profile_store)
 
