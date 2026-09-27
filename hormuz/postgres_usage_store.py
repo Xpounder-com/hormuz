@@ -1844,7 +1844,7 @@ class PostgresUsageStore:
                     parameters,
                 )
                 row = cursor.fetchone()
-        return MonthlyTotals(**dict(row))
+        return _monthly_totals_from_row(row)
 
     def summary_rows(self, *, organization_id: str | None = None) -> list[dict[str, object]]:
         organization = self._organization(organization_id)
@@ -2716,3 +2716,22 @@ class PostgresUsageStore:
 
 def _month_start() -> datetime:
     return datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _monthly_totals_from_row(row: Mapping[str, object]) -> MonthlyTotals:
+    """Normalize PostgreSQL numeric aggregates to the integer repository contract."""
+
+    # PostgreSQL promotes SUM(bigint) to numeric, which psycopg exposes as
+    # Decimal. Keep MonthlyTotals backend-neutral and JSON-safe like SQLite.
+    return MonthlyTotals(
+        requests=int(row["requests"]),
+        denied_requests=int(row["denied_requests"]),
+        rate_limited_requests=int(row["rate_limited_requests"]),
+        input_tokens=int(row["input_tokens"]),
+        output_tokens=int(row["output_tokens"]),
+        cache_read_tokens=int(row["cache_read_tokens"]),
+        cache_write_tokens=int(row["cache_write_tokens"]),
+        reasoning_tokens=int(row["reasoning_tokens"]),
+        cost_microusd=int(row["cost_microusd"]),
+        redaction_count=int(row["redaction_count"]),
+    )
