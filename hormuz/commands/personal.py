@@ -322,13 +322,28 @@ def _remove(profile: PersonalProfile, state: Path) -> int:
     # Remove the create-only guard first. Ancillary state is independently
     # protected and may be unsafe or unavailable; such failures must be
     # reported without stranding a profile that blocks a subsequent connect.
-    removed = PersonalProfileStore(state).remove(profile.key)
     cleanup_error: Exception | None = None
+    profile_store = PersonalProfileStore(state)
+    try:
+        removed = profile_store.remove(profile.key)
+    except PersonalProfileError as error:
+        # remove() may unlink successfully and then fail while durably syncing
+        # the containing directory. Continue cleanup only when the create-only
+        # guard is observably absent; otherwise preserve all ancillary state.
+        try:
+            profile_store.path_for(profile.key).lstat()
+        except FileNotFoundError:
+            removed = True
+            cleanup_error = error
+        except OSError:
+            raise error
+        else:
+            raise
     if profile.mode == "direct":
         try:
             ProviderCredentialStore().delete(profile.key)
         except CredentialStoreError as error:
-            cleanup_error = error
+            cleanup_error = cleanup_error or error
     preference = ContextPreferenceStore(state, profile.key)
     try:
         if profile.previous_preference_enabled is None:

@@ -572,8 +572,13 @@ class RelayTests(unittest.TestCase):
             self.assertFalse(relay._register_upstream(http.client.HTTPConnection("127.0.0.1", 1)))
             snapshot = metrics.snapshot()
             self.assertEqual(snapshot["counters"]["provider_attempts"], 1)
+            self.assertEqual(snapshot["counters"]["provider_failures"], 0)
             self.assertEqual(snapshot["counters"]["cancelled_requests"], 1)
             self.assertEqual(snapshot["reasons"], {"cancelled": 1})
+            self.assertEqual(
+                metrics.benefit(enabled=False)["provider_activity"],
+                {"attempts": 1, "responses": int(response_started), "failures": 0, "cancelled": 1},
+            )
         finally:
             client.close()
             if upstream is not None:

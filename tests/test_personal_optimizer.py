@@ -479,6 +479,44 @@ class PersonalContractTests(unittest.TestCase):
         self.assertTrue(preference.path.is_symlink())
         self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
 
+    def test_post_unlink_profile_error_still_cleans_ancillary_state(self) -> None:
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        credentials.set("personal-a", DIRECT_TOKEN)
+        PersonalProfileStore(self.state).save(self.profile())
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(True)
+        metrics = PersonalMetricsStore(self.state, "personal-a")
+        metrics.record_session()
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="personal-a",
+            state_directory=self.state,
+        )
+        real_fsync = os.fsync
+        fsync_calls = 0
+
+        def fail_first_fsync(descriptor: int) -> None:
+            nonlocal fsync_calls
+            fsync_calls += 1
+            if fsync_calls == 1:
+                raise OSError("post-unlink directory sync failed")
+            real_fsync(descriptor)
+
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            mock.patch("hormuz.personal_profiles.os.fsync", side_effect=fail_first_fsync),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 1)
+        self.assertGreaterEqual(fsync_calls, 3)
+        self.assertFalse(PersonalProfileStore(self.state).path_for("personal-a").exists())
+        self.assertIsNone(credentials.get("personal-a"))
+        self.assertFalse(preference.path.exists())
+        self.assertFalse(metrics.path.exists())
+
     def test_failed_connect_restores_a_preexisting_keyring_credential(self) -> None:
         backend = _MemoryKeyring()
         credentials = ProviderCredentialStore(backend, trust_injected_backend=True)

@@ -210,7 +210,9 @@ class PersonalMetricsStore:
             counters["provider_responses"] += int(
                 measurement.time_to_first_byte_ms is not None
             )
-            counters["provider_failures"] += int(not measurement.succeeded)
+            counters["provider_failures"] += int(
+                not measurement.succeeded and not measurement.cancelled
+            )
             counters["cancelled_requests"] += int(measurement.cancelled)
             _observe(value, "response_bytes", measurement.response_bytes)
             _observe(value, "time_to_first_byte_ms", measurement.time_to_first_byte_ms)
