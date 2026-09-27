@@ -991,7 +991,7 @@ def supported_client_executable(
 def _protocol_for_path(path: str) -> Protocol | None:
     if path in {"/v1/responses", "/v1/responses/compact"}:
         return "responses"
-    if path == "/v1/messages":
+    if path in {"/v1/messages", "/v1/messages/count_tokens"}:
         return "anthropic"
     if path == "/v1/chat/completions":
         return "chat"

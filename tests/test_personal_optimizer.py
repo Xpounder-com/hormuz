@@ -46,7 +46,11 @@ from hormuz.personal_optimization import (
     TypedToolHistoryCompactor,
 )
 from hormuz.personal_qualification import run_product_qualification
-from hormuz.personal_profiles import PersonalProfile, PersonalProfileStore
+from hormuz.personal_profiles import (
+    PersonalProfile,
+    PersonalProfileError,
+    PersonalProfileStore,
+)
 from hormuz.personal_runtime import run_personal_client
 
 
@@ -208,6 +212,15 @@ class PersonalContractTests(unittest.TestCase):
         credentials.delete("personal-a")
         self.assertIsNone(credentials.get("personal-a"))
 
+    def test_profile_save_rejects_an_unreadable_oversized_document(self) -> None:
+        store = PersonalProfileStore(self.state)
+        with (
+            mock.patch("hormuz.personal_profiles.MAX_PROFILE_BYTES", 1),
+            self.assertRaisesRegex(PersonalProfileError, "personal_profile_invalid"),
+        ):
+            store.save(self.profile())
+        self.assertFalse(store.path_for("personal-a").exists())
+
     def test_profile_modes_are_closed_and_managed_cannot_use_aider(self) -> None:
         store = PersonalProfileStore(self.state)
         store.save(self.profile())
@@ -347,6 +360,45 @@ class PersonalContractTests(unittest.TestCase):
             PersonalProfileStore(self.state).path_for("rollback-profile").exists()
         )
 
+    def test_interrupted_connect_rolls_back_profile_and_credential(self) -> None:
+        class InterruptingKeyring(_MemoryKeyring):
+            def set_password(self, service: str, username: str, password: str) -> None:
+                super().set_password(service, username, password)
+                raise KeyboardInterrupt
+
+        credentials = ProviderCredentialStore(
+            InterruptingKeyring(), trust_injected_backend=True
+        )
+        args = argparse.Namespace(
+            personal_command="connect",
+            profile="interrupted-profile",
+            state_directory=self.state,
+            mode="direct",
+            agent="codex",
+            provider="openai",
+            endpoint="https://api.openai.com",
+            model="gpt-5.4",
+            credential_env="PERSONAL_TEST_PROVIDER_KEY",
+            allow_loopback_http=False,
+        )
+        with (
+            mock.patch.object(
+                personal_commands,
+                "ProviderCredentialStore",
+                return_value=credentials,
+            ),
+            mock.patch.dict(
+                os.environ,
+                {"PERSONAL_TEST_PROVIDER_KEY": "sk-interrupted-test-only"},
+                clear=False,
+            ),
+        ):
+            self.assertEqual(personal_commands.run(args), 130)
+        self.assertIsNone(credentials.get("interrupted-profile"))
+        self.assertFalse(
+            PersonalProfileStore(self.state).path_for("interrupted-profile").exists()
+        )
+
     def test_adapter_conformance_scrubs_provider_secret_and_keeps_local_tools(self) -> None:
         for name in ("codex", "claude-code", "aider"):
             with self.subTest(agent=name):
@@ -433,12 +485,18 @@ class PersonalContractTests(unittest.TestCase):
             benefit["request_byte_reduction"]["all_captured_traffic"]["bytes"], 60
         )
         self.assertEqual(benefit["provider_reported"]["input_tokens"]["total"], 0)
+        self.assertEqual(benefit["provider_reported"]["total_tokens"]["total"], 2)
         self.assertEqual(benefit["provider_reported"]["cache_read_tokens"]["missing"], 1)
         self.assertEqual(
             benefit["provider_activity"],
             {"attempts": 1, "responses": 1, "failures": 0, "cancelled": 0},
         )
         self.assertIsNone(benefit["cost"]["actual_microusd"]["total"])
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            personal_commands._print_document(benefit, as_json=False)
+        self.assertIn("total=2", output.getvalue())
+        self.assertIn("actual=unavailable microusd", output.getvalue())
         raw = store.path.read_text(encoding="utf-8")
         self.assertNotIn("prompt", raw)
         self.assertNotIn("response-test", raw)
@@ -534,6 +592,26 @@ class PersonalContractTests(unittest.TestCase):
         changed, _headers = optimizer.prepare(body, "/v1/responses")
         self.assertNotEqual(changed, body)
         self.assertIsNone(optimizer.metrics)
+
+    def test_claude_count_tokens_is_supported_passthrough_traffic(self) -> None:
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(True)
+        metrics = PersonalMetricsStore(self.state, "personal-a")
+        optimizer = RelayOptimizer(
+            preference_store=preference,
+            client="claude-code",
+            gateway_compatible=True,
+            counters=COUNTERS,
+            metrics=metrics,
+        )
+        body = b'{"messages":[{"role":"user","content":"hello"}]}'
+        changed, headers = optimizer.prepare(body, "/v1/messages/count_tokens")
+        self.assertEqual(changed, body)
+        self.assertEqual(headers, {})
+        self.assertEqual(optimizer.status.code, "ready")
+        benefit = metrics.benefit(enabled=True)
+        self.assertEqual(benefit["traffic"]["total_requests"], 1)
+        self.assertNotIn("unsupported_client", benefit["exceptions"])
 
     def test_session_measurement_failure_does_not_prevent_agent_launch(self) -> None:
         class FailingMetrics:
@@ -889,6 +967,8 @@ class PersonalContractTests(unittest.TestCase):
         executable.write_text(
             """#!/usr/bin/env python3
 import http.client, json, os, re, sys, urllib.parse
+if 'PERSONAL_TEST_PROVIDER_KEY' in os.environ:
+    raise SystemExit(2)
 provider = next(value for value in sys.argv if value.startswith('model_providers.hormuz_context_relay='))
 origin = re.search(r'base_url=\"([^\"]+)/v1\"', provider).group(1)
 url = urllib.parse.urlsplit(origin)

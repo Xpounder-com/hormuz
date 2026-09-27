@@ -61,6 +61,7 @@ def run_personal_client(
     )
     local_credential = new_local_credential()
     upstream_auth = "hormuz" if profile.mode == "managed" else profile.provider
+    direct_secret = upstream_credential() if profile.mode == "direct" else None
     server = LocalRelayServer(
         gateway=profile.endpoint,
         client=profile.agent,
@@ -83,7 +84,17 @@ def run_personal_client(
             local_credential=local_credential,
             model=profile.model,
         )
-        completed = subprocess.run(list(plan.argv), env=plan.environment, check=False)
+        launch_values = plan.environment
+        if direct_secret is not None:
+            # The profile may name any provider-credential environment variable.
+            # Filter by the resolved value after the adapter has built its one
+            # reviewed environment snapshot, so aliases cannot reach the child.
+            launch_values = {
+                name: value
+                for name, value in launch_values.items()
+                if value != direct_secret
+            }
+        completed = subprocess.run(list(plan.argv), env=launch_values, check=False)
         return int(completed.returncode)
     except OSError as error:
         raise ClientRelayError("client_launch_failed") from error

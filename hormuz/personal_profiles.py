@@ -75,6 +75,8 @@ class PersonalProfileStore:
         data = json.dumps(
             profile.to_dict(), sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
+        if len(data) > MAX_PROFILE_BYTES:
+            raise PersonalProfileError("personal_profile_invalid")
         temporary: str | None = None
         try:
             descriptor, temporary = tempfile.mkstemp(

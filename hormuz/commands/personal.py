@@ -253,7 +253,7 @@ def _connect(args: argparse.Namespace) -> int:
             credential_write_attempted = True
             credentials.set(key, secret)
         preference.save(True)
-    except Exception:
+    except (Exception, KeyboardInterrupt):
         if not profile_created:
             raise
         try:
@@ -377,8 +377,10 @@ def _print_document(value: dict[str, object], *, as_json: bool) -> None:
             "Provider usage: "
             f"input={_metric_total(provider['input_tokens'])}, "
             f"output={_metric_total(provider['output_tokens'])}, "
+            f"total={_metric_total(provider['total_tokens'])}, "
             f"cache-read={_metric_total(provider['cache_read_tokens'])}, "
-            f"cache-write={_metric_total(provider['cache_write_tokens'])}; "
+            f"cache-write={_metric_total(provider['cache_write_tokens'])}, "
+            f"reasoning={_metric_total(provider['reasoning_tokens'])}; "
             f"responses={activity['responses']}/{activity['attempts']}."
         )
         overhead = waiting["optimizer_overhead_us"]
@@ -393,7 +395,11 @@ def _print_document(value: dict[str, object], *, as_json: bool) -> None:
             f"total={_metric_total(waiting['total_latency_ms'])} ms."
         )
         print(f"Exceptions: {json.dumps(value['exceptions'], sort_keys=True)}")
-        print(f"Cost basis: {value['cost']['basis']}.")
+        print(
+            "Cost: "
+            f"actual={_metric_total(value['cost']['actual_microusd'])} microusd; "
+            f"basis={value['cost']['basis']}."
+        )
         return
     print(json.dumps(value, indent=2, sort_keys=True))
 

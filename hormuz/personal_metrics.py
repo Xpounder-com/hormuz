@@ -337,6 +337,7 @@ class PersonalMetricsStore:
             "provider_reported": {
                 "input_tokens": _metric_view(metrics["provider_input_tokens"]),
                 "output_tokens": _metric_view(metrics["provider_output_tokens"]),
+                "total_tokens": _metric_view(metrics["provider_total_tokens"]),
                 "cache_read_tokens": _metric_view(cache),
                 "cache_write_tokens": _metric_view(metrics["provider_cache_write_tokens"]),
                 "reasoning_tokens": _metric_view(metrics["provider_reasoning_tokens"]),
