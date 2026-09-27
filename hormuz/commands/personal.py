@@ -144,17 +144,9 @@ def run(args: argparse.Namespace) -> int:
         key = validate_personal_key(args.profile)
         if command == "remove":
             return _remove(key, state)
-        profile = PersonalProfileStore(state).load(key)
         if command == "credential":
-            if profile.mode != "direct":
-                raise PersonalCommandError("managed_credential_update_rejected", 2)
-            if args.credential_env != profile.credential_env:
-                raise PersonalCommandError("credential_env_mismatch", 2)
-            ProviderCredentialStore().set(
-                profile.key, _read_provider_credential(args.credential_env)
-            )
-            print(f"personal_credential_updated profile={profile.key}")
-            return 0
+            return _replace_credential(args, key, state)
+        profile = PersonalProfileStore(state).load(key)
         if command == "run":
             return _run_profile(profile, state)
         preference = ContextPreferenceStore(state, profile.key)
@@ -279,19 +271,30 @@ def _connect_locked(
     except (Exception, KeyboardInterrupt):
         if not profile_created:
             raise
+        rollback_errors: list[Exception] = []
         try:
             if previous_preference_enabled is None:
                 preference.clear()
             else:
                 preference.save(previous_preference_enabled)
+        except Exception as cleanup_error:
+            rollback_errors.append(cleanup_error)
+        try:
             if credentials is not None and credential_write_attempted:
                 if previous_secret is None:
                     credentials.delete(key)
                 else:
                     credentials.set(key, previous_secret)
+        except Exception as cleanup_error:
+            rollback_errors.append(cleanup_error)
+        try:
             store.remove(key)
         except Exception as cleanup_error:
-            raise PersonalCommandError("personal_connect_rollback_failed") from cleanup_error
+            rollback_errors.append(cleanup_error)
+        if rollback_errors:
+            raise PersonalCommandError("personal_connect_rollback_failed") from ExceptionGroup(
+                "personal connect rollback failures", rollback_errors
+            )
         raise
     print(
         "personal_connected "
@@ -328,6 +331,24 @@ def _run_profile(profile: PersonalProfile, state: Path) -> int:
     )
 
 
+def _replace_credential(args: argparse.Namespace, key: str, state: Path) -> int:
+    profile_store = PersonalProfileStore(state)
+    # Use the same per-profile transaction as connect/remove so replacement
+    # cannot recreate a credential after a concurrent remove unlinks the
+    # profile.
+    with profile_store.transaction(key, create=False):
+        profile = profile_store.load(key)
+        if profile.mode != "direct":
+            raise PersonalCommandError("managed_credential_update_rejected", 2)
+        if args.credential_env != profile.credential_env:
+            raise PersonalCommandError("credential_env_mismatch", 2)
+        ProviderCredentialStore().set(
+            profile.key, _read_provider_credential(args.credential_env)
+        )
+    print(f"personal_credential_updated profile={profile.key}")
+    return 0
+
+
 def _remove(key: str, state: Path) -> int:
     profile_store = PersonalProfileStore(state)
     with profile_store.transaction(key, create=False):
@@ -344,9 +365,21 @@ def _remove_locked(
     # reported without stranding a profile that blocks a subsequent connect.
     cleanup_error: Exception | None = None
     if not profile_store.entry_exists(key):
-        # Repeated removal is an idempotent no-op.  In particular, do not clear
-        # a managed client's restored shared preference after its personal
-        # profile has already gone away.
+        # A previous removal may have unlinked the profile before credential or
+        # metrics cleanup failed. Retry those idempotent actions while leaving
+        # the shared preference untouched: for a managed profile it may already
+        # have been restored to its pre-personal value.
+        absent_cleanup_errors: list[Exception] = []
+        try:
+            ProviderCredentialStore().delete(key)
+        except CredentialStoreError as error:
+            absent_cleanup_errors.append(error)
+        try:
+            PersonalMetricsStore(state, key).clear()
+        except PersonalMetricsError as error:
+            absent_cleanup_errors.append(error)
+        if absent_cleanup_errors:
+            raise absent_cleanup_errors[0]
         print(
             "personal_removed "
             f"profile={key} removed=false "
@@ -380,13 +413,14 @@ def _remove_locked(
         except CredentialStoreError as error:
             cleanup_error = cleanup_error or error
     preference = ContextPreferenceStore(state, key)
-    try:
-        if profile is None or profile.previous_preference_enabled is None:
-            preference.clear()
-        else:
-            preference.save(profile.previous_preference_enabled)
-    except ContextRuntimeError as error:
-        cleanup_error = cleanup_error or error
+    if profile is not None:
+        try:
+            if profile.previous_preference_enabled is None:
+                preference.clear()
+            else:
+                preference.save(profile.previous_preference_enabled)
+        except ContextRuntimeError as error:
+            cleanup_error = cleanup_error or error
     try:
         PersonalMetricsStore(state, key).clear()
     except PersonalMetricsError as error:

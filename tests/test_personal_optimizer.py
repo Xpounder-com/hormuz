@@ -430,6 +430,104 @@ class PersonalContractTests(unittest.TestCase):
             self.assertEqual(personal_commands.run(remove), 0)
         self.assertFalse(preference.load().enabled)
 
+    def test_repeated_remove_retries_credential_cleanup_without_touching_preference(self) -> None:
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        credentials.set("personal-a", DIRECT_TOKEN)
+        PersonalProfileStore(self.state).save(self.profile())
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(False)
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="personal-a",
+            state_directory=self.state,
+        )
+        delete_calls = 0
+        original_delete = credentials.delete
+
+        def fail_once(key: str) -> None:
+            nonlocal delete_calls
+            delete_calls += 1
+            if delete_calls == 1:
+                raise CredentialStoreError("secure_store_unavailable")
+            original_delete(key)
+
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            mock.patch.object(credentials, "delete", side_effect=fail_once),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 1)
+            self.assertFalse(PersonalProfileStore(self.state).path_for("personal-a").exists())
+            self.assertEqual(credentials.get("personal-a"), DIRECT_TOKEN)
+            self.assertFalse(preference.load().enabled)
+            self.assertEqual(personal_commands.run(remove), 0)
+        self.assertEqual(delete_calls, 2)
+        self.assertIsNone(credentials.get("personal-a"))
+        self.assertFalse(preference.load().enabled)
+
+    def test_credential_update_serializes_with_profile_removal(self) -> None:
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        credentials.set("personal-a", DIRECT_TOKEN)
+        PersonalProfileStore(self.state).save(self.profile())
+        credential = argparse.Namespace(
+            personal_command="credential",
+            profile="personal-a",
+            state_directory=self.state,
+            credential_env="OPENAI_API_KEY",
+        )
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="personal-a",
+            state_directory=self.state,
+        )
+        set_started = threading.Event()
+        release_set = threading.Event()
+        original_set = credentials.set
+
+        def blocking_set(key: str, secret: str) -> None:
+            set_started.set()
+            if not release_set.wait(5):
+                raise AssertionError("test did not release credential replacement")
+            original_set(key, secret)
+
+        results: dict[str, int] = {}
+        credential_thread = threading.Thread(
+            target=lambda: results.setdefault(
+                "credential", personal_commands.run(credential)
+            )
+        )
+        remove_thread = threading.Thread(
+            target=lambda: results.setdefault("remove", personal_commands.run(remove))
+        )
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            mock.patch.object(credentials, "set", side_effect=blocking_set),
+            mock.patch.dict(
+                os.environ, {"OPENAI_API_KEY": "sk-replacement-test-only"}, clear=False
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            credential_thread.start()
+            self.assertTrue(set_started.wait(5))
+            remove_thread.start()
+            remove_thread.join(timeout=0.2)
+            self.assertTrue(remove_thread.is_alive())
+            release_set.set()
+            credential_thread.join(timeout=5)
+            remove_thread.join(timeout=5)
+        self.assertFalse(credential_thread.is_alive())
+        self.assertFalse(remove_thread.is_alive())
+        self.assertEqual(results, {"credential": 0, "remove": 0})
+        self.assertFalse(PersonalProfileStore(self.state).path_for("personal-a").exists())
+        self.assertIsNone(credentials.get("personal-a"))
+
     def test_invalid_metrics_do_not_block_profile_removal(self) -> None:
         backend = _MemoryKeyring()
         credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
@@ -598,12 +696,20 @@ class PersonalContractTests(unittest.TestCase):
         )
         self.assertTrue(ContextPreferenceStore(self.state, "personal-a").load().enabled)
 
-    def test_remove_recovers_from_a_corrupt_profile_and_cleans_state(self) -> None:
+    def test_remove_recovers_from_a_corrupt_profile_without_guessing_preference(self) -> None:
         backend = _MemoryKeyring()
         credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
-        credentials.set("personal-a", DIRECT_TOKEN)
         profiles = PersonalProfileStore(self.state)
-        profiles.save(self.profile())
+        profiles.save(
+            self.profile(
+                mode="managed",
+                provider="hormuz",
+                endpoint="https://gateway.example",
+                managed_profile="managed-source",
+                credential_env=None,
+                previous_preference_enabled=True,
+            )
+        )
         profile_path = profiles.path_for("personal-a")
         profile_path.write_text("{not-json", encoding="utf-8")
         profile_path.chmod(0o600)
@@ -625,7 +731,7 @@ class PersonalContractTests(unittest.TestCase):
             self.assertEqual(personal_commands.run(remove), 0)
         self.assertFalse(profile_path.exists())
         self.assertIsNone(credentials.get("personal-a"))
-        self.assertFalse(preference.path.exists())
+        self.assertTrue(preference.load().enabled)
         self.assertFalse(metrics.path.exists())
 
     def test_remove_unlinks_a_dangling_profile_symlink_without_following_it(self) -> None:
@@ -733,6 +839,61 @@ class PersonalContractTests(unittest.TestCase):
         self.assertFalse(
             PersonalProfileStore(self.state).path_for("rollback-preference").exists()
         )
+
+    def test_failed_connect_removes_profile_even_when_credential_rollback_fails(self) -> None:
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        args = argparse.Namespace(
+            personal_command="connect",
+            profile="rollback-cleanup",
+            state_directory=self.state,
+            mode="direct",
+            agent="codex",
+            provider="openai",
+            endpoint="https://api.openai.com",
+            model="gpt-5.4",
+            credential_env="PERSONAL_TEST_PROVIDER_KEY",
+            allow_loopback_http=False,
+        )
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="rollback-cleanup",
+            state_directory=self.state,
+        )
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            mock.patch.object(
+                ContextPreferenceStore,
+                "save",
+                side_effect=ContextRuntimeError("settings_write_failed"),
+            ),
+            mock.patch.object(
+                credentials,
+                "delete",
+                side_effect=CredentialStoreError("secure_store_unavailable"),
+            ),
+            mock.patch.dict(
+                os.environ,
+                {"PERSONAL_TEST_PROVIDER_KEY": "sk-new-test-only"},
+                clear=False,
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(args), 1)
+        self.assertFalse(
+            PersonalProfileStore(self.state).path_for("rollback-cleanup").exists()
+        )
+        self.assertEqual(credentials.get("rollback-cleanup"), "sk-new-test-only")
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 0)
+        self.assertIsNone(credentials.get("rollback-cleanup"))
 
     def test_interrupted_connect_rolls_back_profile_and_credential(self) -> None:
         class InterruptingKeyring(_MemoryKeyring):

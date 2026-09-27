@@ -133,8 +133,16 @@ guard first, then deletes the direct credential and measurements. It restores a
 preference that existed before `connect`, or removes the preference owned by the
 personal profile when none existed. Unsafe ancillary state is never followed;
 cleanup failure is reported while the removed profile no longer blocks a new
-connection. Since agent configuration was never changed, successful removal
-restores the ordinary setup by construction.
+connection. A repeated `remove` retries credential and measurement cleanup but
+does not change a preference that may already have been restored for a managed
+profile. Credential replacement and removal share one per-profile transaction,
+so replacement cannot recreate a credential after removal. If a damaged
+profile cannot disclose whether it was direct or managed, removal deletes its
+profile, credential, and measurements but leaves the shared preference
+unchanged rather than guessing at managed state. Failed `connect` rollback
+attempts preference, credential, and profile cleanup independently. Since agent
+configuration was never changed, successful removal restores the ordinary
+setup by construction.
 
 ## Caching and regression guard
 
