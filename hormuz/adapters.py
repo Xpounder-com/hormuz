@@ -295,6 +295,31 @@ def adapter_catalog() -> tuple[AgentIdentity, ...]:
     return tuple(adapter.identity for adapter in _ADAPTERS.values())
 
 
+def sanitized_client_environment(
+    adapter: AgentAdapter,
+    inherited_values: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return the built-in adapter's provider-sanitized inherited environment.
+
+    Version discovery executes the selected client before its launch plan is
+    assembled, so it must receive the same credential boundary as the client
+    itself. Runtime adapters are selected from the built-in registry; refusing
+    an unknown implementation keeps this helper from guessing at its secret
+    selectors.
+    """
+
+    if not isinstance(adapter, _BaseAdapter):
+        raise AdapterError("adapter_environment_boundary_unavailable")
+    inherited = adapter._environment(inherited_values)
+    blocked = frozenset(
+        name
+        for candidate in _ADAPTERS.values()
+        if isinstance(candidate, _BaseAdapter)
+        for name in candidate._blocked_environment
+    )
+    return {name: value for name, value in inherited.items() if name not in blocked}
+
+
 def conformance_report(adapter: AgentAdapter) -> dict[str, object]:
     """Run the credential/route portion of the public adapter conformance kit."""
 

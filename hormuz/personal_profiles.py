@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import stat
 import tempfile
+import threading
 import urllib.parse
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -22,6 +26,10 @@ PERSONAL_PROFILE_SCHEMA_VERSION = 2
 MAX_PROFILE_BYTES = 16 * 1024
 Mode = Literal["direct", "managed"]
 Provider = Literal["openai", "anthropic", "hormuz"]
+
+
+_PROFILE_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_PROFILE_THREAD_LOCKS_GUARD = threading.Lock()
 
 
 class PersonalProfileError(RuntimeError):
@@ -69,6 +77,21 @@ class PersonalProfileStore:
 
     def path_for(self, key: str) -> Path:
         return self.directory / (validate_personal_key(key) + ".json")
+
+    @contextmanager
+    def transaction(self, key: str, *, create: bool) -> Iterator[None]:
+        """Serialize a profile's connect/remove transaction across processes."""
+
+        validated = validate_personal_key(key)
+        self._prepare(create=create)
+        digest = hashlib.sha256(validated.encode("utf-8")).hexdigest()
+        lock_path = self.directory / (".profile-" + digest + ".lock")
+        thread_key = os.fspath(lock_path)
+        with _PROFILE_THREAD_LOCKS_GUARD:
+            thread_lock = _PROFILE_THREAD_LOCKS.setdefault(thread_key, threading.Lock())
+        with thread_lock:
+            with _ProfileFileLock(lock_path):
+                yield
 
     def save(self, profile: PersonalProfile) -> None:
         validate_personal_profile(profile)
@@ -163,9 +186,9 @@ class PersonalProfileStore:
         self._prepare(create=False)
         path = self.path_for(key)
         try:
-            loaded = self.load(key)
-            if loaded.key != key:
-                raise PersonalProfileError("personal_profile_invalid")
+            # Unlinking a validated entry name never follows its target. This
+            # deliberately permits recovery from corrupt files, unsafe link
+            # counts/permissions, and dangling symlinks that cannot be loaded.
             path.unlink()
             directory_fd = os.open(self.directory, os.O_RDONLY)
             try:
@@ -175,10 +198,6 @@ class PersonalProfileStore:
             return True
         except FileNotFoundError:
             return False
-        except PersonalProfileError as error:
-            if error.code == "personal_profile_unavailable" and not path.exists():
-                return False
-            raise
         except OSError as error:
             raise PersonalProfileError("personal_profile_remove_failed") from error
 
@@ -189,6 +208,82 @@ class PersonalProfileStore:
             return
         _private_directory(self.state_directory, create=False)
         _private_directory(self.directory, create=False)
+
+
+class _ProfileFileLock(AbstractContextManager["_ProfileFileLock"]):
+    def __init__(self, path: Path):
+        self.path = path
+        self._stream = None
+
+    def __enter__(self) -> "_ProfileFileLock":
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(self.path, flags, 0o600)
+        except OSError as error:
+            raise PersonalProfileError("personal_profile_lock_unavailable") from error
+        try:
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+                or info.st_mode & 0o077
+            ):
+                raise PersonalProfileError("personal_profile_lock_unsafe")
+            os.fchmod(descriptor, 0o600)
+            if os.name == "nt" and info.st_size == 0:  # pragma: no cover - Windows CI
+                os.write(descriptor, b"\x00")
+                os.lseek(descriptor, 0, os.SEEK_SET)
+            self._stream = os.fdopen(descriptor, "a+")
+            descriptor = -1
+            _lock_profile_stream(self._stream)
+            return self
+        except Exception:
+            if self._stream is not None:
+                self._stream.close()
+                self._stream = None
+            elif descriptor >= 0:
+                os.close(descriptor)
+            raise
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        if self._stream is not None:
+            _unlock_profile_stream(self._stream)
+            self._stream.close()
+            self._stream = None
+        return None
+
+
+def _lock_profile_stream(stream) -> None:
+    if os.name == "nt":  # pragma: no cover - Windows CI
+        import msvcrt
+
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_profile_stream(stream) -> None:
+    if os.name == "nt":  # pragma: no cover - Windows CI
+        import msvcrt
+
+        stream.seek(0)
+        try:
+            msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+    else:
+        import fcntl
+
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def parse_personal_profile(value: object) -> PersonalProfile:

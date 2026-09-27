@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from .adapters import adapter_for
+from .adapters import adapter_for, sanitized_client_environment
 from .client_relay import (
     ClientRelayError,
     LocalRelayServer,
@@ -45,19 +44,19 @@ def run_personal_client(
         else SUPPORTED_CLIENT_VERSIONS.get(profile.agent, adapter.identity.version)
     )
     direct_secret = upstream_credential() if profile.mode == "direct" else None
-    inherited_values = None
+    inherited_values = sanitized_client_environment(adapter)
     if direct_secret is not None:
         # The version probe is an execution boundary too. Remove the persisted
         # source name and any alias carrying the same secret before invoking it.
         inherited_values = {
             name: value
-            for name, value in os.environ.items()
+            for name, value in inherited_values.items()
             if name != profile.credential_env and value != direct_secret
         }
     selected_executable = executable or supported_client_executable(
         profile.agent,
         expected_version=expected_version,
-        **({"environment": inherited_values} if inherited_values is not None else {}),
+        environment=inherited_values,
     )
     preference = ContextPreferenceStore(state_directory, profile.key)
     metrics_candidate = PersonalMetricsStore(state_directory, profile.key)

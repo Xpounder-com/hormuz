@@ -141,7 +141,10 @@ def run(args: argparse.Namespace) -> int:
             _print_document(report, as_json=args.json)
             return 0 if report["passed"] else 1
         state = _state_directory(args.state_directory)
-        profile = PersonalProfileStore(state).load(validate_personal_key(args.profile))
+        key = validate_personal_key(args.profile)
+        if command == "remove":
+            return _remove(key, state)
+        profile = PersonalProfileStore(state).load(key)
         if command == "credential":
             if profile.mode != "direct":
                 raise PersonalCommandError("managed_credential_update_rejected", 2)
@@ -169,8 +172,6 @@ def run(args: argparse.Namespace) -> int:
             cleared = metrics.clear()
             print(f"personal_measurements profile={profile.key} cleared={str(cleared).lower()}")
             return 0
-        if command == "remove":
-            return _remove(profile, state)
         if command == "feedback" and args.personal_feedback_command == "export":
             document = metrics.benefit(enabled=preference.load().enabled)
             _write_new(args.output, document)
@@ -201,6 +202,16 @@ def _connect(args: argparse.Namespace) -> int:
     key = validate_personal_key(args.profile)
     state = _state_directory(args.state_directory, create=True)
     store = PersonalProfileStore(state)
+    with store.transaction(key, create=True):
+        return _connect_locked(args, key, state, store)
+
+
+def _connect_locked(
+    args: argparse.Namespace,
+    key: str,
+    state: Path,
+    store: PersonalProfileStore,
+) -> int:
     preference = ContextPreferenceStore(state, key)
     try:
         preference.path.lstat()
@@ -256,9 +267,8 @@ def _connect(args: argparse.Namespace) -> int:
     credential_write_attempted = False
     previous_secret = credentials.get(key) if credentials is not None else None
     try:
-        # Create-only profile persistence is the transaction guard.  In
-        # particular, a repeated connect must not overwrite and then delete an
-        # existing keyring credential when the profile creation is rejected.
+        # Create-only persistence prevents replacement inside the transaction;
+        # the profile lock also serializes this work with complete removal.
         store.save(profile)
         profile_created = True
         if credentials is not None:
@@ -318,20 +328,35 @@ def _run_profile(profile: PersonalProfile, state: Path) -> int:
     )
 
 
-def _remove(profile: PersonalProfile, state: Path) -> int:
+def _remove(key: str, state: Path) -> int:
+    profile_store = PersonalProfileStore(state)
+    with profile_store.transaction(key, create=False):
+        return _remove_locked(key, state, profile_store)
+
+
+def _remove_locked(
+    key: str,
+    state: Path,
+    profile_store: PersonalProfileStore,
+) -> int:
     # Remove the create-only guard first. Ancillary state is independently
     # protected and may be unsafe or unavailable; such failures must be
     # reported without stranding a profile that blocks a subsequent connect.
     cleanup_error: Exception | None = None
-    profile_store = PersonalProfileStore(state)
     try:
-        removed = profile_store.remove(profile.key)
+        profile = profile_store.load(key)
+    except PersonalProfileError as error:
+        if error.code not in {"personal_profile_invalid", "personal_profile_unavailable"}:
+            raise
+        profile = None
+    try:
+        removed = profile_store.remove(key)
     except PersonalProfileError as error:
         # remove() may unlink successfully and then fail while durably syncing
         # the containing directory. Continue cleanup only when the create-only
         # guard is observably absent; otherwise preserve all ancillary state.
         try:
-            profile_store.path_for(profile.key).lstat()
+            profile_store.path_for(key).lstat()
         except FileNotFoundError:
             removed = True
             cleanup_error = error
@@ -339,28 +364,28 @@ def _remove(profile: PersonalProfile, state: Path) -> int:
             raise error
         else:
             raise
-    if profile.mode == "direct":
+    if profile is None or profile.mode == "direct":
         try:
-            ProviderCredentialStore().delete(profile.key)
+            ProviderCredentialStore().delete(key)
         except CredentialStoreError as error:
             cleanup_error = cleanup_error or error
-    preference = ContextPreferenceStore(state, profile.key)
+    preference = ContextPreferenceStore(state, key)
     try:
-        if profile.previous_preference_enabled is None:
+        if profile is None or profile.previous_preference_enabled is None:
             preference.clear()
         else:
             preference.save(profile.previous_preference_enabled)
     except ContextRuntimeError as error:
         cleanup_error = cleanup_error or error
     try:
-        PersonalMetricsStore(state, profile.key).clear()
+        PersonalMetricsStore(state, key).clear()
     except PersonalMetricsError as error:
         cleanup_error = cleanup_error or error
     if cleanup_error is not None:
         raise cleanup_error
     print(
         "personal_removed "
-        f"profile={profile.key} removed={str(removed).lower()} "
+        f"profile={key} removed={str(removed).lower()} "
         "agent_configuration=unchanged managed_session=preserved"
     )
     return 0

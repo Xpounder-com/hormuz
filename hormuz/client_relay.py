@@ -544,6 +544,7 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
         started = time.perf_counter()
         provider_recorded = False
         provider_attempted = False
+        local_cancelled = False
         try:
             gateway_token = self.server.gateway_credential()
         except Exception:
@@ -583,7 +584,6 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                     return
                 connection.request("POST", upstream_path, body=changed, headers=headers)
             else:
-                self.server.optimizer.note_oversized_passthrough()
                 headers = _forward_headers(
                     self.headers,
                     gateway_token,
@@ -602,18 +602,27 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                 connection.endheaders()
                 remaining = length
                 while remaining:
-                    chunk = self.rfile.read(min(RELAY_CHUNK_BYTES, remaining))
+                    try:
+                        chunk = self.rfile.read(min(RELAY_CHUNK_BYTES, remaining))
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                        local_cancelled = True
+                        self.close_connection = True
+                        return
                     if not chunk:
+                        local_cancelled = True
                         self.close_connection = True
                         return
                     connection.send(chunk)
                     remaining -= len(chunk)
+                self.server.optimizer.note_oversized_passthrough()
             response = connection.getresponse()
             self._relay_response(response, path.path, started)
             provider_recorded = True
         except (BrokenPipeError, ConnectionResetError):
             if provider_attempted:
-                self._record_provider_failure(started, cancelled=True)
+                self._record_provider_failure(
+                    started, cancelled=self.server._is_stopping()
+                )
                 provider_recorded = True
             self.close_connection = True
         except (OSError, ssl.SSLError, http.client.HTTPException):
@@ -628,7 +637,8 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
         finally:
             if provider_attempted and not provider_recorded:
                 self._record_provider_failure(
-                    started, cancelled=self.server._is_stopping()
+                    started,
+                    cancelled=local_cancelled or self.server._is_stopping(),
                 )
             if connection is not None:
                 connection.close()
@@ -713,6 +723,7 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                                 and not upstream_failed
                             ),
                             cancelled=cancelled,
+                            response_received=True,
                             response_bytes=accumulator.total_bytes,
                             time_to_first_byte_ms=first_byte_ms,
                             total_latency_ms=max(0.0, (time.perf_counter() - started) * 1000),
@@ -730,6 +741,7 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                 ProviderMeasurement(
                     succeeded=False,
                     cancelled=cancelled,
+                    response_received=False,
                     response_bytes=None,
                     time_to_first_byte_ms=None,
                     total_latency_ms=max(0.0, (time.perf_counter() - started) * 1000),

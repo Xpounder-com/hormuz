@@ -118,6 +118,7 @@ class OptimizationMeasurement:
 class ProviderMeasurement:
     succeeded: bool
     cancelled: bool
+    response_received: bool
     response_bytes: int | None
     time_to_first_byte_ms: float | None
     total_latency_ms: float | None
@@ -207,9 +208,7 @@ class PersonalMetricsStore:
             value = self._load_or_empty(create=True)
             counters = value["counters"]
             counters["provider_attempts"] += 1
-            counters["provider_responses"] += int(
-                measurement.time_to_first_byte_ms is not None
-            )
+            counters["provider_responses"] += int(measurement.response_received)
             counters["provider_failures"] += int(
                 not measurement.succeeded and not measurement.cancelled
             )
