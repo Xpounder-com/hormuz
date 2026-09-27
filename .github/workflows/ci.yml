@@ -268,7 +268,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # The installed-wheel migration matrix normally completes in roughly
+    # 21-25 minutes; keep bounded headroom for hosted-runner variance.
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
