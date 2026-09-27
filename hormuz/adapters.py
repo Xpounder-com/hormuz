@@ -295,17 +295,29 @@ def adapter_catalog() -> tuple[AgentIdentity, ...]:
     return tuple(adapter.identity for adapter in _ADAPTERS.values())
 
 
+def client_launch_values(
+    adapter: AgentAdapter,
+    inherited_values: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return inherited values scrubbed only for the selected adapter."""
+
+    if not isinstance(adapter, _BaseAdapter):
+        raise AdapterError("adapter_environment_boundary_unavailable")
+    return adapter._environment(inherited_values)
+
+
 def sanitized_client_environment(
     adapter: AgentAdapter,
     inherited_values: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Return the built-in adapter's provider-sanitized inherited environment.
+    """Return a broadly provider-sanitized environment for client probing.
 
     Version discovery executes the selected client before its launch plan is
-    assembled, so it must receive the same credential boundary as the client
-    itself. Runtime adapters are selected from the built-in registry; refusing
-    an unknown implementation keeps this helper from guessing at its secret
-    selectors.
+    assembled, so an executable selected from ``PATH`` must not receive any
+    known provider credential.  The actual agent launch uses the selected
+    adapter's narrower boundary so unrelated tool integrations keep working.
+    Runtime adapters are selected from the built-in registry; refusing an
+    unknown implementation keeps this helper from guessing at secret selectors.
     """
 
     if not isinstance(adapter, _BaseAdapter):

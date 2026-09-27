@@ -78,6 +78,22 @@ class PersonalProfileStore:
     def path_for(self, key: str) -> Path:
         return self.directory / (validate_personal_key(key) + ".json")
 
+    def entry_exists(self, key: str) -> bool:
+        """Return whether the validated profile entry itself is present.
+
+        ``lstat`` deliberately treats corrupt files and dangling symlinks as
+        present so removal can recover them without following their targets.
+        """
+
+        self._prepare(create=False)
+        try:
+            self.path_for(key).lstat()
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise PersonalProfileError("personal_profile_unavailable") from error
+        return True
+
     @contextmanager
     def transaction(self, key: str, *, create: bool) -> Iterator[None]:
         """Serialize a profile's connect/remove transaction across processes."""
@@ -391,9 +407,16 @@ def validate_personal_key(value: object) -> str:
     if not isinstance(value, str):
         raise PersonalProfileError("invalid_personal_profile_key")
     try:
-        return validate_profile(value)
+        validated = validate_profile(value)
     except CredentialStoreError as error:
         raise PersonalProfileError("invalid_personal_profile_key") from error
+    # Personal state spans profile, preference, metrics, keyring, and lock
+    # namespaces.  A lowercase ASCII canonical form prevents case-insensitive
+    # filesystems from mapping two accepted keys to one state entry while the
+    # transaction layer derives different locks.
+    if re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", validated) is None:
+        raise PersonalProfileError("invalid_personal_profile_key")
+    return validated
 
 
 def validate_personal_endpoint(value: object, *, allow_insecure_http: bool) -> str:

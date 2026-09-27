@@ -226,6 +226,15 @@ class PersonalContractTests(unittest.TestCase):
             store.save(self.profile())
         self.assertFalse(store.path_for("personal-a").exists())
 
+    def test_personal_profile_keys_require_canonical_lowercase_ascii(self) -> None:
+        store = PersonalProfileStore(self.state)
+        for key in ("Personal-A", "PERSONAL-A", "pérsonal-a", ".personal-a"):
+            with self.subTest(key=key), self.assertRaisesRegex(
+                PersonalProfileError, "invalid_personal_profile_key"
+            ):
+                store.path_for(key)
+        self.assertEqual(store.path_for("personal-a").name, "personal-a.json")
+
     def test_profile_schema_one_remains_removable_after_the_schema_upgrade(self) -> None:
         store = PersonalProfileStore(self.state)
         store.directory.mkdir(parents=True, mode=0o700)
@@ -416,6 +425,8 @@ class PersonalContractTests(unittest.TestCase):
             profile = PersonalProfileStore(self.state).load("managed-source")
             self.assertFalse(profile.previous_preference_enabled)
             self.assertTrue(preference.load().enabled)
+            self.assertEqual(personal_commands.run(remove), 0)
+            self.assertFalse(preference.load().enabled)
             self.assertEqual(personal_commands.run(remove), 0)
         self.assertFalse(preference.load().enabled)
 
@@ -1111,6 +1122,10 @@ class PersonalContractTests(unittest.TestCase):
                 "hormuz.personal_runtime.probe_gateway_capability",
                 return_value=True,
             ),
+            mock.patch(
+                "hormuz.personal_runtime.subprocess.run",
+                return_value=mock.Mock(returncode=0),
+            ) as launched,
             mock.patch.dict(
                 os.environ,
                 {
@@ -1143,6 +1158,16 @@ class PersonalContractTests(unittest.TestCase):
         self.assertNotIn("ANTHROPIC_API_KEY", probe_environment)
         self.assertEqual(
             probe_environment["TOOL_INTEGRATION_TOKEN"], "preserved-tool-token"
+        )
+        launch_environment = launched.call_args.kwargs["env"]
+        self.assertNotIn("OPENAI_API_KEY", launch_environment)
+        self.assertNotIn("CODEX_API_KEY", launch_environment)
+        self.assertEqual(
+            launch_environment["ANTHROPIC_API_KEY"],
+            "must-not-reach-managed-version-probe",
+        )
+        self.assertEqual(
+            launch_environment["TOOL_INTEGRATION_TOKEN"], "preserved-tool-token"
         )
 
     def test_direct_version_probe_cannot_receive_the_provider_credential(self) -> None:

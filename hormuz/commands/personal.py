@@ -343,6 +343,16 @@ def _remove_locked(
     # protected and may be unsafe or unavailable; such failures must be
     # reported without stranding a profile that blocks a subsequent connect.
     cleanup_error: Exception | None = None
+    if not profile_store.entry_exists(key):
+        # Repeated removal is an idempotent no-op.  In particular, do not clear
+        # a managed client's restored shared preference after its personal
+        # profile has already gone away.
+        print(
+            "personal_removed "
+            f"profile={key} removed=false "
+            "agent_configuration=unchanged managed_session=preserved"
+        )
+        return 0
     try:
         profile = profile_store.load(key)
     except PersonalProfileError as error:

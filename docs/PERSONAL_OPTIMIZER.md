@@ -41,7 +41,9 @@ Provider credentials are read from an explicitly named environment variable
 and moved into the operating-system keyring. They are never accepted as a CLI
 argument and never written to the profile or metrics files. The profile keeps
 only the non-secret variable name so a later shell value under that name is
-also removed from the launched agent environment.
+also removed from the launched agent environment. Personal profile names use
+one canonical lowercase ASCII form: a letter or digit followed by up to 63
+letters, digits, periods, underscores, or hyphens.
 
 ```sh
 export OPENAI_API_KEY='your-provider-key'
@@ -82,8 +84,8 @@ personal runner verifies that gateway, agent, and model still match the saved
 managed profile on every launch. It never falls back to direct access.
 
 ```sh
-hormuz personal connect --profile MANAGED_PROFILE_UUID --mode managed
-hormuz personal run --profile MANAGED_PROFILE_UUID
+hormuz personal connect --profile managed-profile-uuid --mode managed
+hormuz personal run --profile managed-profile-uuid
 ```
 
 Removing the personal integration does not log out or delete the managed

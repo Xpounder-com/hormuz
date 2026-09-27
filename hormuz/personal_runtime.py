@@ -7,7 +7,7 @@ import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from .adapters import adapter_for, sanitized_client_environment
+from .adapters import adapter_for, client_launch_values, sanitized_client_environment
 from .client_relay import (
     ClientRelayError,
     LocalRelayServer,
@@ -44,19 +44,25 @@ def run_personal_client(
         else SUPPORTED_CLIENT_VERSIONS.get(profile.agent, adapter.identity.version)
     )
     direct_secret = upstream_credential() if profile.mode == "direct" else None
-    inherited_values = sanitized_client_environment(adapter)
+    probe_values = sanitized_client_environment(adapter)
+    launch_inherited_values = client_launch_values(adapter)
     if direct_secret is not None:
         # The version probe is an execution boundary too. Remove the persisted
         # source name and any alias carrying the same secret before invoking it.
-        inherited_values = {
+        probe_values = {
             name: value
-            for name, value in inherited_values.items()
+            for name, value in probe_values.items()
+            if name != profile.credential_env and value != direct_secret
+        }
+        launch_inherited_values = {
+            name: value
+            for name, value in launch_inherited_values.items()
             if name != profile.credential_env and value != direct_secret
         }
     selected_executable = executable or supported_client_executable(
         profile.agent,
         expected_version=expected_version,
-        environment=inherited_values,
+        environment=probe_values,
     )
     preference = ContextPreferenceStore(state_directory, profile.key)
     metrics_candidate = PersonalMetricsStore(state_directory, profile.key)
@@ -100,11 +106,11 @@ def run_personal_client(
             relay_origin=server.origin,
             local_credential=local_credential,
             model=profile.model,
-            inherited_values=inherited_values,
+            inherited_values=launch_inherited_values,
         )
         launch_values = plan.environment
         if direct_secret is not None:
-            # A custom adapter must not reintroduce a provider-key alias.
+            # A built-in adapter must not reintroduce a direct-secret alias.
             launch_values = {
                 name: value
                 for name, value in launch_values.items()
