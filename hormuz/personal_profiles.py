@@ -18,7 +18,7 @@ from .credential_store import CredentialStoreError, validate_profile
 
 
 PERSONAL_RELEASE_VERSION = "0.1.0"
-PERSONAL_PROFILE_SCHEMA_VERSION = 1
+PERSONAL_PROFILE_SCHEMA_VERSION = 2
 MAX_PROFILE_BYTES = 16 * 1024
 Mode = Literal["direct", "managed"]
 Provider = Literal["openai", "anthropic", "hormuz"]
@@ -41,6 +41,7 @@ class PersonalProfile:
     allow_insecure_http: bool = False
     managed_profile: str | None = None
     credential_env: str | None = None
+    previous_preference_enabled: bool | None = None
     transform_version: str = "structural-v1"
 
     def to_dict(self) -> dict[str, object]:
@@ -56,6 +57,7 @@ class PersonalProfile:
             "allow_insecure_http": self.allow_insecure_http,
             "managed_profile": self.managed_profile,
             "credential_env": self.credential_env,
+            "previous_preference_enabled": self.previous_preference_enabled,
             "transform_version": self.transform_version,
         }
 
@@ -206,10 +208,18 @@ def parse_personal_profile(value: object) -> PersonalProfile:
     }
     if (
         not isinstance(value, dict)
-        or set(value) != expected
-        or value.get("schema_version") != PERSONAL_PROFILE_SCHEMA_VERSION
         or value.get("release_version") != PERSONAL_RELEASE_VERSION
     ):
+        raise PersonalProfileError("personal_profile_invalid")
+    schema_version = value.get("schema_version")
+    if schema_version == 1:
+        previous_preference_enabled = None
+    elif schema_version == PERSONAL_PROFILE_SCHEMA_VERSION:
+        expected.add("previous_preference_enabled")
+        previous_preference_enabled = value.get("previous_preference_enabled")
+    else:
+        raise PersonalProfileError("personal_profile_invalid")
+    if set(value) != expected:
         raise PersonalProfileError("personal_profile_invalid")
     try:
         profile = PersonalProfile(
@@ -222,6 +232,7 @@ def parse_personal_profile(value: object) -> PersonalProfile:
             allow_insecure_http=value.get("allow_insecure_http"),  # type: ignore[arg-type]
             managed_profile=value.get("managed_profile"),  # type: ignore[arg-type]
             credential_env=value.get("credential_env"),  # type: ignore[arg-type]
+            previous_preference_enabled=previous_preference_enabled,  # type: ignore[arg-type]
             transform_version=value.get("transform_version"),  # type: ignore[arg-type]
         )
         return validate_personal_profile(profile)
@@ -241,6 +252,10 @@ def validate_personal_profile(profile: PersonalProfile) -> PersonalProfile:
         or not isinstance(profile.model, str)
         or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}", profile.model) is None
         or not isinstance(profile.allow_insecure_http, bool)
+        or (
+            profile.previous_preference_enabled is not None
+            and not isinstance(profile.previous_preference_enabled, bool)
+        )
         or profile.transform_version != "structural-v1"
     ):
         raise PersonalProfileError("personal_profile_invalid")

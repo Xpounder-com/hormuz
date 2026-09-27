@@ -57,11 +57,13 @@ The active core has seven custody categories:
 5. **Local agent process inheritance.** The opt-in context and personal launchers,
    including the packaged public adapter example, transiently pass the user's
    existing process environment to the official Codex, Claude Code, Aider, or
-   adapter-owned child process so client-owned tools continue to work.
-   It removes that client's direct provider credentials and endpoint selectors,
-   injects only a short-lived loopback relay credential, and never sends the
-   inherited environment to the Hormuz gateway. Hormuz does not persist, log,
-   hash, or serialize these values.
+   adapter-owned child process so client-owned tools continue to work. The
+   personal launcher also uses the sanitized environment for its pinned-version
+   probe. It removes the configured upstream credential before either execution,
+   removes that client's standard provider credentials and endpoint selectors
+   from the main launch, injects only a short-lived loopback relay credential,
+   and never sends the inherited environment to the Hormuz gateway. Hormuz does
+   not persist, log, hash, or serialize these values.
 6. **Personal direct-provider credentials.** `hormuz personal connect` reads one
    explicitly named environment value, validates it without printing it, stores
    it under a distinct service in the operating-system secure store, and then

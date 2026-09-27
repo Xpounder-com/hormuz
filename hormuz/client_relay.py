@@ -189,7 +189,8 @@ class RelayOptimizer:
             )
             return body, {}
         try:
-            payload = strict_json_loads(body.decode("utf-8"))
+            request_text = body.decode("utf-8")
+            payload = strict_json_loads(request_text)
         except (CompactionFormatError, UnicodeDecodeError, RecursionError):
             self._set_status(RelayStatus("unsupported_history"))
             self._observe(
@@ -232,6 +233,25 @@ class RelayOptimizer:
         typed_payload = cast(dict[str, object], payload)
         selections = derive_selections(typed_payload, protocol, client=self.client)
         result = optimize_request(typed_payload, protocol, selections, counters, enabled=True)
+        outgoing_text = serialize_request(result.payload) if result.changed else request_text
+        outgoing = outgoing_text.encode("utf-8") if result.changed else body
+        try:
+            before_tokens = _count_boundary_tokens(request_text, counters)
+            after_tokens = _count_boundary_tokens(outgoing_text, counters)
+        except Exception:
+            result = CompactionResult(
+                payload=typed_payload,
+                changed=False,
+                reason="counter_unavailable",
+                changed_blocks=0,
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens={},
+                after_tokens={},
+            )
+            outgoing = body
+            before_tokens = {}
+            after_tokens = {}
         elapsed_us = max(0, (time.perf_counter_ns() - started) // 1_000)
         if result.changed and elapsed_us > MAX_OPTIMIZER_OVERHEAD_US:
             result = CompactionResult(
@@ -239,16 +259,13 @@ class RelayOptimizer:
                 changed=False,
                 reason="net_regression",
                 changed_blocks=0,
-                before_bytes=result.before_bytes,
-                after_bytes=result.before_bytes,
-                before_tokens=result.before_tokens,
-                after_tokens=dict(result.before_tokens),
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=before_tokens,
+                after_tokens=dict(before_tokens),
             )
-        outgoing = (
-            serialize_request(result.payload).encode("utf-8")
-            if result.changed
-            else body
-        )
+            outgoing = body
+            after_tokens = dict(before_tokens)
         measured_result = CompactionResult(
             payload=result.payload,
             changed=result.changed,
@@ -256,18 +273,18 @@ class RelayOptimizer:
             changed_blocks=result.changed_blocks,
             before_bytes=len(body),
             after_bytes=len(outgoing),
-            before_tokens=result.before_tokens,
-            after_tokens=result.after_tokens,
+            before_tokens=before_tokens,
+            after_tokens=after_tokens,
         )
         self._record_result(measured_result)
         self._observe(
-            eligible=bool(selections),
+            eligible=result.reason in {"compacted", "no_savings", "net_regression"},
             applied=result.changed,
             reason=result.reason,
             before_bytes=measured_result.before_bytes,
             after_bytes=measured_result.after_bytes,
-            before_tokens=result.before_tokens,
-            after_tokens=result.after_tokens,
+            before_tokens=measured_result.before_tokens,
+            after_tokens=measured_result.after_tokens,
             started=started,
         )
         if not result.changed:
@@ -971,7 +988,10 @@ def _client_command(
 
 
 def supported_client_executable(
-    client: str, *, expected_version: str | None = None
+    client: str,
+    *,
+    expected_version: str | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> str:
     try:
         adapter = adapter_for(client)
@@ -992,6 +1012,7 @@ def supported_client_executable(
             stderr=subprocess.PIPE,
             timeout=15,
             check=False,
+            env=None if environment is None else dict(environment),
         )
         output = completed.stdout + b" " + completed.stderr
     except (OSError, subprocess.SubprocessError) as error:
@@ -1005,6 +1026,18 @@ def supported_client_executable(
     if match is None or match.group(1) != expected:
         raise ClientRelayError("unsupported_client")
     return executable
+
+
+def _count_boundary_tokens(
+    value: str, counters: Mapping[str, Callable[[str], int]]
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for name, counter in counters.items():
+        count = counter(value)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError("invalid counter result")
+        counts[name] = count
+    return counts
 
 
 def _protocol_for_path(path: str) -> Protocol | None:

@@ -541,6 +541,7 @@ def _record_active_day(value: dict[str, object]) -> None:
     days = value["active_days"]
     if ordinal not in days:
         days.append(ordinal)
+        days.sort()
         del days[:-30]
 
 

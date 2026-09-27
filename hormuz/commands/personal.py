@@ -202,6 +202,14 @@ def _connect(args: argparse.Namespace) -> int:
     state = _state_directory(args.state_directory, create=True)
     store = PersonalProfileStore(state)
     preference = ContextPreferenceStore(state, key)
+    try:
+        preference.path.lstat()
+    except FileNotFoundError:
+        previous_preference_enabled = None
+    except OSError as error:
+        raise ContextRuntimeError("settings_invalid") from error
+    else:
+        previous_preference_enabled = preference.load().enabled
     credentials: ProviderCredentialStore | None = None
     secret: str | None = None
     if args.mode == "managed":
@@ -217,6 +225,7 @@ def _connect(args: argparse.Namespace) -> int:
             model=managed.model,
             allow_insecure_http=managed.allow_insecure_http,
             managed_profile=managed.key,
+            previous_preference_enabled=previous_preference_enabled,
         )
     else:
         provider = args.provider or ("anthropic" if args.agent == "claude-code" else "openai")
@@ -240,16 +249,9 @@ def _connect(args: argparse.Namespace) -> int:
             model=args.model,
             allow_insecure_http=args.allow_loopback_http,
             credential_env=environment_name,
+            previous_preference_enabled=previous_preference_enabled,
         )
         credentials = ProviderCredentialStore()
-    try:
-        preference.path.lstat()
-    except FileNotFoundError:
-        previous_preference = None
-    except OSError as error:
-        raise ContextRuntimeError("settings_invalid") from error
-    else:
-        previous_preference = preference.load()
     profile_created = False
     credential_write_attempted = False
     previous_secret = credentials.get(key) if credentials is not None else None
@@ -268,10 +270,10 @@ def _connect(args: argparse.Namespace) -> int:
         if not profile_created:
             raise
         try:
-            if previous_preference is None:
+            if previous_preference_enabled is None:
                 preference.clear()
             else:
-                preference.save(previous_preference.enabled)
+                preference.save(previous_preference_enabled)
             if credentials is not None and credential_write_attempted:
                 if previous_secret is None:
                     credentials.delete(key)
@@ -319,9 +321,16 @@ def _run_profile(profile: PersonalProfile, state: Path) -> int:
 def _remove(profile: PersonalProfile, state: Path) -> int:
     if profile.mode == "direct":
         ProviderCredentialStore().delete(profile.key)
-    ContextPreferenceStore(state, profile.key).clear()
-    PersonalMetricsStore(state, profile.key).clear()
+    preference = ContextPreferenceStore(state, profile.key)
+    if profile.previous_preference_enabled is None:
+        preference.clear()
+    else:
+        preference.save(profile.previous_preference_enabled)
     removed = PersonalProfileStore(state).remove(profile.key)
+    # Remove the create-only guard before metrics cleanup. A damaged local
+    # ledger may still be reported, but it must not strand the profile or block
+    # a subsequent connect.
+    PersonalMetricsStore(state, profile.key).clear()
     print(
         "personal_removed "
         f"profile={profile.key} removed={str(removed).lower()} "

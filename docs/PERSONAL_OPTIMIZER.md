@@ -58,10 +58,11 @@ hormuz personal run --profile personal-codex
 ```
 
 The launch uses transient command and environment overrides. It does not edit
-Codex configuration. The child receives a fresh loopback credential, while the
-provider credential stays in the OS keyring and is attached only to the fixed
-HTTPS upstream. Loopback HTTP is available only through an explicit test flag;
-non-loopback HTTP is rejected.
+Codex configuration. The pinned-version probe and the agent launch cannot
+inherit the configured upstream credential. The child receives a fresh
+loopback credential, while the provider credential stays in the OS keyring and
+is attached only to the fixed HTTPS upstream. Loopback HTTP is available only
+through an explicit test flag; non-loopback HTTP is rejected.
 
 Rotate a direct credential from the same named variable without changing the
 profile or clearing local measurements:
@@ -125,8 +126,10 @@ and up to 30 numeric active-day ordinals. The relay may inspect at most 1 MiB of
 a response in memory to extract usage while streaming bytes immediately; it
 does not persist messages, responses, semantic content, content hashes, or
 tool output. `clear` deletes measurements. `remove` also deletes the direct
-credential, personal profile, and preference. Since agent configuration was
-never changed, removal restores the ordinary setup by construction.
+credential and personal profile. It restores a preference that existed before
+`connect`, or removes the preference owned by the personal profile when none
+existed. Since agent configuration was never changed, removal restores the
+ordinary setup by construction.
 
 ## Caching and regression guard
 

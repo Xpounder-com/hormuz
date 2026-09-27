@@ -12,13 +12,14 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
 import hormuz.commands.personal as personal_commands
 from hormuz.adapters import adapter_for, conformance_report
-from hormuz.client_relay import LocalRelayServer, RelayOptimizer
+from hormuz.client_relay import LocalRelayServer, RelayOptimizer, SavedClientProfile
 from hormuz.client_versions import SUPPORTED_CLIENT_VERSIONS
 from hormuz.compaction_runtime import ContextPreferenceStore, ContextRuntimeError
 from hormuz.credential_store import CredentialStoreError, ProviderCredentialStore
@@ -225,6 +226,19 @@ class PersonalContractTests(unittest.TestCase):
             store.save(self.profile())
         self.assertFalse(store.path_for("personal-a").exists())
 
+    def test_profile_schema_one_remains_removable_after_the_schema_upgrade(self) -> None:
+        store = PersonalProfileStore(self.state)
+        store.directory.mkdir(parents=True, mode=0o700)
+        legacy = self.profile().to_dict()
+        legacy["schema_version"] = 1
+        legacy.pop("previous_preference_enabled")
+        path = store.path_for("personal-a")
+        path.write_text(json.dumps(legacy), encoding="utf-8")
+        path.chmod(0o600)
+        loaded = store.load("personal-a")
+        self.assertIsNone(loaded.previous_preference_enabled)
+        self.assertTrue(store.remove("personal-a"))
+
     def test_profile_save_removes_the_link_after_a_post_link_failure(self) -> None:
         store = PersonalProfileStore(self.state)
         real_fsync = os.fsync
@@ -365,6 +379,75 @@ class PersonalContractTests(unittest.TestCase):
             )
         self.assertIsNone(credentials.get("personal-a"))
         self.assertFalse(PersonalProfileStore(self.state).path_for("personal-a").exists())
+        self.assertFalse(ContextPreferenceStore(self.state, "personal-a").path.exists())
+
+    def test_managed_remove_restores_the_preexisting_preference(self) -> None:
+        preference = ContextPreferenceStore(self.state, "managed-source")
+        preference.save(False)
+        managed = SavedClientProfile(
+            key="managed-source",
+            gateway="https://gateway.example",
+            client="codex",
+            model="qualified-model",
+            allow_insecure_http=False,
+        )
+        connect = argparse.Namespace(
+            personal_command="connect",
+            profile="managed-source",
+            state_directory=self.state,
+            mode="managed",
+            agent="codex",
+            provider=None,
+            endpoint=None,
+            model=None,
+            credential_env=None,
+            allow_loopback_http=False,
+        )
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="managed-source",
+            state_directory=self.state,
+        )
+        with (
+            mock.patch.object(personal_commands, "load_saved_profile", return_value=managed),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(connect), 0)
+            profile = PersonalProfileStore(self.state).load("managed-source")
+            self.assertFalse(profile.previous_preference_enabled)
+            self.assertTrue(preference.load().enabled)
+            self.assertEqual(personal_commands.run(remove), 0)
+        self.assertFalse(preference.load().enabled)
+
+    def test_invalid_metrics_do_not_block_profile_removal(self) -> None:
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        credentials.set("personal-a", DIRECT_TOKEN)
+        PersonalProfileStore(self.state).save(self.profile())
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(True)
+        metrics = PersonalMetricsStore(self.state, "personal-a")
+        metrics.record_session()
+        outside = self.state / "preserved-metrics.json"
+        outside.write_text("preserve", encoding="utf-8")
+        metrics.path.unlink()
+        metrics.path.symlink_to(outside)
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="personal-a",
+            state_directory=self.state,
+        )
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 1)
+        self.assertFalse(PersonalProfileStore(self.state).path_for("personal-a").exists())
+        self.assertIsNone(credentials.get("personal-a"))
+        self.assertFalse(preference.path.exists())
+        self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
 
     def test_failed_connect_restores_a_preexisting_keyring_credential(self) -> None:
         backend = _MemoryKeyring()
@@ -614,6 +697,19 @@ class PersonalContractTests(unittest.TestCase):
             workers,
         )
 
+    def test_active_days_remain_sorted_when_the_clock_moves_backward(self) -> None:
+        store = PersonalMetricsStore(self.state, "personal-a")
+        later = datetime(2026, 9, 27, 12, tzinfo=timezone.utc)
+        earlier = datetime(2026, 9, 26, 12, tzinfo=timezone.utc)
+        with mock.patch("hormuz.personal_metrics.datetime", wraps=datetime) as clock:
+            clock.now.side_effect = [later, earlier]
+            store.record_session()
+            store.record_session()
+        self.assertEqual(
+            store.snapshot()["active_days"],
+            [earlier.date().toordinal(), later.date().toordinal()],
+        )
+
     def test_usage_parser_handles_openai_sse_and_anthropic_json(self) -> None:
         sse = (
             b'data: {"type":"response.completed","response":{"usage":'
@@ -742,6 +838,45 @@ class PersonalContractTests(unittest.TestCase):
         self.assertEqual(
             snapshot["metrics"]["request_after_bytes"]["total"], len(changed)
         )
+        self.assertEqual(
+            snapshot["metrics"]["cl100k_before_tokens"]["total"],
+            len(body.decode("utf-8")),
+        )
+        self.assertEqual(
+            snapshot["metrics"]["cl100k_after_tokens"]["total"],
+            len(changed.decode("utf-8")),
+        )
+
+    def test_recognized_call_without_matching_result_is_not_eligible(self) -> None:
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(True)
+        metrics = PersonalMetricsStore(self.state, "personal-a")
+        optimizer = RelayOptimizer(
+            preference_store=preference,
+            client="codex",
+            gateway_compatible=True,
+            counters=COUNTERS,
+            metrics=metrics,
+        )
+        body = json.dumps(
+            {
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call-without-result",
+                        "name": "exec_command",
+                        "arguments": json.dumps({"cmd": "rg --files src/generated"}),
+                    }
+                ]
+            }
+        ).encode()
+        changed, headers = optimizer.prepare(body, "/v1/responses")
+        self.assertEqual(changed, body)
+        self.assertEqual(headers, {})
+        self.assertEqual(optimizer.status.code, "ready")
+        snapshot = metrics.snapshot()
+        self.assertEqual(snapshot["counters"]["eligible_requests"], 0)
+        self.assertEqual(snapshot["reasons"], {"no_eligible_result": 1})
 
     def test_public_adapter_example_preserves_non_provider_environment(self) -> None:
         with mock.patch.dict(
@@ -794,6 +929,44 @@ class PersonalContractTests(unittest.TestCase):
             )
         supported.assert_called_once_with(
             "codex", expected_version=SUPPORTED_CLIENT_VERSIONS["codex"]
+        )
+
+    def test_direct_version_probe_cannot_receive_the_provider_credential(self) -> None:
+        profile = self.profile(
+            key="sanitized-version-probe",
+            endpoint="http://127.0.0.1:9",
+            allow_insecure_http=True,
+            credential_env="PERSONAL_TEST_PROVIDER_KEY",
+        )
+        with (
+            mock.patch(
+                "hormuz.personal_runtime.supported_client_executable",
+                return_value="/usr/bin/true",
+            ) as supported,
+            mock.patch.dict(
+                os.environ,
+                {
+                    "PERSONAL_TEST_PROVIDER_KEY": DIRECT_TOKEN,
+                    "PROVIDER_SECRET_ALIAS": DIRECT_TOKEN,
+                    "TOOL_INTEGRATION_TOKEN": "preserved-tool-token",
+                },
+                clear=True,
+            ),
+        ):
+            self.assertEqual(
+                run_personal_client(
+                    profile=profile,
+                    state_directory=self.state,
+                    upstream_credential=lambda: DIRECT_TOKEN,
+                    counters=COUNTERS,
+                ),
+                0,
+            )
+        probe_environment = supported.call_args.kwargs["environment"]
+        self.assertNotIn("PERSONAL_TEST_PROVIDER_KEY", probe_environment)
+        self.assertNotIn(DIRECT_TOKEN, probe_environment.values())
+        self.assertEqual(
+            probe_environment["TOOL_INTEGRATION_TOKEN"], "preserved-tool-token"
         )
 
     def test_session_measurement_failure_does_not_prevent_agent_launch(self) -> None:

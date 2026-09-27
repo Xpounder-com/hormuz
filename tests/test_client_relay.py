@@ -1053,6 +1053,34 @@ raise SystemExit(0 if response.status == 200 else 1)
             else:
                 os.environ["PATH"] = old_path
 
+    def test_client_version_probe_uses_the_supplied_environment(self) -> None:
+        bin_directory = Path(self.temporary.name) / "sanitized-version-bin"
+        bin_directory.mkdir()
+        codex = bin_directory / "codex"
+        codex.write_text(
+            "#!/bin/sh\n"
+            "if [ -n \"$PERSONAL_TEST_PROVIDER_KEY\" ]; then exit 7; fi\n"
+            "echo 'codex-cli 0.148.0'\n",
+            encoding="utf-8",
+        )
+        codex.chmod(0o700)
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PATH": str(bin_directory),
+                "PERSONAL_TEST_PROVIDER_KEY": "must-not-reach-version-probe",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                supported_client_executable(
+                    "codex",
+                    expected_version="0.148.0",
+                    environment={"PATH": str(bin_directory)},
+                ),
+                str(codex),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

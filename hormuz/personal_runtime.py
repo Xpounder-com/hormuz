@@ -44,8 +44,20 @@ def run_personal_client(
         if profile.mode == "direct"
         else SUPPORTED_CLIENT_VERSIONS.get(profile.agent, adapter.identity.version)
     )
+    direct_secret = upstream_credential() if profile.mode == "direct" else None
+    inherited_values = None
+    if direct_secret is not None:
+        # The version probe is an execution boundary too. Remove the persisted
+        # source name and any alias carrying the same secret before invoking it.
+        inherited_values = {
+            name: value
+            for name, value in os.environ.items()
+            if name != profile.credential_env and value != direct_secret
+        }
     selected_executable = executable or supported_client_executable(
-        profile.agent, expected_version=expected_version
+        profile.agent,
+        expected_version=expected_version,
+        **({"environment": inherited_values} if inherited_values is not None else {}),
     )
     preference = ContextPreferenceStore(state_directory, profile.key)
     metrics_candidate = PersonalMetricsStore(state_directory, profile.key)
@@ -68,7 +80,6 @@ def run_personal_client(
     )
     local_credential = new_local_credential()
     upstream_auth = "hormuz" if profile.mode == "managed" else profile.provider
-    direct_secret = upstream_credential() if profile.mode == "direct" else None
     server = LocalRelayServer(
         gateway=profile.endpoint,
         client=profile.agent,
@@ -85,17 +96,6 @@ def run_personal_client(
     )
     thread.start()
     try:
-        inherited_values = None
-        if direct_secret is not None:
-            # Remove the persisted non-secret source name before the adapter
-            # writes its reviewed loopback routing values. This preserves, for
-            # example, Aider's local OPENAI_API_KEY while never inheriting the
-            # shell's value for that name.
-            inherited_values = {
-                name: value
-                for name, value in os.environ.items()
-                if name != profile.credential_env and value != direct_secret
-            }
         plan = adapter.launch_plan(
             executable=selected_executable,
             relay_origin=server.origin,
