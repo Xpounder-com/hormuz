@@ -80,6 +80,21 @@ EXPECTED_COMMAND_TREE = {
     },
     "login": None,
     "logout": None,
+    "personal": {
+        "adapters": None,
+        "benefit": None,
+        "clear": None,
+        "conformance": None,
+        "connect": None,
+        "contract": None,
+        "credential": None,
+        "feedback": {"export": None},
+        "off": None,
+        "on": None,
+        "qualify": None,
+        "remove": None,
+        "run": None,
+    },
     "policy": {
         "activate": None,
         "administrator": {

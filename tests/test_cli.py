@@ -349,6 +349,10 @@ class ClientConfigTests(unittest.TestCase):
                 ["custody", "executor", "register-assets"],
                 ["custody", "executor", "register", "assets"],
             ),
+            (
+                ["personal", "feedback-export"],
+                ["personal", "feedback", "export"],
+            ),
         )
         for legacy, primary in aliases:
             with self.subTest(legacy=legacy):

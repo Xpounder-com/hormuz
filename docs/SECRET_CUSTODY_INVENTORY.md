@@ -20,7 +20,7 @@ custody integration tests separately prove encryption and recovery behavior.
 
 ## Ownership boundary
 
-The active core has six custody categories:
+The active core has seven custody categories:
 
 1. **Hormuz-managed protected material.** Provider credentials may be stored
    in owner-only encrypted envelope files. Metadata-only audit artifacts use
@@ -54,14 +54,21 @@ The active core has six custody categories:
    command argument, log field or archive member. Keep the archive, backup key,
    and session master key in separate custody locations. This path does not use
    provider custody or the runtime session key, and the CLI rejects key reuse.
-5. **Local context-helper process inheritance.** The opt-in context launcher
-   transiently passes the user's existing process environment to the official
-   Codex or Claude Code child process so client-owned tools continue to work.
+5. **Local agent process inheritance.** The opt-in context and personal launchers
+   transiently pass the user's existing process environment to the official
+   Codex, Claude Code, or Aider child process so client-owned tools continue to work.
    It removes that client's direct provider credentials and endpoint selectors,
    injects only a short-lived loopback relay credential, and never sends the
    inherited environment to the Hormuz gateway. Hormuz does not persist, log,
    hash, or serialize these values.
-6. **GitHub connector signing and identity keys.** The opt-in outcome receiver
+6. **Personal direct-provider credentials.** `hormuz personal connect` reads one
+   explicitly named environment value, validates it without printing it, stores
+   it under a distinct service in the operating-system secure store, and then
+   uses it only for the fixed direct-provider origin. There is no plaintext-file
+   fallback. The profile and metrics stores never contain the credential. The
+   user rotates it with `hormuz personal credential` and a provider-issued
+   replacement, and can delete it with `hormuz personal remove`.
+7. **GitHub connector signing and identity keys.** The opt-in outcome receiver
    resolves versioned webhook and tenant fingerprint keys from the deployment
    secret manager at startup. It uses them only for exact-body signature
    verification and domain-separated delivery, receipt, authority, and
@@ -147,6 +154,9 @@ The browser's own backup/retention behavior remains under user control.
   does not re-encrypt an existing archive.
 - Session owners log out to revoke the server credential family before local
   deletion. The helper serializes refresh using a private metadata-only lock.
+- Personal users revoke direct provider credentials at the provider when
+  compromise is suspected, then remove or reconnect the local personal profile;
+  deleting a local profile alone does not revoke a provider-issued credential.
 - Policy-recovery operators separately protect and rotate the opt-in break-glass
   credential.
 - Custody operators rotate key-service authorization and purpose-specific key

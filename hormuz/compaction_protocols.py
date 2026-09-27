@@ -16,7 +16,7 @@ from .compaction import Format, Protocol, Selection
 from .compaction_formats import TRANSFORM_VERSION, strict_json_loads
 
 
-SUPPORTED_CLIENTS = frozenset({"codex", "claude-code"})
+SUPPORTED_CLIENTS = frozenset({"codex", "claude-code", "aider"})
 _FORMATS = frozenset({"json_table", "line_runs", "search_lines", "path_list"})
 
 

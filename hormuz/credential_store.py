@@ -20,6 +20,7 @@ except ImportError:  # The gateway-only installation does not require OS keyring
 
 
 _SERVICE_NAME = "ai.hormuz.session"
+_PERSONAL_PROVIDER_SERVICE_NAME = "ai.hormuz.personal-provider"
 
 
 class CredentialStoreError(RuntimeError):
@@ -140,6 +141,67 @@ class SecureCredentialStore:
             raise CredentialStoreError("secure_store_unavailable") from error
 
 
+class ProviderCredentialStore:
+    """Fail-closed storage for one direct-mode provider secret per profile.
+
+    Provider credentials intentionally use a distinct keyring service and a
+    closed string contract.  They are never serialized into profile or metrics
+    files and are not accepted as command-line arguments.
+    """
+
+    def __init__(
+        self,
+        backend: KeyringBackend | None = None,
+        *,
+        trust_injected_backend: bool = False,
+    ):
+        if backend is None:
+            if keyring is None:
+                raise CredentialStoreError("secure_store_dependency_missing")
+            try:
+                backend = keyring.get_keyring()
+            except Exception:
+                raise CredentialStoreError("secure_store_unavailable") from None
+        self.backend = backend
+        if not trust_injected_backend:
+            _validate_backend(self.backend)
+
+    def get(self, profile: str) -> str | None:
+        username = _profile_username(profile)
+        try:
+            value = self.backend.get_password(_PERSONAL_PROVIDER_SERVICE_NAME, username)
+        except Exception as error:
+            raise CredentialStoreError("secure_store_unavailable") from error
+        if value is None:
+            return None
+        return _provider_secret(value)
+
+    def set(self, profile: str, secret: str) -> None:
+        username = _profile_username(profile)
+        value = _provider_secret(secret)
+        try:
+            self.backend.set_password(_PERSONAL_PROVIDER_SERVICE_NAME, username, value)
+        except Exception as error:
+            raise CredentialStoreError("secure_store_unavailable") from error
+
+    def delete(self, profile: str) -> None:
+        username = _profile_username(profile)
+        try:
+            self.backend.delete_password(_PERSONAL_PROVIDER_SERVICE_NAME, username)
+        except Exception as error:
+            if keyring is not None and isinstance(error, keyring.errors.PasswordDeleteError):
+                return
+            # Injected test backends and platform keyrings do not necessarily
+            # share an exception type for an already-absent item.  Confirm
+            # absence before treating deletion as failed.
+            try:
+                if self.backend.get_password(_PERSONAL_PROVIDER_SERVICE_NAME, username) is None:
+                    return
+            except Exception:
+                pass
+            raise CredentialStoreError("secure_store_unavailable") from error
+
+
 class CredentialLock(AbstractContextManager["CredentialLock"]):
     """A metadata-only cross-process lock around refresh credential rotation."""
 
@@ -251,6 +313,17 @@ def _required_string(value: object, *, maximum: int) -> str:
         raise ValueError("invalid string")
     if any(character in value for character in ("\n", "\r", "\x00")):
         raise ValueError("invalid string")
+    return value
+
+
+def _provider_secret(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not 8 <= len(value.encode("utf-8")) <= 4096
+        or value != value.strip()
+        or any(character in value for character in ("\n", "\r", "\x00"))
+    ):
+        raise CredentialStoreError("invalid_provider_credential")
     return value
 
 
