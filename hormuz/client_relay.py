@@ -473,6 +473,10 @@ class LocalRelayServer(ThreadingHTTPServer):
                 owned.close()
             self._upstream_condition.notify_all()
 
+    def _is_stopping(self) -> bool:
+        with self._upstream_condition:
+            return self._stopping
+
     def shutdown(self) -> None:
         # Closing HTTPConnection from another thread is insufficient: a
         # response's socket file object can retain a blocking read. Shutdown
@@ -614,14 +618,18 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
             self.close_connection = True
         except (OSError, ssl.SSLError, http.client.HTTPException):
             if provider_attempted:
-                self._record_provider_failure(started, cancelled=False)
+                self._record_provider_failure(
+                    started, cancelled=self.server._is_stopping()
+                )
                 provider_recorded = True
             if not self._response_started:
                 self._error(HTTPStatus.BAD_GATEWAY, "gateway_unavailable")
             self.close_connection = True
         finally:
             if provider_attempted and not provider_recorded:
-                self._record_provider_failure(started, cancelled=False)
+                self._record_provider_failure(
+                    started, cancelled=self.server._is_stopping()
+                )
             if connection is not None:
                 connection.close()
                 self.server._unregister_upstream(connection)
@@ -629,7 +637,7 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
     def _relay_response(
         self, response: http.client.HTTPResponse, request_path: str, started: float
     ) -> None:
-        first_byte_ms = max(0.0, (time.perf_counter() - started) * 1000)
+        first_byte_ms: float | None = None
         protocol = self.server.adapter.protocol_for_path(request_path) or "responses"
         accumulator = ResponseUsageAccumulator(
             protocol, response.getheader("Content-Type")
@@ -649,17 +657,32 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
             self.end_headers()
             while True:
                 try:
-                    chunk = response.read(RELAY_CHUNK_BYTES)
+                    # The first read is deliberately one byte so the recorded
+                    # TTFT cannot collapse headers-to-first-body delay into
+                    # header latency or wait for a larger buffered read.
+                    chunk = response.read(
+                        1 if first_byte_ms is None else RELAY_CHUNK_BYTES
+                    )
                 except (OSError, ssl.SSLError, http.client.HTTPException):
-                    upstream_failed = True
+                    if self.server._is_stopping():
+                        cancelled = True
+                    else:
+                        upstream_failed = True
                     self.close_connection = True
                     break
                 if not chunk:
                     completed = response.length in {None, 0}
-                    upstream_failed = not completed
-                    if upstream_failed:
+                    if not completed and self.server._is_stopping():
+                        cancelled = True
+                    else:
+                        upstream_failed = not completed
+                    if cancelled or upstream_failed:
                         self.close_connection = True
                     break
+                if first_byte_ms is None:
+                    first_byte_ms = max(
+                        0.0, (time.perf_counter() - started) * 1000
+                    )
                 accumulator.feed(chunk)
                 try:
                     self.wfile.write(chunk)
@@ -672,7 +695,10 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
             cancelled = True
             self.close_connection = True
         except (OSError, ssl.SSLError, http.client.HTTPException):
-            upstream_failed = True
+            if self.server._is_stopping():
+                cancelled = True
+            else:
+                upstream_failed = True
             self.close_connection = True
         finally:
             response.close()

@@ -43,6 +43,7 @@ from hormuz.compaction_enforcement import (
 from hormuz.compaction_formats import restore_text
 from hormuz.compaction_protocols import derive_selections
 from hormuz.compaction_runtime import ContextPreferenceStore
+from hormuz.personal_metrics import PersonalMetricsStore
 
 
 COUNTERS = {"cl100k_base": len, "o200k_base": len}
@@ -449,6 +450,74 @@ class RelayTests(unittest.TestCase):
             gateway_thread.join(timeout=2)
             gateway.server_close()
 
+    def test_ttft_starts_at_the_first_response_body_byte(self) -> None:
+        gateway = socket.socket()
+        gateway.bind(("127.0.0.1", 0))
+        gateway.listen(1)
+        gateway.settimeout(5)
+        measurements = []
+        recorded = threading.Event()
+
+        class Metrics:
+            @staticmethod
+            def record_provider(measurement) -> None:
+                measurements.append(measurement)
+                recorded.set()
+
+        relay = LocalRelayServer(
+            gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}",
+            client="codex",
+            local_credential=LOCAL_TOKEN,
+            gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=RelayOptimizer(
+                preference_store=self.store,
+                client="codex",
+                gateway_compatible=False,
+            ),
+            metrics=Metrics(),
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        client = http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        upstream = None
+        try:
+            with mock.patch(
+                "hormuz.client_relay.time.perf_counter",
+                side_effect=[10.0, 12.0, 13.0],
+            ) as clock:
+                client.request(
+                    "POST",
+                    "/v1/responses",
+                    body=b"{}",
+                    headers={"Authorization": "Bearer " + LOCAL_TOKEN},
+                )
+                upstream, _ = gateway.accept()
+                request = b""
+                while b"\r\n\r\n{}" not in request:
+                    request += upstream.recv(8192)
+                upstream.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n"
+                    b"Connection: close\r\n\r\n"
+                )
+                response = client.getresponse()
+                self.assertEqual(response.status, 200)
+                # Receiving response headers alone must not record TTFT.
+                self.assertEqual(clock.call_count, 1)
+                upstream.sendall(b"x")
+                self.assertEqual(response.read(), b"x")
+                self.assertTrue(recorded.wait(2))
+            self.assertEqual(len(measurements), 1)
+            self.assertAlmostEqual(measurements[0].time_to_first_byte_ms, 2000.0)
+            self.assertAlmostEqual(measurements[0].total_latency_ms, 3000.0)
+        finally:
+            client.close()
+            if upstream is not None:
+                upstream.close()
+            relay.shutdown()
+            relay_thread.join(timeout=2)
+            relay.server_close()
+            gateway.close()
+
     def test_shutdown_interrupts_blocked_upstream_read(self) -> None:
         for response_started in (False, True):
             with self.subTest(response_started=response_started):
@@ -459,10 +528,14 @@ class RelayTests(unittest.TestCase):
         gateway.bind(("127.0.0.1", 0))
         gateway.listen(1)
         gateway.settimeout(5)
+        metrics = PersonalMetricsStore(
+            self.state, f"shutdown-{'started' if response_started else 'headers'}"
+        )
         relay = LocalRelayServer(
             gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}", client="codex",
             local_credential=LOCAL_TOKEN, gateway_credential=lambda: ACCESS_TOKEN,
             optimizer=RelayOptimizer(preference_store=self.store, client="codex", gateway_compatible=False),
+            metrics=metrics,
         )
         relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
         relay_thread.start()
@@ -497,6 +570,10 @@ class RelayTests(unittest.TestCase):
             with relay._upstream_condition:
                 self.assertFalse(relay._upstreams)
             self.assertFalse(relay._register_upstream(http.client.HTTPConnection("127.0.0.1", 1)))
+            snapshot = metrics.snapshot()
+            self.assertEqual(snapshot["counters"]["provider_attempts"], 1)
+            self.assertEqual(snapshot["counters"]["cancelled_requests"], 1)
+            self.assertEqual(snapshot["reasons"], {"cancelled": 1})
         finally:
             client.close()
             if upstream is not None:

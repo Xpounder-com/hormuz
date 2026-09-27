@@ -319,18 +319,30 @@ def _run_profile(profile: PersonalProfile, state: Path) -> int:
 
 
 def _remove(profile: PersonalProfile, state: Path) -> int:
-    if profile.mode == "direct":
-        ProviderCredentialStore().delete(profile.key)
-    preference = ContextPreferenceStore(state, profile.key)
-    if profile.previous_preference_enabled is None:
-        preference.clear()
-    else:
-        preference.save(profile.previous_preference_enabled)
+    # Remove the create-only guard first. Ancillary state is independently
+    # protected and may be unsafe or unavailable; such failures must be
+    # reported without stranding a profile that blocks a subsequent connect.
     removed = PersonalProfileStore(state).remove(profile.key)
-    # Remove the create-only guard before metrics cleanup. A damaged local
-    # ledger may still be reported, but it must not strand the profile or block
-    # a subsequent connect.
-    PersonalMetricsStore(state, profile.key).clear()
+    cleanup_error: Exception | None = None
+    if profile.mode == "direct":
+        try:
+            ProviderCredentialStore().delete(profile.key)
+        except CredentialStoreError as error:
+            cleanup_error = error
+    preference = ContextPreferenceStore(state, profile.key)
+    try:
+        if profile.previous_preference_enabled is None:
+            preference.clear()
+        else:
+            preference.save(profile.previous_preference_enabled)
+    except ContextRuntimeError as error:
+        cleanup_error = cleanup_error or error
+    try:
+        PersonalMetricsStore(state, profile.key).clear()
+    except PersonalMetricsError as error:
+        cleanup_error = cleanup_error or error
+    if cleanup_error is not None:
+        raise cleanup_error
     print(
         "personal_removed "
         f"profile={profile.key} removed={str(removed).lower()} "

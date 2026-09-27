@@ -109,7 +109,8 @@ The compact view reports:
   traffic;
 - provider-reported input, output, cache-read, cache-write, reasoning, and total
   usage when present;
-- optimizer overhead, time to first byte, total latency, and exceptions;
+- optimizer overhead, time to first provider response body byte, total latency,
+  and exceptions;
 - actual cost only when the provider explicitly reports an unambiguous
   `actual_cost_microusd` field.
 
@@ -125,11 +126,13 @@ The persisted file contains only bounded counters, sums, maxima, reason codes,
 and up to 30 numeric active-day ordinals. The relay may inspect at most 1 MiB of
 a response in memory to extract usage while streaming bytes immediately; it
 does not persist messages, responses, semantic content, content hashes, or
-tool output. `clear` deletes measurements. `remove` also deletes the direct
-credential and personal profile. It restores a preference that existed before
-`connect`, or removes the preference owned by the personal profile when none
-existed. Since agent configuration was never changed, removal restores the
-ordinary setup by construction.
+tool output. `clear` deletes measurements. `remove` removes the personal profile
+guard first, then deletes the direct credential and measurements. It restores a
+preference that existed before `connect`, or removes the preference owned by the
+personal profile when none existed. Unsafe ancillary state is never followed;
+cleanup failure is reported while the removed profile no longer blocks a new
+connection. Since agent configuration was never changed, successful removal
+restores the ordinary setup by construction.
 
 ## Caching and regression guard
 

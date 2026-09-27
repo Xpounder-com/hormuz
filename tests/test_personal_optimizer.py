@@ -449,6 +449,36 @@ class PersonalContractTests(unittest.TestCase):
         self.assertFalse(preference.path.exists())
         self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
 
+    def test_invalid_preference_does_not_block_profile_removal(self) -> None:
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        credentials.set("personal-a", DIRECT_TOKEN)
+        PersonalProfileStore(self.state).save(self.profile())
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        outside = self.state / "preserved-preference.json"
+        outside.write_text("preserve", encoding="utf-8")
+        outside.chmod(0o600)
+        preference.path.symlink_to(outside)
+        metrics = PersonalMetricsStore(self.state, "personal-a")
+        metrics.record_session()
+        remove = argparse.Namespace(
+            personal_command="remove",
+            profile="personal-a",
+            state_directory=self.state,
+        )
+        with (
+            mock.patch.object(
+                personal_commands, "ProviderCredentialStore", return_value=credentials
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(remove), 1)
+        self.assertFalse(PersonalProfileStore(self.state).path_for("personal-a").exists())
+        self.assertIsNone(credentials.get("personal-a"))
+        self.assertFalse(metrics.path.exists())
+        self.assertTrue(preference.path.is_symlink())
+        self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
+
     def test_failed_connect_restores_a_preexisting_keyring_credential(self) -> None:
         backend = _MemoryKeyring()
         credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
