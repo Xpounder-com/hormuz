@@ -40,6 +40,7 @@ class PersonalProfile:
     model: str
     allow_insecure_http: bool = False
     managed_profile: str | None = None
+    credential_env: str | None = None
     transform_version: str = "structural-v1"
 
     def to_dict(self) -> dict[str, object]:
@@ -54,6 +55,7 @@ class PersonalProfile:
             "model": self.model,
             "allow_insecure_http": self.allow_insecure_http,
             "managed_profile": self.managed_profile,
+            "credential_env": self.credential_env,
             "transform_version": self.transform_version,
         }
 
@@ -78,6 +80,7 @@ class PersonalProfileStore:
         if len(data) > MAX_PROFILE_BYTES:
             raise PersonalProfileError("personal_profile_invalid")
         temporary: str | None = None
+        destination_linked = False
         try:
             descriptor, temporary = tempfile.mkstemp(
                 prefix=".personal-profile-", dir=self.directory
@@ -88,6 +91,7 @@ class PersonalProfileStore:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.link(temporary, destination, follow_symlinks=False)
+            destination_linked = True
             os.unlink(temporary)
             temporary = None
             directory_fd = os.open(self.directory, os.O_RDONLY)
@@ -98,6 +102,11 @@ class PersonalProfileStore:
         except FileExistsError as error:
             raise PersonalProfileError("personal_profile_exists") from error
         except OSError as error:
+            if destination_linked:
+                try:
+                    destination.unlink()
+                except OSError:
+                    pass
             raise PersonalProfileError("personal_profile_write_failed") from error
         finally:
             if temporary is not None:
@@ -192,6 +201,7 @@ def parse_personal_profile(value: object) -> PersonalProfile:
         "model",
         "allow_insecure_http",
         "managed_profile",
+        "credential_env",
         "transform_version",
     }
     if (
@@ -211,6 +221,7 @@ def parse_personal_profile(value: object) -> PersonalProfile:
             model=value.get("model"),  # type: ignore[arg-type]
             allow_insecure_http=value.get("allow_insecure_http"),  # type: ignore[arg-type]
             managed_profile=value.get("managed_profile"),  # type: ignore[arg-type]
+            credential_env=value.get("credential_env"),  # type: ignore[arg-type]
             transform_version=value.get("transform_version"),  # type: ignore[arg-type]
         )
         return validate_personal_profile(profile)
@@ -239,7 +250,11 @@ def validate_personal_profile(profile: PersonalProfile) -> PersonalProfile:
     if endpoint != profile.endpoint:
         raise PersonalProfileError("personal_profile_invalid")
     if profile.mode == "managed":
-        if profile.provider != "hormuz" or profile.managed_profile is None:
+        if (
+            profile.provider != "hormuz"
+            or profile.managed_profile is None
+            or profile.credential_env is not None
+        ):
             raise PersonalProfileError("personal_profile_invalid")
         try:
             validate_profile(profile.managed_profile)
@@ -248,7 +263,12 @@ def validate_personal_profile(profile: PersonalProfile) -> PersonalProfile:
         if profile.agent == "aider":
             # The managed gateway does not expose Chat Completions.
             raise PersonalProfileError("managed_agent_unsupported")
-    elif profile.managed_profile is not None or profile.provider == "hormuz":
+    elif (
+        profile.managed_profile is not None
+        or profile.provider == "hormuz"
+        or not isinstance(profile.credential_env, str)
+        or re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", profile.credential_env) is None
+    ):
         raise PersonalProfileError("personal_profile_invalid")
     if profile.provider == "openai" and "anthropic" in adapter.capabilities.protocols:
         raise PersonalProfileError("provider_protocol_mismatch")

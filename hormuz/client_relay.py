@@ -244,21 +244,35 @@ class RelayOptimizer:
                 before_tokens=result.before_tokens,
                 after_tokens=dict(result.before_tokens),
             )
-        self._record_result(result)
+        outgoing = (
+            serialize_request(result.payload).encode("utf-8")
+            if result.changed
+            else body
+        )
+        measured_result = CompactionResult(
+            payload=result.payload,
+            changed=result.changed,
+            reason=result.reason,
+            changed_blocks=result.changed_blocks,
+            before_bytes=len(body),
+            after_bytes=len(outgoing),
+            before_tokens=result.before_tokens,
+            after_tokens=result.after_tokens,
+        )
+        self._record_result(measured_result)
         self._observe(
             eligible=bool(selections),
             applied=result.changed,
             reason=result.reason,
-            before_bytes=result.before_bytes,
-            after_bytes=result.after_bytes,
+            before_bytes=measured_result.before_bytes,
+            after_bytes=measured_result.after_bytes,
             before_tokens=result.before_tokens,
             after_tokens=result.after_tokens,
             started=started,
         )
         if not result.changed:
             return body, {}
-        changed = serialize_request(result.payload).encode("utf-8")
-        return changed, {CONTEXT_FORMAT_HEADER: CONTEXT_FORMAT_VERSION}
+        return outgoing, {CONTEXT_FORMAT_HEADER: CONTEXT_FORMAT_VERSION}
 
     def note_oversized_passthrough(self) -> None:
         """Snapshot the toggle without buffering or inspecting a large body."""
@@ -508,6 +522,7 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
             return
         started = time.perf_counter()
         provider_recorded = False
+        provider_attempted = False
         try:
             gateway_token = self.server.gateway_credential()
         except Exception:
@@ -540,6 +555,7 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                 # Registration precedes connect. A connection racing shutdown
                 # closes before its first POST; a connected socket is shut
                 # down without clearing connection.sock or allowing reconnect.
+                provider_attempted = True
                 connection.connect()
                 if not self.server._attach_upstream_socket(connection):
                     self.close_connection = True
@@ -554,6 +570,7 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                     {},
                     upstream_auth=self.server.upstream_auth,
                 )
+                provider_attempted = True
                 connection.connect()
                 if not self.server._attach_upstream_socket(connection):
                     self.close_connection = True
@@ -574,17 +591,19 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
             self._relay_response(response, path.path, started)
             provider_recorded = True
         except (BrokenPipeError, ConnectionResetError):
-            self._record_provider_failure(started, cancelled=True)
-            provider_recorded = True
+            if provider_attempted:
+                self._record_provider_failure(started, cancelled=True)
+                provider_recorded = True
             self.close_connection = True
         except (OSError, ssl.SSLError, http.client.HTTPException):
-            self._record_provider_failure(started, cancelled=False)
-            provider_recorded = True
+            if provider_attempted:
+                self._record_provider_failure(started, cancelled=False)
+                provider_recorded = True
             if not self._response_started:
                 self._error(HTTPStatus.BAD_GATEWAY, "gateway_unavailable")
             self.close_connection = True
         finally:
-            if not provider_recorded and connection is not None:
+            if provider_attempted and not provider_recorded:
                 self._record_provider_failure(started, cancelled=False)
             if connection is not None:
                 connection.close()

@@ -145,6 +145,8 @@ def run(args: argparse.Namespace) -> int:
         if command == "credential":
             if profile.mode != "direct":
                 raise PersonalCommandError("managed_credential_update_rejected", 2)
+            if args.credential_env != profile.credential_env:
+                raise PersonalCommandError("credential_env_mismatch", 2)
             ProviderCredentialStore().set(
                 profile.key, _read_provider_credential(args.credential_env)
             )
@@ -237,8 +239,17 @@ def _connect(args: argparse.Namespace) -> int:
             ),
             model=args.model,
             allow_insecure_http=args.allow_loopback_http,
+            credential_env=environment_name,
         )
         credentials = ProviderCredentialStore()
+    try:
+        preference.path.lstat()
+    except FileNotFoundError:
+        previous_preference = None
+    except OSError as error:
+        raise ContextRuntimeError("settings_invalid") from error
+    else:
+        previous_preference = preference.load()
     profile_created = False
     credential_write_attempted = False
     previous_secret = credentials.get(key) if credentials is not None else None
@@ -257,7 +268,10 @@ def _connect(args: argparse.Namespace) -> int:
         if not profile_created:
             raise
         try:
-            preference.clear()
+            if previous_preference is None:
+                preference.clear()
+            else:
+                preference.save(previous_preference.enabled)
             if credentials is not None and credential_write_attempted:
                 if previous_secret is None:
                     credentials.delete(key)

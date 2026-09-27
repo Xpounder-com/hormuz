@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from .adapters import (
     ADAPTER_API_VERSION,
@@ -30,7 +31,7 @@ class ExampleAgentAdapter:
         model: str,
         inherited_values: dict[str, str] | None = None,
     ) -> LaunchPlan:
-        values = {} if inherited_values is None else dict(inherited_values)
+        values = os.environ.copy() if inherited_values is None else dict(inherited_values)
         for name in (
             "OPENAI_API_KEY",
             "OPENAI_API_BASE",

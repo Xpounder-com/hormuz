@@ -7,6 +7,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import tempfile
 import threading
 import time
@@ -18,8 +19,9 @@ from unittest import mock
 import hormuz.commands.personal as personal_commands
 from hormuz.adapters import adapter_for, conformance_report
 from hormuz.client_relay import LocalRelayServer, RelayOptimizer
+from hormuz.client_versions import SUPPORTED_CLIENT_VERSIONS
 from hormuz.compaction_runtime import ContextPreferenceStore, ContextRuntimeError
-from hormuz.credential_store import ProviderCredentialStore
+from hormuz.credential_store import CredentialStoreError, ProviderCredentialStore
 from hormuz.execution_methods import (
     ExecutionMethodError,
     ExecutionRouter,
@@ -45,6 +47,7 @@ from hormuz.personal_optimization import (
     RecoveryBuffer,
     TypedToolHistoryCompactor,
 )
+from hormuz.personal_adapter_example import ExampleAgentAdapter
 from hormuz.personal_qualification import run_product_qualification
 from hormuz.personal_profiles import (
     PersonalProfile,
@@ -194,6 +197,7 @@ class PersonalContractTests(unittest.TestCase):
             "provider": "openai",
             "endpoint": "https://api.openai.com",
             "model": "qualified-model",
+            "credential_env": "OPENAI_API_KEY",
         }
         values.update(changes)
         return PersonalProfile(**values)
@@ -221,6 +225,25 @@ class PersonalContractTests(unittest.TestCase):
             store.save(self.profile())
         self.assertFalse(store.path_for("personal-a").exists())
 
+    def test_profile_save_removes_the_link_after_a_post_link_failure(self) -> None:
+        store = PersonalProfileStore(self.state)
+        real_fsync = os.fsync
+        calls = 0
+
+        def fail_directory_fsync(descriptor: int) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("directory fsync failed")
+            real_fsync(descriptor)
+
+        with (
+            mock.patch("hormuz.personal_profiles.os.fsync", side_effect=fail_directory_fsync),
+            self.assertRaisesRegex(PersonalProfileError, "personal_profile_write_failed"),
+        ):
+            store.save(self.profile())
+        self.assertFalse(store.path_for("personal-a").exists())
+
     def test_profile_modes_are_closed_and_managed_cannot_use_aider(self) -> None:
         store = PersonalProfileStore(self.state)
         store.save(self.profile())
@@ -233,6 +256,7 @@ class PersonalContractTests(unittest.TestCase):
                     provider="hormuz",
                     endpoint="https://gateway.example",
                     managed_profile="managed-source",
+                    credential_env=None,
                 )
             )
 
@@ -268,6 +292,10 @@ class PersonalContractTests(unittest.TestCase):
             ):
                 self.assertEqual(personal_commands.run(connect_args()), 0)
             self.assertEqual(credentials.get("personal-a"), DIRECT_TOKEN)
+            self.assertEqual(
+                PersonalProfileStore(self.state).load("personal-a").credential_env,
+                "PERSONAL_TEST_PROVIDER_KEY",
+            )
             self.assertTrue(ContextPreferenceStore(self.state, "personal-a").load().enabled)
 
             with mock.patch.dict(
@@ -276,6 +304,24 @@ class PersonalContractTests(unittest.TestCase):
                 clear=False,
             ):
                 self.assertEqual(personal_commands.run(connect_args()), 1)
+            self.assertEqual(credentials.get("personal-a"), DIRECT_TOKEN)
+
+            with mock.patch.dict(
+                os.environ,
+                {"OTHER_PROVIDER_KEY": "sk-other-test-only"},
+                clear=False,
+            ):
+                self.assertEqual(
+                    personal_commands.run(
+                        argparse.Namespace(
+                            personal_command="credential",
+                            profile="personal-a",
+                            state_directory=self.state,
+                            credential_env="OTHER_PROVIDER_KEY",
+                        )
+                    ),
+                    2,
+                )
             self.assertEqual(credentials.get("personal-a"), DIRECT_TOKEN)
 
             with mock.patch.dict(
@@ -358,6 +404,47 @@ class PersonalContractTests(unittest.TestCase):
         self.assertEqual(credentials.get("rollback-profile"), "sk-preexisting-test-only")
         self.assertFalse(
             PersonalProfileStore(self.state).path_for("rollback-profile").exists()
+        )
+
+    def test_failed_connect_restores_a_preexisting_preference(self) -> None:
+        backend = _MemoryKeyring()
+        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
+        preference = ContextPreferenceStore(self.state, "rollback-preference")
+        preference.save(True)
+        args = argparse.Namespace(
+            personal_command="connect",
+            profile="rollback-preference",
+            state_directory=self.state,
+            mode="direct",
+            agent="codex",
+            provider="openai",
+            endpoint="https://api.openai.com",
+            model="gpt-5.4",
+            credential_env="PERSONAL_TEST_PROVIDER_KEY",
+            allow_loopback_http=False,
+        )
+        with (
+            mock.patch.object(
+                personal_commands,
+                "ProviderCredentialStore",
+                return_value=credentials,
+            ),
+            mock.patch.object(
+                credentials,
+                "set",
+                side_effect=CredentialStoreError("credential_write_failed"),
+            ),
+            mock.patch.dict(
+                os.environ,
+                {"PERSONAL_TEST_PROVIDER_KEY": "sk-new-test-only"},
+                clear=False,
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(personal_commands.run(args), 1)
+        self.assertTrue(preference.load().enabled)
+        self.assertFalse(
+            PersonalProfileStore(self.state).path_for("rollback-preference").exists()
         )
 
     def test_interrupted_connect_rolls_back_profile_and_credential(self) -> None:
@@ -612,6 +699,102 @@ class PersonalContractTests(unittest.TestCase):
         benefit = metrics.benefit(enabled=True)
         self.assertEqual(benefit["traffic"]["total_requests"], 1)
         self.assertNotIn("unsupported_client", benefit["exceptions"])
+
+    def test_optimizer_measures_the_actual_request_body_bytes(self) -> None:
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(True)
+        metrics = PersonalMetricsStore(self.state, "personal-a")
+        optimizer = RelayOptimizer(
+            preference_store=preference,
+            client="codex",
+            gateway_compatible=True,
+            counters=COUNTERS,
+            metrics=metrics,
+        )
+        paths = "".join(
+            f"src/generated/very_long_item_name_{index}.py\n"
+            for index in range(100)
+        )
+        body = json.dumps(
+            {
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call-1",
+                        "name": "exec_command",
+                        "arguments": json.dumps({"cmd": "rg --files src/generated"}),
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call-1",
+                        "output": paths,
+                    },
+                ]
+            },
+            indent=4,
+        ).encode()
+        changed, _headers = optimizer.prepare(body, "/v1/responses")
+        self.assertNotEqual(changed, body)
+        snapshot = metrics.snapshot()
+        self.assertEqual(
+            snapshot["metrics"]["request_before_bytes"]["total"], len(body)
+        )
+        self.assertEqual(
+            snapshot["metrics"]["request_after_bytes"]["total"], len(changed)
+        )
+
+    def test_public_adapter_example_preserves_non_provider_environment(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HOME": "/tmp/example-home",
+                "PATH": "/usr/bin",
+                "OPENAI_API_KEY": "must-not-survive",
+            },
+            clear=True,
+        ):
+            plan = ExampleAgentAdapter().launch_plan(
+                executable="example-agent",
+                relay_origin="http://127.0.0.1:1234",
+                local_credential=LOCAL_TOKEN,
+                model="qualified-model",
+            )
+        self.assertEqual(plan.environment["HOME"], "/tmp/example-home")
+        self.assertEqual(plan.environment["PATH"], "/usr/bin")
+        self.assertNotIn("OPENAI_API_KEY", plan.environment)
+
+    def test_managed_personal_run_uses_the_managed_client_version_pin(self) -> None:
+        profile = self.profile(
+            key="managed-personal",
+            mode="managed",
+            provider="hormuz",
+            endpoint="http://127.0.0.1:9",
+            allow_insecure_http=True,
+            managed_profile="managed-source",
+            credential_env=None,
+        )
+        with (
+            mock.patch(
+                "hormuz.personal_runtime.supported_client_executable",
+                return_value="/usr/bin/true",
+            ) as supported,
+            mock.patch(
+                "hormuz.personal_runtime.probe_gateway_capability",
+                return_value=True,
+            ),
+        ):
+            self.assertEqual(
+                run_personal_client(
+                    profile=profile,
+                    state_directory=self.state,
+                    upstream_credential=lambda: "hox_a_" + "a" * 43,
+                    counters=COUNTERS,
+                ),
+                0,
+            )
+        supported.assert_called_once_with(
+            "codex", expected_version=SUPPORTED_CLIENT_VERSIONS["codex"]
+        )
 
     def test_session_measurement_failure_does_not_prevent_agent_launch(self) -> None:
         class FailingMetrics:
@@ -954,6 +1137,50 @@ class PersonalContractTests(unittest.TestCase):
             provider_thread.join(timeout=2)
             provider.server_close()
 
+    def test_truncated_local_upload_records_no_provider_attempt(self) -> None:
+        metrics = PersonalMetricsStore(self.state, "personal-a")
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(False)
+        relay = LocalRelayServer(
+            gateway="http://127.0.0.1:9",
+            client="codex",
+            local_credential=LOCAL_TOKEN,
+            gateway_credential=lambda: DIRECT_TOKEN,
+            optimizer=RelayOptimizer(
+                preference_store=preference,
+                client="codex",
+                gateway_compatible=True,
+                counters=COUNTERS,
+                metrics=metrics,
+            ),
+            upstream_auth="openai",
+            metrics=metrics,
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        client = socket.create_connection(("127.0.0.1", relay.server_port), timeout=2)
+        try:
+            request = (
+                "POST /v1/responses HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{relay.server_port}\r\n"
+                f"Authorization: Bearer {LOCAL_TOKEN}\r\n"
+                "Content-Type: application/json\r\n"
+                "Content-Length: 100\r\n"
+                "\r\n"
+                "{}"
+            ).encode()
+            client.sendall(request)
+            client.shutdown(socket.SHUT_WR)
+            self.assertEqual(client.recv(4096), b"")
+            snapshot = metrics.snapshot()
+            self.assertEqual(snapshot["counters"]["provider_attempts"], 0)
+            self.assertEqual(snapshot["counters"]["provider_failures"], 0)
+        finally:
+            client.close()
+            relay.shutdown()
+            relay_thread.join(timeout=2)
+            relay.server_close()
+
     def test_complete_personal_journey_uses_transient_codex_configuration(self) -> None:
         provider = _DirectProvider()
         provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
@@ -1048,6 +1275,7 @@ raise SystemExit(0 if response.status == 200 else 1)
                 contextlib.redirect_stderr(errors),
             ):
                 self.assertEqual(personal_commands.run(connect), 0)
+                os.environ["PERSONAL_TEST_PROVIDER_KEY"] = "sk-new-shell-value-test-only"
                 command = lambda name: argparse.Namespace(
                     personal_command=name,
                     profile="journey-codex",

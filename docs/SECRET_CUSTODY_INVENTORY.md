@@ -54,9 +54,10 @@ The active core has seven custody categories:
    command argument, log field or archive member. Keep the archive, backup key,
    and session master key in separate custody locations. This path does not use
    provider custody or the runtime session key, and the CLI rejects key reuse.
-5. **Local agent process inheritance.** The opt-in context and personal launchers
-   transiently pass the user's existing process environment to the official
-   Codex, Claude Code, or Aider child process so client-owned tools continue to work.
+5. **Local agent process inheritance.** The opt-in context and personal launchers,
+   including the packaged public adapter example, transiently pass the user's
+   existing process environment to the official Codex, Claude Code, Aider, or
+   adapter-owned child process so client-owned tools continue to work.
    It removes that client's direct provider credentials and endpoint selectors,
    injects only a short-lived loopback relay credential, and never sends the
    inherited environment to the Hormuz gateway. Hormuz does not persist, log,
@@ -65,9 +66,11 @@ The active core has seven custody categories:
    explicitly named environment value, validates it without printing it, stores
    it under a distinct service in the operating-system secure store, and then
    uses it only for the fixed direct-provider origin. There is no plaintext-file
-   fallback. The profile and metrics stores never contain the credential. The
-   user rotates it with `hormuz personal credential` and a provider-issued
-   replacement, and can delete it with `hormuz personal remove`.
+   fallback. The profile retains only the non-secret source environment-variable
+   name so the launcher can scrub it even if its shell value later changes; the
+   profile and metrics stores never contain the credential. The user rotates it
+   from that same named variable with `hormuz personal credential` and a
+   provider-issued replacement, and can delete it with `hormuz personal remove`.
 7. **GitHub connector signing and identity keys.** The opt-in outcome receiver
    resolves versioned webhook and tenant fingerprint keys from the deployment
    secret manager at startup. It uses them only for exact-body signature

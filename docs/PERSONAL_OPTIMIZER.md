@@ -39,7 +39,9 @@ the full applicable CI suite remains required.
 
 Provider credentials are read from an explicitly named environment variable
 and moved into the operating-system keyring. They are never accepted as a CLI
-argument and never written to the profile or metrics files.
+argument and never written to the profile or metrics files. The profile keeps
+only the non-secret variable name so a later shell value under that name is
+also removed from the launched agent environment.
 
 ```sh
 export OPENAI_API_KEY='your-provider-key'
@@ -61,8 +63,8 @@ provider credential stays in the OS keyring and is attached only to the fixed
 HTTPS upstream. Loopback HTTP is available only through an explicit test flag;
 non-loopback HTTP is rejected.
 
-Rotate a direct credential without changing the profile or clearing local
-measurements:
+Rotate a direct credential from the same named variable without changing the
+profile or clearing local measurements:
 
 ```sh
 export OPENAI_API_KEY='replacement-provider-key'

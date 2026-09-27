@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 from collections.abc import Callable, Mapping
@@ -16,6 +17,7 @@ from .client_relay import (
     probe_gateway_capability,
     supported_client_executable,
 )
+from .client_versions import SUPPORTED_CLIENT_VERSIONS
 from .compaction_runtime import ContextPreferenceStore
 from .personal_metrics import PersonalMetricsError, PersonalMetricsStore
 from .personal_profiles import PersonalProfile
@@ -37,8 +39,13 @@ def run_personal_client(
     """
 
     adapter = adapter_for(profile.agent)
+    expected_version = (
+        adapter.identity.version
+        if profile.mode == "direct"
+        else SUPPORTED_CLIENT_VERSIONS.get(profile.agent, adapter.identity.version)
+    )
     selected_executable = executable or supported_client_executable(
-        profile.agent, expected_version=adapter.identity.version
+        profile.agent, expected_version=expected_version
     )
     preference = ContextPreferenceStore(state_directory, profile.key)
     metrics_candidate = PersonalMetricsStore(state_directory, profile.key)
@@ -78,17 +85,27 @@ def run_personal_client(
     )
     thread.start()
     try:
+        inherited_values = None
+        if direct_secret is not None:
+            # Remove the persisted non-secret source name before the adapter
+            # writes its reviewed loopback routing values. This preserves, for
+            # example, Aider's local OPENAI_API_KEY while never inheriting the
+            # shell's value for that name.
+            inherited_values = {
+                name: value
+                for name, value in os.environ.items()
+                if name != profile.credential_env and value != direct_secret
+            }
         plan = adapter.launch_plan(
             executable=selected_executable,
             relay_origin=server.origin,
             local_credential=local_credential,
             model=profile.model,
+            inherited_values=inherited_values,
         )
         launch_values = plan.environment
         if direct_secret is not None:
-            # The profile may name any provider-credential environment variable.
-            # Filter by the resolved value after the adapter has built its one
-            # reviewed environment snapshot, so aliases cannot reach the child.
+            # A custom adapter must not reintroduce a provider-key alias.
             launch_values = {
                 name: value
                 for name, value in launch_values.items()
