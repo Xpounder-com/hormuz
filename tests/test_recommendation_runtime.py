@@ -1440,6 +1440,32 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
             ),
         )
 
+        future_request = _budget_plan_request(self.scope, amount="65")
+        future_request["window"] = {
+            "start_at": "2026-09-25T00:00:00.000000Z",
+            "end_at": "2026-09-27T00:00:00.000000Z",
+        }
+        future = self.repositories.budgets.create_plan(
+            self.principal, future_request
+        )
+        no_overlap = self.request(
+            "non-overlapping-budget-change",
+            change_type="budget_plan_change",
+            candidate_budget_plan={
+                "id": future["budget_plan_id"],
+                "version": future["version"],
+            },
+            expires_at="2026-09-24T23:00:00Z",
+        )
+        self.error(
+            "invalid_request",
+            lambda: self.generate(
+                no_overlap,
+                baseline=self.baseline,
+                candidate=self.baseline,
+            ),
+        )
+
         expired = self.request(
             "expired-budget-change",
             change_type="budget_plan_change",
@@ -1470,6 +1496,113 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
         )
         assert evaluation is not None
         self.assertEqual(evaluation["bindings"]["budget_bindings"], [])
+
+    def test_expired_target_activation_is_bound_as_candidate_history(self) -> None:
+        active = self.repositories.budgets.create_plan(
+            self.principal,
+            _budget_plan_request(self.scope, amount="100"),
+        )
+        self.repositories.budgets.activate_plan(
+            self.principal,
+            active["budget_plan_id"],
+            _activation_request(active["version"]),
+        )
+        candidate_request = _budget_plan_request(
+            self.scope,
+            amount="75",
+            budget_plan_id=active["budget_plan_id"],
+            expected_version=active["version"],
+        )
+        candidate_request["window"] = {
+            "start_at": "2026-09-23T00:00:00.000000Z",
+            "end_at": "2026-09-27T00:00:00.000000Z",
+        }
+        candidate = self.repositories.budgets.create_plan(
+            self.principal, candidate_request
+        )
+        late = "2026-09-26T12:00:00.000000Z"
+        evaluation = self.generate(
+            self.request(
+                "expired-target-activation-history",
+                change_type="budget_plan_change",
+                candidate_budget_plan={
+                    "id": candidate["budget_plan_id"],
+                    "version": candidate["version"],
+                },
+                expires_at="2026-09-26T23:00:00Z",
+            ),
+            baseline=self.baseline,
+            candidate=self.baseline,
+            now=late,
+        )
+        assert evaluation is not None
+        self.assertEqual(evaluation["bindings"]["budget_bindings"], [])
+        activation_binding = evaluation["bindings"][
+            "candidate_budget_activation_binding"
+        ]
+        self.assertEqual(
+            {
+                key: activation_binding[key]
+                for key in (
+                    "budget_plan_id",
+                    "active_version",
+                    "activation_generation",
+                )
+            },
+            {
+                "budget_plan_id": active["budget_plan_id"],
+                "active_version": active["version"],
+                "activation_generation": 1,
+            },
+        )
+        self.assertEqual(len(activation_binding["activation_event_id"]), 32)
+        self.assertEqual(len(activation_binding["content_digest"]), 64)
+
+        with self.runtime(now=late):
+            self.repositories.recommendations.decide(
+                self.principal,
+                "expired-target-activation-history",
+                self.decision(evaluation),
+                "accept-expired-target-activation-history",
+            )
+        with (
+            mock.patch.object(
+                self.repositories.budgets,
+                "_policy",
+                return_value=(
+                    mock.Mock(),
+                    {
+                        "version": self.baseline.version_id,
+                        "content_digest": self.baseline.content_sha256,
+                    },
+                ),
+            ),
+            mock.patch(
+                "hormuz._portfolio_sql.PortfolioSQL.now", return_value=late
+            ),
+        ):
+            self.repositories.budgets.activate_plan(
+                self.principal,
+                candidate["budget_plan_id"],
+                _activation_request(
+                    candidate["version"],
+                    expected_active_version=active["version"],
+                    expected_activation_generation=1,
+                ),
+            )
+        with self.runtime(now=late):
+            evidence = self.repositories.recommendations.application_evidence(
+                self.principal,
+                "expired-target-activation-history",
+                1,
+            )
+            applied = self.repositories.recommendations.record_applied(
+                self.principal,
+                "expired-target-activation-history",
+                1,
+                evidence,
+            )
+        self.assertEqual(applied["state"], "accepted")
 
 
 if __name__ == "__main__":

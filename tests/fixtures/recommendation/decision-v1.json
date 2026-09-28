@@ -101,6 +101,7 @@
         }
       ],
       "budget_bindings": [],
+      "candidate_budget_activation_binding": null,
       "candidate_budget_digest": null,
       "candidate_policy_digest": "a88aaac4e8edd921b4f32fc9ae384aafe50b29123ea0846636762d5b11c40952",
       "metric_rules": [

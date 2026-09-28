@@ -39,7 +39,7 @@ from tools import verify_role_view_runtime as role_verifier
 
 
 PLAN_PATH = "docs/recommendation-runtime-plan-v1.json"
-PLAN_SHA256 = "ccd9fcae635a8a7a28e7396253cfceaf534fe46c8bde36e34e48c555edc7ee0f"
+PLAN_SHA256 = "095b1ccb2cf4e826cf74cd9f22c9775e5d4c17cdbca76e453279a3664cbb6fa3"
 PREDECESSOR_PATH = "docs/role-view-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "ba13527aa781e88232ca1403468e181c759004628645bb9bc48e660955a1e533"
@@ -690,7 +690,10 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         "weak_evidence_result": "suppressed_no_recommendation",
         "expired_candidate_budget_result": "suppressed_no_recommendation",
         "budget_window_binding": (
-            "active_bindings_exclude_ended_plans_and_candidate_expiry_bounds_recommendation"
+            "active_bindings_exclude_ended_plans_and_candidate_window_overlaps_and_bounds_recommendation"
+        ),
+        "candidate_budget_activation_history_binding": (
+            "separate_target_pointer_including_expired_predecessor_and_direct_successor_receipt"
         ),
         "budget_activation_policy_binding": (
             "activation_receipt_policy_version_and_digest_match_reviewed_binding"

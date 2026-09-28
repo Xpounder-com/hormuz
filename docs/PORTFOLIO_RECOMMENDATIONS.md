@@ -69,8 +69,12 @@ All policy-change categories conflict when they share the same work scope,
 scope version, and baseline policy digest; a full candidate policy cannot be
 split into independently accepted category labels. Work-budget changes remain
 a separate conflict group. Candidate budget plans whose window has ended are
-suppressed, and a live candidate cannot produce a recommendation that expires
-after its plan window. Ended active plans are omitted from new budget bindings.
+suppressed. A live candidate must have a usable instant before the
+recommendation expires, and the recommendation cannot expire after the plan
+window. Ended active plans are omitted from effective budget bindings. The
+candidate plan's target pointer is frozen separately, including an expired
+predecessor, so target activation history is not lost when the effective set is
+empty.
 The budget activation receipt must also name the exact policy version and digest
 reviewed with the recommendation, so a temporary policy change cannot be hidden
 by restoring the old policy before application is recorded.
@@ -98,13 +102,15 @@ after that succeeds may the internal `record_applied` operation append an
 Late application after expiry is rejected. The application receipt also
 rechecks the frozen scorecard and every policy or budget binding other than the
 intentional target change. A budget target must be the immediate activation
-successor of the binding reviewed at generation, or the first activation when
-no target binding existed. Post-acceptance drift appends an `invalidated` event
+successor of the separately frozen target pointer reviewed at generation,
+including when that predecessor's plan window has ended, or the first activation
+when no target pointer existed. Post-acceptance drift appends an `invalidated` event
 instead of an `applied` event.
 
 Application evidence is derived again inside the recommendation transaction.
-Budget receipts bind the current validated plan pointer, predecessor version,
-and next activation generation to its immutable activation event.
+Budget receipts bind the current validated plan pointer and the predecessor's
+version, content digest, activation event, and next activation generation to the
+immutable activation history.
 Managed-policy receipts bind the current active version and generation to the
 unique immutable `policy_activated` or `policy_rolled_back` event.
 Caller-supplied event identifiers or digests cannot

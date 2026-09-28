@@ -446,6 +446,30 @@ class RecommendationRepository:
         return row
 
     @staticmethod
+    def _candidate_budget_activation_binding(
+        sql,
+        organization: str,
+        plan_id: str,
+        now: str,
+    ) -> dict[str, object] | None:
+        try:
+            active = WorkBudgetRepository._active_budget(
+                sql, organization, plan_id, now
+            )
+        except (BudgetIntegrityError, BudgetRepositoryError):
+            raise PortfolioError("unavailable") from None
+        if active is None:
+            return None
+        plan, activation, pointer, _history = active
+        return {
+            "budget_plan_id": plan["budget_plan_id"],
+            "active_version": plan["version"],
+            "activation_generation": pointer["activation_generation"],
+            "activation_event_id": activation["activation_event_id"],
+            "content_digest": plan["content_digest"],
+        }
+
+    @staticmethod
     def _parse_preview(value: Mapping[str, object]) -> dict[str, object]:
         if type(value) is not dict or set(value) != _PREVIEW_FIELDS:
             raise PortfolioError("invalid_request")
@@ -747,6 +771,7 @@ class RecommendationRepository:
             )
             candidate_budget_digest = None
             candidate_budget_expired = False
+            candidate_budget_activation_binding = None
             proposal = request["proposal"]
             if proposal["change_type"] == "budget_plan_change":
                 candidate = self._candidate_budget(
@@ -762,10 +787,22 @@ class RecommendationRepository:
                 candidate_budget_digest = candidate["content_digest"]
                 if (
                     not candidate_budget_expired
-                    and _instant(request["expires_at"])
-                    > _instant(candidate["window_end_at"], persisted=True)
+                    and (
+                        _instant(request["expires_at"])
+                        > _instant(candidate["window_end_at"], persisted=True)
+                        or _instant(candidate["window_start_at"], persisted=True)
+                        >= _instant(request["expires_at"])
+                    )
                 ):
                     raise PortfolioError("invalid_request")
+                candidate_budget_activation_binding = (
+                    self._candidate_budget_activation_binding(
+                        sql,
+                        organization,
+                        candidate["budget_plan_id"],
+                        now,
+                    )
+                )
                 if any(
                     binding["budget_plan_id"] == candidate["budget_plan_id"]
                     and binding["active_version"] == candidate["version"]
@@ -798,6 +835,9 @@ class RecommendationRepository:
                     active_policy_version=active_policy["version"],
                     active_policy_generation=active_policy.get("generation"),
                     candidate_budget_digest=candidate_budget_digest,
+                    candidate_budget_activation_binding=(
+                        candidate_budget_activation_binding
+                    ),
                 )
                 if evaluation is None:
                     return None
@@ -1001,6 +1041,8 @@ class RecommendationRepository:
             return "policy_drift"
         if self._policy_evaluation_context_drift(stored):
             return "policy_drift"
+        if self._candidate_budget_activation_drift(sql, stored, now):
+            return "policy_drift"
         reason, current_budgets = self._bound_context(sql, row, stored, now)
         if reason is not None:
             return reason
@@ -1029,6 +1071,49 @@ class RecommendationRepository:
         except (KeyError, TypeError, PortfolioError):
             return True
         return not hmac.compare_digest(actual, expected)
+
+    def _candidate_budget_activation_drift(
+        self,
+        sql,
+        stored: Mapping[str, object],
+        now: str,
+    ) -> bool:
+        proposal = stored["recommendation"]["proposal"]
+        if proposal["change_type"] != "budget_plan_change":
+            return False
+        try:
+            expected = stored["bindings"][
+                "candidate_budget_activation_binding"
+            ]
+            actual = self._candidate_budget_activation_binding(
+                sql,
+                stored["recommendation"]["organization_id"],
+                proposal["candidate_budget_plan"]["id"],
+                now,
+            )
+            return not hmac.compare_digest(
+                canonical(actual), canonical(expected)
+            )
+        except (KeyError, TypeError, PortfolioError):
+            return True
+
+    @staticmethod
+    def _stored_candidate_budget_activation_binding(
+        stored: Mapping[str, object],
+    ) -> Mapping[str, object] | None:
+        """Return the frozen target pointer or fail closed for older snapshots."""
+
+        try:
+            proposal = stored["recommendation"]["proposal"]
+            bindings = stored["bindings"]
+            if "candidate_budget_activation_binding" not in bindings:
+                raise PortfolioError("version_conflict")
+            binding = bindings["candidate_budget_activation_binding"]
+            if proposal["change_type"] != "budget_plan_change" and binding is not None:
+                raise PortfolioError("version_conflict")
+            return binding
+        except (KeyError, TypeError, PortfolioError):
+            raise PortfolioError("version_conflict") from None
 
     def _expire_if_due(
         self,
@@ -1577,30 +1662,43 @@ class RecommendationRepository:
         expected_policy_generation: int | None = None,
         expected_policy_version: str | None = None,
         expected_policy_digest: str | None = None,
-        expected_budget_bindings: list[dict[str, object]] | None = None,
+        expected_candidate_budget_activation_binding: (
+            Mapping[str, object] | None
+        ) = None,
     ) -> dict[str, object]:
         if proposal["change_type"] == "budget_plan_change":
             reference = proposal["candidate_budget_plan"]
             if (
-                expected_budget_bindings is None
-                or expected_policy_version is None
+                expected_policy_version is None
                 or expected_policy_digest is None
             ):
                 raise PortfolioError("version_conflict")
             try:
                 expected_policy_version = _identifier(expected_policy_version)
                 expected_policy_digest = _digest(expected_policy_digest)
-                target_bindings = [
-                    binding
-                    for binding in expected_budget_bindings
-                    if binding["budget_plan_id"] == reference["id"]
-                ]
-                if len(target_bindings) > 1:
-                    raise PortfolioError("version_conflict")
-                if target_bindings:
-                    target_binding = target_bindings[0]
+                if expected_candidate_budget_activation_binding is not None:
+                    target_binding = expected_candidate_budget_activation_binding
+                    if (
+                        set(target_binding)
+                        != {
+                            "budget_plan_id",
+                            "active_version",
+                            "activation_generation",
+                            "activation_event_id",
+                            "content_digest",
+                        }
+                        or _identifier(target_binding["budget_plan_id"])
+                        != reference["id"]
+                    ):
+                        raise PortfolioError("version_conflict")
                     expected_previous_version = _version(
                         target_binding["active_version"]
+                    )
+                    expected_previous_event_id = _identifier(
+                        target_binding["activation_event_id"]
+                    )
+                    expected_previous_digest = _digest(
+                        target_binding["content_digest"]
                     )
                     prior_generation = target_binding["activation_generation"]
                     if (
@@ -1611,6 +1709,8 @@ class RecommendationRepository:
                     expected_activation_generation = prior_generation + 1
                 else:
                     expected_previous_version = None
+                    expected_previous_event_id = None
+                    expected_previous_digest = None
                     expected_activation_generation = 1
             except (KeyError, TypeError, PortfolioError):
                 raise PortfolioError("version_conflict") from None
@@ -1625,7 +1725,19 @@ class RecommendationRepository:
                 raise PortfolioError("version_conflict") from None
             if active is None:
                 raise PortfolioError("version_conflict")
-            plan, activation, pointer, _history = active
+            plan, activation, pointer, history = active
+            predecessor_matches = expected_previous_version is None
+            if expected_previous_version is not None and len(history) >= 2:
+                previous_plan, previous_activation = history[-2]
+                predecessor_matches = (
+                    previous_plan["version"] == expected_previous_version
+                    and previous_plan["content_digest"]
+                    == expected_previous_digest
+                    and previous_activation["activation_generation"]
+                    == expected_activation_generation - 1
+                    and previous_activation["activation_event_id"]
+                    == expected_previous_event_id
+                )
             if (
                 plan["version"] != reference["version"]
                 or pointer["active_version"] != reference["version"]
@@ -1637,6 +1749,7 @@ class RecommendationRepository:
                 != expected_previous_version
                 or activation["policy_version"] != expected_policy_version
                 or activation["policy_digest"] != expected_policy_digest
+                or not predecessor_matches
             ):
                 raise PortfolioError("version_conflict")
             receipt = {
@@ -1748,6 +1861,9 @@ class RecommendationRepository:
                 raise PortfolioError("version_conflict")
             if self._policy_evaluation_context_drift(stored):
                 raise PortfolioError("version_conflict")
+            target_binding = self._stored_candidate_budget_activation_binding(
+                stored
+            )
             return self._authoritative_application_evidence(
                 sql,
                 principal,
@@ -1760,7 +1876,7 @@ class RecommendationRepository:
                     "active_policy_version"
                 ],
                 expected_policy_digest=stored["bindings"]["policy_digest"],
-                expected_budget_bindings=stored["bindings"]["budget_bindings"],
+                expected_candidate_budget_activation_binding=target_binding,
             )
 
     def record_applied(
@@ -1847,6 +1963,9 @@ class RecommendationRepository:
                     )
                     failure = True
                 else:
+                    target_binding = (
+                        self._stored_candidate_budget_activation_binding(stored)
+                    )
                     authoritative_evidence = (
                         self._authoritative_application_evidence(
                             sql,
@@ -1860,7 +1979,9 @@ class RecommendationRepository:
                                 "active_policy_version"
                             ],
                             expected_policy_digest=bindings["policy_digest"],
-                            expected_budget_bindings=bindings["budget_bindings"],
+                            expected_candidate_budget_activation_binding=(
+                                target_binding
+                            ),
                         )
                     )
                     if not hmac.compare_digest(

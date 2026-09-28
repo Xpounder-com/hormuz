@@ -103,6 +103,32 @@ def _ref(value: object) -> dict[str, object]:
     return {"id": _identifier(item["id"]), "version": _version(item["version"])}
 
 
+def _budget_activation_binding(
+    value: object,
+    *,
+    expected_plan_id: str,
+) -> dict[str, object] | None:
+    if value is None:
+        return None
+    item = _closed(value, {
+        "budget_plan_id",
+        "active_version",
+        "activation_generation",
+        "activation_event_id",
+        "content_digest",
+    })
+    result = {
+        "budget_plan_id": _identifier(item["budget_plan_id"]),
+        "active_version": _version(item["active_version"]),
+        "activation_generation": _version(item["activation_generation"]),
+        "activation_event_id": _identifier(item["activation_event_id"]),
+        "content_digest": _digest(item["content_digest"]),
+    }
+    if result["budget_plan_id"] != expected_plan_id:
+        _invalid()
+    return result
+
+
 def _proposal(value: object) -> dict[str, object]:
     proposal = _closed(
         value,
@@ -367,6 +393,7 @@ def build_recommendation_evaluation(
     active_policy_version: str | None = None,
     active_policy_generation: int | None = None,
     candidate_budget_digest: str | None = None,
+    candidate_budget_activation_binding: dict[str, object] | None = None,
 ) -> dict[str, object] | None:
     """Return a frozen recommendation evaluation, or ``None`` when suppressed."""
 
@@ -429,9 +456,16 @@ def build_recommendation_evaluation(
         if candidate_budget_digest is None:
             _invalid()
         candidate_budget_digest = _digest(candidate_budget_digest)
+        candidate_budget_activation_binding = _budget_activation_binding(
+            candidate_budget_activation_binding,
+            expected_plan_id=proposal["candidate_budget_plan"]["id"],
+        )
     elif proposal["candidate_policy_digest"] != comparison.candidate.content_sha256:
         _invalid()
-    elif candidate_budget_digest is not None:
+    elif (
+        candidate_budget_digest is not None
+        or candidate_budget_activation_binding is not None
+    ):
         _invalid()
 
     policy = cohorts[baseline_id].get("policy")
@@ -634,6 +668,9 @@ def build_recommendation_evaluation(
             "active_policy_generation": active_policy_generation,
             "candidate_policy_digest": comparison.candidate.content_sha256,
             "candidate_budget_digest": candidate_budget_digest,
+            "candidate_budget_activation_binding": (
+                candidate_budget_activation_binding
+            ),
             "policy_evaluation_context_digest": (
                 policy_evaluation_context_digest
             ),
