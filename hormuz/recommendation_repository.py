@@ -1346,9 +1346,21 @@ class RecommendationRepository:
         )
         rows = sql.execute(
             f"SELECT candidate.* FROM {SNAPSHOT_TABLE} candidate "
+            f"JOIN {EVENT_TABLE} latest_event "
+            "ON latest_event.organization_id=candidate.organization_id "
+            "AND latest_event.recommendation_id=candidate.recommendation_id "
+            "AND latest_event.recommendation_version=candidate.version "
+            "AND latest_event.sequence=("
+            f"SELECT MAX(newer_event.sequence) FROM {EVENT_TABLE} newer_event "
+            "WHERE newer_event.organization_id=candidate.organization_id "
+            "AND newer_event.recommendation_id=candidate.recommendation_id "
+            "AND newer_event.recommendation_version=candidate.version) "
             "WHERE candidate.organization_id=? AND candidate.work_scope_id=? "
             f"AND candidate.work_scope_version=? AND {change_group} "
             "AND candidate.policy_digest=? AND candidate.recommendation_id<>? "
+            "AND candidate.expires_at>? "
+            "AND latest_event.public_state IN ('pending','accepted') "
+            "AND latest_event.event_type<>'applied' "
             "AND NOT EXISTS ("
             f"SELECT 1 FROM {SNAPSHOT_TABLE} newer "
             "WHERE newer.organization_id=candidate.organization_id "
@@ -1361,6 +1373,7 @@ class RecommendationRepository:
                 row["work_scope_version"],
                 row["policy_digest"],
                 row["recommendation_id"],
+                now,
                 _MAX_CONFLICTS + 1,
             ),
         ).fetchall()
@@ -1562,13 +1575,21 @@ class RecommendationRepository:
         now: str,
         *,
         expected_policy_generation: int | None = None,
+        expected_policy_version: str | None = None,
+        expected_policy_digest: str | None = None,
         expected_budget_bindings: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         if proposal["change_type"] == "budget_plan_change":
             reference = proposal["candidate_budget_plan"]
-            if expected_budget_bindings is None:
+            if (
+                expected_budget_bindings is None
+                or expected_policy_version is None
+                or expected_policy_digest is None
+            ):
                 raise PortfolioError("version_conflict")
             try:
+                expected_policy_version = _identifier(expected_policy_version)
+                expected_policy_digest = _digest(expected_policy_digest)
                 target_bindings = [
                     binding
                     for binding in expected_budget_bindings
@@ -1614,6 +1635,8 @@ class RecommendationRepository:
                 != expected_activation_generation
                 or activation["previous_version"]
                 != expected_previous_version
+                or activation["policy_version"] != expected_policy_version
+                or activation["policy_digest"] != expected_policy_digest
             ):
                 raise PortfolioError("version_conflict")
             receipt = {
@@ -1733,6 +1756,10 @@ class RecommendationRepository:
                 expected_policy_generation=stored["bindings"].get(
                     "active_policy_generation"
                 ),
+                expected_policy_version=stored["bindings"][
+                    "active_policy_version"
+                ],
+                expected_policy_digest=stored["bindings"]["policy_digest"],
                 expected_budget_bindings=stored["bindings"]["budget_bindings"],
             )
 
@@ -1829,6 +1856,10 @@ class RecommendationRepository:
                             expected_policy_generation=bindings.get(
                                 "active_policy_generation"
                             ),
+                            expected_policy_version=bindings[
+                                "active_policy_version"
+                            ],
+                            expected_policy_digest=bindings["policy_digest"],
                             expected_budget_bindings=bindings["budget_bindings"],
                         )
                     )

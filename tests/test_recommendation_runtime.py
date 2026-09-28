@@ -846,6 +846,41 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
             )[1]
         self.assertEqual(superseded["state"], "superseded")
 
+    def test_terminal_history_does_not_consume_the_live_conflict_cap(self) -> None:
+        rejected = [
+            self.generate(self.request(f"terminal-history-{index}"))
+            for index in range(2)
+        ]
+        assert all(evaluation is not None for evaluation in rejected)
+        with self.runtime():
+            for index, evaluation in enumerate(rejected):
+                assert evaluation is not None
+                self.service.dispatch(
+                    ADMIN,
+                    "POST",
+                    RECOMMENDATIONS
+                    + f"/terminal-history-{index}/decisions",
+                    body=canonical(
+                        self.decision(evaluation, decision="rejected")
+                    ).encode("ascii"),
+                    idempotency_key=f"reject-terminal-history-{index}",
+                )
+
+        candidate = self.generate(self.request("after-terminal-history"))
+        assert candidate is not None
+        with (
+            mock.patch("hormuz.recommendation_repository._MAX_CONFLICTS", 1),
+            self.runtime(),
+        ):
+            accepted = self.service.dispatch(
+                ADMIN,
+                "POST",
+                RECOMMENDATIONS + "/after-terminal-history/decisions",
+                body=canonical(self.decision(candidate)).encode("ascii"),
+                idempotency_key="accept-after-terminal-history",
+            )[1]
+        self.assertEqual(accepted["state"], "accepted")
+
     def test_accepted_expiry_releases_conflict_and_blocks_late_application(self) -> None:
         expiring = self.generate(self.request(
             "accepted-expiry", expires_at="2026-09-25T00:00:00Z"
@@ -1072,15 +1107,26 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(pointer[0], active["version"])
 
-        self.repositories.budgets.activate_plan(
-            self.principal,
-            candidate["budget_plan_id"],
-            _activation_request(
-                candidate["version"],
-                expected_active_version=active["version"],
-                expected_activation_generation=1,
+        with mock.patch.object(
+            self.repositories.budgets,
+            "_policy",
+            return_value=(
+                mock.Mock(),
+                {
+                    "version": self.baseline.version_id,
+                    "content_digest": self.baseline.content_sha256,
+                },
             ),
-        )
+        ):
+            self.repositories.budgets.activate_plan(
+                self.principal,
+                candidate["budget_plan_id"],
+                _activation_request(
+                    candidate["version"],
+                    expected_active_version=active["version"],
+                    expected_activation_generation=1,
+                ),
+            )
         with managed_sqlite_connection(self.config.database_path) as connection:
             activation_event_id = connection.execute(
                 "SELECT current_activation_event_id "
@@ -1148,6 +1194,96 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
                 idempotency_key="accept-budget-change-follow-up",
             )[1]
         self.assertEqual(accepted_follow_up["state"], "accepted")
+
+    def test_budget_application_requires_the_reviewed_activation_policy(self) -> None:
+        active = self.repositories.budgets.create_plan(
+            self.principal,
+            _budget_plan_request(self.scope, amount="100"),
+        )
+        self.repositories.budgets.activate_plan(
+            self.principal,
+            active["budget_plan_id"],
+            _activation_request(active["version"]),
+        )
+        candidate = self.repositories.budgets.create_plan(
+            self.principal,
+            _budget_plan_request(
+                self.scope,
+                amount="75",
+                budget_plan_id=active["budget_plan_id"],
+                expected_version=active["version"],
+            ),
+        )
+        evaluation = self.generate(
+            self.request(
+                "budget-activation-policy-drift",
+                change_type="budget_plan_change",
+                candidate_budget_plan={
+                    "id": candidate["budget_plan_id"],
+                    "version": candidate["version"],
+                },
+                expires_at="2026-09-24T23:00:00Z",
+            ),
+            baseline=self.baseline,
+            candidate=self.baseline,
+        )
+        assert evaluation is not None
+        with self.runtime():
+            self.repositories.recommendations.decide(
+                self.principal,
+                "budget-activation-policy-drift",
+                self.decision(evaluation),
+                "accept-budget-activation-policy-drift",
+            )
+
+        with mock.patch.object(
+            self.repositories.budgets,
+            "_policy",
+            return_value=(
+                mock.Mock(),
+                {
+                    "version": self.candidate.version_id,
+                    "content_digest": self.candidate.content_sha256,
+                },
+            ),
+        ):
+            self.repositories.budgets.activate_plan(
+                self.principal,
+                candidate["budget_plan_id"],
+                _activation_request(
+                    candidate["version"],
+                    expected_active_version=active["version"],
+                    expected_activation_generation=1,
+                ),
+            )
+
+        proposed_evidence = {
+            "activation_event_id": "wrong-policy-activation",
+            "activated_policy_digest": None,
+            "activated_budget_plan": {
+                "id": candidate["budget_plan_id"],
+                "version": candidate["version"],
+            },
+            "activation_digest": "0" * 64,
+        }
+        with self.runtime():
+            self.error(
+                "version_conflict",
+                lambda: self.repositories.recommendations.application_evidence(
+                    self.principal,
+                    "budget-activation-policy-drift",
+                    1,
+                ),
+            )
+            self.error(
+                "version_conflict",
+                lambda: self.repositories.recommendations.record_applied(
+                    self.principal,
+                    "budget-activation-policy-drift",
+                    1,
+                    proposed_evidence,
+                ),
+            )
 
     def test_budget_application_requires_the_reviewed_direct_successor(self) -> None:
         active = self.repositories.budgets.create_plan(

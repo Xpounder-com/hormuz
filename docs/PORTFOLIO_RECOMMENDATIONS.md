@@ -71,10 +71,15 @@ split into independently accepted category labels. Work-budget changes remain
 a separate conflict group. Candidate budget plans whose window has ended are
 suppressed, and a live candidate cannot produce a recommendation that expires
 after its plan window. Ended active plans are omitted from new budget bindings.
+The budget activation receipt must also name the exact policy version and digest
+reviewed with the recommendation, so a temporary policy change cannot be hidden
+by restoring the old policy before application is recorded.
 An accepted recommendation remains conflicting until it expires,
 is invalidated, or records its separately completed application; the resulting
 `applied` event releases the conflict so a later recommendation can be reviewed
-against the new binding. Cursor continuations evaluate expiry against the first
+against the new binding. Terminal and already-expired history is filtered before
+the bounded live-conflict limit is enforced, so accumulated audit history cannot
+block a later decision. Cursor continuations evaluate expiry against the first
 page's frozen `as_of` time and append at most one expiry event when the expired
 item appears only on a later page.
 

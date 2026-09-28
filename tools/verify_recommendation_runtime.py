@@ -39,7 +39,7 @@ from tools import verify_role_view_runtime as role_verifier
 
 
 PLAN_PATH = "docs/recommendation-runtime-plan-v1.json"
-PLAN_SHA256 = "cd623b98ab1c727b4487e27b60edae7e2fcd5172860ec34009f85b67ca02acf5"
+PLAN_SHA256 = "ccd9fcae635a8a7a28e7396253cfceaf534fe46c8bde36e34e48c555edc7ee0f"
 PREDECESSOR_PATH = "docs/role-view-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "ba13527aa781e88232ca1403468e181c759004628645bb9bc48e660955a1e533"
@@ -692,8 +692,14 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         "budget_window_binding": (
             "active_bindings_exclude_ended_plans_and_candidate_expiry_bounds_recommendation"
         ),
+        "budget_activation_policy_binding": (
+            "activation_receipt_policy_version_and_digest_match_reviewed_binding"
+        ),
         "policy_conflict_scope": (
             "all_incomplete_policy_change_types_same_scope_version_and_baseline"
+        ),
+        "live_conflict_cap": (
+            "terminal_and_already_expired_history_filtered_before_limit"
         ),
         "cursor_expiry": "frozen_as_of_materialized_once_on_every_page",
         "managed_policy_race_control": (
