@@ -180,7 +180,11 @@ tokenizers. The personal relay additionally rejects a changed candidate when
 local optimizer work exceeds the bounded overhead guard. The ordinary request
 is sent instead and the reason is reported as `net_regression`. Provider cache
 categories, auxiliary calls, fallback calls, and optimizer delay remain visible
-so a future priced comparison cannot omit them.
+so a future priced comparison cannot omit them. Bounded measurement persistence
+is queued after that decision and runs outside the provider-forwarding path;
+relay shutdown waits for its own queued observations, while a persistence error
+or a full queue disables further measurements without delaying or replacing the
+provider request.
 
 ## Qualification and limitations
 

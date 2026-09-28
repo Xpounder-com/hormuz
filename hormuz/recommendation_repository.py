@@ -1046,7 +1046,22 @@ class RecommendationRepository:
         reason, current_budgets = self._bound_context(sql, row, stored, now)
         if reason is not None:
             return reason
-        if current_budgets != bindings["budget_bindings"]:
+        proposal = stored["recommendation"]["proposal"]
+        if proposal["change_type"] == "budget_plan_change":
+            target_id = proposal["candidate_budget_plan"]["id"]
+            expected_budgets = [
+                binding
+                for binding in bindings["budget_bindings"]
+                if binding["budget_plan_id"] != target_id
+            ]
+            current_budgets = [
+                binding
+                for binding in current_budgets
+                if binding["budget_plan_id"] != target_id
+            ]
+        else:
+            expected_budgets = bindings["budget_bindings"]
+        if current_budgets != expected_budgets:
             return "policy_drift"
         return None
 

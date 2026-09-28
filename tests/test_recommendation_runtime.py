@@ -1604,6 +1604,57 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
             )
         self.assertEqual(applied["state"], "accepted")
 
+    def test_target_expiry_after_generation_does_not_invalidate_decision(self) -> None:
+        active = self.repositories.budgets.create_plan(
+            self.principal,
+            _budget_plan_request(self.scope, amount="100"),
+        )
+        self.repositories.budgets.activate_plan(
+            self.principal,
+            active["budget_plan_id"],
+            _activation_request(active["version"]),
+        )
+        candidate_request = _budget_plan_request(
+            self.scope,
+            amount="75",
+            budget_plan_id=active["budget_plan_id"],
+            expected_version=active["version"],
+        )
+        candidate_request["window"] = {
+            "start_at": "2026-09-23T00:00:00.000000Z",
+            "end_at": "2026-09-28T00:00:00.000000Z",
+        }
+        candidate = self.repositories.budgets.create_plan(
+            self.principal, candidate_request
+        )
+        evaluation = self.generate(
+            self.request(
+                "target-expires-after-generation",
+                change_type="budget_plan_change",
+                candidate_budget_plan={
+                    "id": candidate["budget_plan_id"],
+                    "version": candidate["version"],
+                },
+                expires_at="2026-09-27T00:00:00Z",
+            ),
+            baseline=self.baseline,
+            candidate=self.baseline,
+        )
+        assert evaluation is not None
+        self.assertEqual(
+            evaluation["bindings"]["budget_bindings"][0]["budget_plan_id"],
+            active["budget_plan_id"],
+        )
+
+        with self.runtime(now="2026-09-26T12:00:00.000000Z"):
+            accepted = self.repositories.recommendations.decide(
+                self.principal,
+                "target-expires-after-generation",
+                self.decision(evaluation),
+                "accept-target-expires-after-generation",
+            )
+        self.assertEqual(accepted["state"], "accepted")
+
 
 if __name__ == "__main__":
     unittest.main()

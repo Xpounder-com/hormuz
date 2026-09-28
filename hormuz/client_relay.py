@@ -6,6 +6,7 @@ import hmac
 import http.client
 import json
 import os
+import queue
 import re
 import secrets
 import shutil
@@ -61,6 +62,7 @@ _LOCAL_CREDENTIAL = re.compile(r"hox_l_[A-Za-z0-9_-]{43}")
 _ACCESS_CREDENTIAL = re.compile(r"hox_a_[A-Za-z0-9_-]{43}")
 _CLIENT_VERSION = re.compile(r"(?<!\d)(\d+\.\d+\.\d+)(?!\d)")
 MAX_OPTIMIZER_OVERHEAD_US = 100_000
+_MAX_PENDING_OPTIMIZATION_METRICS = 1024
 _HOP_HEADERS = frozenset(
     {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"}
 )
@@ -91,6 +93,62 @@ class SavedClientProfile:
     allow_insecure_http: bool
 
 
+@dataclass(frozen=True)
+class _OptimizationMetricTask:
+    store: PersonalMetricsStore
+    measurement: OptimizationMeasurement
+    finished: threading.Event
+    on_failure: Callable[[], None]
+
+
+_OPTIMIZATION_METRIC_TASKS: queue.Queue[_OptimizationMetricTask] = queue.Queue(
+    maxsize=_MAX_PENDING_OPTIMIZATION_METRICS
+)
+_OPTIMIZATION_METRIC_WORKER_LOCK = threading.Lock()
+_optimization_metric_worker: threading.Thread | None = None
+
+
+def _run_optimization_metric_worker() -> None:
+    while True:
+        task = _OPTIMIZATION_METRIC_TASKS.get()
+        try:
+            task.store.record_optimization(task.measurement)
+        except Exception:
+            # Measurement failure must never block or replace provider traffic.
+            task.on_failure()
+        finally:
+            task.finished.set()
+            _OPTIMIZATION_METRIC_TASKS.task_done()
+
+
+def _submit_optimization_metric(
+    store: PersonalMetricsStore,
+    measurement: OptimizationMeasurement,
+    on_failure: Callable[[], None],
+) -> threading.Event:
+    global _optimization_metric_worker
+    finished = threading.Event()
+    with _OPTIMIZATION_METRIC_WORKER_LOCK:
+        if (
+            _optimization_metric_worker is None
+            or not _optimization_metric_worker.is_alive()
+        ):
+            _optimization_metric_worker = threading.Thread(
+                target=_run_optimization_metric_worker,
+                name="hormuz-optimization-metrics",
+                daemon=True,
+            )
+            _optimization_metric_worker.start()
+    try:
+        _OPTIMIZATION_METRIC_TASKS.put_nowait(
+            _OptimizationMetricTask(store, measurement, finished, on_failure)
+        )
+    except queue.Full:
+        on_failure()
+        finished.set()
+    return finished
+
+
 class RelayOptimizer:
     def __init__(
         self,
@@ -107,6 +165,8 @@ class RelayOptimizer:
         self._counters = counters
         self._resources_checked = counters is not None
         self.metrics = metrics
+        self._metrics_lock = threading.Lock()
+        self._pending_metrics: set[threading.Event] = set()
         self._lock = threading.Lock()
         self._status = RelayStatus("off")
 
@@ -291,45 +351,57 @@ class RelayOptimizer:
             return body, {}
         return outgoing, {CONTEXT_FORMAT_HEADER: CONTEXT_FORMAT_VERSION}
 
-    def note_oversized_passthrough(self) -> None:
+    def note_oversized_passthrough(self, request_bytes: int) -> None:
         """Snapshot the toggle without buffering or inspecting a large body."""
         try:
             enabled = self.preference_store.load().enabled
         except ContextRuntimeError:
             self._set_status(RelayStatus("settings_invalid"))
-            return
-        if not enabled:
-            self._set_status(RelayStatus("off"))
         else:
-            try:
-                adapter_for(self.client)
-            except AdapterError:
-                self._set_status(RelayStatus("unsupported_client"))
+            if not enabled:
+                self._set_status(RelayStatus("off"))
             else:
-                self._set_status(
-                    RelayStatus(
-                        "gateway_incompatible"
-                        if not self.gateway_compatible
-                        else "unsupported_history"
+                try:
+                    adapter_for(self.client)
+                except AdapterError:
+                    self._set_status(RelayStatus("unsupported_client"))
+                else:
+                    self._set_status(
+                        RelayStatus(
+                            "gateway_incompatible"
+                            if not self.gateway_compatible
+                            else "unsupported_history"
+                        )
                     )
-                )
-        if self.metrics is not None:
-            reason = self.status.code
-            try:
-                self.metrics.record_optimization(
-                    OptimizationMeasurement(
-                        eligible=False,
-                        applied=False,
-                        reason="disabled" if reason == "off" else reason,
-                        before_bytes=None,
-                        after_bytes=None,
-                        before_tokens=None,
-                        after_tokens=None,
-                        overhead_us=0,
-                    )
-                )
-            except PersonalMetricsError:
-                self.metrics = None
+        reason = self.status.code
+        self._queue_observation(
+            OptimizationMeasurement(
+                eligible=False,
+                applied=False,
+                reason="disabled" if reason == "off" else reason,
+                before_bytes=request_bytes,
+                after_bytes=request_bytes,
+                before_tokens=None,
+                after_tokens=None,
+                overhead_us=0,
+            )
+        )
+
+    def flush_metrics(self, timeout: float = 5.0) -> bool:
+        """Wait for this optimizer's queued local measurements to settle."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            with self._metrics_lock:
+                self._pending_metrics = {
+                    event for event in self._pending_metrics if not event.is_set()
+                }
+                pending = tuple(self._pending_metrics)
+            if not pending:
+                return True
+            for event in pending:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not event.wait(remaining):
+                    return False
 
     def _token_counters(self) -> Mapping[str, Callable[[str], int]] | None:
         with self._lock:
@@ -372,23 +444,41 @@ class RelayOptimizer:
         after_tokens: Mapping[str, int] | None,
         started: int,
     ) -> None:
-        if self.metrics is None:
-            return
-        try:
-            self.metrics.record_optimization(
-                OptimizationMeasurement(
-                    eligible=eligible,
-                    applied=applied,
-                    reason=reason,
-                    before_bytes=before_bytes,
-                    after_bytes=after_bytes,
-                    before_tokens=before_tokens,
-                    after_tokens=after_tokens,
-                    overhead_us=max(0, (time.perf_counter_ns() - started) // 1_000),
-                )
+        self._queue_observation(
+            OptimizationMeasurement(
+                eligible=eligible,
+                applied=applied,
+                reason=reason,
+                before_bytes=before_bytes,
+                after_bytes=after_bytes,
+                before_tokens=before_tokens,
+                after_tokens=after_tokens,
+                overhead_us=max(0, (time.perf_counter_ns() - started) // 1_000),
             )
-        except PersonalMetricsError:
-            self.metrics = None
+        )
+
+    def _queue_observation(self, measurement: OptimizationMeasurement) -> None:
+        with self._metrics_lock:
+            metrics = self.metrics
+        if metrics is None:
+            return
+
+        def disable_failed_store() -> None:
+            with self._metrics_lock:
+                if self.metrics is metrics:
+                    self.metrics = None
+
+        event = _submit_optimization_metric(
+            metrics, measurement, disable_failed_store
+        )
+        with self._metrics_lock:
+            self._pending_metrics = {
+                pending
+                for pending in self._pending_metrics
+                if not pending.is_set()
+            }
+            if not event.is_set():
+                self._pending_metrics.add(event)
 
 
 class LocalRelayServer(ThreadingHTTPServer):
@@ -495,6 +585,7 @@ class LocalRelayServer(ThreadingHTTPServer):
             self._upstream_condition.wait_for(
                 lambda: not self._upstreams, timeout=self._UPSTREAM_DRAIN_SECONDS
             )
+        self.optimizer.flush_metrics(timeout=self._UPSTREAM_DRAIN_SECONDS)
 
 
 class LocalRelayHandler(BaseHTTPRequestHandler):
@@ -614,7 +705,7 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                         return
                     connection.send(chunk)
                     remaining -= len(chunk)
-                self.server.optimizer.note_oversized_passthrough()
+                self.server.optimizer.note_oversized_passthrough(length)
             response = connection.getresponse()
             self._relay_response(response, path.path, started)
             provider_recorded = True
@@ -1147,9 +1238,14 @@ def _valid_upstream_credential(
 ) -> bool:
     if mode == "hormuz":
         return isinstance(value, str) and _ACCESS_CREDENTIAL.fullmatch(value) is not None
+    if not isinstance(value, str):
+        return False
+    try:
+        encoded = value.encode("latin-1")
+    except UnicodeEncodeError:
+        return False
     return (
-        isinstance(value, str)
-        and 8 <= len(value.encode("utf-8")) <= 4096
+        8 <= len(encoded) <= 4096
         and value == value.strip()
         and not any(character in value for character in ("\r", "\n", "\x00"))
     )

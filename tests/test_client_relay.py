@@ -451,6 +451,47 @@ class RelayTests(unittest.TestCase):
             gateway_thread.join(timeout=2)
             gateway.server_close()
 
+    def test_non_latin_1_provider_credentials_fail_before_connect(self) -> None:
+        for upstream_auth in ("openai", "anthropic"):
+            with self.subTest(upstream_auth=upstream_auth):
+                relay = LocalRelayServer(
+                    gateway="http://127.0.0.1:9",
+                    client="codex",
+                    local_credential=LOCAL_TOKEN,
+                    gateway_credential=lambda: "sk-invalid-☃",
+                    optimizer=RelayOptimizer(
+                        preference_store=self.store,
+                        client="codex",
+                        gateway_compatible=False,
+                    ),
+                    upstream_auth=upstream_auth,
+                )
+                relay_thread = threading.Thread(
+                    target=relay.serve_forever, daemon=True
+                )
+                relay_thread.start()
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", relay.server_port, timeout=5
+                )
+                try:
+                    connection.request(
+                        "POST",
+                        "/v1/responses",
+                        body=b"{}",
+                        headers={"Authorization": "Bearer " + LOCAL_TOKEN},
+                    )
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 503)
+                    self.assertEqual(
+                        json.loads(response.read())["error"]["code"],
+                        "gateway_credential_unavailable",
+                    )
+                finally:
+                    connection.close()
+                    relay.shutdown()
+                    relay_thread.join(timeout=2)
+                    relay.server_close()
+
     def test_ttft_starts_at_the_first_response_body_byte(self) -> None:
         gateway = socket.socket()
         gateway.bind(("127.0.0.1", 0))
@@ -867,8 +908,13 @@ class RelayTests(unittest.TestCase):
         gateway_thread = threading.Thread(target=gateway.serve_forever, daemon=True)
         gateway_thread.start()
         self.store.save(True)
+        metrics = PersonalMetricsStore(self.state, "oversized")
         optimizer = RelayOptimizer(
-            preference_store=self.store, client="codex", gateway_compatible=True, counters=COUNTERS
+            preference_store=self.store,
+            client="codex",
+            gateway_compatible=True,
+            counters=COUNTERS,
+            metrics=metrics,
         )
         relay = LocalRelayServer(
             gateway=f"http://127.0.0.1:{gateway.server_port}", client="codex",
@@ -888,8 +934,18 @@ class RelayTests(unittest.TestCase):
             connection.close()
             self.assertEqual(gateway.requests[0][0], original)
             self.assertEqual(optimizer.status.code, "unsupported_history")
+            self.assertTrue(optimizer.flush_metrics())
+            benefit = metrics.benefit(enabled=True)
+            self.assertEqual(benefit["traffic"]["total_requests"], 1)
+            reduction = benefit["request_byte_reduction"]["all_captured_traffic"]
+            self.assertEqual(reduction["observed_requests"], 1)
+            self.assertEqual(reduction["expected_requests"], 1)
+            self.assertEqual(reduction["bytes"], 0)
+            self.assertEqual(reduction["percent"], 0.0)
+            self.assertTrue(reduction["complete"])
+            self.assertFalse(reduction["missing"])
             self.store.save(False)
-            optimizer.note_oversized_passthrough()
+            optimizer.note_oversized_passthrough(len(original))
             self.assertEqual(optimizer.status.code, "off")
         finally:
             relay.shutdown()

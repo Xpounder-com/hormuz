@@ -1708,7 +1708,44 @@ class PersonalContractTests(unittest.TestCase):
         ).encode()
         changed, _headers = optimizer.prepare(body, "/v1/responses")
         self.assertNotEqual(changed, body)
+        self.assertTrue(optimizer.flush_metrics())
         self.assertIsNone(optimizer.metrics)
+
+    def test_measurement_persistence_is_outside_the_forwarding_path(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+
+        class BlockingMetrics:
+            def record_optimization(self, _measurement) -> None:
+                started.set()
+                if not release.wait(5):
+                    raise AssertionError("test did not release metrics persistence")
+
+        preference = ContextPreferenceStore(self.state, "personal-a")
+        preference.save(False)
+        optimizer = RelayOptimizer(
+            preference_store=preference,
+            client="codex",
+            gateway_compatible=True,
+            counters=COUNTERS,
+            metrics=BlockingMetrics(),  # type: ignore[arg-type]
+        )
+        prepared: list[tuple[bytes, dict[str, str]]] = []
+        worker = threading.Thread(
+            target=lambda: prepared.append(
+                optimizer.prepare(b'{"input":[]}', "/v1/responses")
+            )
+        )
+        try:
+            worker.start()
+            self.assertTrue(started.wait(2))
+            worker.join(timeout=1)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(prepared, [(b'{"input":[]}', {})])
+        finally:
+            release.set()
+            worker.join(timeout=5)
+        self.assertTrue(optimizer.flush_metrics())
 
     def test_claude_count_tokens_is_supported_passthrough_traffic(self) -> None:
         preference = ContextPreferenceStore(self.state, "personal-a")
@@ -1726,6 +1763,7 @@ class PersonalContractTests(unittest.TestCase):
         self.assertEqual(changed, body)
         self.assertEqual(headers, {})
         self.assertEqual(optimizer.status.code, "ready")
+        self.assertTrue(optimizer.flush_metrics())
         benefit = metrics.benefit(enabled=True)
         self.assertEqual(benefit["traffic"]["total_requests"], 1)
         self.assertNotIn("unsupported_client", benefit["exceptions"])
@@ -1765,6 +1803,7 @@ class PersonalContractTests(unittest.TestCase):
         ).encode()
         changed, _headers = optimizer.prepare(body, "/v1/responses")
         self.assertNotEqual(changed, body)
+        self.assertTrue(optimizer.flush_metrics())
         snapshot = metrics.snapshot()
         self.assertEqual(
             snapshot["metrics"]["request_before_bytes"]["total"], len(body)
@@ -1808,6 +1847,7 @@ class PersonalContractTests(unittest.TestCase):
         self.assertEqual(changed, body)
         self.assertEqual(headers, {})
         self.assertEqual(optimizer.status.code, "ready")
+        self.assertTrue(optimizer.flush_metrics())
         snapshot = metrics.snapshot()
         self.assertEqual(snapshot["counters"]["eligible_requests"], 0)
         self.assertEqual(snapshot["reasons"], {"no_eligible_result": 1})
@@ -2361,6 +2401,7 @@ class PersonalContractTests(unittest.TestCase):
                 and time.monotonic() < deadline
             ):
                 time.sleep(0.01)
+            self.assertTrue(optimizer.flush_metrics())
             benefit = metrics.benefit(enabled=False)
             self.assertEqual(benefit["traffic"]["total_requests"], 2)
             self.assertEqual(benefit["provider_reported"]["cache_read_tokens"]["total"], 20)
