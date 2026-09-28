@@ -715,6 +715,69 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
             1,
         )
 
+    def test_later_cursor_keeps_frozen_expiry_after_successor_generation(self) -> None:
+        live = self.generate(
+            self.request("page-a-before-successor"),
+            now="2026-09-24T09:00:00.000000Z",
+        )
+        expired = self.generate(
+            self.request(
+                "page-b-before-successor", expires_at="2026-09-24T11:00:00Z"
+            ),
+            now="2026-09-24T10:00:00.000000Z",
+        )
+        assert live is not None and expired is not None
+
+        frozen_now = "2026-09-24T12:00:00.000000Z"
+        with self.runtime(now=frozen_now):
+            first = self.service.dispatch(
+                ADMIN, "GET", RECOMMENDATIONS, query="limit=1"
+            )[1]
+        successor = self.generate(
+            self.request(
+                "page-b-before-successor",
+                version=2,
+                supersedes_version=1,
+            ),
+            now=frozen_now,
+        )
+        assert successor is not None
+
+        with self.runtime(now=frozen_now):
+            second = self.service.dispatch(
+                ADMIN,
+                "GET",
+                RECOMMENDATIONS,
+                query="cursor=" + first["next_cursor"],
+            )[1]
+            replay = self.service.dispatch(
+                ADMIN,
+                "GET",
+                RECOMMENDATIONS,
+                query="cursor=" + first["next_cursor"],
+            )[1]
+
+        self.assertEqual(second["as_of"], first["as_of"])
+        self.assertEqual(
+            (
+                second["items"][0]["recommendation_id"],
+                second["items"][0]["version"],
+                second["items"][0]["state"],
+            ),
+            ("page-b-before-successor", 1, "expired"),
+        )
+        self.assertEqual(replay["items"], second["items"])
+        prior_events = [
+            row
+            for row in self.rows()["portfolio_policy_recommendation_events"]
+            if row["recommendation_id"] == "page-b-before-successor"
+            and row["recommendation_version"] == 1
+        ]
+        self.assertEqual(
+            [row["event_type"] for row in prior_events],
+            ["generated", "expired"],
+        )
+
     def test_different_policy_change_categories_conflict(self) -> None:
         cap = self.generate(self.request("policy-cap"))
         allowlist_mapping = _policy_mapping(output_cap=1_000)

@@ -778,6 +778,9 @@ class RecommendationRepository:
                 prior_event = self._latest_event(
                     sql, organization, recommendation_id, int(latest["version"])
                 )
+                prior_event = self._expire_if_due(
+                    sql, principal, latest, prior_event, now
+                )
                 if prior_event["public_state"] == "accepted":
                     raise PortfolioError("version_conflict")
 
