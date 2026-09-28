@@ -2402,6 +2402,7 @@ class PersonalContractTests(unittest.TestCase):
             ):
                 time.sleep(0.01)
             self.assertTrue(optimizer.flush_metrics())
+            self.assertTrue(relay.flush_metrics())
             benefit = metrics.benefit(enabled=False)
             self.assertEqual(benefit["traffic"]["total_requests"], 2)
             self.assertEqual(benefit["provider_reported"]["cache_read_tokens"]["total"], 20)
@@ -2506,6 +2507,7 @@ class PersonalContractTests(unittest.TestCase):
             except http.client.IncompleteRead:
                 pass
             connection.close()
+            self.assertTrue(relay.flush_metrics())
             snapshot = metrics.snapshot()
             self.assertEqual(snapshot["counters"]["provider_attempts"], 1)
             self.assertEqual(snapshot["counters"]["provider_responses"], 1)

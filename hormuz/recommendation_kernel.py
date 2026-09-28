@@ -600,11 +600,11 @@ def build_recommendation_evaluation(
             "quality_guardrail": target["guardrails"]["quality"]["state"],
             "reliability_guardrail": target["guardrails"]["reliability"]["state"],
         },
-        "expected_direction": (
-            "lower_cost_with_guardrails"
-            if _cost_direction(cohorts[baseline_id], target) == "lower"
-            else "policy_behavior_change_with_guardrails"
-        ),
+        # The scorecard comparison is observational evidence about two
+        # cohorts.  The proposal is a separately reviewed policy or budget
+        # change and does not currently prove that applying it selects the
+        # lower-cost cohort, so its claimed direction remains behavior-only.
+        "expected_direction": "policy_behavior_change_with_guardrails",
         "affected_scopes": [dict(scorecard["work_scope"])],
         "losing_alternatives": losing,
         "confidence": {

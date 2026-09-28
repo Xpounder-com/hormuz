@@ -179,7 +179,7 @@
         "reason_code": "eligible",
         "state": "eligible"
       },
-      "expected_direction": "lower_cost_with_guardrails",
+      "expected_direction": "policy_behavior_change_with_guardrails",
       "losing_alternatives": [
         {
           "cohort_id": "guarded",

@@ -83,22 +83,26 @@ class RecommendationKernelTests(unittest.TestCase):
         preview_overrides=None,
         evaluated_at=None,
         usage_totals=None,
+        candidate_policy=None,
     ):
         preview = dict(self.fixture["preview_request"])
         preview.update({} if preview_overrides is None else preview_overrides)
         evaluated_at = evaluated_at or datetime.fromisoformat(
             self.fixture["created_at"].replace("Z", "+00:00")
         )
+        candidate = self.candidate if candidate_policy is None else candidate_policy
+        request = deepcopy(self.fixture["generation_request"])
+        request["proposal"]["candidate_policy_digest"] = candidate.content_sha256
         self.usage.monthly_totals.return_value = (
             MonthlyTotals() if usage_totals is None else usage_totals
         )
-        comparison = compare_policy_documents(self.baseline, self.candidate)
+        comparison = compare_policy_documents(self.baseline, candidate)
         preview_result = preview_policy_request(
             config=self.config,
             usage_store=self.usage,
             identity=self.config.identities_by_token[ADMIN],
             baseline=self.baseline,
-            candidate=self.candidate,
+            candidate=candidate,
             client=preview["client"],
             protocol=preview["protocol"],
             requested_model=preview["requested_model"],
@@ -110,11 +114,11 @@ class RecommendationKernelTests(unittest.TestCase):
             usage_store=self.usage,
             suite=self.scenarios,
             baseline=self.baseline,
-            candidate=self.candidate,
+            candidate=candidate,
             evaluated_at=evaluated_at,
         )
         return build_recommendation_evaluation(
-            request=self.fixture["generation_request"],
+            request=request,
             scorecard_evaluation=(
                 self.scorecard_evaluation
                 if scorecard_evaluation is None
@@ -130,6 +134,21 @@ class RecommendationKernelTests(unittest.TestCase):
             budget_bindings=[],
             policy_evaluation_context_digest="0" * 64,
             active_policy_version=self.baseline.version_id,
+        )
+
+    def test_lower_cost_cohort_does_not_claim_an_unbound_savings_direction(self) -> None:
+        raised_cap = deepcopy(self.fixture["baseline_policy"])
+        raised_cap["policies"]["organization"]["max_output_tokens"] = 2_000
+        candidate = PolicyDocument.from_mapping(raised_cap, config=self.config)
+        evaluation = self.evaluate(candidate_policy=candidate)
+        assert evaluation is not None
+        self.assertEqual(
+            evaluation["explanation"]["observed_tradeoff"]["cost_direction"],
+            "lower",
+        )
+        self.assertEqual(
+            evaluation["explanation"]["expected_direction"],
+            "policy_behavior_change_with_guardrails",
         )
 
     def test_frozen_evaluation_and_decision_requests_are_exact(self) -> None:

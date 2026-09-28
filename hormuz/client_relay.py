@@ -48,7 +48,6 @@ from .compaction_runtime import (
 )
 from .personal_metrics import (
     OptimizationMeasurement,
-    PersonalMetricsError,
     PersonalMetricsStore,
     ProviderMeasurement,
     ResponseUsageAccumulator,
@@ -62,7 +61,7 @@ _LOCAL_CREDENTIAL = re.compile(r"hox_l_[A-Za-z0-9_-]{43}")
 _ACCESS_CREDENTIAL = re.compile(r"hox_a_[A-Za-z0-9_-]{43}")
 _CLIENT_VERSION = re.compile(r"(?<!\d)(\d+\.\d+\.\d+)(?!\d)")
 MAX_OPTIMIZER_OVERHEAD_US = 100_000
-_MAX_PENDING_OPTIMIZATION_METRICS = 1024
+_MAX_PENDING_LOCAL_METRICS = 1024
 _HOP_HEADERS = frozenset(
     {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"}
 )
@@ -94,54 +93,52 @@ class SavedClientProfile:
 
 
 @dataclass(frozen=True)
-class _OptimizationMetricTask:
-    store: PersonalMetricsStore
-    measurement: OptimizationMeasurement
+class _LocalMetricTask:
+    write: Callable[[], None]
     finished: threading.Event
     on_failure: Callable[[], None]
 
 
-_OPTIMIZATION_METRIC_TASKS: queue.Queue[_OptimizationMetricTask] = queue.Queue(
-    maxsize=_MAX_PENDING_OPTIMIZATION_METRICS
+_LOCAL_METRIC_TASKS: queue.Queue[_LocalMetricTask] = queue.Queue(
+    maxsize=_MAX_PENDING_LOCAL_METRICS
 )
-_OPTIMIZATION_METRIC_WORKER_LOCK = threading.Lock()
-_optimization_metric_worker: threading.Thread | None = None
+_LOCAL_METRIC_WORKER_LOCK = threading.Lock()
+_local_metric_worker: threading.Thread | None = None
 
 
-def _run_optimization_metric_worker() -> None:
+def _run_local_metric_worker() -> None:
     while True:
-        task = _OPTIMIZATION_METRIC_TASKS.get()
+        task = _LOCAL_METRIC_TASKS.get()
         try:
-            task.store.record_optimization(task.measurement)
+            task.write()
         except Exception:
             # Measurement failure must never block or replace provider traffic.
             task.on_failure()
         finally:
             task.finished.set()
-            _OPTIMIZATION_METRIC_TASKS.task_done()
+            _LOCAL_METRIC_TASKS.task_done()
 
 
-def _submit_optimization_metric(
-    store: PersonalMetricsStore,
-    measurement: OptimizationMeasurement,
+def _submit_local_metric(
+    write: Callable[[], None],
     on_failure: Callable[[], None],
 ) -> threading.Event:
-    global _optimization_metric_worker
+    global _local_metric_worker
     finished = threading.Event()
-    with _OPTIMIZATION_METRIC_WORKER_LOCK:
+    with _LOCAL_METRIC_WORKER_LOCK:
         if (
-            _optimization_metric_worker is None
-            or not _optimization_metric_worker.is_alive()
+            _local_metric_worker is None
+            or not _local_metric_worker.is_alive()
         ):
-            _optimization_metric_worker = threading.Thread(
-                target=_run_optimization_metric_worker,
-                name="hormuz-optimization-metrics",
+            _local_metric_worker = threading.Thread(
+                target=_run_local_metric_worker,
+                name="hormuz-local-metrics",
                 daemon=True,
             )
-            _optimization_metric_worker.start()
+            _local_metric_worker.start()
     try:
-        _OPTIMIZATION_METRIC_TASKS.put_nowait(
-            _OptimizationMetricTask(store, measurement, finished, on_failure)
+        _LOCAL_METRIC_TASKS.put_nowait(
+            _LocalMetricTask(write, finished, on_failure)
         )
     except queue.Full:
         on_failure()
@@ -356,24 +353,22 @@ class RelayOptimizer:
         try:
             enabled = self.preference_store.load().enabled
         except ContextRuntimeError:
-            self._set_status(RelayStatus("settings_invalid"))
+            reason = "settings_invalid"
         else:
             if not enabled:
-                self._set_status(RelayStatus("off"))
+                reason = "off"
             else:
                 try:
                     adapter_for(self.client)
                 except AdapterError:
-                    self._set_status(RelayStatus("unsupported_client"))
+                    reason = "unsupported_client"
                 else:
-                    self._set_status(
-                        RelayStatus(
-                            "gateway_incompatible"
-                            if not self.gateway_compatible
-                            else "unsupported_history"
-                        )
+                    reason = (
+                        "gateway_incompatible"
+                        if not self.gateway_compatible
+                        else "unsupported_history"
                     )
-        reason = self.status.code
+        self._set_status(RelayStatus(reason))
         self._queue_observation(
             OptimizationMeasurement(
                 eligible=False,
@@ -468,8 +463,9 @@ class RelayOptimizer:
                 if self.metrics is metrics:
                     self.metrics = None
 
-        event = _submit_optimization_metric(
-            metrics, measurement, disable_failed_store
+        event = _submit_local_metric(
+            lambda: metrics.record_optimization(measurement),
+            disable_failed_store,
         )
         with self._metrics_lock:
             self._pending_metrics = {
@@ -517,6 +513,8 @@ class LocalRelayServer(ThreadingHTTPServer):
             raise ClientRelayError("unsupported_client") from error
         self.upstream_auth = upstream_auth
         self.metrics = metrics
+        self._metrics_lock = threading.Lock()
+        self._pending_metrics: set[threading.Event] = set()
         self.timeout_seconds = timeout_seconds
         self._upstream_condition = threading.Condition()
         self._upstreams: dict[http.client.HTTPConnection, socket.socket | None] = {}
@@ -586,6 +584,48 @@ class LocalRelayServer(ThreadingHTTPServer):
                 lambda: not self._upstreams, timeout=self._UPSTREAM_DRAIN_SECONDS
             )
         self.optimizer.flush_metrics(timeout=self._UPSTREAM_DRAIN_SECONDS)
+        self.flush_metrics(timeout=self._UPSTREAM_DRAIN_SECONDS)
+
+    def queue_provider_measurement(self, measurement: ProviderMeasurement) -> None:
+        """Persist provider measurements without delaying response completion."""
+        with self._metrics_lock:
+            metrics = self.metrics
+        if metrics is None:
+            return
+
+        def disable_failed_store() -> None:
+            with self._metrics_lock:
+                if self.metrics is metrics:
+                    self.metrics = None
+
+        event = _submit_local_metric(
+            lambda: metrics.record_provider(measurement),
+            disable_failed_store,
+        )
+        with self._metrics_lock:
+            self._pending_metrics = {
+                pending
+                for pending in self._pending_metrics
+                if not pending.is_set()
+            }
+            if not event.is_set():
+                self._pending_metrics.add(event)
+
+    def flush_metrics(self, timeout: float = 5.0) -> bool:
+        """Wait for this relay's queued provider measurements to settle."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            with self._metrics_lock:
+                self._pending_metrics = {
+                    event for event in self._pending_metrics if not event.is_set()
+                }
+                pending = tuple(self._pending_metrics)
+            if not pending:
+                return True
+            for event in pending:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not event.wait(remaining):
+                    return False
 
 
 class LocalRelayHandler(BaseHTTPRequestHandler):
@@ -803,44 +843,39 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
             self.close_connection = True
         finally:
             response.close()
-            if self.server.metrics is not None:
-                try:
-                    self.server.metrics.record_provider(
-                        ProviderMeasurement(
-                            succeeded=(
-                                accepted
-                                and completed
-                                and not cancelled
-                                and not upstream_failed
-                            ),
-                            cancelled=cancelled,
-                            response_received=True,
-                            response_bytes=accumulator.total_bytes,
-                            time_to_first_byte_ms=first_byte_ms,
-                            total_latency_ms=max(0.0, (time.perf_counter() - started) * 1000),
-                            usage=accumulator.usage(),
-                        )
-                    )
-                except PersonalMetricsError:
-                    self.server.metrics = None
-
-    def _record_provider_failure(self, started: float, *, cancelled: bool) -> None:
-        if self.server.metrics is None:
-            return
-        try:
-            self.server.metrics.record_provider(
+            self.server.queue_provider_measurement(
                 ProviderMeasurement(
-                    succeeded=False,
+                    succeeded=(
+                        accepted
+                        and completed
+                        and not cancelled
+                        and not upstream_failed
+                    ),
                     cancelled=cancelled,
-                    response_received=False,
-                    response_bytes=None,
-                    time_to_first_byte_ms=None,
-                    total_latency_ms=max(0.0, (time.perf_counter() - started) * 1000),
-                    usage={},
+                    response_received=True,
+                    response_bytes=accumulator.total_bytes,
+                    time_to_first_byte_ms=first_byte_ms,
+                    total_latency_ms=max(
+                        0.0, (time.perf_counter() - started) * 1000
+                    ),
+                    usage=accumulator.usage(),
                 )
             )
-        except PersonalMetricsError:
-            self.server.metrics = None
+
+    def _record_provider_failure(self, started: float, *, cancelled: bool) -> None:
+        self.server.queue_provider_measurement(
+            ProviderMeasurement(
+                succeeded=False,
+                cancelled=cancelled,
+                response_received=False,
+                response_bytes=None,
+                time_to_first_byte_ms=None,
+                total_latency_ms=max(
+                    0.0, (time.perf_counter() - started) * 1000
+                ),
+                usage={},
+            )
+        )
 
     def do_CONNECT(self) -> None:  # noqa: N802
         self._error(HTTPStatus.METHOD_NOT_ALLOWED, "local_method_not_allowed")
