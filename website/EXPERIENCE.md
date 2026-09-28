@@ -17,10 +17,10 @@ spend and policy chapters. It renders without JavaScript.
 | Active work plan, committed/pending/uncertain/available, scope and plan changes | Internal work-budget owner/report | `docs/WORK_BUDGETS.md`, current internal implementation | Preview; no public CLI or HTTP delivery claimed |
 | Model/client access, output caps, scoped budgets, secret handling | Policy administrator; configuration and managed policy CLI | Real Standard/Strict/Lockdown templates, validated document, scoped admin credential for activation; `docs/POLICY_CONTROL.md` | Teaching editor; apply/undo mutate only the example, with fixed historical usage |
 | Connection, client launcher, personal counters | Team member; Mac companion | Configured gateway, unique identity, supported client; `docs/MACOS_CLIENT_LOCAL.md` | Existing companion illustration plus concrete joining steps |
-| Local context optimization | Team member; Client → Context optimization | v1.2.0, supported mappings, matching helper/resources; `docs/CONTEXT_OPTIMIZATION.md` | Real 127-path transform, exact restore, default-Off switch, unchanged small result |
-| Mac/source/OCI downloads | Member or gateway operator | Published v1.2.0 artifacts and checksums; release source d854a5a453fcbe20cb3f4c1e261e146f2da93855 | Mac Apple Silicon/macOS 14+; Python 3.11+ source; Linux AMD64 OCI |
-| Codex/OpenAI | Member and operator | Documented protocol baseline; v1.2.0 OpenAI-only live qualification | Qualified release path with version boundaries |
-| Claude Code/Anthropic | Member and operator | Messages/streaming/counting protocol contract | Same-candidate v1.2 live qualification explicitly open |
+| Local context optimization | Team member; Client → Context optimization | v1.3.0, supported mappings, matching helper/resources; `docs/CONTEXT_OPTIMIZATION.md` | Real 127-path transform, exact restore, default-Off switch, unchanged small result |
+| Mac/source/OCI downloads | Member or gateway operator | Published v1.3.0 artifacts and checksums; release source cc5f5c1d38b4732823496240bbb4ace309a6240d | Mac Apple Silicon/macOS 14+; Python 3.11+ source; Linux AMD64 OCI |
+| Codex/OpenAI | Member and operator | Documented protocol baseline; v1.3.0 provider-free qualification plus maintained v1.2.0 OpenAI-only live evidence | Qualified release path with version boundaries |
+| Claude Code/Anthropic | Member and operator | Messages/streaming/counting protocol contract | Same-candidate v1.3.0 live qualification explicitly open |
 | Ollama/other endpoints | Operator evaluating compatibility | Ollama official Responses/Messages documentation and Hormuz configurable upstream routes | Candidate only; native Ollama/Chat Completions routes absent; no GPU cost accounting claim |
 
 ## Numeric and policy example
