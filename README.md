@@ -349,7 +349,7 @@ Public TLS remains a customer-controlled ingress responsibility. Read
 | Policy administration | [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) |
 | Usage, tokens, cost, and budgets | [docs/USAGE.md](docs/USAGE.md) |
 | Provider streaming, latency, failover, and compute boundaries | [docs/PROVIDER_RELIABILITY.md](docs/PROVIDER_RELIABILITY.md) |
-| Post-v1.2 portfolio development (v1.3.0 target): registry, attribution, outcomes, finance, and internal work budgets | [docs/PORTFOLIO_INTELLIGENCE.md](docs/PORTFOLIO_INTELLIGENCE.md) and [docs/WORK_BUDGETS.md](docs/WORK_BUDGETS.md) |
+| Post-v1.2 portfolio development (v1.3.0 target): registry, attribution, outcomes, finance, internal work budgets, and reviewable recommendations | [docs/PORTFOLIO_INTELLIGENCE.md](docs/PORTFOLIO_INTELLIGENCE.md), [docs/WORK_BUDGETS.md](docs/WORK_BUDGETS.md), and [docs/PORTFOLIO_RECOMMENDATIONS.md](docs/PORTFOLIO_RECOMMENDATIONS.md) |
 | Secret-egress controls | [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) |
 | Audit contracts and export | [docs/AUDIT.md](docs/AUDIT.md) |
 | Persistence and migrations | [docs/STORAGE.md](docs/STORAGE.md) |

@@ -72,7 +72,7 @@ class SQLiteScorecardTransitionTests(unittest.TestCase):
         self.upgrade()
         self.assertEqual(sqlite_snapshot(self.path), current)
 
-        with mock.patch.object(UsageStore, "schema_version", 19):
+        with mock.patch.object(UsageStore, "schema_version", 20):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
@@ -226,7 +226,7 @@ class PostgresScorecardTransitionTests(PostgresTestCase):
         self.upgrade()
         self.assertEqual(self.snapshot(), current)
 
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 24):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 25):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

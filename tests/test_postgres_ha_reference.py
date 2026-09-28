@@ -275,6 +275,12 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("wait_for_failover_quorum_ready", runner)
         self.assertIn("wait_for_synchronous_durability", runner)
         self.assertIn("sync_state = 'quorum'", runner)
+        self.assertIn("wait_for_cnpg_admission", runner)
+        self.assertIn("kubectl apply --dry-run=server", runner)
+        self.assertLess(
+            runner.index('wait_for_cnpg_admission "${HA_ROOT}/cluster.yaml"'),
+            runner.index('kubectl apply --filename "${HA_ROOT}/cluster.yaml"'),
+        )
         self.assertIn("wait_for_job_complete", runner)
         self.assertIn(
             "CNPG_INSTANCE_SELECTOR='cnpg.io/cluster=hormuz-postgres,cnpg.io/podRole=instance'",

@@ -26,6 +26,7 @@ from hormuz._linear_snapshot_schema import TABLE_DDL as LINEAR_SNAPSHOT_TABLES
 from hormuz._association_schema import TABLE_DDL as ASSOCIATION_TABLES
 from hormuz._scorecard_schema import TABLE_DDL as SCORECARD_TABLES
 from hormuz._role_view_schema import TABLE_DDL as ROLE_VIEW_TABLES
+from hormuz._recommendation_schema import TABLE_DDL as RECOMMENDATION_TABLES
 from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
 from hormuz._portfolio_schema import TABLE_DDL as REGISTRY_TABLES
 from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_RELIABILITY_TABLES
@@ -329,6 +330,7 @@ class PostgresTestCase(unittest.TestCase):
                     *ASSOCIATION_TABLES,
                     *SCORECARD_TABLES,
                     *ROLE_VIEW_TABLES,
+                    *RECOMMENDATION_TABLES,
                     LINEAR_CLAIM_TABLE,
                 ) if table in present)
                 immutable_tables = tuple(table for table in (
@@ -340,6 +342,7 @@ class PostgresTestCase(unittest.TestCase):
                     *ASSOCIATION_TABLES,
                     *SCORECARD_TABLES,
                     *ROLE_VIEW_TABLES,
+                    *RECOMMENDATION_TABLES,
                     LINEAR_CLAIM_TABLE,
                 ) if table in present)
                 # This class owns its unique disposable schema. Reset the exact

@@ -7,6 +7,7 @@ import os
 import shutil
 import socket
 import ssl
+import struct
 import subprocess
 import tempfile
 import threading
@@ -43,6 +44,7 @@ from hormuz.compaction_enforcement import (
 from hormuz.compaction_formats import restore_text
 from hormuz.compaction_protocols import derive_selections
 from hormuz.compaction_runtime import ContextPreferenceStore
+from hormuz.personal_metrics import PersonalMetricsStore
 
 
 COUNTERS = {"cl100k_base": len, "o200k_base": len}
@@ -449,6 +451,319 @@ class RelayTests(unittest.TestCase):
             gateway_thread.join(timeout=2)
             gateway.server_close()
 
+    def test_non_latin_1_provider_credentials_fail_before_connect(self) -> None:
+        for upstream_auth in ("openai", "anthropic"):
+            with self.subTest(upstream_auth=upstream_auth):
+                relay = LocalRelayServer(
+                    gateway="http://127.0.0.1:9",
+                    client="codex",
+                    local_credential=LOCAL_TOKEN,
+                    gateway_credential=lambda: "sk-invalid-☃",
+                    optimizer=RelayOptimizer(
+                        preference_store=self.store,
+                        client="codex",
+                        gateway_compatible=False,
+                    ),
+                    upstream_auth=upstream_auth,
+                )
+                relay_thread = threading.Thread(
+                    target=relay.serve_forever, daemon=True
+                )
+                relay_thread.start()
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", relay.server_port, timeout=5
+                )
+                try:
+                    connection.request(
+                        "POST",
+                        "/v1/responses",
+                        body=b"{}",
+                        headers={"Authorization": "Bearer " + LOCAL_TOKEN},
+                    )
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 503)
+                    self.assertEqual(
+                        json.loads(response.read())["error"]["code"],
+                        "gateway_credential_unavailable",
+                    )
+                finally:
+                    connection.close()
+                    relay.shutdown()
+                    relay_thread.join(timeout=2)
+                    relay.server_close()
+
+    def test_ttft_starts_at_the_first_response_body_byte(self) -> None:
+        gateway = socket.socket()
+        gateway.bind(("127.0.0.1", 0))
+        gateway.listen(1)
+        gateway.settimeout(5)
+        measurements = []
+        recorded = threading.Event()
+
+        class Metrics:
+            @staticmethod
+            def record_provider(measurement) -> None:
+                measurements.append(measurement)
+                recorded.set()
+
+        relay = LocalRelayServer(
+            gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}",
+            client="codex",
+            local_credential=LOCAL_TOKEN,
+            gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=RelayOptimizer(
+                preference_store=self.store,
+                client="codex",
+                gateway_compatible=False,
+            ),
+            metrics=Metrics(),
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        client = http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        upstream = None
+        try:
+            with mock.patch(
+                "hormuz.client_relay.time.perf_counter",
+                side_effect=[10.0, 12.0, 13.0],
+            ) as clock:
+                client.request(
+                    "POST",
+                    "/v1/responses",
+                    body=b"{}",
+                    headers={"Authorization": "Bearer " + LOCAL_TOKEN},
+                )
+                upstream, _ = gateway.accept()
+                request = b""
+                while b"\r\n\r\n{}" not in request:
+                    request += upstream.recv(8192)
+                upstream.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n"
+                    b"Connection: close\r\n\r\n"
+                )
+                response = client.getresponse()
+                self.assertEqual(response.status, 200)
+                # Receiving response headers alone must not record TTFT.
+                self.assertEqual(clock.call_count, 1)
+                upstream.sendall(b"x")
+                self.assertEqual(response.read(), b"x")
+                self.assertTrue(recorded.wait(2))
+            self.assertEqual(len(measurements), 1)
+            self.assertAlmostEqual(measurements[0].time_to_first_byte_ms, 2000.0)
+            self.assertAlmostEqual(measurements[0].total_latency_ms, 3000.0)
+        finally:
+            client.close()
+            if upstream is not None:
+                upstream.close()
+            relay.shutdown()
+            relay_thread.join(timeout=2)
+            relay.server_close()
+            gateway.close()
+
+    def test_provider_metrics_do_not_delay_close_framed_response(self) -> None:
+        gateway = socket.socket()
+        gateway.bind(("127.0.0.1", 0))
+        gateway.listen(1)
+        gateway.settimeout(5)
+        persistence_started = threading.Event()
+        release_persistence = threading.Event()
+
+        class BlockingMetrics:
+            @staticmethod
+            def record_provider(_measurement) -> None:
+                persistence_started.set()
+                if not release_persistence.wait(5):
+                    raise AssertionError("test did not release provider persistence")
+
+        relay = LocalRelayServer(
+            gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}",
+            client="codex",
+            local_credential=LOCAL_TOKEN,
+            gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=RelayOptimizer(
+                preference_store=self.store,
+                client="codex",
+                gateway_compatible=False,
+            ),
+            metrics=BlockingMetrics(),  # type: ignore[arg-type]
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        client = http.client.HTTPConnection(
+            "127.0.0.1", relay.server_port, timeout=5
+        )
+        upstream = None
+        reader = None
+        try:
+            client.request(
+                "POST",
+                "/v1/responses",
+                body=b"{}",
+                headers={"Authorization": "Bearer " + LOCAL_TOKEN},
+            )
+            upstream, _ = gateway.accept()
+            request = b""
+            while b"\r\n\r\n{}" not in request:
+                request += upstream.recv(8192)
+            upstream.sendall(
+                b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\ncomplete"
+            )
+            upstream.shutdown(socket.SHUT_WR)
+            response = client.getresponse()
+            self.assertEqual(response.status, 200)
+            body: list[bytes] = []
+            reader = threading.Thread(target=lambda: body.append(response.read()))
+            reader.start()
+            self.assertTrue(persistence_started.wait(2))
+            reader.join(timeout=1)
+            self.assertFalse(reader.is_alive())
+            self.assertEqual(body, [b"complete"])
+        finally:
+            release_persistence.set()
+            if reader is not None:
+                reader.join(timeout=5)
+            self.assertTrue(relay.flush_metrics())
+            client.close()
+            if upstream is not None:
+                upstream.close()
+            relay.shutdown()
+            relay_thread.join(timeout=2)
+            relay.server_close()
+            gateway.close()
+
+    def test_provider_failure_metrics_do_not_delay_error_response(self) -> None:
+        unavailable = socket.socket()
+        unavailable.bind(("127.0.0.1", 0))
+        unavailable_port = unavailable.getsockname()[1]
+        unavailable.close()
+        persistence_started = threading.Event()
+        release_persistence = threading.Event()
+
+        class BlockingMetrics:
+            @staticmethod
+            def record_provider(_measurement) -> None:
+                persistence_started.set()
+                if not release_persistence.wait(5):
+                    raise AssertionError("test did not release provider persistence")
+
+        relay = LocalRelayServer(
+            gateway=f"http://127.0.0.1:{unavailable_port}",
+            client="codex",
+            local_credential=LOCAL_TOKEN,
+            gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=RelayOptimizer(
+                preference_store=self.store,
+                client="codex",
+                gateway_compatible=False,
+            ),
+            metrics=BlockingMetrics(),  # type: ignore[arg-type]
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        result: list[tuple[int, bytes]] = []
+
+        def request() -> None:
+            connection = http.client.HTTPConnection(
+                "127.0.0.1", relay.server_port, timeout=5
+            )
+            try:
+                connection.request(
+                    "POST",
+                    "/v1/responses",
+                    body=b"{}",
+                    headers={"Authorization": "Bearer " + LOCAL_TOKEN},
+                )
+                response = connection.getresponse()
+                result.append((response.status, response.read()))
+            finally:
+                connection.close()
+
+        worker = threading.Thread(target=request)
+        try:
+            worker.start()
+            self.assertTrue(persistence_started.wait(2))
+            worker.join(timeout=1)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(result[0][0], 502)
+            self.assertEqual(
+                json.loads(result[0][1])["error"]["code"],
+                "gateway_unavailable",
+            )
+        finally:
+            release_persistence.set()
+            worker.join(timeout=5)
+            self.assertTrue(relay.flush_metrics())
+            relay.shutdown()
+            relay_thread.join(timeout=2)
+            relay.server_close()
+
+    def test_empty_provider_response_counts_without_inventing_ttft(self) -> None:
+        gateway = socket.socket()
+        gateway.bind(("127.0.0.1", 0))
+        gateway.listen(1)
+        gateway.settimeout(5)
+        metrics = PersonalMetricsStore(self.state, "empty-response")
+        relay = LocalRelayServer(
+            gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}",
+            client="codex",
+            local_credential=LOCAL_TOKEN,
+            gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=RelayOptimizer(
+                preference_store=self.store,
+                client="codex",
+                gateway_compatible=False,
+            ),
+            metrics=metrics,
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        client = http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        upstream = None
+        try:
+            client.request(
+                "POST",
+                "/v1/responses",
+                body=b"{}",
+                headers={"Authorization": "Bearer " + LOCAL_TOKEN},
+            )
+            upstream, _ = gateway.accept()
+            request = b""
+            while b"\r\n\r\n{}" not in request:
+                request += upstream.recv(8192)
+            upstream.sendall(
+                b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            response = client.getresponse()
+            self.assertEqual(response.status, 204)
+            self.assertEqual(response.read(), b"")
+            with relay._upstream_condition:
+                self.assertTrue(
+                    relay._upstream_condition.wait_for(
+                        lambda: not relay._upstreams, timeout=5
+                    )
+                )
+            self.assertTrue(relay.flush_metrics())
+            benefit = metrics.benefit(enabled=False)
+            self.assertEqual(
+                benefit["provider_activity"],
+                {"attempts": 1, "responses": 1, "failures": 0, "cancelled": 0},
+            )
+            self.assertEqual(
+                benefit["waiting"]["time_to_first_byte_ms"]["observed"], 0
+            )
+            self.assertEqual(
+                benefit["waiting"]["time_to_first_byte_ms"]["missing"], 1
+            )
+        finally:
+            client.close()
+            if upstream is not None:
+                upstream.close()
+            relay.shutdown()
+            relay_thread.join(timeout=2)
+            relay.server_close()
+            gateway.close()
+
     def test_shutdown_interrupts_blocked_upstream_read(self) -> None:
         for response_started in (False, True):
             with self.subTest(response_started=response_started):
@@ -459,10 +774,14 @@ class RelayTests(unittest.TestCase):
         gateway.bind(("127.0.0.1", 0))
         gateway.listen(1)
         gateway.settimeout(5)
+        metrics = PersonalMetricsStore(
+            self.state, f"shutdown-{'started' if response_started else 'headers'}"
+        )
         relay = LocalRelayServer(
             gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}", client="codex",
             local_credential=LOCAL_TOKEN, gateway_credential=lambda: ACCESS_TOKEN,
             optimizer=RelayOptimizer(preference_store=self.store, client="codex", gateway_compatible=False),
+            metrics=metrics,
         )
         relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
         relay_thread.start()
@@ -497,6 +816,15 @@ class RelayTests(unittest.TestCase):
             with relay._upstream_condition:
                 self.assertFalse(relay._upstreams)
             self.assertFalse(relay._register_upstream(http.client.HTTPConnection("127.0.0.1", 1)))
+            snapshot = metrics.snapshot()
+            self.assertEqual(snapshot["counters"]["provider_attempts"], 1)
+            self.assertEqual(snapshot["counters"]["provider_failures"], 0)
+            self.assertEqual(snapshot["counters"]["cancelled_requests"], 1)
+            self.assertEqual(snapshot["reasons"], {"cancelled": 1})
+            self.assertEqual(
+                metrics.benefit(enabled=False)["provider_activity"],
+                {"attempts": 1, "responses": int(response_started), "failures": 0, "cancelled": 1},
+            )
         finally:
             client.close()
             if upstream is not None:
@@ -658,10 +986,12 @@ class RelayTests(unittest.TestCase):
         gateway.bind(("127.0.0.1", 0))
         gateway.listen(2)
         gateway.settimeout(5)
+        metrics = PersonalMetricsStore(self.state, "upstream-reset")
         relay = LocalRelayServer(
             gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}", client="codex",
             local_credential=LOCAL_TOKEN, gateway_credential=lambda: ACCESS_TOKEN,
             optimizer=RelayOptimizer(preference_store=self.store, client="codex", gateway_compatible=False),
+            metrics=metrics,
         )
         relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
         relay_thread.start()
@@ -678,6 +1008,11 @@ class RelayTests(unittest.TestCase):
                     request += upstream.recv(8192)
                 self.assertTrue(request.startswith(b"POST /v1/responses"))
                 # The gateway may have committed the request before disconnect.
+                upstream.setsockopt(
+                    socket.SOL_SOCKET,
+                    socket.SO_LINGER,
+                    struct.pack("ii", 1, 0),
+                )
             try:
                 response = client.getresponse()
             except (http.client.RemoteDisconnected, ConnectionResetError):
@@ -688,6 +1023,18 @@ class RelayTests(unittest.TestCase):
             gateway.settimeout(0.25)
             with self.assertRaises(socket.timeout):
                 gateway.accept()
+            with relay._upstream_condition:
+                self.assertTrue(
+                    relay._upstream_condition.wait_for(
+                        lambda: not relay._upstreams, timeout=5
+                    )
+                )
+            self.assertTrue(relay.flush_metrics())
+            self.assertEqual(
+                metrics.benefit(enabled=False)["provider_activity"],
+                {"attempts": 1, "responses": 0, "failures": 1, "cancelled": 0},
+            )
+            self.assertEqual(metrics.snapshot()["reasons"], {"provider_failure": 1})
         finally:
             client.close()
             relay.shutdown()
@@ -700,8 +1047,13 @@ class RelayTests(unittest.TestCase):
         gateway_thread = threading.Thread(target=gateway.serve_forever, daemon=True)
         gateway_thread.start()
         self.store.save(True)
+        metrics = PersonalMetricsStore(self.state, "oversized")
         optimizer = RelayOptimizer(
-            preference_store=self.store, client="codex", gateway_compatible=True, counters=COUNTERS
+            preference_store=self.store,
+            client="codex",
+            gateway_compatible=True,
+            counters=COUNTERS,
+            metrics=metrics,
         )
         relay = LocalRelayServer(
             gateway=f"http://127.0.0.1:{gateway.server_port}", client="codex",
@@ -721,8 +1073,18 @@ class RelayTests(unittest.TestCase):
             connection.close()
             self.assertEqual(gateway.requests[0][0], original)
             self.assertEqual(optimizer.status.code, "unsupported_history")
+            self.assertTrue(optimizer.flush_metrics())
+            benefit = metrics.benefit(enabled=True)
+            self.assertEqual(benefit["traffic"]["total_requests"], 1)
+            reduction = benefit["request_byte_reduction"]["all_captured_traffic"]
+            self.assertEqual(reduction["observed_requests"], 1)
+            self.assertEqual(reduction["expected_requests"], 1)
+            self.assertEqual(reduction["bytes"], 0)
+            self.assertEqual(reduction["percent"], 0.0)
+            self.assertTrue(reduction["complete"])
+            self.assertFalse(reduction["missing"])
             self.store.save(False)
-            optimizer.note_oversized_passthrough()
+            optimizer.note_oversized_passthrough(len(original))
             self.assertEqual(optimizer.status.code, "off")
         finally:
             relay.shutdown()
@@ -731,6 +1093,104 @@ class RelayTests(unittest.TestCase):
             gateway.shutdown()
             gateway_thread.join(timeout=2)
             gateway.server_close()
+
+    def test_oversized_passthrough_keeps_its_reason_during_concurrent_status_change(self) -> None:
+        self.store.save(True)
+        metrics = PersonalMetricsStore(self.state, "oversized-race")
+        optimizer = RelayOptimizer(
+            preference_store=self.store,
+            client="codex",
+            gateway_compatible=True,
+            counters=COUNTERS,
+            metrics=metrics,
+        )
+        selected = threading.Event()
+        release = threading.Event()
+        original_set_status = optimizer._set_status
+
+        def pause_after_selection(status) -> None:
+            original_set_status(status)
+            if status.code == "unsupported_history":
+                selected.set()
+                if not release.wait(5):
+                    raise AssertionError("test did not release oversized request")
+
+        worker = threading.Thread(
+            target=lambda: optimizer.note_oversized_passthrough(
+                MAX_REQUEST_BYTES + 1
+            )
+        )
+        with mock.patch.object(optimizer, "_set_status", pause_after_selection):
+            try:
+                worker.start()
+                self.assertTrue(selected.wait(2))
+                original_set_status(relay_module.RelayStatus("ready"))
+            finally:
+                release.set()
+                worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(optimizer.flush_metrics())
+        self.assertIsNotNone(optimizer.metrics)
+        self.assertEqual(metrics.snapshot()["reasons"], {"unsupported_history": 1})
+
+    def test_truncated_oversized_upload_records_no_request_metrics(self) -> None:
+        gateway = socket.socket()
+        gateway.bind(("127.0.0.1", 0))
+        gateway.listen(1)
+        gateway.settimeout(5)
+        self.store.save(True)
+        metrics = PersonalMetricsStore(self.state, "truncated-oversized")
+        optimizer = RelayOptimizer(
+            preference_store=self.store,
+            client="codex",
+            gateway_compatible=True,
+            counters=COUNTERS,
+            metrics=metrics,
+        )
+        relay = LocalRelayServer(
+            gateway=f"http://127.0.0.1:{gateway.getsockname()[1]}",
+            client="codex",
+            local_credential=LOCAL_TOKEN,
+            gateway_credential=lambda: ACCESS_TOKEN,
+            optimizer=optimizer,
+            metrics=metrics,
+        )
+        relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+        relay_thread.start()
+        client = socket.create_connection(("127.0.0.1", relay.server_port), timeout=5)
+        upstream = None
+        try:
+            declared = MAX_REQUEST_BYTES + 1
+            request = (
+                f"POST /v1/responses HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{relay.server_port}\r\n"
+                f"Authorization: Bearer {LOCAL_TOKEN}\r\n"
+                "Content-Type: application/json\r\n"
+                f"Content-Length: {declared}\r\n\r\n"
+            ).encode("ascii")
+            client.sendall(request + b"partial-upload")
+            upstream, _ = gateway.accept()
+            client.shutdown(socket.SHUT_WR)
+            client.close()
+            upstream.settimeout(5)
+            while upstream.recv(8192):
+                pass
+            self.assertTrue(relay.flush_metrics())
+            snapshot = metrics.snapshot()
+            self.assertEqual(snapshot["counters"]["requests_total"], 0)
+            self.assertNotIn("unsupported_history", snapshot["reasons"])
+            self.assertEqual(snapshot["counters"]["cancelled_requests"], 1)
+        finally:
+            try:
+                client.close()
+            except OSError:
+                pass
+            if upstream is not None:
+                upstream.close()
+            relay.shutdown()
+            relay_thread.join(timeout=2)
+            relay.server_close()
+            gateway.close()
 
     def test_supported_codex_tool_shape_changes_through_launched_client(self) -> None:
         gateway = _Gateway()
@@ -1052,6 +1512,34 @@ raise SystemExit(0 if response.status == 200 else 1)
                 os.environ.pop("PATH", None)
             else:
                 os.environ["PATH"] = old_path
+
+    def test_client_version_probe_uses_the_supplied_environment(self) -> None:
+        bin_directory = Path(self.temporary.name) / "sanitized-version-bin"
+        bin_directory.mkdir()
+        codex = bin_directory / "codex"
+        codex.write_text(
+            "#!/bin/sh\n"
+            "if [ -n \"$PERSONAL_TEST_PROVIDER_KEY\" ]; then exit 7; fi\n"
+            "echo 'codex-cli 0.148.0'\n",
+            encoding="utf-8",
+        )
+        codex.chmod(0o700)
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PATH": str(bin_directory),
+                "PERSONAL_TEST_PROVIDER_KEY": "must-not-reach-version-probe",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                supported_client_executable(
+                    "codex",
+                    expected_version="0.148.0",
+                    environment={"PATH": str(bin_directory)},
+                ),
+                str(codex),
+            )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,172 @@
+{
+  "schema_id": "hormuz.personal-qualification-fixture",
+  "schema_version": 1,
+  "adapters": ["codex", "claude-code", "aider"],
+  "structural_compaction": {
+    "client": "codex",
+    "protocol": "responses",
+    "tool_name": "exec_command",
+    "command": "rg --files generated",
+    "path_prefix": "generated/qualified_repetitive_path_",
+    "path_suffix": ".py",
+    "path_count": 64,
+    "expected_format": "hormuz-path-list-v1"
+  },
+  "semantic_history": {
+    "recent_turns": 4,
+    "turns": [
+      {
+        "role": "system",
+        "content": "Keep provider credentials out of messages and artifacts.",
+        "constraints": ["Keep provider credentials out of messages and artifacts."]
+      },
+      {
+        "role": "user",
+        "content": "Inspect the old generated output and summarize only the exact typed state. This deliberately repetitive resolved turn is long enough to establish a useful local reduction without asking a model to rewrite it. Inspect the old generated output and summarize only the exact typed state."
+      },
+      {
+        "role": "assistant",
+        "content": "The old generated output was inspected and this resolved response repeats detail that is no longer needed once the recent typed state is retained. The old generated output was inspected and this resolved response repeats detail that is no longer needed once the recent typed state is retained."
+      },
+      {
+        "role": "tool",
+        "content": "Earlier test state contained verbose resolved diagnostics that can be omitted after a newer state exists. Earlier test state contained verbose resolved diagnostics that can be omitted after a newer state exists.",
+        "tool_name": "tests",
+        "tool_state": "failed"
+      },
+      {
+        "role": "user",
+        "content": "What remains before qualification?",
+        "unresolved_question": true
+      },
+      {
+        "role": "assistant",
+        "content": "Checking the current typed result."
+      },
+      {
+        "role": "tool",
+        "content": "Current qualification suite passed.",
+        "tool_name": "tests",
+        "tool_state": "passed"
+      },
+      {
+        "role": "assistant",
+        "content": "The current result is ready for the next bounded gate."
+      }
+    ],
+    "expected": {
+      "constraint": "Keep provider credentials out of messages and artifacts.",
+      "unresolved_question": "What remains before qualification?",
+      "tool_name": "tests",
+      "tool_state": "passed",
+      "reduction_required": true,
+      "recovery_required": true
+    }
+  },
+  "execution_cases": [
+    {
+      "name": "exact_json_lookup",
+      "request": {
+        "step_id": "step-exact",
+        "tool_call_id": "call-exact",
+        "operation": "json_get",
+        "payload": {"document": {"items": [3, 7]}, "path": ["items", 1]},
+        "permission": "read",
+        "side_effecting": false,
+        "streaming_required": false,
+        "expected_model_input_tokens": 300
+      },
+      "expected_method": "deterministic",
+      "expected_result": 7,
+      "model_step_avoided": true
+    },
+    {
+      "name": "ambiguous_language_falls_back",
+      "request": {
+        "step_id": "step-ambiguous",
+        "tool_call_id": "call-ambiguous",
+        "operation": "interpret_request",
+        "payload": {"request": "Choose the nicest answer."},
+        "permission": "read",
+        "side_effecting": false,
+        "streaming_required": true,
+        "expected_model_input_tokens": 300
+      },
+      "expected_method": "model",
+      "expected_result": null,
+      "model_step_avoided": false
+    }
+  ],
+  "jev_cases": [
+    {
+      "name": "qualified_handler_choice",
+      "state": {"files": ["tests/test_feature.py"]},
+      "options": {"tests": "Testing work", "docs": "Documentation work"},
+      "instructions": "Choose the supplied handler for this typed work item.",
+      "expected_model_input_tokens": 500,
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "handler": {
+            "type": "choice",
+            "choice": "tests",
+            "probabilities": {"tests": 0.91, "docs": 0.09},
+            "confidence": 0.82
+          }
+        },
+        "usage": {"input_tokens": 40, "output_tokens": 10},
+        "actual_cost_microusd": 125
+      },
+      "minimum_probability": 0.8,
+      "minimum_net_tokens": 100,
+      "maximum_latency_ms": 1000,
+      "expected_method": "jev",
+      "expected_choice": "tests"
+    },
+    {
+      "name": "low_probability_falls_back",
+      "state": {"files": ["mixed.txt"]},
+      "options": {"tests": "Testing work", "docs": "Documentation work"},
+      "instructions": "Choose the supplied handler for this typed work item.",
+      "expected_model_input_tokens": 500,
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "handler": {
+            "type": "choice",
+            "choice": "docs",
+            "probabilities": {"tests": 0.49, "docs": 0.51},
+            "confidence": 0.99
+          }
+        },
+        "usage": {"input_tokens": 40, "output_tokens": 10}
+      },
+      "minimum_probability": 0.8,
+      "minimum_net_tokens": 100,
+      "maximum_latency_ms": 1000,
+      "expected_method": "model",
+      "expected_choice": null
+    }
+  ],
+  "behavior": {
+    "repeated_failure": {
+      "intent": "read project configuration",
+      "tool_name": "read_file",
+      "outcome": "failure",
+      "error_kind": "temporarily_unavailable",
+      "permission": "read",
+      "side_effecting": false,
+      "retryable": true
+    },
+    "excluded_poll": {
+      "intent": "check status",
+      "tool_name": "status",
+      "outcome": "failure",
+      "error_kind": "pending",
+      "permission": "read",
+      "side_effecting": false,
+      "retryable": true,
+      "polling": true
+    }
+  }
+}

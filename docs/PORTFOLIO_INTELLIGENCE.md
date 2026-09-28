@@ -231,6 +231,12 @@ The ordered release plan is [epic #226](https://github.com/Xpounder-com/hormuz/i
 5. exact final-candidate transition proof to close #214 and the pre-registered
    external candidate proof (#225).
 
+The #224 source candidate's concrete routes, evidence bindings, lifecycle,
+storage, migration, and separate-activation boundary are documented in
+[Portfolio policy recommendations](PORTFOLIO_RECOMMENDATIONS.md). Passing its
+provider-free source and package checks does not establish exact-main CI, the
+final #214 transition gate, the external #225 result, or release publication.
+
 The first #214 checkpoint unblocks the corresponding feature work only after
 #212 and #213 close; feature PRs must pass their applicable transition tests.
 #214 remains open until the final candidate satisfies its complete artifact,

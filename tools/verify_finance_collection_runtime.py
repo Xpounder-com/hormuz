@@ -182,6 +182,7 @@ def verify_finance_collection_runtime(
                     (16, 21),
                     (17, 22),
                     (18, 23),
+                    (19, 24),
                 }
             )
         else:

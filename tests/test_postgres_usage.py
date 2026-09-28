@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from decimal import Decimal
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -11,14 +12,49 @@ from unittest import mock
 
 from hormuz.evidence import EvidenceStorageError
 from hormuz.postgres import PostgresStorageError, postgres_transaction
-from hormuz.postgres_usage_store import PostgresUsageStore
-from hormuz.store import ReservationDenied, ReservationScope, UsageStore
+from hormuz.postgres_usage_store import PostgresUsageStore, _monthly_totals_from_row
+from hormuz.store import MonthlyTotals, ReservationDenied, ReservationScope, UsageStore
 if __package__:
     from ._postgres_fixture import FIXTURES, PostgresTestCase, _identity, _normalized_events
     from ._usage_repository_contract import exercise_usage_repository, ledger_clock, read_usage_repository
 else:  # Isolated wheel compatibility discovery uses the tests directory as its import root.
     from _postgres_fixture import FIXTURES, PostgresTestCase, _identity, _normalized_events
     from _usage_repository_contract import exercise_usage_repository, ledger_clock, read_usage_repository
+
+
+class PostgresUsageNormalizationTests(unittest.TestCase):
+    def test_monthly_numeric_aggregates_are_integer_and_json_safe(self) -> None:
+        row = {
+            "requests": 3,
+            "denied_requests": Decimal("1"),
+            "rate_limited_requests": Decimal("2"),
+            "input_tokens": Decimal("101"),
+            "output_tokens": Decimal("23"),
+            "cache_read_tokens": Decimal("11"),
+            "cache_write_tokens": Decimal("5"),
+            "reasoning_tokens": Decimal("7"),
+            "cost_microusd": Decimal("1234"),
+            "redaction_count": Decimal("4"),
+        }
+
+        totals = _monthly_totals_from_row(row)
+
+        self.assertEqual(
+            totals,
+            MonthlyTotals(
+                requests=3,
+                denied_requests=1,
+                rate_limited_requests=2,
+                input_tokens=101,
+                output_tokens=23,
+                cache_read_tokens=11,
+                cache_write_tokens=5,
+                reasoning_tokens=7,
+                cost_microusd=1234,
+                redaction_count=4,
+            ),
+        )
+        self.assertTrue(all(type(value) is int for value in vars(totals).values()))
 
 
 class PostgresUsageEvidenceTests(PostgresTestCase):
@@ -341,7 +377,12 @@ class PostgresUsageEvidenceTests(PostgresTestCase):
                 status="succeeded",
                 cost_microusd=400,
             )
-        self.assertEqual(self.store.monthly_totals(organization_id="acme").requests, 1)
+        acme_totals = self.store.monthly_totals(organization_id="acme")
+        self.assertEqual(acme_totals.requests, 1)
+        self.assertTrue(
+            all(type(value) is int for value in vars(acme_totals).values()),
+            "PostgreSQL aggregate counters must match the integer repository contract",
+        )
         self.assertEqual(self.store.monthly_totals(organization_id="beta").requests, 1)
         scope = ReservationScope(name="organization", cost_limit_microusd=1_000)
         first = self.store.reserve_budget(

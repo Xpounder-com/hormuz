@@ -145,6 +145,23 @@
       ]
     },
     {
+      "id": "policy_recommendation_metadata",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "portfolio_policy_recommendation_cursors",
+        "portfolio_policy_recommendation_events",
+        "portfolio_policy_recommendation_read_audit",
+        "portfolio_policy_recommendation_snapshots"
+      ],
+      "postgresql_tables": [
+        "portfolio_policy_recommendation_cursors",
+        "portfolio_policy_recommendation_events",
+        "portfolio_policy_recommendation_read_audit",
+        "portfolio_policy_recommendation_snapshots"
+      ]
+    },
+    {
       "id": "linear_connector_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

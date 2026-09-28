@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 
 from tools import verify_core_wheel as packaging
+from tools import verify_recommendation_runtime as successor_verifier
 from tools import verify_role_view_runtime as verifier
 
 
@@ -20,7 +21,15 @@ class RoleViewRuntimePlanTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         plan = json.loads((verifier.ROOT / verifier.PLAN_PATH).read_text())
-        paths = set(verifier.REQUIRED_FILES) | set(plan["source_sha256"])
+        successor_plan = json.loads(
+            (successor_verifier.ROOT / successor_verifier.PLAN_PATH).read_text()
+        )
+        paths = (
+            set(verifier.REQUIRED_FILES)
+            | set(plan["source_sha256"])
+            | set(successor_verifier.REQUIRED_FILES)
+            | set(successor_plan["source_sha256"])
+        )
         for relative in paths:
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -45,12 +54,14 @@ class RoleViewRuntimePlanTests(unittest.TestCase):
 
     def test_fixed_runtime_preserves_external_and_release_gates(self):
         result = verifier.verify(self.root)
-        self.assertEqual(result["status"], "role_view_runtime_candidate_verified")
+        self.assertEqual(result["status"], "role_view_runtime_successor_verified")
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
-            (18, 23),
+            (19, 24),
         )
-        self.assertEqual(result["postgresql_acl"], list(verifier.EXPECTED_ACL))
+        self.assertEqual(
+            result["postgresql_acl"], list(successor_verifier.EXPECTED_ACL)
+        )
         self.assertEqual(result["table_count"], 2)
         self.assertEqual(result["route_count"], 4)
         self.assertEqual(
@@ -58,7 +69,7 @@ class RoleViewRuntimePlanTests(unittest.TestCase):
         )
         self.assertTrue(result["role_scoped_decision_views_implemented"])
         self.assertFalse(result["live_connectors_authorized"])
-        self.assertFalse(result["recommendations_implemented"])
+        self.assertTrue(result["recommendations_implemented"])
         self.assertFalse(result["released"])
 
     def test_duplicate_plan_member_is_rejected(self):
@@ -80,10 +91,21 @@ class RoleViewRuntimePlanTests(unittest.TestCase):
 
     def test_gate_overclaim_is_rejected_even_when_repinned(self):
         plan = self.plan()
+        for relative in plan["source_sha256"]:
+            plan["source_sha256"][relative] = hashlib.sha256(
+                (self.root / relative).read_bytes()
+            ).hexdigest()
         plan["gates"]["exact_main_ci_verified"] = True
         self.write_plan(plan)
         with mock.patch.object(
             verifier, "PLAN_SHA256", verifier.canonical_digest(plan)
+        ), mock.patch.object(
+            verifier, "SQLITE_SCHEMA_VERSION", 18
+        ), mock.patch.object(
+            verifier, "POSTGRES_SCHEMA_VERSION", 23
+        ), mock.patch.dict(
+            verifier._POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
+            {23: verifier.EXPECTED_ACL},
         ):
             with self.assertRaisesRegex(
                 verifier.RoleViewRuntimePlanError,
@@ -109,9 +131,9 @@ class RoleViewRuntimePlanTests(unittest.TestCase):
 
     def test_schema_or_acl_boundary_change_is_rejected(self):
         for sqlite_version, postgres_version, acl in (
-            (17, 23, verifier.EXPECTED_ACL),
-            (18, 22, verifier.EXPECTED_ACL),
-            (18, 23, (261, "0" * 64)),
+            (18, 24, successor_verifier.EXPECTED_ACL),
+            (19, 23, successor_verifier.EXPECTED_ACL),
+            (19, 24, (249, "0" * 64)),
         ):
             with self.subTest(
                 sqlite=sqlite_version, postgres=postgres_version
@@ -121,7 +143,7 @@ class RoleViewRuntimePlanTests(unittest.TestCase):
                 verifier, "POSTGRES_SCHEMA_VERSION", postgres_version
             ), mock.patch.dict(
                 verifier._POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
-                {23: acl},
+                {24: acl},
             ):
                 with self.assertRaisesRegex(
                     verifier.RoleViewRuntimePlanError,

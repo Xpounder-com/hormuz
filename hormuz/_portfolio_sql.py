@@ -45,6 +45,10 @@ from ._role_view_schema import (
     TABLE_DDL as ROLE_VIEW_OWNED_TABLES,
     verify_postgres_role_views,
 )
+from ._recommendation_schema import (
+    TABLE_DDL as RECOMMENDATION_TABLES,
+    verify_postgres_recommendations,
+)
 from ._budget_schema import (
     ACTIVE_TABLE as BUDGET_ACTIVE_TABLE,
     TABLE_DDL as BUDGET_TABLES,
@@ -109,6 +113,7 @@ def portfolio_transaction(
     tables=TABLE_DDL,
     statement_timeout_ms: int = 10000,
     budget_lock: bool = False,
+    policy_lock: bool = False,
     mutable_tables: frozenset[str] = frozenset(),
 ) -> Iterator[PortfolioSQL]:
     if type(statement_timeout_ms) is not int or not 1 <= statement_timeout_ms <= 10000:
@@ -213,6 +218,22 @@ def portfolio_transaction(
                             storage.postgres_schema,
                             PostgresStorageError,
                         )
+                    if tables is RECOMMENDATION_TABLES:
+                        verify_postgres_recommendations(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
+                        verify_postgres_budget(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
+                        verify_postgres_scorecards(
+                            cursor,
+                            storage.postgres_schema,
+                            PostgresStorageError,
+                        )
                 for table in tables:
                     qualified = f'"{storage.postgres_schema}".{table}'
                     excessive_privileges = "DELETE,TRUNCATE" if table in mutable_tables else "UPDATE,DELETE,TRUNCATE"
@@ -242,6 +263,14 @@ def portfolio_transaction(
                             ).fetchone()["allowed"]
                             if has_update != (name in allowed):
                                 raise PortfolioError("unavailable")
+                if policy_lock:
+                    # Share policy control's lock namespace so a caller cannot
+                    # validate one active policy and commit after another
+                    # version is activated concurrently.
+                    connection.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                        (f"hormuz:policy:{organization_id}",),
+                    )
                 if budget_lock:
                     connection.execute(
                         "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",

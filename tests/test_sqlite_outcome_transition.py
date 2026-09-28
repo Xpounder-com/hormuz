@@ -22,6 +22,7 @@ from hormuz._linear_snapshot_schema import TABLE_DDL as LINEAR_SNAPSHOT_TABLES
 from hormuz._association_schema import TABLE_DDL as ASSOCIATION_TABLES
 from hormuz._scorecard_schema import TABLE_DDL as SCORECARD_TABLES
 from hormuz._role_view_schema import TABLE_DDL as ROLE_VIEW_TABLES
+from hormuz._recommendation_schema import TABLE_DDL as RECOMMENDATION_TABLES
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import OUTCOMES
@@ -63,7 +64,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 18)
+        self.assertEqual(UsageStore.schema_version, 19)
         self.predecessor_request = {"backend": "sqlite", "path": str(self.path)}
         self.seeded = attribution_predecessor_call({**self.predecessor_request, "mode": "seed"})
         self.assertEqual(self.seeded["status"], "ready")
@@ -78,7 +79,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         def apply(connection, version):
             self.assertIn(
                 version,
-                (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18),
+                (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19),
             )
             if fail and version == 7:
                 connection.execute(sqlite_statements()[0])
@@ -105,6 +106,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
             | set(ASSOCIATION_TABLES)
             | set(SCORECARD_TABLES)
             | set(ROLE_VIEW_TABLES)
+            | set(RECOMMENDATION_TABLES)
         )
         current["objects"] = [
             row for row in current["objects"]
@@ -114,7 +116,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         current["rows"]["hormuz_schema_migrations"] = [
             row
             for row in current["rows"]["hormuz_schema_migrations"]
-            if row[0] not in {7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}
+            if row[0] not in {7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
         ]
         self.assertEqual(current, before)
 
@@ -122,18 +124,19 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.upgrade()
         self.assert_prior_state_preserved()
         current = sqlite_snapshot(self.path)
-        self.assertEqual(len(current["rows"]), 65)
+        self.assertEqual(len(current["rows"]), 69)
         self.assertTrue(all(not current["rows"][table] for table in ACCOUNT_BINDING_TABLES))
         self.assertTrue(all(not current["rows"][table] for table in LINEAR_TABLES))
         self.assertTrue(all(not current["rows"][table] for table in LINEAR_SNAPSHOT_TABLES))
         self.assertTrue(all(not current["rows"][table] for table in ASSOCIATION_TABLES))
         self.assertTrue(all(not current["rows"][table] for table in SCORECARD_TABLES))
         self.assertTrue(all(not current["rows"][table] for table in ROLE_VIEW_TABLES))
+        self.assertTrue(all(not current["rows"][table] for table in RECOMMENDATION_TABLES))
         before = sqlite_snapshot(self.path)
-        # The candidate binary ends at schema 18. Pretend the next schema
-        # exists so the already-upgraded v18 database exercises the
+        # The candidate binary ends at schema 19. Pretend schema 20 exists so
+        # the already-upgraded v19 database exercises the
         # unsupported-following-migration guard.
-        with mock.patch.object(UsageStore, "schema_version", 19):
+        with mock.patch.object(UsageStore, "schema_version", 20):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

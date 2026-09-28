@@ -2817,6 +2817,10 @@
         "reason_code": {
           "$ref": "#/$defs/reason_code"
         },
+        "pre_apply_evidence": {
+          "$ref": "#/$defs/pre_apply_evidence",
+          "description": "Exact server-derived evidence required to accept this recommendation."
+        },
         "automatic_application": {
           "type": "boolean",
           "const": false,

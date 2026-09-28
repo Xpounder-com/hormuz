@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 
-SQLITE_SCHEMA_VERSION = 18
+SQLITE_SCHEMA_VERSION = 19
 
 
 class StorageErrorFactory(Protocol):
@@ -472,6 +472,9 @@ def verify_applied_sqlite_schema_shape(
     if version >= 18:
         from ._role_view_schema import verify_sqlite_role_views
         verify_sqlite_role_views(connection, error_factory)
+    if version >= 19:
+        from ._recommendation_schema import verify_sqlite_recommendations
+        verify_sqlite_recommendations(connection, error_factory)
 
     required = {
         "gateway_usage_events": {
@@ -756,6 +759,10 @@ def apply_sqlite_migration(
     if version == 18:
         from ._role_view_schema import apply_sqlite_role_view_migration
         apply_sqlite_role_view_migration(connection)
+        return
+    if version == 19:
+        from ._recommendation_schema import apply_sqlite_recommendation_migration
+        apply_sqlite_recommendation_migration(connection)
         return
     raise error_factory("storage_schema_migration_unsupported")
 

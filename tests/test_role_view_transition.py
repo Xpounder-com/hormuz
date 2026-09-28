@@ -43,7 +43,10 @@ class SQLiteRoleViewTransitionTests(unittest.TestCase):
             if fail:
                 raise RuntimeError("synthetic_role_view_migration_failure")
 
-        with mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
+        with (
+            mock.patch.object(UsageStore, "schema_version", 18),
+            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
+        ):
             UsageStore(self.path).verify_ready()
 
     def assert_predecessor_preserved(self) -> None:
@@ -68,7 +71,7 @@ class SQLiteRoleViewTransitionTests(unittest.TestCase):
         self.upgrade()
         self.assertEqual(sqlite_snapshot(self.path), current)
 
-        with mock.patch.object(UsageStore, "schema_version", 19):
+        with mock.patch.object(UsageStore, "schema_version", 20):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
@@ -133,7 +136,9 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
         )
 
     def setUp(self) -> None:
-        super().setUp()
+        # Each case deliberately leaves this class-owned schema at 23. Build
+        # the predecessor directly so a newer installed runtime does not try
+        # to open the prior test's intentionally historical ledger first.
         self._drop_schema(self.schema)
         with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 22):
             self.assertEqual(self.migrate().version, 22)
@@ -183,6 +188,8 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
 
         with mock.patch.object(
             postgres_module, "_migration_sql", side_effect=migration
+        ), mock.patch.object(
+            postgres_module, "POSTGRES_SCHEMA_VERSION", 23
         ):
             self.assertEqual(self.migrate().version, 23)
 
@@ -210,7 +217,7 @@ class PostgresRoleViewTransitionTests(PostgresTestCase):
         self.upgrade()
         self.assertEqual(self.snapshot(), current)
 
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 24):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 25):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

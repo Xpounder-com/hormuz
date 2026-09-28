@@ -31,6 +31,7 @@ unregistered table.
 | `run_outcome_association_metadata` | `portfolio_association_audit_events`, `portfolio_run_outcome_association_cursors`, `portfolio_run_outcome_association_events`, `portfolio_run_work_link_events`, `portfolio_run_work_link_idempotency` | `portfolio_association_audit_events`, `portfolio_run_outcome_association_cursors`, `portfolio_run_outcome_association_events`, `portfolio_run_work_link_events`, `portfolio_run_work_link_idempotency` | Append-only administrator assertions, exact attempt/attribution/source/binding identities, versioned deterministic decisions, keyed replay bindings, fixed-code read/write audit, and digest-bound cursors. Metric references are derived from these rows and existing attempt/cost/outcome facts without storing a scorecard. No title, body, comment, prompt, response, path, employee ranking, raw provider payload, or credential. |
 | `model_scorecard_metadata` | `portfolio_model_scorecard_snapshots`, `portfolio_scorecard_audit_events` | `portfolio_model_scorecard_snapshots`, `portfolio_scorecard_audit_events` | Immutable, versioned model-scorecard snapshots and build audit facts. Canonical input and evaluation documents contain only allowlisted operational metadata, exact source digests, confidence intervals, guardrail results, scope/window identity, decision ownership and lineage. No title, body, comment, prompt, response, path, employee ranking, raw provider payload, credential or causal claim. |
 | `portfolio_role_view_control` | `portfolio_role_view_audit_events`, `portfolio_role_view_cursors` | `portfolio_role_view_audit_events`, `portfolio_role_view_cursors` | Append-only metadata for authorized finance, platform, and team aggregate reads: actor and configured role, bounded organization/team scope, filter digest, frozen primary/companion sequences, page size, opaque cursor position and expiry, result count, and partial-provenance count. No source content, prompt, response, title, body, comment, code, filename, credential, employee rank, or person comparison. |
+| `policy_recommendation_metadata` | `portfolio_policy_recommendation_cursors`, `portfolio_policy_recommendation_events`, `portfolio_policy_recommendation_read_audit`, `portfolio_policy_recommendation_snapshots` | `portfolio_policy_recommendation_cursors`, `portfolio_policy_recommendation_events`, `portfolio_policy_recommendation_read_audit`, `portfolio_policy_recommendation_snapshots` | Immutable, expiring policy and budget recommendation snapshots; append-only generated, accepted, rejected, expired, invalidated, superseded, and separately-applied lifecycle facts; audited reads; and authority-bound frozen cursors. Records bind exact scope, scorecard, policy, rate, model, metric, evidence-window, coverage, guardrail, semantic-comparison, preview, scenario, and rollback references. They exclude prompts, responses, work-item content, code, filenames, credentials, and person rankings. Acceptance does not activate policy or budget state. |
 | `linear_connector_metadata` | `gateway_linear_delivery_receipts`, `gateway_linear_snapshot_receipts`, `portfolio_linear_context_events`, `portfolio_linear_context_retention_events`, `portfolio_linear_snapshot_context_events`, `portfolio_linear_snapshot_context_retention_events`, `portfolio_linear_source_binding_versions` | `gateway_linear_delivery_receipts`, `gateway_linear_route_claims`, `gateway_linear_snapshot_receipts`, `portfolio_linear_context_events`, `portfolio_linear_context_retention_events`, `portfolio_linear_snapshot_context_events`, `portfolio_linear_snapshot_context_retention_events`, `portfolio_linear_source_binding_versions` | Immutable Linear route-binding versions, keyed raw-body and stable-source-fact replay identities, metadata-only webhook and authorized-snapshot context facts, separate snapshot receipts and capture-specific retention markers, and a PostgreSQL-private global route-claim index. Snapshot rows emit no outcomes and remain separate from webhook provenance. The runtime role has no access to the private claim table. No raw request body, plain payload hash, title, description, comment, attachment, label text, credential, prompt, or response body. |
 | `portfolio_attribution_metadata` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | Immutable tenant-qualified attempt/use-case version references, source confidence, append-only corrections, and fixed-class admission receipts. Rejections are separate from eligible attempts. No request header, prompt, response, filename, source/work content, or guessed model facts. |
 | `portfolio_attribution_control` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | Safe read/mutation audit, role-bound frozen-window cursors, keyed request digests and immutable-result references. No copied v1 financial facts or raw JSON mutation bodies. |
@@ -71,8 +72,10 @@ The #218 source implementation adds nine outcome tables in SQLite migration 7
 in SQLite migration 8 / PostgreSQL migration 12. The #217 work-budget runtime
 adds five tables in SQLite migration 9 / PostgreSQL migration 13. None of these
 source changes is by itself a v1.3.0 portfolio release. Provider-invoice/general-ledger
-reconciliation, scorecards and recommendations remain separately gated and
-have no tables in this inventory. Live provider activation also remains gated.
+reconciliation and live provider activation remain separately gated. Scorecard,
+role-view, and recommendation source candidates have the explicitly registered
+tables below, while exact-main CI, final-candidate acceptance, and release remain
+separate gates.
 The provider-reliability source slice adds two content-free, append-only tables
 in SQLite migration 10 / PostgreSQL migration 14. They store gateway-observed
 latency/byte counters and the exact one-hop failover relationship, never a
@@ -123,6 +126,15 @@ recomputed and digest-checked; every result remains an association with bounded
 uncertainty, explicit missing-evidence guardrails, an expiry and a decision
 owner. It stores no source content or person-level ranking and makes no causal
 claim.
+The role-view successor adds append-only read audit and frozen cursor state in
+SQLite migration 18 / PostgreSQL migration 23. It exposes only bounded finance,
+platform, and team aggregates after configured-role authorization and stores no
+person score or source content.
+The recommendation successor adds immutable recommendation snapshots,
+append-only lifecycle/read audit, and frozen cursor state in SQLite migration 19
+/ PostgreSQL migration 24. Recommendations are deterministic, evidence-bound,
+expiring, and drift-sensitive. Acceptance records a decision only; a separate
+policy or budget activation must succeed before an applied event can be added.
 #214 stays open for final-candidate
 transition proof. See [REGISTRY.md](REGISTRY.md) for the opt-in authority and
 [REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) for the application/database

@@ -625,6 +625,16 @@ class PostgresMigrationRLSTests(PostgresTestCase):
             None,
         )
 
+    def test_schema24_bootstrap_preserves_reviewed_recommendation_acl_boundary(self) -> None:
+        self._assert_managed_bootstrap(
+            24,
+            (
+                249,
+                "5a7edf2147cfa67c7c32a3f64ac2f825ae68e74ec323e1b789602dc65155ea2b",
+            ),
+            None,
+        )
+
     def _assert_managed_bootstrap(self, version, expected_acl_boundary, injected_acl_boundary):
         with unittest.mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", version):
             self._assert_managed_bootstrap_at_version(version, expected_acl_boundary, injected_acl_boundary)

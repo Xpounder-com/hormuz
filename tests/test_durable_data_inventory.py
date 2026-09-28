@@ -32,6 +32,7 @@ class DurableDataInventoryTests(unittest.TestCase):
             "hormuz/_association_schema.py",
             "hormuz/_scorecard_schema.py",
             "hormuz/_role_view_schema.py",
+            "hormuz/_recommendation_schema.py",
             "hormuz/_budget_schema.py",
             "hormuz/_provider_reliability_schema.py",
             "hormuz/_finance_attempt_schema.py",
@@ -58,9 +59,9 @@ class DurableDataInventoryTests(unittest.TestCase):
     def test_current_inventory_covers_every_durable_class(self) -> None:
         result = validate_durable_data_inventory(REPOSITORY_ROOT)
         self.assertEqual(result["status"], "passed")
-        self.assertEqual(result["database_class_count"], 39)
-        self.assertEqual(result["sqlite_table_count"], 80)
-        self.assertEqual(result["postgresql_table_count"], 88)
+        self.assertEqual(result["database_class_count"], 40)
+        self.assertEqual(result["sqlite_table_count"], 84)
+        self.assertEqual(result["postgresql_table_count"], 92)
         self.assertEqual(result["operator_artifact_count"], 17)
         self.assertEqual(result["excluded_customer_system_count"], 7)
         self.assertFalse(result["hosted_customer_data_service"])

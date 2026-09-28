@@ -348,6 +348,25 @@ REQUIRED_ROLE_VIEW_RUNTIME_SDIST_PATHS = (
     "tests/test_role_view_transition.py",
     "tests/test_postgres_role_view_runtime.py",
 )
+REQUIRED_RECOMMENDATION_RUNTIME_WHEEL_PATHS = (
+    "hormuz/_recommendation_schema.py",
+    "hormuz/recommendation_kernel.py",
+    "hormuz/recommendation_repository.py",
+    "hormuz/portfolio-intelligence-wire-v1.json",
+    "hormuz/migrations/postgresql/0024_policy_recommendations.sql",
+)
+REQUIRED_RECOMMENDATION_RUNTIME_SDIST_PATHS = (
+    *REQUIRED_RECOMMENDATION_RUNTIME_WHEEL_PATHS,
+    "docs/PORTFOLIO_RECOMMENDATIONS.md",
+    "docs/recommendation-runtime-plan-v1.json",
+    "tools/verify_recommendation_runtime.py",
+    "tests/fixtures/recommendation/decision-v1.json",
+    "tests/test_recommendation_kernel.py",
+    "tests/test_recommendation_runtime.py",
+    "tests/test_recommendation_runtime_plan.py",
+    "tests/test_recommendation_transition.py",
+    "tests/test_postgres_recommendation_runtime.py",
+)
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
     "docs/work-budget-reports-wire-v1.json",
@@ -581,6 +600,18 @@ def main(argv: list[str] | None = None) -> int:
         _sdist_members,
         REQUIRED_ROLE_VIEW_RUNTIME_SDIST_PATHS,
         "Portfolio role-view runtime source kit",
+    )
+    _assert_required_archive_paths(
+        wheel,
+        _wheel_members,
+        REQUIRED_RECOMMENDATION_RUNTIME_WHEEL_PATHS,
+        "Policy recommendation runtime wheel",
+    )
+    _assert_required_archive_paths(
+        sdist,
+        _sdist_members,
+        REQUIRED_RECOMMENDATION_RUNTIME_SDIST_PATHS,
+        "Policy recommendation runtime source kit",
     )
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)

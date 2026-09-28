@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping
@@ -45,6 +46,7 @@ class PolicyChange:
     change_type: str
     before: object | None
     after: object | None
+    segments: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,7 @@ class PolicyPreview:
     evaluated_at: datetime
     usage_period: UsagePeriod
     usage_basis: str
+    usage_snapshot_sha256: str
     identity: Identity
     client: str
     protocol: str
@@ -104,6 +107,7 @@ class PolicyEvaluation:
     suite: PolicyScenarioSuite
     baseline: PolicyVersionIdentity
     candidate: PolicyVersionIdentity
+    usage_snapshot_sha256_by_actor: tuple[tuple[str, str], ...]
     scenarios: tuple[PolicyScenarioResult, ...]
 
     @property
@@ -213,6 +217,7 @@ def preview_policy_request(
         evaluated_at=current,
         usage_period=usage_period,
         usage_basis="current",
+        usage_snapshot_sha256=current_usage.content_sha256,
         identity=identity,
         client=client,
         protocol=protocol,
@@ -306,6 +311,10 @@ def evaluate_policy_scenario_suite(
         suite=suite,
         baseline=PolicyVersionIdentity.from_document(baseline),
         candidate=PolicyVersionIdentity.from_document(candidate),
+        usage_snapshot_sha256_by_actor=tuple(
+            (actor_id, usage_by_actor[actor_id].content_sha256)
+            for actor_id in sorted(usage_by_actor)
+        ),
         scenarios=tuple(results),
     )
 
@@ -315,6 +324,48 @@ class _CurrentUsageSnapshot:
 
     def __init__(self, values: Mapping[tuple[str | None, str | None, str], MonthlyTotals]) -> None:
         self._values = dict(values)
+
+    @property
+    def content_sha256(self) -> str:
+        """Bind preview evidence to the exact aggregate usage reads."""
+
+        fields = (
+            "requests",
+            "denied_requests",
+            "rate_limited_requests",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "reasoning_tokens",
+            "cost_microusd",
+            "redaction_count",
+        )
+        payload = [
+            {
+                "scope": {
+                    "actor_id": actor_id,
+                    "team_id": team_id,
+                    "organization_id": organization_id,
+                },
+                "totals": {
+                    field: getattr(totals, field)
+                    for field in fields
+                },
+            }
+            for (actor_id, team_id, organization_id), totals in sorted(
+                self._values.items(),
+                key=lambda item: tuple("" if part is None else part for part in item[0]),
+            )
+        ]
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+        return hashlib.sha256(encoded).hexdigest()
 
     @classmethod
     def capture(
@@ -412,6 +463,7 @@ def _compare_values(
                 change_type="changed",
                 before=before,
                 after=after,
+                segments=path,
             )
         )
 
@@ -441,6 +493,7 @@ def _append_subtree_change(
             change_type=change_type,
             before=before,
             after=after,
+            segments=path,
         )
     )
 

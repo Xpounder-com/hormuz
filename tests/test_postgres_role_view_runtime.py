@@ -34,7 +34,7 @@ class PostgresPortfolioRoleViewRuntimeTests(PostgresTestCase):
         super().setUp()
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.assertEqual(POSTGRES_SCHEMA_VERSION, 23)
+        self.assertEqual(POSTGRES_SCHEMA_VERSION, 24)
         self.config = replace(
             role_view_config(Path(temporary.name)),
             usage_storage=UsageStorageConfig(

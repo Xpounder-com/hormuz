@@ -34,6 +34,8 @@ include docs/association-runtime-plan-v1.json
 include docs/scorecard-runtime-plan-v1.json
 include docs/portfolio-role-views-wire-v1.json
 include docs/role-view-runtime-plan-v1.json
+include docs/PORTFOLIO_RECOMMENDATIONS.md
+include docs/recommendation-runtime-plan-v1.json
 include docs/association-successor-schema-proposal.sqlite.sql
 include docs/association-successor-schema-acl-proposal.sql
 include docs/registry-transition-plan-v1.json
@@ -105,6 +107,7 @@ include tools/verify_association_transition_plan.py
 include tools/verify_association_runtime_plan.py
 include tools/verify_scorecard_runtime_plan.py
 include tools/verify_role_view_runtime.py
+include tools/verify_recommendation_runtime.py
 include tools/render_portfolio_display_examples.py
 include tools/verify_budget_transition_plan.py
 include tools/verify_core_wheel.py

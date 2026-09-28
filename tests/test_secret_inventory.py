@@ -110,6 +110,29 @@ class SecretInventoryTests(unittest.TestCase):
             ):
                 validate_secret_inventory(candidate, source_root=ROOT)
 
+    def test_personal_provider_credential_custody_is_exact(self) -> None:
+        mutations = (
+            ("source_qualname", "SecureCredentialStore.set"),
+            ("material_class", "session_material"),
+            ("custody_mode", "keyed_hash"),
+            ("storage_owner", "customer_filesystem"),
+            ("runtime_consumer", "gateway_runtime"),
+            ("rotation_authority", "session_owner"),
+            ("key_purpose", "session_material"),
+        )
+        for field, value in mutations:
+            candidate = copy.deepcopy(self.inventory)
+            entry = next(
+                item
+                for item in candidate["managed_materials"]
+                if item["id"] == "personal-provider-credential"
+            )
+            entry[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(
+                SecretInventoryError, "secret_inventory_managed_custody_invalid"
+            ):
+                validate_secret_inventory(candidate, source_root=ROOT)
+
     def test_identity_connector_hash_custody_is_exact(self) -> None:
         mutations = (
             ("github-webhook-signature-verification", "material_class", "tenant_fingerprint_key"),

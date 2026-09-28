@@ -1,0 +1,63 @@
+{
+  "schema_id": "hormuz.personal-release",
+  "schema_version": 1,
+  "artifact": "Hormuz Personal Optimizer",
+  "release_version": "0.1.0",
+  "initial_platform": {
+    "os": "macOS",
+    "minimum_version": "14",
+    "architecture": "arm64",
+    "surface": "terminal"
+  },
+  "initial_agent": {
+    "key": "codex",
+    "version": "0.148.0",
+    "protocol": "responses"
+  },
+  "installation": "python -m pip install 'hormuz[client,context]'",
+  "qualification_checks": [
+    "hormuz personal qualify --json",
+    "tests.test_personal_optimizer",
+    "tests.test_client_relay",
+    "tests.test_compaction",
+    "tests.test_compaction_runtime",
+    "tests.test_compaction_enforcement",
+    "tests.test_context_compaction_evaluation",
+    "wheel-install-smoke"
+  ],
+  "optional_provider_free_real_client_checks": [
+    "Codex CLI 0.148.0 against a scripted local Responses provider",
+    "Aider 0.86.2 against a scripted local Chat Completions provider"
+  ],
+  "release_claim": "On qualified Codex requests containing supported repetitive rg tool output, Hormuz applies a bounded lossless local representation when both maintained token counters show a useful reduction; unsupported and unqualified traffic follows the ordinary request path.",
+  "claim_exclusions": [
+    "provider bill reduction without provider evidence",
+    "live-model task quality without separately authorized paired qualification",
+    "fresh-machine release acceptance",
+    "release publication",
+    "portfolio release closure",
+    "native roadmap closure",
+    "physical Windows acceptance"
+  ],
+  "package_boundaries": {
+    "personal": [
+      "hormuz.adapters",
+      "hormuz.personal_profiles",
+      "hormuz.personal_metrics",
+      "hormuz.personal_runtime",
+      "hormuz.personal_qualification",
+      "hormuz.execution_methods",
+      "hormuz.personal_optimization",
+      "hormuz.commands.personal"
+    ],
+    "shared": [
+      "hormuz.client_relay",
+      "hormuz.compaction",
+      "hormuz.compaction_runtime",
+      "hormuz.compaction_protocols"
+    ],
+    "server_infrastructure_required": false,
+    "postgresql_required": false,
+    "ci_scope": "full while shared relay and compaction modules change"
+  }
+}

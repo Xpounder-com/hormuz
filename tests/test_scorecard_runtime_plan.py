@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 
 from tools import verify_core_wheel as packaging
+from tools import verify_recommendation_runtime as recommendation_verifier
 from tools import verify_role_view_runtime as successor_verifier
 from tools import verify_scorecard_runtime_plan as verifier
 
@@ -24,11 +25,19 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
         successor_plan = json.loads(
             (successor_verifier.ROOT / successor_verifier.PLAN_PATH).read_text()
         )
+        recommendation_plan = json.loads(
+            (
+                recommendation_verifier.ROOT
+                / recommendation_verifier.PLAN_PATH
+            ).read_text()
+        )
         paths = (
             set(verifier.REQUIRED_FILES)
             | set(plan["source_sha256"])
             | set(successor_verifier.REQUIRED_FILES)
             | set(successor_plan["source_sha256"])
+            | set(recommendation_verifier.REQUIRED_FILES)
+            | set(recommendation_plan["source_sha256"])
         )
         for relative in paths:
             target = self.root / relative
@@ -55,10 +64,10 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
         self.assertEqual(result["status"], "scorecard_runtime_successor_verified")
         self.assertEqual(
             (result["sqlite_schema_version"], result["postgresql_schema_version"]),
-            (18, 23),
+            (19, 24),
         )
         self.assertEqual(
-            result["postgresql_acl"], list(successor_verifier.EXPECTED_ACL)
+            result["postgresql_acl"], list(recommendation_verifier.EXPECTED_ACL)
         )
         self.assertEqual(result["table_count"], 2)
         self.assertTrue(result["kernel_implemented"])
@@ -120,9 +129,9 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
 
     def test_schema_or_acl_boundary_change_is_rejected(self):
         for sqlite_version, postgres_version, acl in (
-            (17, 23, successor_verifier.EXPECTED_ACL),
-            (18, 22, successor_verifier.EXPECTED_ACL),
-            (18, 23, (261, "0" * 64)),
+            (18, 24, recommendation_verifier.EXPECTED_ACL),
+            (19, 23, recommendation_verifier.EXPECTED_ACL),
+            (19, 24, (249, "0" * 64)),
         ):
             with self.subTest(
                 sqlite=sqlite_version, postgres=postgres_version
@@ -132,7 +141,7 @@ class ScorecardRuntimePlanTests(unittest.TestCase):
                 verifier, "POSTGRES_SCHEMA_VERSION", postgres_version
             ), mock.patch.dict(
                 verifier._POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
-                {23: acl},
+                {24: acl},
             ):
                 with self.assertRaisesRegex(
                     verifier.ScorecardRuntimePlanError,
