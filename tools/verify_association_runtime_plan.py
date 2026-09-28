@@ -20,10 +20,11 @@ from hormuz.postgres import (
     POSTGRES_SCHEMA_VERSION,
     _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
 )
+from tools._verification_runtime import runtime_plan_source_sha256
 
 
 PLAN_PATH = "docs/association-runtime-plan-v1.json"
-PLAN_SHA256 = "fcd178f2b9644e73ffd9edc8ec93aa8fe1294977662d35be9674497f74c60787"
+PLAN_SHA256 = "1cfd4fb8bf4cd59d3f9e0ad1c039665d4d928f395472faaf749916d7d1742cde"
 PREDECESSOR_PATH = "docs/association-transition-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "261ccd15e629f7beb58e76a12ad2ed206ed6b8222414e6409beb40e9af6c79f3"
@@ -76,6 +77,7 @@ SOURCE_PATHS = (
     "hormuz/portfolio_repository.py",
     "hormuz/portfolio_wire.py",
     "hormuz/postgres.py",
+    "pyproject.toml",
     "tests/_postgres_fixture.py",
     "tests/fixtures/association/runtime-multisource-v1.json",
     "tests/test_association_metrics.py",
@@ -111,6 +113,7 @@ SOURCE_PATHS = (
     "tests/test_sqlite_registry_transition.py",
     "tests/test_store.py",
     "tools/verify_association_transition_plan.py",
+    "tools/_verification_runtime.py",
     "tools/verify_core_wheel.py",
     "tools/verify_durable_data_inventory.py",
     "tools/verify_finance_collection_postgres_runtime.py",
@@ -128,6 +131,7 @@ SUCCESSOR_PROTECTED_SOURCE_PATHS = (
     "hormuz/association_repository.py",
     "hormuz/migrations/postgresql/0021_run_outcome_association.sql",
     "hormuz/portfolio-association-wire-v1.json",
+    "pyproject.toml",
     "tests/fixtures/association/runtime-multisource-v1.json",
     "tests/test_association_metrics.py",
     "tests/test_association_runtime.py",
@@ -243,8 +247,11 @@ def _validate_predecessor(root: Path) -> None:
         _fail("association_runtime_predecessor_changed")
     for relative, expected in frozen.items():
         try:
-            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
-        except OSError:
+            actual = runtime_plan_source_sha256(
+                root / relative,
+                omit_project_version=relative == "pyproject.toml",
+            )
+        except (OSError, ValueError):
             _fail("association_runtime_source_kit_incomplete")
         if actual != expected:
             _fail("association_runtime_predecessor_changed")
@@ -355,8 +362,11 @@ def _validate_successor_predecessor(root: Path) -> None:
         if not isinstance(expected, str):
             _fail("association_runtime_plan_invalid")
         try:
-            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
-        except OSError:
+            actual = runtime_plan_source_sha256(
+                root / relative,
+                omit_project_version=relative == "pyproject.toml",
+            )
+        except (OSError, ValueError):
             _fail("association_runtime_source_kit_incomplete")
         if actual != expected:
             _fail("association_runtime_source_changed")
@@ -511,8 +521,11 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
             _fail("association_runtime_plan_invalid")
         try:
-            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
-        except OSError:
+            actual = runtime_plan_source_sha256(
+                root / relative,
+                omit_project_version=relative == "pyproject.toml",
+            )
+        except (OSError, ValueError):
             _fail("association_runtime_source_kit_incomplete")
         if actual != expected:
             _fail("association_runtime_source_changed")

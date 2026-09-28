@@ -45,6 +45,37 @@ class VerificationRuntimeTests(unittest.TestCase):
         second = runtime.canonical_json_sha256({"a": True, "b": [2, 1]})
         self.assertEqual(first, second)
 
+    def test_runtime_plan_source_hash_ignores_only_the_project_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            pyproject = Path(temporary) / "pyproject.toml"
+            pyproject.write_text(
+                '[project]\nversion = "1.2.0"\ndependencies = ["one"]\n',
+                encoding="utf-8",
+            )
+            first = runtime.runtime_plan_source_sha256(
+                pyproject, omit_project_version=True
+            )
+            pyproject.write_text(
+                '[project]\nversion = "1.3.0"\ndependencies = ["one"]\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                first,
+                runtime.runtime_plan_source_sha256(
+                    pyproject, omit_project_version=True
+                ),
+            )
+            pyproject.write_text(
+                '[project]\nversion = "1.3.0"\ndependencies = ["two"]\n',
+                encoding="utf-8",
+            )
+            self.assertNotEqual(
+                first,
+                runtime.runtime_plan_source_sha256(
+                    pyproject, omit_project_version=True
+                ),
+            )
+
     def test_private_json_writer_is_atomic_owner_only_and_cleans_failed_temporary_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "evidence" / "summary.json"

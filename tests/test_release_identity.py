@@ -87,23 +87,31 @@ class ReleaseIdentityTests(unittest.TestCase):
             values,
         )
 
-    def test_runtime_plans_do_not_pin_release_metadata_or_marketing_copy(self) -> None:
-        excluded_paths = {
-            "association-runtime-plan-v1.json": {"pyproject.toml"},
-            "scorecard-runtime-plan-v1.json": {"pyproject.toml"},
-            "role-view-runtime-plan-v1.json": {"pyproject.toml"},
-            "recommendation-runtime-plan-v1.json": {
-                "README.md",
-                "docs/ROADMAP.md",
-            },
-        }
+    def test_runtime_plans_pin_packaging_but_not_marketing_copy(self) -> None:
+        filenames = (
+            "association-runtime-plan-v1.json",
+            "scorecard-runtime-plan-v1.json",
+            "role-view-runtime-plan-v1.json",
+            "recommendation-runtime-plan-v1.json",
+        )
 
-        for filename, excluded in excluded_paths.items():
+        for filename in filenames:
             with self.subTest(filename=filename):
                 plan = json.loads(
                     (ROOT / "docs" / filename).read_text(encoding="utf-8")
                 )
-                self.assertTrue(excluded.isdisjoint(plan["source_sha256"]))
+                self.assertIn("pyproject.toml", plan["source_sha256"])
+
+        recommendation = json.loads(
+            (ROOT / "docs" / "recommendation-runtime-plan-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertTrue(
+            {"README.md", "docs/ROADMAP.md"}.isdisjoint(
+                recommendation["source_sha256"]
+            )
+        )
 
 
 if __name__ == "__main__":

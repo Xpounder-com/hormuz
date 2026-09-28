@@ -8,8 +8,8 @@
   "base_main_commit": "edd5b04a2c84c854190c41a774ab5a9c89a7ca41",
   "predecessor": {
     "path": "docs/role-view-runtime-plan-v1.json",
-    "file_sha256": "ec1e061f1107c1638459ec36957376b404aea144e8bd9070b4b953043da1d5c7",
-    "canonical_sha256": "d9095feb23475fcc60146ad9a9e54d32cba70d46056f520fe748e6504b6ecdd5"
+    "file_sha256": "f20b2fdabbbc375b330744a2c1a60413d5c5b7fa1a2057ac45053fe7e5e8d2a1",
+    "canonical_sha256": "91a63fb48285574366c7e289c376c164e9b634f11f74073de91cfde6a8a123ab"
   },
   "transitions": {
     "sqlite": {
@@ -164,11 +164,12 @@
     "hormuz/postgres.py": "8c7007ea416e935f2cdb97f602787daf10d720142e97976689c7854188ae5578",
     "hormuz/recommendation_kernel.py": "ee27d1b886bdf3968e29f340ec6f2eec2962042763a5192fa58cd12d2b3e9991",
     "hormuz/recommendation_repository.py": "69d996403cc426812364118aea6a024a5e10d840d76c03d297f41bb146a23308",
+    "pyproject.toml": "2573869497995f6235e63aade4e8eb7d75853765c28441c9170b52f996aa2e2e",
     "tests/_postgres_fixture.py": "a4cb407afb146ce0fffe20f7cd9008b0165d2ffa9e49a01a2a534899cc7ed988",
     "tests/fixtures/recommendation/decision-v1.json": "38a2ee1acff6ab07da120165f208471473d01c62b90007ff6f529d2617ef98b7",
     "tests/test_association_transition_preflight.py": "d170446059c239ac6d332ca896c6ad233791fc1d5634dde7ab9ce599720978f4",
     "tests/test_association_transition_plan.py": "6a9939a2a86e78b839f7be3c5eac5bbd910cfc8cd31a440f9a8371574bfc8260",
-    "tests/test_association_runtime_plan.py": "67334eb85270b02d8cc4198ff7ac1d9379206a85e5dbd67db4c1608f32101f89",
+    "tests/test_association_runtime_plan.py": "69dfdaee8f4f4d1d57937f18823856c01f3a10c4db9955e2d0fda42d9bcee971",
     "tests/test_attribution_schema.py": "2a9ee27e0535f31d200ab03bb12475bfb57422bee25acecd2764af70fb63cf30",
     "tests/test_budget_schema.py": "26b4e84b65942df7f0f2b7707d5a7dc220334e73f28dd43cf29eb286f756beaa",
     "tests/test_durable_data_inventory.py": "fd7cd58b809ebac753d9a7ba9d29294cc9bac2f3c15a25d1894ca51b3e0e63d3",
@@ -211,7 +212,8 @@
     "tests/test_sqlite_outcome_transition.py": "79149c374defc7665422ca118feb1cff36ac32924d154d70906de2f492a6823b",
     "tests/test_sqlite_registry_transition.py": "892c2300c7ae0b93e7495a5708df6f0195a5dd698e7be2e28afb8528bce79ea9",
     "tests/test_store.py": "e922c6f8a0d82332f3288b4aca42ea09892dc2beb9b88b3a68d2a67b21fe9afa",
-    "tools/verify_association_runtime_plan.py": "9c293e00f66524859cfffe71deee4dcc011c9c11cd766472e08c3192b5ed9560",
+    "tools/_verification_runtime.py": "5ebb76601652dfc94a83365839221362e622a4d927fa12229dcbae052e050ae5",
+    "tools/verify_association_runtime_plan.py": "7d677a8ff3df1b57e12946cc861ce1130217eb856b018d92177ae91b29ff59c9",
     "tools/verify_association_transition_plan.py": "4bd26c163d96322df9f441dc7f9d2067e7eb4594981c5eb9f5a1d7d1d4b2b516",
     "tools/verify_core_wheel.py": "00c7f3d1730cb9fa5307faddc4b5f8e75806a0528d1ae71728d93eece55debfa",
     "tools/verify_durable_data_inventory.py": "4f5fc83c31b632352f02563fb71c283e48da31fb014e8fae1eb4b5ed7b602dc2",
@@ -221,8 +223,8 @@
     "tools/verify_linear_reconciliation_plan.py": "7696bf242c55a1148a56a726ab957ce4e98a47ebfe5c8b83ed0676424cbbb52b",
     "tools/verify_linear_runtime_plan.py": "21c06c7b1372ee1d29dc93f157e829fa81feda1568d12327d11628c60a235f34",
     "tools/verify_linear_transition_plan.py": "065b5ff66852bb2f4cf4d94c05bb37d80cd5dd2e2dd65e0c6b1bcd68dc107a2b",
-    "tools/verify_role_view_runtime.py": "57d22fc3f6df111a4c0f0544f8dd478947f8774a2fa044fafc5e1b84aab8118f",
-    "tools/verify_scorecard_runtime_plan.py": "d5645c714f8bb33bfbd7c57473d5e25db088646a6ecea0c2d61b0db41ffc1c50"
+    "tools/verify_role_view_runtime.py": "d8833f23904239d55af4033e14034fe92ec17586acbaaf3f1ef26300ec1e64f9",
+    "tools/verify_scorecard_runtime_plan.py": "48153166f9b8b6bf8f534b07736c1f8be2d0f7db8e5b1c66c6716cfa4a174de5"
   },
   "gates": {
     "role_view_runtime_predecessor_verified": true,
