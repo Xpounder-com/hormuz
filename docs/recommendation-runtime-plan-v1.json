@@ -142,7 +142,7 @@
     "arbitrary_policy_patches"
   ],
   "source_sha256": {
-    ".github/workflows/ci.yml": "372028d49738e2bc044c278c0bc1b5cf350292466e732545e41a715700e0f771",
+    ".github/workflows/ci.yml": "cde0462d47a3dd03555872365ceddc5e062bbc3685df3432fd45d0d26b015459",
     "MANIFEST.in": "b83026d12889f0c1302c5610fad9cd59aea0fb63a4cafd57ab3419638c53be91",
     "README.md": "b5c9a098bc45798fdd22e2abfed9aae72e8d517e65a1abe2b240ca7c4933a730",
     "docs/DURABLE_DATA.md": "d522c233604a6f5cc9b3c1356a9684fd09f96f2e94e9ae3c4550021929cd02d6",
@@ -184,7 +184,7 @@
     "tests/test_postgres_linear_snapshot_runtime.py": "246c09d43c72e9ab22e69f7963481d706be0ed42b0d930c6ab7219be8e09c0a6",
     "tests/test_postgres_migration_rls.py": "b0bf045d5ac964c40a72443b2d6e8a4c4ad6c80bdbc2b65ccc10f190b29575e4",
     "tests/test_postgres_outcome_transition.py": "a411205176ce5f3220ce9c2c3615bf49f08eff0063eefa37e1c74ab2cc6f0e9f",
-    "tests/test_postgres_recommendation_runtime.py": "99a1f25706007f5957494e99561d0a95e65e54b7a0e402eff048f5fd3b10e33c",
+    "tests/test_postgres_recommendation_runtime.py": "c86fe098b9cc619b5b24f812f48c5745df18e321d6f0f5734c86d7e79fd6d21c",
     "tests/test_postgres_role_view_runtime.py": "6e484111204c1cd06e7a26e4a97a140350a20285fe656cdaec2448c8deb9060a",
     "tests/test_postgres_scorecard_runtime.py": "0e7958616dcead3c94d3ae70c2cb618d61e944d6dd3f1df16eb491298b155a0e",
     "tests/test_postgres_test_boundaries.py": "1e8540e70e96118b9a1ca8b7969c55d3c52a01f13e8311c18b81768eef7b00d1",

@@ -39,7 +39,7 @@ from tools import verify_role_view_runtime as role_verifier
 
 
 PLAN_PATH = "docs/recommendation-runtime-plan-v1.json"
-PLAN_SHA256 = "a90bf293ea08e537cc855e0313463073b0392ef6b9912644abc840d967fb08f4"
+PLAN_SHA256 = "812ee49aa163d15fe46126f3da97a341f7422c5f551e5f0b2f4b2dcc2fed05bd"
 PREDECESSOR_PATH = "docs/role-view-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "ba13527aa781e88232ca1403468e181c759004628645bb9bc48e660955a1e533"
