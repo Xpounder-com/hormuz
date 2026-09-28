@@ -18,8 +18,9 @@ written to the usage database.
 
 > [!IMPORTANT]
 > Hormuz 1.0 established the stable CLI and policy/evidence contracts. Hormuz
-> 1.2 preserves those contracts and adds default-Off client-side context
-> optimization plus an Apple Silicon companion distribution. The original
+> 1.3 preserves those contracts and adds the terminal-first Personal Optimizer,
+> its adapter SDK, and Aider support on top of the existing client-side context
+> optimization and Apple Silicon companion. The original
 > release qualification included five isolated internal repetitions of one exact
 > offline policy workflow plus exact-byte candidate custody. That bounded result
 > does not prove external human usability, blanket production fitness, customer
@@ -58,7 +59,7 @@ The provider-free demo exercises the real HTTP gateway, policy, redaction,
 request-attempt, and SQLite evidence paths with disposable loopback providers:
 
 ~~~bash
-git clone --branch v1.2.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
+git clone --branch v1.3.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
 cd hormuz
 python3 -m venv .venv
 source .venv/bin/activate
@@ -66,7 +67,7 @@ python -m pip install --editable .
 hormuz demo
 ~~~
 
-The commands above select the stable v1.2.0 source tag. Installation downloads
+The commands above select the stable v1.3.0 source tag. Installation downloads
 Python dependencies; the demo itself uses only disposable local loopback
 providers. No OpenAI or Anthropic account is required. A successful run reports:
 
@@ -89,6 +90,25 @@ Both demos remove their temporary state by default. They are executable product
 tours, not provider-compatibility or production-deployment certifications. See
 [policy administrator usability](docs/POLICY_ADMIN_USABILITY.md) for the exact
 v1 repeatability and custody boundary.
+
+## Personal Optimizer
+
+The terminal-first Personal Optimizer runs without an organization or
+PostgreSQL. It keeps the provider credential in the operating-system keyring,
+launches a supported coding agent through an authenticated loopback relay, and
+shows content-free local benefit measurements. Unsupported or non-beneficial
+traffic follows the ordinary request path.
+
+~~~bash
+python -m pip install 'hormuz[client,context]'
+hormuz context resources install
+hormuz personal contract --json
+hormuz personal qualify --json
+~~~
+
+See the [Personal Optimizer guide](docs/PERSONAL_OPTIMIZER.md) for direct and
+managed setup, the simple On/Off controls, removal, and the bounded release
+claim.
 
 ## Usage visibility without content capture
 
@@ -331,7 +351,7 @@ concurrency, rollback, and compatibility behavior.
 | --- | --- | --- |
 | Source + SQLite | Local evaluation and one-process operation | Not a shared or HA store |
 | [Signed OCI image](docs/OCI.md) | Version-matched Linux `amd64` reference | Digest is the artifact contract; no mutable `latest` tag |
-| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | Developer ID signed and notarized [v1.2.0 download](https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip); [checksums and qualification evidence](https://github.com/Xpounder-com/hormuz/releases/tag/v1.2.0); Intel Macs are unsupported |
+| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | Developer ID signed and notarized [v1.3.0 download](https://github.com/Xpounder-com/hormuz/releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip); [checksums and qualification evidence](https://github.com/Xpounder-com/hormuz/releases/tag/v1.3.0); Intel Macs are unsupported |
 | [Docker Compose](deploy/compose/README.md) | Provider-free single-VM evaluation or pilot | One gateway replica; not HA or production certification |
 | [Kubernetes + Helm](deploy/kubernetes/README.md) | Bounded multi-replica reference | Customer-operated PostgreSQL and ingress; not general HA/DR certification |
 
@@ -349,7 +369,7 @@ Public TLS remains a customer-controlled ingress responsibility. Read
 | Policy administration | [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) |
 | Usage, tokens, cost, and budgets | [docs/USAGE.md](docs/USAGE.md) |
 | Provider streaming, latency, failover, and compute boundaries | [docs/PROVIDER_RELIABILITY.md](docs/PROVIDER_RELIABILITY.md) |
-| Post-v1.2 portfolio development (v1.3.0 target): registry, attribution, outcomes, finance, internal work budgets, and reviewable recommendations | [docs/PORTFOLIO_INTELLIGENCE.md](docs/PORTFOLIO_INTELLIGENCE.md), [docs/WORK_BUDGETS.md](docs/WORK_BUDGETS.md), and [docs/PORTFOLIO_RECOMMENDATIONS.md](docs/PORTFOLIO_RECOMMENDATIONS.md) |
+| Portfolio development: registry, attribution, outcomes, finance, internal work budgets, and reviewable recommendations | [docs/PORTFOLIO_INTELLIGENCE.md](docs/PORTFOLIO_INTELLIGENCE.md), [docs/WORK_BUDGETS.md](docs/WORK_BUDGETS.md), and [docs/PORTFOLIO_RECOMMENDATIONS.md](docs/PORTFOLIO_RECOMMENDATIONS.md) |
 | Secret-egress controls | [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) |
 | Audit contracts and export | [docs/AUDIT.md](docs/AUDIT.md) |
 | Persistence and migrations | [docs/STORAGE.md](docs/STORAGE.md) |
@@ -370,7 +390,7 @@ python3 -m hormuz contract manifest
 
 | Status | Current boundary |
 | --- | --- |
-| Stable public contract | v1.2.0 preserves the v1.0 CLI and policy/evidence contracts and adds default-Off local context optimization. |
+| Stable public contract | v1.3.0 preserves the v1.0 CLI and policy/evidence contracts and adds the Personal Optimizer, adapter SDK, and Aider integration. |
 | Production certification | None claimed; deployment fitness remains operator- and environment-specific. |
 | Verified references | Only the exact profiles documented in [SUPPORT.md](SUPPORT.md) and their retained evidence. |
 | Unfinished | Independent external onboarding, general production HA/DR, cloud certification, complete provider-account coverage, and independent review. |

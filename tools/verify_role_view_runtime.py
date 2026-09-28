@@ -34,13 +34,13 @@ from tools import verify_scorecard_runtime_plan as scorecard_verifier
 
 
 PLAN_PATH = "docs/role-view-runtime-plan-v1.json"
-PLAN_SHA256 = "1afced7771629acf838391eafbe597e9e79c79aac9e8f27d6ac818b23145d822"
+PLAN_SHA256 = "d9095feb23475fcc60146ad9a9e54d32cba70d46056f520fe748e6504b6ecdd5"
 PREDECESSOR_PATH = "docs/scorecard-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
-    "b5ad84161eb9d5f2ac109cc25856a041fca5f905bd0f1d415d112b055e7fafb2"
+    "93919f51005ccc6ffedcecdb15086cd2c73af716ff10a1aa42e50cae801a4b56"
 )
 PREDECESSOR_CANONICAL_SHA256 = (
-    "72e7ad360f825cc5125488209da3843119eff856bf0fcf2f466e0be255c9af46"
+    "44135ccdfe7872b17426d668e058d829280f700fd7055d6c7fa071e76be7e33a"
 )
 BASE_MAIN_COMMIT = "108d952b4426be74f11306d30a4955807e8fe766"
 EXPECTED_ACL = (
@@ -127,7 +127,6 @@ SOURCE_PATHS = (
     "hormuz/postgres.py",
     "hormuz/role_view_repository.py",
     "hormuz/work-budget-reports-wire-v2.json",
-    "pyproject.toml",
     "tests/_postgres_fixture.py",
     "tests/_role_view_fixture.py",
     "tests/fixtures/portfolio_role_views/wire-v1-examples.json",

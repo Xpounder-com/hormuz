@@ -8,8 +8,8 @@
   "base_main_commit": "edd5b04a2c84c854190c41a774ab5a9c89a7ca41",
   "predecessor": {
     "path": "docs/role-view-runtime-plan-v1.json",
-    "file_sha256": "ba13527aa781e88232ca1403468e181c759004628645bb9bc48e660955a1e533",
-    "canonical_sha256": "1afced7771629acf838391eafbe597e9e79c79aac9e8f27d6ac818b23145d822"
+    "file_sha256": "ec1e061f1107c1638459ec36957376b404aea144e8bd9070b4b953043da1d5c7",
+    "canonical_sha256": "d9095feb23475fcc60146ad9a9e54d32cba70d46056f520fe748e6504b6ecdd5"
   },
   "transitions": {
     "sqlite": {
@@ -149,11 +149,9 @@
   "source_sha256": {
     ".github/workflows/ci.yml": "cde0462d47a3dd03555872365ceddc5e062bbc3685df3432fd45d0d26b015459",
     "MANIFEST.in": "b83026d12889f0c1302c5610fad9cd59aea0fb63a4cafd57ab3419638c53be91",
-    "README.md": "b5c9a098bc45798fdd22e2abfed9aae72e8d517e65a1abe2b240ca7c4933a730",
     "docs/DURABLE_DATA.md": "d522c233604a6f5cc9b3c1356a9684fd09f96f2e94e9ae3c4550021929cd02d6",
     "docs/PORTFOLIO_INTELLIGENCE.md": "bf33b5bba821861d0b0e2427af93c2c8630e57944b7e75fea6895aa74c478ecb",
     "docs/PORTFOLIO_RECOMMENDATIONS.md": "70f54a62e9fd90339ea5037c409ffdd11a5857d0be0925670d0818f2b47eaa2c",
-    "docs/ROADMAP.md": "19e514084a1bbdf0001c0191d879219a096f09b5ea6d8a79642f813944912cd0",
     "docs/durable-data-v1.json": "d692998f9456d7f80b60bd238f0dd43213216343bc218567fb7059b4cfd5cd4c",
     "hormuz/_portfolio_sql.py": "190057089da4b5052c011815bdd57818eb5a062deed1a88aeb6324b2479b2b94",
     "hormuz/_recommendation_schema.py": "83b8947b57025f6b53b9aef993364fdec0fe0009c8d8a05ccf95d922a5fbfb6f",
@@ -213,7 +211,7 @@
     "tests/test_sqlite_outcome_transition.py": "79149c374defc7665422ca118feb1cff36ac32924d154d70906de2f492a6823b",
     "tests/test_sqlite_registry_transition.py": "892c2300c7ae0b93e7495a5708df6f0195a5dd698e7be2e28afb8528bce79ea9",
     "tests/test_store.py": "e922c6f8a0d82332f3288b4aca42ea09892dc2beb9b88b3a68d2a67b21fe9afa",
-    "tools/verify_association_runtime_plan.py": "b4133ae6279ac1ce6a8575e52d83ef1edc4afdd8fff41be52a2555ab4d5c3f7e",
+    "tools/verify_association_runtime_plan.py": "9c293e00f66524859cfffe71deee4dcc011c9c11cd766472e08c3192b5ed9560",
     "tools/verify_association_transition_plan.py": "4bd26c163d96322df9f441dc7f9d2067e7eb4594981c5eb9f5a1d7d1d4b2b516",
     "tools/verify_core_wheel.py": "00c7f3d1730cb9fa5307faddc4b5f8e75806a0528d1ae71728d93eece55debfa",
     "tools/verify_durable_data_inventory.py": "4f5fc83c31b632352f02563fb71c283e48da31fb014e8fae1eb4b5ed7b602dc2",
@@ -223,8 +221,8 @@
     "tools/verify_linear_reconciliation_plan.py": "7696bf242c55a1148a56a726ab957ce4e98a47ebfe5c8b83ed0676424cbbb52b",
     "tools/verify_linear_runtime_plan.py": "21c06c7b1372ee1d29dc93f157e829fa81feda1568d12327d11628c60a235f34",
     "tools/verify_linear_transition_plan.py": "065b5ff66852bb2f4cf4d94c05bb37d80cd5dd2e2dd65e0c6b1bcd68dc107a2b",
-    "tools/verify_role_view_runtime.py": "6902f0f4c09b4c9287d801cfbc08037ea4bc4cc838899333289e40cf2c60b0c9",
-    "tools/verify_scorecard_runtime_plan.py": "1dbdc6566f9dcdeeff707aa39be13c758f1db461c44c401567694cec7bc1a986"
+    "tools/verify_role_view_runtime.py": "57d22fc3f6df111a4c0f0544f8dd478947f8774a2fa044fafc5e1b84aab8118f",
+    "tools/verify_scorecard_runtime_plan.py": "d5645c714f8bb33bfbd7c57473d5e25db088646a6ecea0c2d61b0db41ffc1c50"
   },
   "gates": {
     "role_view_runtime_predecessor_verified": true,

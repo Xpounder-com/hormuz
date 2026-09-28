@@ -3,11 +3,11 @@
 This checkpoint combines existing, provider-free transition cases under one
 strict runner. It runs both immutable published predecessors against the
 current development source **and** a wheel built from that same runtime tree.
-The current tree still declares package `1.2.0`, but merged main now installs
+The current tree declares package `1.3.0` and installs
 SQLite schema 15 and PostgreSQL schema 20, including the Linear runtime and
 reconciliation snapshot. The association checkpoint assigns 16/21 and exposes
-its proposal only through a patched test migration. This is not an exact
-v1.3.0 candidate, a bundled association migration or a production rollback.
+its proposal only through a patched test migration. This does not claim a
+bundled association migration or a production rollback.
 
 The runner requires the published v1.0.0 source archive and custody manifest
 (SHA-256 `2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a`
@@ -52,14 +52,14 @@ python3.12 -m venv "$ARTIFACTS/candidate"
 "$ARTIFACTS/source/bin/python" -m build --wheel \
   --outdir "$ARTIFACTS/candidate-wheel"
 "$ARTIFACTS/candidate/bin/python" -m pip install \
-  "$ARTIFACTS/candidate-wheel/hormuz-1.2.0-py3-none-any.whl[postgres]"
+  "$ARTIFACTS/candidate-wheel/hormuz-1.3.0-py3-none-any.whl[postgres]"
 ```
 
 Then run both development modes:
 
 ```console
 COMMON=(--source-root "$ROOT" \
-  --candidate-wheel "$ARTIFACTS/candidate-wheel/hormuz-1.2.0-py3-none-any.whl" \
+  --candidate-wheel "$ARTIFACTS/candidate-wheel/hormuz-1.3.0-py3-none-any.whl" \
   --v1-archive "$ARTIFACTS/hormuz-1.0.0.tar.gz" \
   --v1-manifest "$ARTIFACTS/hormuz-v1.0.0-candidate-manifest.json" \
   --v1-python "$ARTIFACTS/v1/bin/python" \
@@ -95,7 +95,6 @@ tables are not bundled runtime schema. Published 12/17 and current 15/20
 binaries must refuse the newer state; compatibility is restoration with an
 exact quiesced old pair or retained forward recovery, never a ledger edit.
 
-Successful output is a source/wheel development checkpoint only. #214 still
-requires an exact final-candidate matrix for complete APIs, source install,
-wheel, signed OCI, single-VM Compose, SQLite, PostgreSQL, populated
-policy/custody recovery, and green protected-main CI before a release tag.
+Successful output proves the bounded source/wheel transition cases named above.
+#214 separately tracks the complete portfolio transition, rollback, and recovery
+claim across its additional environments.

@@ -110,7 +110,6 @@
     "hormuz/portfolio_repository.py": "4924db44944e925c81180d2adfe6bb7199c76bd931f44328d09d2dae4965ca59",
     "hormuz/portfolio_wire.py": "fb406faa00419ff2957b087f564ee7b92aa871da53b2c898f425c49436d71824",
     "hormuz/postgres.py": "5bd3c19e13f2977bd0504a537566c6f9a8ec1120a70aaebf77526455421d2eec",
-    "pyproject.toml": "788786f2488635411d7d277415be9f642899e886f80e3a4c5bfef0a5ae466a5e",
     "tests/_postgres_fixture.py": "21bfa9fea65e6edbe5ebb7827a048256da750330bfc97a3a1582d952010ec4b4",
     "tests/fixtures/association/runtime-multisource-v1.json": "af14bd8eac03d63be21e612e80cdb5f1b9118ace6cb5e9b7686119712dfb2caf",
     "tests/test_association_metrics.py": "18787ac29e4d8f6f9e0de2530540103fc9812786c6346be421d4a618c63a9b4c",

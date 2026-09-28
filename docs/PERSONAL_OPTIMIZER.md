@@ -1,7 +1,7 @@
 # Hormuz Personal Optimizer 0.1.0
 
-Hormuz Personal Optimizer is an independently versioned artifact shipped in
-the `hormuz` Python distribution. It lets one developer keep using a supported
+Hormuz Personal Optimizer is a versioned component of the `hormuz` Python
+distribution. It lets one developer keep using a supported
 coding agent while a launcher-owned loopback relay applies qualified local
 optimizations and records bounded, content-free measurements.
 
@@ -30,8 +30,8 @@ hormuz personal contract --json
   the ordinary request path unchanged.
 
 This does not claim a provider bill reduction unless provider evidence supplies
-that basis. It does not close the portfolio roadmap, native roadmap, existing
-v1.3 commitments, or physical Windows acceptance. The personal modules are
+that basis. It does not close the portfolio roadmap, native roadmap, or physical
+Windows acceptance. The personal modules are
 separate, but the first release changes the shared relay and compaction path, so
 the full applicable CI suite remains required.
 

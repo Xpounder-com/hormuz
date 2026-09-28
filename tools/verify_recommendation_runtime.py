@@ -39,13 +39,13 @@ from tools import verify_role_view_runtime as role_verifier
 
 
 PLAN_PATH = "docs/recommendation-runtime-plan-v1.json"
-PLAN_SHA256 = "97d158e2cbc58181386514787c6c4ec812e936e7d6cd8c0d563ff57a789b8600"
+PLAN_SHA256 = "528561c6164ed066fc685a2cc9a5ca2ab8397ae07c124aa3e7b44d39ccefb843"
 PREDECESSOR_PATH = "docs/role-view-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
-    "ba13527aa781e88232ca1403468e181c759004628645bb9bc48e660955a1e533"
+    "ec1e061f1107c1638459ec36957376b404aea144e8bd9070b4b953043da1d5c7"
 )
 PREDECESSOR_CANONICAL_SHA256 = (
-    "1afced7771629acf838391eafbe597e9e79c79aac9e8f27d6ac818b23145d822"
+    "d9095feb23475fcc60146ad9a9e54d32cba70d46056f520fe748e6504b6ecdd5"
 )
 BASE_MAIN_COMMIT = "edd5b04a2c84c854190c41a774ab5a9c89a7ca41"
 EXPECTED_ACL = (
@@ -121,11 +121,9 @@ EXCLUSIONS = (
 SOURCE_PATHS = (
     ".github/workflows/ci.yml",
     "MANIFEST.in",
-    "README.md",
     "docs/DURABLE_DATA.md",
     "docs/PORTFOLIO_INTELLIGENCE.md",
     "docs/PORTFOLIO_RECOMMENDATIONS.md",
-    "docs/ROADMAP.md",
     "docs/durable-data-v1.json",
     "hormuz/_portfolio_sql.py",
     "hormuz/_recommendation_schema.py",

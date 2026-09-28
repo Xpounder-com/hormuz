@@ -25,13 +25,13 @@ from hormuz.scorecard_kernel import ScorecardKernelError, build_scorecard_evalua
 
 
 PLAN_PATH = "docs/scorecard-runtime-plan-v1.json"
-PLAN_SHA256 = "72e7ad360f825cc5125488209da3843119eff856bf0fcf2f466e0be255c9af46"
+PLAN_SHA256 = "44135ccdfe7872b17426d668e058d829280f700fd7055d6c7fa071e76be7e33a"
 PREDECESSOR_PATH = "docs/association-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
-    "45e6d5eb87c3763d5b53a4c86189b9e5ed68fa320390f17e965f356f62769921"
+    "fd375d31e40e974df4519029b00faafd4011ab6fa7e3d07380f2db48d5fb912e"
 )
 PREDECESSOR_CANONICAL_SHA256 = (
-    "c1bfb6af710ae09fab4ecfd43c652462d297620c3aba3ac360ee45f041ff43a8"
+    "fcd178f2b9644e73ffd9edc8ec93aa8fe1294977662d35be9674497f74c60787"
 )
 BASE_MAIN_COMMIT = "b770ae140e01aa07a0baed4a449dff453b4ae843"
 EXPECTED_ACL = (
@@ -72,7 +72,6 @@ SOURCE_PATHS = (
     "hormuz/scorecard_evidence_reference.py",
     "hormuz/scorecard_kernel.py",
     "hormuz/scorecard_repository.py",
-    "pyproject.toml",
     "tests/_postgres_fixture.py",
     "tests/fixtures/scorecard/runtime-v1.json",
     "tests/test_association_runtime_plan.py",

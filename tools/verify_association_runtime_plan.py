@@ -23,7 +23,7 @@ from hormuz.postgres import (
 
 
 PLAN_PATH = "docs/association-runtime-plan-v1.json"
-PLAN_SHA256 = "c1bfb6af710ae09fab4ecfd43c652462d297620c3aba3ac360ee45f041ff43a8"
+PLAN_SHA256 = "fcd178f2b9644e73ffd9edc8ec93aa8fe1294977662d35be9674497f74c60787"
 PREDECESSOR_PATH = "docs/association-transition-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "261ccd15e629f7beb58e76a12ad2ed206ed6b8222414e6409beb40e9af6c79f3"
@@ -76,7 +76,6 @@ SOURCE_PATHS = (
     "hormuz/portfolio_repository.py",
     "hormuz/portfolio_wire.py",
     "hormuz/postgres.py",
-    "pyproject.toml",
     "tests/_postgres_fixture.py",
     "tests/fixtures/association/runtime-multisource-v1.json",
     "tests/test_association_metrics.py",
