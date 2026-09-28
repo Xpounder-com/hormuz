@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from ._budget_schema import (
     MAX_ACTIVE_BUDGET_PLANS,
+    MAX_BUDGET_ACTIVATIONS_PER_PLAN,
     BudgetIntegrityError,
     BudgetPlanIntegrityError,
     validate_budget_plan_row,
@@ -1292,7 +1293,10 @@ class RecommendationRepository:
                 int(other["version"]),
             )
             event = self._expire_if_due(sql, principal, other, event, now)
-            if event["public_state"] in {"pending", "accepted"}:
+            if (
+                event["event_type"] != "applied"
+                and event["public_state"] in {"pending", "accepted"}
+            ):
                 result.append((other, event))
         return result
 
@@ -1475,9 +1479,37 @@ class RecommendationRepository:
         now: str,
         *,
         expected_policy_generation: int | None = None,
+        expected_budget_bindings: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         if proposal["change_type"] == "budget_plan_change":
             reference = proposal["candidate_budget_plan"]
+            if expected_budget_bindings is None:
+                raise PortfolioError("version_conflict")
+            try:
+                target_bindings = [
+                    binding
+                    for binding in expected_budget_bindings
+                    if binding["budget_plan_id"] == reference["id"]
+                ]
+                if len(target_bindings) > 1:
+                    raise PortfolioError("version_conflict")
+                if target_bindings:
+                    target_binding = target_bindings[0]
+                    expected_previous_version = _version(
+                        target_binding["active_version"]
+                    )
+                    prior_generation = target_binding["activation_generation"]
+                    if (
+                        type(prior_generation) is not int
+                        or not 1 <= prior_generation < MAX_BUDGET_ACTIVATIONS_PER_PLAN
+                    ):
+                        raise PortfolioError("version_conflict")
+                    expected_activation_generation = prior_generation + 1
+                else:
+                    expected_previous_version = None
+                    expected_activation_generation = 1
+            except (KeyError, TypeError, PortfolioError):
+                raise PortfolioError("version_conflict") from None
             try:
                 active = WorkBudgetRepository._active_budget(
                     sql,
@@ -1495,6 +1527,10 @@ class RecommendationRepository:
                 or pointer["active_version"] != reference["version"]
                 or pointer["current_activation_event_id"]
                 != activation["activation_event_id"]
+                or activation["activation_generation"]
+                != expected_activation_generation
+                or activation["previous_version"]
+                != expected_previous_version
             ):
                 raise PortfolioError("version_conflict")
             receipt = {
@@ -1612,6 +1648,7 @@ class RecommendationRepository:
                 expected_policy_generation=stored["bindings"].get(
                     "active_policy_generation"
                 ),
+                expected_budget_bindings=stored["bindings"]["budget_bindings"],
             )
 
     def record_applied(
@@ -1705,6 +1742,7 @@ class RecommendationRepository:
                             expected_policy_generation=bindings.get(
                                 "active_policy_generation"
                             ),
+                            expected_budget_bindings=bindings["budget_bindings"],
                         )
                     )
                     if not hmac.compare_digest(

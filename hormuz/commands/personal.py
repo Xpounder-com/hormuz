@@ -142,10 +142,11 @@ def run(args: argparse.Namespace) -> int:
             report = run_product_qualification()
             _print_document(report, as_json=args.json)
             return 0 if report["passed"] else 1
-        state = _state_directory(args.state_directory)
         key = validate_personal_key(args.profile)
         if command == "remove":
+            state = _state_directory(args.state_directory, allow_missing=True)
             return _remove(key, state)
+        state = _state_directory(args.state_directory)
         if command == "credential":
             return _replace_credential(args, key, state)
         if command in {"on", "off"}:
@@ -751,12 +752,17 @@ def _write_new(path: Path, value: object) -> None:
         raise PersonalCommandError("output_write_failed") from error
 
 
-def _state_directory(path: Path, *, create: bool = False) -> Path:
+def _state_directory(
+    path: Path,
+    *,
+    create: bool = False,
+    allow_missing: bool = False,
+) -> Path:
     target = path.expanduser()
     try:
         if create:
             target.mkdir(mode=0o700, parents=True, exist_ok=True)
-        return target.resolve(strict=True)
+        return target.resolve(strict=not allow_missing)
     except OSError as error:
         raise PersonalCommandError("personal_state_unavailable", 2) from error
 

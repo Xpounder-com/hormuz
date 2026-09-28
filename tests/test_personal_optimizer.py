@@ -376,6 +376,30 @@ class PersonalContractTests(unittest.TestCase):
         self.assertIn("removed=false", output.getvalue())
         self.assertFalse(profiles.directory.exists())
 
+    def test_remove_before_state_directory_exists_is_an_idempotent_noop(self) -> None:
+        missing_state = self.state / "never-created-state"
+        output = io.StringIO()
+        with (
+            mock.patch.object(
+                personal_commands,
+                "ProviderCredentialStore",
+                side_effect=AssertionError("empty removal must not open a keyring"),
+            ),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(
+                personal_commands.run(
+                    argparse.Namespace(
+                        personal_command="remove",
+                        profile="never-created",
+                        state_directory=missing_state,
+                    )
+                ),
+                0,
+            )
+        self.assertIn("removed=false", output.getvalue())
+        self.assertFalse(missing_state.exists())
+
     def test_connect_is_create_only_and_remove_restores_transient_setup(self) -> None:
         backend = _MemoryKeyring()
         credentials = ProviderCredentialStore(backend, trust_injected_backend=True)

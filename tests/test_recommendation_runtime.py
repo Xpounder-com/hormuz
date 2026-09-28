@@ -1077,6 +1077,142 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
             )
         self.assertEqual(result["state"], "accepted")
 
+        successor = self.repositories.budgets.create_plan(
+            self.principal,
+            _budget_plan_request(
+                self.scope,
+                amount="50",
+                budget_plan_id=candidate["budget_plan_id"],
+                expected_version=candidate["version"],
+            ),
+        )
+        follow_up = self.generate(
+            self.request(
+                "budget-change-follow-up",
+                change_type="budget_plan_change",
+                candidate_budget_plan={
+                    "id": successor["budget_plan_id"],
+                    "version": successor["version"],
+                },
+            ),
+            baseline=self.baseline,
+            candidate=self.baseline,
+        )
+        assert follow_up is not None
+        with self.runtime():
+            accepted_follow_up = self.service.dispatch(
+                ADMIN,
+                "POST",
+                RECOMMENDATIONS + "/budget-change-follow-up/decisions",
+                body=canonical(self.decision(follow_up)).encode("ascii"),
+                idempotency_key="accept-budget-change-follow-up",
+            )[1]
+        self.assertEqual(accepted_follow_up["state"], "accepted")
+
+    def test_budget_application_requires_the_reviewed_direct_successor(self) -> None:
+        active = self.repositories.budgets.create_plan(
+            self.principal,
+            _budget_plan_request(self.scope, amount="100"),
+        )
+        self.repositories.budgets.activate_plan(
+            self.principal,
+            active["budget_plan_id"],
+            _activation_request(active["version"]),
+        )
+        candidate = self.repositories.budgets.create_plan(
+            self.principal,
+            _budget_plan_request(
+                self.scope,
+                amount="75",
+                budget_plan_id=active["budget_plan_id"],
+                expected_version=active["version"],
+            ),
+        )
+        detour = self.repositories.budgets.create_plan(
+            self.principal,
+            _budget_plan_request(
+                self.scope,
+                amount="60",
+                budget_plan_id=active["budget_plan_id"],
+                expected_version=candidate["version"],
+            ),
+        )
+        evaluation = self.generate(
+            self.request(
+                "budget-direct-successor",
+                change_type="budget_plan_change",
+                candidate_budget_plan={
+                    "id": candidate["budget_plan_id"],
+                    "version": candidate["version"],
+                },
+            ),
+            baseline=self.baseline,
+            candidate=self.baseline,
+        )
+        assert evaluation is not None
+        with self.runtime():
+            self.service.dispatch(
+                ADMIN,
+                "POST",
+                RECOMMENDATIONS + "/budget-direct-successor/decisions",
+                body=canonical(self.decision(evaluation)).encode("ascii"),
+                idempotency_key="accept-budget-direct-successor",
+            )
+        self.repositories.budgets.activate_plan(
+            self.principal,
+            candidate["budget_plan_id"],
+            _activation_request(
+                candidate["version"],
+                expected_active_version=active["version"],
+                expected_activation_generation=1,
+            ),
+        )
+        self.repositories.budgets.activate_plan(
+            self.principal,
+            detour["budget_plan_id"],
+            _activation_request(
+                detour["version"],
+                expected_active_version=candidate["version"],
+                expected_activation_generation=2,
+            ),
+        )
+        self.repositories.budgets.activate_plan(
+            self.principal,
+            candidate["budget_plan_id"],
+            _activation_request(
+                candidate["version"],
+                expected_active_version=detour["version"],
+                expected_activation_generation=3,
+                reason_code="reactivated",
+            ),
+        )
+        with self.runtime():
+            self.error(
+                "version_conflict",
+                lambda: self.repositories.recommendations.application_evidence(
+                    self.principal,
+                    "budget-direct-successor",
+                    1,
+                ),
+            )
+            self.error(
+                "version_conflict",
+                lambda: self.repositories.recommendations.record_applied(
+                    self.principal,
+                    "budget-direct-successor",
+                    1,
+                    {
+                        "activation_event_id": "intervening-budget-activation",
+                        "activated_policy_digest": None,
+                        "activated_budget_plan": {
+                            "id": candidate["budget_plan_id"],
+                            "version": candidate["version"],
+                        },
+                        "activation_digest": "a" * 64,
+                    },
+                ),
+            )
+
     def test_expired_candidate_budget_plan_is_suppressed(self) -> None:
         request = _budget_plan_request(self.scope, amount="75")
         request["window"] = {

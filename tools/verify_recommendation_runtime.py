@@ -39,7 +39,7 @@ from tools import verify_role_view_runtime as role_verifier
 
 
 PLAN_PATH = "docs/recommendation-runtime-plan-v1.json"
-PLAN_SHA256 = "812ee49aa163d15fe46126f3da97a341f7422c5f551e5f0b2f4b2dcc2fed05bd"
+PLAN_SHA256 = "114a2ec3d8d7cb40a4028fe34c81ae77239f36f4645ae84884bc8e4d2feaeac9"
 PREDECESSOR_PATH = "docs/role-view-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "ba13527aa781e88232ca1403468e181c759004628645bb9bc48e660955a1e533"
@@ -687,17 +687,17 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         "weak_evidence_result": "suppressed_no_recommendation",
         "expired_candidate_budget_result": "suppressed_no_recommendation",
         "policy_conflict_scope": (
-            "all_policy_change_types_same_scope_version_and_baseline"
+            "all_incomplete_policy_change_types_same_scope_version_and_baseline"
         ),
         "cursor_expiry": "frozen_as_of_materialized_once_on_every_page",
         "managed_policy_race_control": (
             "shared_policy_control_tenant_lock_and_transactional_reread"
         ),
         "application_drift_recheck": (
-            "scorecard_and_non_target_policy_budget_bindings"
+            "scorecard_non_target_policy_budget_bindings_and_target_direct_successor"
         ),
         "application_evidence": (
-            "server_derived_authoritative_activation_ledger"
+            "server_derived_authoritative_activation_ledger_with_reviewed_predecessor"
         ),
         "local_policy_applied_event": False,
         "database_statement_timeout_ms": 5000,
