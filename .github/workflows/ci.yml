@@ -120,6 +120,11 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" demo
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" policy demo
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" personal contract --json > "$RUNNER_TEMP/personal-contract.json"
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" personal qualify --json > "$RUNNER_TEMP/personal-qualification.json"
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" personal conformance --agent aider --json > "$RUNNER_TEMP/personal-aider-conformance.json"
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m hormuz.personal_adapter_example > "$RUNNER_TEMP/personal-adapter-example.json"
+          PERSONAL_CONTRACT_PATH="$RUNNER_TEMP/personal-contract.json" PERSONAL_QUALIFICATION_PATH="$RUNNER_TEMP/personal-qualification.json" PERSONAL_AIDER_PATH="$RUNNER_TEMP/personal-aider-conformance.json" PERSONAL_EXAMPLE_PATH="$RUNNER_TEMP/personal-adapter-example.json" "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -c 'import json, os, pathlib; contract = json.loads(pathlib.Path(os.environ["PERSONAL_CONTRACT_PATH"]).read_text()); qualification = json.loads(pathlib.Path(os.environ["PERSONAL_QUALIFICATION_PATH"]).read_text()); aider = json.loads(pathlib.Path(os.environ["PERSONAL_AIDER_PATH"]).read_text()); example = json.loads(pathlib.Path(os.environ["PERSONAL_EXAMPLE_PATH"]).read_text()); assert contract["schema_id"] == "hormuz.personal-release"; assert qualification["passed"] is True and qualification["provider_calls"] == 0; assert aider["passed"] is True and example["passed"] is True'
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz-context-experiment" --help
           HORMUZ_TOKEN=test-identity-token "$RUNNER_TEMP/hormuz-wheel/bin/hormuz-context-experiment" \
             --config config.example.json \
@@ -263,7 +268,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # The installed-wheel migration matrix normally completes in roughly
+    # 21-25 minutes; keep bounded headroom for hosted-runner variance.
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777

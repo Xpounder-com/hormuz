@@ -18,6 +18,7 @@ from .commands import custody as custody_commands
 from .commands import finance as finance_commands
 from .commands import policy as policy_commands
 from .commands import portfolio as portfolio_commands
+from .commands import personal as personal_commands
 from .commands import runtime as runtime_commands
 from .commands import session as session_commands
 from .commands import onboarding as onboarding_commands
@@ -77,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     client_commands.add_client_commands(subparsers)
     context_commands.add_context_commands(subparsers)
+    personal_commands.add_personal_commands(subparsers)
     session_commands.add_session_commands(subparsers)
     onboarding_commands.add_onboarding_commands(subparsers)
 
@@ -116,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
         return session_commands.client_config(args)
     if args.command == "context":
         return context_commands.run(args)
+    if args.command == "personal":
+        return personal_commands.run(args)
     if args.command == "contract" and args.contract_command == "manifest":
         return runtime_commands._contract_manifest()
     if args.command == "demo":
@@ -303,6 +307,7 @@ def _normalize_command_argv(argv: list[str]) -> list[str]:
         (("custody", "administrator", "revoke-static"), ("custody", "administrator", "retire", "static")),
         (("custody", "evidence", "deletion-check"), ("custody", "evidence", "deletion", "check")),
         (("custody", "executor", "register-assets"), ("custody", "executor", "register", "assets")),
+        (("personal", "feedback-export"), ("personal", "feedback", "export")),
     )
     for legacy, primary in nested_aliases:
         if tuple(command[: len(legacy)]) == legacy:

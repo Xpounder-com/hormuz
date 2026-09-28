@@ -90,6 +90,21 @@ class PreferenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ContextRuntimeError, "settings_invalid"):
             self.store.load()
 
+    def test_clear_removes_a_valid_setting_and_rejects_a_dangling_symlink(self) -> None:
+        self.store.save(True)
+        self.assertTrue(self.store.clear())
+        self.assertFalse(self.store.path.exists())
+        self.assertFalse(self.store.clear())
+
+        self.store.path.symlink_to(Path(self.temporary.name) / "missing-setting")
+        with self.assertRaisesRegex(ContextRuntimeError, "settings_invalid"):
+            self.store.clear()
+
+        dangling_root = Path(self.temporary.name) / "dangling-clear-root"
+        dangling_root.symlink_to(Path(self.temporary.name) / "missing-clear-root")
+        with self.assertRaisesRegex(ContextRuntimeError, "settings_directory_unsafe"):
+            ContextPreferenceStore(dangling_root, "profile-1").clear()
+
 
 class MappingTests(unittest.TestCase):
     def test_exact_contracts_and_safe_rg_commands_are_selected(self) -> None:

@@ -269,7 +269,29 @@ def _status(args: argparse.Namespace) -> int:
 
 
 def _install_resources(directory: Path | None) -> int:
-    target = (directory or default_tokenizer_cache_directory()).expanduser()
+    if directory is None:
+        state_root = default_state_directory().expanduser()
+        try:
+            if state_root.is_symlink():
+                raise ContextCommandError("resource_directory_unsafe", 1)
+            state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            root_info = state_root.lstat()
+            if (
+                not stat.S_ISDIR(root_info.st_mode)
+                or state_root.is_symlink()
+                or root_info.st_uid != os.getuid()
+            ):
+                raise ContextCommandError("resource_directory_unsafe", 1)
+            if root_info.st_mode & 0o077:
+                state_root.chmod(0o700)
+                root_info = state_root.lstat()
+            if root_info.st_mode & 0o077:
+                raise ContextCommandError("resource_directory_unsafe", 1)
+        except OSError as error:
+            raise ContextCommandError("resource_install_failed", 1) from error
+        target = default_tokenizer_cache_directory(state_root)
+    else:
+        target = directory.expanduser()
     try:
         if target.is_symlink():
             raise ContextCommandError("resource_directory_unsafe", 1)

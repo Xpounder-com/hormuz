@@ -145,6 +145,42 @@ class ContextPreferenceStore:
             self._unlock(lock_fd)
             os.close(lock_fd)
 
+    def clear(self) -> bool:
+        """Remove the preference without creating state or following links."""
+        try:
+            self.directory.lstat()
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise ContextRuntimeError("settings_directory_unavailable") from error
+        self._prepare_directory(create=False)
+        lock_fd = self._open_lock()
+        try:
+            self._lock(lock_fd)
+            try:
+                self._read_regular(self.path, MAX_SETTINGS_BYTES)
+            except ContextRuntimeError:
+                try:
+                    self.path.lstat()
+                except FileNotFoundError:
+                    return False
+                raise
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                return False
+            except OSError as error:
+                raise ContextRuntimeError("settings_write_failed") from error
+            directory_fd = os.open(self.directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            return True
+        finally:
+            self._unlock(lock_fd)
+            os.close(lock_fd)
+
     def _prepare_directory(self, *, create: bool) -> None:
         if create:
             try:

@@ -36,6 +36,26 @@ SCORECARD_FIXTURE = (
 NOW = "2026-09-24T12:00:00.000000Z"
 
 
+def _budget_plan_request(
+    scope,
+    *,
+    amount: str,
+    budget_plan_id: str | None = None,
+    expected_version: int | None = None,
+) -> dict[str, object]:
+    value = _plan_request(
+        scope,
+        amount=amount,
+        budget_plan_id=budget_plan_id,
+        expected_version=expected_version,
+    )
+    value["window"] = {
+        "start_at": "2026-09-23T00:00:00.000000Z",
+        "end_at": "2026-09-25T00:00:00.000000Z",
+    }
+    return value
+
+
 def _policy_mapping(*, output_cap: int) -> dict[str, object]:
     return {
         "schema_id": "hormuz.policy-document",
@@ -62,6 +82,11 @@ def _policy_mapping(*, output_cap: int) -> dict[str, object]:
 
 class SQLiteRecommendationRuntimeTests(unittest.TestCase):
     def setUp(self) -> None:
+        clock = mock.patch(
+            "hormuz._portfolio_sql.PortfolioSQL.now", return_value=NOW
+        )
+        clock.start()
+        self.addCleanup(clock.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
@@ -510,7 +535,7 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
             )
         plan = self.repositories.budgets.create_plan(
             self.principal,
-            _plan_request(self.scope, amount="100"),
+            _budget_plan_request(self.scope, amount="100"),
         )
         self.repositories.budgets.activate_plan(
             self.principal,
@@ -840,7 +865,7 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
     def test_budget_recommendation_requires_separate_activation(self) -> None:
         active = self.repositories.budgets.create_plan(
             self.principal,
-            _plan_request(self.scope, amount="100"),
+            _budget_plan_request(self.scope, amount="100"),
         )
         self.repositories.budgets.activate_plan(
             self.principal,
@@ -849,7 +874,7 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
         )
         candidate = self.repositories.budgets.create_plan(
             self.principal,
-            _plan_request(
+            _budget_plan_request(
                 self.scope,
                 amount="75",
                 budget_plan_id=active["budget_plan_id"],
@@ -934,7 +959,7 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
         self.assertEqual(result["state"], "accepted")
 
     def test_expired_candidate_budget_plan_is_suppressed(self) -> None:
-        request = _plan_request(self.scope, amount="75")
+        request = _budget_plan_request(self.scope, amount="75")
         request["window"] = {
             "start_at": "2026-09-23T00:00:00.000000Z",
             "end_at": "2026-09-25T00:00:00.000000Z",

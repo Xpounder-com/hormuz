@@ -14,6 +14,7 @@ import ssl
 import stat
 import subprocess
 import threading
+import time
 import urllib.parse
 import uuid
 from collections.abc import Callable, Mapping
@@ -23,7 +24,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Literal, cast
 
-from .compaction import MAX_REQUEST_BYTES, CompactionResult, optimize_request, serialize_request
+from .adapters import AdapterError, adapter_for
+from .compaction import (
+    MAX_REQUEST_BYTES,
+    CompactionResult,
+    Protocol,
+    optimize_request,
+    serialize_request,
+)
 from .client_versions import SUPPORTED_CLIENT_VERSIONS
 from .compaction_formats import CompactionFormatError, strict_json_loads
 from .compaction_contract import (
@@ -37,6 +45,13 @@ from .compaction_runtime import (
     ContextRuntimeError,
     load_token_counters,
 )
+from .personal_metrics import (
+    OptimizationMeasurement,
+    PersonalMetricsError,
+    PersonalMetricsStore,
+    ProviderMeasurement,
+    ResponseUsageAccumulator,
+)
 from .session_client import SessionClientError, validate_session_gateway
 
 
@@ -45,6 +60,7 @@ RELAY_CHUNK_BYTES = 16 * 1024
 _LOCAL_CREDENTIAL = re.compile(r"hox_l_[A-Za-z0-9_-]{43}")
 _ACCESS_CREDENTIAL = re.compile(r"hox_a_[A-Za-z0-9_-]{43}")
 _CLIENT_VERSION = re.compile(r"(?<!\d)(\d+\.\d+\.\d+)(?!\d)")
+MAX_OPTIMIZER_OVERHEAD_US = 100_000
 _HOP_HEADERS = frozenset(
     {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"}
 )
@@ -83,12 +99,14 @@ class RelayOptimizer:
         client: str,
         gateway_compatible: bool,
         counters: Mapping[str, Callable[[str], int]] | None = None,
+        metrics: PersonalMetricsStore | None = None,
     ):
         self.preference_store = preference_store
         self.client = client
         self.gateway_compatible = gateway_compatible
         self._counters = counters
         self._resources_checked = counters is not None
+        self.metrics = metrics
         self._lock = threading.Lock()
         self._status = RelayStatus("off")
 
@@ -98,43 +116,180 @@ class RelayOptimizer:
             return self._status
 
     def prepare(self, body: bytes, path: str) -> tuple[bytes, dict[str, str]]:
+        started = time.perf_counter_ns()
         try:
             enabled = self.preference_store.load().enabled
         except ContextRuntimeError:
             self._set_status(RelayStatus("settings_invalid"))
+            self._observe(
+                eligible=False,
+                applied=False,
+                reason="settings_invalid",
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=None,
+                after_tokens=None,
+                started=started,
+            )
             return body, {}
         if not enabled:
             self._set_status(RelayStatus("off"))
+            self._observe(
+                eligible=False,
+                applied=False,
+                reason="disabled",
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=None,
+                after_tokens=None,
+                started=started,
+            )
             return body, {}
-        if self.client not in {"codex", "claude-code"}:
+        try:
+            adapter_for(self.client)
+        except AdapterError:
             self._set_status(RelayStatus("unsupported_client"))
+            self._observe(
+                eligible=False,
+                applied=False,
+                reason="unsupported_client",
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=None,
+                after_tokens=None,
+                started=started,
+            )
             return body, {}
         if not self.gateway_compatible:
             self._set_status(RelayStatus("gateway_incompatible"))
+            self._observe(
+                eligible=False,
+                applied=False,
+                reason="gateway_incompatible",
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=None,
+                after_tokens=None,
+                started=started,
+            )
             return body, {}
         protocol = _protocol_for_path(path)
         if protocol is None or len(body) > MAX_REQUEST_BYTES:
-            self._set_status(RelayStatus("unsupported_history" if protocol is not None else "unsupported_client"))
+            reason = "unsupported_history" if protocol is not None else "unsupported_client"
+            self._set_status(RelayStatus(reason))
+            self._observe(
+                eligible=False,
+                applied=False,
+                reason=reason,
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=None,
+                after_tokens=None,
+                started=started,
+            )
             return body, {}
         try:
-            payload = strict_json_loads(body.decode("utf-8"))
+            request_text = body.decode("utf-8")
+            payload = strict_json_loads(request_text)
         except (CompactionFormatError, UnicodeDecodeError, RecursionError):
             self._set_status(RelayStatus("unsupported_history"))
+            self._observe(
+                eligible=False,
+                applied=False,
+                reason="unsupported_history",
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=None,
+                after_tokens=None,
+                started=started,
+            )
             return body, {}
         if not isinstance(payload, dict):
             self._set_status(RelayStatus("unsupported_history"))
+            self._observe(
+                eligible=False,
+                applied=False,
+                reason="unsupported_history",
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=None,
+                after_tokens=None,
+                started=started,
+            )
             return body, {}
         counters = self._token_counters()
         if counters is None:
+            self._observe(
+                eligible=False,
+                applied=False,
+                reason="resources_unavailable",
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=None,
+                after_tokens=None,
+                started=started,
+            )
             return body, {}
         typed_payload = cast(dict[str, object], payload)
         selections = derive_selections(typed_payload, protocol, client=self.client)
         result = optimize_request(typed_payload, protocol, selections, counters, enabled=True)
-        self._record_result(result)
+        outgoing_text = serialize_request(result.payload) if result.changed else request_text
+        outgoing = outgoing_text.encode("utf-8") if result.changed else body
+        try:
+            before_tokens = _count_boundary_tokens(request_text, counters)
+            after_tokens = _count_boundary_tokens(outgoing_text, counters)
+        except Exception:
+            result = CompactionResult(
+                payload=typed_payload,
+                changed=False,
+                reason="counter_unavailable",
+                changed_blocks=0,
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens={},
+                after_tokens={},
+            )
+            outgoing = body
+            before_tokens = {}
+            after_tokens = {}
+        elapsed_us = max(0, (time.perf_counter_ns() - started) // 1_000)
+        if result.changed and elapsed_us > MAX_OPTIMIZER_OVERHEAD_US:
+            result = CompactionResult(
+                payload=typed_payload,
+                changed=False,
+                reason="net_regression",
+                changed_blocks=0,
+                before_bytes=len(body),
+                after_bytes=len(body),
+                before_tokens=before_tokens,
+                after_tokens=dict(before_tokens),
+            )
+            outgoing = body
+            after_tokens = dict(before_tokens)
+        measured_result = CompactionResult(
+            payload=result.payload,
+            changed=result.changed,
+            reason=result.reason,
+            changed_blocks=result.changed_blocks,
+            before_bytes=len(body),
+            after_bytes=len(outgoing),
+            before_tokens=before_tokens,
+            after_tokens=after_tokens,
+        )
+        self._record_result(measured_result)
+        self._observe(
+            eligible=result.reason in {"compacted", "no_savings", "net_regression"},
+            applied=result.changed,
+            reason=result.reason,
+            before_bytes=measured_result.before_bytes,
+            after_bytes=measured_result.after_bytes,
+            before_tokens=measured_result.before_tokens,
+            after_tokens=measured_result.after_tokens,
+            started=started,
+        )
         if not result.changed:
             return body, {}
-        changed = serialize_request(result.payload).encode("utf-8")
-        return changed, {CONTEXT_FORMAT_HEADER: CONTEXT_FORMAT_VERSION}
+        return outgoing, {CONTEXT_FORMAT_HEADER: CONTEXT_FORMAT_VERSION}
 
     def note_oversized_passthrough(self) -> None:
         """Snapshot the toggle without buffering or inspecting a large body."""
@@ -145,12 +300,36 @@ class RelayOptimizer:
             return
         if not enabled:
             self._set_status(RelayStatus("off"))
-        elif self.client not in {"codex", "claude-code"}:
-            self._set_status(RelayStatus("unsupported_client"))
-        elif not self.gateway_compatible:
-            self._set_status(RelayStatus("gateway_incompatible"))
         else:
-            self._set_status(RelayStatus("unsupported_history"))
+            try:
+                adapter_for(self.client)
+            except AdapterError:
+                self._set_status(RelayStatus("unsupported_client"))
+            else:
+                self._set_status(
+                    RelayStatus(
+                        "gateway_incompatible"
+                        if not self.gateway_compatible
+                        else "unsupported_history"
+                    )
+                )
+        if self.metrics is not None:
+            reason = self.status.code
+            try:
+                self.metrics.record_optimization(
+                    OptimizationMeasurement(
+                        eligible=False,
+                        applied=False,
+                        reason="disabled" if reason == "off" else reason,
+                        before_bytes=None,
+                        after_bytes=None,
+                        before_tokens=None,
+                        after_tokens=None,
+                        overhead_us=0,
+                    )
+                )
+            except PersonalMetricsError:
+                self.metrics = None
 
     def _token_counters(self) -> Mapping[str, Callable[[str], int]] | None:
         with self._lock:
@@ -181,6 +360,36 @@ class RelayOptimizer:
         with self._lock:
             self._status = status
 
+    def _observe(
+        self,
+        *,
+        eligible: bool,
+        applied: bool,
+        reason: str,
+        before_bytes: int | None,
+        after_bytes: int | None,
+        before_tokens: Mapping[str, int] | None,
+        after_tokens: Mapping[str, int] | None,
+        started: int,
+    ) -> None:
+        if self.metrics is None:
+            return
+        try:
+            self.metrics.record_optimization(
+                OptimizationMeasurement(
+                    eligible=eligible,
+                    applied=applied,
+                    reason=reason,
+                    before_bytes=before_bytes,
+                    after_bytes=after_bytes,
+                    before_tokens=before_tokens,
+                    after_tokens=after_tokens,
+                    overhead_us=max(0, (time.perf_counter_ns() - started) // 1_000),
+                )
+            )
+        except PersonalMetricsError:
+            self.metrics = None
+
 
 class LocalRelayServer(ThreadingHTTPServer):
     allow_reuse_address = False
@@ -191,10 +400,12 @@ class LocalRelayServer(ThreadingHTTPServer):
         self,
         *,
         gateway: str,
-        client: Literal["codex", "claude-code"],
+        client: str,
         local_credential: str,
         gateway_credential: Callable[[], str],
         optimizer: RelayOptimizer,
+        upstream_auth: Literal["hormuz", "openai", "anthropic"] = "hormuz",
+        metrics: PersonalMetricsStore | None = None,
         timeout_seconds: float = 60,
     ):
         if _LOCAL_CREDENTIAL.fullmatch(local_credential) is None:
@@ -208,6 +419,14 @@ class LocalRelayServer(ThreadingHTTPServer):
         self.local_credential = local_credential
         self.gateway_credential = gateway_credential
         self.optimizer = optimizer
+        if upstream_auth not in {"hormuz", "openai", "anthropic"}:
+            raise ClientRelayError("invalid_upstream_auth")
+        try:
+            self.adapter = adapter_for(client)
+        except AdapterError as error:
+            raise ClientRelayError("unsupported_client") from error
+        self.upstream_auth = upstream_auth
+        self.metrics = metrics
         self.timeout_seconds = timeout_seconds
         self._upstream_condition = threading.Condition()
         self._upstreams: dict[http.client.HTTPConnection, socket.socket | None] = {}
@@ -253,6 +472,10 @@ class LocalRelayServer(ThreadingHTTPServer):
             if owned is not None:
                 owned.close()
             self._upstream_condition.notify_all()
+
+    def _is_stopping(self) -> bool:
+        with self._upstream_condition:
+            return self._stopping
 
     def shutdown(self) -> None:
         # Closing HTTPConnection from another thread is insufficient: a
@@ -318,12 +541,16 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
         if self.headers.get("Transfer-Encoding") is not None:
             self._error(HTTPStatus.BAD_REQUEST, "local_transfer_encoding_unsupported")
             return
+        started = time.perf_counter()
+        provider_recorded = False
+        provider_attempted = False
+        local_cancelled = False
         try:
             gateway_token = self.server.gateway_credential()
         except Exception:
             self._error(HTTPStatus.SERVICE_UNAVAILABLE, "gateway_credential_unavailable")
             return
-        if _ACCESS_CREDENTIAL.fullmatch(gateway_token) is None:
+        if not _valid_upstream_credential(gateway_token, self.server.upstream_auth):
             self._error(HTTPStatus.SERVICE_UNAVAILABLE, "gateway_credential_unavailable")
             return
         connection: http.client.HTTPConnection | None = None
@@ -341,19 +568,30 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                     return
                 changed, context_headers = self.server.optimizer.prepare(body, path.path)
                 headers = _forward_headers(
-                    self.headers, gateway_token, len(changed), context_headers
+                    self.headers,
+                    gateway_token,
+                    len(changed),
+                    context_headers if self.server.upstream_auth == "hormuz" else {},
+                    upstream_auth=self.server.upstream_auth,
                 )
                 # Registration precedes connect. A connection racing shutdown
                 # closes before its first POST; a connected socket is shut
                 # down without clearing connection.sock or allowing reconnect.
+                provider_attempted = True
                 connection.connect()
                 if not self.server._attach_upstream_socket(connection):
                     self.close_connection = True
                     return
                 connection.request("POST", upstream_path, body=changed, headers=headers)
             else:
-                self.server.optimizer.note_oversized_passthrough()
-                headers = _forward_headers(self.headers, gateway_token, length, {})
+                headers = _forward_headers(
+                    self.headers,
+                    gateway_token,
+                    length,
+                    {},
+                    upstream_auth=self.server.upstream_auth,
+                )
+                provider_attempted = True
                 connection.connect()
                 if not self.server._attach_upstream_socket(connection):
                     self.close_connection = True
@@ -364,26 +602,60 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                 connection.endheaders()
                 remaining = length
                 while remaining:
-                    chunk = self.rfile.read(min(RELAY_CHUNK_BYTES, remaining))
+                    try:
+                        chunk = self.rfile.read(min(RELAY_CHUNK_BYTES, remaining))
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                        local_cancelled = True
+                        self.close_connection = True
+                        return
                     if not chunk:
+                        local_cancelled = True
                         self.close_connection = True
                         return
                     connection.send(chunk)
                     remaining -= len(chunk)
+                self.server.optimizer.note_oversized_passthrough()
             response = connection.getresponse()
-            self._relay_response(response)
+            self._relay_response(response, path.path, started)
+            provider_recorded = True
         except (BrokenPipeError, ConnectionResetError):
+            if provider_attempted:
+                self._record_provider_failure(
+                    started, cancelled=self.server._is_stopping()
+                )
+                provider_recorded = True
             self.close_connection = True
         except (OSError, ssl.SSLError, http.client.HTTPException):
+            if provider_attempted:
+                self._record_provider_failure(
+                    started, cancelled=self.server._is_stopping()
+                )
+                provider_recorded = True
             if not self._response_started:
                 self._error(HTTPStatus.BAD_GATEWAY, "gateway_unavailable")
             self.close_connection = True
         finally:
+            if provider_attempted and not provider_recorded:
+                self._record_provider_failure(
+                    started,
+                    cancelled=local_cancelled or self.server._is_stopping(),
+                )
             if connection is not None:
                 connection.close()
                 self.server._unregister_upstream(connection)
 
-    def _relay_response(self, response: http.client.HTTPResponse) -> None:
+    def _relay_response(
+        self, response: http.client.HTTPResponse, request_path: str, started: float
+    ) -> None:
+        first_byte_ms: float | None = None
+        protocol = self.server.adapter.protocol_for_path(request_path) or "responses"
+        accumulator = ResponseUsageAccumulator(
+            protocol, response.getheader("Content-Type")
+        )
+        accepted = 200 <= response.status < 300
+        completed = False
+        cancelled = False
+        upstream_failed = False
         try:
             self._response_started = True
             self.send_response(response.status)
@@ -393,16 +665,120 @@ class LocalRelayHandler(BaseHTTPRequestHandler):
                     self.send_header(name, value)
             self.send_header("Connection", "close")
             self.end_headers()
-            while chunk := response.read(RELAY_CHUNK_BYTES):
-                self.wfile.write(chunk)
-                self.wfile.flush()
+            while True:
+                try:
+                    # The first read is deliberately one byte so the recorded
+                    # TTFT cannot collapse headers-to-first-body delay into
+                    # header latency or wait for a larger buffered read.
+                    chunk = response.read(
+                        1 if first_byte_ms is None else RELAY_CHUNK_BYTES
+                    )
+                except (OSError, ssl.SSLError, http.client.HTTPException):
+                    if self.server._is_stopping():
+                        cancelled = True
+                    else:
+                        upstream_failed = True
+                    self.close_connection = True
+                    break
+                if not chunk:
+                    completed = response.length in {None, 0}
+                    if not completed and self.server._is_stopping():
+                        cancelled = True
+                    else:
+                        upstream_failed = not completed
+                    if cancelled or upstream_failed:
+                        self.close_connection = True
+                    break
+                if first_byte_ms is None:
+                    first_byte_ms = max(
+                        0.0, (time.perf_counter() - started) * 1000
+                    )
+                accumulator.feed(chunk)
+                try:
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    cancelled = True
+                    self.close_connection = True
+                    break
+        except (BrokenPipeError, ConnectionResetError):
+            cancelled = True
+            self.close_connection = True
+        except (OSError, ssl.SSLError, http.client.HTTPException):
+            if self.server._is_stopping():
+                cancelled = True
+            else:
+                upstream_failed = True
+            self.close_connection = True
         finally:
             response.close()
+            if self.server.metrics is not None:
+                try:
+                    self.server.metrics.record_provider(
+                        ProviderMeasurement(
+                            succeeded=(
+                                accepted
+                                and completed
+                                and not cancelled
+                                and not upstream_failed
+                            ),
+                            cancelled=cancelled,
+                            response_received=True,
+                            response_bytes=accumulator.total_bytes,
+                            time_to_first_byte_ms=first_byte_ms,
+                            total_latency_ms=max(0.0, (time.perf_counter() - started) * 1000),
+                            usage=accumulator.usage(),
+                        )
+                    )
+                except PersonalMetricsError:
+                    self.server.metrics = None
+
+    def _record_provider_failure(self, started: float, *, cancelled: bool) -> None:
+        if self.server.metrics is None:
+            return
+        try:
+            self.server.metrics.record_provider(
+                ProviderMeasurement(
+                    succeeded=False,
+                    cancelled=cancelled,
+                    response_received=False,
+                    response_bytes=None,
+                    time_to_first_byte_ms=None,
+                    total_latency_ms=max(0.0, (time.perf_counter() - started) * 1000),
+                    usage={},
+                )
+            )
+        except PersonalMetricsError:
+            self.server.metrics = None
 
     def do_CONNECT(self) -> None:  # noqa: N802
         self._error(HTTPStatus.METHOD_NOT_ALLOWED, "local_method_not_allowed")
 
     def do_GET(self) -> None:  # noqa: N802
+        path = urllib.parse.urlsplit(self.path)
+        # Codex refreshes provider model metadata at startup.  The personal
+        # relay deliberately does not expose or proxy an upstream catalog:
+        # its configured model is explicit and Codex retains its bundled
+        # metadata.  A valid empty catalog keeps that read-only probe local.
+        if (
+            self.server.client_name == "codex"
+            and not path.scheme
+            and not path.netloc
+            and not path.fragment
+            and path.path == "/v1/models"
+        ):
+            if not self._authenticated():
+                self._error(HTTPStatus.UNAUTHORIZED, "local_authentication_failed")
+                return
+            body = b'{"models":[]}'
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         self._error(HTTPStatus.METHOD_NOT_ALLOWED, "local_method_not_allowed")
 
     def do_OPTIONS(self) -> None:  # noqa: N802
@@ -633,52 +1009,37 @@ def _client_command(
     *,
     executable: str | None = None,
 ) -> tuple[list[str], dict[str, str]]:
-    executable = executable or shutil.which("codex" if profile.client == "codex" else "claude")
+    try:
+        adapter = adapter_for(profile.client)
+    except AdapterError as error:
+        raise ClientRelayError("unsupported_client") from error
+    executable = executable or shutil.which(adapter.identity.executable)
     if executable is None:
         raise ClientRelayError("supported_client_not_installed")
-    if profile.client == "codex":
-        blocked_names = {
-            "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORGANIZATION",
-            "OPENAI_PROJECT", "CODEX_API_KEY",
-        }
-    else:
-        blocked_names = {
-            "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS",
-            "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
-        }
-    environment = {
-        name: value for name, value in os.environ.items()
-        if name not in blocked_names
-    }
-    if profile.client == "codex":
-        environment.update({"HORMUZ_LOCAL_RELAY_TOKEN": local_credential})
-        provider = (
-            '{name="Hormuz",base_url=' + json.dumps(relay_origin + "/v1")
-            + ',wire_api="responses",requires_openai_auth=false,env_key="HORMUZ_LOCAL_RELAY_TOKEN"}'
-        )
-        return (
-            [executable, "-c", 'model_provider="hormuz_context_relay"', "-c",
-             "model_providers.hormuz_context_relay=" + provider, "-c", "model=" + json.dumps(profile.model)],
-            environment,
-        )
-    environment.update(
-        {
-            "ANTHROPIC_BASE_URL": relay_origin,
-            "ANTHROPIC_API_KEY": "",
-            "ANTHROPIC_AUTH_TOKEN": local_credential,
-            "ANTHROPIC_MODEL": profile.model,
-            "ANTHROPIC_DEFAULT_OPUS_MODEL": profile.model,
-            "ANTHROPIC_DEFAULT_SONNET_MODEL": profile.model,
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL": profile.model,
-        }
+    plan = adapter.launch_plan(
+        executable=executable,
+        relay_origin=relay_origin,
+        local_credential=local_credential,
+        model=profile.model,
     )
-    return [executable, "--model", profile.model], environment
+    return list(plan.argv), plan.environment
 
 
-def supported_client_executable(client: str) -> str:
-    command = "codex" if client == "codex" else "claude" if client == "claude-code" else None
-    expected = SUPPORTED_CLIENT_VERSIONS.get(client)
-    executable = shutil.which(command) if command is not None else None
+def supported_client_executable(
+    client: str,
+    *,
+    expected_version: str | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> str:
+    try:
+        adapter = adapter_for(client)
+    except AdapterError as error:
+        raise ClientRelayError("unsupported_client") from error
+    command = adapter.identity.executable
+    expected = expected_version or SUPPORTED_CLIENT_VERSIONS.get(
+        client, adapter.identity.version
+    )
+    executable = shutil.which(command)
     if executable is None or expected is None:
         raise ClientRelayError("unsupported_client")
     try:
@@ -689,6 +1050,7 @@ def supported_client_executable(client: str) -> str:
             stderr=subprocess.PIPE,
             timeout=15,
             check=False,
+            env=None if environment is None else dict(environment),
         )
         output = completed.stdout + b" " + completed.stderr
     except (OSError, subprocess.SubprocessError) as error:
@@ -704,18 +1066,41 @@ def supported_client_executable(client: str) -> str:
     return executable
 
 
-def _protocol_for_path(path: str) -> Literal["responses", "anthropic"] | None:
+def _count_boundary_tokens(
+    value: str, counters: Mapping[str, Callable[[str], int]]
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for name, counter in counters.items():
+        count = counter(value)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError("invalid counter result")
+        counts[name] = count
+    return counts
+
+
+def _protocol_for_path(path: str) -> Protocol | None:
     if path in {"/v1/responses", "/v1/responses/compact"}:
         return "responses"
-    if path == "/v1/messages":
+    if path in {"/v1/messages", "/v1/messages/count_tokens"}:
         return "anthropic"
+    if path == "/v1/chat/completions":
+        return "chat"
     return None
 
 
 def _allowed_paths(client: str) -> frozenset[str]:
-    if client == "codex":
-        return frozenset({"/v1/responses", "/v1/responses/compact"})
-    return frozenset({"/v1/messages", "/v1/messages/count_tokens"})
+    try:
+        adapter = adapter_for(client)
+    except AdapterError:
+        return frozenset()
+    candidates = (
+        "/v1/responses",
+        "/v1/responses/compact",
+        "/v1/messages",
+        "/v1/messages/count_tokens",
+        "/v1/chat/completions",
+    )
+    return frozenset(path for path in candidates if adapter.protocol_for_path(path) is not None)
 
 
 def _gateway_connection(gateway: str, timeout: float) -> http.client.HTTPConnection:
@@ -736,17 +1121,35 @@ def _forward_headers(
     gateway_token: str,
     content_length: int,
     context_headers: Mapping[str, str],
+    *,
+    upstream_auth: Literal["hormuz", "openai", "anthropic"] = "hormuz",
 ) -> dict[str, str]:
     result = {
-        "Authorization": "Bearer " + gateway_token,
         "Content-Type": headers.get("Content-Type", "application/json"),
         "Accept": headers.get("Accept", "application/json"),
         "Content-Length": str(content_length),
         "Cache-Control": "no-store",
     }
+    if upstream_auth == "anthropic":
+        result["X-Api-Key"] = gateway_token
+    else:
+        result["Authorization"] = "Bearer " + gateway_token
     for name in ("User-Agent", "OpenAI-Beta", "Anthropic-Version", "Anthropic-Beta", "X-Hormuz-Work-Attribution"):
         value = headers.get(name)
         if value is not None and "\r" not in value and "\n" not in value:
             result[name] = value
     result.update(context_headers)
     return result
+
+
+def _valid_upstream_credential(
+    value: object, mode: Literal["hormuz", "openai", "anthropic"]
+) -> bool:
+    if mode == "hormuz":
+        return isinstance(value, str) and _ACCESS_CREDENTIAL.fullmatch(value) is not None
+    return (
+        isinstance(value, str)
+        and 8 <= len(value.encode("utf-8")) <= 4096
+        and value == value.strip()
+        and not any(character in value for character in ("\r", "\n", "\x00"))
+    )

@@ -545,12 +545,23 @@ def _validate_managed_materials(
             and entry.get("runtime_consumer") == "portfolio_runtime"
             and entry.get("rotation_authority") == "identity_operator"
         )
+        personal_provider_mode = (
+            mode == "os_secure_store"
+            and coordinate.source_module == "hormuz/credential_store.py"
+            and coordinate.source_qualname == "ProviderCredentialStore.set"
+            and entry.get("material_class") == "provider_credential"
+            and entry.get("storage_owner") == "client_os_secure_store"
+            and entry.get("runtime_consumer") == "client_credential_helper"
+            and entry.get("rotation_authority") == "provider_credential_operator"
+            and entry.get("key_purpose") == "provider_credential"
+        )
         local_session_mode = (
             mode in {
                 "session_flow_aead", "keyed_hash", "os_secure_store",
                 "private_invitation_handoff", "browser_http_only_cookie",
             }
             and not identity_connector_hash
+            and not personal_provider_mode
         )
         if mode == "browser_http_only_cookie" and (
             coordinate.source_module != "hormuz/console_http.py"
@@ -592,7 +603,7 @@ def _validate_managed_materials(
             entry.get("key_purpose") != "session_material" or entry.get("material_class") != "session_material"
         ):
             raise SecretInventoryError("secret_inventory_managed_custody_invalid")
-        if not local_session_mode and not identity_connector_hash and mode not in {
+        if not local_session_mode and not identity_connector_hash and not personal_provider_mode and mode not in {
             "hormuz_encrypted_envelope", "external_service_encryption",
             "transient_import", "hosted_backup_aead",
         }:
