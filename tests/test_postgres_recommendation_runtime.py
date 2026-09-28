@@ -423,6 +423,198 @@ class PostgresRecommendationRuntimeTests(PostgresTestCase):
             )
         self.assertEqual(applied["state"], "accepted")
 
+    def test_managed_policy_generation_detects_reactivation_and_intervening_activation(self) -> None:
+        detour = PolicyDocument.from_mapping(
+            _policy_mapping(output_cap=750), config=self.config
+        )
+        actor_key = "static:" + "2" * 64
+
+        def install_control_plane() -> None:
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("SET LOCAL search_path TO {}").format(
+                            self.sql.Identifier(self.schema)
+                        )
+                    )
+                    cursor.execute(
+                        "INSERT INTO policy_tenants "
+                        "(organization_id,initialized_at,initialized_by_kind,"
+                        "initialized_by_identity_key) VALUES (%s,%s,%s,%s)",
+                        ("acme", NOW, "static", actor_key),
+                    )
+                    for document in (self.baseline, self.candidate, detour):
+                        cursor.execute(
+                            "INSERT INTO policy_versions "
+                            "(organization_id,version_id,content_sha256,document_json,"
+                            "change_summary,created_at,author_kind,author_identity_key) "
+                            "VALUES (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s)",
+                            (
+                                "acme",
+                                document.version_id,
+                                document.content_sha256,
+                                json.dumps(document.to_mapping()),
+                                "{}",
+                                NOW,
+                                "static",
+                                actor_key,
+                            ),
+                        )
+                    cursor.execute(
+                        "INSERT INTO policy_active_versions "
+                        "(organization_id,version_id,generation,activated_at,"
+                        "activated_by_kind,activated_by_identity_key) "
+                        "VALUES (%s,%s,%s,%s,%s,%s)",
+                        (
+                            "acme",
+                            self.baseline.version_id,
+                            1,
+                            NOW,
+                            "static",
+                            actor_key,
+                        ),
+                    )
+                    cursor.execute(
+                        "INSERT INTO policy_control_events "
+                        "(event_id,event_schema_id,event_schema_version,organization_id,"
+                        "occurred_at,event_type,actor_kind,actor_identity_key,"
+                        "version_id,generation) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (
+                            "21111111-1111-4111-8111-111111111111",
+                            "hormuz.policy-control-event",
+                            1,
+                            "acme",
+                            NOW,
+                            "policy_activated",
+                            "static",
+                            actor_key,
+                            self.baseline.version_id,
+                            1,
+                        ),
+                    )
+
+        def activate(document: PolicyDocument, generation: int, event_id: str) -> None:
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("SET LOCAL search_path TO {}").format(
+                            self.sql.Identifier(self.schema)
+                        )
+                    )
+                    cursor.execute(
+                        "UPDATE policy_active_versions SET version_id=%s,generation=%s,"
+                        "activated_at=%s,activated_by_kind=%s,"
+                        "activated_by_identity_key=%s WHERE organization_id=%s",
+                        (
+                            document.version_id,
+                            generation,
+                            NOW,
+                            "static",
+                            actor_key,
+                            "acme",
+                        ),
+                    )
+                    cursor.execute(
+                        "INSERT INTO policy_control_events "
+                        "(event_id,event_schema_id,event_schema_version,organization_id,"
+                        "occurred_at,event_type,actor_kind,actor_identity_key,"
+                        "version_id,generation) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (
+                            event_id,
+                            "hormuz.policy-control-event",
+                            1,
+                            "acme",
+                            NOW,
+                            "policy_activated",
+                            "static",
+                            actor_key,
+                            document.version_id,
+                            generation,
+                        ),
+                    )
+
+        install_control_plane()
+        managed_config = replace(
+            self.config,
+            policy_control=PolicyControlConfig(mode="postgresql"),
+        )
+        managed = create_portfolio_repository(
+            managed_config, environ=self.environment
+        ).recommendations
+
+        def generate(recommendation_id: str):
+            return managed.generate(
+                self.principal,
+                self.request(recommendation_id),
+                baseline_policy=self.baseline,
+                candidate_policy=self.candidate,
+                usage_store=self.usage,
+                preview_request={
+                    "actor_id": "alice",
+                    "client": "codex",
+                    "protocol": "openai",
+                    "requested_model": "synthetic",
+                    "requested_output_tokens": 750,
+                },
+                scenario_suite=self.scenarios,
+            )
+
+        with mock.patch(
+            "hormuz._portfolio_sql.PortfolioSQL.now", return_value=NOW
+        ):
+            reactivated = generate("managed-reactivation-drift")
+            assert reactivated is not None
+            self.assertEqual(
+                reactivated["bindings"]["active_policy_generation"], 1
+            )
+            activate(
+                detour,
+                2,
+                "22222222-2222-4222-8222-222222222222",
+            )
+            activate(
+                self.baseline,
+                3,
+                "23333333-3333-4333-8333-333333333333",
+            )
+            with self.assertRaises(PortfolioError) as caught:
+                managed.decide(
+                    self.principal,
+                    "managed-reactivation-drift",
+                    self.decision(reactivated),
+                    "managed-reactivation-decision",
+                )
+            self.assertEqual(caught.exception.code, "version_conflict")
+
+            intervened = generate("managed-intervening-activation")
+            assert intervened is not None
+            self.assertEqual(
+                intervened["bindings"]["active_policy_generation"], 3
+            )
+            managed.decide(
+                self.principal,
+                "managed-intervening-activation",
+                self.decision(intervened),
+                "managed-intervening-accept",
+            )
+            activate(
+                detour,
+                4,
+                "24444444-4444-4444-8444-444444444444",
+            )
+            activate(
+                self.candidate,
+                5,
+                "25555555-5555-4555-8555-555555555555",
+            )
+            with self.assertRaises(PortfolioError) as caught:
+                managed.application_evidence(
+                    self.principal,
+                    "managed-intervening-activation",
+                    1,
+                )
+            self.assertEqual(caught.exception.code, "version_conflict")
+
     def test_drift_expiry_and_weak_evidence_fail_closed(self) -> None:
         drift = self.generate("postgres-policy-drift")
         assert drift is not None

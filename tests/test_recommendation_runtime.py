@@ -925,6 +925,62 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
             "weak-suppressed", scorecard=weak
         )))
 
+    def test_scenario_evidence_binds_usage_snapshot_and_exact_decisions(self) -> None:
+        first = self.generate(self.request("scenario-evidence-empty-usage"))
+        assert first is not None
+        self.usage.monthly_totals.return_value = MonthlyTotals(
+            requests=7,
+            input_tokens=900,
+            output_tokens=450,
+            cost_microusd=12_345,
+        )
+        second = self.generate(self.request("scenario-evidence-used-usage"))
+        assert second is not None
+        self.assertEqual(
+            first["verification_summary"], second["verification_summary"]
+        )
+        self.assertNotEqual(
+            first["pre_apply_evidence"]["saved_scenario_evaluation"]["digest"],
+            second["pre_apply_evidence"]["saved_scenario_evaluation"]["digest"],
+        )
+
+    def test_scope_identifier_cannot_impersonate_policy_field(self) -> None:
+        baseline_mapping = _policy_mapping(output_cap=1_000)
+        baseline_mapping["policies"]["actors"]["allowed_models"] = {
+            "monthly_budget_usd": 100,
+        }
+        candidate_mapping = deepcopy(baseline_mapping)
+        candidate_mapping["policies"]["actors"]["allowed_models"][
+            "monthly_budget_usd"
+        ] = 50
+        baseline = PolicyDocument.from_mapping(
+            baseline_mapping, config=self.config
+        )
+        candidate = PolicyDocument.from_mapping(
+            candidate_mapping, config=self.config
+        )
+        request = self.request(
+            "scope-field-impersonation",
+            change_type="model_allowlist_change",
+            candidate_policy=candidate,
+        )
+        self.error(
+            "invalid_request",
+            lambda: self.generate(
+                request, baseline=baseline, candidate=candidate
+            ),
+        )
+
+    def test_recommendation_cannot_outlive_scorecard_evidence(self) -> None:
+        request = self.request(
+            "outlives-scorecard",
+            expires_at="2026-10-10T00:00:00.000001Z",
+        )
+        self.error("invalid_request", lambda: self.generate(request))
+        self.assertEqual(
+            self.rows()["portfolio_policy_recommendation_snapshots"], []
+        )
+
     def test_budget_recommendation_requires_separate_activation(self) -> None:
         active = self.repositories.budgets.create_plan(
             self.principal,

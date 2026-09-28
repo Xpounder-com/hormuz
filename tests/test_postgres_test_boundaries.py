@@ -144,6 +144,7 @@ EXPECTED_OWNERS = {
         {
             "test_restricted_runtime_replay_decision_local_receipt_boundary_and_rls",
             "test_managed_policy_application_uses_authoritative_activation_receipt",
+            "test_managed_policy_generation_detects_reactivation_and_intervening_activation",
             "test_concurrent_conflicting_acceptance_has_one_winner",
             "test_drift_expiry_and_weak_evidence_fail_closed",
             "test_post_acceptance_scorecard_drift_invalidates_application",
@@ -264,7 +265,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 135)
+        self.assertEqual(len(owned), 136)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

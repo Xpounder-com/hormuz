@@ -141,6 +141,7 @@ def _generation_digest(evaluation: Mapping[str, object]) -> str:
         # Evaluation time is server-owned. Stable replay is instead bound to
         # the closed request and usage context retained in bindings.
         stable["pre_apply_evidence"].pop("request_preview")
+        stable["pre_apply_evidence"].pop("saved_scenario_evaluation")
     except (KeyError, TypeError, PortfolioError, json.JSONDecodeError):
         raise PortfolioError("unavailable") from None
     return _sha256(stable)
@@ -211,7 +212,7 @@ class RecommendationRepository:
             raise PortfolioError("invalid_request")
         return identity
 
-    def _active_policy(self, principal: PortfolioPrincipal) -> dict[str, str]:
+    def _active_policy(self, principal: PortfolioPrincipal) -> dict[str, object]:
         identity = self._identity(principal.organization_id, principal.actor_id)
         try:
             snapshot = PolicyRuntime(
@@ -237,13 +238,13 @@ class RecommendationRepository:
         self,
         sql,
         principal: PortfolioPrincipal,
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         """Read managed policy identity while its tenant lock is held."""
 
         if self.config.policy_control.mode != "postgresql":
             return self._active_policy(principal)
         row = sql.one(
-            "SELECT active.version_id, versions.content_sha256 "
+            "SELECT active.version_id, active.generation, versions.content_sha256 "
             "FROM policy_active_versions active "
             "JOIN policy_versions versions "
             "ON versions.organization_id=active.organization_id "
@@ -257,11 +258,14 @@ class RecommendationRepository:
             or _ID.fullmatch(row["version_id"]) is None
             or type(row["content_sha256"]) is not str
             or _DIGEST.fullmatch(row["content_sha256"]) is None
+            or type(row["generation"]) is not int
+            or not 1 <= row["generation"] <= 9_007_199_254_740_991
         ):
             raise PortfolioError("unavailable")
         return {
             "version": row["version_id"],
             "digest": row["content_sha256"],
+            "generation": row["generation"],
         }
 
     @staticmethod
@@ -657,7 +661,8 @@ class RecommendationRepository:
         with self._transaction(principal) as sql:
             active_policy = self._active_policy_in_transaction(sql, principal)
             if (
-                active_policy != preflight_policy
+                active_policy["version"] != preflight_policy["version"]
+                or active_policy["digest"] != preflight_policy["digest"]
                 or active_policy["digest"] != baseline_policy.content_sha256
             ):
                 raise PortfolioError("version_conflict")
@@ -731,6 +736,7 @@ class RecommendationRepository:
                     scenarios=scenarios,
                     budget_bindings=budget_bindings,
                     active_policy_version=active_policy["version"],
+                    active_policy_generation=active_policy.get("generation"),
                     candidate_budget_digest=candidate_budget_digest,
                 )
                 if evaluation is None:
@@ -922,13 +928,15 @@ class RecommendationRepository:
         sql,
         row: Mapping[str, object],
         stored: Mapping[str, object],
-        active_policy: Mapping[str, str],
+        active_policy: Mapping[str, object],
         now: str,
     ) -> str | None:
         bindings = stored["bindings"]
         if (
             active_policy["digest"] != bindings["policy_digest"]
             or active_policy["version"] != bindings["active_policy_version"]
+            or active_policy.get("generation")
+            != bindings.get("active_policy_generation")
         ):
             return "policy_drift"
         reason, current_budgets = self._bound_context(sql, row, stored, now)
@@ -1465,6 +1473,8 @@ class RecommendationRepository:
         principal: PortfolioPrincipal,
         proposal: Mapping[str, object],
         now: str,
+        *,
+        expected_policy_generation: int | None = None,
     ) -> dict[str, object]:
         if proposal["change_type"] == "budget_plan_change":
             reference = proposal["candidate_budget_plan"]
@@ -1543,6 +1553,10 @@ class RecommendationRepository:
                 or activated_at != occurred_at
                 or activated_at > _persisted_timestamp(now)
                 or content_digest != proposal["candidate_policy_digest"]
+                or (
+                    expected_policy_generation is not None
+                    and generation != expected_policy_generation + 1
+                )
             ):
                 raise PortfolioError("version_conflict")
         except (KeyError, TypeError, PortfolioError):
@@ -1591,7 +1605,13 @@ class RecommendationRepository:
             if event["event_type"] != "accepted" or row["expires_at"] <= now:
                 raise PortfolioError("version_conflict")
             return self._authoritative_application_evidence(
-                sql, principal, stored["recommendation"]["proposal"], now
+                sql,
+                principal,
+                stored["recommendation"]["proposal"],
+                now,
+                expected_policy_generation=stored["bindings"].get(
+                    "active_policy_generation"
+                ),
             )
 
     def record_applied(
@@ -1636,6 +1656,7 @@ class RecommendationRepository:
                     expected_policy = {
                         "version": bindings["active_policy_version"],
                         "digest": bindings["policy_digest"],
+                        "generation": bindings.get("active_policy_generation"),
                     }
                     target_id = proposal["candidate_budget_plan"]["id"]
                     original_other_budgets = [
@@ -1649,7 +1670,12 @@ class RecommendationRepository:
                         if binding["budget_plan_id"] != target_id
                     ]
                     if (
-                        active_policy != expected_policy
+                        {
+                            "version": active_policy["version"],
+                            "digest": active_policy["digest"],
+                            "generation": active_policy.get("generation"),
+                        }
+                        != expected_policy
                         or current_other_budgets != original_other_budgets
                     ):
                         drift = "policy_drift"
@@ -1672,7 +1698,13 @@ class RecommendationRepository:
                 else:
                     authoritative_evidence = (
                         self._authoritative_application_evidence(
-                            sql, principal, proposal, now
+                            sql,
+                            principal,
+                            proposal,
+                            now,
+                            expected_policy_generation=bindings.get(
+                                "active_policy_generation"
+                            ),
                         )
                     )
                     if not hmac.compare_digest(

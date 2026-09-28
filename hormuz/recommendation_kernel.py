@@ -14,7 +14,12 @@ import hashlib
 import re
 from typing import Mapping
 
-from .policy_analysis import PolicyComparison, PolicyEvaluation, PolicyPreview
+from .policy_analysis import (
+    PolicyChange,
+    PolicyComparison,
+    PolicyEvaluation,
+    PolicyPreview,
+)
 from .portfolio_wire import canonical
 
 
@@ -171,6 +176,8 @@ def _decision_behavior(decision) -> dict[str, object]:
     return {
         "allowed": bool(decision.allowed),
         "action": str(decision.action),
+        "reason": str(decision.reason),
+        "requested_model": str(decision.requested_model),
         "resolved_alias": decision.resolved_alias,
         "upstream_model": (
             None if decision.route is None else decision.route.upstream_model
@@ -179,42 +186,59 @@ def _decision_behavior(decision) -> dict[str, object]:
     }
 
 
+def _policy_field(change: PolicyChange) -> str | None:
+    """Return the schema field, never a customer-controlled scope identifier."""
+
+    segments = change.segments
+    if not segments or segments[0] != "policies" or len(segments) < 2:
+        return None
+    if segments[1] == "organization":
+        return segments[2] if len(segments) >= 3 else None
+    if segments[1] in {"teams", "actors"}:
+        return segments[3] if len(segments) >= 4 else None
+    if segments[1] == "team_model_output_limits":
+        return "team_model_output_limits"
+    return None
+
+
 def _policy_change_allowed(change_type: str, comparison: PolicyComparison) -> bool:
-    paths = tuple(change.path for change in comparison.changes)
+    changes = comparison.changes
     if change_type == "budget_plan_change":
-        return not paths
-    if not paths:
+        return not changes
+    if not changes:
         return False
+    fields = tuple(_policy_field(change) for change in changes)
     if change_type == "model_allowlist_change":
-        return all("allowed_models" in path for path in paths)
+        return all(field == "allowed_models" for field in fields)
     if change_type == "model_fallback_change":
-        return all("fallback_model" in path for path in paths)
+        return all(
+            field in {"fallback_model", "fallback_models"}
+            for field in fields
+        )
     if change_type == "output_or_cost_cap_change":
-        markers = (
+        cap_fields = {
             "max_output_tokens",
             "monthly_token_limit",
             "monthly_budget_usd",
             "per_actor_monthly_budget_usd",
             "team_model_output_limits",
-        )
-        return all(any(marker in path for marker in markers) for path in paths)
+        }
+        return all(field in cap_fields for field in fields)
     # Routing-policy recommendations are the remaining typed policy changes;
     # they still cannot smuggle egress or secret-control changes.
+    excluded_fields = {
+        "allowed_models",
+        "fallback_model",
+        "fallback_models",
+        "max_output_tokens",
+        "monthly_token_limit",
+        "monthly_budget_usd",
+        "per_actor_monthly_budget_usd",
+        "team_model_output_limits",
+    }
     return all(
-        path.startswith("policies.")
-        and "allowed_models" not in path
-        and "fallback_model" not in path
-        and not any(
-            marker in path
-            for marker in (
-                "max_output_tokens",
-                "monthly_token_limit",
-                "monthly_budget_usd",
-                "per_actor_monthly_budget_usd",
-                "team_model_output_limits",
-            )
-        )
-        for path in paths
+        field is not None and field not in excluded_fields
+        for field in fields
     )
 
 
@@ -340,6 +364,7 @@ def build_recommendation_evaluation(
     scenarios: PolicyEvaluation,
     budget_bindings: list[dict[str, object]],
     active_policy_version: str | None = None,
+    active_policy_generation: int | None = None,
     candidate_budget_digest: str | None = None,
 ) -> dict[str, object] | None:
     """Return a frozen recommendation evaluation, or ``None`` when suppressed."""
@@ -366,6 +391,8 @@ def build_recommendation_evaluation(
     _, scorecard_expiry = _timestamp(scorecard.get("expires_at"))
     if created >= scorecard_expiry or _coverage(scorecard) is None:
         return None
+    if expires > scorecard_expiry:
+        _invalid("recommendation_expiry_exceeds_scorecard")
 
     cohorts = _cohort_map(scorecard)
     baseline_id = scorecard.get("baseline_cohort_id")
@@ -466,6 +493,35 @@ def build_recommendation_evaluation(
         "kind": "saved_scenario_evaluation",
         "suite_id": scenarios.suite.suite_id,
         "suite_digest": scenarios.suite.content_sha256,
+        "evaluated_at": scenarios.evaluated_at.astimezone(timezone.utc).isoformat(
+            timespec="microseconds"
+        ).replace("+00:00", "Z"),
+        "usage_basis": scenarios.usage_basis,
+        "usage_period": {
+            "starts_at": scenarios.usage_period.starts_at.astimezone(
+                timezone.utc
+            ).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            "ends_before": scenarios.usage_period.ends_before.astimezone(
+                timezone.utc
+            ).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+        },
+        "usage_snapshots": [
+            {"actor_id": actor_id, "digest": digest}
+            for actor_id, digest in scenarios.usage_snapshot_sha256_by_actor
+        ],
+        "results": [
+            {
+                "scenario": result.scenario.to_mapping(),
+                "baseline_behavior": _decision_behavior(
+                    result.baseline_decision
+                ),
+                "candidate_behavior": _decision_behavior(
+                    result.candidate_decision
+                ),
+                "behavior_changed": result.changed,
+            }
+            for result in scenarios.scenarios
+        ],
         "scenario_count": len(scenarios.scenarios),
         "changed_count": scenarios.changed_count,
         "baseline_allowed_count": scenarios.baseline_allowed_count,
@@ -571,15 +627,27 @@ def build_recommendation_evaluation(
                 if active_policy_version is None
                 else active_policy_version
             ),
+            "active_policy_generation": active_policy_generation,
             "candidate_policy_digest": comparison.candidate.content_sha256,
             "candidate_budget_digest": candidate_budget_digest,
             "request_preview_context": preview_context,
+            "scenario_evaluation_context": {
+                "suite_digest": scenarios.suite.content_sha256,
+                "usage_basis": scenarios.usage_basis,
+                "usage_period": scenario_payload["usage_period"],
+                "usage_snapshots": scenario_payload["usage_snapshots"],
+            },
             "budget_bindings": budget_bindings,
             "metric_rules": metric_rules,
             "actual_models": models,
             "rate_cards": rate_cards,
         },
     }
+    if active_policy_generation is not None and (
+        type(active_policy_generation) is not int
+        or not 1 <= active_policy_generation <= 9_007_199_254_740_991
+    ):
+        _invalid()
     if len(canonical(result).encode("ascii")) > MAX_EVALUATION_BYTES:
         _invalid()
     return result

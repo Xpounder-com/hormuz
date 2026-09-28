@@ -46,6 +46,7 @@ class PolicyChange:
     change_type: str
     before: object | None
     after: object | None
+    segments: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,7 @@ class PolicyEvaluation:
     suite: PolicyScenarioSuite
     baseline: PolicyVersionIdentity
     candidate: PolicyVersionIdentity
+    usage_snapshot_sha256_by_actor: tuple[tuple[str, str], ...]
     scenarios: tuple[PolicyScenarioResult, ...]
 
     @property
@@ -309,6 +311,10 @@ def evaluate_policy_scenario_suite(
         suite=suite,
         baseline=PolicyVersionIdentity.from_document(baseline),
         candidate=PolicyVersionIdentity.from_document(candidate),
+        usage_snapshot_sha256_by_actor=tuple(
+            (actor_id, usage_by_actor[actor_id].content_sha256)
+            for actor_id in sorted(usage_by_actor)
+        ),
         scenarios=tuple(results),
     )
 
@@ -457,6 +463,7 @@ def _compare_values(
                 change_type="changed",
                 before=before,
                 after=after,
+                segments=path,
             )
         )
 
@@ -486,6 +493,7 @@ def _append_subtree_change(
             change_type=change_type,
             before=before,
             after=after,
+            segments=path,
         )
     )
 
