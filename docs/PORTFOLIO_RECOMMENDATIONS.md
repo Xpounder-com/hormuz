@@ -59,11 +59,19 @@ stale versions, cross-tenant references, policy drift, scorecard drift, expired
 recommendations, and conflicting accepted changes fail closed. Drift and expiry
 are recorded before the conflict is returned.
 
+The saved evaluation also binds a credential-free digest of every participating
+identity and the configured model routes, including upstream model, protocol,
+failover, and pricing fields. A process restarted with changed identity or
+routing inputs invalidates the old recommendation before decision or recorded
+application even when the managed policy version itself has not changed.
+
 All policy-change categories conflict when they share the same work scope,
 scope version, and baseline policy digest; a full candidate policy cannot be
 split into independently accepted category labels. Work-budget changes remain
 a separate conflict group. Candidate budget plans whose window has ended are
-suppressed. An accepted recommendation remains conflicting until it expires,
+suppressed, and a live candidate cannot produce a recommendation that expires
+after its plan window. Ended active plans are omitted from new budget bindings.
+An accepted recommendation remains conflicting until it expires,
 is invalidated, or records its separately completed application; the resulting
 `applied` event releases the conflict so a later recommendation can be reviewed
 against the new binding. Cursor continuations evaluate expiry against the first

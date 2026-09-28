@@ -128,6 +128,7 @@ class RecommendationKernelTests(unittest.TestCase):
             preview=preview_result,
             scenarios=scenario_result,
             budget_bindings=[],
+            policy_evaluation_context_digest="0" * 64,
             active_policy_version=self.baseline.version_id,
         )
 

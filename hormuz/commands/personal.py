@@ -264,6 +264,11 @@ def _connect_locked(
     removal_state_saved = False
     credential_write_attempted = False
     previous_secret = credentials.get(key) if credentials is not None else None
+    if credentials is not None and previous_secret is not None:
+        # A profile-less credential is not owned by this connect attempt.  It
+        # cannot be overwritten safely because an abrupt process exit cannot
+        # durably restore the previous secret without persisting that secret.
+        raise PersonalCommandError("personal_credential_conflict", 2)
     removal_state = _removal_state_for_profile(
         profile,
         credential_cleanup_required=(
@@ -279,7 +284,7 @@ def _connect_locked(
         # Create-only persistence prevents replacement inside the transaction.
         store.save(profile)
         profile_created = True
-        if credentials is not None:
+        if credentials is not None and previous_secret is None:
             assert secret is not None
             credential_write_attempted = True
             credentials.set(key, secret)

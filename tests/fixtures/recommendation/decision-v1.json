@@ -121,6 +121,7 @@
         }
       ],
       "policy_digest": "bde928bd312be1f9eef7bea7d560dfa4a9cb308a7e447a0b700b0f354cf05f37",
+      "policy_evaluation_context_digest": "0000000000000000000000000000000000000000000000000000000000000000",
       "policy_version_id": "sha256:bde928bd312be1f9eef7bea7d560dfa4a9cb308a7e447a0b700b0f354cf05f37",
       "rate_cards": [
         {

@@ -75,7 +75,10 @@ The active core has seven custody categories:
    connected profile's credential or write into its ledger. A private cleanup
    record binds only cleanup booleans and preference action to that generation;
    the profile, cleanup, and metrics stores never contain the credential. The
-   user rotates it
+   create-only connection refuses when any credential is already present under
+   the profile key, since no content-free recovery record could restore that
+   unowned secret after an abrupt exit or safely infer ownership at removal.
+   The user rotates it
    from that same named variable with `hormuz personal credential` and a
    provider-issued replacement, and can delete it with `hormuz personal remove`.
 7. **GitHub connector signing and identity keys.** The opt-in outcome receiver

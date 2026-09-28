@@ -39,7 +39,7 @@ from tools import verify_role_view_runtime as role_verifier
 
 
 PLAN_PATH = "docs/recommendation-runtime-plan-v1.json"
-PLAN_SHA256 = "114a2ec3d8d7cb40a4028fe34c81ae77239f36f4645ae84884bc8e4d2feaeac9"
+PLAN_SHA256 = "cd623b98ab1c727b4487e27b60edae7e2fcd5172860ec34009f85b67ca02acf5"
 PREDECESSOR_PATH = "docs/role-view-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
     "ba13527aa781e88232ca1403468e181c759004628645bb9bc48e660955a1e533"
@@ -677,6 +677,9 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         "request_preview_binding": (
             "actor_request_time_period_and_usage_snapshot_digest"
         ),
+        "policy_evaluation_context_binding": (
+            "credential_free_identity_and_model_route_digest_rechecked_before_decision_and_application"
+        ),
         "frozen_decision_fixture": DECISION_FIXTURE_PATH,
         "suppression_coverage_fields": list(SUPPRESSION_COVERAGE_FIELDS),
         "suppression_guardrails": list(SUPPRESSION_GUARDRAILS),
@@ -686,6 +689,9 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         "applied_event_public_state": "accepted",
         "weak_evidence_result": "suppressed_no_recommendation",
         "expired_candidate_budget_result": "suppressed_no_recommendation",
+        "budget_window_binding": (
+            "active_bindings_exclude_ended_plans_and_candidate_expiry_bounds_recommendation"
+        ),
         "policy_conflict_scope": (
             "all_incomplete_policy_change_types_same_scope_version_and_baseline"
         ),

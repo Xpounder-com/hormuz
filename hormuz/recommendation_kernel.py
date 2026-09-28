@@ -363,6 +363,7 @@ def build_recommendation_evaluation(
     preview: PolicyPreview,
     scenarios: PolicyEvaluation,
     budget_bindings: list[dict[str, object]],
+    policy_evaluation_context_digest: str,
     active_policy_version: str | None = None,
     active_policy_generation: int | None = None,
     candidate_budget_digest: str | None = None,
@@ -375,6 +376,9 @@ def build_recommendation_evaluation(
     if created >= expires:
         _invalid()
     _digest(scorecard_evaluation_digest)
+    policy_evaluation_context_digest = _digest(
+        policy_evaluation_context_digest
+    )
     if type(scorecard_evaluation) is not dict:
         _invalid()
     scorecard = scorecard_evaluation.get("scorecard")
@@ -630,6 +634,9 @@ def build_recommendation_evaluation(
             "active_policy_generation": active_policy_generation,
             "candidate_policy_digest": comparison.candidate.content_sha256,
             "candidate_budget_digest": candidate_budget_digest,
+            "policy_evaluation_context_digest": (
+                policy_evaluation_context_digest
+            ),
             "request_preview_context": preview_context,
             "scenario_evaluation_context": {
                 "suite_digest": scenarios.suite.content_sha256,

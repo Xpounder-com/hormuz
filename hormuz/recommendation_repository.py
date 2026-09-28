@@ -148,6 +148,49 @@ def _generation_digest(evaluation: Mapping[str, object]) -> str:
     return _sha256(stable)
 
 
+def _policy_evaluation_context_digest(
+    config: GatewayConfig,
+    organization: str,
+    actor_ids: set[str],
+) -> str:
+    """Fingerprint credential-free local inputs used by saved evaluations."""
+
+    identities: list[dict[str, object]] = []
+    for actor_id in sorted(actor_ids):
+        identity = config.identities_by_actor.get(actor_id)
+        if identity is None or identity.organization_id != organization:
+            raise PortfolioError("unavailable")
+        identities.append({
+            "actor_id": identity.actor_id,
+            "actor_name": identity.actor_name,
+            "team_id": identity.team_id,
+            "team_name": identity.team_name,
+            "allowed_clients": list(identity.allowed_clients),
+            "organization_id": identity.organization_id,
+            "clearance": identity.clearance,
+            "identity_type": identity.identity_type,
+            "authentication_source": identity.authentication_source,
+        })
+    routes = {
+        alias: {
+            "alias": route.alias,
+            "protocol": route.protocol,
+            "upstream_model": route.upstream_model,
+            "input_cost_per_million": route.input_cost_per_million,
+            "cache_read_cost_per_million": route.cache_read_cost_per_million,
+            "cache_write_cost_per_million": route.cache_write_cost_per_million,
+            "output_cost_per_million": route.output_cost_per_million,
+            "failover_alias": route.failover_alias,
+        }
+        for alias, route in sorted(config.model_routes.items())
+    }
+    return _sha256({
+        "organization_id": organization,
+        "identities": identities,
+        "model_routes": routes,
+    })
+
+
 class RecommendationRepository:
     """Own recommendation generation, audited reads, and lifecycle events."""
 
@@ -201,15 +244,8 @@ class RecommendationRepository:
             self._authorize(principal)
 
     def _identity(self, organization: str, actor_id: str) -> Identity:
-        matches = {
-            (identity.organization_id, identity.actor_id): identity
-            for identity in (
-                *self.config.identities_by_token.values(),
-                *self.config.identities_by_subject.values(),
-            )
-        }
-        identity = matches.get((organization, actor_id))
-        if identity is None:
+        identity = self.config.identities_by_actor.get(actor_id)
+        if identity is None or identity.organization_id != organization:
             raise PortfolioError("invalid_request")
         return identity
 
@@ -366,6 +402,10 @@ class RecommendationRepository:
             if active is None:
                 raise PortfolioError("unavailable")
             plan, activation, verified_pointer, _history = active
+            if _instant(plan["window_end_at"], persisted=True) <= _instant(
+                now, persisted=True
+            ):
+                continue
             if (
                 plan["work_scope_id"],
                 plan["work_scope_version"],
@@ -717,9 +757,15 @@ class RecommendationRepository:
                 )
                 candidate_budget_expired = (
                     _instant(candidate["window_end_at"], persisted=True)
-                    <= _instant(now, persisted=True)
+                    <= evaluated_at
                 )
                 candidate_budget_digest = candidate["content_digest"]
+                if (
+                    not candidate_budget_expired
+                    and _instant(request["expires_at"])
+                    > _instant(candidate["window_end_at"], persisted=True)
+                ):
+                    raise PortfolioError("invalid_request")
                 if any(
                     binding["budget_plan_id"] == candidate["budget_plan_id"]
                     and binding["active_version"] == candidate["version"]
@@ -736,6 +782,19 @@ class RecommendationRepository:
                     preview=preview,
                     scenarios=scenarios,
                     budget_bindings=budget_bindings,
+                    policy_evaluation_context_digest=(
+                        _policy_evaluation_context_digest(
+                            self.config,
+                            organization,
+                            {
+                                preview_identity.actor_id,
+                                *(
+                                    scenario.actor_id
+                                    for scenario in scenario_suite.scenarios
+                                ),
+                            },
+                        )
+                    ),
                     active_policy_version=active_policy["version"],
                     active_policy_generation=active_policy.get("generation"),
                     candidate_budget_digest=candidate_budget_digest,
@@ -940,12 +999,36 @@ class RecommendationRepository:
             != bindings.get("active_policy_generation")
         ):
             return "policy_drift"
+        if self._policy_evaluation_context_drift(stored):
+            return "policy_drift"
         reason, current_budgets = self._bound_context(sql, row, stored, now)
         if reason is not None:
             return reason
         if current_budgets != bindings["budget_bindings"]:
             return "policy_drift"
         return None
+
+    def _policy_evaluation_context_drift(
+        self, stored: Mapping[str, object]
+    ) -> bool:
+        try:
+            bindings = stored["bindings"]
+            expected = _digest(bindings["policy_evaluation_context_digest"])
+            preview_actor = bindings["request_preview_context"]["actor"]
+            snapshots = bindings["scenario_evaluation_context"]["usage_snapshots"]
+            actor_ids = {_identifier(preview_actor["actor_id"])}
+            actor_ids.update(
+                _identifier(snapshot["actor_id"])
+                for snapshot in snapshots
+            )
+            actual = _policy_evaluation_context_digest(
+                self.config,
+                stored["recommendation"]["organization_id"],
+                actor_ids,
+            )
+        except (KeyError, TypeError, PortfolioError):
+            return True
+        return not hmac.compare_digest(actual, expected)
 
     def _expire_if_due(
         self,
@@ -1640,6 +1723,8 @@ class RecommendationRepository:
                 return dict(event["evidence"])
             if event["event_type"] != "accepted" or row["expires_at"] <= now:
                 raise PortfolioError("version_conflict")
+            if self._policy_evaluation_context_drift(stored):
+                raise PortfolioError("version_conflict")
             return self._authoritative_application_evidence(
                 sql,
                 principal,
@@ -1688,6 +1773,8 @@ class RecommendationRepository:
                     sql, row, stored, now
                 )
                 bindings = stored["bindings"]
+                if drift is None and self._policy_evaluation_context_drift(stored):
+                    drift = "policy_drift"
                 if drift is None and proposal["change_type"] == "budget_plan_change":
                     active_policy = self._active_policy_in_transaction(sql, principal)
                     expected_policy = {

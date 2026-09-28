@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 import sqlite3
@@ -488,6 +489,43 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
         self.assertEqual((expired["state"], expired["reason_code"]), (
             "expired", "expired",
         ))
+
+    def test_routing_context_drift_invalidates_before_decision(self) -> None:
+        evaluation = self.generate(self.request("routing-context-drift"))
+        assert evaluation is not None
+        changed_routes = dict(self.config.model_routes)
+        changed_routes["synthetic"] = replace(
+            changed_routes["synthetic"], upstream_model="synthetic-drifted"
+        )
+        changed_config = replace(self.config, model_routes=changed_routes)
+        changed = create_portfolio_repository(changed_config).recommendations
+        with (
+            mock.patch.object(
+                changed,
+                "_active_policy",
+                return_value={
+                    "version": self.baseline.version_id,
+                    "digest": self.baseline.content_sha256,
+                },
+            ),
+            mock.patch(
+                "hormuz._portfolio_sql.PortfolioSQL.now", return_value=NOW
+            ),
+        ):
+            self.error(
+                "version_conflict",
+                lambda: changed.decide(
+                    self.principal,
+                    "routing-context-drift",
+                    self.decision(evaluation),
+                    "routing-context-drift-decision",
+                ),
+            )
+        event = self.rows()["portfolio_policy_recommendation_events"][-1]
+        self.assertEqual(
+            (event["event_type"], event["reason_code"]),
+            ("invalidated", "policy_drift"),
+        )
 
     def test_policy_change_between_generation_preflight_and_commit_is_rejected(self) -> None:
         baseline = {
@@ -1007,6 +1045,7 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
                 "id": candidate["budget_plan_id"],
                 "version": candidate["version"],
             },
+            expires_at="2026-09-24T23:00:00Z",
         )
         evaluation = self.generate(
             value,
@@ -1094,6 +1133,7 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
                     "id": successor["budget_plan_id"],
                     "version": successor["version"],
                 },
+                expires_at="2026-09-24T23:00:00Z",
             ),
             baseline=self.baseline,
             candidate=self.baseline,
@@ -1145,6 +1185,7 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
                     "id": candidate["budget_plan_id"],
                     "version": candidate["version"],
                 },
+                expires_at="2026-09-24T23:00:00Z",
             ),
             baseline=self.baseline,
             candidate=self.baseline,
@@ -1230,6 +1271,7 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
             "expiring-budget-change",
             change_type="budget_plan_change",
             candidate_budget_plan=reference,
+            expires_at="2026-09-24T23:00:00Z",
         )
         evaluation = self.generate(
             replayable,
@@ -1242,9 +1284,24 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
                 replayable,
                 baseline=self.baseline,
                 candidate=self.baseline,
-                now="2026-09-26T00:00:00.000000Z",
+                now="2026-09-24T13:00:00.000000Z",
             ),
             evaluation,
+        )
+
+        outliving = self.request(
+            "outliving-budget-change",
+            change_type="budget_plan_change",
+            candidate_budget_plan=reference,
+            expires_at="2026-09-26T00:00:00Z",
+        )
+        self.error(
+            "invalid_request",
+            lambda: self.generate(
+                outliving,
+                baseline=self.baseline,
+                candidate=self.baseline,
+            ),
         )
 
         expired = self.request(
@@ -1260,6 +1317,23 @@ class SQLiteRecommendationRuntimeTests(unittest.TestCase):
                 now="2026-09-26T00:00:00.000000Z",
             )
         )
+
+    def test_ended_active_budget_is_not_bound_to_a_new_recommendation(self) -> None:
+        active = self.repositories.budgets.create_plan(
+            self.principal,
+            _budget_plan_request(self.scope, amount="100"),
+        )
+        self.repositories.budgets.activate_plan(
+            self.principal,
+            active["budget_plan_id"],
+            _activation_request(active["version"]),
+        )
+        evaluation = self.generate(
+            self.request("ended-active-budget-binding"),
+            now="2026-09-26T00:00:00.000000Z",
+        )
+        assert evaluation is not None
+        self.assertEqual(evaluation["bindings"]["budget_bindings"], [])
 
 
 if __name__ == "__main__":

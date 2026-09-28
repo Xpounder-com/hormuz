@@ -396,9 +396,24 @@ class PostgresRecommendationRuntimeTests(PostgresTestCase):
         managed = create_portfolio_repository(
             managed_config, environ=self.environment
         ).recommendations
+        changed_routes = dict(managed_config.model_routes)
+        changed_routes["synthetic"] = replace(
+            changed_routes["synthetic"], upstream_model="synthetic-drifted"
+        )
+        drifted = create_portfolio_repository(
+            replace(managed_config, model_routes=changed_routes),
+            environ=self.environment,
+        ).recommendations
         with mock.patch(
             "hormuz._portfolio_sql.PortfolioSQL.now", return_value=NOW
         ):
+            with self.assertRaises(PortfolioError) as caught:
+                drifted.application_evidence(
+                    self.principal,
+                    "postgres-managed-application",
+                    1,
+                )
+            self.assertEqual(caught.exception.code, "version_conflict")
             evidence = managed.application_evidence(
                 self.principal,
                 "postgres-managed-application",
@@ -562,6 +577,26 @@ class PostgresRecommendationRuntimeTests(PostgresTestCase):
         with mock.patch(
             "hormuz._portfolio_sql.PortfolioSQL.now", return_value=NOW
         ):
+            routing = generate("managed-routing-context-drift")
+            assert routing is not None
+            changed_routes = dict(managed_config.model_routes)
+            changed_routes["synthetic"] = replace(
+                changed_routes["synthetic"],
+                output_cost_per_million=1.25,
+            )
+            drifted = create_portfolio_repository(
+                replace(managed_config, model_routes=changed_routes),
+                environ=self.environment,
+            ).recommendations
+            with self.assertRaises(PortfolioError) as caught:
+                drifted.decide(
+                    self.principal,
+                    "managed-routing-context-drift",
+                    self.decision(routing),
+                    "managed-routing-context-drift-decision",
+                )
+            self.assertEqual(caught.exception.code, "version_conflict")
+
             reactivated = generate("managed-reactivation-drift")
             assert reactivated is not None
             self.assertEqual(

@@ -621,90 +621,6 @@ class PersonalContractTests(unittest.TestCase):
         self.assertFalse(preference.load().enabled)
         self.assertFalse(profiles.removal_state_path_for("managed-source").exists())
 
-    def test_preference_retry_preserves_a_restored_preexisting_credential(self) -> None:
-        key = "personal-a"
-        preference = ContextPreferenceStore(self.state, key)
-        preference.save(False)
-        backend = _MemoryKeyring()
-        credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
-        previous_secret = "sk-preexisting-test-only"
-        credentials.set(key, previous_secret)
-        connect = argparse.Namespace(
-            personal_command="connect",
-            profile=key,
-            state_directory=self.state,
-            mode="direct",
-            agent="codex",
-            provider="openai",
-            endpoint="https://api.openai.com",
-            model="qualified-model",
-            credential_env="PERSONAL_TEST_PROVIDER_KEY",
-            allow_loopback_http=False,
-        )
-        remove = argparse.Namespace(
-            personal_command="remove",
-            profile=key,
-            state_directory=self.state,
-        )
-        original_save = ContextPreferenceStore.save
-        save_calls = 0
-
-        def fail_connect_and_preference_rollback(
-            preference_store: ContextPreferenceStore, enabled: bool
-        ) -> None:
-            nonlocal save_calls
-            save_calls += 1
-            if save_calls == 1:
-                original_save(preference_store, enabled)
-            if save_calls <= 2:
-                raise ContextRuntimeError("settings_write_failed")
-            original_save(preference_store, enabled)
-
-        with (
-            mock.patch.object(
-                personal_commands, "ProviderCredentialStore", return_value=credentials
-            ),
-            mock.patch.object(
-                ContextPreferenceStore,
-                "save",
-                autospec=True,
-                side_effect=fail_connect_and_preference_rollback,
-            ),
-            mock.patch.dict(
-                os.environ,
-                {"PERSONAL_TEST_PROVIDER_KEY": "sk-replacement-test-only"},
-                clear=False,
-            ),
-            contextlib.redirect_stderr(io.StringIO()),
-        ):
-            self.assertEqual(personal_commands.run(connect), 1)
-        profiles = PersonalProfileStore(self.state)
-        self.assertFalse(profiles.entry_exists(key))
-        removal_state = profiles.load_removal_state(key)
-        self.assertIsNotNone(removal_state)
-        assert removal_state is not None
-        self.assertFalse(removal_state.credential_cleanup_required)
-        self.assertEqual(removal_state.preference_action, "disable")
-        self.assertEqual(credentials.get(key), previous_secret)
-
-        retry_errors = io.StringIO()
-        with contextlib.redirect_stderr(retry_errors):
-            self.assertEqual(personal_commands.run(connect), 1)
-        self.assertIn("personal_removal_incomplete", retry_errors.getvalue())
-
-        with (
-            mock.patch.object(
-                personal_commands,
-                "ProviderCredentialStore",
-                side_effect=AssertionError("preference retry must not open a keyring"),
-            ),
-            contextlib.redirect_stdout(io.StringIO()),
-        ):
-            self.assertEqual(personal_commands.run(remove), 0)
-        self.assertFalse(preference.load().enabled)
-        self.assertEqual(credentials.get(key), previous_secret)
-        self.assertFalse(profiles.removal_state_path_for(key).exists())
-
     def test_remove_rejects_cleanup_state_from_another_profile_generation(self) -> None:
         profiles = PersonalProfileStore(self.state)
         profiles.save(self.profile())
@@ -738,8 +654,6 @@ class PersonalContractTests(unittest.TestCase):
         preference.save(False)
         backend = _MemoryKeyring()
         credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
-        previous_secret = "sk-preexisting-test-only"
-        credentials.set(key, previous_secret)
         connect = argparse.Namespace(
             personal_command="connect",
             profile=key,
@@ -801,7 +715,7 @@ class PersonalContractTests(unittest.TestCase):
             ),
             mock.patch.dict(
                 os.environ,
-                {"PERSONAL_TEST_PROVIDER_KEY": "sk-replacement-test-only"},
+                {"PERSONAL_TEST_PROVIDER_KEY": "sk-connect-test-only"},
                 clear=False,
             ),
             contextlib.redirect_stderr(io.StringIO()),
@@ -814,21 +728,19 @@ class PersonalContractTests(unittest.TestCase):
         self.assertIsNotNone(removal_state)
         assert removal_state is not None
         retained_profile = profiles.load(key)
-        self.assertFalse(removal_state.credential_cleanup_required)
+        self.assertTrue(removal_state.credential_cleanup_required)
         self.assertEqual(removal_state.preference_action, "disable")
         self.assertEqual(
             removal_state.profile_generation,
             retained_profile.generation,
         )
-        self.assertEqual(credentials.get(key), previous_secret)
+        self.assertIsNone(credentials.get(key))
 
         with (
             mock.patch.object(
                 personal_commands,
                 "ProviderCredentialStore",
-                side_effect=AssertionError(
-                    "safe retained-state cleanup must preserve the old credential"
-                ),
+                return_value=credentials,
             ),
             contextlib.redirect_stdout(io.StringIO()),
         ):
@@ -836,7 +748,7 @@ class PersonalContractTests(unittest.TestCase):
         self.assertFalse(profiles.entry_exists(key))
         self.assertFalse(profiles.removal_state_path_for(key).exists())
         self.assertFalse(preference.load().enabled)
-        self.assertEqual(credentials.get(key), previous_secret)
+        self.assertIsNone(credentials.get(key))
 
     def test_preference_change_serializes_with_managed_profile_removal(self) -> None:
         profiles = PersonalProfileStore(self.state)
@@ -1295,45 +1207,49 @@ class PersonalContractTests(unittest.TestCase):
         self.assertFalse(profile_path.is_symlink())
         self.assertFalse(missing_target.exists())
 
-    def test_failed_connect_restores_a_preexisting_keyring_credential(self) -> None:
+    def test_connect_refuses_an_unowned_keyring_credential(self) -> None:
         backend = _MemoryKeyring()
         credentials = ProviderCredentialStore(backend, trust_injected_backend=True)
-        credentials.set("rollback-profile", "sk-preexisting-test-only")
-        args = argparse.Namespace(
-            personal_command="connect",
-            profile="rollback-profile",
-            state_directory=self.state,
-            mode="direct",
-            agent="codex",
-            provider="openai",
-            endpoint="https://api.openai.com",
-            model="gpt-5.4",
-            credential_env="PERSONAL_TEST_PROVIDER_KEY",
-            allow_loopback_http=False,
-        )
-        with (
-            mock.patch.object(
-                personal_commands,
-                "ProviderCredentialStore",
-                return_value=credentials,
-            ),
-            mock.patch.object(
-                ContextPreferenceStore,
-                "save",
-                side_effect=ContextRuntimeError("settings_write_failed"),
-            ),
-            mock.patch.dict(
-                os.environ,
-                {"PERSONAL_TEST_PROVIDER_KEY": "sk-new-test-only"},
-                clear=False,
-            ),
-            contextlib.redirect_stderr(io.StringIO()),
+        profiles = PersonalProfileStore(self.state)
+        for key, requested_secret in (
+            ("credential-conflict-same", "sk-preexisting-test-only"),
+            ("credential-conflict-different", "sk-different-test-only"),
         ):
-            self.assertEqual(personal_commands.run(args), 1)
-        self.assertEqual(credentials.get("rollback-profile"), "sk-preexisting-test-only")
-        self.assertFalse(
-            PersonalProfileStore(self.state).path_for("rollback-profile").exists()
-        )
+            with self.subTest(key=key):
+                credentials.set(key, "sk-preexisting-test-only")
+                args = argparse.Namespace(
+                    personal_command="connect",
+                    profile=key,
+                    state_directory=self.state,
+                    mode="direct",
+                    agent="codex",
+                    provider="openai",
+                    endpoint="https://api.openai.com",
+                    model="gpt-5.4",
+                    credential_env="PERSONAL_TEST_PROVIDER_KEY",
+                    allow_loopback_http=False,
+                )
+                errors = io.StringIO()
+                with (
+                    mock.patch.object(
+                        personal_commands,
+                        "ProviderCredentialStore",
+                        return_value=credentials,
+                    ),
+                    mock.patch.dict(
+                        os.environ,
+                        {"PERSONAL_TEST_PROVIDER_KEY": requested_secret},
+                        clear=False,
+                    ),
+                    contextlib.redirect_stderr(errors),
+                ):
+                    self.assertEqual(personal_commands.run(args), 2)
+                self.assertIn("personal_credential_conflict", errors.getvalue())
+                self.assertEqual(
+                    credentials.get(key), "sk-preexisting-test-only"
+                )
+                self.assertFalse(profiles.entry_exists(key))
+                self.assertIsNone(profiles.load_removal_state(key))
 
     def test_failed_connect_restores_a_preexisting_preference(self) -> None:
         backend = _MemoryKeyring()

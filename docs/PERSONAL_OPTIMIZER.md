@@ -148,7 +148,11 @@ transaction, so a stale command cannot recreate credentials or overwrite a
 managed preference after removal. Direct credential reads use the same
 transaction and generation check: rotation remains visible within one profile
 lifetime, while an old relay cannot acquire a replacement profile's credential
-for its old endpoint. If a damaged profile cannot disclose whether it was
+for its old endpoint. A new direct connection refuses any credential already
+stored under that profile key because an abrupt exit could not durably restore
+an unowned secret, and a later removal could not safely infer its ownership.
+Intentional rotation remains the separate `personal credential` operation. If
+a damaged profile cannot disclose whether it was
 direct or managed, removal deletes its profile, credential, and measurements
 but leaves the shared preference unchanged rather than guessing at managed
 state. Failed `connect` rollback attempts preference, credential, and profile
