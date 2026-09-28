@@ -22,16 +22,17 @@ from hormuz.postgres import (
     _POSTGRES_EXPECTED_ACL_BOUNDARY_BY_VERSION,
 )
 from hormuz.scorecard_kernel import ScorecardKernelError, build_scorecard_evaluation
+from tools._verification_runtime import runtime_plan_source_sha256
 
 
 PLAN_PATH = "docs/scorecard-runtime-plan-v1.json"
-PLAN_SHA256 = "72e7ad360f825cc5125488209da3843119eff856bf0fcf2f466e0be255c9af46"
+PLAN_SHA256 = "1c8df538a8e59e9081f76bbb529fab9dc8f3458251ad0987dc67e4c074969d2c"
 PREDECESSOR_PATH = "docs/association-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
-    "45e6d5eb87c3763d5b53a4c86189b9e5ed68fa320390f17e965f356f62769921"
+    "b95e9d3e9aa83e3c361ca55cdc872a750d68492f434ba6f7b3120509dd425680"
 )
 PREDECESSOR_CANONICAL_SHA256 = (
-    "c1bfb6af710ae09fab4ecfd43c652462d297620c3aba3ac360ee45f041ff43a8"
+    "1cfd4fb8bf4cd59d3f9e0ad1c039665d4d928f395472faaf749916d7d1742cde"
 )
 BASE_MAIN_COMMIT = "b770ae140e01aa07a0baed4a449dff453b4ae843"
 EXPECTED_ACL = (
@@ -114,6 +115,7 @@ SOURCE_PATHS = (
     "tests/test_store.py",
     "tools/verify_association_transition_plan.py",
     "tools/verify_association_runtime_plan.py",
+    "tools/_verification_runtime.py",
     "tools/verify_core_wheel.py",
     "tools/verify_durable_data_inventory.py",
     "tools/verify_finance_collection_postgres_runtime.py",
@@ -131,6 +133,7 @@ SUCCESSOR_PROTECTED_SOURCE_PATHS = (
     "hormuz/scorecard_evidence_reference.py",
     "hormuz/scorecard_kernel.py",
     "hormuz/scorecard_repository.py",
+    "pyproject.toml",
     "tests/fixtures/scorecard/runtime-v1.json",
     "tests/test_scorecard_evidence_reference.py",
     "tests/test_scorecard_kernel.py",
@@ -432,7 +435,14 @@ def _validate_successor_predecessor(root: Path) -> None:
             content = (root / relative).read_bytes()
         except OSError:
             _fail("scorecard_runtime_source_kit_incomplete")
-        if relative == "hormuz/portfolio-intelligence-wire-v1.json":
+        if relative == "pyproject.toml":
+            try:
+                actual = runtime_plan_source_sha256(
+                    root / relative, omit_project_version=True
+                )
+            except ValueError:
+                _fail("scorecard_runtime_source_changed")
+        elif relative == "hormuz/portfolio-intelligence-wire-v1.json":
             recommendation_extension = (
                 b'        "pre_apply_evidence": {\n'
                 b'          "$ref": "#/$defs/pre_apply_evidence",\n'
@@ -442,7 +452,9 @@ def _validate_successor_predecessor(root: Path) -> None:
             if content.count(recommendation_extension) != 1:
                 _fail("scorecard_runtime_source_changed")
             content = content.replace(recommendation_extension, b"")
-        actual = hashlib.sha256(content).hexdigest()
+            actual = hashlib.sha256(content).hexdigest()
+        else:
+            actual = hashlib.sha256(content).hexdigest()
         if actual != expected:
             _fail("scorecard_runtime_source_changed")
     _validate_predecessor(root)
@@ -583,8 +595,11 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
             _fail("scorecard_runtime_plan_invalid")
         try:
-            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
-        except OSError:
+            actual = runtime_plan_source_sha256(
+                root / relative,
+                omit_project_version=relative == "pyproject.toml",
+            )
+        except (OSError, ValueError):
             _fail("scorecard_runtime_source_kit_incomplete")
         if actual != expected:
             _fail("scorecard_runtime_source_changed")

@@ -8,8 +8,8 @@
   "base_main_commit": "b770ae140e01aa07a0baed4a449dff453b4ae843",
   "predecessor": {
     "path": "docs/association-runtime-plan-v1.json",
-    "file_sha256": "45e6d5eb87c3763d5b53a4c86189b9e5ed68fa320390f17e965f356f62769921",
-    "canonical_sha256": "c1bfb6af710ae09fab4ecfd43c652462d297620c3aba3ac360ee45f041ff43a8"
+    "file_sha256": "b95e9d3e9aa83e3c361ca55cdc872a750d68492f434ba6f7b3120509dd425680",
+    "canonical_sha256": "1cfd4fb8bf4cd59d3f9e0ad1c039665d4d928f395472faaf749916d7d1742cde"
   },
   "transitions": {
     "sqlite": {
@@ -106,10 +106,10 @@
     "hormuz/scorecard_evidence_reference.py": "3b8897892ebb6a7449d77066c0f51a5228cb232018cf482afa39b2a846bdbc9b",
     "hormuz/scorecard_kernel.py": "34803b0d7bd22fb9276db64eb543495e4bacc7c44bde70d1f3cd6528ecc54d6a",
     "hormuz/scorecard_repository.py": "072ec5155f705330a8617387459e2462a30fd2d29e929443564eb5ec06835f6c",
-    "pyproject.toml": "e8c86e5c3a3686603dadfa52e28a8a1807559bab24423a48b7a7ebd4dd80e1f8",
+    "pyproject.toml": "2573869497995f6235e63aade4e8eb7d75853765c28441c9170b52f996aa2e2e",
     "tests/_postgres_fixture.py": "5fa2a62a46e15a31f0df36062bf9e46e45bdf9c04a7e6ec0ca0ed96b447ffd10",
     "tests/fixtures/scorecard/runtime-v1.json": "34ca5f778b61feb1ca3db434165ec607e9c21b2a7bc8fb22152cc6056ee38224",
-    "tests/test_association_runtime_plan.py": "8a7aebfbd7ba14933f838a42180a740820bb43b8ee3d7b0b42a3b29c37a2415c",
+    "tests/test_association_runtime_plan.py": "69dfdaee8f4f4d1d57937f18823856c01f3a10c4db9955e2d0fda42d9bcee971",
     "tests/test_association_transition_plan.py": "cbcbe7d5baefc919e0388f6435d1cf3030a3a2aac0ea85921763ae4b16f0fa2f",
     "tests/test_association_transition_preflight.py": "0932ead941bc88696c8e50c31c9a52d6b6081985dc373f969c6442c204392293",
     "tests/test_attribution_schema.py": "af8aee359ebe292b39ec8630efda3fee2e09d46888403a747cb8fff1150df8ef",
@@ -146,8 +146,9 @@
     "tests/test_sqlite_outcome_transition.py": "b6f1b9bfda0b0673ec81064cf3f4ab40b2adaffff8091d9fc64132d3180b3d79",
     "tests/test_sqlite_registry_transition.py": "1a7cb390e64178cf8550c53eb9c33508ab5c954bf80a9811cffc05adffce7915",
     "tests/test_store.py": "61980d9073ec29129f64ee3d30b9739bda9c1d75441ddc16b86960284138cfce",
+    "tools/_verification_runtime.py": "5ebb76601652dfc94a83365839221362e622a4d927fa12229dcbae052e050ae5",
     "tools/verify_association_transition_plan.py": "9167495f5f876c6f5460e48cc0f27f882fcd47aba3f64cd3a492c6656e7eb06e",
-    "tools/verify_association_runtime_plan.py": "b1d1b88d0227ec168976f74dd2b656b2b793e77e33d45c01bc04a19143c023f9",
+    "tools/verify_association_runtime_plan.py": "7d677a8ff3df1b57e12946cc861ce1130217eb856b018d92177ae91b29ff59c9",
     "tools/verify_core_wheel.py": "5258465b5184d97693af4ee1c90d19bbc877d2bf01fc61041de9382d812bffff",
     "tools/verify_durable_data_inventory.py": "1ec094934a2e7447a56840f839316ca3c0ee031f6dd7f132da81fdb5784dd924",
     "tools/verify_finance_collection_postgres_runtime.py": "54e9d3ee81981558934e60d1ea9b2f5fb5023afcc53dc33c4f12f192461195e3",

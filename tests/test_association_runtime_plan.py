@@ -12,6 +12,7 @@ from unittest import mock
 
 from tools import verify_association_runtime_plan as verifier
 from tools import verify_core_wheel as packaging
+from tools._verification_runtime import runtime_plan_source_sha256
 
 
 class AssociationRuntimePlanTests(unittest.TestCase):
@@ -31,9 +32,10 @@ class AssociationRuntimePlanTests(unittest.TestCase):
         # internally consistent source manifest without changing the checked-in
         # predecessor artifact.
         for relative in plan["source_sha256"]:
-            plan["source_sha256"][relative] = hashlib.sha256(
-                (self.root / relative).read_bytes()
-            ).hexdigest()
+            plan["source_sha256"][relative] = runtime_plan_source_sha256(
+                self.root / relative,
+                omit_project_version=relative == "pyproject.toml",
+            )
         self.write_plan(plan)
         self.historical_plan_sha256 = verifier.canonical_digest(plan)
 
@@ -46,9 +48,10 @@ class AssociationRuntimePlanTests(unittest.TestCase):
         )
 
     def repin(self, plan, relative):
-        plan["source_sha256"][relative] = hashlib.sha256(
-            (self.root / relative).read_bytes()
-        ).hexdigest()
+        plan["source_sha256"][relative] = runtime_plan_source_sha256(
+            self.root / relative,
+            omit_project_version=relative == "pyproject.toml",
+        )
         self.write_plan(plan)
         return verifier.canonical_digest(plan)
 

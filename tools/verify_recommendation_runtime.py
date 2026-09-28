@@ -35,17 +35,18 @@ from hormuz.recommendation_kernel import (
     _ALLOWED_CHANGE_TYPES,
 )
 from hormuz.recommendation_repository import _CURSOR_TTL, _MAX_CONFLICTS
+from tools._verification_runtime import runtime_plan_source_sha256
 from tools import verify_role_view_runtime as role_verifier
 
 
 PLAN_PATH = "docs/recommendation-runtime-plan-v1.json"
-PLAN_SHA256 = "97d158e2cbc58181386514787c6c4ec812e936e7d6cd8c0d563ff57a789b8600"
+PLAN_SHA256 = "43515503b4121f9f7daf796f163ccd953aaf40e46421a77efab5ae4eae08d17a"
 PREDECESSOR_PATH = "docs/role-view-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
-    "ba13527aa781e88232ca1403468e181c759004628645bb9bc48e660955a1e533"
+    "f20b2fdabbbc375b330744a2c1a60413d5c5b7fa1a2057ac45053fe7e5e8d2a1"
 )
 PREDECESSOR_CANONICAL_SHA256 = (
-    "1afced7771629acf838391eafbe597e9e79c79aac9e8f27d6ac818b23145d822"
+    "91a63fb48285574366c7e289c376c164e9b634f11f74073de91cfde6a8a123ab"
 )
 BASE_MAIN_COMMIT = "edd5b04a2c84c854190c41a774ab5a9c89a7ca41"
 EXPECTED_ACL = (
@@ -121,11 +122,9 @@ EXCLUSIONS = (
 SOURCE_PATHS = (
     ".github/workflows/ci.yml",
     "MANIFEST.in",
-    "README.md",
     "docs/DURABLE_DATA.md",
     "docs/PORTFOLIO_INTELLIGENCE.md",
     "docs/PORTFOLIO_RECOMMENDATIONS.md",
-    "docs/ROADMAP.md",
     "docs/durable-data-v1.json",
     "hormuz/_portfolio_sql.py",
     "hormuz/_recommendation_schema.py",
@@ -138,6 +137,7 @@ SOURCE_PATHS = (
     "hormuz/postgres.py",
     "hormuz/recommendation_kernel.py",
     "hormuz/recommendation_repository.py",
+    "pyproject.toml",
     "tests/_postgres_fixture.py",
     DECISION_FIXTURE_PATH,
     "tests/test_association_transition_preflight.py",
@@ -185,6 +185,7 @@ SOURCE_PATHS = (
     "tests/test_sqlite_outcome_transition.py",
     "tests/test_sqlite_registry_transition.py",
     "tests/test_store.py",
+    "tools/_verification_runtime.py",
     "tools/verify_association_runtime_plan.py",
     "tools/verify_association_transition_plan.py",
     "tools/verify_core_wheel.py",
@@ -757,8 +758,11 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         ):
             _fail("recommendation_runtime_plan_invalid")
         try:
-            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
-        except OSError:
+            actual = runtime_plan_source_sha256(
+                root / relative,
+                omit_project_version=relative == "pyproject.toml",
+            )
+        except (OSError, ValueError):
             _fail("recommendation_runtime_source_kit_incomplete")
         if actual != expected:
             _fail("recommendation_runtime_source_changed")

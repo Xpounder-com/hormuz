@@ -8,8 +8,8 @@
   "base_main_commit": "108d952b4426be74f11306d30a4955807e8fe766",
   "predecessor": {
     "path": "docs/scorecard-runtime-plan-v1.json",
-    "file_sha256": "b5ad84161eb9d5f2ac109cc25856a041fca5f905bd0f1d415d112b055e7fafb2",
-    "canonical_sha256": "72e7ad360f825cc5125488209da3843119eff856bf0fcf2f466e0be255c9af46"
+    "file_sha256": "7804eb14b861071d98a911822976b3bccd8671782c6c61a7f69594fe7860c22d",
+    "canonical_sha256": "1c8df538a8e59e9081f76bbb529fab9dc8f3458251ad0987dc67e4c074969d2c"
   },
   "transitions": {
     "sqlite": {
@@ -130,11 +130,11 @@
     "hormuz/postgres.py": "a8957e1cd6f8eee5a099b92c57239449a849779dc5df025629c27f286e99ccc9",
     "hormuz/role_view_repository.py": "ffd5eccaa8bff80d249ba5d7f831dd436ac9a822b031cb68bf51f850653fbd44",
     "hormuz/work-budget-reports-wire-v2.json": "c84d182f93894fec1a1eca0d057311cb52fa2c288e3470e119e65f9565f08168",
-    "pyproject.toml": "b1a5f1e71829ed37f38dbbb37fb53e4b537f097ad761d14b148733bebd95b205",
+    "pyproject.toml": "2573869497995f6235e63aade4e8eb7d75853765c28441c9170b52f996aa2e2e",
     "tests/_postgres_fixture.py": "49e6cda45b92b66dbe76b7d68c3267c4998a0d31aabc8a7517d0d0e3d86699b3",
     "tests/_role_view_fixture.py": "7fce016cf28353e3634d0bbb4d03896d47a05fbb7213953ebe94517b951e9086",
     "tests/fixtures/portfolio_role_views/wire-v1-examples.json": "a2fa30be4c1849a48b2dc40bce910c4d66e57e090b7eb1b72cdd66d5d1bb7c2b",
-    "tests/test_association_runtime_plan.py": "5db6cbf0e5ad33f8000486d0949a95b4bda0e4fdecbaff45ccfc2cef44aa1c5f",
+    "tests/test_association_runtime_plan.py": "69dfdaee8f4f4d1d57937f18823856c01f3a10c4db9955e2d0fda42d9bcee971",
     "tests/test_association_transition_plan.py": "fd8cccc14dd474b318f0f2ea9a3095d8900c1828d7a2992014d03d0ae9be35fd",
     "tests/test_association_transition_preflight.py": "0ab55afb890d7125f67642ff0b20bcd3265e9b7892bf93daa214b39d2af42bb7",
     "tests/test_attribution_schema.py": "7245263307d93e6f89148d2ce5af304aed18df39fd6abd41886fe18d776213da",
@@ -173,8 +173,9 @@
     "tests/test_sqlite_outcome_transition.py": "beb925a662d99a145f7e43fa821bbbb1b9ae67ae8dd78c85871b67160b4ce574",
     "tests/test_sqlite_registry_transition.py": "24ea0640b27e8cfa5a5552dc6f1b2a4109ea6ce034e3a77bd5c6f3fa132d1827",
     "tests/test_store.py": "6d056b6f27b5aec94474b05e5013850b9f330907d9b5ef121be5b0d19dc38be8",
+    "tools/_verification_runtime.py": "5ebb76601652dfc94a83365839221362e622a4d927fa12229dcbae052e050ae5",
     "tools/render_portfolio_display_examples.py": "07fe80f75a187c460ba99092911f80feb2b743aded4cab87894381188c7ff055",
-    "tools/verify_association_runtime_plan.py": "be9381e61898a0e54541b97988877f8cb78578d3af7136d8da80608976976f95",
+    "tools/verify_association_runtime_plan.py": "7d677a8ff3df1b57e12946cc861ce1130217eb856b018d92177ae91b29ff59c9",
     "tools/verify_association_transition_plan.py": "ea4ce71dfbe92539c61b0dcbed71ae534669982cb34a873c82e04c5f910bfc33",
     "tools/verify_budget_transition_plan.py": "d47eddc9ece732f3c5e4b4338029828f5cf30534cfd0ccc094b6b4728a13ff8c",
     "tools/verify_core_wheel.py": "324840ed2fcd012f70dbe8b650491a67ff40658917baf0d3a3632758770bfad9",
@@ -186,7 +187,7 @@
     "tools/verify_linear_reconciliation_plan.py": "96d3f76cb01373ff10a04a96b2575e638f05e4d510ae50ea8e0a0b7085ff1c0b",
     "tools/verify_linear_runtime_plan.py": "d0e6bed202e5bba87c0fb3c705cc0cbdf7c1ae09649db42b3b17bcba7be45b4c",
     "tools/verify_linear_transition_plan.py": "2efb72004f5ad7f5dfa4fa9780b89079d750f7fbd22b7dd2575e5315828faee8",
-    "tools/verify_scorecard_runtime_plan.py": "c2f83aa985464ecd947bf69f5503ba1f2235bb73e66798ee258fa4552738d0fb"
+    "tools/verify_scorecard_runtime_plan.py": "48153166f9b8b6bf8f534b07736c1f8be2d0f7db8e5b1c66c6716cfa4a174de5"
   },
   "gates": {
     "scorecard_runtime_predecessor_verified": true,

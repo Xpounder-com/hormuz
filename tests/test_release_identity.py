@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tomllib
 import unittest
 from pathlib import Path
@@ -26,18 +27,21 @@ class ReleaseIdentityTests(unittest.TestCase):
     def test_current_package_runtime_and_container_identity_are_consistent(self) -> None:
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         project = pyproject["project"]
-        self.assertEqual(project["version"], "1.2.0")
-        self.assertEqual(hormuz.__version__, "1.2.0")
+        expected_version = "1.3.0"
+        self.assertEqual(project["version"], expected_version)
+        self.assertEqual(hormuz.__version__, expected_version)
         self.assertNotIn("Development Status :: 3 - Alpha", project["classifiers"])
 
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-        self.assertEqual(dockerfile.count("ARG HORMUZ_VERSION=1.2.0"), 2)
+        self.assertEqual(dockerfile.count(f"ARG HORMUZ_VERSION={expected_version}"), 2)
         self.assertNotIn("ARG HORMUZ_VERSION=0.1.3", dockerfile)
 
         hosted_dockerfile = (ROOT / "deploy/render/gateway/Dockerfile").read_text(
             encoding="utf-8"
         )
-        self.assertEqual(hosted_dockerfile.count("ARG HORMUZ_VERSION=1.2.0"), 2)
+        self.assertEqual(
+            hosted_dockerfile.count(f"ARG HORMUZ_VERSION={expected_version}"), 2
+        )
         self.assertIn('"hormuz==${HORMUZ_VERSION}"', hosted_dockerfile)
         self.assertNotIn("hormuz==1.0.0", hosted_dockerfile)
 
@@ -81,6 +85,32 @@ class ReleaseIdentityTests(unittest.TestCase):
         self.assertIn(
             "sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67",
             values,
+        )
+
+    def test_runtime_plans_pin_packaging_but_not_marketing_copy(self) -> None:
+        filenames = (
+            "association-runtime-plan-v1.json",
+            "scorecard-runtime-plan-v1.json",
+            "role-view-runtime-plan-v1.json",
+            "recommendation-runtime-plan-v1.json",
+        )
+
+        for filename in filenames:
+            with self.subTest(filename=filename):
+                plan = json.loads(
+                    (ROOT / "docs" / filename).read_text(encoding="utf-8")
+                )
+                self.assertIn("pyproject.toml", plan["source_sha256"])
+
+        recommendation = json.loads(
+            (ROOT / "docs" / "recommendation-runtime-plan-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertTrue(
+            {"README.md", "docs/ROADMAP.md"}.isdisjoint(
+                recommendation["source_sha256"]
+            )
         )
 
 

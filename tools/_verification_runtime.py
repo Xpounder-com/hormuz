@@ -19,6 +19,9 @@ from typing import Any
 
 
 _SHA256_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_PROJECT_VERSION_LINE = re.compile(
+    rb'(?m)^version[ \t]*=[ \t]*"[^"\r\n]+"[ \t]*$'
+)
 
 
 def is_sha256_digest(value: object) -> bool:
@@ -53,6 +56,23 @@ def canonical_json_sha256(value: object) -> str:
 
     canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+
+
+def runtime_plan_source_sha256(
+    path: Path,
+    *,
+    omit_project_version: bool = False,
+) -> str:
+    """Hash one runtime-plan source, optionally ignoring its release version."""
+
+    payload = path.read_bytes()
+    if omit_project_version:
+        payload, replacements = _PROJECT_VERSION_LINE.subn(
+            b'version = "<release-version>"', payload
+        )
+        if replacements != 1:
+            raise ValueError("project_version_line_invalid")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def run_container_command(

@@ -5,15 +5,26 @@ Hormuz is a model-neutral enterprise AI gateway and policy control plane for emp
 This roadmap is evidence-gated. A milestone is not complete because code exists or a narrow test passes. Every closure needs an explicit scope, executable checks, package or deployment proof where relevant, and a truthful statement of what remains unproven.
 
 The additive native-companion program is tracked in [epic #329](https://github.com/Xpounder-com/hormuz/issues/329)
-and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md). Its version
-targets do not replace the v1.3.0 portfolio scope below or imply release publication.
+and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md).
 
-## v1.3.0 portfolio-intelligence implementation order
+## v1.3.0 Personal Optimizer release
+
+Hormuz v1.3.0 packages the terminal-first Personal Optimizer, its adapter SDK,
+and Aider support without making organization setup, PostgreSQL, GitHub, Linear,
+or the native desktop roadmap prerequisites for personal use. The bounded claim
+and commands are documented in the
+[v1.3.0 release note](releases/v1.3.0-personal-optimizer.md).
+
+The portfolio work already present in the package remains available under its
+documented contracts. Open connectors, external validation, and broader
+portfolio acceptance continue separately; they do not hold this release.
+
+## Portfolio-intelligence implementation order
 
 The accepted [portfolio-intelligence contract](PORTFOLIO_INTELLIGENCE.md) and
 [ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md) originated
 under the unreleased v1.1.0 plan. Because v1.2.0 shipped first, the remaining
-portfolio program now targets v1.3.0. Frozen v1.1 contract identifiers and
+portfolio program continued alongside v1.3.0. Frozen v1.1 contract identifiers and
 accepted checkpoint evidence remain historical inputs and are not rewritten.
 The work is organized under
 [epic #226](https://github.com/Xpounder-com/hormuz/issues/226) and must proceed
@@ -40,15 +51,14 @@ through these gates in order:
    scorecards, role-scoped aggregate views, and reviewable recommendations
    that never apply policy automatically
    ([#222](https://github.com/Xpounder-com/hormuz/issues/222)–[#224](https://github.com/Xpounder-com/hormuz/issues/224)).
-5. **Prove the release claim.** Close #214 with the exact final candidate's
-   v1.0.0/v1.2.0-to-v1.3.0 artifact, migration, rollback, and recovery evidence. Run
-   the preregistered, immutable-candidate external validation gate in
+5. **Prove the portfolio claim.** Close #214 with exact artifact, migration,
+   rollback, and recovery evidence. Run the preregistered external validation in
    [#225](https://github.com/Xpounder-com/hormuz/issues/225). Internal,
    synthetic, or observational evidence cannot be relabeled as that proof.
 
 #214 has two checkpoints: accepted pre-implementation plans/tests unblock the
-corresponding feature work after #212 and #213 close; final candidate evidence
-closes #214 before the v1.3.0 tag. Keep #214 open between those checkpoints and
+corresponding feature work after #212 and #213 close; final-candidate evidence
+closes #214 before claiming the complete portfolio milestone. Keep #214 open between those checkpoints and
 record acceptance with exact reviewed commits and test references. #213 itself
 remains feature-free and introduces no portfolio schema or migration.
 
@@ -66,7 +76,7 @@ provider-free, review-only recommendation kernel, audited administrator reads
 and decisions, explicit expiry and drift handling, and separate application
 evidence. Source, migration, and package checks for that candidate remain
 feature evidence; they do not close #214, authorize the #225 external gate, or
-establish a v1.3.0 release.
+establish the complete portfolio milestone.
 
 Every issue inherits the release gates in #226: authorization before access,
 strict versioned schemas, metadata-only persistence and evidence, tenant

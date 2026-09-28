@@ -30,17 +30,18 @@ from hormuz.role_view_repository import (
     _OPERATIONS,
     PortfolioRoleViewRepository,
 )
+from tools._verification_runtime import runtime_plan_source_sha256
 from tools import verify_scorecard_runtime_plan as scorecard_verifier
 
 
 PLAN_PATH = "docs/role-view-runtime-plan-v1.json"
-PLAN_SHA256 = "1afced7771629acf838391eafbe597e9e79c79aac9e8f27d6ac818b23145d822"
+PLAN_SHA256 = "91a63fb48285574366c7e289c376c164e9b634f11f74073de91cfde6a8a123ab"
 PREDECESSOR_PATH = "docs/scorecard-runtime-plan-v1.json"
 PREDECESSOR_FILE_SHA256 = (
-    "b5ad84161eb9d5f2ac109cc25856a041fca5f905bd0f1d415d112b055e7fafb2"
+    "7804eb14b861071d98a911822976b3bccd8671782c6c61a7f69594fe7860c22d"
 )
 PREDECESSOR_CANONICAL_SHA256 = (
-    "72e7ad360f825cc5125488209da3843119eff856bf0fcf2f466e0be255c9af46"
+    "1c8df538a8e59e9081f76bbb529fab9dc8f3458251ad0987dc67e4c074969d2c"
 )
 BASE_MAIN_COMMIT = "108d952b4426be74f11306d30a4955807e8fe766"
 EXPECTED_ACL = (
@@ -171,6 +172,7 @@ SOURCE_PATHS = (
     "tests/test_sqlite_registry_transition.py",
     "tests/test_store.py",
     "tools/render_portfolio_display_examples.py",
+    "tools/_verification_runtime.py",
     "tools/verify_association_runtime_plan.py",
     "tools/verify_association_transition_plan.py",
     "tools/verify_budget_transition_plan.py",
@@ -194,6 +196,7 @@ SUCCESSOR_PROTECTED_SOURCE_PATHS = (
     "hormuz/portfolio-role-views-wire-v1.json",
     "hormuz/role_view_repository.py",
     "hormuz/work-budget-reports-wire-v2.json",
+    "pyproject.toml",
     "tests/_role_view_fixture.py",
     "tests/fixtures/portfolio_role_views/wire-v1-examples.json",
 )
@@ -552,8 +555,11 @@ def _validate_successor_predecessor(root: Path) -> None:
         if not isinstance(expected, str):
             _fail("role_view_runtime_plan_invalid")
         try:
-            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
-        except OSError:
+            actual = runtime_plan_source_sha256(
+                root / relative,
+                omit_project_version=relative == "pyproject.toml",
+            )
+        except (OSError, ValueError):
             _fail("role_view_runtime_source_kit_incomplete")
         if actual != expected:
             _fail("role_view_runtime_source_changed")
@@ -708,8 +714,11 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
             _fail("role_view_runtime_plan_invalid")
         try:
-            actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
-        except OSError:
+            actual = runtime_plan_source_sha256(
+                root / relative,
+                omit_project_version=relative == "pyproject.toml",
+            )
+        except (OSError, ValueError):
             _fail("role_view_runtime_source_kit_incomplete")
         if actual != expected:
             _fail("role_view_runtime_source_changed")
