@@ -40,9 +40,9 @@ Store notarization credentials in Keychain using `xcrun notarytool store-credent
 ```sh
 HORMUZ_CODESIGN_IDENTITY='Developer ID Application: Company Name (TEAMID)' \
   ./script/package_macos_release.sh \
-  --output-directory /private/tmp/hormuz-macos-1.2.0 \
+  --output-directory /private/tmp/hormuz-macos-1.3.0 \
   --bundle-id com.xpounder.hormuz \
-  --version 1.2.0 \
+  --version 1.3.0 \
   --build 1 \
   --context-helper-directory /private/path/context-helpers \
   --tokenizer-cache /private/path/context-tokenizers
@@ -52,8 +52,8 @@ Submit, staple, and repackage the same app:
 
 ```sh
 ./script/notarize_macos_release.sh \
-  --bundle /private/tmp/hormuz-macos-1.2.0/Hormuz.app \
-  --upload-archive /private/tmp/hormuz-macos-1.2.0/Hormuz-1.2.0-notarization-upload.zip \
+  --bundle /private/tmp/hormuz-macos-1.3.0/Hormuz.app \
+  --upload-archive /private/tmp/hormuz-macos-1.3.0/Hormuz-1.3.0-notarization-upload.zip \
   --keychain-profile hormuz-notary
 ```
 

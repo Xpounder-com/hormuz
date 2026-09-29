@@ -95,7 +95,7 @@ overview = [
     p("Try it before a sales conversation", "h2"),
     p(f'The <link href="{URL}demo/" color="#31684b">real provider-free recording</link> demonstrates allow, fallback/cap, redact, deny with no upstream call, and synthetic metadata evidence. The complete quickstart needs no provider account.'),
     p("Know the boundary", "h2"),
-    p("v1.2.0 preserves the stable v1 CLI/policy/evidence contracts and adds default-Off local context optimization plus a signed Apple Silicon companion; the matching signed OCI reference is linux/amd64. No blanket production certification, managed service, 24/7 SLA, invoice reconciliation, independent security review, or customer endorsement is claimed.", "small"),
+    p("v1.3.0 preserves the stable v1 CLI, policy, and evidence contracts. It adds the Personal Optimizer, adapter SDK, and Aider integration. Personal Optimizer support is limited to macOS 14+ on Apple Silicon. The matching signed OCI reference is linux/amd64 and does not imply optimizer support in that image. No blanket production certification, managed service, 24/7 SLA, invoice reconciliation, independent security review, or customer endorsement is claimed.", "small"),
     p('<b>Discuss one workflow:</b> Mehrdad Zaker · <link href="mailto:mehrdadz@neuralint.io" color="#31684b">mehrdadz@neuralint.io</link><br/>' + f'<link href="{URL}" color="#31684b">usehormuz.github.io</link>'),
     p("Sources: " + link("Architecture", "docs/ARCHITECTURE.md") + " · " + link("Clients", "docs/CLIENTS.md") + " · " + link("Support", "SUPPORT.md") + " · " + link("Offer", "marketing/OFFER.md"), "small"),
 ]
@@ -163,7 +163,7 @@ trust = [
     p("<b>Identity:</b> OIDC JWT verification, with issuer/audience/expiry/signature checks and explicit subject mapping. The opt-in hosted evaluation path adds browser login and revocable Hormuz sessions; real-IdP and operating evidence remain deployment-specific."),
     p("<b>Secrets:</b> deterministic redact, deny or off modes—not complete semantic DLP. Custody-lifecycle approvals are separate from inference; no per-inference human-approval workflow is claimed."),
     p("<b>Usage:</b> captured gateway traffic in the current UTC month, with configured-rate-card cost estimates—not complete provider-account coverage or reconciled invoices."),
-    p("<b>Maturity:</b> v1.2.0 source release and signed Apple Silicon companion; matching v1.2.0 linux/amd64 signed OCI reference. Reference evidence does not certify your deployment."),
+    p("<b>Maturity:</b> v1.3.0 source release and signed Apple Silicon companion. Personal Optimizer support is limited to macOS 14+ on Apple Silicon. The matching v1.3.0 linux/amd64 signed OCI reference does not claim optimizer support. Reference evidence does not certify your deployment."),
     p("Questions to resolve before production traffic", "h2"),
     p("Who owns TLS/ingress and bypass controls? How are tokens issued, refreshed and revoked? Where are provider keys held? Who has administrative access? What are metadata/log/backup retention and deletion rules? Which migration, rollback, HA, capacity and recovery checks pass here? What remains for independent security review and provider/contract review?"),
     p("Inspect synthetic evidence", "h2"),
