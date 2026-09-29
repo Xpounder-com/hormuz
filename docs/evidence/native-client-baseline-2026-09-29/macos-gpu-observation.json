@@ -1,0 +1,28 @@
+{
+  "schema_id": "hormuz.native-client-gpu-observation",
+  "schema_version": 1,
+  "source_commit": "cc5f5c1d38b4732823496240bbb4ace309a6240d",
+  "version": "1.3.0",
+  "executable_sha256": "0726774b2c43695579633c920ad0e09bb8a6abb2399687a99d599807f314dd10",
+  "recorded_at_utc": "2026-09-29T13:16:13.038Z",
+  "scenario": "visible connected synthetic preview",
+  "tool": "Xcode 26.4.1 (17E202), Instruments 16.0, Metal System Trace",
+  "requested_seconds": 10,
+  "observed_seconds": 10.742787,
+  "power_source": "Battery Power",
+  "low_power_mode": false,
+  "target_direct_metal_command_buffer_rows": 0,
+  "target_gpu_interval_rows": 0,
+  "target_current_allocated_size_rows": 0,
+  "target_displayed_surface_rows": 0,
+  "system_gpu_interval_rows": 220,
+  "per_process_gpu_utilization_percent": null,
+  "utilization_state": "unavailable: powermetrics requires superuser and Metal System Trace did not expose a per-process utilization percentage",
+  "method": "LaunchServices started a fresh signature-verified app copy; xctrace attached to its exact numeric process and completed a bounded Metal System Trace. Exported target Metal command-buffer, GPU-interval, current-allocation and displayed-surface tables had no rows attributed to Hormuz. The system GPU table had activity from other processes, so it is not assigned to Hormuz.",
+  "raw_trace_retention": "not committed: the Instruments trace and exports enumerate unrelated processes and environment metadata",
+  "limits": [
+    "No direct Hormuz Metal work was attributed during this short visible-idle observation; this is not a zero-GPU-utilization claim.",
+    "WindowServer composition is system-wide and cannot be assigned to this app from these exported rows.",
+    "The trace ran on battery power and is separate from the idle repetition protocol."
+  ]
+}

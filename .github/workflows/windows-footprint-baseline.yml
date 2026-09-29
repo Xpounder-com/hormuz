@@ -4,17 +4,35 @@ on:
   pull_request:
     paths:
       - .github/workflows/windows-footprint-baseline.yml
-      - clients/rust/windows/FootprintBaseline.cs
-      - clients/rust/windows/collect-footprint-baseline.ps1
+      - clients/rust/.cargo/**
+      - clients/rust/Cargo.lock
+      - clients/rust/Cargo.toml
+      - clients/rust/rust-toolchain.toml
+      - clients/rust/core/**
+      - clients/rust/interaction/**
+      - clients/rust/platform/**
+      - clients/rust/session/**
+      - clients/rust/transport/**
+      - clients/rust/windows/**
       - tools/verify_windows_footprint_baseline.py
+      - docs/evidence/native-client-footprint-budgets-v1.json
       - docs/evidence/native-client-windows-baseline-2026-09-20/**
   push:
     branches: [main]
     paths:
       - .github/workflows/windows-footprint-baseline.yml
-      - clients/rust/windows/FootprintBaseline.cs
-      - clients/rust/windows/collect-footprint-baseline.ps1
+      - clients/rust/.cargo/**
+      - clients/rust/Cargo.lock
+      - clients/rust/Cargo.toml
+      - clients/rust/rust-toolchain.toml
+      - clients/rust/core/**
+      - clients/rust/interaction/**
+      - clients/rust/platform/**
+      - clients/rust/session/**
+      - clients/rust/transport/**
+      - clients/rust/windows/**
       - tools/verify_windows_footprint_baseline.py
+      - docs/evidence/native-client-footprint-budgets-v1.json
       - docs/evidence/native-client-windows-baseline-2026-09-20/**
   workflow_dispatch:
 
@@ -150,6 +168,7 @@ jobs:
           --artifacts footprint-evidence
           --source-sha "${{ github.sha }}"
           --proposed-head "${{ github.event.pull_request.head.sha || github.sha }}"
+          --budgets docs/evidence/native-client-footprint-budgets-v1.json
           --output windows-footprint-verification.json
       - name: Save content-free verification summary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

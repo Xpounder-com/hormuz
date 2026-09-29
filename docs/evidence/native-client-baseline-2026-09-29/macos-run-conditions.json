@@ -1,0 +1,137 @@
+{
+  "schema_id": "hormuz.native-client-run-conditions",
+  "schema_version": 1,
+  "host": {
+    "hardware_model": "Mac17,2",
+    "processor": "Apple M5",
+    "architecture": "arm64",
+    "logical_processors": 10,
+    "memory_bytes": 34359738368,
+    "os": "26.2",
+    "os_build": "25C56",
+    "python": "3.14.0",
+    "low_power_mode": false,
+    "thermal_state": null,
+    "thermal_state_reason": "unavailable: pmset -g therm returned an IOKit error",
+    "display": {
+      "pixel_width": 3024,
+      "pixel_height": 1964,
+      "retina": true,
+      "built_in": true,
+      "main": true,
+      "online": true
+    }
+  },
+  "protocol": {
+    "warmup_seconds": 60,
+    "duration_seconds": 300,
+    "sample_interval_seconds": 5,
+    "samples_per_run": 61,
+    "scenario_order": [
+      "hidden-1",
+      "visible-1",
+      "folded-1",
+      "visible-2",
+      "folded-2",
+      "hidden-2",
+      "folded-3",
+      "hidden-3",
+      "visible-3"
+    ],
+    "power_rule": "The recorded source must match before and after each accepted run."
+  },
+  "runs": [
+    {
+      "scenario": "hidden",
+      "repeat": 1,
+      "recorded_at_utc": "2026-09-29T12:41:02.598732+00:00",
+      "power_before": "AC Power",
+      "power_after": "AC Power"
+    },
+    {
+      "scenario": "visible",
+      "repeat": 1,
+      "recorded_at_utc": "2026-09-29T12:47:02.967544+00:00",
+      "power_before": "AC Power",
+      "power_after": "AC Power"
+    },
+    {
+      "scenario": "folded",
+      "repeat": 1,
+      "recorded_at_utc": "2026-09-29T12:53:03.331885+00:00",
+      "power_before": "AC Power",
+      "power_after": "AC Power"
+    },
+    {
+      "scenario": "visible",
+      "repeat": 2,
+      "recorded_at_utc": "2026-09-29T12:59:03.665701+00:00",
+      "power_before": "AC Power",
+      "power_after": "AC Power"
+    },
+    {
+      "scenario": "folded",
+      "repeat": 2,
+      "recorded_at_utc": "2026-09-29T13:05:04.025682+00:00",
+      "power_before": "AC Power",
+      "power_after": "AC Power"
+    },
+    {
+      "scenario": "hidden",
+      "repeat": 2,
+      "recorded_at_utc": "2026-09-29T13:26:22.401440+00:00",
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "folded",
+      "repeat": 3,
+      "recorded_at_utc": "2026-09-29T13:32:22.766823+00:00",
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "hidden",
+      "repeat": 3,
+      "recorded_at_utc": "2026-09-29T13:38:23.144925+00:00",
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    },
+    {
+      "scenario": "visible",
+      "repeat": 3,
+      "recorded_at_utc": "2026-09-29T13:44:23.523186+00:00",
+      "power_before": "Battery Power",
+      "power_after": "Battery Power"
+    }
+  ],
+  "discarded_attempts": [
+    {
+      "scenario": "hidden",
+      "repeat": 2,
+      "recorded_at_utc": "2026-09-29T13:11:46.175460+00:00",
+      "power_before": "AC Power",
+      "power_after": "Battery Power",
+      "report_committed": false,
+      "reason": "Power source changed during the run; a fresh stable-battery replacement was collected."
+    }
+  ],
+  "interaction_audits": {
+    "source_commit": "cc5f5c1d38b4732823496240bbb4ace309a6240d",
+    "version": "1.3.0",
+    "executable_sha256": "0726774b2c43695579633c920ad0e09bb8a6abb2399687a99d599807f314dd10",
+    "signature_verified": true,
+    "power_source": "Battery Power",
+    "accessibility_automation_enabled": false,
+    "layout_fixture": "connected synthetic preview",
+    "layout_report_sha256": "7cc57c21e14df1ae1ba654037ded4b7695e2d464af8f7b717fceb6fd884c8ecd",
+    "motion_fixture": "expired synthetic preview",
+    "motion_report_sha256": "3879a2c29c325a8e28ad08060d88a521c45e1f3819f0346d6146e0f2ba89ca66"
+  },
+  "limitations": [
+    "The first five accepted idle runs used AC power and the final four used battery power; no power-state performance comparison is claimed.",
+    "Thermal state, display scaling, refresh rate, and other developer-workstation activity were not controlled.",
+    "Accessibility automation was disabled, so an external 100-cycle Mac input loop was not run.",
+    "Synthetic preview mode skipped saved-session restoration, network refresh, and context-helper launch."
+  ]
+}

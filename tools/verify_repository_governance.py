@@ -42,6 +42,22 @@ CI_JOB_NAMES = {
     "native-contracts": "Native client contracts",
 }
 NATIVE_WORKFLOW_REFERENCE = "./.github/workflows/native-client-contracts.yml"
+WINDOWS_FOOTPRINT_TRIGGER_PATHS = (
+    ".github/workflows/windows-footprint-baseline.yml",
+    "clients/rust/.cargo/**",
+    "clients/rust/Cargo.lock",
+    "clients/rust/Cargo.toml",
+    "clients/rust/rust-toolchain.toml",
+    "clients/rust/core/**",
+    "clients/rust/interaction/**",
+    "clients/rust/platform/**",
+    "clients/rust/session/**",
+    "clients/rust/transport/**",
+    "clients/rust/windows/**",
+    "tools/verify_windows_footprint_baseline.py",
+    "docs/evidence/native-client-footprint-budgets-v1.json",
+    "docs/evidence/native-client-windows-baseline-2026-09-20/**",
+)
 CI_PATH_SCOPED_JOB_IDS = (
     "postgres-compatibility",
     "postgres-backup-restore",
@@ -1451,7 +1467,11 @@ def _validate_native_contract_workflow(
             "        working-directory: clients/rust\n",
             "        shell: pwsh\n",
             "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
-            "        run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json\n",
+            "        run: >-\n",
+            "          ./windows/verify-acceptance.ps1\n",
+            "          -Executable ./target/release/hormuz-windows.exe\n",
+            "          -Output ./target/release/windows-acceptance.json\n",
+            "          -Budget ../../docs/evidence/native-client-footprint-budgets-v1.json\n",
         ),
         "Verify native Windows instance activation": (
             "        working-directory: clients/rust\n",
@@ -1483,6 +1503,10 @@ def _validate_native_contract_workflow(
             "        working-directory: clients/rust\n",
             "        shell: pwsh\n",
             "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n",
+            "          $acceptance = Get-Content target/release/windows-acceptance.json -Raw | ConvertFrom-Json\n",
+            '          if ($acceptance.schema_version -ne 2 -or $acceptance.budget_status -ne "passed") {\n',
+            '            throw "Windows interaction budgets were not verified."\n',
+            "            schema_version = 2\n",
             '            artifact_kind = "unsigned_connected_development_candidate"\n',
             "            source_commit = (git rev-parse HEAD).Trim()\n",
             "            proposed_head = $env:HORMUZ_PR_HEAD\n",
@@ -1490,6 +1514,7 @@ def _validate_native_contract_workflow(
             "            sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()\n",
             '            native_smoke = "passed"\n',
             '            external_ui_automation = "passed"\n',
+            "            interaction_budget = $acceptance.budget_status\n",
             '            instance_lifecycle = "passed"\n',
             "            lifecycle_sha256 = (Get-FileHash target/release/windows-lifecycle.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
             "            acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()\n",
@@ -1564,6 +1589,7 @@ def _validate_workflows(
     pages_writers: list[tuple[str, str]] = []
     pages_workflow_seen = False
     native_workflow_seen = False
+    windows_footprint_workflow_seen = False
     candidate_freeze_seen = False
     candidate_job_bytes_valid = False
     candidate_workflow_bytes_valid = False
@@ -1626,6 +1652,15 @@ def _validate_workflows(
         if path.name == "native-client-contracts.yml":
             _validate_native_contract_workflow(text, job_blocks, job_fields)
             native_workflow_seen = True
+        if path.name == "windows-footprint-baseline.yml":
+            if any(
+                text.count(f"      - {relative}\n") != 2
+                for relative in WINDOWS_FOOTPRINT_TRIGGER_PATHS
+            ):
+                raise RepositoryGovernanceError(
+                    "Windows footprint workflow trigger coverage changed"
+                )
+            windows_footprint_workflow_seen = True
         if path.name == "macos-distribution.yml":
             if any(
                 text.count(marker)
@@ -1953,6 +1988,8 @@ def _validate_workflows(
         raise RepositoryGovernanceError("Pages workflow is required")
     if not native_workflow_seen:
         raise RepositoryGovernanceError("native contract workflow is required")
+    if not windows_footprint_workflow_seen:
+        raise RepositoryGovernanceError("Windows footprint workflow is required")
     if contents_writers:
         raise RepositoryGovernanceError(
             "workflow-issued contents write is forbidden"

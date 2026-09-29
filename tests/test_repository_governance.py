@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tools.verify_repository_governance import (
     RepositoryGovernanceError,
+    WINDOWS_FOOTPRINT_TRIGGER_PATHS,
     validate_repository_governance,
 )
 
@@ -365,11 +366,28 @@ class RepositoryGovernanceTests(unittest.TestCase):
             with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
                 validate_repository_governance(root)
 
+    def test_windows_footprint_workflow_tracks_every_build_input(self) -> None:
+        for relative in WINDOWS_FOOTPRINT_TRIGGER_PATHS:
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/windows-footprint-baseline.yml"
+                value = workflow.read_text(encoding="utf-8")
+                marker = f"      - {relative}\n"
+                self.assertEqual(value.count(marker), 2)
+                workflow.write_text(value.replace(marker, "", 1), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    RepositoryGovernanceError,
+                    "Windows footprint workflow trigger coverage changed",
+                ):
+                    validate_repository_governance(root)
+
     def test_windows_preview_checks_and_provenance_cannot_be_removed(self) -> None:
         mutations = (
             ("run: cargo build -p hormuz-windows --release --locked", "run: cargo check -p hormuz-windows --locked"),
             ("run: ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe", "run: Write-Output passed"),
-            ("run: ./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json", "run: Write-Output passed"),
+            ("          ./windows/verify-acceptance.ps1\n", "          Write-Output passed\n"),
+            ("          -Budget ../../docs/evidence/native-client-footprint-budgets-v1.json\n", ""),
             ("run: ./windows/verify-lifecycle.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-lifecycle.json", "run: Write-Output passed"),
             ("run: ./windows/test-acceptance-failure.ps1", "run: Write-Output passed"),
             ("run: ./windows/verify-rebuild.ps1", "run: Write-Output passed"),
@@ -379,6 +397,9 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ("if ($imports | Where-Object { $_ -match '^(vcruntime|msvcp|concrt)' }) {", "if ($false) {"),
             ("source_commit = (git rev-parse HEAD).Trim()", 'source_commit = "unverified"'),
             ("sha256 = (Get-FileHash target/release/hormuz-windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()", 'sha256 = "unverified"'),
+            ('if ($acceptance.schema_version -ne 2 -or $acceptance.budget_status -ne "passed") {', 'if ($false) {'),
+            ("            schema_version = 2\n", "            schema_version = 1\n"),
+            ("interaction_budget = $acceptance.budget_status", 'interaction_budget = "unverified"'),
             ('manual_platform_acceptance = "pending"', 'manual_platform_acceptance = "passed"'),
             ("            clients/rust/target/release/windows-build.json\n", ""),
             ("            clients/rust/target/release/windows-acceptance.json\n", ""),

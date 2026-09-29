@@ -1,0 +1,84 @@
+{
+  "schema_id": "hormuz.native-client-static-baseline",
+  "schema_version": 2,
+  "measured_at_utc": "2026-09-29T12:38:38Z",
+  "measurement_host": {
+    "architecture": "arm64",
+    "os": "26.2",
+    "os_build": "25C56"
+  },
+  "method": "Published manifest and distribution-proof verification; fresh archive extraction; regular-file logical-size and 512-byte st_blocks allocation sums; otool -L; codesign --verify --deep --strict, Gatekeeper assessment, and stapled-ticket validation outside the restricted sandbox.",
+  "mac": {
+    "source_commit": "cc5f5c1d38b4732823496240bbb4ace309a6240d",
+    "version": "1.3.0",
+    "build": "23001",
+    "architecture": "arm64",
+    "minimum_macos": "14.0",
+    "artifact_url": "https://github.com/Xpounder-com/hormuz/releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip",
+    "archive_sha256": "77d463869f35c5bd4c9bae0548ce5e66ddc49fdb565f81d22ac36cd01d0b599d",
+    "archive_bytes": 13239896,
+    "release_manifest_match": true,
+    "distribution_proof_sha256": "ec45078a10e848b9c48ba0652054b4e6ef7c28c3faeb8cdaca98cbabcfc47278",
+    "bundle_logical_bytes": 18260512,
+    "bundle_allocated_bytes": 18300928,
+    "regular_file_count": 16,
+    "component_logical_bytes": {
+      "Contents/Helpers": 10219792,
+      "Contents/MacOS": 2599952,
+      "Contents/Resources": 5432484,
+      "Contents/_CodeSignature": 5670,
+      "bundle_metadata": 2614
+    },
+    "native_executable_bytes": 2599952,
+    "native_executable_sha256": "0726774b2c43695579633c920ad0e09bb8a6abb2399687a99d599807f314dd10",
+    "native_executable_architectures": [
+      "arm64"
+    ],
+    "context_helper_backend_bytes": 10219792,
+    "context_helper_backend_sha256": "120a443cc72334a44dd06fd2d7f0451c21373acc889b399c8a53810fab0ec9b7",
+    "context_helper_backend_architectures": [
+      "arm64"
+    ],
+    "context_helper_launcher_bytes": 398,
+    "context_helper_launcher_sha256": "d85c56b7143b1a47d8640a35b15a6915757473030e3e2fcd18f7fb84b204e1aa",
+    "native_dynamic_dependencies": [
+      "/usr/lib/libSystem.B.dylib",
+      "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+      "/System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork",
+      "/System/Library/Frameworks/Combine.framework/Versions/A/Combine",
+      "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+      "/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics",
+      "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+      "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+      "/System/Library/Frameworks/SwiftUI.framework/Versions/A/SwiftUI",
+      "/usr/lib/libobjc.A.dylib",
+      "/usr/lib/swift/libswiftCore.dylib",
+      "/usr/lib/swift/libswiftCoreFoundation.dylib",
+      "/usr/lib/swift/libswiftCoreImage.dylib",
+      "/usr/lib/swift/libswiftDarwin.dylib",
+      "/usr/lib/swift/libswiftDataDetection.dylib",
+      "/usr/lib/swift/libswiftDispatch.dylib",
+      "/usr/lib/swift/libswiftIOKit.dylib",
+      "/usr/lib/swift/libswiftMetal.dylib",
+      "/usr/lib/swift/libswiftOSLog.dylib",
+      "/usr/lib/swift/libswiftObjectiveC.dylib",
+      "/usr/lib/swift/libswiftObservation.dylib",
+      "/usr/lib/swift/libswiftQuartzCore.dylib",
+      "/usr/lib/swift/libswiftSpatial.dylib",
+      "/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib",
+      "/usr/lib/swift/libswiftXPC.dylib",
+      "/usr/lib/swift/libswift_Concurrency.dylib",
+      "/usr/lib/swift/libswiftos.dylib",
+      "/usr/lib/swift/libswiftsimd.dylib"
+    ],
+    "helper_backend_dynamic_dependencies": [
+      "/usr/lib/libSystem.B.dylib",
+      "/usr/lib/libz.1.dylib"
+    ],
+    "signature_valid": true,
+    "gatekeeper_accepted": true,
+    "notarization_ticket_valid": true,
+    "system_runtime_dependencies_only": true,
+    "bundled_runtime_note": "The context helper embeds its Python and tokenizer payload; its bootloader imports do not enumerate that packaged runtime."
+  }
+}

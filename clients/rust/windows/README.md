@@ -96,7 +96,10 @@ cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo build -p hormuz-windows --release --locked
 ./windows/verify-smoke.ps1 -Executable ./target/release/hormuz-windows.exe
-./windows/verify-acceptance.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-acceptance.json
+./windows/verify-acceptance.ps1 `
+  -Executable ./target/release/hormuz-windows.exe `
+  -Output ./target/release/windows-acceptance.json `
+  -Budget ../../docs/evidence/native-client-footprint-budgets-v1.json
 ./windows/verify-lifecycle.ps1 -Executable ./target/release/hormuz-windows.exe -Output ./target/release/windows-lifecycle.json
 ./target/release/hormuz-windows.exe --preview
 ./target/release/hormuz-windows.exe
@@ -163,19 +166,23 @@ GDI/USER objects, observer CPU time, OS/architecture, and source/executable hash
 Observer CPU covers only the worker measurement interval, excluding compilation,
 the watchdog and WMI service work.
 Working set and private bytes are different counters; neither represents total
-physical footprint. Before/after values are observations with no numerical
-regression budget. Startup, wake-ups, GPU, physical display changes, sign-in and
-active-client scenarios remain unmeasured. Host power, thermal and display
-conditions are uncontrolled. The observer reads only the owned preview's UI
-and numeric process topology; it does not collect other window text, command
-lines, process owners, credentials or screenshots.
+physical footprint. The native CI job compares the 100-cycle deltas with the
+proposed ceilings in `docs/evidence/native-client-footprint-budgets-v1.json`.
+Those alarms are not performance guarantees. This short job does not measure
+startup, wake-ups, GPU, physical display changes, sign-in or active-client
+scenarios. Host power, thermal and display conditions are uncontrolled. The
+observer reads only the owned preview's UI and numeric process topology; it does
+not collect other window text, command lines, process owners, credentials or
+screenshots.
 
 Parameters `-WarmupSeconds`, `-SampleCount`, `-IntervalMilliseconds`,
 `-Repetitions` and `-Cycles` support longer local observations. Existing output
-is never overwritten. A parent watchdog owns both processes and stops them if
-the provider hangs or the check fails. The success evidence is written only
-after the preview exits cleanly. CI stores it beside the executable and pins
-its SHA-256 in the build manifest. `manual_platform_acceptance` stays `pending`.
+is never overwritten. `-Budget` accepts the shared proposed-budget JSON and
+requires exactly 100 cycles. A parent watchdog owns both processes and stops
+them if the provider hangs or the check fails. The success evidence is written
+only after the preview exits cleanly. CI stores it beside the executable and
+pins its SHA-256 in the build manifest. `manual_platform_acceptance` stays
+`pending`.
 The Windows failure-path regression launches an owned, inert program without a
 preview window, requires rejection and process cleanup, and verifies that an
 existing evidence file is preserved before any new target is launched.
@@ -199,8 +206,8 @@ factors and results. Use only the synthetic preview; attach content-free evidenc
 4. Move between 100%, 150% and 200% displays; change scale/resolution; disconnect
    the active display; change taskbar placement/auto-hide. Check reachability,
    crisp text, control hit areas and keyboard focus after every change.
-5. Repeat at least 100 interactions and record process-tree memory, CPU, wake-ups
-   and GPU activity using the #332 measurement protocol before proposing budgets.
+5. Repeat at least 100 interactions, compare process-tree memory and CPU with the
+   proposed #332 budgets, and record wake-up/GPU availability explicitly.
 
 #331 remains open until that evidence and protected-main checks are recorded.
 Real sign-in/usage belongs to v1.5.0 (#340), launch/relay to v1.6.0 (#341), and
