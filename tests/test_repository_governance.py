@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tools.verify_repository_governance import (
     RepositoryGovernanceError,
+    WINDOWS_FOOTPRINT_TRIGGER_PATHS,
     validate_repository_governance,
 )
 
@@ -364,6 +365,22 @@ class RepositoryGovernanceTests(unittest.TestCase):
             workflow.write_text(value, encoding="utf-8")
             with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
                 validate_repository_governance(root)
+
+    def test_windows_footprint_workflow_tracks_every_build_input(self) -> None:
+        for relative in WINDOWS_FOOTPRINT_TRIGGER_PATHS:
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/windows-footprint-baseline.yml"
+                value = workflow.read_text(encoding="utf-8")
+                marker = f"      - {relative}\n"
+                self.assertEqual(value.count(marker), 2)
+                workflow.write_text(value.replace(marker, "", 1), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    RepositoryGovernanceError,
+                    "Windows footprint workflow trigger coverage changed",
+                ):
+                    validate_repository_governance(root)
 
     def test_windows_preview_checks_and_provenance_cannot_be_removed(self) -> None:
         mutations = (

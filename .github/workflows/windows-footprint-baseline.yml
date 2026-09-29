@@ -4,8 +4,16 @@ on:
   pull_request:
     paths:
       - .github/workflows/windows-footprint-baseline.yml
-      - clients/rust/windows/FootprintBaseline.cs
-      - clients/rust/windows/collect-footprint-baseline.ps1
+      - clients/rust/.cargo/**
+      - clients/rust/Cargo.lock
+      - clients/rust/Cargo.toml
+      - clients/rust/rust-toolchain.toml
+      - clients/rust/core/**
+      - clients/rust/interaction/**
+      - clients/rust/platform/**
+      - clients/rust/session/**
+      - clients/rust/transport/**
+      - clients/rust/windows/**
       - tools/verify_windows_footprint_baseline.py
       - docs/evidence/native-client-footprint-budgets-v1.json
       - docs/evidence/native-client-windows-baseline-2026-09-20/**
@@ -13,8 +21,16 @@ on:
     branches: [main]
     paths:
       - .github/workflows/windows-footprint-baseline.yml
-      - clients/rust/windows/FootprintBaseline.cs
-      - clients/rust/windows/collect-footprint-baseline.ps1
+      - clients/rust/.cargo/**
+      - clients/rust/Cargo.lock
+      - clients/rust/Cargo.toml
+      - clients/rust/rust-toolchain.toml
+      - clients/rust/core/**
+      - clients/rust/interaction/**
+      - clients/rust/platform/**
+      - clients/rust/session/**
+      - clients/rust/transport/**
+      - clients/rust/windows/**
       - tools/verify_windows_footprint_baseline.py
       - docs/evidence/native-client-footprint-budgets-v1.json
       - docs/evidence/native-client-windows-baseline-2026-09-20/**

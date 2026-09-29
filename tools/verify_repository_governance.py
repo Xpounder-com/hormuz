@@ -42,6 +42,22 @@ CI_JOB_NAMES = {
     "native-contracts": "Native client contracts",
 }
 NATIVE_WORKFLOW_REFERENCE = "./.github/workflows/native-client-contracts.yml"
+WINDOWS_FOOTPRINT_TRIGGER_PATHS = (
+    ".github/workflows/windows-footprint-baseline.yml",
+    "clients/rust/.cargo/**",
+    "clients/rust/Cargo.lock",
+    "clients/rust/Cargo.toml",
+    "clients/rust/rust-toolchain.toml",
+    "clients/rust/core/**",
+    "clients/rust/interaction/**",
+    "clients/rust/platform/**",
+    "clients/rust/session/**",
+    "clients/rust/transport/**",
+    "clients/rust/windows/**",
+    "tools/verify_windows_footprint_baseline.py",
+    "docs/evidence/native-client-footprint-budgets-v1.json",
+    "docs/evidence/native-client-windows-baseline-2026-09-20/**",
+)
 CI_PATH_SCOPED_JOB_IDS = (
     "postgres-compatibility",
     "postgres-backup-restore",
@@ -1573,6 +1589,7 @@ def _validate_workflows(
     pages_writers: list[tuple[str, str]] = []
     pages_workflow_seen = False
     native_workflow_seen = False
+    windows_footprint_workflow_seen = False
     candidate_freeze_seen = False
     candidate_job_bytes_valid = False
     candidate_workflow_bytes_valid = False
@@ -1635,6 +1652,15 @@ def _validate_workflows(
         if path.name == "native-client-contracts.yml":
             _validate_native_contract_workflow(text, job_blocks, job_fields)
             native_workflow_seen = True
+        if path.name == "windows-footprint-baseline.yml":
+            if any(
+                text.count(f"      - {relative}\n") != 2
+                for relative in WINDOWS_FOOTPRINT_TRIGGER_PATHS
+            ):
+                raise RepositoryGovernanceError(
+                    "Windows footprint workflow trigger coverage changed"
+                )
+            windows_footprint_workflow_seen = True
         if path.name == "macos-distribution.yml":
             if any(
                 text.count(marker)
@@ -1962,6 +1988,8 @@ def _validate_workflows(
         raise RepositoryGovernanceError("Pages workflow is required")
     if not native_workflow_seen:
         raise RepositoryGovernanceError("native contract workflow is required")
+    if not windows_footprint_workflow_seen:
+        raise RepositoryGovernanceError("Windows footprint workflow is required")
     if contents_writers:
         raise RepositoryGovernanceError(
             "workflow-issued contents write is forbidden"
