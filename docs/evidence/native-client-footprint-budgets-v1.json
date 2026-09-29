@@ -1,0 +1,39 @@
+{
+  "schema_id": "hormuz.native-client-footprint-budgets",
+  "schema_version": 1,
+  "status": "proposed",
+  "basis": {
+    "macos": "Hormuz v1.3.0 notarized arm64 release on Mac17,2; three five-minute runs per synthetic idle mode and ten warm window-appearance trials",
+    "windows": "Protected-main unsigned release-mode x64 synthetic preview: three five-minute runs per mode at 544e99ecccc4299bb69e467e47e29ea4dd8e6ebf and a 100-cycle acceptance check confirmed at 04799698392c6196dd39d28ce36753c706180e43"
+  },
+  "macos": {
+    "archive_bytes_max": 15728640,
+    "bundle_logical_bytes_max": 23068672,
+    "bundle_allocated_bytes_max": 23068672,
+    "idle_rss_kib_max": 131072,
+    "idle_physical_footprint_bytes_max": 50331648,
+    "idle_cpu_percent_one_core_max": 0.01,
+    "package_idle_wakeups_per_five_minutes_max": 10,
+    "interrupt_wakeups_per_five_minutes_max": 25,
+    "warm_start_panel_upper_bound_seconds_max": 2.5
+  },
+  "windows": {
+    "executable_bytes_max": 3670016,
+    "working_set_bytes_max": 25165824,
+    "private_bytes_max": 4194304,
+    "app_cpu_percent_one_core_max": 0.1,
+    "window_ready_upper_bound_seconds_max": 8.0,
+    "post_100_cycle_working_set_growth_bytes_max": 1048576,
+    "post_100_cycle_private_bytes_growth_max": 524288,
+    "post_100_cycle_cpu_seconds_max": 5.0,
+    "post_100_cycle_handle_growth_max": 4,
+    "post_100_cycle_gdi_object_growth_max": 2,
+    "post_100_cycle_user_object_growth_max": 2
+  },
+  "limits": [
+    "These are proposed regression alarms derived from synthetic observations, not supported-hardware requirements or performance guarantees.",
+    "The Mac and Windows artifacts have different feature sets and counters; their values are not compared with each other.",
+    "Hosted Windows runner conditions and the Mac developer workstation are not controlled clean-machine environments.",
+    "Connected sign-in, active relay/helper workloads, cold startup, and per-process Windows wake-ups or GPU activity need separate budgets when those measurements exist."
+  ]
+}

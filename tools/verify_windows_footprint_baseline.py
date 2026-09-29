@@ -235,7 +235,7 @@ def verify(artifacts: Path, source_sha: str, proposed_head: str) -> dict:
         evidence_hashes[scenario] = sha256(report_path)
     return {
         "schema_id": "hormuz.windows.synthetic-footprint-verification",
-        "schema_version": 1,
+        "schema_version": 2,
         "result": "passed",
         "source_commit": source_sha,
         "proposed_head": proposed_head,
@@ -255,18 +255,46 @@ def verify(artifacts: Path, source_sha: str, proposed_head: str) -> dict:
     }
 
 
+def verify_budgets(summary: dict, path: Path) -> None:
+    report = read_json(path)
+    require(report.get("schema_id") == "hormuz.native-client-footprint-budgets" and
+            report.get("schema_version") == 1 and report.get("status") == "proposed",
+            "Unexpected footprint budget schema.")
+    budgets = report.get("windows")
+    require(isinstance(budgets, dict), "Windows budgets are missing.")
+    runs = [run for scenario in summary["scenarios"].values()
+            for run in scenario["runs"]]
+    require(summary["executable_bytes"] <=
+            integer(budgets.get("executable_bytes_max"), "executable budget", minimum=1),
+            "The Windows executable exceeds its proposed budget.")
+    checks = (
+        ("working_set_bytes_max", "working_set_bytes_max"),
+        ("private_bytes_max", "private_bytes_max"),
+        ("app_cpu_percent_one_core", "app_cpu_percent_one_core_max"),
+        ("window_ready_upper_bound_seconds", "window_ready_upper_bound_seconds_max"),
+    )
+    for observed, budget in checks:
+        limit = number(budgets.get(budget), budget)
+        require(max(number(run[observed], observed) for run in runs) <= limit,
+                f"A Windows observation exceeds {budget}.")
+    summary["budget_status"] = "passed"
+    summary["budget_schema_id"] = report["schema_id"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts", required=True, type=Path)
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--proposed-head", required=True)
+    parser.add_argument("--budgets", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     summary = verify(args.artifacts, args.source_sha, args.proposed_head)
+    verify_budgets(summary, args.budgets)
     with args.output.open("x", encoding="utf-8") as stream:
         json.dump(summary, stream, indent=2, allow_nan=False)
         stream.write("\n")
-    print("windows_footprint_evidence=passed scenarios=3 runs=9 samples=549")
+    print("windows_footprint_evidence=passed scenarios=3 runs=9 samples=549 budgets=passed")
 
 
 if __name__ == "__main__":

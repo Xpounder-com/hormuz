@@ -3,7 +3,7 @@
 
 This is a warm-LaunchServices observation, not a cold-boot startup benchmark.
 Only numeric timing and owned-window geometry are retained. The app must be a
-fresh, signature-verified extraction of the pinned v1.2.0 release.
+fresh, signature-verified extraction of the pinned release.
 """
 
 import argparse
@@ -12,13 +12,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import time
 
 
-SOURCE = "d854a5a453fcbe20cb3f4c1e261e146f2da93855"
-EXECUTABLE_SHA256 = "2ece94a031a039d0e27c7ce873787f83f704045e44b0e63cedb71841b9bb3ecc"
+DEFAULT_SOURCE = "d854a5a453fcbe20cb3f4c1e261e146f2da93855"
+DEFAULT_VERSION = "1.2.0"
+DEFAULT_EXECUTABLE_SHA256 = "2ece94a031a039d0e27c7ce873787f83f704045e44b0e63cedb71841b9bb3ecc"
 
 
 def rows():
@@ -133,9 +135,18 @@ def main():
     parser.add_argument("--window-probe", type=Path, required=True)
     parser.add_argument("--trials", type=int, default=10)
     parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument("--source-commit", default=DEFAULT_SOURCE)
+    parser.add_argument("--version", default=DEFAULT_VERSION)
+    parser.add_argument("--executable-sha256", default=DEFAULT_EXECUTABLE_SHA256)
     args = parser.parse_args()
     if not 1 <= args.trials <= 100 or not 1 <= args.timeout <= 60:
         parser.error("Trials must be 1–100 and timeout 1–60 seconds.")
+    if re.fullmatch(r"[0-9a-f]{40}", args.source_commit) is None:
+        parser.error("Source commit must be a full lowercase SHA-1.")
+    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version) is None:
+        parser.error("Version must be a three-part numeric release version.")
+    if re.fullmatch(r"[0-9a-f]{64}", args.executable_sha256) is None:
+        parser.error("Executable SHA-256 must be 64 lowercase hexadecimal characters.")
     root = args.recording_directory.resolve()
     probe = args.window_probe.resolve()
     if not probe.is_file() or not os.access(probe, os.X_OK):
@@ -145,7 +156,7 @@ def main():
         parser.error("Refusing to overwrite an existing report.")
     app = root / "extracted/Hormuz.app"
     binary = app / "Contents/MacOS/Hormuz"
-    if hashlib.sha256(binary.read_bytes()).hexdigest() != EXECUTABLE_SHA256:
+    if hashlib.sha256(binary.read_bytes()).hexdigest() != args.executable_sha256:
         raise RuntimeError("The executable does not match the pinned release.")
 
     measurements = []
@@ -158,9 +169,9 @@ def main():
     report = {
         "schema_id": "hormuz.native-client-startup-sample",
         "schema_version": 1,
-        "source_commit": SOURCE,
-        "version": "1.2.0",
-        "executable_sha256": EXECUTABLE_SHA256,
+        "source_commit": args.source_commit,
+        "version": args.version,
+        "executable_sha256": args.executable_sha256,
         "recorded_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "scenario_requested": "visible connected synthetic preview",
         "method": "monotonic clock before LaunchServices open -n -g; poll owned process and numeric CoreGraphics on-screen panel geometry with alpha greater than zero",

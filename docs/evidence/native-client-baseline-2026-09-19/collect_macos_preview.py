@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproduce the v1.2.0 preview baseline only, not a general app profiler.
+"""Measure one pinned Hormuz release preview, not a general app profiler.
 
 The original recordings used the same ps collection body with a fixed temporary
 recording directory. Schema v3 also records Darwin per-process physical
@@ -13,21 +13,34 @@ point this at an app already in use. It launches synthetic preview state and
 terminates only the newly identified process at the exact verified binary path.
 """
 from pathlib import Path
-import argparse,ctypes,datetime,hashlib,json,os,resource,signal,struct,subprocess,time
+import argparse,ctypes,datetime,hashlib,json,os,re,resource,signal,struct,subprocess,time
+DEFAULT_SOURCE='d854a5a453fcbe20cb3f4c1e261e146f2da93855'
+DEFAULT_VERSION='1.2.0'
+DEFAULT_EXECUTABLE_SHA256='2ece94a031a039d0e27c7ce873787f83f704045e44b0e63cedb71841b9bb3ecc'
 p=argparse.ArgumentParser()
 p.add_argument('scenario',choices=['hidden','visible','folded'])
-p.add_argument('--recording-directory',type=Path,required=True,help='Directory containing extracted/Hormuz.app from the pinned v1.2.0 release; numeric reports are written here.')
+p.add_argument('--recording-directory',type=Path,required=True,help='Directory containing extracted/Hormuz.app from the pinned release; numeric reports are written here.')
 p.add_argument('--warmup',type=int,default=60)
 p.add_argument('--duration',type=int,default=300)
+p.add_argument('--repeat',type=int,default=1)
+p.add_argument('--source-commit',default=DEFAULT_SOURCE)
+p.add_argument('--version',default=DEFAULT_VERSION)
+p.add_argument('--executable-sha256',default=DEFAULT_EXECUTABLE_SHA256)
 a=p.parse_args()
 root=a.recording_directory.resolve()
-if a.warmup < 0 or not 1 <= a.duration <= 3600:
-    p.error('Warm-up must be nonnegative and duration between 1 and 3600 seconds.')
+if a.warmup < 0 or not 1 <= a.duration <= 3600 or not 1 <= a.repeat <= 100:
+    p.error('Warm-up must be nonnegative; duration 1–3600 seconds; repeat 1–100.')
+if re.fullmatch(r'[0-9a-f]{40}',a.source_commit) is None:
+    p.error('Source commit must be a full lowercase SHA-1.')
+if re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',a.version) is None:
+    p.error('Version must be a three-part numeric release version.')
+if re.fullmatch(r'[0-9a-f]{64}',a.executable_sha256) is None:
+    p.error('Executable SHA-256 must be 64 lowercase hexadecimal characters.')
 if (root/(a.scenario+'-idle-sample.json')).exists():
     p.error('Refusing to overwrite an existing sample; use a fresh recording directory.')
 app=root/'extracted/Hormuz.app'
 binary=app/'Contents/MacOS/Hormuz'
-if hashlib.sha256(binary.read_bytes()).hexdigest()!='2ece94a031a039d0e27c7ce873787f83f704045e44b0e63cedb71841b9bb3ecc':
+if hashlib.sha256(binary.read_bytes()).hexdigest()!=a.executable_sha256:
     raise RuntimeError('The executable does not match the pinned released preview.')
 def rows():
     raw=subprocess.check_output(['/bin/ps','-axo','pid=,ppid=,rss=,time=,comm='],text=True)
@@ -140,12 +153,12 @@ try:
     measured=samples[-1]['elapsed_seconds']-samples[0]['elapsed_seconds']
     report={
       'schema_id':'hormuz.native-client-idle-sample','schema_version':3,
-      'source_commit':'d854a5a453fcbe20cb3f4c1e261e146f2da93855','version':'1.2.0',
-      'executable_sha256':'2ece94a031a039d0e27c7ce873787f83f704045e44b0e63cedb71841b9bb3ecc',
+      'source_commit':a.source_commit,'version':a.version,
+      'executable_sha256':a.executable_sha256,
       'recorded_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
       'scenario_requested':a.scenario,'preview':'connected synthetic snapshot; saved-session restoration skipped by source guard',
       'conditions':'Developer workstation with other applications active; background LaunchServices launch; UI state not independently observed; no user interactions during sample.',
-      'warmup_seconds':a.warmup,'sample_interval_seconds':5,'duration_seconds':measured,'repeat':1,
+      'warmup_seconds':a.warmup,'sample_interval_seconds':5,'duration_seconds':measured,'repeat':a.repeat,
       'method':'ps process counters plus Darwin proc_pid_rusage RUSAGE_INFO_V0 and mach_timebase_info; root descendants plus processes executing inside this exact app bundle; no arguments or identities retained',
       'samples':samples,'max_process_count':max(s['process_count'] for s in samples),
       'rss_kib_min':min(s['rss_kib_sum'] for s in samples),'rss_kib_max':max(s['rss_kib_sum'] for s in samples),

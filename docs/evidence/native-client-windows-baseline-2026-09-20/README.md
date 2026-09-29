@@ -55,6 +55,22 @@ image, architecture, logical processor count and collection parameters. It
 contains no process IDs, paths, command lines, identities, window text,
 screenshots, credentials, prompts or responses.
 
+The verifier applies the proposed ceilings in
+[`native-client-footprint-budgets-v1.json`](../native-client-footprint-budgets-v1.json):
+3.5 MiB executable size, 24 MiB working set, 4 MiB private bytes, 0.1% of one
+core, and an 8-second window-ready upper bound. The separate native acceptance
+job applies the same file to its 100-cycle before/after samples: at most 1 MiB
+working-set growth, 512 KiB private-byte growth, five CPU seconds, four handles,
+and two GDI or USER objects. These deliberately loose values detect material
+regressions; they are not product guarantees or cross-runner performance claims.
+The current exact-main [CI run 36504256235](https://github.com/Xpounder-com/hormuz/actions/runs/36504256235)
+at `04799698392c6196dd39d28ce36753c706180e43` completed all 100 cycles with
+zero settled growth in working set, private bytes, handles, GDI objects or USER
+objects; cumulative app CPU increased by 2.234375 seconds. The downloaded
+content-free acceptance artifact and executable both matched that run's build
+manifest. This is the basis for the interaction ceilings, not physical input
+acceptance.
+
 `working_set_bytes_sum` and `private_bytes_sum` are sampled process-tree sums
 of distinct Windows counters. Neither is total physical memory. App CPU time
 comes from `System.Diagnostics.Process`; percentage of one core uses the first
@@ -76,6 +92,7 @@ on a different hosted runner; their power, thermal, display and background
 conditions are uncontrolled, so state-to-state differences are descriptive,
 not a controlled performance comparison. This procedure does not measure GPU
 activity, physical keyboard or tray input, screen-reader usability, real
-sign-in/active-client behavior, connected helpers, or numerical regression
-budgets. Those parts of #332 and [#331](https://github.com/Xpounder-com/hormuz/issues/331)
-remain open.
+sign-in/active-client behavior, or connected helpers. Wake-up and GPU budgets
+remain unset because those counters are unavailable in this hosted procedure.
+Physical Windows acceptance remains in
+[#331](https://github.com/Xpounder-com/hormuz/issues/331).

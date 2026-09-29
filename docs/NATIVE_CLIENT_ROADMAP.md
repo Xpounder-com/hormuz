@@ -7,11 +7,10 @@ AI sessions. The Python gateway remains server-side.
 
 ## Planned versions
 
-The latest published product release at planning time is v1.2.0. The existing
-v1.3.0 Portfolio Intelligence milestone remains independent. These additive
-desktop improvements use new minor-release targets. A target is neither a
-published release nor permission to change existing package/version identities.
-Patch releases are reserved for compatible fixes after a feature release.
+The current published product release is v1.3.0. These additive desktop
+improvements use later minor-release targets. A target is neither a published
+release nor permission to change existing package/version identities. Patch
+releases are reserved for compatible fixes after a feature release.
 
 | Target | Improvement |
 |---|---|
@@ -71,16 +70,18 @@ rather than silently changing either implementation. See
 
 The #331 Windows preview is an explicitly synthetic native shell. Its CI
 process and UI Automation observations do not establish manual platform
-acceptance. The [#332 baseline checkpoint](evidence/native-client-baseline-2026-09-19/README.md)
-records verified historical artifact sizes and preliminary Mac preview
-measurements; #332 also records later short Windows CI observations.
-Complete platform measurements are still required before setting budgets.
+acceptance. The [historical #332 checkpoint](evidence/native-client-baseline-2026-09-19/README.md)
+records the initial v1.2.0 observations; the
+[current release checkpoint](evidence/native-client-baseline-2026-09-29/README.md)
+binds repeated v1.3.0 Mac measurements to the notarized artifact. The
+[proposed budgets](evidence/native-client-footprint-budgets-v1.json) are
+regression alarms for the measured synthetic scope, not performance promises.
 
 Issue #334 adds a separate unpublished `1.5.0-dev.1`
 [Rust transport](../clients/rust/transport/README.md) with one bounded runtime,
 verified TLS, request cancellation and no automatic replay after an ambiguous
 outcome. It is not loaded by the shipped app. The gateway and app version remain
-v1.2.0; a library test pass is not a connected-companion or release claim.
+v1.3.0; a library test pass is not a connected-companion or release claim.
 
 Issue #335 adds the unpublished `1.5.0-dev.1`
 [session controller](../clients/rust/session/README.md): bounded browser
@@ -140,7 +141,7 @@ implementation and test boundaries. Source integration and synthetic CI do not
 complete #339/#340 or the outstanding v1.4.0 gates: login/helper adapters,
 authorized-account end-to-end proof, native desktop acceptance, connected
 measurements, signing and clean installation remain separate. The Windows
-package is `1.5.0-dev.1`; the published product remains v1.2.0.
+package is `1.5.0-dev.1`; the published product remains v1.3.0.
 
 Issue #341 adds the separate unpublished `1.6.0-dev.1`
 [governed relay](../clients/rust/relay/README.md). Its source tests exercise

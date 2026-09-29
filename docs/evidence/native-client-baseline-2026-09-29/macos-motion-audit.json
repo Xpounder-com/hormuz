@@ -1,0 +1,129 @@
+{
+  "compactHeight" : 318,
+  "compactLayoutPassed" : true,
+  "opacitySamples" : [
+    {
+      "alpha" : 0.99999999996003264,
+      "expanded" : false,
+      "height" : 79,
+      "step" : 0
+    },
+    {
+      "alpha" : 0.88114741640587735,
+      "expanded" : false,
+      "height" : 79,
+      "step" : 1
+    },
+    {
+      "alpha" : 0.60340850316409744,
+      "expanded" : false,
+      "height" : 79,
+      "step" : 2
+    },
+    {
+      "alpha" : 0.057286115432360618,
+      "expanded" : false,
+      "height" : 79,
+      "step" : 3
+    },
+    {
+      "alpha" : 0,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 4
+    },
+    {
+      "alpha" : 0.020817643575684452,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 5
+    },
+    {
+      "alpha" : 0.078423492975484704,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 6
+    },
+    {
+      "alpha" : 0.16519592159331756,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 7
+    },
+    {
+      "alpha" : 0.27325806256547874,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 8
+    },
+    {
+      "alpha" : 0.52062979821129762,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 9
+    },
+    {
+      "alpha" : 0.64739899806675971,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 10
+    },
+    {
+      "alpha" : 0.76554335587031919,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 11
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 12
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 13
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 14
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 15
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 16
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 17
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 18
+    },
+    {
+      "alpha" : 1,
+      "expanded" : true,
+      "height" : 318,
+      "step" : 19
+    }
+  ],
+  "passed" : true,
+  "rapidReversalPassed" : true,
+  "smoothOpacityPassed" : true
+}
