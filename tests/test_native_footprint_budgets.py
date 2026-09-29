@@ -34,7 +34,9 @@ class NativeFootprintBudgetTests(unittest.TestCase):
         })
         self.assertEqual(set(document["windows"]), {
             "executable_bytes_max", "working_set_bytes_max", "private_bytes_max",
-            "app_cpu_percent_one_core_max", "window_ready_upper_bound_seconds_max",
+            "app_cpu_percent_one_core_max",
+            "first_run_window_ready_upper_bound_seconds_max",
+            "subsequent_window_ready_upper_bound_seconds_max",
             "post_100_cycle_working_set_growth_bytes_max",
             "post_100_cycle_private_bytes_growth_max",
             "post_100_cycle_cpu_seconds_max", "post_100_cycle_handle_growth_max",
@@ -66,6 +68,17 @@ class NativeFootprintBudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "working_set_bytes_max"):
             verify_budgets(summary, BUDGETS)
 
+    def test_windows_budget_separates_first_and_subsequent_readiness(self) -> None:
+        summary = self.windows_summary()
+        summary["scenarios"]["visible"]["runs"][0]["window_ready_upper_bound_seconds"] = 40.1
+        with self.assertRaisesRegex(ValueError, "first_run_window_ready"):
+            verify_budgets(summary, BUDGETS)
+
+        summary = self.windows_summary()
+        summary["scenarios"]["visible"]["runs"][1]["window_ready_upper_bound_seconds"] = 8.1
+        with self.assertRaisesRegex(ValueError, "subsequent_window_ready"):
+            verify_budgets(summary, BUDGETS)
+
     @staticmethod
     def windows_summary() -> dict:
         run = {
@@ -77,9 +90,8 @@ class NativeFootprintBudgetTests(unittest.TestCase):
         return {
             "executable_bytes": 2_662_912,
             "scenarios": {
-                "visible": {"runs": [deepcopy(run)]},
-                "folded": {"runs": [deepcopy(run)]},
-                "hidden": {"runs": [deepcopy(run)]},
+                scenario: {"runs": [deepcopy(run) for _ in range(3)]}
+                for scenario in ("visible", "folded", "hidden")
             },
         }
 

@@ -271,11 +271,24 @@ def verify_budgets(summary: dict, path: Path) -> None:
         ("working_set_bytes_max", "working_set_bytes_max"),
         ("private_bytes_max", "private_bytes_max"),
         ("app_cpu_percent_one_core", "app_cpu_percent_one_core_max"),
-        ("window_ready_upper_bound_seconds", "window_ready_upper_bound_seconds_max"),
     )
     for observed, budget in checks:
         limit = number(budgets.get(budget), budget)
         require(max(number(run[observed], observed) for run in runs) <= limit,
+                f"A Windows observation exceeds {budget}.")
+    first_runs = [scenario["runs"][0] for scenario in summary["scenarios"].values()]
+    subsequent_runs = [run for scenario in summary["scenarios"].values()
+                       for run in scenario["runs"][1:]]
+    readiness_checks = (
+        (first_runs, "first_run_window_ready_upper_bound_seconds_max"),
+        (subsequent_runs, "subsequent_window_ready_upper_bound_seconds_max"),
+    )
+    for selected, budget in readiness_checks:
+        limit = number(budgets.get(budget), budget)
+        require(selected and
+                max(number(run["window_ready_upper_bound_seconds"],
+                           "window_ready_upper_bound_seconds")
+                    for run in selected) <= limit,
                 f"A Windows observation exceeds {budget}.")
     summary["budget_status"] = "passed"
     summary["budget_schema_id"] = report["schema_id"]

@@ -58,11 +58,14 @@ screenshots, credentials, prompts or responses.
 The verifier applies the proposed ceilings in
 [`native-client-footprint-budgets-v1.json`](../native-client-footprint-budgets-v1.json):
 3.5 MiB executable size, 24 MiB working set, 4 MiB private bytes, 0.1% of one
-core, and an 8-second window-ready upper bound. The separate native acceptance
-job applies the same file to its 100-cycle before/after samples: at most 1 MiB
-working-set growth, 512 KiB private-byte growth, five CPU seconds, four handles,
-and two GDI or USER objects. These deliberately loose values detect material
-regressions; they are not product guarantees or cross-runner performance claims.
+core, a 40-second first-run window-ready upper bound, and an 8-second bound for
+the six subsequent runs. The first-run allowance includes cold PowerShell and
+UI Automation compilation on each fresh hosted runner; it is not an app-startup
+claim. The separate native acceptance job applies the same file to its 100-cycle
+before/after samples: at most 1 MiB working-set growth, 512 KiB private-byte
+growth, five CPU seconds, four handles, and two GDI or USER objects. These
+deliberately loose values detect material regressions; they are not product
+guarantees or cross-runner performance claims.
 The current exact-main [CI run 36504256235](https://github.com/Xpounder-com/hormuz/actions/runs/36504256235)
 at `04799698392c6196dd39d28ce36753c706180e43` completed all 100 cycles with
 zero settled growth in working set, private bytes, handles, GDI objects or USER

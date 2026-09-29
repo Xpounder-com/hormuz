@@ -4,7 +4,7 @@
   "status": "proposed",
   "basis": {
     "macos": "Hormuz v1.3.0 notarized arm64 release on Mac17,2; three five-minute runs per synthetic idle mode and ten warm window-appearance trials",
-    "windows": "Protected-main unsigned release-mode x64 synthetic preview: three five-minute runs per mode at 544e99ecccc4299bb69e467e47e29ea4dd8e6ebf and a 100-cycle acceptance check confirmed at 04799698392c6196dd39d28ce36753c706180e43"
+    "windows": "Protected-main unsigned release-mode x64 synthetic preview: three five-minute runs per mode at 544e99ecccc4299bb69e467e47e29ea4dd8e6ebf, a 100-cycle acceptance check at 04799698392c6196dd39d28ce36753c706180e43, and first-versus-subsequent window-ready variance confirmed by PR run 36579358646"
   },
   "macos": {
     "archive_bytes_max": 15728640,
@@ -22,7 +22,8 @@
     "working_set_bytes_max": 25165824,
     "private_bytes_max": 4194304,
     "app_cpu_percent_one_core_max": 0.1,
-    "window_ready_upper_bound_seconds_max": 8.0,
+    "first_run_window_ready_upper_bound_seconds_max": 40.0,
+    "subsequent_window_ready_upper_bound_seconds_max": 8.0,
     "post_100_cycle_working_set_growth_bytes_max": 1048576,
     "post_100_cycle_private_bytes_growth_max": 524288,
     "post_100_cycle_cpu_seconds_max": 5.0,
