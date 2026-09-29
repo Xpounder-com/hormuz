@@ -2,7 +2,7 @@
 
 Hormuz's first customer distribution path is a Developer ID signed and Apple-notarized download. It does not require Mac App Store review, App Sandbox adoption, or an App Store listing; Apple's [notarization overview](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) describes this automated trust check as separate from App Review. The existing local preview remains an ad hoc build with bundle identifier `com.hormuz.mac.local`; it is never a customer artifact.
 
-The current customer artifact is [Hormuz v1.2.0 for Apple Silicon](https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip). Verify it against the release's [SHA-256 manifest](https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0/SHA256SUMS.txt) before installation. The [release page](https://github.com/Xpounder-com/hormuz/releases/tag/v1.2.0) publishes the exact source commit, qualification boundaries, and content-free evidence.
+The current customer artifact is [Hormuz v1.3.0 for Apple Silicon](https://github.com/Xpounder-com/hormuz/releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip). Verify it against the release's [SHA-256 manifest](https://github.com/Xpounder-com/hormuz/releases/download/v1.3.0/SHA256SUMS.txt) before installation. The [release page](https://github.com/Xpounder-com/hormuz/releases/tag/v1.3.0) publishes the exact source commit, qualification boundaries, and content-free evidence.
 
 The permanent identifier is `com.xpounder.hormuz`, registered as an explicit App ID in Apple Developer team `R267LZMUTY`. Treat both values as identity decisions: changing the identifier or signing team later changes the app's designated requirement and can disrupt Keychain access, updates, and rollback behavior. The current app has no custom entitlements and uses no provisioning profile. Apple's [Developer ID guidance](https://developer.apple.com/support/developer-id/) requires a Developer ID provisioning profile only when an app adopts advanced capabilities such as CloudKit; registering the explicit App ID now reserves the customer identity without adding such a profile to this build.
 
@@ -40,9 +40,9 @@ Store notarization credentials in Keychain using `xcrun notarytool store-credent
 ```sh
 HORMUZ_CODESIGN_IDENTITY='Developer ID Application: Company Name (TEAMID)' \
   ./script/package_macos_release.sh \
-  --output-directory /private/tmp/hormuz-macos-1.2.0 \
+  --output-directory /private/tmp/hormuz-macos-1.3.0 \
   --bundle-id com.xpounder.hormuz \
-  --version 1.2.0 \
+  --version 1.3.0 \
   --build 1 \
   --context-helper-directory /private/path/context-helpers \
   --tokenizer-cache /private/path/context-tokenizers
@@ -52,8 +52,8 @@ Submit, staple, and repackage the same app:
 
 ```sh
 ./script/notarize_macos_release.sh \
-  --bundle /private/tmp/hormuz-macos-1.2.0/Hormuz.app \
-  --upload-archive /private/tmp/hormuz-macos-1.2.0/Hormuz-1.2.0-notarization-upload.zip \
+  --bundle /private/tmp/hormuz-macos-1.3.0/Hormuz.app \
+  --upload-archive /private/tmp/hormuz-macos-1.3.0/Hormuz-1.3.0-notarization-upload.zip \
   --keychain-profile hormuz-notary
 ```
 

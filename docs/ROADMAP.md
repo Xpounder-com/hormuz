@@ -252,9 +252,9 @@ The approved deployment hierarchy in [#100](https://github.com/Xpounder-com/horm
 keeps the signed OCI digest as the application contract and treats deployment
 profiles as separately verified operational references. [#101](https://github.com/Xpounder-com/hormuz/issues/101)
 is complete with the first signed, anonymously pullable `v0.1.1` Linux AMD64
-digest. The current signed artifact is the verified `v1.2.0` digest; the older
-`v1.0.0`, `v0.1.3`, and `v0.1.1` artifacts retain their documented historical
-and rollback-evidence roles.
+digest. The current signed artifact is the verified `v1.3.0` digest; the older
+`v1.2.0`, `v1.0.0`, `v0.1.3`, and `v0.1.1` artifacts retain their documented
+historical and rollback-evidence roles.
 The first deployment profile, [#102](https://github.com/Xpounder-com/hormuz/issues/102),
 is implemented in [PR #137](https://github.com/Xpounder-com/hormuz/pull/137):
 one hardened gateway and one private persistent PostgreSQL service on a single

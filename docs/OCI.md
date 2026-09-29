@@ -152,19 +152,19 @@ signed supported digest, attestations, or semantic-version GHCR tag. The
 corrected public-registry gate uses the next immutable version, `v0.1.3`,
 rather than moving or reusing `v0.1.2`.
 
-Verify the current v1.2.0 signed digest anonymously:
+Verify the current v1.3.0 signed digest anonymously:
 
 ```bash
-image="ghcr.io/xpounder-com/hormuz@sha256:2f9c619c184139032c8af6782a2229b56e5f28980bfded5c5da14e620577b4b1"
-identity="https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/v1.2.0"
+image="ghcr.io/xpounder-com/hormuz@sha256:005eafa1bf576f906c54463fc8ea44cb5308a6792dae0e52c02eaedff7f2f561"
+identity="https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/v1.3.0"
 issuer="https://token.actions.githubusercontent.com"
-commit="d854a5a453fcbe20cb3f4c1e261e146f2da93855"
+commit="cc5f5c1d38b4732823496240bbb4ace309a6240d"
 
 certificate_claims=(
   --certificate-identity "$identity"
   --certificate-oidc-issuer "$issuer"
   --certificate-github-workflow-name "Release signed OCI digest"
-  --certificate-github-workflow-ref "refs/tags/v1.2.0"
+  --certificate-github-workflow-ref "refs/tags/v1.3.0"
   --certificate-github-workflow-repository "Xpounder-com/hormuz"
   --certificate-github-workflow-sha "$commit"
   --certificate-github-workflow-trigger "push"
@@ -222,15 +222,17 @@ entries remain historical evidence and must not be deleted or represented as
 revoked certificates. A verifier configured with a different expected
 identity must fail closed before the artifact is admitted.
 
-The current `v1.2.0` release is
-`sha256:2f9c619c184139032c8af6782a2229b56e5f28980bfded5c5da14e620577b4b1`.
-The prior `v1.0.0` release is
+The current `v1.3.0` release is
+`sha256:005eafa1bf576f906c54463fc8ea44cb5308a6792dae0e52c02eaedff7f2f561`.
+The prior `v1.2.0` release is
+`sha256:2f9c619c184139032c8af6782a2229b56e5f28980bfded5c5da14e620577b4b1`,
+and the prior `v1.0.0` release is
 `sha256:e74fd7c527d257ff337510436f25a0eaf1e2fb799e1258566c9f393025e6b5a3`.
 The prior supported rollback target for the bounded cross-version drill is the
 original `v0.1.1` digest
 `sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a`.
 That drill still exercises the older `v1.0.0` to `v0.1.1` pair; it does not
-establish a v1.2.0 production rollback or data downgrade. `v0.1.3` remains a
+establish a v1.2.0 or v1.3.0 production rollback or data downgrade. `v0.1.3` remains a
 separately verified historical reference, while the failed `v0.1.2` attempt is
 not a supported release.
 
