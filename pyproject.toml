@@ -21,7 +21,7 @@ classifiers = [
   "Topic :: Security"
 ]
 dependencies = [
-  "PyJWT[crypto]>=2.14,<3",
+  "PyJWT[crypto]>=2.13,<3",
   "cryptography>=42"
 ]
 
