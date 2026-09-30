@@ -7,6 +7,15 @@ This roadmap is evidence-gated. A milestone is not complete because code exists 
 The additive native-companion program is tracked in [epic #329](https://github.com/Xpounder-com/hormuz/issues/329)
 and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md).
 
+## v1.4.0 native client baseline release
+
+Hormuz v1.4.0 aligns the package, gateway image and Mac companion release
+identity and publishes bounded native-client footprint regression evidence.
+The Windows development shell remains an unsigned preview; manual platform
+acceptance is tracked in [#331](https://github.com/Xpounder-com/hormuz/issues/331).
+See the [v1.4.0 release note](releases/v1.4.0-native-baseline.md) for installation
+and claim boundaries.
+
 ## v1.3.0 Personal Optimizer release
 
 Hormuz v1.3.0 packages the terminal-first Personal Optimizer, its adapter SDK,
@@ -252,9 +261,9 @@ The approved deployment hierarchy in [#100](https://github.com/Xpounder-com/horm
 keeps the signed OCI digest as the application contract and treats deployment
 profiles as separately verified operational references. [#101](https://github.com/Xpounder-com/hormuz/issues/101)
 is complete with the first signed, anonymously pullable `v0.1.1` Linux AMD64
-digest. The current signed artifact is the verified `v1.3.0` digest; the older
-`v1.2.0`, `v1.0.0`, `v0.1.3`, and `v0.1.1` artifacts retain their documented
-historical and rollback-evidence roles.
+digest. Current signed artifacts and their digests are recorded on each release
+page; the verified `v1.3.0`, `v1.2.0`, `v1.0.0`, `v0.1.3`, and `v0.1.1`
+artifacts retain their documented historical and rollback-evidence roles.
 The first deployment profile, [#102](https://github.com/Xpounder-com/hormuz/issues/102),
 is implemented in [PR #137](https://github.com/Xpounder-com/hormuz/pull/137):
 one hardened gateway and one private persistent PostgreSQL service on a single
