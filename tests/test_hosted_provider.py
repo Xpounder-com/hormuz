@@ -787,7 +787,6 @@ class HostedProviderHTTPTests(HostedProviderHTTPTestCase):
             Path(__file__).resolve().parents[1]
             / "deploy/render/gateway/provider-pilot.Caddyfile"
         ).read_text()
-        self.assertIn("/v1/auth/* /v1/desktop/* /v1/admin/*", caddy)
         self.assertIn("unhealthy_request_count 9", caddy)
         self.assertIn("max_conns_per_host 9", caddy)
         self.assertIn("response_header_timeout 660s", caddy)

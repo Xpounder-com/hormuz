@@ -12,7 +12,14 @@ final class SessionTests: PrivateStorageTestCase {
         XCTAssertEqual(status.profile?.organization, "org-a")
         XCTAssertEqual(status.profile?.model, "approved-alias")
         XCTAssertEqual(status.profile?.desktopManaged, true)
+        XCTAssertEqual(status.profile?.desktopProfileVersion, 1)
         _ = try await controller.dashboard(profileID: try XCTUnwrap(status.profile?.id))
+        await transport.setDesktopProfileVersion(2)
+        do {
+            _ = try await controller.dashboard(profileID: try XCTUnwrap(status.profile?.id))
+            XCTFail("Expected changed policy version to disable stale launcher")
+        } catch { XCTAssertEqual(error as? ClientError, .desktopProfileChanged) }
+        await transport.setDesktopProfileVersion(1)
         await transport.setDesktopProfileModel("changed-alias")
         do {
             _ = try await controller.dashboard(profileID: try XCTUnwrap(status.profile?.id))

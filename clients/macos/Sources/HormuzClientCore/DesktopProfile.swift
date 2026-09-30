@@ -18,14 +18,15 @@ public struct DesktopProfile: Decodable, Sendable {
               allowedClients == [expectedClient] else { throw ClientError.invalidResponse }
         return try ConnectionProfile(gateway: gatewayOrigin, organization: organizationId,
             client: client, model: modelAlias, allowLoopbackHTTP: allowLoopbackHTTP,
-            desktopManaged: true)
+            desktopManaged: true, desktopProfileVersion: profileVersion)
     }
 
     public func validate(_ saved: ConnectionProfile) throws {
         let refreshed = try connection(origin: saved.gateway, client: saved.client,
                                        allowLoopbackHTTP: saved.allowLoopbackHTTP)
         guard saved.desktopManaged == true, refreshed.gateway == saved.gateway,
-              refreshed.organization == saved.organization, refreshed.model == saved.model else {
+              refreshed.organization == saved.organization, refreshed.model == saved.model,
+              refreshed.desktopProfileVersion == saved.desktopProfileVersion else {
             throw ClientError.desktopProfileChanged
         }
     }

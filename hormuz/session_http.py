@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 _MAX_BODY = 16 * 1024
 _ENROLLMENT = re.compile(r"[A-Za-z0-9_-]{32}\Z")
 _REDEEM = re.compile(r"/v1/auth/enrollments/([A-Za-z0-9_-]{32})/redeem\Z")
-_DESKTOP_REDEEM = re.compile(r"/v1/desktop/enrollments/([A-Za-z0-9_-]{32})/redeem\Z")
+_DESKTOP_REDEEM = re.compile(r"/v1/auth/desktop/enrollments/([A-Za-z0-9_-]{32})/redeem\Z")
 LOGGER = logging.getLogger("hormuz.session")
 
 
@@ -93,7 +93,7 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
     path = request.path
     if request.fragment:
         raise SessionBrokerError("invalid_session_request")
-    if handler.command == "GET" and path == "/v1/desktop/profile":
+    if handler.command == "GET" and path == "/v1/auth/desktop/profile":
         if request.query or handler.headers.get("Origin") is not None:
             raise SessionBrokerError("invalid_session_request")
         authorization = handler.headers.get_all("Authorization", [])
@@ -167,7 +167,7 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
             "expires_at": enrollment.expires_at.isoformat(), "poll_interval_seconds": 1,
         })
         return
-    if path == "/v1/desktop/enrollments":
+    if path == "/v1/auth/desktop/enrollments":
         value = _json(handler, allowed={"client", "enrollment_secret"}, required={"client", "enrollment_secret"})
         enrollment, login_url = broker.create_desktop_enrollment(
             client_name=value["client"], enrollment_secret=value["enrollment_secret"]

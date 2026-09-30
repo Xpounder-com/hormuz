@@ -416,7 +416,7 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
             "/v1/responses/compact",
             "/v1/messages",
             "/v1/messages/count_tokens",
-        } or request.path.startswith(("/v1/auth/", "/v1/desktop/", "/v1/admin/", "/console/"))
+        } or request.path.startswith(("/v1/auth/", "/v1/admin/", "/console/"))
         if not allowed:
             self._stage_response(HTTPStatus.SERVICE_UNAVAILABLE, "route_disabled")
             return False

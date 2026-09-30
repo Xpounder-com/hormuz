@@ -10,7 +10,7 @@ from tests._session_fixtures import SessionHTTPTestCase
 class DesktopEnrollmentTests(SessionHTTPTestCase):
     def desktop_enroll(self, client="codex"):
         secret = "desktop-enrollment-secret-" + "s" * 40
-        status, _, enrollment = self.request("POST", "/v1/desktop/enrollments", {
+        status, _, enrollment = self.request("POST", "/v1/auth/desktop/enrollments", {
             "client": client, "enrollment_secret": secret,
         })
         self.assertEqual(status, 201, enrollment)
@@ -18,14 +18,14 @@ class DesktopEnrollmentTests(SessionHTTPTestCase):
 
     def test_first_sign_in_profile_restore_and_replay(self):
         enrollment, secret = self.desktop_enroll()
-        status, _, pending = self.request("POST", "/v1/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+        status, _, pending = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
             "enrollment_secret": secret,
         })
         self.assertEqual(status, 409, pending)
         values, cookie = self.begin_browser(enrollment)
         status, _, _ = self.callback(values, cookie)
         self.assertEqual(status, 200)
-        status, _, reply = self.request("POST", "/v1/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+        status, _, reply = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
             "enrollment_secret": secret,
         })
         self.assertEqual(status, 200, reply)
@@ -35,7 +35,7 @@ class DesktopEnrollmentTests(SessionHTTPTestCase):
         self.assertEqual(profile["organization_id"], "org-a")
         self.assertEqual(profile["model_alias"], "safe-openai")
         self.assertEqual(profile["allowed_clients"], ["codex"])
-        status, _, restored = self.request("GET", "/v1/desktop/profile", headers={
+        status, _, restored = self.request("GET", "/v1/auth/desktop/profile", headers={
             "Authorization": "Bearer " + reply["access_token"],
         })
         self.assertEqual((status, restored), (200, profile))
@@ -49,7 +49,7 @@ class DesktopEnrollmentTests(SessionHTTPTestCase):
         })
         self.assertEqual(status, 200, usage)
         self.assertEqual(usage["requests"], 1)
-        status, _, _ = self.request("POST", "/v1/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+        status, _, _ = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
             "enrollment_secret": secret,
         })
         self.assertNotEqual(status, 200)
@@ -59,7 +59,7 @@ class DesktopEnrollmentTests(SessionHTTPTestCase):
         enrollment, secret = self.desktop_enroll()
         values, cookie = self.begin_browser(enrollment)
         self.assertEqual(self.callback(values, cookie)[0], 200)
-        status, _, reply = self.request("POST", "/v1/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+        status, _, reply = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
             "enrollment_secret": secret,
         })
         self.assertEqual(status, 200, reply)
@@ -70,13 +70,13 @@ class DesktopEnrollmentTests(SessionHTTPTestCase):
         enrollment, secret = self.desktop_enroll(client="claude-code")
         values, cookie = self.begin_browser(enrollment)
         self.assertNotEqual(self.callback(values, cookie)[0], 200)
-        status, _, _ = self.request("POST", "/v1/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+        status, _, _ = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
             "enrollment_secret": secret,
         })
         self.assertNotEqual(status, 200)
 
     def test_profile_requires_session_bearer(self):
-        self.assertEqual(self.request("GET", "/v1/desktop/profile")[0], 401)
+        self.assertEqual(self.request("GET", "/v1/auth/desktop/profile")[0], 401)
 
     def test_missing_default_revokes_new_session_before_responding(self):
         enrollment, secret = self.desktop_enroll()
@@ -87,7 +87,7 @@ class DesktopEnrollmentTests(SessionHTTPTestCase):
         ))
         self.gateway.config = self.config
         self.gateway.session_broker.config = self.config
-        status, _, response = self.request("POST", "/v1/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+        status, _, response = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
             "enrollment_secret": secret,
         })
         self.assertEqual(status, 400, response)

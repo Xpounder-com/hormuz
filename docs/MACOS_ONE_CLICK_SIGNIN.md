@@ -85,9 +85,9 @@ versioned desktop contract so older clients do not change behavior:
 
 | Route | Auth | Purpose |
 | --- | --- | --- |
-| `POST /v1/desktop/enrollments` | None | Create a short-lived, one-time enrollment bound to a device secret and preferred supported client. Return an exact-origin browser login URL, enrollment ID, expiry, and bounded poll interval. |
-| `POST /v1/desktop/enrollments/{id}/redeem` | Device secret | Return the access and refresh session pair plus the validated desktop profile only after browser login and membership selection. |
-| `GET /v1/desktop/profile` | Session bearer | Return the current organization, allowed clients, selected client, approved model alias, and profile version for restore or policy changes. |
+| `POST /v1/auth/desktop/enrollments` | None | Create a short-lived, one-time enrollment bound to a device secret and preferred supported client. Return an exact-origin browser login URL, enrollment ID, expiry, and bounded poll interval. |
+| `POST /v1/auth/desktop/enrollments/{id}/redeem` | Device secret | Return the access and refresh session pair plus the validated desktop profile only after browser login and membership selection. |
+| `GET /v1/auth/desktop/profile` | Session bearer | Return the current organization, allowed clients, selected client, approved model alias, and profile version for restore or policy changes. |
 
 The desktop profile has `schema_id = "hormuz.desktop-profile"`,
 `schema_version = 1`, `gateway_origin`, `organization_id`, `client`,

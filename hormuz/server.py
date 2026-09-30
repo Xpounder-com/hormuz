@@ -570,7 +570,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
             handle_console_request(self)
             return
-        if path.startswith(("/v1/auth/", "/v1/desktop/")):
+        if path.startswith("/v1/auth/"):
             handle_session_request(self)
             return
         if path == "/health":
@@ -740,7 +740,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
             handle_console_request(self)
             return
-        if path.startswith(("/v1/auth/", "/v1/desktop/")):
+        if path.startswith("/v1/auth/"):
             handle_session_request(self)
             return
         routes = {

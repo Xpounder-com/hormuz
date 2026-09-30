@@ -77,13 +77,13 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
         self.gateway.config = self.config
         self.gateway.session_broker.config = self.config
         secret = "desktop-enrollment-secret-" + "s" * 40
-        status, _, enrollment = self.request("POST", "/v1/desktop/enrollments", {
+        status, _, enrollment = self.request("POST", "/v1/auth/desktop/enrollments", {
             "client": "codex", "enrollment_secret": secret,
         })
         self.assertEqual(status, 201, enrollment)
         values, cookie = self.accept_in_browser(enrollment)
         self.assertEqual(self.callback(values, cookie)[0], 200)
-        status, _, reply = self.request("POST", "/v1/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+        status, _, reply = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
             "enrollment_secret": secret,
         })
         self.assertEqual(status, 200, reply)

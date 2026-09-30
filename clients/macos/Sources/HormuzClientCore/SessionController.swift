@@ -116,7 +116,7 @@ public actor SessionController {
             "client": client.rawValue, "enrollment_secret": secret,
         ])
         let reply = try await transport.request(origin: origin, allowLoopbackHTTP: allowLoopbackHTTP,
-            path: "/v1/desktop/enrollments", body: enrollmentBody, accessToken: nil)
+            path: "/v1/auth/desktop/enrollments", body: enrollmentBody, accessToken: nil)
         guard reply.status == 201 else { throw ClientError.loginRejected }
         let enrollment = try reply.decode(Enrollment.self)
         guard enrollment.enrollmentId.range(of: #"\A[A-Za-z0-9_-]{32}\z"#, options: .regularExpression) != nil,
@@ -134,7 +134,7 @@ public actor SessionController {
             try Task.checkCancellation()
             let body = try JSONSerialization.data(withJSONObject: ["enrollment_secret": secret])
             let result = try await transport.request(origin: origin, allowLoopbackHTTP: allowLoopbackHTTP,
-                path: "/v1/desktop/enrollments/" + enrollment.enrollmentId + "/redeem",
+                path: "/v1/auth/desktop/enrollments/" + enrollment.enrollmentId + "/redeem",
                 body: body, accessToken: nil)
             if result.status == 200 {
                 let redemption = try result.decode(DesktopRedemption.self)
@@ -195,7 +195,7 @@ public actor SessionController {
         defer { lock.unlock() }
         let record = try await credentialWhileLocked(profileID: profileID)
         if record.profile.desktopManaged == true {
-            let reply = try await transport.request(profile: record.profile, path: "/v1/desktop/profile",
+            let reply = try await transport.request(profile: record.profile, path: "/v1/auth/desktop/profile",
                 body: nil, accessToken: record.accessToken)
             guard reply.status != 401 else { throw ClientError.loginRequired }
             guard reply.status == 200 else { throw ClientError.gatewayUnavailable }
