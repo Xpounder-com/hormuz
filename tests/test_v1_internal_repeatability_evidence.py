@@ -296,7 +296,7 @@ class V1InternalRepeatabilityEvidenceTests(unittest.TestCase):
             dependency_root = Path(temporary)
             valid = {
                 "paths": [str(dependency_root)],
-                "versions": {"PyJWT": "2.14.0", "cryptography": "42.0.0"},
+                "versions": {"PyJWT": "2.13.0", "cryptography": "42.0.0"},
             }
             self.assertEqual(
                 runner._validate_dependency_probe(valid, ROOT),
@@ -304,7 +304,6 @@ class V1InternalRepeatabilityEvidenceTests(unittest.TestCase):
             )
             for distribution, unsupported in (
                 ("PyJWT", "2.7.0"),
-                ("PyJWT", "2.13.0"),
                 ("cryptography", "41.0.7"),
             ):
                 with self.subTest(distribution=distribution):

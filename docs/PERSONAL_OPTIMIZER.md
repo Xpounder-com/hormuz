@@ -20,8 +20,8 @@ hormuz personal contract --json
   live provider/model interpretation remains a separate authorized gate. The
   existing managed context release keeps its independently pinned 0.147.0
   compatibility baseline.
-- Installation: `python -m pip install 'hormuz[client,context]'` followed by
-  `hormuz context resources install`.
+- Installation: `python -m pip install 'PyJWT[crypto]>=2.14,<3' 'hormuz[client,context]'`
+  followed by `hormuz context resources install`.
 - Server dependencies: none. Direct mode does not need an organization,
   PostgreSQL, or a Hormuz gateway.
 - Release claim: for qualified Codex requests containing supported repetitive

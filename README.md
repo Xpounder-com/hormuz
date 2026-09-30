@@ -100,7 +100,7 @@ shows content-free local benefit measurements. Unsupported or non-beneficial
 traffic follows the ordinary request path.
 
 ~~~bash
-python -m pip install 'hormuz[client,context]'
+python -m pip install 'PyJWT[crypto]>=2.14,<3' 'hormuz[client,context]'
 hormuz context resources install
 hormuz personal contract --json
 hormuz personal qualify --json

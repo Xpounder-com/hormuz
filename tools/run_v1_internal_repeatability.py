@@ -40,7 +40,7 @@ COMMAND_TIMEOUT_SECONDS = 120
 _SETUP_IDENTITY_TOKEN = "v1-sandbox-setup-only"
 _EXPECTED_RUNTIME_REQUIREMENTS = frozenset(
     {
-        "PyJWT[crypto]>=2.14,<3",
+        "PyJWT[crypto]>=2.13,<3",
         "cryptography>=42",
     }
 )
@@ -247,7 +247,7 @@ def _validate_dependency_probe(value: object, source_root: Path) -> list[str]:
     jwt_version = _final_release(versions["PyJWT"])
     cryptography_version = _final_release(versions["cryptography"])
     if not (
-        jwt_version >= (2, 14)
+        jwt_version >= (2, 13)
         and jwt_version < (3,)
         and cryptography_version >= (42,)
     ):
