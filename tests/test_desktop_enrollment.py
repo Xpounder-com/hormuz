@@ -85,6 +85,10 @@ class DesktopEnrollmentTests(SessionHTTPTestCase):
         self.assertEqual(reply["desktop_profile"]["organization_id"], "org-b")
 
     def test_profile_tracks_active_runtime_policy_and_fails_closed_when_unavailable(self):
+        self.assertIs(
+            self.gateway.session_broker.policy_runtime,
+            self.gateway.policy_engine.policy_runtime,
+        )
         enrollment, secret = self.desktop_enroll()
         values, cookie = self.begin_browser(enrollment)
         self.assertEqual(self.callback(values, cookie)[0], 200)

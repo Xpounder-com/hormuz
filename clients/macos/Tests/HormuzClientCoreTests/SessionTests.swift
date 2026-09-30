@@ -31,6 +31,12 @@ final class SessionTests: PrivateStorageTestCase {
             _ = try await controller.accessCredential(profileID: try XCTUnwrap(status.profile?.id))
             XCTFail("Expected unavailable profile to withhold launcher credential")
         } catch { XCTAssertEqual(error as? ClientError, .gatewayUnavailable) }
+        await transport.setDesktopProfileUnavailable(false)
+        await transport.setDesktopProfileRejected(true)
+        do {
+            _ = try await controller.accessCredential(profileID: try XCTUnwrap(status.profile?.id))
+            XCTFail("Expected rejected default to withhold launcher credential")
+        } catch { XCTAssertEqual(error as? ClientError, .desktopProfileChanged) }
     }
 
     func testDesktopSignInRejectsForeignProfileAndRevokesSession() async throws {

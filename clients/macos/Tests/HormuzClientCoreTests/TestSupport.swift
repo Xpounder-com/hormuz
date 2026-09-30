@@ -41,6 +41,7 @@ actor FixtureTransport: GatewayTransport {
     var desktopProfileModel = "approved-alias"
     var desktopProfileVersion = 1
     var desktopProfileUnavailable = false
+    var desktopProfileRejected = false
 
     init(clock: TestClock) { self.clock = clock; absoluteExpiry = clock.now().addingTimeInterval(43_200) }
     func setRefreshFailure() { refreshFails = true }
@@ -54,6 +55,7 @@ actor FixtureTransport: GatewayTransport {
     func setDesktopProfileModel(_ value: String) { desktopProfileModel = value }
     func setDesktopProfileVersion(_ value: Int) { desktopProfileVersion = value }
     func setDesktopProfileUnavailable(_ value: Bool) { desktopProfileUnavailable = value }
+    func setDesktopProfileRejected(_ value: Bool) { desktopProfileRejected = value }
     func counts() -> (Int, Int) { (refreshCount, logoutCount) }
 
     func request(profile: ConnectionProfile, path: String, body: Data?, accessToken: String?) async throws -> GatewayReply {
@@ -71,6 +73,7 @@ actor FixtureTransport: GatewayTransport {
             return try pair()
         case "/v1/auth/desktop/profile":
             if desktopProfileUnavailable { return try reply(503, ["error": "unavailable"]) }
+            if desktopProfileRejected { return try reply(400, ["error": "desktop_default_unavailable"]) }
             return try reply(200, desktopProfile(client: profile.client))
         case "/v1/auth/refresh":
             refreshCount += 1
