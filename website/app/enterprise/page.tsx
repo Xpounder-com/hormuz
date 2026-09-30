@@ -5,7 +5,7 @@ import { pageMetadata } from '../../lib/metadata';
 import { sitePath, sourcePath } from '../../lib/site.mjs';
 import { PageFrame, PageHero } from '../components/PageFrame';
 
-export const metadata = pageMetadata('Enterprise pricing & paid pilot — Hormuz', 'Install Hormuz free. Get self-service support for $2,000/month, or evaluate one workflow with a $15,000, 90-day paid pilot.', '/enterprise/');
+export const metadata = pageMetadata('Team services & paid pilot — Hormuz', 'Self-host the team gateway free. Get support for $2,000/month, or evaluate one workflow with a $15,000, 90-day paid pilot.', '/enterprise/');
 
 const comparison = [
   ['Gateway, identity, policy, budgets, secret controls, evidence', 'Included in the Apache-2.0 core', 'The same open-source capabilities'],
@@ -18,9 +18,9 @@ const comparison = [
 
 export default function EnterprisePage() {
   return <PageFrame active="enterprise">
-    <PageHero eyebrow="Enterprise evaluation & support" title={<>Install free.<br /><span>Pay for practical help.</span></>}>
+    <PageHero eyebrow="For teams · evaluation & support" title={<>Self-host the gateway.<br /><span>Pay for practical help.</span></>}>
       <p>Use Hormuz’s open-source controls with your own gateway and provider accounts. Add ongoing support for your operating team, or a guided 90-day pilot to evaluate one workflow.</p>
-      <div className="hero-actions"><CampaignLink className="button button-primary" href={sitePath('/docs/')}>Install free →</CampaignLink><a className="button button-ghost" href="#comparison">Compare the paths ↓</a></div>
+      <div className="hero-actions"><CampaignLink className="button button-primary" href={sitePath('/docs/#quickstart')}>Explore team setup →</CampaignLink><CampaignLink className="button button-ghost" href={sitePath('/plans/')}>All plans →</CampaignLink></div>
     </PageHero>
     <EnterprisePlans />
     <section className="section" id="comparison">
