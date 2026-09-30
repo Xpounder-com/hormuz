@@ -2,8 +2,20 @@
 
 Status: the desktop enrollment contract, server-chosen profile, Mac first-run
 screen, Keychain session path, and automatic Hormuz-owned launcher are
-implemented and verified with local fixtures. A production HTTPS origin, live
-OIDC/provider configuration, and a signed release are **not deployed**.
+implemented and verified with local fixtures. The dedicated HTTPS service is
+live in maintenance mode; desktop sign-in, OIDC/provider configuration, and a
+signed release are **not deployed**.
+
+Live Render check on 2026-09-30: `hormuz-desktop`
+(`srv-dauev8h7lnhs73b3vrvg`) has the assigned origin
+`https://hormuz-desktop.onrender.com`. Its first deploy
+(`dep-dauev917lnhs73b3vtsg`) succeeded from `main` at
+`dde4dbf245ee0c47d796f0d4ebd61ed6e7cec0ee`, before these desktop routes.
+It has its own 1 GB disk at `/var/lib/hormuz/private`, auto-deploy disabled,
+and `HORMUZ_HOSTED_MODE=maintenance`. Direct HTTPS checks returned `200` with
+`status=maintenance` and `inference_enabled=false` at `/health`, and `503` at
+`/ready`, `/console`, both auth callbacks, and a model route. This is a closed
+entry point, not a functioning Mac sign-in or production inference service.
 
 Live Render check on 2026-09-29: `hormuz-https-preflight`
 (`srv-daaqhpvavr4c73b7b0kg`) was serving `provider_pilot` and returned ready
@@ -25,9 +37,10 @@ existing manual connection path under Advanced.
 This path needs a canonical Hormuz HTTPS origin shipped with the signed Mac app.
 `https://usehormuz.github.io` remains the public site. Its static GitHub Pages
 hosting cannot run the enrollment, OIDC callback, session, and gateway routes.
-A dedicated production Render web service could use its HTTPS `onrender.com`
-address without requiring a custom domain. The repository currently has examples
-and a provider-free hosted staging profile, but no configured production origin.
+A dedicated Render web service now has the HTTPS `onrender.com` address above,
+without requiring a custom domain. The repository still has examples and a
+provider-free hosted staging profile; the assigned origin has not been placed
+in a signed Mac build or configured for live identity and inference.
 The release build must fail if its canonical origin is unset or uses an example,
 local, pilot, preflight, staging, or GitHub Pages host. A development build may
 inject a local fixture origin explicitly.
@@ -73,8 +86,8 @@ Use one canonical HTTPS origin for desktop enrollment, session APIs, gateway
 identity, usage, and governed inference in the first hosted release. This avoids
 passing an access token between unrelated origins. With the current domain
 setup, keep the public site on GitHub Pages and put those dynamic routes on a
-dedicated production Render web service. The Render hostname is a release
-configuration decision; this design does not claim deployment of that service.
+dedicated Render web service. Its assigned hostname is recorded above; release
+configuration and live sign-in qualification are still pending.
 Before more than one customer uses that origin, provider
 routes, provider credentials, rate cards, and usage attribution must resolve
 from the authenticated organization rather than from a shared gateway default.
