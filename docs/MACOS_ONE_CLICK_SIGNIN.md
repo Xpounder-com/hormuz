@@ -81,10 +81,11 @@ internal pilot. That does not qualify the preflight service for distribution.
    the server validates which client the signed-in person may use.
 3. Open the returned login URL in the system browser. The browser completes OIDC.
    When the person belongs to one active organization, continue automatically.
-   The current managed onboarding path requires a tenant-scoped gateway with
-   exactly one active organization. Static identity mappings can resolve one
-   organization after login. A browser picker for multiple managed memberships
-   remains to be built. Do not ask for an organization ID in the Mac app.
+   A managed invitation binds its organization in the browser; a returning
+   managed member can continue automatically when the issuer has one managed
+   organization. Static identity mappings work alongside managed onboarding.
+   A browser picker for multiple managed memberships remains to be built. Do
+   not ask for an organization ID in the Mac app.
 4. Redeem the enrollment in the app. The server returns a tenant-bound session
    plus a versioned desktop profile with its canonical gateway origin and one
    approved default model alias for the selected client. The app verifies the
@@ -147,8 +148,11 @@ For example:
 ```
 
 Configuration validation requires a routed alias with the matching protocol.
-Redemption also checks the signed-in person's effective policy; an absent or
-disallowed default is an administrator action state, not a Mac-side picker.
+Redemption and profile refresh check the signed-in person's active effective
+policy, including a PostgreSQL managed policy when enabled. A new active policy
+version changes the desktop profile version, so the credential helper withholds
+the saved launcher token until the person reconnects. An absent or disallowed
+default is an administrator action state, not a Mac-side picker.
 
 The browser login uses the existing OIDC state, nonce, PKCE, and cookie checks.
 Enrollment credentials remain in the native app and never appear in the URL or

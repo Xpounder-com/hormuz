@@ -187,23 +187,29 @@ public actor SessionController {
     public func accessCredential(profileID: UUID, forceRefresh: Bool = false) async throws -> String {
         let lock = try await directory.lock()
         defer { lock.unlock() }
-        return try await credentialWhileLocked(profileID: profileID, forceRefresh: forceRefresh).accessToken
+        let record = try await credentialWhileLocked(profileID: profileID, forceRefresh: forceRefresh)
+        try await validateDesktopProfile(record)
+        return record.accessToken
     }
 
     public func dashboard(profileID: UUID) async throws -> Dashboard {
         let lock = try await directory.lock()
         defer { lock.unlock() }
         let record = try await credentialWhileLocked(profileID: profileID)
-        if record.profile.desktopManaged == true {
-            let reply = try await transport.request(profile: record.profile, path: "/v1/auth/desktop/profile",
-                body: nil, accessToken: record.accessToken)
-            guard reply.status != 401 else { throw ClientError.loginRequired }
-            guard reply.status == 200 else { throw ClientError.gatewayUnavailable }
-            try reply.decode(DesktopProfile.self).validate(record.profile)
-        }
+        try await validateDesktopProfile(record)
         async let who = identity(record.profile, token: record.accessToken)
         async let use = usage(record.profile, token: record.accessToken)
         return try await Dashboard(identity: who, usage: use, checkedAt: now())
+    }
+
+    private func validateDesktopProfile(_ record: SessionRecord) async throws {
+        guard record.profile.desktopManaged else { return }
+        let reply = try await transport.request(profile: record.profile, path: "/v1/auth/desktop/profile",
+            body: nil, accessToken: record.accessToken)
+        guard reply.status != 401 else { throw ClientError.loginRequired }
+        guard reply.status != 400 else { throw ClientError.desktopProfileChanged }
+        guard reply.status == 200 else { throw ClientError.gatewayUnavailable }
+        try reply.decode(DesktopProfile.self).validate(record.profile)
     }
 
     /// Content-free operational checks used by the signed pilot workflow. They

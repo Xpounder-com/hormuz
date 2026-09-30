@@ -300,18 +300,18 @@ class TeamDirectory:
             if row is None or not hmac.compare_digest(bytes(row["browser_cookie_hash"]), self.store._digest("browser", browser_cookie)) or _parse_time(row["expires_at"]) <= now:
                 raise SessionStoreError("invalid_callback_state")
             invitation = connection.execute(
-                "SELECT * FROM onboarding_invitations WHERE secret_hash = ? AND organization_id = ?",
-                (self.store._digest("invitation", code), row["organization_id"]),
+                "SELECT * FROM onboarding_invitations WHERE secret_hash = ? AND (? IS NULL OR organization_id = ?)",
+                (self.store._digest("invitation", code), row["organization_id"], row["organization_id"]),
             ).fetchone()
             member = self._available_invitation(connection, invitation, now)
             if row["invitation_id"] is not None or member["issuer"] != row["issuer"] or row["client_name"] not in json.loads(member["allowed_clients"]):
                 raise SessionStoreError("onboarding_invitation_unavailable")
             connection.execute(
-                "UPDATE session_enrollments SET invitation_id = ?, membership_id = ?, authorization_version = ? WHERE id = ?",
-                (invitation["id"], member["id"], member["authorization_version"], enrollment_id),
+                "UPDATE session_enrollments SET organization_id = ?, invitation_id = ?, membership_id = ?, authorization_version = ? WHERE id = ?",
+                (invitation["organization_id"], invitation["id"], member["id"], member["authorization_version"], enrollment_id),
             )
             transient = json.loads(self.store._decrypt(bytes(row["encrypted_flow"]), associated_data=enrollment_id.encode()))
-            return AuthorizationFlow(enrollment_id, row["issuer"], row["client_name"], transient["nonce"], transient["pkce_verifier"], row["organization_id"], invitation["id"])
+            return AuthorizationFlow(enrollment_id, row["issuer"], row["client_name"], transient["nonce"], transient["pkce_verifier"], invitation["organization_id"], invitation["id"])
 
     def authorize_enrollment(self, *, flow: AuthorizationFlow, claims: dict[str, object]) -> None:
         """Claims must already have passed signature, issuer, audience and nonce validation."""
@@ -327,54 +327,64 @@ class TeamDirectory:
             ).fetchone()
             if row is None or row["organization_id"] != flow.organization_id or row["issuer"] != flow.issuer or claims.get("iss") != flow.issuer:
                 raise SessionStoreError("enrollment_unavailable")
-            organization = self._organization(connection, row["organization_id"])
+            organization_id = row["organization_id"]
+            if organization_id is None:
+                organizations = tuple(
+                    candidate[0] for candidate in connection.execute(
+                        "SELECT id FROM onboarding_organizations WHERE issuer = ? ORDER BY id", (flow.issuer,)
+                    )
+                )
+                if len(organizations) != 1:
+                    raise SessionStoreError("desktop_membership_selection_unavailable")
+                organization_id = organizations[0]
+            organization = self._organization(connection, organization_id)
             if organization["issuer"] != flow.issuer:
                 raise SessionStoreError("onboarding_membership_unavailable")
             invitation = None
             if row["invitation_id"] is not None:
                 invitation = connection.execute(
                     "SELECT * FROM onboarding_invitations WHERE id = ? AND organization_id = ?",
-                    (row["invitation_id"], row["organization_id"]),
+                    (row["invitation_id"], organization_id),
                 ).fetchone()
                 member = self._available_invitation(connection, invitation, now)
                 if claims.get("email_verified") is not True:
                     raise SessionStoreError("onboarding_verified_email_required")
-                email_hash = self._email_hash(row["organization_id"], claims.get("email"))
+                email_hash = self._email_hash(organization_id, claims.get("email"))
                 if not hmac.compare_digest(bytes(member["email_hash"]), email_hash):
                     raise SessionStoreError("onboarding_recipient_mismatch")
                 if member["subject"] is not None and member["subject"] != subject:
                     raise SessionStoreError("onboarding_subject_mismatch")
                 collision = connection.execute(
                     "SELECT id FROM onboarding_memberships WHERE organization_id = ? AND issuer = ? AND subject = ? AND id != ?",
-                    (row["organization_id"], flow.issuer, subject, member["id"]),
+                    (organization_id, flow.issuer, subject, member["id"]),
                 ).fetchone()
                 if collision is not None:
                     raise SessionStoreError("onboarding_subject_already_bound")
             else:
                 member = connection.execute(
                     "SELECT * FROM onboarding_memberships WHERE organization_id = ? AND issuer = ? AND subject = ? AND status = 'active'",
-                    (row["organization_id"], flow.issuer, subject),
+                    (organization_id, flow.issuer, subject),
                 ).fetchone()
             if member is None or member["issuer"] != flow.issuer or row["client_name"] not in json.loads(member["allowed_clients"]):
                 raise SessionStoreError("onboarding_membership_unavailable")
             if invitation is not None:
                 connection.execute(
                     "UPDATE onboarding_memberships SET status = 'active', subject = ?, updated_at = ? WHERE id = ? AND organization_id = ?",
-                    (subject, _isoformat(now), member["id"], row["organization_id"]),
+                    (subject, _isoformat(now), member["id"], organization_id),
                 )
                 connection.execute(
                     "UPDATE onboarding_invitations SET status = 'accepted', secret_hash = NULL, completed_at = ? WHERE id = ? AND organization_id = ?",
-                    (_isoformat(now), invitation["id"], row["organization_id"]),
+                    (_isoformat(now), invitation["id"], organization_id),
                 )
-                self._event(connection, row["organization_id"], "invitation_accepted", team_id=member["team_id"],
+                self._event(connection, organization_id, "invitation_accepted", team_id=member["team_id"],
                             membership_id=member["id"], invitation_id=invitation["id"], decision_actor=member["id"])
             connection.execute(
                 """
-                UPDATE session_enrollments SET status = 'authorized', subject = ?, actor_id = ?,
+                UPDATE session_enrollments SET status = 'authorized', subject = ?, organization_id = ?, actor_id = ?,
                     team_id = ?, clearance = ?, membership_id = ?, authorization_version = ?,
                     authorized_at = ?, encrypted_flow = NULL WHERE id = ?
                 """,
-                (subject, member["id"], member["team_id"], member["clearance"], member["id"], member["authorization_version"], _isoformat(now), flow.enrollment_id),
+                (subject, organization_id, member["id"], member["team_id"], member["clearance"], member["id"], member["authorization_version"], _isoformat(now), flow.enrollment_id),
             )
 
     def identity_for_session(self, principal: SessionPrincipal) -> Identity:

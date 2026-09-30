@@ -40,6 +40,7 @@ actor FixtureTransport: GatewayTransport {
     var desktopProfileOrigin = "https://gateway.example.test"
     var desktopProfileModel = "approved-alias"
     var desktopProfileVersion = 1
+    var desktopProfileUnavailable = false
 
     init(clock: TestClock) { self.clock = clock; absoluteExpiry = clock.now().addingTimeInterval(43_200) }
     func setRefreshFailure() { refreshFails = true }
@@ -52,6 +53,7 @@ actor FixtureTransport: GatewayTransport {
     func setDesktopProfileOrigin(_ value: String) { desktopProfileOrigin = value }
     func setDesktopProfileModel(_ value: String) { desktopProfileModel = value }
     func setDesktopProfileVersion(_ value: Int) { desktopProfileVersion = value }
+    func setDesktopProfileUnavailable(_ value: Bool) { desktopProfileUnavailable = value }
     func counts() -> (Int, Int) { (refreshCount, logoutCount) }
 
     func request(profile: ConnectionProfile, path: String, body: Data?, accessToken: String?) async throws -> GatewayReply {
@@ -68,6 +70,7 @@ actor FixtureTransport: GatewayTransport {
         case let value where value.hasSuffix("/redeem"):
             return try pair()
         case "/v1/auth/desktop/profile":
+            if desktopProfileUnavailable { return try reply(503, ["error": "unavailable"]) }
             return try reply(200, desktopProfile(client: profile.client))
         case "/v1/auth/refresh":
             refreshCount += 1

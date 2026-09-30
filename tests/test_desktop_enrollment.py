@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from unittest import mock
 
+from hormuz.policy_document import local_policy_snapshot
+from hormuz.postgres import PostgresStorageError
 from tests._session_fixtures import SessionHTTPTestCase
 
 
@@ -64,6 +67,46 @@ class DesktopEnrollmentTests(SessionHTTPTestCase):
         })
         self.assertEqual(status, 200, reply)
         self.assertEqual(reply["desktop_profile"]["organization_id"], "org-b")
+
+    def test_static_identity_still_works_with_onboarding_enabled_and_no_managed_team(self):
+        self.config = replace(self.config, session_broker=replace(
+            self.config.session_broker, onboarding_enabled=True,
+        ))
+        self.gateway.config = self.config
+        self.gateway.session_broker.config = self.config
+        self.idp.subject = "bob-subject"
+        enrollment, secret = self.desktop_enroll()
+        values, cookie = self.begin_browser(enrollment)
+        self.assertEqual(self.callback(values, cookie)[0], 200)
+        status, _, reply = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+            "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 200, reply)
+        self.assertEqual(reply["desktop_profile"]["organization_id"], "org-b")
+
+    def test_profile_tracks_active_runtime_policy_and_fails_closed_when_unavailable(self):
+        enrollment, secret = self.desktop_enroll()
+        values, cookie = self.begin_browser(enrollment)
+        self.assertEqual(self.callback(values, cookie)[0], 200)
+        status, _, reply = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+            "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 200, reply)
+        headers = {"Authorization": "Bearer " + reply["access_token"]}
+        identity = self.gateway.session_broker.authenticate(reply["access_token"])
+        snapshot = local_policy_snapshot(self.config, identity)
+        runtime = mock.Mock()
+        runtime.snapshot_for.return_value = replace(snapshot, policy_version="new-active-version")
+        self.gateway.session_broker.policy_runtime = runtime
+        status, _, updated = self.request("GET", "/v1/auth/desktop/profile", headers=headers)
+        self.assertEqual(status, 200, updated)
+        self.assertNotEqual(updated["profile_version"], reply["desktop_profile"]["profile_version"])
+        runtime.snapshot_for.return_value = replace(
+            snapshot, effective_policy=replace(snapshot.effective_policy, allowed_models=("safe-claude",)),
+        )
+        self.assertEqual(self.request("GET", "/v1/auth/desktop/profile", headers=headers)[0], 400)
+        runtime.snapshot_for.side_effect = PostgresStorageError("policy_store_unavailable")
+        self.assertEqual(self.request("GET", "/v1/auth/desktop/profile", headers=headers)[0], 503)
 
     def test_disallowed_client_does_not_create_usable_session(self):
         self.idp.subject = "bob-subject"

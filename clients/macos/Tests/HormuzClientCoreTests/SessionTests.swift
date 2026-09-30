@@ -16,7 +16,7 @@ final class SessionTests: PrivateStorageTestCase {
         _ = try await controller.dashboard(profileID: try XCTUnwrap(status.profile?.id))
         await transport.setDesktopProfileVersion(2)
         do {
-            _ = try await controller.dashboard(profileID: try XCTUnwrap(status.profile?.id))
+            _ = try await controller.accessCredential(profileID: try XCTUnwrap(status.profile?.id))
             XCTFail("Expected changed policy version to disable stale launcher")
         } catch { XCTAssertEqual(error as? ClientError, .desktopProfileChanged) }
         await transport.setDesktopProfileVersion(1)
@@ -25,6 +25,12 @@ final class SessionTests: PrivateStorageTestCase {
             _ = try await controller.dashboard(profileID: try XCTUnwrap(status.profile?.id))
             XCTFail("Expected changed server profile to disable stale launcher")
         } catch { XCTAssertEqual(error as? ClientError, .desktopProfileChanged) }
+        await transport.setDesktopProfileModel("approved-alias")
+        await transport.setDesktopProfileUnavailable(true)
+        do {
+            _ = try await controller.accessCredential(profileID: try XCTUnwrap(status.profile?.id))
+            XCTFail("Expected unavailable profile to withhold launcher credential")
+        } catch { XCTAssertEqual(error as? ClientError, .gatewayUnavailable) }
     }
 
     func testDesktopSignInRejectsForeignProfileAndRevokesSession() async throws {

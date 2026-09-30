@@ -14,6 +14,9 @@ from typing import Any
 from .auth import AuthenticationError, Authenticator, _validate_remote_url
 from .config import GatewayConfig, Identity
 from .onboarding import TeamDirectory
+from .policy_document import local_policy_snapshot
+from .policy_runtime import PolicyRuntime
+from .postgres import PostgresStorageError
 from .session_store import (
     Enrollment,
     SQLiteSessionStore,
@@ -50,12 +53,14 @@ class SessionBroker:
         config: GatewayConfig,
         authenticator: Authenticator,
         store: SQLiteSessionStore,
+        policy_runtime: PolicyRuntime | None = None,
     ):
         if not config.session_broker.enabled or config.session_broker.public_base_url is None:
             raise SessionBrokerError("session_broker_disabled")
         self.config = config
         self.authenticator = authenticator
         self.store = store
+        self.policy_runtime = policy_runtime
         self.directory = TeamDirectory(config, store)
         self.callback_url = config.session_broker.public_base_url + "/v1/auth/callback"
 
@@ -119,20 +124,13 @@ class SessionBroker:
         if len(login_issuers) != 1:
             raise SessionBrokerError("desktop_issuer_unavailable")
         issuer = login_issuers[0]
-        # Managed onboarding currently binds an enrollment to one organization
-        # before OIDC. A tenant-scoped gateway has exactly one such organization.
-        if self.config.session_broker.onboarding_enabled:
-            organizations = self.directory.organizations_for_issuer(issuer.issuer)
-            if len(organizations) != 1:
-                raise SessionBrokerError("desktop_membership_selection_unavailable")
-            organization_id = organizations[0]
-        else:
-            organization_id = None
+        # The browser can bind a managed invitation. Otherwise the validated
+        # OIDC subject selects a static identity or a sole managed organization.
         enrollment = self.store.create_enrollment(
             issuer=issuer.issuer,
             client_name=client_name,
             enrollment_secret=enrollment_secret,
-            organization_id=organization_id,
+            organization_id=None,
         )
         login_url = (
             self.config.session_broker.public_base_url
@@ -152,7 +150,17 @@ class SessionBroker:
         alias = self.config.session_broker.desktop_defaults.get(identity.organization_id, {}).get(client)
         protocol = "openai" if client == "codex" else "anthropic"
         route = self.config.model_routes.get(alias or "")
-        policy = self.config.resolved_policy(identity)
+        if self.policy_runtime is None and self.config.policy_control.mode != "local":
+            raise SessionBrokerError("desktop_policy_unavailable")
+        try:
+            snapshot = (
+                self.policy_runtime.snapshot_for(identity)
+                if self.policy_runtime is not None
+                else local_policy_snapshot(self.config, identity)
+            )
+        except PostgresStorageError as error:
+            raise SessionBrokerError("desktop_policy_unavailable") from error
+        policy = snapshot.effective_policy
         if (
             route is None or route.protocol != protocol
             or policy.allowed_clients is not None and client not in policy.allowed_clients
@@ -165,6 +173,8 @@ class SessionBroker:
             "model": alias,
             "allowed_clients": policy.allowed_clients,
             "allowed_models": policy.allowed_models,
+            "policy_version": snapshot.policy_version,
+            "policy_content_sha256": snapshot.content_sha256,
         }, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return {
             "schema_id": "hormuz.desktop-profile",
@@ -278,7 +288,7 @@ class SessionBroker:
                 issuer_name=flow.issuer,
                 nonce=flow.nonce,
             )
-            if self.directory.manages_organization(flow.organization_id):
+            if flow.invitation_id is not None or self.directory.manages_organization(flow.organization_id):
                 if not self.config.session_broker.onboarding_enabled:
                     raise SessionBrokerError("onboarding_disabled")
                 claims = _complete_onboarding_claims(
@@ -290,7 +300,18 @@ class SessionBroker:
                 self.directory.authorize_enrollment(flow=flow, claims=claims)
                 return
             subject = claims["sub"]
-            identity = self.authenticator.identity_for_subject(flow.issuer, subject)
+            identity = self.config.identity_for_subject(flow.issuer, subject)
+            if identity is None:
+                if not self.config.session_broker.onboarding_enabled or flow.organization_id is not None:
+                    raise AuthenticationError("unmapped_subject")
+                claims = _complete_onboarding_claims(
+                    claims,
+                    token_response=token_response,
+                    userinfo_endpoint=metadata.userinfo_endpoint,
+                    allow_insecure_http=issuer.allow_insecure_http,
+                )
+                self.directory.authorize_enrollment(flow=flow, claims=claims)
+                return
             if identity.identity_type != "human":
                 raise AuthenticationError("human_subject_required")
             if (
