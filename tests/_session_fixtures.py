@@ -131,7 +131,8 @@ def session_config(root: Path, issuer: str, gateway: str) -> dict:
         "listen": {"host": "127.0.0.1", "port": 8787}, "database": str(root / "usage.sqlite3"),
         "upstreams": {protocol: {"base_url": issuer, "api_key_env": "TEST_PROVIDER_KEY"} for protocol in ("openai", "anthropic")},
         "authentication": {
-            "session_broker": {"enabled": True, "public_base_url": gateway, "database": str(root / "sessions.sqlite3"), "allow_insecure_http": True},
+            "session_broker": {"enabled": True, "public_base_url": gateway, "database": str(root / "sessions.sqlite3"), "allow_insecure_http": True,
+                               "desktop_defaults": {"org-a": {"codex": "safe-openai", "claude-code": "safe-claude"}, "org-b": {"codex": "safe-openai"}}},
             "oidc": {"issuers": [{
                 "issuer": issuer, "audiences": ["hormuz-api"], "allow_insecure_http": True,
                 "login": {"client_id": "fixture-login", "client_secret_env": "TEST_OIDC_SECRET"},

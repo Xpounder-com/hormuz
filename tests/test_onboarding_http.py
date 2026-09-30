@@ -69,6 +69,55 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
         self.assertEqual(status, 200)
         return pair
 
+    def test_desktop_sign_in_uses_single_managed_organization(self):
+        self.config = replace(self.config, session_broker=replace(
+            self.config.session_broker,
+            desktop_defaults={"customer-a": {"codex": "safe-openai"}},
+        ))
+        self.gateway.config = self.config
+        self.gateway.session_broker.config = self.config
+        secret = "desktop-enrollment-secret-" + "s" * 40
+        status, _, enrollment = self.request("POST", "/v1/auth/desktop/enrollments", {
+            "client": "codex", "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 201, enrollment)
+        values, cookie = self.accept_in_browser(enrollment)
+        self.assertEqual(self.callback(values, cookie)[0], 200)
+        status, _, reply = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+            "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 200, reply)
+        self.assertEqual(reply["desktop_profile"]["organization_id"], "customer-a")
+        self.assertEqual(reply["desktop_profile"]["model_alias"], "safe-openai")
+        # A member who already accepted the invitation can sign in again
+        # without selecting an organization or reusing an invitation.
+        status, _, returning = self.request("POST", "/v1/auth/desktop/enrollments", {
+            "client": "codex", "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 201, returning)
+        values, cookie = self.begin_browser(returning)
+        self.assertEqual(self.callback(values, cookie)[0], 200)
+        status, _, second = self.request("POST", "/v1/auth/desktop/enrollments/" + returning["enrollment_id"] + "/redeem", {
+            "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 200, second)
+        self.assertEqual(second["desktop_profile"]["organization_id"], "customer-a")
+
+    def test_desktop_sign_in_resolves_static_subject_alongside_managed_team(self):
+        self.idp.subject = "bob-subject"
+        secret = "desktop-enrollment-secret-" + "s" * 40
+        status, _, enrollment = self.request("POST", "/v1/auth/desktop/enrollments", {
+            "client": "codex", "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 201, enrollment)
+        values, cookie = self.begin_browser(enrollment)
+        self.assertEqual(self.callback(values, cookie)[0], 200)
+        status, _, reply = self.request("POST", "/v1/auth/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+            "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 200, reply)
+        self.assertEqual(reply["desktop_profile"]["organization_id"], "org-b")
+
     def test_new_member_can_use_gateway_and_personal_stats_then_operator_removes_access(self):
         pair = self.join_team()
         self.assertEqual(self.idp.userinfo_requests, 0)

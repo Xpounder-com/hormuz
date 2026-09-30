@@ -117,7 +117,7 @@ _OIDC_LOGIN_FIELDS = frozenset({"client_id", "client_secret_env", "scopes", "tok
 _SESSION_BROKER_FIELDS = frozenset({
     "enabled", "public_base_url", "database", "master_key_env", "access_ttl_seconds",
     "absolute_ttl_seconds", "enrollment_ttl_seconds", "allow_insecure_http", "trusted_parent_path",
-    "onboarding_enabled", "console_enabled", "policy_impact_enabled",
+    "onboarding_enabled", "console_enabled", "policy_impact_enabled", "desktop_defaults",
 })
 _MODEL_ROUTE_FIELDS = frozenset(
     {
@@ -343,7 +343,13 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
 
     authentication = _schema_optional_object(raw, "authentication", frozenset({"oidc", "session_broker"}))
     if authentication is not None:
-        _schema_optional_object(authentication, "session_broker", _SESSION_BROKER_FIELDS)
+        broker = _schema_optional_object(authentication, "session_broker", _SESSION_BROKER_FIELDS)
+        if broker is not None and "desktop_defaults" in broker:
+            defaults = broker["desktop_defaults"]
+            if not isinstance(defaults, dict):
+                raise ConfigurationInputError("configuration_unsupported_fields")
+            for clients in defaults.values():
+                _schema_object(clients, frozenset({"codex", "claude-code"}))
         oidc = _schema_optional_object(authentication, "oidc", frozenset({"issuers"}))
         if oidc is not None:
             for issuer in _schema_optional_array(oidc, "issuers"):

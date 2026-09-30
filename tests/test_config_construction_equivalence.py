@@ -61,6 +61,11 @@ def _canonical(value: Any, *, config_directory: Path) -> object:
                     type(value).__name__ == "SessionBrokerConfig"
                     and field.name == "policy_impact_enabled"
                     and getattr(value, field.name) is False
+                ) and not (
+                    # Desktop defaults are opt-in; the empty value keeps the legacy snapshot.
+                    type(value).__name__ == "SessionBrokerConfig"
+                    and field.name == "desktop_defaults"
+                    and not getattr(value, field.name)
                 )
             },
         }

@@ -16,15 +16,21 @@ navigates without clearing entered fields. The lower-right expand action opens
 the optional full control center. The companion, control center, and credential
 helper share one state owner and one Keychain session.
 
-The explicit
-**Hormuz hosted pilot — Codex/OpenAI** setup fixes the client to Codex, permits
-only `openai-primary` or `openai-secondary`, and requires HTTPS. The **Custom
-team gateway** setup preserves the existing Codex or Claude Code controls and
-the loopback-only HTTP development option. The OpenAI pilot provides
+The next hosted first-run flow is **Continue with Hormuz**. The app opens the
+system browser, receives the approved organization and model from the gateway,
+saves the session in Keychain, and prepares its own client launcher. Manual
+self-hosted setup is under Advanced. This flow requires an injected
+`HormuzDesktopOrigin` in the app bundle and is currently local source only;
+see [one sign-in path](../../docs/MACOS_ONE_CLICK_SIGNIN.md). To preview it
+against a local fixture, set `HORMUZ_DESKTOP_ORIGIN` to an HTTPS or loopback
+origin before running `./clients/macos/script/build_and_run.sh`.
+
+Previously saved **Hormuz hosted pilot — Codex/OpenAI** profiles remain
+supported. Manual setup under Advanced preserves Codex or Claude Code controls
+and the loopback-only HTTP development option. The OpenAI pilot provides
 same-provider model fallback; it does not qualify Claude Code, cross-provider
-failover, or protection from an OpenAI-wide outage. It is not a VPN, chat
-replacement, or hosted signup service. Customer distribution uses the separately
-documented signed and notarized release workflow.
+failover, or protection from an OpenAI-wide outage. Customer distribution uses
+the separately documented signed and notarized release workflow.
 
 Build from the repository root with the installed Swift toolchain:
 

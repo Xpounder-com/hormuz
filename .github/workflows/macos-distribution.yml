@@ -484,6 +484,7 @@ jobs:
           HORMUZ_UNSIGNED_PAYLOAD: ${{ runner.temp }}/hormuz-unsigned-payload
           HORMUZ_SOURCE_COMMIT: ${{ github.sha }}
           HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HORMUZ_DESKTOP_ORIGIN: ${{ vars.HORMUZ_DESKTOP_ORIGIN }}
         run: |
           set -euo pipefail
           umask 077
@@ -538,6 +539,9 @@ jobs:
             --context-helper-directory "$HORMUZ_UNSIGNED_PAYLOAD/context-helpers"
             --tokenizer-cache "$HORMUZ_UNSIGNED_PAYLOAD/context-tokenizers"
           )
+          if [ -n "$HORMUZ_DESKTOP_ORIGIN" ]; then
+            HORMUZ_PACKAGE_ARGS+=(--desktop-origin "$HORMUZ_DESKTOP_ORIGIN")
+          fi
           if [ -d "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz.dSYM" ]; then
             HORMUZ_PACKAGE_ARGS+=(--prebuilt-dsym "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz.dSYM")
           fi

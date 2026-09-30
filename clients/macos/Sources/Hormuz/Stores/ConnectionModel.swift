@@ -29,6 +29,25 @@ import Observation
     private var directory: PrivateDirectory?
     private var operation: Task<Void, Never>?
     private var didRestore = false
+    private let desktopOrigin = Bundle.main.object(forInfoDictionaryKey: "HormuzDesktopOrigin") as? String
+
+    init() {
+        let paths = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
+            + ["/opt/homebrew/bin", "/usr/local/bin", FileManager.default.homeDirectoryForCurrentUser.path + "/.local/bin"]
+        let codexFound = paths.contains { FileManager.default.isExecutableFile(atPath: $0 + "/codex") }
+        let claudeFound = paths.contains { FileManager.default.isExecutableFile(atPath: $0 + "/claude") }
+        if !codexFound && claudeFound { client = .claudeCode }
+    }
+
+    var desktopSignInAvailable: Bool {
+        guard let desktopOrigin else { return false }
+        return (try? ConnectionProfile.normalizeGateway(desktopOrigin,
+            allowLoopbackHTTP: desktopAllowsLoopback)) != nil
+    }
+
+    private var desktopAllowsLoopback: Bool {
+        Bundle.main.bundleIdentifier == "com.hormuz.mac.local"
+    }
 
     var statusLabel: String {
         if awaitingBrowser { return "Waiting for browser sign-in" }
@@ -54,18 +73,50 @@ import Observation
     }
 
     func signIn() {
+        setup = .custom
         run { try await self.performSignIn() }
+    }
+
+    func signInDesktop() {
+        run { try await self.performDesktopSignIn() }
+    }
+
+    private func performDesktopSignIn() async throws {
+        guard let origin = desktopOrigin, desktopSignInAvailable,
+              let controller else { throw ClientError.desktopUnavailable }
+        dashboard = nil
+        connector = nil
+        connectorSaved = false
+        let chosenClient = client
+        try await controller.signInDesktop(origin: origin, client: chosenClient,
+            allowLoopbackHTTP: desktopAllowsLoopback) { url in
+            await MainActor.run {
+                self.loginURL = url
+                self.awaitingBrowser = true
+                if !NSWorkspace.shared.open(url) {
+                    self.message = "The browser could not open. Use Open sign-in page to continue."
+                }
+            }
+        }
+        awaitingBrowser = false
+        loginURL = nil
+        try await syncStatus()
+        guard let profile else { throw ClientError.loginRequired }
+        dashboard = try await controller.dashboard(profileID: profile.id)
+        try await prepareDesktopLauncher()
     }
 
     func reconnect() {
         run {
             guard let controller = self.controller else { throw ClientError.storageUnavailable }
+            let desktopManaged = self.profile?.desktopManaged == true
             self.dashboard = nil
             // Retire the previous session first. Failed revocation must not create
             // a second session or silently discard the Keychain retry record.
             try await controller.signOut()
             try await self.syncStatus()
-            try await self.performSignIn()
+            if desktopManaged { try await self.performDesktopSignIn() }
+            else { try await self.performSignIn() }
         }
     }
 
@@ -115,6 +166,7 @@ import Observation
             self.dashboard = nil
             self.dashboard = try await controller.dashboard(profileID: profile.id)
             try await self.syncStatus()
+            if profile.desktopManaged { try await self.prepareDesktopLauncher() }
         }
     }
 
@@ -124,6 +176,8 @@ import Observation
             self.dashboard = nil
             try await controller.signOut()
             try await self.syncStatus()
+            self.connector = nil
+            self.connectorSaved = false
             self.message = "Session revoked. Local credentials were removed. The saved launcher will require a new sign-in."
         }
     }
@@ -157,6 +211,23 @@ import Observation
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(connector.command, forType: .string)
         message = "Launcher command copied. No credentials were copied."
+    }
+
+    func openClient() {
+        guard connectorSaved, let connector, hasSession, dashboard != nil,
+              sessionState == .active, expiresAt.map({ $0 > Date() }) == true else { return }
+        if !NSWorkspace.shared.open(connector.launcher) {
+            message = "Terminal could not open the Hormuz launcher. Review the client setup in Advanced."
+        }
+    }
+
+    private func prepareDesktopLauncher() async throws {
+        guard let profile, profile.desktopManaged, let directory,
+              let executable = Bundle.main.executableURL else { throw ClientError.storageUnavailable }
+        let plan = try ConnectorPlan.preview(profile: profile, directory: directory, helper: executable)
+        try await plan.apply(in: directory)
+        connector = plan
+        connectorSaved = true
     }
 
     func setContextOptimization(enabled: Bool) {

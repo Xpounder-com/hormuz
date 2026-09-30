@@ -83,6 +83,16 @@ For a credential-free rehearsal, use `--ad-hoc`. The resulting metadata always s
 
 The manual **Mac signed distribution** workflow performs the same steps on a GitHub-hosted Mac. Configure a protected `macos-distribution` environment with required review and these secrets:
 
+For a one-click sign-in release, set the non-secret environment variable
+`HORMUZ_DESKTOP_ORIGIN` to the verified dedicated production HTTPS gateway
+origin. When set, the signing job passes it to the package script, which rejects
+empty, local, example, GitHub Pages, staging, pilot, and preflight origins. With
+no origin configured, the signed app retains its existing manual setup. The
+current `hormuz-https-preflight.onrender.com` pilot is not an eligible release
+origin.
+See [the one sign-in path](MACOS_ONE_CLICK_SIGNIN.md) for the hosted activation
+and installed-app checks.
+
 | Secret | Value |
 | --- | --- |
 | `MACOS_DEVELOPER_ID_P12_BASE64` | Base64 of the password-protected Developer ID `.p12` |

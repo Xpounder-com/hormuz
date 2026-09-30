@@ -368,6 +368,8 @@ class GatewayServer(ThreadingHTTPServer):
             self.provider_reliability_store = provider_reliability_store
             policy_runtime = PolicyRuntime(config, environ=environ, connection_pool=self.postgres_pool,
                                            organization_ids=storage_organizations)
+            if self.session_broker is not None:
+                self.session_broker.policy_runtime = policy_runtime
             self.policy_engine = PolicyEngine(
                 config,
                 self.store,

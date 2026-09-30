@@ -24,10 +24,13 @@ public struct ConnectionProfile: Codable, Equatable, Sendable {
     public let model: String
     public let allowLoopbackHTTP: Bool
     public let setup: GatewaySetup
+    public let desktopManaged: Bool
+    public let desktopProfileVersion: Int?
 
     public init(id: UUID = UUID(), gateway: String, organization: String, issuer: String? = nil,
                 client: AIClient, model: String, allowLoopbackHTTP: Bool = false,
-                setup: GatewaySetup = .custom) throws {
+                setup: GatewaySetup = .custom, desktopManaged: Bool = false,
+                desktopProfileVersion: Int? = nil) throws {
         let normalizedGateway = try Self.normalizeGateway(
             gateway, allowLoopbackHTTP: allowLoopbackHTTP
         )
@@ -41,6 +44,9 @@ public struct ConnectionProfile: Codable, Equatable, Sendable {
                   URLComponents(string: normalizedGateway)?.scheme == "https"
             else { throw ClientError.invalidProfile }
         }
+        if let desktopProfileVersion {
+            guard desktopManaged, desktopProfileVersion > 0 else { throw ClientError.invalidProfile }
+        }
         self.id = id
         self.gateway = normalizedGateway
         self.organization = organization
@@ -49,10 +55,13 @@ public struct ConnectionProfile: Codable, Equatable, Sendable {
         self.model = model
         self.allowLoopbackHTTP = allowLoopbackHTTP
         self.setup = setup
+        self.desktopManaged = desktopManaged
+        self.desktopProfileVersion = desktopProfileVersion
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, gateway, organization, issuer, client, model, allowLoopbackHTTP, setup
+        case id, gateway, organization, issuer, client, model, allowLoopbackHTTP, setup, desktopManaged,
+             desktopProfileVersion
     }
 
     public init(from decoder: Decoder) throws {
@@ -71,7 +80,9 @@ public struct ConnectionProfile: Codable, Equatable, Sendable {
             client: container.decode(AIClient.self, forKey: .client),
             model: container.decode(String.self, forKey: .model),
             allowLoopbackHTTP: container.decode(Bool.self, forKey: .allowLoopbackHTTP),
-            setup: setup
+            setup: setup,
+            desktopManaged: try container.decodeIfPresent(Bool.self, forKey: .desktopManaged) ?? false,
+            desktopProfileVersion: try container.decodeIfPresent(Int.self, forKey: .desktopProfileVersion)
         )
     }
 
@@ -85,6 +96,8 @@ public struct ConnectionProfile: Codable, Equatable, Sendable {
         try container.encode(model, forKey: .model)
         try container.encode(allowLoopbackHTTP, forKey: .allowLoopbackHTTP)
         try container.encode(setup, forKey: .setup)
+        if desktopManaged { try container.encode(true, forKey: .desktopManaged) }
+        try container.encodeIfPresent(desktopProfileVersion, forKey: .desktopProfileVersion)
     }
 
     public var key: String { id.uuidString.lowercased() }
@@ -92,7 +105,8 @@ public struct ConnectionProfile: Codable, Equatable, Sendable {
     public func validated() throws -> ConnectionProfile {
         try ConnectionProfile(id: id, gateway: gateway, organization: organization, issuer: issuer,
                               client: client, model: model, allowLoopbackHTTP: allowLoopbackHTTP,
-                              setup: setup)
+                              setup: setup, desktopManaged: desktopManaged,
+                              desktopProfileVersion: desktopProfileVersion)
     }
 
     public static func normalizeGateway(_ value: String, allowLoopbackHTTP: Bool) throws -> String {

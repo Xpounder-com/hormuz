@@ -96,6 +96,9 @@ class PostgresPolicyImpactTests(PostgresTestCase):
         config, env, _, _, _, _ = self.initialized()
         raw = json.loads(config.source_path.read_text())
         raw["authentication"] = session_config(config.source_path.parent, "http://127.0.0.1:9444", "http://127.0.0.1:8787")["authentication"]
+        # This listener is deliberately authentication-only. The session fixture's
+        # desktop default names a different test gateway's model route.
+        raw["authentication"]["session_broker"].pop("desktop_defaults", None)
         raw["authentication"]["oidc"]["issuers"][0]["subjects"] = []
         raw["authentication"]["session_broker"].update(onboarding_enabled=True, console_enabled=True, policy_impact_enabled=True)
         config.source_path.write_text(json.dumps(raw))

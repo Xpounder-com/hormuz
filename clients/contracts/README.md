@@ -81,7 +81,7 @@ and adds these portable corpora. Fixtures contain synthetic values only.
 | `profiles.json` (49 cases) | Swift `ConnectionProfile`; Python `validate_session_gateway` owns only its CLI gateway string | Native validation, normalization, legacy defaults, round trips, explicit CLI/native differences |
 | `context-settings.json` (20 cases) | Swift `ContextOptimizationSettings`; Python `ContextPreferenceStore` | Missing means Off; only the two canonical schema-v1 byte strings are valid |
 | `status.json` | Swift `SessionState`, `ConnectionStatus`, `CompanionReadingStatus`, `ContextOptimizationStatus` | Pending sessions remain present; freshness and optimization codes retain their display meaning |
-| `errors.json` (22 cases) | Swift `ClientError` | Fixed messages and codes; Rust uses a platform-neutral credential-store name instead of Keychain |
+| `errors.json` (24 cases) | Swift `ClientError` | Fixed messages and codes; Rust uses a platform-neutral credential-store name instead of Keychain |
 
 Python has no native profile or UI status model. Its consumer checks the shared
 gateway inputs against the existing CLI expectations, the setting bytes against

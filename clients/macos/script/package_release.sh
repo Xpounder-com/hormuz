@@ -10,6 +10,7 @@ Options:
   --bundle-id ID       Distribution bundle identifier (default: com.xpounder.hormuz)
   --version VERSION    CFBundleShortVersionString (default: package version)
   --build NUMBER       Positive CFBundleVersion integer (default: 1)
+  --desktop-origin URL Canonical production HTTPS sign-in origin for one-click builds.
   --identity NAME      Developer ID Application identity; may also be set with
                        HORMUZ_CODESIGN_IDENTITY
   --prebuilt-binary PATH
@@ -32,6 +33,8 @@ HORMUZ_OUTPUT_DIRECTORY=""
 HORMUZ_BUNDLE_ID="com.xpounder.hormuz"
 HORMUZ_VERSION=""
 HORMUZ_BUILD_NUMBER="1"
+HORMUZ_DESKTOP_ORIGIN=""
+HORMUZ_DESKTOP_ORIGIN_SPECIFIED=0
 HORMUZ_IDENTITY="${HORMUZ_CODESIGN_IDENTITY:-}"
 HORMUZ_PREBUILT_BINARY=""
 HORMUZ_PREBUILT_DSYM=""
@@ -45,6 +48,7 @@ while [ "$#" -gt 0 ]; do
     --bundle-id) HORMUZ_BUNDLE_ID="${2:-}"; shift 2 ;;
     --version) HORMUZ_VERSION="${2:-}"; shift 2 ;;
     --build) HORMUZ_BUILD_NUMBER="${2:-}"; shift 2 ;;
+    --desktop-origin) HORMUZ_DESKTOP_ORIGIN="${2:-}"; HORMUZ_DESKTOP_ORIGIN_SPECIFIED=1; shift 2 ;;
     --identity) HORMUZ_IDENTITY="${2:-}"; shift 2 ;;
     --prebuilt-binary) HORMUZ_PREBUILT_BINARY="${2:-}"; shift 2 ;;
     --prebuilt-dsym) HORMUZ_PREBUILT_DSYM="${2:-}"; shift 2 ;;
@@ -83,6 +87,28 @@ fi
 if ! [[ "$HORMUZ_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
   echo "Build number must be a positive integer." >&2
   exit 2
+fi
+if [ "$HORMUZ_DESKTOP_ORIGIN_SPECIFIED" -eq 1 ]; then
+  python3 - "$HORMUZ_DESKTOP_ORIGIN" <<'PY'
+import sys
+from urllib.parse import urlsplit
+raw = sys.argv[1]
+try:
+    url = urlsplit(raw)
+    hostname = url.hostname or ""
+    valid = (raw.isascii() and raw == raw.strip()
+             and all(33 <= ord(character) <= 126 for character in raw)
+             and url.scheme == "https" and hostname and not url.username and not url.password
+             and not url.path and not url.query and not url.fragment and url.port is None
+             and hostname not in {"localhost", "127.0.0.1", "::1", "example.com", "example.org", "example.net", "github.io"}
+             and "." in hostname
+             and not hostname.endswith((".example.com", ".example.org", ".example.net", ".test", ".local", ".github.io"))
+             and not any(label in hostname for label in ("staging", "preflight", "pilot", "example")))
+except ValueError:
+    valid = False
+if not valid:
+    raise SystemExit("A production HTTPS --desktop-origin is required for a distributable build")
+PY
 fi
 if [ -n "$HORMUZ_PREBUILT_DSYM" ] && [ -z "$HORMUZ_PREBUILT_BINARY" ]; then
   echo "--prebuilt-dsym requires --prebuilt-binary." >&2
@@ -227,6 +253,9 @@ done
 plutil -replace CFBundleIdentifier -string "$HORMUZ_BUNDLE_ID" "$HORMUZ_BUNDLE/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$HORMUZ_VERSION" "$HORMUZ_BUNDLE/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$HORMUZ_BUILD_NUMBER" "$HORMUZ_BUNDLE/Contents/Info.plist"
+if [ -n "$HORMUZ_DESKTOP_ORIGIN" ]; then
+  plutil -replace HormuzDesktopOrigin -string "$HORMUZ_DESKTOP_ORIGIN" "$HORMUZ_BUNDLE/Contents/Info.plist"
+fi
 chmod 755 "$HORMUZ_BINARY" "$HORMUZ_CONTEXT_HELPER_BINARY" \
   "$HORMUZ_CONTEXT_HELPER_ARM64"
 chmod 644 "$HORMUZ_CONTEXT_TOKENIZERS/$HORMUZ_CL100K" "$HORMUZ_CONTEXT_TOKENIZERS/$HORMUZ_O200K"

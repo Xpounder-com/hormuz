@@ -182,6 +182,25 @@ class HostedProviderConfigTests(unittest.TestCase):
             with self.subTest(mutate=mutate), self.assertRaises(HostedError):
                 load_provider_profile(staging.source_path, config.source_path, settings)
 
+    def test_existing_openai_pilot_can_add_desktop_default_without_rebinding_login_state(self):
+        config, staging, settings, document = provider_profile(
+            self.root, pilot_profile="external_pilot_openai"
+        )
+        self.assertEqual(staging.session_broker.desktop_defaults, {})
+        candidate = json.loads(json.dumps(document))
+        candidate["authentication"]["session_broker"]["desktop_defaults"] = {
+            "evaluation": {"codex": "openai-primary"}
+        }
+        config.source_path.write_text(json.dumps(candidate))
+        updated = load_provider_profile(staging.source_path, config.source_path, settings)
+        self.assertEqual(
+            updated.session_broker.desktop_defaults,
+            {"evaluation": {"codex": "openai-primary"}},
+        )
+        self.assertEqual(updated.session_broker.public_base_url, staging.session_broker.public_base_url)
+        self.assertEqual(updated.session_broker.database_path, staging.session_broker.database_path)
+        self.assertEqual(updated.oidc_issuers, staging.oidc_issuers)
+
     def test_every_provider_route_requires_explicit_cache_rates(self):
         for alias in self.document["model_routes"]:
             for field in ("cache_read_cost_per_million", "cache_write_cost_per_million"):

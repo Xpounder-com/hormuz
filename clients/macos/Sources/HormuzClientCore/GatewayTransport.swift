@@ -15,6 +15,15 @@ public protocol GatewayTransport: Sendable {
     func request(profile: ConnectionProfile, path: String, body: Data?, accessToken: String?) async throws -> GatewayReply
 }
 
+public extension GatewayTransport {
+    func request(origin: String, allowLoopbackHTTP: Bool, path: String, body: Data?,
+                 accessToken: String?) async throws -> GatewayReply {
+        let bootstrap = try ConnectionProfile(gateway: origin, organization: "desktop-bootstrap",
+            client: .codex, model: "desktop-bootstrap", allowLoopbackHTTP: allowLoopbackHTTP)
+        return try await request(profile: bootstrap, path: path, body: body, accessToken: accessToken)
+    }
+}
+
 private final class NoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,

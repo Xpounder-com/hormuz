@@ -2,6 +2,76 @@ import XCTest
 @testable import HormuzClientCore
 
 final class SessionTests: PrivateStorageTestCase {
+    func testDesktopSignInDerivesProfileAndVerifiesItOnRestore() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        try await controller.signInDesktop(origin: "https://gateway.example.test", client: .codex) { url in
+            XCTAssertEqual(url.host, "gateway.example.test")
+        }
+        let status = try await controller.status()
+        XCTAssertEqual(status.profile?.organization, "org-a")
+        XCTAssertEqual(status.profile?.model, "approved-alias")
+        XCTAssertEqual(status.profile?.desktopManaged, true)
+        XCTAssertEqual(status.profile?.desktopProfileVersion, 1)
+        _ = try await controller.dashboard(profileID: try XCTUnwrap(status.profile?.id))
+        await transport.setDesktopProfileVersion(2)
+        do {
+            _ = try await controller.accessCredential(profileID: try XCTUnwrap(status.profile?.id))
+            XCTFail("Expected changed policy version to disable stale launcher")
+        } catch { XCTAssertEqual(error as? ClientError, .desktopProfileChanged) }
+        await transport.setDesktopProfileVersion(1)
+        await transport.setDesktopProfileModel("changed-alias")
+        do {
+            _ = try await controller.dashboard(profileID: try XCTUnwrap(status.profile?.id))
+            XCTFail("Expected changed server profile to disable stale launcher")
+        } catch { XCTAssertEqual(error as? ClientError, .desktopProfileChanged) }
+        await transport.setDesktopProfileModel("approved-alias")
+        await transport.setDesktopProfileUnavailable(true)
+        do {
+            _ = try await controller.accessCredential(profileID: try XCTUnwrap(status.profile?.id))
+            XCTFail("Expected unavailable profile to withhold launcher credential")
+        } catch { XCTAssertEqual(error as? ClientError, .gatewayUnavailable) }
+        await transport.setDesktopProfileUnavailable(false)
+        await transport.setDesktopProfileRejected(true)
+        do {
+            _ = try await controller.accessCredential(profileID: try XCTUnwrap(status.profile?.id))
+            XCTFail("Expected rejected default to withhold launcher credential")
+        } catch { XCTAssertEqual(error as? ClientError, .desktopProfileChanged) }
+    }
+
+    func testDesktopSignInRejectsForeignProfileAndRevokesSession() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        await transport.setDesktopProfileOrigin("https://attacker.test")
+        do {
+            try await controller.signInDesktop(origin: "https://gateway.example.test", client: .codex) { _ in }
+            XCTFail("Expected origin validation")
+        } catch { XCTAssertEqual(error as? ClientError, .invalidResponse) }
+        XCTAssertNil(try store.load())
+        let foreignCounts = await transport.counts()
+        XCTAssertEqual(foreignCounts.1, 1)
+    }
+
+    func testDesktopSignInRejectsForeignBrowserAndCancellationRevokes() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        await transport.setBadLoginURL()
+        do {
+            try await controller.signInDesktop(origin: "https://gateway.example.test", client: .codex) { _ in
+                XCTFail("Foreign login URL must never open")
+            }
+            XCTFail("Expected browser URL rejection")
+        } catch { XCTAssertEqual(error as? ClientError, .invalidResponse) }
+        await transport.setBadLoginURL(false)
+        store.cancelOnNextSave = true
+        let login = Task { try await controller.signInDesktop(origin: "https://gateway.example.test", client: .codex) { _ in } }
+        do { try await login.value; XCTFail("Expected cancelled login") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertNil(try store.load())
+        let cancelledCounts = await transport.counts()
+        XCTAssertEqual(cancelledCounts.1, 1)
+    }
+
     func testEnrollmentDeadlineHonorsGatewayExpirationBeyondFiveMinutes() {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         XCTAssertEqual(

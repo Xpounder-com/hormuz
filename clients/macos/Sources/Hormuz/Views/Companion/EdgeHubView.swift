@@ -111,7 +111,10 @@ struct EdgeHubView: View {
                 destination(.appearance, symbol: "slider.horizontal.3", subtitle: "Size, display & visibility")
             }
             if !connection.hasSession {
-                Button("Connect to Hormuz") { navigation.open(.setup) }
+                Button("Continue with Hormuz") {
+                    navigation.open(.setup)
+                    if connection.desktopSignInAvailable { connection.signInDesktop() }
+                }
                     .buttonStyle(EdgePrimaryButtonStyle(scale: scale))
             } else if needsReconnect || connection.sessionState == .revocationPending {
                 Button("Review connection") { navigation.open(.connection) }

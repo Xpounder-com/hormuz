@@ -27,6 +27,8 @@ pub enum ClientError {
     InvalidArguments,
     ContextSettingsInvalid,
     ContextHelperUnavailable,
+    DesktopProfileChanged,
+    DesktopUnavailable,
 }
 
 impl fmt::Display for ClientError {
@@ -54,6 +56,8 @@ impl fmt::Display for ClientError {
             Self::InvalidArguments => "Unsupported helper arguments. Open Hormuz to configure the connection.",
             Self::ContextSettingsInvalid => "The local context optimization setting could not be verified. Optimization remains off.",
             Self::ContextHelperUnavailable => "The local context optimization helper is unavailable. Save a new connector after reinstalling Hormuz.",
+            Self::DesktopProfileChanged => "Your team's Hormuz settings changed. Sign out and connect again to update this client.",
+            Self::DesktopUnavailable => "Hormuz sign-in is not configured for this app. Use Advanced to connect to a self-hosted gateway.",
         })
     }
 }
