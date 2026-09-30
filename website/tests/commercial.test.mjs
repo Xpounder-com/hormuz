@@ -37,6 +37,7 @@ test('lead payload excludes unknown fields and unconsented campaign data', () =>
   const tagged = buildLead(fields, '?utm_source=linkedin&email=private');
   assert.equal(tagged.campaign, 'utm_source=linkedin');
   assert.equal(buildLead({ ...fields, interest: 'support' }).interest, 'Enterprise support subscription');
+  assert.equal(buildLead({ ...fields, interest: 'enterprise' }).interest, 'Custom enterprise engagement');
 });
 
 test('creative attribution survives multiple page hops while downloads and external paths stay clean', () => {
