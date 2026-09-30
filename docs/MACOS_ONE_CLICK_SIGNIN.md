@@ -41,6 +41,10 @@ at deployed commit `d854a5a453fcbe20cb3f4c1e261e146f2da93855`. It builds
 auto-deploy disabled. That revision predates these desktop routes; its preflight
 hostname is deliberately rejected by the signed Mac release gate. The Render
 project's “Production” label does not change the service's pilot contract.
+That deployed source expects SQLite usage schema 12 and PostgreSQL schema 17;
+the current branch expects 19 and 24. Reusing its database avoids another
+resource charge, but an in-place update requires reviewed backups and both
+explicit migrations while serving is closed in maintenance.
 
 ## Decision
 
@@ -162,10 +166,16 @@ details so the user can identify the service receiving requests.
    are already registered in Okta. The provider profile needs an explicit
    `desktop_defaults` alias for its existing organization and approved Codex
    route; adding this field leaves the initialized identity binding intact.
-   Review and back up the private profile, close inference in maintenance,
-   validate it with `provider-check`, deploy the reviewed code, and restore the
-   same `provider-pilot` scope. Verify a real browser callback and enrolled
-   Codex session. Do not add a service, database, disk, or provider credential.
+   Review and back up the private profile and existing stores, close inference
+   in maintenance, then deploy the reviewed code while maintenance remains on.
+   Follow the hosted runbooks for the SQLite 12-to-19 and PostgreSQL 17-to-24
+   migrations. The PostgreSQL step needs the retained direct migration
+   credential, which is intentionally absent from the serving process. Add the
+   desktop default to the private provider profile, validate it with
+   `provider-check`, remove the migration credential from the service, and
+   restore the same `provider-pilot` scope. Verify a real browser callback and
+   enrolled Codex session. Do not add a service, database, disk, or provider
+   credential.
    A green `/ready` response is intermediate evidence, not production
    qualification. Use an ad hoc development Mac build with the preflight origin
    for this pilot; keep the signed distribution gate unchanged.
