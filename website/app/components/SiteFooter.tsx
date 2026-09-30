@@ -12,7 +12,7 @@ export function SiteFooter() {
         </CampaignLink>
         <p className="footer-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a></p>
         <p>Understand AI usage. Set the policy for what happens next.</p>
-        <span>Apache-2.0 · Hormuz 1.3.0<br />Production qualification remains deployment-specific.</span>
+        <span>Apache-2.0 · Core 1.4.0 · Mac 1.3.0<br />Production qualification remains deployment-specific.</span>
       </div>
 
       <div className="footer-column">
