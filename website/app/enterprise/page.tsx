@@ -5,7 +5,7 @@ import { pageMetadata } from '../../lib/metadata';
 import { sitePath, sourcePath } from '../../lib/site.mjs';
 import { PageFrame, PageHero } from '../components/PageFrame';
 
-export const metadata = pageMetadata('Team services & paid pilot — Hormuz', 'Self-host the team gateway free. Get support for $2,000/month, or evaluate one workflow with a $15,000, 90-day paid pilot.', '/enterprise/');
+export const metadata = pageMetadata('Team services & enterprise engagement — Hormuz', 'Self-host the team gateway free, choose fixed support or a scoped pilot, or contact sales for custom enterprise pricing.', '/enterprise/');
 
 const comparison = [
   ['Gateway, identity, policy, budgets, secret controls, evidence', 'Included in the Apache-2.0 core', 'The same open-source capabilities'],
@@ -23,6 +23,7 @@ export default function EnterprisePage() {
       <div className="hero-actions"><CampaignLink className="button button-primary" href={sitePath('/docs/#quickstart')}>Explore team setup →</CampaignLink><CampaignLink className="button button-ghost" href={sitePath('/plans/')}>All plans →</CampaignLink></div>
     </PageHero>
     <EnterprisePlans />
+    <section className="section offer-section" id="custom"><p className="section-label">ENTERPRISE · CUSTOM PROPOSAL</p><h2>Need a scope beyond the fixed plans?</h2><p>Bring your integration, security review, procurement, and operating requirements. We will discuss fit, then agree deliverables, support terms, and pricing in writing before any payment. The open-source gateway remains available without a software license fee.</p><CampaignLink className="button button-primary" href={sitePath('/contact/?interest=enterprise')}>Contact sales →</CampaignLink></section>
     <section className="section" id="comparison">
       <div className="section-heading narrow"><p className="section-label">What is free. What is paid.</p><h2>The value is help making it work in your environment.</h2><p>Start independently, subscribe to the support plan below, or agree a guided pilot with the maintainer. All product controls remain open source.</p></div>
       <div className="table-scroll"><table className="comparison-table"><caption>Open-source product and paid services</caption><thead><tr><th scope="col">Area</th><th scope="col">Open source</th><th scope="col">Enterprise engagement</th></tr></thead><tbody>{comparison.map(([area, oss, paid]) => <tr key={area}><th scope="row">{area}</th><td>{oss}</td><td>{paid}</td></tr>)}</tbody></table></div>

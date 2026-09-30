@@ -1,8 +1,8 @@
 import { CONTACT_EMAIL } from './site.mjs';
 
-export const INTERESTS = Object.freeze({ review: 'Free AI governance review', pilot: 'Enterprise pilot', support: 'Enterprise support subscription', integration: 'Client integration', security: 'Security requirements', community: 'Open-source feedback' });
+export const INTERESTS = Object.freeze({ review: 'Free AI governance review', pilot: 'Enterprise pilot', support: 'Enterprise support subscription', enterprise: 'Custom enterprise engagement', integration: 'Client integration', security: 'Security requirements', community: 'Open-source feedback' });
 export const CAMPAIGN_TAGS = Object.freeze(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content']);
-export const isSalesInquiry = interest => ['review', 'pilot', 'support'].includes(interest);
+export const isSalesInquiry = interest => ['review', 'pilot', 'support', 'enterprise'].includes(interest);
 
 function clean(value, max) {
   return String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max);

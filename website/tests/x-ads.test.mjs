@@ -22,7 +22,7 @@ test('only acknowledged sales interests qualify for the lead event; general inqu
     assert.equal(trackConfirmedApplication(win, { interest }), false);
     assert.equal(win.twq, undefined);
   }
-  for (const interest of ['review', 'pilot', 'support']) {
+  for (const interest of ['review', 'pilot', 'support', 'enterprise']) {
     const win = browser(); saveAdConsent('allowed', win);
     assert.equal(trackConfirmedApplication(win, { interest, testSubmission: true }), false);
     assert.equal(trackConfirmedApplication(win, { interest }), true);
