@@ -10,7 +10,7 @@ Options:
   --bundle-id ID       Distribution bundle identifier (default: com.xpounder.hormuz)
   --version VERSION    CFBundleShortVersionString (default: package version)
   --build NUMBER       Positive CFBundleVersion integer (default: 1)
-  --desktop-origin URL Canonical production HTTPS sign-in origin (required for a distributable build).
+  --desktop-origin URL Canonical production HTTPS sign-in origin for one-click builds.
   --identity NAME      Developer ID Application identity; may also be set with
                        HORMUZ_CODESIGN_IDENTITY
   --prebuilt-binary PATH
@@ -34,6 +34,7 @@ HORMUZ_BUNDLE_ID="com.xpounder.hormuz"
 HORMUZ_VERSION=""
 HORMUZ_BUILD_NUMBER="1"
 HORMUZ_DESKTOP_ORIGIN=""
+HORMUZ_DESKTOP_ORIGIN_SPECIFIED=0
 HORMUZ_IDENTITY="${HORMUZ_CODESIGN_IDENTITY:-}"
 HORMUZ_PREBUILT_BINARY=""
 HORMUZ_PREBUILT_DSYM=""
@@ -47,7 +48,7 @@ while [ "$#" -gt 0 ]; do
     --bundle-id) HORMUZ_BUNDLE_ID="${2:-}"; shift 2 ;;
     --version) HORMUZ_VERSION="${2:-}"; shift 2 ;;
     --build) HORMUZ_BUILD_NUMBER="${2:-}"; shift 2 ;;
-    --desktop-origin) HORMUZ_DESKTOP_ORIGIN="${2:-}"; shift 2 ;;
+    --desktop-origin) HORMUZ_DESKTOP_ORIGIN="${2:-}"; HORMUZ_DESKTOP_ORIGIN_SPECIFIED=1; shift 2 ;;
     --identity) HORMUZ_IDENTITY="${2:-}"; shift 2 ;;
     --prebuilt-binary) HORMUZ_PREBUILT_BINARY="${2:-}"; shift 2 ;;
     --prebuilt-dsym) HORMUZ_PREBUILT_DSYM="${2:-}"; shift 2 ;;
@@ -87,7 +88,7 @@ if ! [[ "$HORMUZ_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
   echo "Build number must be a positive integer." >&2
   exit 2
 fi
-if [ "$HORMUZ_AD_HOC" -eq 0 ] || [ -n "$HORMUZ_DESKTOP_ORIGIN" ]; then
+if [ "$HORMUZ_DESKTOP_ORIGIN_SPECIFIED" -eq 1 ]; then
   python3 - "$HORMUZ_DESKTOP_ORIGIN" <<'PY'
 import sys
 from urllib.parse import urlsplit

@@ -491,7 +491,6 @@ jobs:
           for name in HORMUZ_CERTIFICATE_BASE64 HORMUZ_CERTIFICATE_PASSWORD HORMUZ_NOTARY_KEY_BASE64 HORMUZ_NOTARY_KEY_ID HORMUZ_NOTARY_ISSUER_ID; do
             test -n "${!name}"
           done
-          test -n "$HORMUZ_DESKTOP_ORIGIN"
           HORMUZ_KEYCHAIN="$RUNNER_TEMP/hormuz-signing.keychain-db"
           HORMUZ_CERTIFICATE="$RUNNER_TEMP/developer-id.p12"
           HORMUZ_NOTARY_KEY="$RUNNER_TEMP/AuthKey_$HORMUZ_NOTARY_KEY_ID.p8"
@@ -536,11 +535,13 @@ jobs:
             --bundle-id "$HORMUZ_BUNDLE_ID"
             --version "$HORMUZ_VERSION"
             --build "$HORMUZ_BUILD_NUMBER"
-            --desktop-origin "$HORMUZ_DESKTOP_ORIGIN"
             --prebuilt-binary "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz"
             --context-helper-directory "$HORMUZ_UNSIGNED_PAYLOAD/context-helpers"
             --tokenizer-cache "$HORMUZ_UNSIGNED_PAYLOAD/context-tokenizers"
           )
+          if [ -n "$HORMUZ_DESKTOP_ORIGIN" ]; then
+            HORMUZ_PACKAGE_ARGS+=(--desktop-origin "$HORMUZ_DESKTOP_ORIGIN")
+          fi
           if [ -d "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz.dSYM" ]; then
             HORMUZ_PACKAGE_ARGS+=(--prebuilt-dsym "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz.dSYM")
           fi

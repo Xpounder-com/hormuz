@@ -1,4 +1,4 @@
-"""The signed Mac build must use a dynamic production HTTPS origin."""
+"""One-click Mac builds require a dynamic production HTTPS origin."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ class MacOSPackagingOriginTests(unittest.TestCase):
 
     def test_pages_and_nonproduction_render_hosts_are_rejected(self):
         for origin in (
+            "",
             "https://usehormuz.github.io",
             "https://hormuz-https-preflight.onrender.com",
             "https://hormuz-staging.onrender.com",
@@ -39,6 +40,16 @@ class MacOSPackagingOriginTests(unittest.TestCase):
         error = self._validate("https://hormuz-desktop.onrender.com")
         self.assertIn("--context-helper-directory must contain", error)
         self.assertNotIn("production HTTPS --desktop-origin is required", error)
+
+    def test_signed_build_without_one_click_origin_keeps_existing_packaging_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--output-directory", directory],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--context-helper-directory must contain", result.stderr)
+        self.assertNotIn("production HTTPS --desktop-origin is required", result.stderr)
 
 
 if __name__ == "__main__":

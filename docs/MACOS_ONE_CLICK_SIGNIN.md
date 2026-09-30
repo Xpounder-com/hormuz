@@ -63,8 +63,10 @@ suspended. The existing paid preflight service is the current pilot origin. The
 repository still has examples and a provider-free hosted staging profile; no
 desktop origin has been placed in a signed Mac build or qualified for live
 desktop sign-in and inference.
-The release build must fail if its canonical origin is unset or uses an example,
-local, pilot, preflight, staging, or GitHub Pages host. A development build may
+A signed one-click build must explicitly set a qualified canonical origin and
+reject example, local, pilot, preflight, staging, or GitHub Pages hosts. A signed
+build without that setting keeps the existing manual setup, so this unfinished
+hosted pilot does not block unrelated Mac releases. A development build may
 explicitly inject a local fixture or the existing preflight origin for a bounded
 internal pilot. That does not qualify the preflight service for distribution.
 
@@ -183,8 +185,9 @@ details so the user can identify the service receiving requests.
    installation/version recovery if the hosted product requires those cases.
 4. After the live pilot and production qualification, decide whether to
    repurpose the existing paid service as the canonical hosted entry point.
-   Set the protected GitHub environment variable `HORMUZ_DESKTOP_ORIGIN` only
-   to a qualified production HTTPS origin, package and notarize a signed build,
+   Set the protected GitHub environment variable `HORMUZ_DESKTOP_ORIGIN` for a
+   one-click release only after qualifying the production HTTPS origin. Package
+   and notarize a signed build,
    and verify installed initial and returning sign-in plus a launched client
    request. The public GitHub Pages site can then link to the reviewed Mac
    download. Do not start another paid resource without a separate cost decision.

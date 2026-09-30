@@ -85,9 +85,11 @@ The manual **Mac signed distribution** workflow performs the same steps on a Git
 
 For a one-click sign-in release, set the non-secret environment variable
 `HORMUZ_DESKTOP_ORIGIN` to the verified dedicated production HTTPS gateway
-origin. The signing job passes it to the package script, which rejects missing,
-local, example, GitHub Pages, staging, pilot, and preflight origins. The current
-`hormuz-https-preflight.onrender.com` pilot is not an eligible release origin.
+origin. When set, the signing job passes it to the package script, which rejects
+empty, local, example, GitHub Pages, staging, pilot, and preflight origins. With
+no origin configured, the signed app retains its existing manual setup. The
+current `hormuz-https-preflight.onrender.com` pilot is not an eligible release
+origin.
 See [the one sign-in path](MACOS_ONE_CLICK_SIGNIN.md) for the hosted activation
 and installed-app checks.
 
