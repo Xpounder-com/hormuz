@@ -18,6 +18,7 @@ export function SiteHeader({
   active: string;
   overlay?: boolean;
 }) {
+  const navigationActive = active === 'enterprise' ? 'plans' : active;
   return (
     <header className={`nav-shell${overlay ? ' nav-shell-overlay' : ''}`}>
       <nav className="site-nav" aria-label="Primary navigation">
@@ -30,8 +31,8 @@ export function SiteHeader({
             <CampaignLink
               key={item.key}
               href={sitePath(item.href)}
-              className={active === item.key ? 'nav-active' : undefined}
-              aria-current={active === item.key ? 'page' : undefined}
+              className={navigationActive === item.key ? 'nav-active' : undefined}
+              aria-current={active === item.key ? 'page' : navigationActive === item.key ? 'location' : undefined}
             >
               {item.label}
             </CampaignLink>
@@ -45,7 +46,7 @@ export function SiteHeader({
               <CampaignLink
                 key={item.key}
                 href={sitePath(item.href)}
-                aria-current={active === item.key ? 'page' : undefined}
+                aria-current={active === item.key ? 'page' : navigationActive === item.key ? 'location' : undefined}
               >
                 {item.label}
               </CampaignLink>
