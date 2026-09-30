@@ -2,10 +2,12 @@
 
 Status: the desktop enrollment contract, server-chosen profile, Mac first-run
 screen, Keychain session path, and automatic Hormuz-owned launcher are
-implemented and verified with local fixtures. The dedicated HTTPS service is
-live in maintenance mode with its Okta callbacks registered and its private
-hosted profile prepared. Credentials, initialized identity state, provider
-routing, desktop sign-in, and a signed release are **not deployed**.
+implemented and verified with local fixtures. The new HTTPS service was
+suspended on 2026-09-30 to avoid an additional paid Render instance. Its Okta
+callbacks remain registered, but it is not serving traffic. The existing paid
+provider pilot and PostgreSQL database are the no-new-resource path for a Mac
+development pilot. Desktop routes, real desktop sign-in, and a signed release
+are **not deployed**.
 
 Live Render check on 2026-09-30: `hormuz-desktop`
 (`srv-dauev8h7lnhs73b3vrvg`) has the assigned origin
@@ -28,7 +30,9 @@ mounted profile was copied into a private regular file on the new disk and
 validated by the deployed Linux loader with synthetic credentials. Identity
 state is not initialized and no service credentials were entered. Direct HTTPS
 checks still returned maintenance health and `503` for readiness, both
-callbacks, and desktop enrollment.
+callbacks, and desktop enrollment. The service is now suspended; Render's
+dashboard says suspended services are not billed. No second PostgreSQL database
+was created. The short period before suspension accrued a small charge.
 
 Live Render check on 2026-09-29: `hormuz-https-preflight`
 (`srv-daaqhpvavr4c73b7b0kg`) was serving `provider_pilot` and returned ready
@@ -50,13 +54,15 @@ existing manual connection path under Advanced.
 This path needs a canonical Hormuz HTTPS origin shipped with the signed Mac app.
 `https://usehormuz.github.io` remains the public site. Its static GitHub Pages
 hosting cannot run the enrollment, OIDC callback, session, and gateway routes.
-A dedicated Render web service now has the HTTPS `onrender.com` address above,
-without requiring a custom domain. The repository still has examples and a
-provider-free hosted staging profile; the assigned origin has not been placed
-in a signed Mac build or configured for live identity and inference.
+The new Render service has the HTTPS `onrender.com` address above, but is
+suspended. The existing paid preflight service is the current pilot origin. The
+repository still has examples and a provider-free hosted staging profile; no
+desktop origin has been placed in a signed Mac build or qualified for live
+desktop sign-in and inference.
 The release build must fail if its canonical origin is unset or uses an example,
 local, pilot, preflight, staging, or GitHub Pages host. A development build may
-inject a local fixture origin explicitly.
+explicitly inject a local fixture or the existing preflight origin for a bounded
+internal pilot. That does not qualify the preflight service for distribution.
 
 ## User flow
 
@@ -96,11 +102,15 @@ out; it never falls back to an arbitrary gateway or provider credential.
 ## Hosted entry point
 
 Use one canonical HTTPS origin for desktop enrollment, session APIs, gateway
-identity, usage, and governed inference in the first hosted release. This avoids
-passing an access token between unrelated origins. With the current domain
-setup, keep the public site on GitHub Pages and put those dynamic routes on a
-dedicated Render web service. Its assigned hostname is recorded above; release
-configuration and live sign-in qualification are still pending.
+identity, usage, and governed inference. This avoids passing an access token
+between unrelated origins. Keep the public site on GitHub Pages. To avoid a
+second recurring Render bill, first qualify the new desktop contract on the
+existing paid `hormuz-https-preflight` service and its existing PostgreSQL
+database. This is an internal pilot only. The service's preflight hostname is
+deliberately excluded from the signed distribution build; production release
+configuration and live sign-in qualification remain pending. Repurposing this
+same service for distribution would require explicit operational review and
+acceptance before changing that release gate.
 Before more than one customer uses that origin, provider
 routes, provider credentials, rate cards, and usage attribution must resolve
 from the authenticated organization rather than from a shared gateway default.
@@ -147,26 +157,27 @@ details so the user can identify the service receiving requests.
 
 1. Implement the desktop enrollment/profile routes and native one-button flow:
    complete in the local source and provider-free tests.
-2. Create a dedicated Render web service and use its assigned HTTPS
-   `onrender.com` origin for the sign-in and gateway API. Register that exact
-   origin's `/v1/auth/callback` and `/v1/admin/auth/callback` redirect URLs in
-   the existing Okta setup. Configure the service's private hosted profile with
-   the same `public_origin`, Okta issuer/client, tenant-scoped provider route,
-   and an explicit `desktop_defaults` alias for the intended client. Verify a
-   real browser callback and governed request on the new service before using
-   it in a release. The current provider-free staging and external pilot modes
-   are not a production service by a hostname change alone.
-   Provision its own persistent disk and operator profile; do not point a new
-   service at the existing pilot state or reuse its session master key. Keep
-   the service in maintenance while preparing state and Okta callbacks. A
-   provider-pilot deploy and a green `/ready` response are intermediate evidence,
-   not production qualification.
+2. Use the existing paid `hormuz-https-preflight` service and existing
+   PostgreSQL database for a one-person internal pilot. Both exact callback URLs
+   are already registered in Okta. The provider profile needs an explicit
+   `desktop_defaults` alias for its existing organization and approved Codex
+   route; adding this field leaves the initialized identity binding intact.
+   Review and back up the private profile, close inference in maintenance,
+   validate it with `provider-check`, deploy the reviewed code, and restore the
+   same `provider-pilot` scope. Verify a real browser callback and enrolled
+   Codex session. Do not add a service, database, disk, or provider credential.
+   A green `/ready` response is intermediate evidence, not production
+   qualification. Use an ad hoc development Mac build with the preflight origin
+   for this pilot; keep the signed distribution gate unchanged.
 3. Add browser selection for multiple managed memberships and client
    installation/version recovery if the hosted product requires those cases.
-4. Set the protected GitHub environment variable `HORMUZ_DESKTOP_ORIGIN` to
-   that verified Render origin, package and notarize a signed build, and verify
-   installed initial and returning sign-in plus a launched client request.
-   The public GitHub Pages site can then link to the reviewed Mac download.
+4. After the live pilot and production qualification, decide whether to
+   repurpose the existing paid service as the canonical hosted entry point.
+   Set the protected GitHub environment variable `HORMUZ_DESKTOP_ORIGIN` only
+   to a qualified production HTTPS origin, package and notarize a signed build,
+   and verify installed initial and returning sign-in plus a launched client
+   request. The public GitHub Pages site can then link to the reviewed Mac
+   download. Do not start another paid resource without a separate cost decision.
 
 ## Native implementation boundaries
 
