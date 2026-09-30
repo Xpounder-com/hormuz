@@ -49,6 +49,7 @@
 .open-source-option p { font-size: 12px; color: #5c6758; line-height: 1.7; max-width: 650px; margin: 0; }
 .open-source-option .button { flex-shrink: 0; font-size: 13px; }
 .pricing-cost-note { text-align: center; font-size: 12px; color: #5c6758; margin: 20px 0 0; }
+.landing-redesign .offer-grid.offer-grid-two { grid-template-columns: repeat(2,minmax(0,1fr)); }
 .footer-intro .footer-owner { font-size: 13px; margin: 20px 0 8px; color: #24392d; }
 .footer-owner a { text-decoration: underline; text-underline-offset: 3px; }
 .footer-column > span { font-size: 11px; line-height: 1.7; color: #5c6758; }
@@ -69,6 +70,7 @@
   .landing-redesign .conversion-offers .price-amount strong { font-size: 50px; }
 }
 @media (max-width: 800px) {
+  .landing-redesign .offer-grid.offer-grid-two { grid-template-columns: 1fr; }
   .hero-conversion-grid { grid-template-columns: 1fr; max-width: 590px; gap: 34px; }
   .hero-conversion-grid .landing-hero-copy { text-align: center; }
   .hero-conversion-grid h1 { font-size: clamp(45px,9vw,66px); }

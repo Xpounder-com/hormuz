@@ -4,8 +4,15 @@ import { REPOSITORY, sitePath, sourcePath } from '../../lib/site.mjs';
 import { PageFrame, PageHero } from '../components/PageFrame';
 import { CodeBlock } from '../components/CodeBlock';
 
-export const metadata = pageMetadata('Quickstart & downloads — Hormuz', 'Install the stable source release, run the real gateway without provider keys, and connect a supported AI client.', '/docs/');
+export const metadata = pageMetadata('Personal Optimizer setup & team downloads — Hormuz', 'Set up the free Personal Optimizer on a supported Mac, or install the gateway and connect a team companion.', '/docs/');
 
+const personalInstall = `git clone --branch v1.4.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
+cd hormuz
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install 'PyJWT[crypto]>=2.14,<3' '.[client,context]'
+hormuz context resources install
+hormuz personal qualify --json`;
 const quickstart = `git clone --branch v1.4.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
 cd hormuz
 python3 -m venv .venv
@@ -22,15 +29,16 @@ const references = [
 export default function DocsPage() {
   return <PageFrame active="docs">
     <PageHero eyebrow="Documentation" title={<>Install free.<br /><span>Make the first request count.</span></>}>
-      <p>Join an existing gateway with the Mac companion, or install the gateway for your organization. The provider-free demo is your first check; the client walkthrough takes you to real governed usage.</p>
-      <div className="hero-actions"><a className="button button-primary" href="#mac">Install for Mac ↓</a><CampaignLink className="button button-ghost" href="#quickstart">Install the gateway →</CampaignLink></div>
+      <p>Set up the Personal Optimizer on your own Mac, join an existing team gateway with the Mac companion, or install the gateway for your organization.</p>
+      <div className="hero-actions"><a className="button button-primary" href="#personal">Personal setup ↓</a><a className="button button-ghost" href="#mac">Team Mac app ↓</a></div>
     </PageHero>
     <div className="docs-shell">
       <aside className="docs-sidebar" aria-label="Documentation navigation">
-        <div><strong>Get started</strong><a href="#mac">Mac companion</a><a href="#first-request">First governed request</a><a href="#quickstart">Provider-free demo</a><a href="#downloads">Source & OCI versions</a><CampaignLink href={sitePath('/integrations/')}>Connect a client</CampaignLink><a href="#policy-tour">Try a policy change</a></div>
+        <div><strong>Get started</strong><a href="#personal">Personal Optimizer</a><a href="#mac">Team Mac companion</a><a href="#first-request">First governed request</a><a href="#quickstart">Provider-free demo</a><a href="#downloads">Source & OCI versions</a><CampaignLink href={sitePath('/integrations/')}>Connect a client</CampaignLink><a href="#policy-tour">Try a policy change</a></div>
         <div><strong>Go deeper</strong>{references.map(([tag, title, , path]) => <a key={tag} href={sourcePath(path)}>{title} ↗</a>)}<a href={sourcePath('SUPPORT.md')}>Support matrix ↗</a></div>
       </aside>
       <article className="docs-content">
+        <section id="personal" className="docs-section"><p className="section-label">Personal Optimizer · $0 Hormuz fee</p><h2>Keep your coding agent. See what Hormuz improves.</h2><p className="docs-lead">The current personal release supports terminal use on Apple Silicon Macs running macOS 14 or later, with Codex CLI 0.148.0. Direct mode uses your own OpenAI API credential, stored in the OS keyring. It needs no team gateway, organization, or Hormuz account.</p><p>Install Python 3.11 or newer and the pinned Codex CLI, then install the published v1.4.0 source and run the provider-free qualification:</p><CodeBlock code={personalInstall} label="Personal Optimizer setup" /><p>After qualification, follow the <a href={sourcePath('docs/PERSONAL_OPTIMIZER.md') + '#connect-directly'}>direct connection instructions ↗</a> to add your provider credential and launch Codex. Run <code>hormuz personal benefit --profile personal-codex</code> to see eligible and transformed traffic; <code>hormuz personal off --profile personal-codex</code> restores the ordinary request path.</p><div className="docs-callout"><span aria-hidden="true">i</span><p><strong>Cost and scope:</strong> Hormuz has no personal software fee or checkout. Your provider may bill API usage. The initial automatic transform applies only to supported repetitive <code>rg --files</code> results; byte and token estimates are not a provider bill or a guaranteed saving. The signed Mac app below is the team gateway companion, while this direct personal path runs from the terminal.</p></div></section>
         <section id="mac" className="docs-section"><p className="section-label">Join your existing team gateway</p><h2>Your connection. Your usage. On your Mac.</h2><p className="docs-lead">Hormuz 1.3.0 supports Apple Silicon on macOS 14 or later. The signed, notarized archive includes its context helper and tokenizer resources; no separate Python installation is needed.</p><div className="resource-actions"><a className="button button-primary" href={REPOSITORY + '/releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip'}>Download Hormuz 1.3.0 for Mac ↓</a><a href={REPOSITORY + '/releases/tag/v1.3.0'}>Release & verification evidence ↗</a></div><ol className="numbered-list"><li>Extract the archive and move Hormuz.app to Applications.</li><li>Get your gateway URL, organization, and unique identity or invitation from your administrator. The app does not provision a hosted gateway.</li><li>Connect and sign in using the gateway’s configured identity flow. Review and save the supported client launcher.</li><li>Launch your coding client through Hormuz, choose an approved model, and make one small authorized request. Inspect your usage and connection state.</li></ol><p>Context optimization is Off by default under <strong>Client → Context optimization</strong>. It changes the next request on this device and connection. <CampaignLink href={sitePath('/demo/#compaction')}>Try exactly what it does →</CampaignLink></p><details className="disclosure"><summary>Verify the Mac archive</summary><p>Expected SHA-256:</p><code className="hash">77d463869f35c5bd4c9bae0548ce5e66ddc49fdb565f81d22ac36cd01d0b599d</code><p>Compare with <a href={REPOSITORY + '/releases/download/v1.3.0/SHA256SUMS.txt'}>the published checksums</a>. Keep normal Gatekeeper checks enabled. Intel Macs are unsupported. Upgrades use versioned archives; there is no automatic updater.</p></details><div className="docs-callout"><span aria-hidden="true">i</span><p><strong>No team gateway yet?</strong> Follow the source quickstart below or <CampaignLink href={sitePath('/enterprise/')}>choose help setting it up</CampaignLink>. A download alone does not create a provider account or a team connection.</p></div></section>
         <section id="quickstart" className="docs-section">
           <p className="section-label">01 / Install and run</p><h2>The complete first-run path.</h2>

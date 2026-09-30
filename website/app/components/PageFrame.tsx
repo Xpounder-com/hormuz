@@ -6,6 +6,7 @@ import { commercial } from '../../lib/commercial.mjs';
 import { PassageLines } from './Brand';
 
 const sections: Record<string, [string, string][]> = {
+  plans: [['Options', '#offers'], ['How payment works', '#details']],
   enterprise: [['Pricing', '#plans'], ['Support', '#support'], ['Compare', '#comparison'], ['90-day process', '#pilot'], ['Agreed payments', '#payment']],
   demo: [['The $1M example', '#experience'], ['Questions', '#faq'], ['Technical evidence', '#recording']],
   security: [['At a glance', '#status'], ['Data handling', '#data-handling'], ['Controls', '#controls'], ['Open gates', '#gates']],
