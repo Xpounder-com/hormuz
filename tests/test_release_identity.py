@@ -27,7 +27,7 @@ class ReleaseIdentityTests(unittest.TestCase):
     def test_current_package_runtime_and_container_identity_are_consistent(self) -> None:
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         project = pyproject["project"]
-        expected_version = "1.3.0"
+        expected_version = "1.4.0"
         self.assertEqual(project["version"], expected_version)
         self.assertEqual(hormuz.__version__, expected_version)
         self.assertNotIn("Development Status :: 3 - Alpha", project["classifiers"])

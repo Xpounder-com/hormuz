@@ -1,9 +1,9 @@
 # Native Windows connected development companion
 
 The v1.4.0 foundation for [#331](https://github.com/Xpounder-com/hormuz/issues/331)
-now integrates #339/#340 at unpublished `1.5.0-dev.1`. The published product
-remains `1.2.0`. This is an unsigned development executable, not a qualified
-installer. The build target is Windows 10/11 x64 (`x86_64-pc-windows-msvc`);
+now integrates #339/#340 at unpublished `1.5.0-dev.1`. This is an unsigned
+development executable, not a qualified installer. The build target is
+Windows 10/11 x64 (`x86_64-pc-windows-msvc`);
 Windows ARM64 is not qualified. The workspace statically links the MSVC C runtime
 and CI checks PE imports for an undeclared Visual C++ redistributable dependency.
 
