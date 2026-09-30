@@ -7,7 +7,8 @@ AI sessions. The Python gateway remains server-side.
 
 ## Planned versions
 
-The current published product release is v1.4.0. These additive desktop
+The current published core release is v1.4.0; the latest notarized Mac download
+remains v1.3.0. These additive desktop
 improvements use later minor-release targets. A target is neither a published
 release nor permission to change existing package/version identities. Patch
 releases are reserved for compatible fixes after a feature release.
@@ -80,8 +81,8 @@ regression alarms for the measured synthetic scope, not performance promises.
 Issue #334 adds a separate unpublished `1.5.0-dev.1`
 [Rust transport](../clients/rust/transport/README.md) with one bounded runtime,
 verified TLS, request cancellation and no automatic replay after an ambiguous
-outcome. It is not loaded by the shipped app. The gateway and app version are
-v1.4.0; a library test pass is not a connected-companion or release claim.
+outcome. It is not loaded by the shipped app. The gateway package is v1.4.0;
+a library test pass is not a connected-companion or release claim.
 
 Issue #335 adds the unpublished `1.5.0-dev.1`
 [session controller](../clients/rust/session/README.md): bounded browser
@@ -141,7 +142,7 @@ implementation and test boundaries. Source integration and synthetic CI do not
 complete #339/#340 or #331 manual Windows acceptance: login/helper adapters,
 authorized-account end-to-end proof, native desktop acceptance, connected
 measurements, signing and clean installation remain separate. The Windows
-package is `1.5.0-dev.1`; the published product is v1.4.0.
+package is `1.5.0-dev.1`; the published core package is v1.4.0.
 
 Issue #341 adds the separate unpublished `1.6.0-dev.1`
 [governed relay](../clients/rust/relay/README.md). Its source tests exercise

@@ -9,8 +9,9 @@ and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md).
 
 ## v1.4.0 native client baseline release
 
-Hormuz v1.4.0 aligns the package, gateway image and Mac companion release
-identity and publishes bounded native-client footprint regression evidence.
+Hormuz v1.4.0 aligns the package and gateway image release identity and
+publishes bounded native-client footprint regression evidence. The latest
+notarized Mac download remains v1.3.0.
 The Windows development shell remains an unsigned preview; manual platform
 acceptance is tracked in [#331](https://github.com/Xpounder-com/hormuz/issues/331).
 See the [v1.4.0 release note](releases/v1.4.0-native-baseline.md) for installation
