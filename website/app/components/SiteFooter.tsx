@@ -28,7 +28,8 @@ export function SiteFooter() {
 
       <div className="footer-column">
         <strong>Evaluate</strong>
-        <CampaignLink href={sitePath('/enterprise/')}>Pricing & pilot</CampaignLink>
+        <CampaignLink href={sitePath('/plans/')}>Plans and pricing</CampaignLink>
+        <CampaignLink href={sitePath('/enterprise/')}>Team services</CampaignLink>
         <CampaignLink href={sitePath('/security/')}>Security & boundaries</CampaignLink>
         <CampaignLink href={sitePath('/resources/')}>Buyer & project resources</CampaignLink>
         <CampaignLink href={sitePath('/brand/')}>Brand & assets</CampaignLink>

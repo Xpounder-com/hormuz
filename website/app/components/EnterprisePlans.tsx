@@ -7,17 +7,17 @@ export function EnterprisePlans() {
   return <section className="section offer-section" id="plans" aria-labelledby="plans-title">
     <div className="section-heading">
       <p className="section-label">THE PRICE. THE SCOPE. THE NEXT STEP.</p>
-      <h2 id="plans-title">Install free.<br />Choose the help you need.</h2>
-      <p className="offer-intro">The controls stay open source. Add ongoing support or a guided pilot for integration, evaluation, and operating help.</p>
+      <h2 id="plans-title">Run the team gateway free.<br />Choose the help you need.</h2>
+      <p className="offer-intro">The team controls stay open source. Add ongoing support or a guided pilot for integration, evaluation, and operating help.</p>
     </div>
     <div className="offer-grid conversion-offers">
       <article className="offer-card">
-        <p className="section-label">01 / INSTALL AND EXPLORE</p><h3>Open source</h3>
+        <p className="section-label">01 / INSTALL AND EXPLORE</p><h3>Team gateway</h3>
         <PriceAmount amount="$0" period="Software license · Apache-2.0" />
-        <p>Use the product with your own gateway and provider accounts. Start with a local demo or join your team on Mac.</p>
-        <ul><li>Gateway, policy, model access, and budgets</li><li>Token, estimated-cost, and outcome reports</li><li>Mac companion and local context optimization</li><li>Documentation and community support</li></ul>
+        <p>Operate a gateway with your own provider accounts. Start with a local demo or join an existing team gateway on Mac.</p>
+        <ul><li>Gateway, policy, model access, and budgets</li><li>Token, estimated-cost, and outcome reports</li><li>Mac companion for configured team gateways</li><li>Documentation and community support</li></ul>
         <CampaignLink className="button button-primary" href={sitePath('/docs/')}>Install free <span aria-hidden="true">↗</span></CampaignLink>
-        <p className="field-hint">No card required. You operate your infrastructure and pay your providers.</p>
+        <p className="field-hint">No card required. You operate your infrastructure and pay your providers. <CampaignLink href={sitePath('/plans/#offers')}>Using Hormuz personally? See the free personal path →</CampaignLink></p>
       </article>
       <article className="offer-card offer-featured">
         <p className="section-label">02 / KEEP MOVING</p>
