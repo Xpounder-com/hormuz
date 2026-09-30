@@ -134,6 +134,18 @@
       "swift_message": "The local context optimization helper is unavailable. Save a new connector after reinstalling Hormuz.",
       "native_message": "The local context optimization helper is unavailable. Save a new connector after reinstalling Hormuz.",
       "note": ""
+    },
+    {
+      "code": "desktopProfileChanged",
+      "swift_message": "Your team's Hormuz settings changed. Sign out and connect again to update this client.",
+      "native_message": "Your team's Hormuz settings changed. Sign out and connect again to update this client.",
+      "note": ""
+    },
+    {
+      "code": "desktopUnavailable",
+      "swift_message": "Hormuz sign-in is not configured for this app. Use Advanced to connect to a self-hosted gateway.",
+      "native_message": "Hormuz sign-in is not configured for this app. Use Advanced to connect to a self-hosted gateway.",
+      "note": ""
     }
   ]
 }
