@@ -152,7 +152,8 @@ signed supported digest, attestations, or semantic-version GHCR tag. The
 corrected public-registry gate uses the next immutable version, `v0.1.3`,
 rather than moving or reusing `v0.1.2`.
 
-Verify the current v1.3.0 signed digest anonymously:
+Verify the prior v1.3.0 signed digest anonymously. Each newer release page
+records its own signed digest and exact workflow evidence:
 
 ```bash
 image="ghcr.io/xpounder-com/hormuz@sha256:005eafa1bf576f906c54463fc8ea44cb5308a6792dae0e52c02eaedff7f2f561"
@@ -222,7 +223,7 @@ entries remain historical evidence and must not be deleted or represented as
 revoked certificates. A verifier configured with a different expected
 identity must fail closed before the artifact is admitted.
 
-The current `v1.3.0` release is
+The prior `v1.3.0` release is
 `sha256:005eafa1bf576f906c54463fc8ea44cb5308a6792dae0e52c02eaedff7f2f561`.
 The prior `v1.2.0` release is
 `sha256:2f9c619c184139032c8af6782a2229b56e5f28980bfded5c5da14e620577b4b1`,

@@ -18,9 +18,9 @@ written to the usage database.
 
 > [!IMPORTANT]
 > Hormuz 1.0 established the stable CLI and policy/evidence contracts. Hormuz
-> 1.3 preserves those contracts and adds the terminal-first Personal Optimizer,
-> its adapter SDK, and Aider support on top of the existing client-side context
-> optimization and Apple Silicon companion. The original
+> 1.4 preserves those contracts and the terminal-first Personal Optimizer,
+> its adapter SDK, and Aider support. It also carries the native-client source
+> foundation and measured footprint regression baselines. The original
 > release qualification included five isolated internal repetitions of one exact
 > offline policy workflow plus exact-byte candidate custody. That bounded result
 > does not prove external human usability, blanket production fitness, customer
@@ -59,7 +59,7 @@ The provider-free demo exercises the real HTTP gateway, policy, redaction,
 request-attempt, and SQLite evidence paths with disposable loopback providers:
 
 ~~~bash
-git clone --branch v1.3.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
+git clone --branch v1.4.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
 cd hormuz
 python3 -m venv .venv
 source .venv/bin/activate
@@ -67,7 +67,7 @@ python -m pip install --editable .
 hormuz demo
 ~~~
 
-The commands above select the stable v1.3.0 source tag. Installation downloads
+The commands above select the stable v1.4.0 source tag. Installation downloads
 Python dependencies; the demo itself uses only disposable local loopback
 providers. No OpenAI or Anthropic account is required. A successful run reports:
 
@@ -100,7 +100,7 @@ shows content-free local benefit measurements. Unsupported or non-beneficial
 traffic follows the ordinary request path.
 
 ~~~bash
-python -m pip install 'hormuz[client,context]'
+python -m pip install 'PyJWT[crypto]>=2.14,<3' 'hormuz[client,context]'
 hormuz context resources install
 hormuz personal contract --json
 hormuz personal qualify --json
@@ -351,7 +351,7 @@ concurrency, rollback, and compatibility behavior.
 | --- | --- | --- |
 | Source + SQLite | Local evaluation and one-process operation | Not a shared or HA store |
 | [Signed OCI image](docs/OCI.md) | Version-matched Linux `amd64` reference | Digest is the artifact contract; no mutable `latest` tag |
-| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | Developer ID signed and notarized [v1.3.0 download](https://github.com/Xpounder-com/hormuz/releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip); [checksums and qualification evidence](https://github.com/Xpounder-com/hormuz/releases/tag/v1.3.0); Intel Macs are unsupported |
+| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | Latest notarized download remains [v1.3.0](https://github.com/Xpounder-com/hormuz/releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip); [checksums and qualification evidence](https://github.com/Xpounder-com/hormuz/releases/tag/v1.3.0); no v1.4 Mac archive is published; Intel Macs are unsupported |
 | [Docker Compose](deploy/compose/README.md) | Provider-free single-VM evaluation or pilot | One gateway replica; not HA or production certification |
 | [Kubernetes + Helm](deploy/kubernetes/README.md) | Bounded multi-replica reference | Customer-operated PostgreSQL and ingress; not general HA/DR certification |
 
@@ -390,7 +390,7 @@ python3 -m hormuz contract manifest
 
 | Status | Current boundary |
 | --- | --- |
-| Stable public contract | v1.3.0 preserves the v1.0 CLI and policy/evidence contracts and adds the Personal Optimizer, adapter SDK, and Aider integration. |
+| Stable public contract | v1.4.0 preserves the v1.0 CLI and policy/evidence contracts and the v1.3 Personal Optimizer, adapter SDK, and Aider integration. The Windows shell remains an unqualified development preview. |
 | Production certification | None claimed; deployment fitness remains operator- and environment-specific. |
 | Verified references | Only the exact profiles documented in [SUPPORT.md](SUPPORT.md) and their retained evidence. |
 | Unfinished | Independent external onboarding, general production HA/DR, cloud certification, complete provider-account coverage, and independent review. |
