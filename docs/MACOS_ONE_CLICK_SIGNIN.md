@@ -3,8 +3,9 @@
 Status: the desktop enrollment contract, server-chosen profile, Mac first-run
 screen, Keychain session path, and automatic Hormuz-owned launcher are
 implemented and verified with local fixtures. The dedicated HTTPS service is
-live in maintenance mode; desktop sign-in, OIDC/provider configuration, and a
-signed release are **not deployed**.
+live in maintenance mode with its Okta callbacks registered and its private
+hosted profile prepared. Credentials, initialized identity state, provider
+routing, desktop sign-in, and a signed release are **not deployed**.
 
 Live Render check on 2026-09-30: `hormuz-desktop`
 (`srv-dauev8h7lnhs73b3vrvg`) has the assigned origin
@@ -16,6 +17,18 @@ and `HORMUZ_HOSTED_MODE=maintenance`. Direct HTTPS checks returned `200` with
 `status=maintenance` and `inference_enabled=false` at `/health`, and `503` at
 `/ready`, `/console`, both auth callbacks, and a model route. This is a closed
 entry point, not a functioning Mac sign-in or production inference service.
+
+On 2026-09-30, the existing Okta app **Hormuz Hosted Login (non-production)**
+retained both preflight callbacks and saved the dedicated service's exact
+`/v1/auth/callback` and `/v1/admin/auth/callback` URLs. Its PKCE requirement
+remained enabled. Render deploy `dep-daufig6k1f9s73bl3lj0` succeeded from the
+same `dde4dbf245ee0c47d796f0d4ebd61ed6e7cec0ee` source revision after
+the six-field `hormuz-hosted.json` and `HORMUZ_CONFIG` path were saved. The
+mounted profile was copied into a private regular file on the new disk and
+validated by the deployed Linux loader with synthetic credentials. Identity
+state is not initialized and no service credentials were entered. Direct HTTPS
+checks still returned maintenance health and `503` for readiness, both
+callbacks, and desktop enrollment.
 
 Live Render check on 2026-09-29: `hormuz-https-preflight`
 (`srv-daaqhpvavr4c73b7b0kg`) was serving `provider_pilot` and returned ready
