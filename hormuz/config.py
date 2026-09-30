@@ -293,6 +293,7 @@ class SessionBrokerConfig:
     onboarding_enabled: bool = False
     console_enabled: bool = False
     policy_impact_enabled: bool = False
+    desktop_defaults: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

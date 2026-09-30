@@ -24,8 +24,8 @@ struct EdgeConnectionView: View {
             } else if showSetup {
                 setup
             } else {
-                Text("Connect with your team’s gateway and organization details.").foregroundStyle(.secondary)
-                Button("Connect to Hormuz") { navigation.open(.setup) }
+                Text("Sign in once. Hormuz will choose your organization and approved model.").foregroundStyle(.secondary)
+                Button("Continue with Hormuz") { navigation.open(.setup) }
                     .buttonStyle(EdgePrimaryButtonStyle(scale: scale))
             }
             if connection.isBusy {
@@ -67,6 +67,23 @@ struct EdgeConnectionView: View {
 
     private var setup: some View {
         VStack(alignment: .leading, spacing: 14 * scale) {
+            Text("Sign in once. Hormuz will choose your organization and approved model.").foregroundStyle(.secondary)
+            if connection.desktopSignInAvailable {
+                Button("Continue with Hormuz", action: connection.signInDesktop)
+                    .buttonStyle(EdgePrimaryButtonStyle(scale: scale))
+                    .disabled(connection.isBusy)
+            } else {
+                Label("Hosted sign-in is not configured in this build.", systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+            }
+            DisclosureGroup("Advanced: self-hosted gateway", isExpanded: $advanced) {
+                manualSetup.padding(.top, 10 * scale)
+            }
+        }.disabled(connection.isBusy)
+    }
+
+    private var manualSetup: some View {
+        VStack(alignment: .leading, spacing: 14 * scale) {
             Text("Use the details provided by your team.").foregroundStyle(.secondary)
             field("Gateway", text: $connection.gateway, prompt: "https://gateway.example.com")
             field("Organization", text: $connection.organization, prompt: "Organization ID")
@@ -77,19 +94,15 @@ struct EdgeConnectionView: View {
                 }.labelsHidden().pickerStyle(.menu)
             }
             field("Model alias", text: $connection.model, prompt: "Approved by your team")
-            DisclosureGroup("Advanced settings", isExpanded: $advanced) {
-                VStack(alignment: .leading, spacing: 12 * scale) {
-                    field("OIDC issuer", text: $connection.issuer, prompt: "Optional")
-                    Toggle("Allow HTTP for local development", isOn: $connection.allowLoopbackHTTP)
-                    Text("Loopback only. Team gateways require HTTPS.").foregroundStyle(.secondary)
-                }.padding(.top, 10 * scale)
-            }
+            field("OIDC issuer", text: $connection.issuer, prompt: "Optional")
+            Toggle("Allow HTTP for local development", isOn: $connection.allowLoopbackHTTP)
+            Text("Loopback only. Team gateways require HTTPS.").foregroundStyle(.secondary)
             Text("Sign in securely in your browser. Hormuz never collects your password.")
                 .font(.system(size: 11 * scale)).foregroundStyle(.secondary)
             Button("Sign in with browser", action: connection.signIn)
                 .buttonStyle(EdgePrimaryButtonStyle(scale: scale))
                 .disabled(connection.gateway.isEmpty || connection.organization.isEmpty || connection.model.isEmpty)
-        }.disabled(connection.isBusy)
+        }
     }
 
     private func field(_ title: String, text: Binding<String>, prompt: String) -> some View {

@@ -30,6 +30,16 @@ mkdir -p "$HORMUZ_BUNDLE/Contents/Resources/ContextHelper"
 mkdir -p "$HORMUZ_BUNDLE/Contents/Helpers"
 cp "$HORMUZ_BUILD_DIR/Hormuz" "$HORMUZ_BINARY"
 cp "$HORMUZ_MAC_ROOT/Resources/Info.plist" "$HORMUZ_BUNDLE/Contents/Info.plist"
+if [ -n "${HORMUZ_DESKTOP_ORIGIN:-}" ]; then
+  python3 - "$HORMUZ_DESKTOP_ORIGIN" <<'PY'
+import sys
+from urllib.parse import urlsplit
+url = urlsplit(sys.argv[1])
+if (url.scheme != "https" and not (url.scheme == "http" and url.hostname in {"127.0.0.1", "localhost", "::1"})) or not url.hostname or url.username or url.password or url.path or url.query or url.fragment:
+    raise SystemExit("HORMUZ_DESKTOP_ORIGIN must be an HTTPS or loopback origin")
+PY
+  plutil -replace HormuzDesktopOrigin -string "$HORMUZ_DESKTOP_ORIGIN" "$HORMUZ_BUNDLE/Contents/Info.plist"
+fi
 cp "$HORMUZ_MAC_ROOT/Resources/Hormuz.icns" "$HORMUZ_BUNDLE/Contents/Resources/Hormuz.icns"
 cp "$HORMUZ_MAC_ROOT/Resources/HormuzMark.png" "$HORMUZ_MAC_ROOT/Resources/HormuzMenuMark.png" "$HORMUZ_BUNDLE/Contents/Resources/"
 cp "$HORMUZ_MAC_ROOT/Resources/hormuz-context-dev" "$HORMUZ_CONTEXT_HELPER"

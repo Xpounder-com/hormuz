@@ -484,12 +484,14 @@ jobs:
           HORMUZ_UNSIGNED_PAYLOAD: ${{ runner.temp }}/hormuz-unsigned-payload
           HORMUZ_SOURCE_COMMIT: ${{ github.sha }}
           HORMUZ_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HORMUZ_DESKTOP_ORIGIN: ${{ vars.HORMUZ_DESKTOP_ORIGIN }}
         run: |
           set -euo pipefail
           umask 077
           for name in HORMUZ_CERTIFICATE_BASE64 HORMUZ_CERTIFICATE_PASSWORD HORMUZ_NOTARY_KEY_BASE64 HORMUZ_NOTARY_KEY_ID HORMUZ_NOTARY_ISSUER_ID; do
             test -n "${!name}"
           done
+          test -n "$HORMUZ_DESKTOP_ORIGIN"
           HORMUZ_KEYCHAIN="$RUNNER_TEMP/hormuz-signing.keychain-db"
           HORMUZ_CERTIFICATE="$RUNNER_TEMP/developer-id.p12"
           HORMUZ_NOTARY_KEY="$RUNNER_TEMP/AuthKey_$HORMUZ_NOTARY_KEY_ID.p8"
@@ -534,6 +536,7 @@ jobs:
             --bundle-id "$HORMUZ_BUNDLE_ID"
             --version "$HORMUZ_VERSION"
             --build "$HORMUZ_BUILD_NUMBER"
+            --desktop-origin "$HORMUZ_DESKTOP_ORIGIN"
             --prebuilt-binary "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz"
             --context-helper-directory "$HORMUZ_UNSIGNED_PAYLOAD/context-helpers"
             --tokenizer-cache "$HORMUZ_UNSIGNED_PAYLOAD/context-tokenizers"

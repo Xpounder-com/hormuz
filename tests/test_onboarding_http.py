@@ -69,6 +69,27 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
         self.assertEqual(status, 200)
         return pair
 
+    def test_desktop_sign_in_uses_single_managed_organization(self):
+        self.config = replace(self.config, session_broker=replace(
+            self.config.session_broker,
+            desktop_defaults={"customer-a": {"codex": "safe-openai"}},
+        ))
+        self.gateway.config = self.config
+        self.gateway.session_broker.config = self.config
+        secret = "desktop-enrollment-secret-" + "s" * 40
+        status, _, enrollment = self.request("POST", "/v1/desktop/enrollments", {
+            "client": "codex", "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 201, enrollment)
+        values, cookie = self.accept_in_browser(enrollment)
+        self.assertEqual(self.callback(values, cookie)[0], 200)
+        status, _, reply = self.request("POST", "/v1/desktop/enrollments/" + enrollment["enrollment_id"] + "/redeem", {
+            "enrollment_secret": secret,
+        })
+        self.assertEqual(status, 200, reply)
+        self.assertEqual(reply["desktop_profile"]["organization_id"], "customer-a")
+        self.assertEqual(reply["desktop_profile"]["model_alias"], "safe-openai")
+
     def test_new_member_can_use_gateway_and_personal_stats_then_operator_removes_access(self):
         pair = self.join_team()
         self.assertEqual(self.idp.userinfo_requests, 0)

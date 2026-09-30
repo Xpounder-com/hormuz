@@ -105,6 +105,78 @@ class SessionBroker:
         )
         return enrollment, login_url
 
+    def create_desktop_enrollment(
+        self, *, client_name: str, enrollment_secret: str
+    ) -> tuple[Enrollment, str]:
+        """Defer organization selection until the browser has identified a person."""
+        if client_name not in _SUPPORTED_CLIENTS:
+            raise SessionBrokerError("unsupported_client")
+        if not self.config.session_broker.desktop_defaults:
+            raise SessionBrokerError("desktop_not_configured")
+        login_issuers = [
+            issuer for issuer in self.config.oidc_issuers.values() if issuer.login is not None
+        ]
+        if len(login_issuers) != 1:
+            raise SessionBrokerError("desktop_issuer_unavailable")
+        issuer = login_issuers[0]
+        # Managed onboarding currently binds an enrollment to one organization
+        # before OIDC. A tenant-scoped gateway has exactly one such organization.
+        if self.config.session_broker.onboarding_enabled:
+            organizations = self.directory.organizations_for_issuer(issuer.issuer)
+            if len(organizations) != 1:
+                raise SessionBrokerError("desktop_membership_selection_unavailable")
+            organization_id = organizations[0]
+        else:
+            organization_id = None
+        enrollment = self.store.create_enrollment(
+            issuer=issuer.issuer,
+            client_name=client_name,
+            enrollment_secret=enrollment_secret,
+            organization_id=organization_id,
+        )
+        login_url = (
+            self.config.session_broker.public_base_url
+            + "/v1/auth/login?"
+            + urllib.parse.urlencode({"enrollment": enrollment.enrollment_id})
+        )
+        return enrollment, login_url
+
+    def desktop_profile(self, access_token: str) -> dict[str, object]:
+        try:
+            identity = self.authenticate(access_token)
+        except AuthenticationError as error:
+            raise SessionBrokerError(error.code) from error
+        if len(identity.allowed_clients) != 1:
+            raise SessionBrokerError("desktop_client_unavailable")
+        client = identity.allowed_clients[0]
+        alias = self.config.session_broker.desktop_defaults.get(identity.organization_id, {}).get(client)
+        protocol = "openai" if client == "codex" else "anthropic"
+        route = self.config.model_routes.get(alias or "")
+        policy = self.config.resolved_policy(identity)
+        if (
+            route is None or route.protocol != protocol
+            or policy.allowed_clients is not None and client not in policy.allowed_clients
+            or policy.allowed_models is not None and alias not in policy.allowed_models
+        ):
+            raise SessionBrokerError("desktop_default_unavailable")
+        version_input = json.dumps({
+            "organization": identity.organization_id,
+            "client": client,
+            "model": alias,
+            "allowed_clients": policy.allowed_clients,
+            "allowed_models": policy.allowed_models,
+        }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return {
+            "schema_id": "hormuz.desktop-profile",
+            "schema_version": 1,
+            "gateway_origin": self.config.session_broker.public_base_url,
+            "organization_id": identity.organization_id,
+            "allowed_clients": [client],
+            "client": client,
+            "model_alias": alias,
+            "profile_version": int(hashlib.sha256(version_input).hexdigest()[:15], 16) or 1,
+        }
+
     def begin_authorization(self, enrollment_id: str) -> tuple[str, str]:
         state = secrets.token_urlsafe(32)
         browser_cookie = secrets.token_urlsafe(32)

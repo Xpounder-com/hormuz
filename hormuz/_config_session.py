@@ -69,6 +69,17 @@ def build_session_broker(raw: dict[str, Any], *, source_path: Path) -> SessionBr
             raise ConfigError("session broker trusted_parent_path must be an absolute path")
         trusted_parent_path = trusted_path
     access_ttl = _integer(item.get("access_ttl_seconds", 600), f"{prefix}.access_ttl_seconds", minimum=300, maximum=900)
+    defaults_raw = _object(item.get("desktop_defaults", {}), f"{prefix}.desktop_defaults")
+    desktop_defaults: dict[str, dict[str, str]] = {}
+    for organization_id, clients_raw in defaults_raw.items():
+        organization = _string(organization_id, f"{prefix}.desktop_defaults.organization")
+        clients = _object(clients_raw, f"{prefix}.desktop_defaults.{organization}")
+        if not clients or set(clients) - {"codex", "claude-code"}:
+            raise ConfigError("desktop defaults require supported client names")
+        desktop_defaults[organization] = {
+            client: _string(alias, f"{prefix}.desktop_defaults.{organization}.{client}")
+            for client, alias in clients.items()
+        }
     return SessionBrokerConfig(
         enabled=True,
         public_base_url=public_url,
@@ -82,6 +93,7 @@ def build_session_broker(raw: dict[str, Any], *, source_path: Path) -> SessionBr
         onboarding_enabled=_boolean(item.get("onboarding_enabled", False), f"{prefix}.onboarding_enabled"),
         console_enabled=_boolean(item.get("console_enabled", False), f"{prefix}.console_enabled"),
         policy_impact_enabled=_boolean(item.get("policy_impact_enabled", False), f"{prefix}.policy_impact_enabled"),
+        desktop_defaults=desktop_defaults,
     )
 
 
@@ -102,6 +114,14 @@ def validate_session_references(config: GatewayConfig) -> None:
         raise ConfigError("session database must be separate from usage storage")
     if broker.allow_insecure_http and config.ingress.mode != "local":
         raise ConfigError("insecure session login is restricted to local ingress")
+    for organization, clients in broker.desktop_defaults.items():
+        if organization not in config.organization_ids and not broker.onboarding_enabled:
+            raise ConfigError("desktop default organization is not configured")
+        for client, alias in clients.items():
+            route = config.model_routes.get(alias)
+            protocol = "openai" if client == "codex" else "anthropic"
+            if route is None or route.protocol != protocol:
+                raise ConfigError("desktop default model must have a compatible route")
     for issuer in issuers:
         if issuer.login.client_id in issuer.audiences:
             raise ConfigError("OIDC login client_id must differ from gateway resource audiences")

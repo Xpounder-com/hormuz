@@ -8,6 +8,20 @@ private struct Enrollment: Decodable {
     let pollIntervalSeconds: Int
 }
 
+private struct DesktopRedemption: Decodable {
+    let accessToken: String
+    let refreshToken: String
+    let tokenType: String
+    let accessExpiresAt: Date
+    let sessionExpiresAt: Date
+    let desktopProfile: DesktopProfile
+
+    func credentialPair() -> CredentialPair {
+        CredentialPair(accessToken: accessToken, refreshToken: refreshToken, tokenType: tokenType,
+                       accessExpiresAt: accessExpiresAt, sessionExpiresAt: sessionExpiresAt)
+    }
+}
+
 public actor SessionController {
     public let directory: PrivateDirectory
     private let store: any SessionStore
@@ -91,6 +105,77 @@ public actor SessionController {
         throw ClientError.loginTimedOut
     }
 
+    public func signInDesktop(origin: String, client: AIClient, allowLoopbackHTTP: Bool = false,
+                              openBrowser: @Sendable (URL) async throws -> Void) async throws {
+        let origin = try ConnectionProfile.normalizeGateway(origin, allowLoopbackHTTP: allowLoopbackHTTP)
+        let lock = try await directory.lock()
+        defer { lock.unlock() }
+        guard try store.load() == nil else { throw ClientError.alreadySignedIn }
+        let secret = try Self.enrollmentSecret()
+        let enrollmentBody = try JSONSerialization.data(withJSONObject: [
+            "client": client.rawValue, "enrollment_secret": secret,
+        ])
+        let reply = try await transport.request(origin: origin, allowLoopbackHTTP: allowLoopbackHTTP,
+            path: "/v1/desktop/enrollments", body: enrollmentBody, accessToken: nil)
+        guard reply.status == 201 else { throw ClientError.loginRejected }
+        let enrollment = try reply.decode(Enrollment.self)
+        guard enrollment.enrollmentId.range(of: #"\A[A-Za-z0-9_-]{32}\z"#, options: .regularExpression) != nil,
+              (1...10).contains(enrollment.pollIntervalSeconds), enrollment.expiresAt > now(),
+              let loginURL = URL(string: enrollment.loginUrl),
+              loginURL.absoluteString == origin + "/v1/auth/login?enrollment=" + enrollment.enrollmentId
+        else { throw ClientError.invalidResponse }
+        try Task.checkCancellation()
+        try await openBrowser(loginURL)
+        guard let pollingMilliseconds = Self.enrollmentPollingMilliseconds(
+            expiresAt: enrollment.expiresAt, now: now()
+        ) else { throw ClientError.loginTimedOut }
+        let deadline = ContinuousClock.now + .milliseconds(pollingMilliseconds)
+        while ContinuousClock.now < deadline {
+            try Task.checkCancellation()
+            let body = try JSONSerialization.data(withJSONObject: ["enrollment_secret": secret])
+            let result = try await transport.request(origin: origin, allowLoopbackHTTP: allowLoopbackHTTP,
+                path: "/v1/desktop/enrollments/" + enrollment.enrollmentId + "/redeem",
+                body: body, accessToken: nil)
+            if result.status == 200 {
+                let redemption = try result.decode(DesktopRedemption.self)
+                let record: SessionRecord
+                do {
+                    let profile = try redemption.desktopProfile.connection(origin: origin,
+                        client: client, allowLoopbackHTTP: allowLoopbackHTTP)
+                    record = try redemption.credentialPair().record(profile: profile, now: now())
+                } catch {
+                    await revokeDesktopToken(redemption.refreshToken, origin: origin,
+                        allowLoopbackHTTP: allowLoopbackHTTP)
+                    throw error
+                }
+                let profile = record.profile
+                var saved = false
+                do {
+                    try Task.checkCancellation()
+                    _ = try await identity(profile, token: record.accessToken)
+                    try Task.checkCancellation()
+                    try directory.saveProfile(profile)
+                    try store.save(record)
+                    saved = true
+                    try Task.checkCancellation()
+                } catch {
+                    if saved {
+                        var suspended = record
+                        suspended.state = .revocationPending
+                        try? store.save(suspended)
+                    }
+                    let revoked = await revokeUnsaved(record)
+                    if saved && revoked { try? store.delete() }
+                    throw error
+                }
+                return
+            }
+            guard result.status == 409 else { throw ClientError.loginRejected }
+            try await Task.sleep(for: .seconds(enrollment.pollIntervalSeconds))
+        }
+        throw ClientError.loginTimedOut
+    }
+
     static func enrollmentPollingMilliseconds(expiresAt: Date, now: Date) -> Int? {
         let milliseconds = expiresAt.timeIntervalSince(now) * 1_000
         guard milliseconds > 0, milliseconds <= Double(Int.max) else { return nil }
@@ -109,6 +194,13 @@ public actor SessionController {
         let lock = try await directory.lock()
         defer { lock.unlock() }
         let record = try await credentialWhileLocked(profileID: profileID)
+        if record.profile.desktopManaged == true {
+            let reply = try await transport.request(profile: record.profile, path: "/v1/desktop/profile",
+                body: nil, accessToken: record.accessToken)
+            guard reply.status != 401 else { throw ClientError.loginRequired }
+            guard reply.status == 200 else { throw ClientError.gatewayUnavailable }
+            try reply.decode(DesktopProfile.self).validate(record.profile)
+        }
         async let who = identity(record.profile, token: record.accessToken)
         async let use = usage(record.profile, token: record.accessToken)
         return try await Dashboard(identity: who, usage: use, checkedAt: now())
@@ -274,6 +366,18 @@ public actor SessionController {
                 struct Revocation: Decodable { let revoked: Bool }
                 return reply.status == 200 && (try? reply.decode(Revocation.self).revoked) == true
             } catch { return false }
+        }.value
+    }
+
+    private func revokeDesktopToken(_ refreshToken: String, origin: String,
+                                    allowLoopbackHTTP: Bool) async {
+        guard SessionRecord.validToken(refreshToken, prefix: "hox_r_") else { return }
+        let transport = self.transport
+        _ = await Task.detached {
+            try? await transport.request(origin: origin, allowLoopbackHTTP: allowLoopbackHTTP,
+                path: "/v1/auth/logout",
+                body: JSONSerialization.data(withJSONObject: ["credential": refreshToken]),
+                accessToken: nil)
         }.value
     }
 

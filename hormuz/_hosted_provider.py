@@ -235,7 +235,8 @@ def _validate_state_binding(config: GatewayConfig, staging: GatewayConfig) -> No
         config.listen != staging.listen
         or not _same_dataclass(config.ingress, staging.ingress)
         or config.database_path != staging.database_path
-        or config.session_broker != staging.session_broker
+        or not _same_dataclass(config.session_broker, staging.session_broker,
+                               ignore=("desktop_defaults",))
         or config.oidc_issuers != staging.oidc_issuers
     ):
         raise HostedError("hosted_provider_state_binding_mismatch")

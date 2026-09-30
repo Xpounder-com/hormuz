@@ -37,25 +37,36 @@ actor FixtureTransport: GatewayTransport {
     var badDeploymentIdentity = false
     var generation = 0
     var sessionRevoked = false
+    var desktopProfileOrigin = "https://gateway.example.test"
+    var desktopProfileModel = "approved-alias"
 
     init(clock: TestClock) { self.clock = clock; absoluteExpiry = clock.now().addingTimeInterval(43_200) }
     func setRefreshFailure() { refreshFails = true }
     func setLogoutFailure(_ flag: Bool) { logoutFails = flag }
     func setWrongOrganization() { wrongOrganization = true }
     func setBadLoginURL() { badLoginURL = true }
+    func setBadLoginURL(_ value: Bool) { badLoginURL = value }
     func setBadReliability() { badReliability = true }
     func setBadDeploymentIdentity() { badDeploymentIdentity = true }
+    func setDesktopProfileOrigin(_ value: String) { desktopProfileOrigin = value }
+    func setDesktopProfileModel(_ value: String) { desktopProfileModel = value }
     func counts() -> (Int, Int) { (refreshCount, logoutCount) }
 
     func request(profile: ConnectionProfile, path: String, body: Data?, accessToken: String?) async throws -> GatewayReply {
         switch path {
-        case "/v1/auth/enrollments":
+        case "/v1/auth/enrollments", "/v1/desktop/enrollments":
             let enrollment = String(repeating: "e", count: 32)
             return try reply(201, ["enrollment_id": enrollment,
                 "login_url": (badLoginURL ? "https://attacker.test" : profile.gateway) + "/v1/auth/login?enrollment=" + enrollment,
                 "expires_at": iso(clock.now().addingTimeInterval(300)), "poll_interval_seconds": 1])
+        case let value where value.hasPrefix("/v1/desktop/enrollments/") && value.hasSuffix("/redeem"):
+            var result = pairValue()
+            result["desktop_profile"] = desktopProfile(client: profile.client)
+            return try reply(200, result)
         case let value where value.hasSuffix("/redeem"):
             return try pair()
+        case "/v1/desktop/profile":
+            return try reply(200, desktopProfile(client: profile.client))
         case "/v1/auth/refresh":
             refreshCount += 1
             if refreshFails { throw ClientError.gatewayUnavailable }
@@ -99,10 +110,19 @@ actor FixtureTransport: GatewayTransport {
     }
 
     private func pair() throws -> GatewayReply {
+        try reply(200, pairValue())
+    }
+    private func pairValue() -> [String: Any] {
         let letter = String(UnicodeScalar(97 + generation)!)
-        return try reply(200, ["access_token": "hox_a_" + String(repeating: letter, count: 43),
+        return ["access_token": "hox_a_" + String(repeating: letter, count: 43),
             "refresh_token": "hox_r_" + String(repeating: letter, count: 43), "token_type": "Bearer",
-            "access_expires_at": iso(clock.now().addingTimeInterval(600)), "session_expires_at": iso(absoluteExpiry)])
+            "access_expires_at": iso(clock.now().addingTimeInterval(600)), "session_expires_at": iso(absoluteExpiry)]
+    }
+    private func desktopProfile(client: AIClient) -> [String: Any] {
+        ["schema_id": "hormuz.desktop-profile", "schema_version": 1,
+         "gateway_origin": desktopProfileOrigin, "organization_id": "org-a",
+         "allowed_clients": [client.rawValue], "client": client.rawValue,
+         "model_alias": desktopProfileModel, "profile_version": 1]
     }
     private func reply(_ status: Int, _ value: [String: Any]) throws -> GatewayReply {
         GatewayReply(status: status, data: try JSONSerialization.data(withJSONObject: value))

@@ -27,6 +27,11 @@ struct EdgeClientView: View {
                 Label(profile.client.title, systemImage: "terminal")
                     .font(.system(size: 20 * scale, weight: .semibold))
                 Text(profile.model).textSelection(.enabled)
+                if profile.desktopManaged && connection.connectorSaved {
+                    Button("Open \(profile.client.title)", action: connection.openClient)
+                        .buttonStyle(EdgePrimaryButtonStyle(scale: scale))
+                        .disabled(connection.isBusy || connection.dashboard == nil || connection.sessionState != .active)
+                }
                 Text("Hormuz settings apply when you use its dedicated launcher from your project directory.")
                     .foregroundStyle(.secondary)
                 Toggle(
@@ -62,7 +67,7 @@ struct EdgeClientView: View {
                     .font(.system(size: 20 * scale, weight: .semibold))
                 Text("Connect to your team first, then set up a governed Codex or Claude Code launcher.")
                     .foregroundStyle(.secondary)
-                Button("Connect to Hormuz") { navigation.open(.setup) }
+                Button("Continue with Hormuz") { navigation.open(.setup) }
                     .buttonStyle(EdgePrimaryButtonStyle(scale: scale))
             }
         }

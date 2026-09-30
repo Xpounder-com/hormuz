@@ -51,7 +51,13 @@
       "absolute_ttl_seconds": 43200,
       "enrollment_ttl_seconds": 300,
       "onboarding_enabled": true,
-      "console_enabled": true
+      "console_enabled": true,
+      "desktop_defaults": {
+        "replace-with-organization-id": {
+          "codex": "openai-primary",
+          "claude-code": "anthropic-primary"
+        }
+      }
     },
     "oidc": {
       "issuers": [
