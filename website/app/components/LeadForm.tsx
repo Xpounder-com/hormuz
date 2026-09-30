@@ -20,7 +20,7 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
   const [reference, setReference] = useState('');
   const requestReference = useRef('');
   const testSubmission = new URLSearchParams(search).get('qa') === '1';
-  const selectedOffer = interest === 'review' ? { price: '$0', detail: 'Free AI governance review · no obligation', action: 'Request my free review →' } : interest === 'pilot' ? { price: PILOT_PRICE, detail: 'USD · one-time fee for a scoped 90-day pilot', action: 'Discuss my pilot →' } : interest === 'support' ? { price: `${SUPPORT_PRICE}/mo`, detail: 'USD · ask about fixed support or a custom engagement', action: 'Request support details →' } : null;
+  const selectedOffer = interest === 'review' ? { price: '$0', detail: 'Free AI governance review · no obligation', action: 'Request my free review →' } : interest === 'pilot' ? { price: PILOT_PRICE, detail: 'USD · one-time fee for a scoped 90-day pilot', action: 'Discuss my pilot →' } : interest === 'support' ? { price: `${SUPPORT_PRICE}/mo`, detail: 'USD · fixed support scope', action: 'Request support details →' } : interest === 'enterprise' ? { price: 'Custom quote', detail: 'Scope and pricing agreed in a written proposal before payment', action: 'Contact sales →' } : null;
   const pending = useRef(false);
   const confirmation = useRef<HTMLHeadingElement>(null);
   useEffect(() => {

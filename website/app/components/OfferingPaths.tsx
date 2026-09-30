@@ -10,7 +10,7 @@ export function OfferingPaths() {
       <h2 id="offers-title">Start with your own work.<br />Bring your team when you need to.</h2>
       <p className="offer-intro">The software is open source. Personal use needs no Hormuz account or team gateway. Team services are priced separately for the help involved.</p>
     </div>
-    <div className="offer-grid offer-grid-two conversion-offers">
+    <div className="offer-grid conversion-offers">
       <article className="offer-card offer-featured">
         <p className="section-label">FOR ONE DEVELOPER</p>
         <h3>Personal Optimizer</h3>
@@ -28,6 +28,15 @@ export function OfferingPaths() {
         <ul><li>Identity, model access, budgets, and secret controls</li><li>Metadata-only usage and evidence</li><li>Mac companion for an existing team gateway</li><li>Documentation and community support</li></ul>
         <CampaignLink className="button button-outline" href={sitePath('/docs/#quickstart')}>Explore team setup <span aria-hidden="true">↗</span></CampaignLink>
         <p className="field-hint">Your organization operates the gateway and pays its provider and infrastructure charges.</p>
+      </article>
+      <article className="offer-card">
+        <p className="section-label">FOR CUSTOM ORGANIZATIONAL NEEDS</p>
+        <h3>Enterprise</h3>
+        <PriceAmount amount="Custom" period="Pricing by proposal" />
+        <p>Discuss the integration, security review, procurement, and operating help your organization needs. We will define the scope and price together before any commitment.</p>
+        <ul><li>Review your deployment and client requirements</li><li>Agree deliverables and support terms in writing</li><li>Keep the open-source gateway under your control</li></ul>
+        <CampaignLink className="button button-outline" href={sitePath('/contact/?interest=enterprise')}>Contact sales <span aria-hidden="true">↗</span></CampaignLink>
+        <p className="field-hint">An inquiry does not include managed hosting, a production SLA, or a service agreement.</p>
       </article>
     </div>
     <div className="open-source-option"><div><span className="section-label">FOUNDER-LED TEAM SERVICES</span><h3>Pay for defined help.</h3><p>Support for one self-hosted gateway is {SUPPORT_PRICE}/month. A scoped 90-day pilot for one team and workflow is {PILOT_PRICE}. Review the terms and delivery boundaries before paying.</p></div><CampaignLink className="button button-outline" href={sitePath('/enterprise/')}>See team services <span aria-hidden="true">↗</span></CampaignLink></div>
