@@ -321,6 +321,48 @@ class RelayTests(unittest.TestCase):
         with self.assertRaisesRegex(ClientRelayError, "profile_invalid"):
             load_saved_profile(self.state, profile_key)
 
+    def test_loader_accepts_native_desktop_metadata_and_rejects_invalid_versions(self) -> None:
+        profile_key = str(uuid.uuid4())
+        path = self.state / "profile.json"
+        profile = {
+            "id": profile_key,
+            "gateway": "https://gateway.example.test",
+            "organization": "org-a",
+            "client": "codex",
+            "model": "openai-primary",
+            "allowLoopbackHTTP": False,
+            "setup": "custom",
+            "desktopManaged": True,
+            "desktopProfileVersion": 123456789,
+        }
+
+        def write(value: dict[str, object]) -> None:
+            path.write_text(json.dumps(value), encoding="utf-8")
+            path.chmod(0o600)
+
+        write(profile)
+        loaded = load_saved_profile(self.state, profile_key)
+        self.assertEqual((loaded.client, loaded.model), ("codex", "openai-primary"))
+
+        for changes in (
+            {"desktopManaged": "true"}, {"desktopManaged": None},
+            {"desktopManaged": False}, {"desktopProfileVersion": 0},
+            {"desktopProfileVersion": -1}, {"desktopProfileVersion": True},
+            {"desktopProfileVersion": 1.5}, {"desktopProfileVersion": "1"},
+            {"desktopProfileVersion": 2 ** 63}, {"unknownDesktopField": "unexpected"},
+        ):
+            write({**profile, **changes})
+            with self.subTest(changes=changes), self.assertRaisesRegex(ClientRelayError, "profile_invalid"):
+                load_saved_profile(self.state, profile_key)
+
+        # Optional metadata has the same defaults as the native decoder.
+        legacy = {key: value for key, value in profile.items()
+                  if key not in {"desktopManaged", "desktopProfileVersion"}}
+        for optional in ({}, {"desktopManaged": False}, {"desktopManaged": True},
+                         {"desktopManaged": False, "desktopProfileVersion": None}):
+            write({**legacy, **optional})
+            self.assertEqual(load_saved_profile(self.state, profile_key), loaded)
+
     def test_toggle_is_pinned_per_request_and_off_is_exact(self) -> None:
         optimizer = RelayOptimizer(
             preference_store=self.store, client="codex", gateway_compatible=True, counters=COUNTERS

@@ -1010,7 +1010,8 @@ def load_saved_profile(directory: Path, profile: str) -> SavedClientProfile:
     if not isinstance(value, dict):
         raise ClientRelayError("profile_invalid")
     required = {"id", "gateway", "organization", "client", "model", "allowLoopbackHTTP"}
-    if not required <= set(value) or set(value) - (required | {"issuer", "setup"}):
+    optional = {"issuer", "setup", "desktopManaged", "desktopProfileVersion"}
+    if not required <= set(value) or set(value) - (required | optional):
         raise ClientRelayError("profile_invalid")
     identifier = value.get("id")
     organization = value.get("organization")
@@ -1019,6 +1020,8 @@ def load_saved_profile(directory: Path, profile: str) -> SavedClientProfile:
     model = value.get("model")
     allow = value.get("allowLoopbackHTTP")
     setup = value.get("setup")
+    desktop_managed = value.get("desktopManaged", False)
+    desktop_version = value.get("desktopProfileVersion")
     if (
         not isinstance(identifier, str)
         or _canonical_uuid(identifier) is None
@@ -1029,6 +1032,12 @@ def load_saved_profile(directory: Path, profile: str) -> SavedClientProfile:
         or not isinstance(model, str)
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model)
         or not isinstance(allow, bool)
+        or not isinstance(desktop_managed, bool)
+        or (
+            desktop_version is not None
+            and (type(desktop_version) is not int or not desktop_managed
+                 or not 1 <= desktop_version <= 2 ** 63 - 1)
+        )
         or (
             "setup" in value
             and (not isinstance(setup, str) or setup not in {"custom", "openai-pilot"})
