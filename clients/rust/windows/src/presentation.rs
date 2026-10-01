@@ -1,5 +1,6 @@
 use crate::connection::{Phase, View};
 use hormuz_client_core::{ClientError, ConnectionProfile, ReadingStatus};
+#[cfg(windows)]
 use hormuz_client_interaction::Metric;
 
 /// Inputs are non-secret. Enrollment and all credentials belong to the worker.
@@ -75,6 +76,7 @@ pub fn labels(view: &View) -> [String; 5] {
     }
 }
 
+#[cfg(windows)]
 pub fn details(view: &View, metric: Metric, pinned: bool) -> String {
     let reading = view.snapshot.reading();
     let status = freshness(reading.status());
@@ -119,6 +121,7 @@ fn freshness(status: ReadingStatus) -> &'static str {
     }
 }
 
+#[cfg(windows)]
 fn metric_name(metric: Metric) -> &'static str {
     match metric {
         Metric::Requests => "Requests",

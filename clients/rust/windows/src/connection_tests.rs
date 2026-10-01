@@ -610,14 +610,14 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     assert_eq!(text(window, 203), "openai-primary");
     send(window, WM_COMMAND, 110);
     until(|| text(window, 301).contains("Enter your gateway"));
-    assert_eq!(text(window, 302), "Your requests: —");
+    assert_eq!(text(window, 113), "Your requests: —");
     // Back and Escape navigate the actual native form before the shell hides.
     // Focus moves through native edit/combo controls; no synthetic shared focus
     // observation substitutes for the GUI thread's real focus owner here.
     send(window, WM_COMMAND, 112);
     until(|| unsafe { IsWindowVisible(GetDlgItem(window, 201)) == 0 });
     assert_eq!(text(window, 112), "&Settings");
-    assert_ne!(unsafe { IsWindowVisible(GetDlgItem(window, 302)) }, 0);
+    assert_ne!(unsafe { IsWindowVisible(GetDlgItem(window, 113)) }, 0);
     send(window, WM_COMMAND, 112);
     until(|| focus(window) == unsafe { GetDlgItem(window, 201) });
     for next in [202, 203, 204, 205] {
@@ -644,7 +644,7 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     until(|| unsafe {
         IsWindowVisible(window) != 0
             && IsIconic(window) == 0
-            && IsWindowVisible(GetDlgItem(window, 302)) != 0
+            && IsWindowVisible(GetDlgItem(window, 113)) != 0
     });
     assert_eq!(unsafe { IsWindowVisible(GetDlgItem(window, 201)) }, 0);
     send(window, WM_COMMAND, 112);
@@ -663,13 +663,13 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     send(window, WM_COMMAND, 109);
     until(|| text(window, 300).starts_with("Current"));
     assert_eq!(
-        text(window, 302),
+        text(window, 113),
         format!(
             "Your requests: {}",
             fixture()["usage"]["requests"].as_i64().unwrap()
         )
     );
-    assert!(!text(window, 303).contains("synthetic"));
+    assert!(!text(window, 114).contains("synthetic"));
     assert!(!text(window, 301).contains("hox_"));
     send(window, WM_COMMAND, 112);
     until(|| unsafe { IsWindowVisible(GetDlgItem(window, 201)) == 0 });
@@ -716,27 +716,27 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     until(|| unsafe {
         IsWindowVisible(window) != 0
             && IsIconic(window) == 0
-            && IsWindowVisible(GetDlgItem(window, 302)) != 0
+            && IsWindowVisible(GetDlgItem(window, 113)) != 0
     });
     send(window, WM_COMMAND, 101);
-    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 302)) == 0 });
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 113)) == 0 });
     send(window, WM_CLOSE, 0);
     PrivateDirectory::open(&root)
         .unwrap()
         .request_reopen()
         .unwrap();
     until(|| unsafe { IsWindowVisible(window) != 0 && IsIconic(window) == 0 });
-    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 302)) != 0 });
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 113)) != 0 });
     send(window, WM_COMMAND, 112);
     until(|| unsafe { IsWindowVisible(GetDlgItem(window, 201)) != 0 });
     transport.mode.store(1, Ordering::SeqCst);
     clock.1.store(10, Ordering::SeqCst);
     send(window, WM_COMMAND, 111);
     until(|| text(window, 300).starts_with("Offline"));
-    assert!(!text(window, 302).ends_with('—'));
+    assert!(!text(window, 113).ends_with('—'));
     transport.mode.store(0, Ordering::SeqCst);
     send(window, WM_COMMAND, 110);
-    until(|| text(window, 302).ends_with('—') && store.load().unwrap().is_none());
+    until(|| text(window, 113).ends_with('—') && store.load().unwrap().is_none());
     send(window, WM_COMMAND, 104);
     assert_eq!(completion.recv_timeout(Duration::from_secs(8)).unwrap(), 0);
     worker.join().unwrap();
