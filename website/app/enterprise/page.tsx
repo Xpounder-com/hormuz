@@ -5,7 +5,7 @@ import { pageMetadata } from '../../lib/metadata';
 import { sitePath, sourcePath } from '../../lib/site.mjs';
 import { PageFrame, PageHero } from '../components/PageFrame';
 
-export const metadata = pageMetadata('Team services & enterprise engagement — Hormuz', 'Self-host the team gateway free, choose fixed support or a scoped pilot, or contact sales for custom enterprise pricing.', '/enterprise/');
+export const metadata = pageMetadata('Enterprise & implementation services — Hormuz', 'Contact sales for custom gateway capacity, deployment, integration, and support. Self-hosted support and scoped pilots remain separate services.', '/enterprise/');
 
 const comparison = [
   ['Gateway, identity, policy, budgets, secret controls, evidence', 'Included in the Apache-2.0 core', 'The same open-source capabilities'],
@@ -13,26 +13,26 @@ const comparison = [
   ['Support', 'Public, best-effort community channels', 'Self-service: one gateway, 4 hours/month, response within 2 business days. Pilot and custom support follow their agreed scope.'],
   ['Evaluation evidence', 'Reproducible demos and reference tests', 'A workflow-specific evidence pack and gap review'],
   ['Infrastructure, provider accounts, credentials, retention', 'Operated by you', 'Still operated by you unless explicitly contracted otherwise'],
-  ['Managed hosting, 24/7 SLA, certification', 'Not included', 'Not an established offering or implied commitment'],
+  ['Managed hosting, availability, incident response', 'You operate the deployment', 'Hosted Pro is accepting inquiries. Custom requirements need qualification and a written proposal; fixed services do not include hosting.'],
 ];
 
 export default function EnterprisePage() {
   return <PageFrame active="enterprise">
-    <PageHero eyebrow="For teams · evaluation & support" title={<>Self-host the gateway.<br /><span>Pay for practical help.</span></>}>
-      <p>Use Hormuz’s open-source controls with your own gateway and provider accounts. Add ongoing support for your operating team, or a guided 90-day pilot to evaluate one workflow.</p>
-      <div className="hero-actions"><CampaignLink className="button button-primary" href={sitePath('/docs/#quickstart')}>Explore team setup →</CampaignLink><CampaignLink className="button button-ghost" href={sitePath('/plans/')}>All plans →</CampaignLink></div>
+    <PageHero eyebrow="Enterprise · custom proposal" title={<>Your API workload.<br /><span>A scope agreed together.</span></>}>
+      <p>Discuss gateway capacity, deployment, integration, security review, and operating support for your organization. Enterprise pricing follows a written proposal. Your model-provider accounts and charges remain yours.</p>
+      <div className="hero-actions"><CampaignLink className="button button-primary" href={sitePath('/contact/?interest=enterprise')}>Contact sales →</CampaignLink><CampaignLink className="button button-ghost" href={sitePath('/plans/')}>All plans →</CampaignLink></div>
     </PageHero>
+    <section className="section offer-section" id="custom"><p className="section-label">ENTERPRISE · CUSTOM PROPOSAL</p><h2>Plan capacity and operating coverage for your workload.</h2><p>Bring your API routes, request volumes, concurrent streams, deployment preferences, security review, and procurement requirements. We will discuss fit, then agree capacity, deliverables, support coverage, availability commitments, and pricing in writing before payment. Commitments depend on technical qualification and operating capacity.</p><p>For the standard shared hosted offer, <CampaignLink href={sitePath('/plans/#pro-billing')}>review Pro pricing and request access</CampaignLink>. The open-source gateway remains available without a software license fee.</p><CampaignLink className="button button-primary" href={sitePath('/contact/?interest=enterprise')}>Contact sales →</CampaignLink></section>
     <EnterprisePlans />
-    <section className="section offer-section" id="custom"><p className="section-label">ENTERPRISE · CUSTOM PROPOSAL</p><h2>Need a scope beyond the fixed plans?</h2><p>Bring your integration, security review, procurement, and operating requirements. We will discuss fit, then agree deliverables, support terms, and pricing in writing before any payment. The open-source gateway remains available without a software license fee.</p><CampaignLink className="button button-primary" href={sitePath('/contact/?interest=enterprise')}>Contact sales →</CampaignLink></section>
     <section className="section" id="comparison">
-      <div className="section-heading narrow"><p className="section-label">What is free. What is paid.</p><h2>The value is help making it work in your environment.</h2><p>Start independently, subscribe to the support plan below, or agree a guided pilot with the maintainer. All product controls remain open source.</p></div>
+      <div className="section-heading narrow"><p className="section-label">SELF-HOSTED IMPLEMENTATION & SUPPORT</p><h2>Help making it work in your environment.</h2><p>These separate services support a gateway you operate. Start independently, subscribe to self-service support, or agree a guided pilot with the maintainer. All existing product controls remain open source.</p></div>
       <div className="table-scroll"><table className="comparison-table"><caption>Open-source product and paid services</caption><thead><tr><th scope="col">Area</th><th scope="col">Open source</th><th scope="col">Enterprise engagement</th></tr></thead><tbody>{comparison.map(([area, oss, paid]) => <tr key={area}><th scope="row">{area}</th><td>{oss}</td><td>{paid}</td></tr>)}</tbody></table></div>
       <p className="after-grid">Self-service support has the fixed scope and renewal terms below. Pilot and custom engagements require a separate agreement on scope, capacity, start date, and commercial terms before payment.</p>
     </section>
     <section className="enterprise-control-section"><div className="enterprise-control-inner"><div className="enterprise-control-heading"><p className="section-label light">A practical starting point</p><h2>One team. One client path. Named owners.</h2></div><div className="enterprise-control-list">
       <div><span>01</span><h3>Good initial fit</h3><p>A platform or engineering lead introducing Codex or Claude Code under company provider accounts, with a security reviewer and a named gateway operator.</p></div>
       <div><span>02</span><h3>Your prerequisites</h3><p>A non-production environment, authorized provider account, unique identities, approved test inputs, and someone empowered to decide policy and acceptance criteria.</p></div>
-      <div><span>03</span><h3>Not a fit yet</h3><p>A turnkey hosted service, fleet-wide monitoring, employee productivity scoring, semantic DLP guarantees, or a certification-backed 24/7 service requirement.</p></div>
+      <div><span>03</span><h3>Boundaries to agree</h3><p>These fixed services do not activate hosted Pro or provide 24/7 operations. Fleet-wide monitoring, employee productivity scoring, semantic DLP guarantees, and certification-backed services are not established offerings.</p></div>
     </div></div></section>
     <section className="pilot-section section" id="pilot"><div className="pilot-heading"><p className="section-label">90-day paid pilot · $15,000 USD</p><h2>Prove one workflow before widening the route.</h2><p>Begin with a short fit and scope discussion. A shorter evaluation can be agreed before a 90-day commitment; no work or calendar slot is confirmed by an inquiry.</p></div><div className="pilot-steps">
       <article><span>Days 1–15</span><h3>Map</h3><p>Name the client, identity, provider credential, policy, secret, budget, and evidence boundaries. Agree prerequisites and pass/fail criteria.</p><strong>Control map + acceptance plan</strong></article>
@@ -48,6 +48,6 @@ export default function EnterprisePage() {
       {commercial.supportPaymentUrl && <a className="button button-outline" href={commercial.supportPaymentUrl} rel="noreferrer"><span>Custom agreed support · {SUPPORT_PRICE} USD/month</span><span aria-hidden="true">↗</span></a>}
     </div><p>Checkout is operated by AI and Robotics Solutions. Your card statement may show LINKEDFULL.COM. Support renews monthly until canceled under your agreed cancellation terms. Provider charges and infrastructure are separate.</p></section>}
     <section className="enterprise-truth section"><div><span className="status-ring" aria-hidden="true"><i /></span><strong>v1.4.0 core · preserved v1 contracts</strong></div><h2>Engineering evidence is not enterprise certification.</h2><p>Reference checks do not establish your TLS, credential custody, retention, recovery, high availability, compliance, or independent security review. No customer endorsements, certifications, invoice reconciliation, or production SLA are claimed.</p><CampaignLink href={sitePath('/security/')}>Review the security boundary →</CampaignLink></section>
-    <section className="page-cta"><div><p className="section-label light">Founder-led · Mehrdad Zaker</p><h2>Bring one workflow and its constraints.</h2><p>Install independently, or discuss the scope of a guided pilot before payment.</p></div><CampaignLink className="button button-light" href={sitePath('/contact/?interest=pilot')}>Discuss my pilot →</CampaignLink></section>
+    <section className="page-cta"><div><p className="section-label light">Founder-led · Mehrdad Zaker</p><h2>Bring your workload and its constraints.</h2><p>Discuss capacity, deployment, integration, and support before agreeing an Enterprise proposal.</p></div><CampaignLink className="button button-light" href={sitePath('/contact/?interest=enterprise')}>Contact sales →</CampaignLink></section>
   </PageFrame>;
 }

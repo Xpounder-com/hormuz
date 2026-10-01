@@ -1,4 +1,36 @@
-# Hormuz: open source with supported evaluation
+# Hormuz: free Personal, hosted Pro, custom Enterprise
+
+## Hosted pricing direction
+
+Approved October 1, 2026:
+
+- **Personal Optimizer: $0**, running locally with the customer's own provider
+  account. No paid personal subscription or guaranteed provider savings.
+- **Pro: $99 USD per workspace per month**, including 100,000 gateway requests.
+  Additional requests cost **$10 per 100,000**, prorated by request.
+  Administrative users are included. Customers pay model providers directly.
+- **Enterprise: custom proposal**, covering agreed capacity, deployment,
+  integration, and operating support. Availability and response commitments
+  depend on qualification and agreed operating capacity.
+
+Pro is intended for production application API traffic on Hormuz-operated
+hosting. The existing Render setup is the intended starting point; this pricing
+decision does not authorize new paid infrastructure or establish capacity.
+It is currently **accepting inquiries**, with no Pro checkout or automatic
+activation. Hosted onboarding, per-workspace provider credential isolation,
+application API compatibility, subscription billing, durable request metering,
+usage controls, and production reliability qualification are launch prerequisites.
+
+The proposed billable unit is one accepted client request; streaming chunks,
+internal retries, and failover attempts must not multiply the charge. Failed,
+canceled, and rejected request treatment must be defined before activation.
+For 1,000,000 monthly requests, the proposed Hormuz fee is $189, excluding
+provider charges and applicable taxes. Monthly request allowance is separate
+from request-rate, concurrency, and payload capacity.
+
+The target-buyer and pricing assumptions remain hypotheses to validate with
+qualified workloads, willingness to pay, and measured hosting/support costs.
+Existing self-hosted support and pilot offers below remain separate services.
 
 ## The operational problem
 

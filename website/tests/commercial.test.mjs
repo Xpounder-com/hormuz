@@ -22,6 +22,7 @@ test('unconfigured commercial paths stay absent and configured destinations are 
 test('campaign links keep intent and fragment, forward only bounded campaign tags, and never tag external links', () => {
   const search = '?utm_source=linkedin&utm_medium=cpc&utm_campaign=enterprise&email=private@example.com&gclid=identifier';
   assert.equal(campaignLink('/contact/?interest=support#content', search), '/contact/?interest=support&utm_source=linkedin&utm_medium=cpc&utm_campaign=enterprise#content');
+  assert.equal(campaignLink('/contact/?interest=pro', search), '/contact/?interest=pro&utm_source=linkedin&utm_medium=cpc&utm_campaign=enterprise');
   assert.equal(campaignLink('https://cal.com/example', search), 'https://cal.com/example');
   assert.equal(campaignLink('//other.example/', search), '//other.example/');
   assert.equal(campaignLink('/contact/', '?utm_source=%3Cscript%3E&utm_medium=' + 'a'.repeat(65)), '/contact/');
@@ -38,6 +39,7 @@ test('lead payload excludes unknown fields and unconsented campaign data', () =>
   assert.equal(tagged.campaign, 'utm_source=linkedin');
   assert.equal(buildLead({ ...fields, interest: 'support' }).interest, 'Enterprise support subscription');
   assert.equal(buildLead({ ...fields, interest: 'enterprise' }).interest, 'Custom enterprise engagement');
+  assert.equal(buildLead({ ...fields, interest: 'pro' }).interest, 'Hosted Pro access');
 });
 
 test('creative attribution survives multiple page hops while downloads and external paths stay clean', () => {

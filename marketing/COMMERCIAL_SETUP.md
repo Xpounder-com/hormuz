@@ -1,5 +1,26 @@
 # Enterprise conversion setup
 
+## Hosted Pro inquiry offer
+
+Approved October 1, 2026: Pro is planned at **$99 USD/workspace/month** with
+100,000 gateway requests included, then **$10 per additional 100,000 requests**,
+prorated by request. Administrative users are included; model usage and taxes
+are separate. Enterprise requirements follow a custom proposal.
+
+The website's `interest=pro` path requests access through the existing inquiry
+form. It does not create a subscription or production gateway. Do not use the
+support or pilot Payment Links for Pro. Before adding Pro checkout, qualify
+workspace provisioning, tenant-specific provider credentials, supported production
+API routes and application identities, subscriptions and verified payment events,
+durable request billing, usage alerts and approved overages, traffic limits,
+recovery, and operating support. Define failed/canceled/rejected request handling
+and confirm merchant terms before payment. Streaming chunks and internal retries
+are not additional billable requests.
+
+Render hosting is the intended service direction, not a claim of current
+production readiness. This website change does not provision paid resources,
+change credentials, or alter existing service payment configuration.
+
 Approved offer, September 6, 2026:
 
 - Free AI governance review to establish fit.

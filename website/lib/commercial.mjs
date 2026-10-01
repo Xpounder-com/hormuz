@@ -2,6 +2,10 @@ import { commercialConfig, selfServiceSupportPaymentUrl } from './commercial-con
 
 export const PILOT_PRICE = '$15,000';
 export const SUPPORT_PRICE = '$2,000';
+export const PRO_PRICE = '$99';
+export const PRO_INCLUDED_REQUESTS = '100,000';
+export const PRO_OVERAGE_PRICE = '$10';
+export const PRO_OVERAGE_REQUESTS = '100,000';
 
 export function validateCommercialConfig(config) {
   const result = { formEndpoint: '', bookingUrl: '', pilotPaymentUrl: '', supportPaymentUrl: '' };
