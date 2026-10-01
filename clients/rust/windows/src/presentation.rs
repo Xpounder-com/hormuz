@@ -1,5 +1,7 @@
 use crate::connection::{Phase, View};
 use hormuz_client_core::{ClientError, ConnectionProfile, ReadingStatus};
+#[cfg(windows)]
+use hormuz_client_interaction::Metric;
 
 /// Inputs are non-secret. Enrollment and all credentials belong to the worker.
 pub fn profile(
@@ -35,12 +37,7 @@ pub fn profile(
 
 pub fn labels(view: &View) -> [String; 5] {
     let reading = view.snapshot.reading();
-    let freshness = match reading.status() {
-        ReadingStatus::Current => "Current",
-        ReadingStatus::Stale => "Stale",
-        ReadingStatus::Offline => "Offline",
-        ReadingStatus::NeedsAuthentication => "Sign-in required",
-    };
+    let freshness = freshness(reading.status());
     let state = match view.phase {
         Phase::Checking => "Checking saved connection...".into(),
         Phase::SigningIn => "Complete sign-in in your browser. Sign out cancels.".into(),
@@ -78,6 +75,61 @@ pub fn labels(view: &View) -> [String; 5] {
         ],
     }
 }
+
+#[cfg(windows)]
+pub fn details(view: &View, metric: Metric, pinned: bool) -> String {
+    let reading = view.snapshot.reading();
+    let status = freshness(reading.status());
+    let pin = if pinned { " · Pinned" } else { "" };
+    let Some(usage) = reading.usage() else {
+        return format!(
+            "{status} · {}: —{pin}\r\nNo successful gateway reading",
+            metric_name(metric)
+        );
+    };
+    let (value, note) = match metric {
+        Metric::Requests => (
+            format!("Requests: {}", usage.requests()),
+            "Current UTC month · gateway-captured only".into(),
+        ),
+        Metric::Tokens => (
+            format!("Tokens: {}", view.snapshot.total_tokens().unwrap()),
+            format!(
+                "Input: {} · Output: {}",
+                usage.input_tokens(),
+                usage.output_tokens()
+            ),
+        ),
+        Metric::Cost => (
+            format!("Est. cost: ${:.4}", usage.cost_usd()),
+            "Rate-card estimate; not a provider bill".into(),
+        ),
+    };
+    let time = reading
+        .checked_at_epoch_seconds()
+        .map(time_label)
+        .unwrap_or_else(|| "Last success time unavailable".into());
+    format!("{status} · {value}{pin}\r\n{note}\r\n{time}")
+}
+
+fn freshness(status: ReadingStatus) -> &'static str {
+    match status {
+        ReadingStatus::Current => "Current",
+        ReadingStatus::Stale => "Stale",
+        ReadingStatus::Offline => "Offline",
+        ReadingStatus::NeedsAuthentication => "Sign-in required",
+    }
+}
+
+#[cfg(windows)]
+fn metric_name(metric: Metric) -> &'static str {
+    match metric {
+        Metric::Requests => "Requests",
+        Metric::Tokens => "Tokens",
+        Metric::Cost => "Cost",
+    }
+}
+
 fn time_label(seconds: f64) -> String {
     time::OffsetDateTime::from_unix_timestamp(seconds as i64)
         .ok()

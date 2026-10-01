@@ -227,7 +227,11 @@ It opens at startup to preserve access to sign-in. Back returns to the compact
 usage summary; Settings opens the form and requests native focus on its first
 enabled edit or action. Escape first lets an open native combo cancel its list,
 then returns from Settings, then hides the summary. Close still hides the shell.
-Other settings pages and metric-detail cards are not implemented.
+The three native usage buttons now enter the shared metric regions. Hover opens
+an unpinned detail card; button activation pins or unpins it. The card shows the
+original reading freshness and last-success time, a token breakdown or cost
+estimate basis, and has a keyboard-accessible Close action. Opening Settings
+closes it. Other settings pages are not implemented.
 
 Pointer and keyboard-focus observations remain native. Form controls map to
 the shared Settings region, including descendants and the exact item/list HWNDs
@@ -273,12 +277,14 @@ Additional portable sequences cover settings commands, same-turn cancellation,
 keyboard traversal and projection rollback. The native connected-window test
 posts synthetic keyboard messages through the real Win32 message loop and reads
 the GUI thread's actual focus. It exercises startup form visibility, Tab through
-edits and the combo, popup-first Escape, Back/summary/Hide/Reopen and sign-in/out.
+edits and the combo, popup-first Escape, Back/summary/Hide/Reopen, native
+metric-card selection/dismissal and sign-in/out.
 The isolated native probe verifies owned combo-list/descendant classification
 and rejects unrelated or closed-form handles.
-These are synthetic/CI checks. Physical hover travel, pointer geometry across
-displays, native menus, keyboard and screen-reader usability remain unqualified;
-metric-detail and remaining settings-page integration also remain outstanding.
+These are synthetic/CI checks. Physical hover-to-card travel, pointer geometry
+across displays, outside-click dismissal, native menus, keyboard and
+screen-reader usability remain unqualified; remaining settings-page integration
+also remains outstanding.
 #338 remains open. The preview/footprint measurement scripts are unchanged.
 
 Timer/message contracts: [GetMessage ordering](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmessage)

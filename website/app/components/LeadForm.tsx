@@ -8,7 +8,7 @@ import { INTERESTS, campaignSource, isSalesInquiry } from '../../lib/contact.mjs
 import { prepareLeadAttempt, submitLead } from '../../lib/lead.mjs';
 import { trackConfirmedApplication } from '../../lib/x-ads.mjs';
 import { trackAnalyticsLead } from '../../lib/analytics.mjs';
-import { PILOT_PRICE, SUPPORT_PRICE } from '../../lib/commercial.mjs';
+import { PILOT_PRICE, SUPPORT_PRICE, PRO_PRICE, PRO_INCLUDED_REQUESTS, PRO_OVERAGE_PRICE } from '../../lib/commercial.mjs';
 import { CONTACT_EMAIL, sitePath } from '../../lib/site.mjs';
 
 export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUrl: string }) {
@@ -20,7 +20,7 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
   const [reference, setReference] = useState('');
   const requestReference = useRef('');
   const testSubmission = new URLSearchParams(search).get('qa') === '1';
-  const selectedOffer = interest === 'review' ? { price: '$0', detail: 'Free AI governance review · no obligation', action: 'Request my free review →' } : interest === 'pilot' ? { price: PILOT_PRICE, detail: 'USD · one-time fee for a scoped 90-day pilot', action: 'Discuss my pilot →' } : interest === 'support' ? { price: `${SUPPORT_PRICE}/mo`, detail: 'USD · fixed support scope', action: 'Request support details →' } : interest === 'enterprise' ? { price: 'Custom quote', detail: 'Scope and pricing agreed in a written proposal before payment', action: 'Contact sales →' } : null;
+  const selectedOffer = interest === 'pro' ? { price: PRO_PRICE + '/mo', detail: 'USD / workspace · ' + PRO_INCLUDED_REQUESTS + ' requests included · ' + PRO_OVERAGE_PRICE + ' per additional 100,000 · accepting inquiries', action: 'Request Pro access →' } : interest === 'review' ? { price: '$0', detail: 'Free AI governance review · no obligation', action: 'Request my free review →' } : interest === 'pilot' ? { price: PILOT_PRICE, detail: 'USD · one-time fee for a scoped 90-day pilot', action: 'Discuss my pilot →' } : interest === 'support' ? { price: `${SUPPORT_PRICE}/mo`, detail: 'USD · fixed support scope', action: 'Request support details →' } : interest === 'enterprise' ? { price: 'Custom quote', detail: 'Scope and pricing agreed in a written proposal before payment', action: 'Contact sales →' } : null;
   const pending = useRef(false);
   const confirmation = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -68,15 +68,16 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
     {testSubmission && <p role="status" className="form-status">QA test mode: this sends a clearly marked test inquiry to the owner. It does not count as an X Ads lead.</p>}
     <form className="contact-form" action={endpoint} method="post" onSubmit={submit} aria-busy={state === 'sending'}>
       <fieldset disabled={state === 'sending'} className="lead-fields">
-        <legend className="sr-only">Enterprise application</legend>
+        <legend className="sr-only">Hormuz inquiry</legend>
         <input type="hidden" name="_subject" value="Hormuz website inquiry" />
         <label>I am interested in<select name="interest" value={interest} onChange={e => setInterest(e.target.value)}>{Object.entries(INTERESTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {selectedOffer && <div className="selected-offer" aria-live="polite"><strong>{selectedOffer.price}</strong><span>{selectedOffer.detail}</span></div>}
+        {interest === 'pro' && <p className="field-hint">Pro is a planned hosted service for production API workloads. Provider usage is separate. API compatibility, traffic limits, support coverage, and activation are confirmed before payment. <CampaignLink href={sitePath('/plans/#pro-billing')}>Review Pro pricing →</CampaignLink>.</p>}
         {interest === 'support' && <p className="field-hint">Ready to subscribe? <CampaignLink href={sitePath('/enterprise/#support')}>See the self-service plan and start directly →</CampaignLink>. This form sends an inquiry.</p>}
         <label>Your name<input name="name" autoComplete="name" required maxLength={100} /></label>
         <label>Work email<input name="email" type="email" autoComplete="email" required maxLength={254} /></label>
         <label>Organization<input name="organization" autoComplete="organization" required maxLength={150} /></label>
-        <label>What does your team need to control?<textarea name="workflow" required maxLength={1200} rows={4} aria-describedby="lead-safety" placeholder="For example: Codex model access and budgets for one engineering team." /></label>
+        <label>Your API workflow or team requirements<textarea name="workflow" required maxLength={1200} rows={4} aria-describedby="lead-safety" placeholder="For example: an application using OpenAI Responses, expected monthly requests, concurrent streams, and the controls you need." /></label>
         <p className="field-hint" id="lead-safety">Do not include credentials, prompts, customer data, or other secrets.</p>
         <label>Timing <span>(optional)</span><input name="timeframe" maxLength={100} placeholder="For example: this quarter" /></label>
         <div className="lead-trap" aria-hidden="true"><label>Leave this empty<input name="_gotcha" tabIndex={-1} autoComplete="off" /></label></div>

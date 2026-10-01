@@ -56,6 +56,7 @@ struct App {
     network: OnceCell<crate::network::NetworkEvents>,
     inputs: Cell<[HWND; 13]>,
     settings_button: Cell<HWND>,
+    details: Cell<[HWND; 2]>,
     profile_loaded: Cell<bool>,
     session_notifications: Cell<bool>,
     preview: bool,
@@ -115,6 +116,7 @@ pub(super) fn run_with_factory(
             network: OnceCell::new(),
             inputs: Cell::new([null_mut(); 13]),
             settings_button: Cell::new(null_mut()),
+            details: Cell::new([null_mut(); 2]),
             profile_loaded: Cell::new(false),
             session_notifications: Cell::new(false),
             preview,
@@ -172,13 +174,23 @@ pub(super) fn run_with_factory(
         ];
         let mut controls = [null_mut(); 8];
         for (index, (kind, text, id)) in descriptions.into_iter().enumerate() {
+            let metric_id = if preview {
+                0
+            } else {
+                match index {
+                    2 => connected::REQUESTS,
+                    3 => connected::TOKENS,
+                    4 => connected::COST,
+                    _ => 0,
+                }
+            };
             controls[index] = CreateWindowExW(
                 0,
-                wide(kind).as_ptr(),
+                wide(if metric_id != 0 { "BUTTON" } else { kind }).as_ptr(),
                 wide(text).as_ptr(),
                 WS_CHILD
                     | WS_VISIBLE
-                    | if id == 0 {
+                    | if id == 0 && metric_id == 0 {
                         0
                     } else {
                         WS_TABSTOP | BS_PUSHBUTTON as u32
@@ -188,7 +200,13 @@ pub(super) fn run_with_factory(
                 1,
                 1,
                 hwnd,
-                (if !preview && id == 0 { 300 + index } else { id }) as HMENU,
+                (if metric_id != 0 {
+                    metric_id
+                } else if !preview && id == 0 {
+                    300 + index
+                } else {
+                    id
+                }) as HMENU,
                 instance,
                 null(),
             );
@@ -348,6 +366,8 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
                     }
                 } else if app.interaction.folded() {
                     168
+                } else if app.interaction.selected_metric().is_some() {
+                    332
                 } else if !app.interaction.settings_open() {
                     248
                 } else {
@@ -412,6 +432,8 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             }
         } else if app.interaction.folded() {
             128
+        } else if app.interaction.selected_metric().is_some() {
+            292
         } else if !app.interaction.settings_open() {
             208
         } else {
@@ -436,6 +458,31 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             })
             .as_ptr(),
         );
+        if !app.preview {
+            let details = app.details.get();
+            MoveWindow(
+                details[0],
+                scale(16, dpi),
+                scale(202, dpi),
+                scale(292, dpi),
+                scale(74, dpi),
+                1,
+            );
+            MoveWindow(
+                details[1],
+                scale(316, dpi),
+                scale(232, dpi),
+                scale(100, dpi),
+                scale(28, dpi),
+                1,
+            );
+            let show_details = app.interaction.selected_metric().is_some()
+                && !app.interaction.folded()
+                && !app.interaction.settings_open();
+            for detail in details {
+                ShowWindow(detail, if show_details { SW_SHOW } else { SW_HIDE });
+            }
+        }
         connected::layout(app, y);
         let font = CreateFontW(
             -scale(14, dpi),
@@ -458,6 +505,7 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
                 .into_iter()
                 .chain(app.inputs.get())
                 .chain([app.settings_button.get()])
+                .chain(app.details.get())
                 .filter(|h| !h.is_null())
             {
                 SendMessageW(control, WM_SETFONT, font as usize, 1);
@@ -687,6 +735,10 @@ unsafe extern "system" fn window_proc(
                             connected::update(app);
                         }
                     }
+                    connected::REQUESTS | connected::TOKENS | connected::COST => {
+                        interactions::metric(hwnd, app, wparam & 0xffff);
+                    }
+                    connected::CLOSE_DETAILS => interactions::dismiss_details(hwnd, app),
                     FOLD => {
                         interactions::toggle_fold(hwnd, app);
                     }

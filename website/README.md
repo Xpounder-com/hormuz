@@ -4,9 +4,12 @@ Static Next.js export for **https://usehormuz.github.io/**. This repository
 remains the authoritative website source; the dedicated
 [`usehormuz/usehormuz.github.io`](https://github.com/usehormuz/usehormuz.github.io)
 repository pins a reviewed source commit for publication.
-The existing Hormuz visual system is retained. This project site emphasizes
-open-source documentation, demos, and community; enterprise information is
-secondary and there is no checkout, hosted application, or form backend.
+The site presents free Personal Optimizer, planned hosted Pro, and custom
+Enterprise proposals alongside open-source documentation, demos, and community.
+Pro is inquiry-only until hosted onboarding, billing, and production qualification
+are complete. The static site does not provision a gateway or activate a Pro
+subscription. Existing external support and pilot checkouts are separate services;
+inquiries use Formspree with an email fallback.
 
 ## Build and check
 
