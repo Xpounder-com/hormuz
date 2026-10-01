@@ -183,6 +183,18 @@ def build_custody_control_domain(
         # when custody execution is disabled. A role name alone grants no
         # executor credential or custody capability.
         raise ConfigError("custody_executor requires custody_control.mode postgresql")
+    if custody_control_mode != "postgresql" and custody_executor_raw:
+        if usage_storage.backend != "postgresql":
+            raise ConfigError("custody_executor role-only configuration requires PostgreSQL usage storage")
+        if custody_executor_role in {
+            usage_storage.postgres_runtime_role,
+            policy_control.postgres_control_role,
+            custody_control_role,
+        }:
+            raise ConfigError(
+                "custody_executor.postgres_executor_role must differ from runtime, "
+                "policy-control, and custody-control roles"
+            )
     if custody_control_mode == "postgresql":
         active_dsn_envs = {
             usage_storage.postgres_dsn_env,
