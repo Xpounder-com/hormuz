@@ -196,6 +196,31 @@ class CustodyControlUnitTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             self._load(invalid_retention, environment)
 
+    def test_role_only_executor_with_local_custody_cannot_alias_authorization_roles(self) -> None:
+        value, environment = self._managed_value()
+        value["custody_control"] = {
+            "mode": "local",
+            "postgres_control_role": "hormuz_custody_control_test",
+        }
+        value.pop("custody_retention")
+        value["custody_executor"] = {
+            "postgres_executor_role": "hormuz_custody_executor_test",
+        }
+        self.assertEqual(
+            self._load(value, environment).custody_executor.postgres_executor_role,
+            "hormuz_custody_executor_test",
+        )
+
+        for role in (
+            "hormuz_runtime_test",
+            "hormuz_policy_control_test",
+            "hormuz_custody_control_test",
+        ):
+            candidate = json.loads(json.dumps(value))
+            candidate["custody_executor"]["postgres_executor_role"] = role
+            with self.subTest(role=role), self.assertRaises(ConfigError):
+                self._load(candidate, environment)
+
     def test_lifecycle_configuration_binds_immutable_asset_generations_without_exposing_bindings_to_evidence(self) -> None:
         value, environment = self._managed_value()
         key_references = value["key_custody"]["key_references"]  # type: ignore[index]
