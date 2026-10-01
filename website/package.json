@@ -12,7 +12,7 @@
     "campaign:url": "node scripts/campaign-url.mjs"
   },
   "engines": { "node": ">=22.14.0" },
-  "dependencies": { "next": "16.3.3", "react": "19.2.6", "react-dom": "19.2.6" },
+  "dependencies": { "next": "16.3.8", "react": "19.2.6", "react-dom": "19.2.6" },
   "devDependencies": {
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
