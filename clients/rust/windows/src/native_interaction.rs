@@ -1,7 +1,9 @@
 //! GUI-thread observations and one-shot Win32 timers for the shared reducer.
 use super::*;
 use crate::interaction::{Bridge, Command, TimerAction};
-use hormuz_client_interaction::{Event, FocusTarget, PointerTarget, SettingsPage, Visibility};
+use hormuz_client_interaction::{
+    Event, FocusTarget, Metric, PointerTarget, SettingsPage, Visibility,
+};
 use std::{cell::RefCell, time::Instant};
 use windows_sys::Win32::UI::Controls::{GetComboBoxInfo, COMBOBOXINFO};
 
@@ -13,6 +15,8 @@ pub struct Controller {
     began: Instant,
     rendered: Cell<Visibility>,
     rendered_settings: Cell<bool>,
+    rendered_metric: Cell<Option<Metric>>,
+    rendered_pin: Cell<Option<Metric>>,
     pointer: Cell<PointerTarget>,
     focus: Cell<Option<FocusTarget>>,
     observed_visible: Cell<bool>,
@@ -30,6 +34,8 @@ impl Controller {
             began: Instant::now(),
             rendered: Cell::new(Visibility::Expanded),
             rendered_settings: Cell::new(false),
+            rendered_metric: Cell::new(None),
+            rendered_pin: Cell::new(None),
             pointer: Cell::new(PointerTarget::Outside),
             focus: Cell::new(None),
             observed_visible: Cell::new(true),
@@ -47,6 +53,14 @@ impl Controller {
 
     pub fn settings_open(&self) -> bool {
         self.rendered_settings.get()
+    }
+
+    pub fn selected_metric(&self) -> Option<Metric> {
+        self.rendered_metric.get()
+    }
+
+    pub fn pinned_metric(&self) -> Option<Metric> {
+        self.rendered_pin.get()
     }
 
     fn now_ms(&self) -> Option<u64> {
@@ -143,6 +157,29 @@ pub unsafe fn settings(hwnd: HWND, app: &App) {
     }
 }
 
+pub unsafe fn metric(hwnd: HWND, app: &App, id: usize) {
+    if app.preview {
+        return;
+    }
+    let metric = match id {
+        connected::REQUESTS => Metric::Requests,
+        connected::TOKENS => Metric::Tokens,
+        connected::COST => Metric::Cost,
+        _ => return,
+    };
+    unsafe {
+        focus(hwnd, app, GetFocus());
+        pointer(hwnd, app, hwnd, WM_NULL);
+        input(hwnd, app, Event::TogglePin { metric });
+    }
+}
+
+pub unsafe fn dismiss_details(hwnd: HWND, app: &App) {
+    unsafe {
+        input(hwnd, app, Event::DismissDetails);
+    }
+}
+
 pub unsafe fn escape(hwnd: HWND, app: &App) {
     unsafe {
         if !connected::escape_popup(app) {
@@ -208,6 +245,10 @@ pub unsafe fn drain(hwnd: HWND, app: &App) {
     let before = controller.rendered.replace(update.snapshot.visibility);
     let settings = update.snapshot.settings_page.is_some();
     let before_settings = controller.rendered_settings.replace(settings);
+    let metric = update.snapshot.selected_metric;
+    let before_metric = controller.rendered_metric.replace(metric);
+    let pin = update.snapshot.pinned_metric;
+    let before_pin = controller.rendered_pin.replace(pin);
     controller
         .observed_visible
         .set(update.snapshot.visibility != Visibility::Hidden);
@@ -230,7 +271,13 @@ pub unsafe fn drain(hwnd: HWND, app: &App) {
             controller.pointer.set(PointerTarget::Outside);
             controller.focus.set(None);
         } else {
-            if before != update.snapshot.visibility || before_settings != settings {
+            if before_metric != metric || before_pin != pin {
+                connected::update(app);
+            }
+            if before != update.snapshot.visibility
+                || before_settings != settings
+                || before_metric != metric
+            {
                 reflow(hwnd, app);
             }
             let activate = controller.activate.replace(false);
@@ -319,6 +366,21 @@ unsafe fn form_contains(inputs: [HWND; 13], open: bool, target: HWND) -> bool {
             })
 }
 
+fn metric_at(app: &App, target: HWND) -> Option<Metric> {
+    let controls = app.controls.get();
+    [
+        (controls[2], Metric::Requests),
+        (controls[3], Metric::Tokens),
+        (controls[4], Metric::Cost),
+    ]
+    .into_iter()
+    .find_map(|(handle, metric)| (handle == target).then_some(metric))
+}
+
+fn detail_contains(app: &App, target: HWND) -> bool {
+    app.details.get().contains(&target)
+}
+
 pub unsafe fn focus(hwnd: HWND, app: &App, target: HWND) {
     let controller = &app.interaction;
     if !controller.ready.get()
@@ -339,6 +401,8 @@ pub unsafe fn focus(hwnd: HWND, app: &App, target: HWND) {
     let region = inside.then(|| {
         if unsafe { form_contains(app.inputs.get(), controller.settings_open(), target) } {
             FocusTarget::Settings
+        } else if detail_contains(app, target) {
+            FocusTarget::Details
         } else {
             FocusTarget::Widget
         }
@@ -403,8 +467,14 @@ pub unsafe fn pointer(hwnd: HWND, app: &App, _source: HWND, _message: u32) {
             PointerTarget::Outside
         } else if in_form {
             PointerTarget::Settings
+        } else if detail_contains(app, target) {
+            PointerTarget::Details
         } else if target == app.settings_button.get() {
             PointerTarget::SettingsHandle
+        } else if !app.preview {
+            metric_at(app, target)
+                .map(|metric| PointerTarget::Metric { metric })
+                .unwrap_or(PointerTarget::Widget)
         } else {
             PointerTarget::Widget
         };
@@ -427,6 +497,7 @@ pub unsafe fn initialize(hwnd: HWND, app: &App) -> bool {
         .into_iter()
         .chain(app.inputs.get())
         .chain([app.settings_button.get()])
+        .chain(app.details.get())
         .chain(unsafe { combo_parts(app.inputs.get()[9]) })
         .filter(|h| !h.is_null())
     {

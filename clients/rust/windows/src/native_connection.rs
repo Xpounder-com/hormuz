@@ -11,6 +11,10 @@ pub const SIGN_IN: usize = 109;
 pub const SIGN_OUT: usize = 110;
 pub const RETRY: usize = 111;
 pub const SETTINGS: usize = 112;
+pub const REQUESTS: usize = 113;
+pub const TOKENS: usize = 114;
+pub const COST: usize = 115;
+pub const CLOSE_DETAILS: usize = 116;
 
 pub struct Browser;
 impl BrowserOpener for Browser {
@@ -103,6 +107,40 @@ pub unsafe fn initialize(
             return false;
         }
         app.settings_button.set(button);
+        let details = [
+            CreateWindowExW(
+                0,
+                wide("STATIC").as_ptr(),
+                wide("").as_ptr(),
+                WS_CHILD | WS_BORDER,
+                0,
+                0,
+                1,
+                1,
+                hwnd,
+                401 as HMENU,
+                GetModuleHandleW(null()),
+                null(),
+            ),
+            CreateWindowExW(
+                0,
+                wide("BUTTON").as_ptr(),
+                wide("&Close details").as_ptr(),
+                WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON as u32,
+                0,
+                0,
+                1,
+                1,
+                hwnd,
+                CLOSE_DETAILS as HMENU,
+                GetModuleHandleW(null()),
+                null(),
+            ),
+        ];
+        if details.iter().any(|handle| handle.is_null()) {
+            return false;
+        }
+        app.details.set(details);
         let definitions = [
             ("STATIC", "&Gateway (HTTPS)", 0),
             ("EDIT", "", 201),
@@ -205,6 +243,17 @@ pub unsafe fn update(app: &App) {
     unsafe {
         for (control, text) in app.controls.get().iter().zip(presentation::labels(&view)) {
             SetWindowTextW(*control, wide(&text).as_ptr());
+        }
+        if let Some(metric) = app.interaction.selected_metric() {
+            SetWindowTextW(
+                app.details.get()[0],
+                wide(&presentation::details(
+                    &view,
+                    metric,
+                    app.interaction.pinned_metric() == Some(metric),
+                ))
+                .as_ptr(),
+            );
         }
         let inputs = app.inputs.get();
         if !app.profile_loaded.get() && !view.phase.busy() {
