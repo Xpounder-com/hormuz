@@ -671,6 +671,39 @@ fn native_connected_controls_show_scoped_usage_and_clear_on_sign_out() {
     );
     assert!(!text(window, 303).contains("synthetic"));
     assert!(!text(window, 301).contains("hox_"));
+    send(window, WM_COMMAND, 112);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 201)) == 0 });
+    let mut metric_before: RECT = unsafe { std::mem::zeroed() };
+    assert_ne!(
+        unsafe { GetWindowRect(GetDlgItem(window, 114), &mut metric_before) },
+        0
+    );
+    send(window, WM_COMMAND, 114);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 401)) != 0 });
+    let mut metric_after: RECT = unsafe { std::mem::zeroed() };
+    assert_ne!(
+        unsafe { GetWindowRect(GetDlgItem(window, 114), &mut metric_after) },
+        0
+    );
+    assert!((metric_before.top - metric_after.top).abs() <= 2);
+    assert!(text(window, 401).contains("Input:"));
+    assert!(text(window, 401).contains("Output:"));
+    assert!(text(window, 401).contains("Pinned"));
+    send(window, WM_COMMAND, 116);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 401)) == 0 });
+    send(window, WM_COMMAND, 115);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 401)) != 0 });
+    assert!(text(window, 401).contains("not a provider bill"));
+    send(window, WM_COMMAND, 112);
+    until(|| unsafe {
+        IsWindowVisible(GetDlgItem(window, 401)) == 0
+            && IsWindowVisible(GetDlgItem(window, 201)) != 0
+    });
+    send(window, WM_COMMAND, 112);
+    until(|| unsafe { IsWindowVisible(GetDlgItem(window, 201)) == 0 });
+    println!(
+        "native_metric_details=passed tokens=broken_down cost=estimated settings_dismissal=passed"
+    );
     // External native visibility notifications must agree with the reducer,
     // including startup's hidden construction and later OS-driven restoration.
     unsafe {

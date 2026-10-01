@@ -113,9 +113,11 @@ cover ordered inputs, stale timer cancellation, dismissal and reopening; seven
 traces also exercise the existing Swift hover/navigation models. The shipping
 Swift sources remain unchanged. The Windows development shell now consumes the
 shared whole-panel visibility, pointer/focus and timer policy, including ordered
-Hide/Reopen, explicit Fold and stale native callback cancellation. Synthetic
-native timer/window tests and CI UI Automation exercise that integration.
-**#338 remains open** for native metric/detail-card and settings wiring, physical
+Hide/Reopen, explicit Fold and stale native callback cancellation. The connected
+Windows panel also maps its three usage buttons to native metric/detail controls;
+synthetic tests cover activation, dismissal and Settings transitions. Synthetic
+native timer/window tests and CI UI Automation exercise the earlier integration.
+**#338 remains open** for remaining settings pages, physical
 hover/focus/outside-click/reopen and keyboard/screen-reader acceptance. The
 checkpoint does not complete #331, native interaction or release gates.
 
