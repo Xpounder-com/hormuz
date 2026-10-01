@@ -8,4 +8,6 @@ if [ ! -x "$HORMUZ_CONTEXT_PYTHON" ]; then
   echo "Hormuz context helper is unavailable. Rebuild the local app after creating .venv." >&2
   exit 1
 fi
+PATH="$HORMUZ_CONTEXT_REPOSITORY/.venv/bin:$PATH"
+export PATH
 exec "$HORMUZ_CONTEXT_PYTHON" -m hormuz "$@"

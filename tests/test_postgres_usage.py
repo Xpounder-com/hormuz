@@ -23,6 +23,30 @@ else:  # Isolated wheel compatibility discovery uses the tests directory as its 
 
 
 class PostgresUsageNormalizationTests(unittest.TestCase):
+    def test_secret_aggregates_can_be_sent_as_integer_json(self) -> None:
+        # PostgreSQL SUM(bigint) returns Decimal even for an empty ledger.
+        # Exercise the repository method used by the Mac usage endpoint.
+        store = object.__new__(PostgresUsageStore)
+        transaction = mock.MagicMock()
+        cursor = transaction.__enter__.return_value.cursor.return_value.__enter__.return_value
+        with (
+            mock.patch.object(store, "_organization", return_value="acme"),
+            mock.patch.object(store, "_transaction", return_value=transaction),
+            mock.patch.object(store, "_table", return_value="gateway_secret_events"),
+        ):
+            for detections in (0, 7):
+                with self.subTest(detections=detections):
+                    cursor.fetchone.return_value = {
+                        "events": 0 if detections == 0 else 2,
+                        "detections": Decimal(detections),
+                        "redacted_requests": 0 if detections == 0 else 1,
+                        "denied_requests": 0 if detections == 0 else 1,
+                    }
+                    totals = store.monthly_secret_totals(actor_id="alice", organization_id="acme")
+                    encoded = json.loads(json.dumps(vars(totals)))
+                    self.assertEqual(encoded["detections"], detections)
+                    self.assertTrue(all(type(value) is int for value in encoded.values()))
+
     def test_monthly_numeric_aggregates_are_integer_and_json_safe(self) -> None:
         row = {
             "requests": 3,
