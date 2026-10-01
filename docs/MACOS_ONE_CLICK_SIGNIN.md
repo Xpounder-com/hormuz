@@ -42,9 +42,19 @@ auto-deploy disabled. That revision predates these desktop routes; its preflight
 hostname is deliberately rejected by the signed Mac release gate. The Render
 project's “Production” label does not change the service's pilot contract.
 That deployed source expects SQLite usage schema 12 and PostgreSQL schema 17;
-the current branch expects 19 and 24. Reusing its database avoids another
-resource charge, but an in-place update requires reviewed backups and both
-explicit migrations while serving is closed in maintenance.
+the current branch expects 19 and 24. Reusing its paid PostgreSQL instance
+avoids another resource charge. A second logical database within that instance
+can be initialized with distinct roles, while the existing login state still
+needs an offline SQLite migration under maintenance before the new desktop
+routes can serve traffic.
+
+On 2026-10-01, `hormuz_desktop_v1` was created as a second logical database
+inside the same paid PostgreSQL 16 instance. The original logical database
+remains intact. New direct migration and runtime logins authenticate without
+role impersonation; Hormuz's restricted bootstrap completed schema 24 and
+verified four authorization roles. The migration password is held in the Mac
+login Keychain, not in the web-service environment. This database preparation
+does not mean the gateway code or Mac sign-in is deployed.
 
 ## Decision
 

@@ -199,6 +199,23 @@ Use these exact attributes:
 - migration: `LOGIN NOSUPERUSER NOCREATEDB CREATEROLE NOINHERIT`
   `NOREPLICATION NOBYPASSRLS`.
 
+For a Mac development pilot that must reuse the existing paid PostgreSQL 16
+instance, create a second logical database named `hormuz_desktop_v1` inside
+that instance. Render supports multiple logical databases in one instance;
+both share its CPU, 1 GB storage, backups, and failure domain. Confirm free
+storage before bootstrap and leave autoscaling disabled. This creates no second
+Render database resource and leaves the original logical database intact.
+Use unique direct logins `hormuz_desktop_v1_migration_direct` and
+`hormuz_desktop_v1_runtime_direct`. PostgreSQL roles are shared across logical
+databases, so use the four exact new authorization roles in the
+[OpenAI-only shared-instance profile](../deploy/render/gateway/provider-openai-shared-postgres.example.json).
+The provider loader accepts that complete layout or the original one and
+rejects mixed role names. Both direct DSNs must name `hormuz_desktop_v1` and
+authenticate with `session_user=current_user`. Store the migration credential
+in the operator's password manager, then remove it from the serving environment
+after bootstrap. Keep the original logical database for rollback until it is
+explicitly retired.
+
 Keep the Render-managed operator role as database owner and grant the direct
 migration login only `CREATE` on that database. Create both direct logins through
 one disposable `CREATEROLE` builder and drop that builder before bootstrap.

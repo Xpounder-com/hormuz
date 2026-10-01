@@ -176,7 +176,12 @@ def build_custody_control_domain(
         minimum=60,
         maximum=24 * 60 * 60,
     )
-    if custody_control_mode != "postgresql" and custody_executor_raw:
+    if custody_control_mode != "postgresql" and (
+        set(custody_executor_raw) - {"postgres_executor_role"}
+    ):
+        # The hosted provider verifies this NOLOGIN authorization role even
+        # when custody execution is disabled. A role name alone grants no
+        # executor credential or custody capability.
         raise ConfigError("custody_executor requires custody_control.mode postgresql")
     if custody_control_mode == "postgresql":
         active_dsn_envs = {

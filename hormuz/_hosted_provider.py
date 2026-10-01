@@ -96,6 +96,28 @@ PROVIDER_USAGE_STORAGE = UsageStorageConfig(
         max_idle_seconds=300,
     ),
 )
+DESKTOP_SHARED_POSTGRES_LAYOUT = (
+    UsageStorageConfig(
+        backend="postgresql",
+        postgres_dsn_env=PROVIDER_RUNTIME_DSN_ENV,
+        postgres_migration_dsn_env=PROVIDER_MIGRATION_DSN_ENV,
+        postgres_schema="hormuz",
+        postgres_runtime_role="hormuz_desktop_v1_runtime",
+        postgres_pool=PROVIDER_USAGE_STORAGE.postgres_pool,
+    ),
+    PolicyControlConfig(postgres_control_role="hormuz_desktop_v1_policy_control"),
+    CustodyControlConfig(postgres_control_role="hormuz_desktop_v1_custody_control"),
+    CustodyExecutorConfig(postgres_executor_role="hormuz_desktop_v1_custody_executor"),
+)
+PROVIDER_POSTGRES_LAYOUTS = (
+    (
+        PROVIDER_USAGE_STORAGE,
+        PolicyControlConfig(),
+        CustodyControlConfig(),
+        CustodyExecutorConfig(),
+    ),
+    DESKTOP_SHARED_POSTGRES_LAYOUT,
+)
 
 
 def provider_protocols(settings: dict[str, str]) -> tuple[str, ...]:
@@ -249,7 +271,6 @@ def _validate_provider_runtime(config: GatewayConfig, protocols: tuple[str, ...]
         or config.ingress.mode != "external_tls_proxy"
         or config.ingress.trusted_proxy_cidrs != ("127.0.0.1/32",)
         or config.ingress.credential_env != "HORMUZ_INGRESS_CREDENTIAL"
-        or config.usage_storage != PROVIDER_USAGE_STORAGE
         or not config.session_broker.enabled
         or not config.session_broker.onboarding_enabled
         or not config.session_broker.console_enabled
@@ -257,6 +278,10 @@ def _validate_provider_runtime(config: GatewayConfig, protocols: tuple[str, ...]
         or config.identities_by_token
         or config.identities_by_subject
     ):
+        raise HostedError("hosted_provider_configuration_unsafe")
+    if config.usage_storage not in {
+        layout[0] for layout in PROVIDER_POSTGRES_LAYOUTS
+    }:
         raise HostedError("hosted_provider_configuration_unsafe")
 
     if set(config.upstreams) != set(protocols):
@@ -331,9 +356,12 @@ def _validate_provider_runtime(config: GatewayConfig, protocols: tuple[str, ...]
     ):
         raise HostedError("hosted_provider_limits_invalid")
     if (
-        config.policy_control != PolicyControlConfig()
-        or config.custody_control != CustodyControlConfig()
-        or config.custody_executor != CustodyExecutorConfig()
+        (
+            config.usage_storage,
+            config.policy_control,
+            config.custody_control,
+            config.custody_executor,
+        ) not in PROVIDER_POSTGRES_LAYOUTS
         or config.custody_retention is not None
         or config.custody_lifecycle is not None
         or config.key_custody is not None
