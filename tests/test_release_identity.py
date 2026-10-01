@@ -45,6 +45,11 @@ class ReleaseIdentityTests(unittest.TestCase):
         self.assertIn('"hormuz==${HORMUZ_VERSION}"', hosted_dockerfile)
         self.assertNotIn("hormuz==1.0.0", hosted_dockerfile)
 
+        mac_workflow = (ROOT / ".github/workflows/macos-distribution.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(f"default: {expected_version}", mac_workflow)
+
         server = (ROOT / "hormuz" / "server.py").read_text(encoding="utf-8")
         self.assertIn('f"Hormuz/{__version__}"', server)
         self.assertNotIn("Hormuz/0.1.3", server)
@@ -89,6 +94,7 @@ class ReleaseIdentityTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         opening = readme.split("## What works", 1)[0]
         self.assertIn("Hormuz 1.0", opening)
+        self.assertIn("> 1.5 preserves", opening)
         self.assertIn("five isolated internal repetitions", opening)
         self.assertIn("does not prove external", opening)
         self.assertNotIn("public open-source alpha", opening)

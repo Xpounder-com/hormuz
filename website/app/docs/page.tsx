@@ -56,7 +56,7 @@ PASS external provider calls: 0 (3 loopback simulator calls)`}</code></pre></div
         </section>
         <section id="downloads" className="docs-section">
           <p className="section-label">02 / Select a distribution</p><h2>Core 1.5.0. Mac companion 1.3.0.</h2>
-          <div className="table-scroll"><table className="comparison-table"><caption>Current published distribution boundaries</caption><thead><tr><th scope="col">Distribution</th><th scope="col">Version</th><th scope="col">Use and boundary</th></tr></thead><tbody>
+          <div className="table-scroll"><table className="comparison-table release-downloads"><caption>Current published distribution boundaries</caption><thead><tr><th scope="col">Distribution</th><th scope="col">Version</th><th scope="col">Use and boundary</th></tr></thead><tbody>
             <tr><th scope="row">Source</th><td>v1.5.0</td><td>CLI, gateway, adapter SDK, and Aider integration on Python 3.11+. Personal Optimizer support is limited to macOS 14+ on Apple Silicon. <a href={REPOSITORY + '/releases/download/v1.5.0/hormuz-1.5.0.tar.gz'}>Source archive ↗</a> · <a href={REPOSITORY + '/releases/tag/v1.5.0'}>Release evidence ↗</a></td></tr>
             <tr><th scope="row">Apple Silicon companion</th><td>v1.3.0</td><td>Developer ID signed and notarized for Apple Silicon, macOS 14+. <a href="#mac">Install and connect →</a></td></tr>
             <tr><th scope="row">Signed OCI reference</th><td>v1.5.0</td><td>Linux AMD64 image at ghcr.io/xpounder-com/hormuz:v1.5.0. Pin the digest in <a href={REPOSITORY + '/releases/download/v1.5.0/oci-release-summary.json'}>release evidence ↗</a> and follow <a href={sourcePath('docs/OCI.md')}>signature verification ↗</a>.</td></tr>

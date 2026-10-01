@@ -15,6 +15,9 @@ test('core download versions agree with packaging without promoting Windows or M
   assert.match(docs, /Unsigned, unsupported/);
   assert.match(docs, /releases\/download\/v1\.3\.0\/Hormuz-1\.3\.0-notarized\.zip/);
   assert.match(docs, /\/issues\/340/);
+  assert.match(docs, /comparison-table release-downloads/);
+  const styles = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(styles, /\.release-downloads\s*\{\s*min-width:\s*720px;/);
 });
 
 test('native paths and metadata use the dedicated organization root', () => {

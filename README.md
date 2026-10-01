@@ -18,9 +18,11 @@ written to the usage database.
 
 > [!IMPORTANT]
 > Hormuz 1.0 established the stable CLI and policy/evidence contracts. Hormuz
-> 1.4 preserves those contracts and the terminal-first Personal Optimizer,
-> its adapter SDK, and Aider support. It also carries the native-client source
-> foundation and measured footprint regression baselines. The original
+> 1.5 preserves those contracts and the terminal-first Personal Optimizer,
+> its adapter SDK, and Aider support. It adds verified desktop enrollment
+> contracts and Windows usage detail cards in development source. Windows
+> remains an unsigned, unsupported preview; the notarized Mac download remains
+> v1.3.0. See the [v1.5 release boundaries](docs/releases/v1.5.0-verified-improvements.md). The original
 > release qualification included five isolated internal repetitions of one exact
 > offline policy workflow plus exact-byte candidate custody. That bounded result
 > does not prove external human usability, blanket production fitness, customer
