@@ -402,16 +402,11 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
         );
         let controls = app.controls.get();
         for (index, control) in controls.iter().take(5).enumerate() {
-            let mut y = if app.preview {
+            let y = if app.preview {
                 [16, 40, 82, 106, 130][index]
             } else {
                 [12, 36, 118, 142, 166][index]
             };
-            // The panel grows upward from the work-area edge. Keep each usage
-            // button at its screen position when a hover opens the detail card.
-            if !app.preview && app.interaction.selected_metric().is_some() && index >= 2 {
-                y += 84;
-            }
             MoveWindow(
                 *control,
                 scale(16, dpi),
@@ -468,7 +463,7 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             MoveWindow(
                 details[0],
                 scale(16, dpi),
-                scale(118, dpi),
+                scale(202, dpi),
                 scale(292, dpi),
                 scale(74, dpi),
                 1,
@@ -476,7 +471,7 @@ unsafe fn reflow(hwnd: HWND, app: &App) {
             MoveWindow(
                 details[1],
                 scale(316, dpi),
-                scale(148, dpi),
+                scale(232, dpi),
                 scale(100, dpi),
                 scale(28, dpi),
                 1,
