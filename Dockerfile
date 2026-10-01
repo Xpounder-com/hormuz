@@ -15,7 +15,7 @@ RUN test "${TARGETPLATFORM}" = "linux/amd64" \
 
 FROM patched-base AS builder
 
-ARG HORMUZ_VERSION=1.4.0
+ARG HORMUZ_VERSION=1.5.0
 ARG SOURCE_DATE_EPOCH
 ARG TARGETPLATFORM
 
@@ -65,7 +65,7 @@ RUN python -m pip wheel \
 
 FROM patched-base AS runtime
 
-ARG HORMUZ_VERSION=1.4.0
+ARG HORMUZ_VERSION=1.5.0
 ARG SOURCE_DATE_EPOCH
 ARG VCS_REF=unknown
 

@@ -62,7 +62,9 @@ bound bytes while reading; a parser size check is not streaming transport.
 `hormuz.native-client-fixtures` version 1 versions the test corpus, not an HTTP
 API, persisted credential, or released application. The existing identity and
 usage HTTP schema IDs and versions stay unchanged. The unpublished Rust package
-is `1.4.0-dev.1` (`publish = false`); the shipped gateway/app remain v1.2.0.
+is `1.4.0-dev.1` (`publish = false`); the gateway is v1.5.0 and the latest
+notarized Mac app remains v1.3.0. The core release does not promote these
+unpublished libraries or qualify Windows support.
 
 Additive cases may be added to this corpus with all consumers updated. Changing
 an existing expectation requires an explicit compatibility decision and a

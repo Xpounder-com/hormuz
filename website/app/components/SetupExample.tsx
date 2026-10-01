@@ -24,7 +24,7 @@ export function SetupExample() {
       ['Review your client launcher', 'Choose the supported coding client and an approved model, review the generated settings, and save the launcher. Use it for governed model requests.'],
       ['Send a request. Inspect the result.', 'Run a small authorized request. Confirm the app shows the connected state and usage, and have the administrator check attribution. Try an agreed policy denial before expanding usage.'],
     ] : [
-      ['Install the gateway', 'Use the v1.4.0 source release or the signed Linux AMD64 OCI image. The provider-free demo verifies your local setup before using company provider accounts.'],
+      ['Install the gateway', 'Use the v1.5.0 source release or the signed Linux AMD64 OCI image. The provider-free demo verifies your local setup before using company provider accounts.'],
       ['Configure identity, providers, and policy', 'Choose the supported protocol, provide server-side provider credentials, configure model rates, and provision unique identities. Set model access, secret handling, and budget/output caps.'],
       ['Publish a team connection', 'Use an organization-controlled hostname and TLS outside local development. Give each member the gateway connection and their own identity, not a shared provider key.'],
       ['Verify the first governed workflow', 'Check an allowed request, a denied request with zero upstream calls, and the team/model usage report. Qualify recovery, credential custody, and operations before production rollout.'],

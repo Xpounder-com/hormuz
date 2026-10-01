@@ -7,10 +7,13 @@ AI sessions. The Python gateway remains server-side.
 
 ## Planned versions
 
-The current published core release is v1.4.0; the latest notarized Mac download
-remains v1.3.0. These additive desktop
-improvements use later minor-release targets. A target is neither a published
-release nor permission to change existing package/version identities. Patch
+The current core release is v1.5.0; the latest notarized Mac download
+remains v1.3.0. v1.5.0 ships verified improvements while Windows stays an
+unsigned development preview. The original connected-Windows target below
+does not establish support or close #331/#337–#340. See the
+[release scope](releases/v1.5.0-verified-improvements.md).
+Later additive desktop improvements use minor-release targets. A target is
+neither a published release nor permission to change existing package/version identities. Patch
 releases are reserved for compatible fixes after a feature release.
 
 | Target | Improvement |
@@ -37,8 +40,11 @@ releases are reserved for compatible fixes after a feature release.
 ## Delivery and acceptance
 
 1. v1.4.0 establishes shared contracts, a minimal Windows panel and measured baselines.
-2. v1.5.0 is the first connected Windows milestone: secure sign-in, real scoped
-   usage, complete interactions, reliable folding/reopening and a measured idle footprint.
+2. v1.5.0 ships verified core improvements and Windows development source.
+   The originally planned connected-Windows acceptance remains open: secure
+   authorized sign-in, real scoped usage, complete native interactions,
+   reliable folding/reopening, clean installation and a connected idle footprint.
+   Preview publication does not satisfy those criteria.
 3. v1.6.0 adds governed launch/relay; v1.7.0 separately qualifies a Rust optimizer.
 4. v1.8.0 adds Linux and capability fallbacks; v1.9.0 integrates the existing Mac
    views with Rust and qualifies platform distribution and performance.
@@ -81,7 +87,7 @@ regression alarms for the measured synthetic scope, not performance promises.
 Issue #334 adds a separate unpublished `1.5.0-dev.1`
 [Rust transport](../clients/rust/transport/README.md) with one bounded runtime,
 verified TLS, request cancellation and no automatic replay after an ambiguous
-outcome. It is not loaded by the shipped app. The gateway package is v1.4.0;
+outcome. It is not loaded by the shipped Mac app. The gateway package is v1.5.0;
 a library test pass is not a connected-companion or release claim.
 
 Issue #335 adds the unpublished `1.5.0-dev.1`
@@ -144,7 +150,8 @@ implementation and test boundaries. Source integration and synthetic CI do not
 complete #339/#340 or #331 manual Windows acceptance: login/helper adapters,
 authorized-account end-to-end proof, native desktop acceptance, connected
 measurements, signing and clean installation remain separate. The Windows
-package is `1.5.0-dev.1`; the published core package is v1.4.0.
+package stays `1.5.0-dev.1`; the core package is v1.5.0. Its development
+identity is not promoted to stable Windows support by the core release.
 
 Issue #341 adds the separate unpublished `1.6.0-dev.1`
 [governed relay](../clients/rust/relay/README.md). Its source tests exercise

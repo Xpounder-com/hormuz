@@ -30,7 +30,7 @@ export default function IntegrationsPage() {
           <p>Leave optional gateway model discovery disabled and select an explicit supported model. Hormuz does not implement that optional discovery endpoint.</p>
         </article>
       </div>
-      <p className="after-grid">These are documented protocol baselines, not a claim that every newer client is supported. Hormuz v1.4.0 core passes provider-free release checks; the maintained live-provider evidence remains the v1.2.0 OpenAI-only qualification, and same-candidate Claude Code/Anthropic qualification remains open. See <a href={sourcePath('SUPPORT.md')}>Support</a> and <a href={sourcePath('docs/LIVE_CLIENT_CONFORMANCE.md')}>live-client conformance</a> for the evidence boundaries.</p>
+      <p className="after-grid">These are documented protocol baselines, not a claim that every newer client is supported. Hormuz v1.5.0 core passes provider-free release checks; the maintained live-provider evidence remains the v1.2.0 OpenAI-only qualification, and same-candidate Claude Code/Anthropic qualification remains open. See <a href={sourcePath('SUPPORT.md')}>Support</a> and <a href={sourcePath('docs/LIVE_CLIENT_CONFORMANCE.md')}>live-client conformance</a> for the evidence boundaries.</p>
     </section>
     <section className="protocol-section" id="protocols"><div className="protocol-inner"><div><p className="section-label light">Provider protocols</p><h2>Model traffic, not every client action.</h2><p>Hormuz does not govern shell commands, MCP servers, browser requests, Git traffic, or requests that bypass it.</p></div><div className="protocol-table">
       <div className="protocol-head"><span>Surface</span><span>Current contract</span><span>Boundary</span></div>

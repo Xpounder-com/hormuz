@@ -7,6 +7,17 @@ This roadmap is evidence-gated. A milestone is not complete because code exists 
 The additive native-companion program is tracked in [epic #329](https://github.com/Xpounder-com/hormuz/issues/329)
 and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md).
 
+## v1.5.0 verified improvements; Windows preview
+
+Hormuz v1.5.0 ships the verified core and website improvements, including
+the gateway's desktop enrollment/discovery contracts and the Next.js security
+update. Windows usage detail cards are available in development source and
+automated native evidence, not as a supported Windows distribution.
+The latest signed and notarized Mac archive remains v1.3.0; no v1.5 Mac app
+is submitted to Apple. Manual Windows acceptance and connected-product
+qualification remain open in #331 and #337–#340. See the
+[v1.5.0 release note](releases/v1.5.0-verified-improvements.md).
+
 ## v1.4.0 native client baseline release
 
 Hormuz v1.4.0 aligns the package and gateway image release identity and

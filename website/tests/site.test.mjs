@@ -2,8 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { sitePath, siteUrl, CONTACT_EMAIL } from '../lib/site.mjs';
+import { sitePath, siteUrl, CONTACT_EMAIL, SOURCE_VERSION, OCI_VERSION } from '../lib/site.mjs';
 import { buildInquiry, campaignSource } from '../lib/contact.mjs';
+
+test('core download versions agree with packaging without promoting Windows or Mac', () => {
+  const core = readFileSync(new URL('../../pyproject.toml', import.meta.url), 'utf8');
+  const version = core.match(/^version = "([^"]+)"$/m)?.[1];
+  assert.equal(SOURCE_VERSION, `v${version}`);
+  assert.equal(OCI_VERSION, SOURCE_VERSION);
+  const docs = readFileSync(new URL('../app/docs/page.tsx', import.meta.url), 'utf8');
+  assert.match(docs, /Windows development preview/);
+  assert.match(docs, /Unsigned, unsupported/);
+  assert.match(docs, /releases\/download\/v1\.3\.0\/Hormuz-1\.3\.0-notarized\.zip/);
+  assert.match(docs, /\/issues\/340/);
+  assert.match(docs, /comparison-table release-downloads/);
+  const styles = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(styles, /\.release-downloads\s*\{\s*min-width:\s*720px;/);
+});
 
 test('native paths and metadata use the dedicated organization root', () => {
   assert.equal(sitePath('/'), '/');
