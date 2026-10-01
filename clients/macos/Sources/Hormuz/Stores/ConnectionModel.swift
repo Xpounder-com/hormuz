@@ -86,8 +86,10 @@ import Observation
     }
 
     private func performDesktopSignIn() async throws {
-        guard let origin = desktopOrigin, desktopSignInAvailable,
+        guard let configuredOrigin = desktopOrigin, desktopSignInAvailable,
               let controller else { throw ClientError.desktopUnavailable }
+        let origin = try ConnectionProfile.normalizeGateway(configuredOrigin,
+            allowLoopbackHTTP: desktopAllowsLoopback)
         dashboard = nil
         connector = nil
         connectorSaved = false
