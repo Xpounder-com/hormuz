@@ -80,6 +80,48 @@ class HostedProviderConfigTests(unittest.TestCase):
         self.assertEqual(self.config.usage_storage.postgres_pool.max_connections, 4)
         self.assertEqual(self.config.usage_storage.postgres_pool.max_waiting, 8)
 
+    def test_shared_postgres_instance_requires_one_exact_isolated_role_layout(self):
+        _, _, settings, document = provider_profile(
+            self.root, pilot_profile="external_pilot_openai"
+        )
+        candidate = json.loads(json.dumps(document))
+        candidate["usage_storage"]["postgres_runtime_role"] = "hormuz_desktop_v1_runtime"
+        candidate["policy_control"] = {
+            "postgres_control_role": "hormuz_desktop_v1_policy_control"
+        }
+        candidate["custody_control"] = {
+            "postgres_control_role": "hormuz_desktop_v1_custody_control"
+        }
+        candidate["custody_executor"] = {
+            "postgres_executor_role": "hormuz_desktop_v1_custody_executor"
+        }
+        loaded = self.load(candidate, settings)
+        self.assertEqual(
+            loaded.usage_storage.postgres_runtime_role, "hormuz_desktop_v1_runtime"
+        )
+        self.assertEqual(
+            loaded.policy_control.postgres_control_role,
+            "hormuz_desktop_v1_policy_control",
+        )
+
+        for key, field, value in (
+            ("usage_storage", "postgres_runtime_role", "hormuz_runtime"),
+            ("policy_control", "postgres_control_role", "hormuz_policy_control"),
+            ("custody_control", "postgres_control_role", "hormuz_custody_control"),
+            ("custody_executor", "postgres_executor_role", "hormuz_custody_executor"),
+        ):
+            mixed = json.loads(json.dumps(candidate))
+            mixed[key][field] = value
+            with self.subTest(key=key), self.assertRaises(HostedError):
+                self.load(mixed, settings)
+
+        executor_credential = json.loads(json.dumps(candidate))
+        executor_credential["custody_executor"]["postgres_executor_dsn_env"] = (
+            "HORMUZ_CUSTODY_EXECUTOR_DSN"
+        )
+        with self.assertRaises(HostedError):
+            self.load(executor_credential, settings)
+
     def test_state_provider_route_policy_and_limit_expansions_fail_closed(self):
         mutations = []
 

@@ -42,9 +42,19 @@ auto-deploy disabled. That revision predates these desktop routes; its preflight
 hostname is deliberately rejected by the signed Mac release gate. The Render
 project's “Production” label does not change the service's pilot contract.
 That deployed source expects SQLite usage schema 12 and PostgreSQL schema 17;
-the current branch expects 19 and 24. Reusing its database avoids another
-resource charge, but an in-place update requires reviewed backups and both
-explicit migrations while serving is closed in maintenance.
+the current branch expects 19 and 24. Reusing its paid PostgreSQL instance
+avoids another resource charge. A second logical database within that instance
+can be initialized with distinct roles, while the existing login state still
+needs an offline SQLite migration under maintenance before the new desktop
+routes can serve traffic.
+
+On 2026-10-01, `hormuz_desktop_v1` was created as a second logical database
+inside the same paid PostgreSQL 16 instance. The original logical database
+remains intact. New direct migration and runtime logins authenticate without
+role impersonation; Hormuz's restricted bootstrap completed schema 24 and
+verified four authorization roles. The migration password is held in the Mac
+login Keychain, not in the web-service environment. This database preparation
+does not mean the gateway code or Mac sign-in is deployed.
 
 ## Decision
 
@@ -167,21 +177,22 @@ details so the user can identify the service receiving requests.
 
 1. Implement the desktop enrollment/profile routes and native one-button flow:
    complete in the local source and provider-free tests.
-2. Use the existing paid `hormuz-https-preflight` service and existing
-   PostgreSQL database for a one-person internal pilot. Both exact callback URLs
+2. Use the existing paid `hormuz-https-preflight` service and the new
+   `hormuz_desktop_v1` logical database in its existing paid PostgreSQL instance
+   for a one-person internal pilot. Both exact callback URLs
    are already registered in Okta. The provider profile needs an explicit
    `desktop_defaults` alias for its existing organization and approved Codex
    route; adding this field leaves the initialized identity binding intact.
    Review and back up the private profile and existing stores, close inference
    in maintenance, then deploy the reviewed code while maintenance remains on.
-   Follow the hosted runbooks for the SQLite 12-to-19 and PostgreSQL 17-to-24
-   migrations. The PostgreSQL step needs the retained direct migration
-   credential, which is intentionally absent from the serving process. Add the
-   desktop default to the private provider profile, validate it with
-   `provider-check`, remove the migration credential from the service, and
-   restore the same `provider-pilot` scope. Verify a real browser callback and
-   enrolled Codex session. Do not add a service, database, disk, or provider
-   credential.
+   Follow the hosted runbook for the SQLite 12-to-19 migration. The new logical
+   database already has PostgreSQL schema 24, so point the service's restricted
+   runtime DSN at it without putting its retained migration credential in the
+   serving environment. Add the desktop default and distinct authorization
+   roles to the private provider profile, validate it with `provider-check`,
+   and restore the same `provider-pilot` scope. Verify a real browser callback
+   and enrolled Codex session. Do not add a Render service, PostgreSQL instance,
+   disk, or provider credential.
    A green `/ready` response is intermediate evidence, not production
    qualification. Use an ad hoc development Mac build with the preflight origin
    for this pilot; keep the signed distribution gate unchanged.
