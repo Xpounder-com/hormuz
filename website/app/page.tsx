@@ -12,7 +12,7 @@ import { ContextOptimizationPreview } from './components/ContextOptimizationPrev
 import { QuestionIndex } from './components/QuestionIndex';
 
 export const metadata = {
-  ...pageMetadata('Hormuz | Personal AI Optimizer & Team Gateway', 'Start with the free Personal Optimizer on your Mac, or self-host an open-source gateway for team policy and AI usage.', '/'),
+  ...pageMetadata('Hormuz | Personal Optimizer & Hosted Pro Gateway', 'Use the Personal Optimizer free on your Mac. Request access to hosted Pro for production API workflows, or discuss custom Enterprise requirements.', '/'),
   verification: { google: 'qauQXsmCOtWfE0ar7muWwlqPmMfW5F7uaI28QGz30v4' },
 };
 
@@ -20,11 +20,11 @@ export default function Home() {
   return <div className="landing-home"><SiteHeader active="platform" /><main id="content" tabIndex={-1}>
     <section className="landing-hero customer-hero" id="top">
       <div className="customer-hero-grid"><div className="landing-hero-copy">
-        <p className="landing-eyebrow"><span className="mini-dot" /> PERSONAL OPTIMIZER + TEAM GATEWAY</p>
+        <p className="landing-eyebrow"><span className="mini-dot" /> PERSONAL OPTIMIZER + HOSTED PRO</p>
         <h1>Start with your own work.<br /><em>See what Hormuz improves.</em></h1>
-        <p className="landing-deck">Use the free Personal Optimizer on a supported Mac with your own provider account and measure qualified local context reductions. When your team needs governance, self-host the open-source gateway to set policies and inspect captured usage.</p>
+        <p className="landing-deck">Use the free Personal Optimizer on a supported Mac with your own provider account and measure qualified local context reductions. For production API workflows, request access to hosted Pro: a gateway operated by Hormuz, with team controls and usage reporting.</p>
         <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/#personal')}>Set up personal use <span aria-hidden="true">↗</span></CampaignLink><a className="button landing-secondary" href="#spend">Explore the team example <span aria-hidden="true">↓</span></a></div>
-        <p className="landing-reassurance">No Hormuz software fee · Provider charges separate · No personal account required</p>
+        <p className="landing-reassurance">Personal use is free · Provider charges separate · Hosted Pro accepting inquiries</p>
       </div><SpendHookPreview /></div>
       <p className="hero-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a> · Led by Mehrdad Zaker</p>
     </section>
@@ -36,6 +36,6 @@ export default function Home() {
     <section className="landing-section" id="install"><div className="landing-heading"><p className="landing-eyebrow">FOR TEAMS · YOUR FIRST GOVERNED REQUEST</p><h2>Start with your role.<br /><em>Then connect your tools.</em></h2><p>The team Mac app connects to a configured gateway. The gateway applies your organization’s policies. For direct use on your own Mac, follow the <CampaignLink href={sitePath('/docs/#personal')}>Personal Optimizer setup</CampaignLink>.</p></div><div className="install-paths"><article><p className="landing-eyebrow">JOIN AN EXISTING TEAM</p><h3>Get the Mac companion.</h3><p>Install Hormuz 1.3.0 on Apple Silicon, macOS 14+. Use your team’s gateway address and identity, review the client launcher, then see your own usage.</p><CampaignLink className="button landing-primary" href={sitePath('/docs/#mac')}>Install free for Mac ↗</CampaignLink></article><article><p className="landing-eyebrow">SET UP YOUR ORGANIZATION</p><h3>Run your own gateway.</h3><p>Install from source or a signed OCI image. Start with the provider-free demo, configure identities and provider accounts, and verify your first governed client request.</p><CampaignLink className="button landing-secondary" href={sitePath('/docs/#quickstart')}>Install the gateway →</CampaignLink></article></div><p className="after-grid">Using Ollama or another endpoint? <CampaignLink href={sitePath('/demo/#setup')}>Check your exact stack and its current compatibility status →</CampaignLink></p>
     <p className="after-grid">Practical guides: <CampaignLink href={sitePath('/guides/team-ai-budgets/')}>Manage AI costs and team budgets</CampaignLink> · <CampaignLink href={sitePath('/guides/codex-claude-code-gateway/')}>Connect Codex and Claude Code</CampaignLink></p></section>
     <QuestionIndex compact />
-    <section className="landing-final"><p className="landing-eyebrow">TRY IT WITH YOUR WORKFLOW</p><h2>Your tools.<br /><em>Your control.</em></h2><p>Start with the free Personal Optimizer or set up the open-source gateway for your team. Paid team services have a separate scope.</p><div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/#personal')}>Set up personal use ↗</CampaignLink><CampaignLink className="button landing-secondary" href={sitePath('/plans/')}>See plans →</CampaignLink></div></section>
+    <section className="landing-final"><p className="landing-eyebrow">TRY IT WITH YOUR WORKFLOW</p><h2>Your tools.<br /><em>Your control.</em></h2><p>Start with the free Personal Optimizer, request hosted Pro access for your APIs, or discuss custom Enterprise requirements.</p><div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/#personal')}>Set up personal use ↗</CampaignLink><CampaignLink className="button landing-secondary" href={sitePath('/plans/')}>See plans →</CampaignLink></div></section>
   </main><SiteFooter /></div>;
 }

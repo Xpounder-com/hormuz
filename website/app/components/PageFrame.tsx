@@ -6,8 +6,8 @@ import { commercial } from '../../lib/commercial.mjs';
 import { PassageLines } from './Brand';
 
 const sections: Record<string, [string, string][]> = {
-  plans: [['Options', '#offers'], ['How payment works', '#details']],
-  enterprise: [['Pricing', '#plans'], ['Custom scope', '#custom'], ['Support', '#support'], ['Compare', '#comparison'], ['90-day process', '#pilot'], ['Agreed payments', '#payment']],
+  plans: [['Options', '#offers'], ['Pro pricing', '#pro-billing'], ['How payment works', '#details']],
+  enterprise: [['Custom scope', '#custom'], ['Self-hosted services', '#plans'], ['Support', '#support'], ['Compare', '#comparison'], ['90-day process', '#pilot'], ['Agreed payments', '#payment']],
   demo: [['The $1M example', '#experience'], ['Questions', '#faq'], ['Technical evidence', '#recording']],
   security: [['At a glance', '#status'], ['Data handling', '#data-handling'], ['Controls', '#controls'], ['Open gates', '#gates']],
   integrations: [['My stack', '#my-stack'], ['Client setup', '#clients'], ['Protocols', '#protocols'], ['Verify your route', '#verification']],
@@ -22,7 +22,7 @@ export function PageFrame({ active, children }: { active: string; children: Reac
     <main id="content" tabIndex={-1}>{children}
       {['demo', 'integrations', 'resources'].includes(active) && <section className="next-conversation">
         <PassageLines />
-        <div><p className="section-label">Make it work for your team</p><h2>Start free.<br /><em>Get help when you need it.</em></h2><p>Install the open-source product or <CampaignLink href={sitePath('/enterprise/')}>choose a paid engagement</CampaignLink>.</p></div>
+        <div><p className="section-label">Choose your next step</p><h2>Start free.<br /><em>Grow with your workload.</em></h2><p>Use Hormuz locally or <CampaignLink href={sitePath('/plans/')}>explore hosted Pro and custom Enterprise options</CampaignLink>.</p></div>
         <CampaignLink className="button landing-primary" href={sitePath('/docs/')}>Install free <span aria-hidden="true">↗</span></CampaignLink>
       </section>}
     </main><SiteFooter />

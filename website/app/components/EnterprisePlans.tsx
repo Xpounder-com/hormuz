@@ -6,13 +6,13 @@ import { PriceAmount } from './PriceCard';
 export function EnterprisePlans() {
   return <section className="section offer-section" id="plans" aria-labelledby="plans-title">
     <div className="section-heading">
-      <p className="section-label">THE PRICE. THE SCOPE. THE NEXT STEP.</p>
-      <h2 id="plans-title">Run the team gateway free.<br />Choose the help you need.</h2>
-      <p className="offer-intro">The team controls stay open source. Add ongoing support or a guided pilot for integration, evaluation, and operating help.</p>
+      <p className="section-label">SEPARATE IMPLEMENTATION & SUPPORT SERVICES</p>
+      <h2 id="plans-title">Operate your own gateway.<br />Choose the help you need.</h2>
+      <p className="offer-intro">The existing controls stay open source. Add ongoing support or a guided pilot for a deployment you operate. For Hormuz-operated hosting, <CampaignLink href={sitePath('/plans/#pro-billing')}>see the planned Pro offer →</CampaignLink>.</p>
     </div>
     <div className="offer-grid conversion-offers">
       <article className="offer-card">
-        <p className="section-label">01 / INSTALL AND EXPLORE</p><h3>Team gateway</h3>
+        <p className="section-label">01 / INSTALL AND EXPLORE</p><h3>Self-hosted gateway</h3>
         <PriceAmount amount="$0" period="Software license · Apache-2.0" />
         <p>Operate a gateway with your own provider accounts. Start with a local demo or join an existing team gateway on Mac.</p>
         <ul><li>Gateway, policy, model access, and budgets</li><li>Token, estimated-cost, and outcome reports</li><li>Mac companion for configured team gateways</li><li>Documentation and community support</li></ul>
