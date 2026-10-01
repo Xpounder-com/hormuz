@@ -1,13 +1,29 @@
 # Hormuz Mac: one sign-in path
 
-Status: the desktop enrollment contract, server-chosen profile, Mac first-run
-screen, Keychain session path, and automatic Hormuz-owned launcher are
-implemented and verified with local fixtures. The new HTTPS service was
-suspended on 2026-09-30 to avoid an additional paid Render instance. Its Okta
-callbacks remain registered, but it is not serving traffic. The existing paid
-provider pilot and PostgreSQL database are the no-new-resource path for a Mac
-development pilot. Desktop routes, real desktop sign-in, and a signed release
-are **not deployed**.
+Status: the one-button flow is verified in an internal development Mac build
+against the existing paid `hormuz-https-preflight` service. The app completes
+browser sign-in with the existing Okta setup, saves its session in Keychain,
+loads its server-selected Codex profile and usage, and prepares **Open Codex**.
+The same account restores after restarting the app. Before any governed request,
+the companion shows verified zero activity. No paid model request was sent during
+this verification. Signed distribution, clean-machine installation, and external
+provider qualification remain separate gates.
+
+Verified live on 2026-10-01 at `d8cdd14912cfc15e805e8a2cf80a3734f8f0b03f`, Render deploy
+`dep-dav79s942hec73d9ubhg`, on fresh instance `srv-daaqhpvavr4c73b7b0kg-66cfd8f49b-98cfx`.
+`/health`, `/ready`, `/v1/auth/desktop/profile`, `/v1/gateway/whoami`, and
+`/v1/gateway/usage` returned `200`; `provider-check` verified the private
+configuration, restricted PostgreSQL runtime, and four-connection pool.
+The migration credential is absent from the serving environment. The client
+launcher and its packaged helper accepted the saved desktop-managed profile.
+The ad hoc development rebuild requested macOS Keychain permission; after the
+owner approved it on the Mac, session, identity, and usage checks all returned
+`200`, and the native companion showed verified zero activity.
+
+The added `hormuz-desktop` service remains suspended. This pilot uses the
+existing paid web service and PostgreSQL instance, without another service,
+database instance, disk, or provider credential. The public site remains
+`https://usehormuz.github.io`.
 
 Live Render check on 2026-09-30: `hormuz-desktop`
 (`srv-dauev8h7lnhs73b3vrvg`) has the assigned origin
@@ -38,23 +54,25 @@ Live Render check on 2026-09-29: `hormuz-https-preflight`
 (`srv-daaqhpvavr4c73b7b0kg`) was serving `provider_pilot` and returned ready
 at deployed commit `d854a5a453fcbe20cb3f4c1e261e146f2da93855`. It builds
 `deploy/render/gateway/Dockerfile` from `Xpounder-com/hormuz` `main`, with
-auto-deploy disabled. That revision predates these desktop routes; its preflight
-hostname is deliberately rejected by the signed Mac release gate. The Render
-project's “Production” label does not change the service's pilot contract.
+auto-deploy disabled. That historical revision predates the desktop routes;
+the current internal pilot was upgraded on 2026-10-01 as recorded above. Its
+preflight hostname is deliberately rejected by the signed Mac release gate.
+The Render project's “Production” label does not change the service's pilot contract.
 That deployed source expects SQLite usage schema 12 and PostgreSQL schema 17;
 the current branch expects 19 and 24. Reusing its paid PostgreSQL instance
 avoids another resource charge. A second logical database within that instance
-can be initialized with distinct roles, while the existing login state still
-needs an offline SQLite migration under maintenance before the new desktop
-routes can serve traffic.
+was initialized with distinct roles on 2026-10-01. The offline SQLite
+12-to-19 migration completed under maintenance before desktop routes were
+activated on the same provider-pilot service.
 
 On 2026-10-01, `hormuz_desktop_v1` was created as a second logical database
 inside the same paid PostgreSQL 16 instance. The original logical database
 remains intact. New direct migration and runtime logins authenticate without
 role impersonation; Hormuz's restricted bootstrap completed schema 24 and
 verified four authorization roles. The migration password is held in the Mac
-login Keychain, not in the web-service environment. This database preparation
-does not mean the gateway code or Mac sign-in is deployed.
+login Keychain, not in the web-service environment. After database preparation,
+the gateway was deployed, its runtime verified, and real Mac sign-in completed
+as recorded above. The original logical database remains available.
 
 ## Decision
 
@@ -70,9 +88,9 @@ This path needs a canonical Hormuz HTTPS origin shipped with the signed Mac app.
 hosting cannot run the enrollment, OIDC callback, session, and gateway routes.
 The new Render service has the HTTPS `onrender.com` address above, but is
 suspended. The existing paid preflight service is the current pilot origin. The
-repository still has examples and a provider-free hosted staging profile; no
-desktop origin has been placed in a signed Mac build or qualified for live
-desktop sign-in and inference.
+internal development build injects that origin and has completed real desktop
+sign-in. No desktop origin has been placed in a signed Mac build; signed
+distribution and a launched live provider request remain unqualified.
 A signed one-click build must explicitly set a qualified canonical origin and
 reject example, local, pilot, preflight, staging, or GitHub Pages hosts. A signed
 build without that setting keeps the existing manual setup, so this unfinished
@@ -125,8 +143,9 @@ second recurring Render bill, first qualify the new desktop contract on the
 existing paid `hormuz-https-preflight` service and its existing PostgreSQL
 database. This is an internal pilot only. The service's preflight hostname is
 deliberately excluded from the signed distribution build; production release
-configuration and live sign-in qualification remain pending. Repurposing this
-same service for distribution would require explicit operational review and
+configuration and external provider qualification remain pending. Real sign-in
+has been verified for the internal development build as recorded above.
+Repurposing this same service for distribution would require explicit operational review and
 acceptance before changing that release gate.
 Before more than one customer uses that origin, provider
 routes, provider credentials, rate cards, and usage attribution must resolve
@@ -193,7 +212,8 @@ details so the user can identify the service receiving requests.
    and restore the same `provider-pilot` scope. Verify a real browser callback
    and enrolled Codex session. Do not add a Render service, PostgreSQL instance,
    disk, or provider credential.
-   A green `/ready` response is intermediate evidence, not production
+   This internal sign-in pilot was completed on 2026-10-01 as recorded above.
+   A green `/ready` response remains intermediate evidence for production
    qualification. Use an ad hoc development Mac build with the preflight origin
    for this pilot; keep the signed distribution gate unchanged.
 3. Add browser selection for multiple managed memberships and client
@@ -232,7 +252,10 @@ details so the user can identify the service receiving requests.
   client rejection, one-time redemption, restore profile, governed fixture
   inference, and usage. Swift tests cover profile-origin rejection, session
   revocation on mismatch, and changed profile on restore. The remaining
-  membership, installed-client, and installed-app cases above stay open.
+  multi-membership, client installation recovery, and clean-machine cases
+  above stay open. A real returning account, installed Codex selection, the
+  native desktop profile, and packaged-helper compatibility were verified for
+  the internal development build.
 - An installed Mac app completes first sign-in and a returning launch without
   entering gateway, organization, issuer, model, or a terminal command.
 - A launched supported client sends one fixture request through the Hormuz
