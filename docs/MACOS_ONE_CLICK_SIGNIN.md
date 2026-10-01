@@ -5,7 +5,7 @@ against the existing paid `hormuz-https-preflight` service. The app completes
 browser sign-in with the existing Okta setup, saves its session in Keychain,
 loads its server-selected Codex profile and usage, and prepares **Open Codex**.
 The same account restores after restarting the app. Before any governed request,
-the app shows **No Hormuz activity yet**. No paid model request was sent during
+the companion shows verified zero activity. No paid model request was sent during
 this verification. Signed distribution, clean-machine installation, and external
 provider qualification remain separate gates.
 
@@ -57,8 +57,7 @@ at deployed commit `d854a5a453fcbe20cb3f4c1e261e146f2da93855`. It builds
 auto-deploy disabled. That historical revision predates the desktop routes;
 the current internal pilot was upgraded on 2026-10-01 as recorded above. Its
 preflight hostname is deliberately rejected by the signed Mac release gate.
-The Render
-project's “Production” label does not change the service's pilot contract.
+The Render project's “Production” label does not change the service's pilot contract.
 That deployed source expects SQLite usage schema 12 and PostgreSQL schema 17;
 the current branch expects 19 and 24. Reusing its paid PostgreSQL instance
 avoids another resource charge. A second logical database within that instance
@@ -146,8 +145,7 @@ database. This is an internal pilot only. The service's preflight hostname is
 deliberately excluded from the signed distribution build; production release
 configuration and external provider qualification remain pending. Real sign-in
 has been verified for the internal development build as recorded above.
-Repurposing this
-same service for distribution would require explicit operational review and
+Repurposing this same service for distribution would require explicit operational review and
 acceptance before changing that release gate.
 Before more than one customer uses that origin, provider
 routes, provider credentials, rate cards, and usage attribution must resolve
