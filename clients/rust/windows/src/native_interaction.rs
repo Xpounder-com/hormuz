@@ -1,7 +1,9 @@
 //! GUI-thread observations and one-shot Win32 timers for the shared reducer.
 use super::*;
 use crate::interaction::{Bridge, Command, TimerAction};
-use hormuz_client_interaction::{Event, FocusTarget, Metric, PointerTarget, SettingsPage, Visibility};
+use hormuz_client_interaction::{
+    Event, FocusTarget, Metric, PointerTarget, SettingsPage, Visibility,
+};
 use std::{cell::RefCell, time::Instant};
 use windows_sys::Win32::UI::Controls::{GetComboBoxInfo, COMBOBOXINFO};
 
