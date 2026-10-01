@@ -59,7 +59,7 @@ The provider-free demo exercises the real HTTP gateway, policy, redaction,
 request-attempt, and SQLite evidence paths with disposable loopback providers:
 
 ~~~bash
-git clone --branch v1.4.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
+git clone --branch v1.5.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
 cd hormuz
 python3 -m venv .venv
 source .venv/bin/activate
@@ -67,7 +67,7 @@ python -m pip install --editable .
 hormuz demo
 ~~~
 
-The commands above select the stable v1.4.0 source tag. Installation downloads
+The commands above select the stable v1.5.0 source tag. Installation downloads
 Python dependencies; the demo itself uses only disposable local loopback
 providers. No OpenAI or Anthropic account is required. A successful run reports:
 
@@ -390,7 +390,7 @@ python3 -m hormuz contract manifest
 
 | Status | Current boundary |
 | --- | --- |
-| Stable public contract | v1.4.0 preserves the v1.0 CLI and policy/evidence contracts and the v1.3 Personal Optimizer, adapter SDK, and Aider integration. The Windows shell remains an unqualified development preview. |
+| Stable public contract | v1.5.0 preserves the v1.0 CLI and policy/evidence contracts and the v1.3 Personal Optimizer, adapter SDK, and Aider integration. The Windows shell remains an unsigned, unqualified development preview; see the [release boundaries](docs/releases/v1.5.0-verified-improvements.md). |
 | Production certification | None claimed; deployment fitness remains operator- and environment-specific. |
 | Verified references | Only the exact profiles documented in [SUPPORT.md](SUPPORT.md) and their retained evidence. |
 | Unfinished | Independent external onboarding, general production HA/DR, cloud certification, complete provider-account coverage, and independent review. |

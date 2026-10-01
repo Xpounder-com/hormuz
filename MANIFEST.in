@@ -1,6 +1,7 @@
 include SECURITY.md
 include LICENSE
 include SUPPORT.md
+recursive-include docs/releases *.md
 include CONTRIBUTING.md
 include CODE_OF_CONDUCT.md
 include .github/workflows/ci.yml

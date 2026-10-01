@@ -27,7 +27,7 @@ class ReleaseIdentityTests(unittest.TestCase):
     def test_current_package_runtime_and_container_identity_are_consistent(self) -> None:
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         project = pyproject["project"]
-        expected_version = "1.4.0"
+        expected_version = "1.5.0"
         self.assertEqual(project["version"], expected_version)
         self.assertEqual(hormuz.__version__, expected_version)
         self.assertNotIn("Development Status :: 3 - Alpha", project["classifiers"])
@@ -65,6 +65,25 @@ class ReleaseIdentityTests(unittest.TestCase):
             "tools/verify_v1_internal_repeatability_evidence.py",
             v1_candidate.REQUIRED_ARCHIVE_PATHS,
         )
+
+    def test_current_release_preserves_native_preview_boundaries(self) -> None:
+        note = (ROOT / "docs/releases/v1.5.0-verified-improvements.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("unsigned, unsupported development preview", note)
+        self.assertIn("1.5.0-dev.1", note)
+        self.assertIn("No signed Windows installer is published", note)
+        self.assertIn("No v1.5 Mac app is submitted to Apple", note)
+        self.assertIn("releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip", note)
+        windows = tomllib.loads(
+            (ROOT / "clients/rust/windows/Cargo.toml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(windows["package"]["version"], "1.5.0-dev.1")
+        self.assertEqual(windows["package"]["publish"], {"workspace": True})
+        workspace = tomllib.loads(
+            (ROOT / "clients/rust/Cargo.toml").read_text(encoding="utf-8")
+        )
+        self.assertFalse(workspace["workspace"]["package"]["publish"])
 
     def test_current_readme_uses_the_bounded_v1_claim(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
