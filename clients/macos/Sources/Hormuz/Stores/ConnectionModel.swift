@@ -32,11 +32,15 @@ import Observation
     private let desktopOrigin = Bundle.main.object(forInfoDictionaryKey: "HormuzDesktopOrigin") as? String
 
     init() {
+        client = Self.installedClient()
+    }
+
+    private static func installedClient() -> AIClient {
         let paths = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
             + ["/opt/homebrew/bin", "/usr/local/bin", FileManager.default.homeDirectoryForCurrentUser.path + "/.local/bin"]
         let codexFound = paths.contains { FileManager.default.isExecutableFile(atPath: $0 + "/codex") }
         let claudeFound = paths.contains { FileManager.default.isExecutableFile(atPath: $0 + "/claude") }
-        if !codexFound && claudeFound { client = .claudeCode }
+        return !codexFound && claudeFound ? .claudeCode : .codex
     }
 
     var desktopSignInAvailable: Bool {
@@ -82,12 +86,21 @@ import Observation
     }
 
     private func performDesktopSignIn() async throws {
-        guard let origin = desktopOrigin, desktopSignInAvailable,
+        guard let configuredOrigin = desktopOrigin, desktopSignInAvailable,
               let controller else { throw ClientError.desktopUnavailable }
+        let origin = try ConnectionProfile.normalizeGateway(configuredOrigin,
+            allowLoopbackHTTP: desktopAllowsLoopback)
         dashboard = nil
         connector = nil
         connectorSaved = false
-        let chosenClient = client
+        // Manual profile restoration must not override hosted client detection.
+        // Keep an already approved desktop client when reconnecting to its origin.
+        let chosenClient: AIClient
+        if let profile, profile.desktopManaged, profile.gateway == origin {
+            chosenClient = profile.client
+        } else {
+            chosenClient = Self.installedClient()
+        }
         try await controller.signInDesktop(origin: origin, client: chosenClient,
             allowLoopbackHTTP: desktopAllowsLoopback) { url in
             await MainActor.run {

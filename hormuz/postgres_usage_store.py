@@ -1967,7 +1967,14 @@ class PostgresUsageStore:
                     parameters,
                 )
                 row = cursor.fetchone()
-        return SecretTotals(**dict(row))
+        # SUM(bigint) is numeric in PostgreSQL and arrives as Decimal. Keep the
+        # integer repository contract JSON-safe, including an empty ledger.
+        return SecretTotals(
+            events=int(row["events"]),
+            detections=int(row["detections"]),
+            redacted_requests=int(row["redacted_requests"]),
+            denied_requests=int(row["denied_requests"]),
+        )
 
     def audit_events(
         self,
