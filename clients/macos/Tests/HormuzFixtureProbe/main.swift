@@ -13,17 +13,22 @@ final class FixtureSessions: SessionStore, @unchecked Sendable {
 enum ProbeFailure: Error { case failed }
 func require(_ value: Bool) throws { if !value { throw ProbeFailure.failed } }
 
+final class FixtureBrowserRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 /// A simulated browser, separate from the native transport, with its own cookies.
 func fixtureBrowser(_ login: URL) async throws {
-    let session = URLSession(configuration: .ephemeral)
+    let session = URLSession(configuration: .ephemeral, delegate: FixtureBrowserRedirect(), delegateQueue: nil)
     defer { session.invalidateAndCancel() }
     let (page, response) = try await session.data(from: login)
-    try require((response as? HTTPURLResponse)?.statusCode == 200)
-    let html = String(decoding: page, as: UTF8.self)
-    let expression = try NSRegularExpression(pattern: "href=\"([^\"]+)\"")
-    guard let match = expression.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-          let range = Range(match.range(at: 1), in: html),
-          let authorization = URL(string: String(html[range]).replacingOccurrences(of: "&amp;", with: "&")) else {
+    try require((response as? HTTPURLResponse)?.statusCode == 302 && page.isEmpty)
+    guard let location = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location"),
+          let authorization = URL(string: location) else {
         throw ProbeFailure.failed
     }
     try require(authorization.scheme == "http" && authorization.host == "127.0.0.1")
