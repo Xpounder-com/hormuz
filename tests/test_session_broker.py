@@ -5,6 +5,7 @@ import sqlite3
 from contextlib import closing, redirect_stdout
 from dataclasses import replace
 from unittest import mock
+from urllib.parse import urlsplit
 
 from hormuz.attribution_admission import RESULT_HEADER
 from hormuz.attribution_config import AttributionBinding, AttributionConfig, WorkScopeRef
@@ -98,6 +99,13 @@ class SessionPortfolioIntegrationTests(SessionHTTPTestCase):
 
 
 class SessionBrokerTests(SessionHTTPTestCase):
+    def test_invitation_page_requires_onboarding_and_leaves_normal_login_available(self):
+        enrollment, _ = self.enroll()
+        query = urlsplit(enrollment["login_url"]).query
+        status, _, _ = self.request("GET", "/v1/auth/join?" + query)
+        self.assertEqual(status, 400)
+        self.begin_browser(enrollment)
+
     def test_login_with_client_secret_post_uses_body_authentication(self):
         issuer = self.config.oidc_issuers[self.idp.origin]
         self.config.oidc_issuers[self.idp.origin] = replace(
@@ -194,7 +202,7 @@ class SessionBrokerTests(SessionHTTPTestCase):
                 enrollment, secret = self.enroll()
                 values, cookie = self.begin_browser(enrollment)
                 self.assertEqual(self.callback(values, cookie)[0], 400)
-                self.assertEqual(self.request("POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem", {"enrollment_secret": secret})[0], 409)
+                self.assertEqual(self.request("POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem", {"enrollment_secret": secret})[0], 400)
 
     def test_idp_outage_blocks_new_login_but_does_not_extend_existing_session(self):
         pair = self.browser_login()

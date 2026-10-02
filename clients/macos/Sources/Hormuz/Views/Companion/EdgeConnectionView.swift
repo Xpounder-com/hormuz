@@ -72,6 +72,8 @@ struct EdgeConnectionView: View {
                 Button("Continue with Hormuz", action: connection.signInDesktop)
                     .buttonStyle(EdgePrimaryButtonStyle(scale: scale))
                     .disabled(connection.isBusy)
+                Button("Use team invitation", action: connection.joinTeamDesktop)
+                    .disabled(connection.isBusy)
             } else {
                 Label("Hosted sign-in is not configured in this build.", systemImage: "info.circle")
                     .foregroundStyle(.secondary)

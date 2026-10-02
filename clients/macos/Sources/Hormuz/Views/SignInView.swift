@@ -18,6 +18,9 @@ struct SignInView: View {
                     .buttonStyle(DesktopPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
                     .disabled(connection.isBusy)
                     .accessibilityIdentifier("desktop-sign-in-button")
+                Button("Use team invitation", action: connection.joinTeamDesktop)
+                    .disabled(connection.isBusy)
+                    .accessibilityIdentifier("desktop-join-team-button")
             } else {
                 Label("Hosted sign-in is not configured in this build.", systemImage: "info.circle")
                     .foregroundStyle(.secondary)

@@ -120,6 +120,13 @@ non-credential enrollment URL for opening in a browser. A headless environment
 without an approved secure store must use the existing workload/JWT path;
 there is no plaintext persistence fallback.
 
+Normal login sets the temporary callback cookie and redirects directly to the
+configured identity provider. It does not show an invitation field. A new team
+member who has an operator-issued invitation uses `hormuz login --join-team`
+with the same connection arguments. Only that explicit flow opens the separate
+invitation page. In the Mac app, the secondary **Use team invitation** action
+opens it; **Continue with Hormuz** always uses normal sign-in.
+
 Generated setup invokes `hormuz auth session --gateway ... --profile ...` as a
 credential helper. Its stdout is deliberately a secret channel for the client;
 do not log it or run it just to display a token. The helper refreshes near
@@ -136,10 +143,11 @@ or duplicate fields, ambiguous body framing, and bodies over 16 KiB.
 | Method and route | Input | Success |
 | --- | --- | --- |
 | `POST /enrollments` | `client`, independent `enrollment_secret`, optional configured `issuer` and `organization_id` | 201: enrollment ID, login URL, expiry, polling interval |
-| `GET /login?enrollment=...` | Non-credential enrollment ID | 200: browser confirmation page and temporary HTTP-only cookie |
+| `GET /login?enrollment=...` | Non-credential enrollment ID | 302: redirect to the configured IdP and temporary HTTP-only callback cookie; no invitation page |
+| `GET /join?enrollment=...` | Non-credential enrollment ID; onboarding enabled | 200: separate team-invitation page and temporary HTTP-only cookie |
 | `POST /invitations/accept` | Opt-in browser form: invitation code, enrollment and state; matching Origin and browser cookie | 200: sign-in confirmation link; no credential; invitation is consumed only after verified IdP callback |
 | `POST /callback` | IdP form containing `state`, `code`, optional `iss`; browser cookie required | 200: completion page with no credential |
-| `POST /enrollments/{id}/redeem` | Original enrollment secret | 200: access/refresh pair and access/session expiry; 409 while unavailable |
+| `POST /enrollments/{id}/redeem` | Original enrollment secret | 200: access/refresh pair and access/session expiry; 409 while pending or unavailable; 400 for a failed enrollment only when its original secret matches |
 | `POST /refresh` | Current refresh credential | 200: rotated access/refresh pair with unchanged absolute expiry |
 | `POST /logout` | Current credential or previously consumed refresh credential from this session | 200: idempotent revocation result |
 
@@ -148,6 +156,11 @@ HTTP status distinguishes invalid input (400), invalid/expired/replayed session
 (401), non-redeemable enrollment (409), process limit (429), and dependency
 failure (503). Fixed diagnostic reasons appear in the message and metadata-only
 logs; clients must not parse message text as a stable error-code contract.
+After a verified identity is denied managed team access, the browser shows
+**Team access required** and clears its callback cookie. It does not issue a
+Hormuz session or automatically add the person to a team. An originating
+client stops polling after the failed enrollment; callers without the original
+enrollment secret cannot distinguish that failure from an unavailable enrollment.
 This adds no entries to the frozen v1.1 portfolio schema manifest.
 
 Identity and personal usage remain `/v1/gateway/whoami` and

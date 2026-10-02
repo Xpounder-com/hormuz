@@ -20,7 +20,7 @@ public enum ClientError: String, Error, LocalizedError {
         case .gatewayUnavailable: return "The gateway could not be reached. Check its address and your connection."
         case .unexpectedRedirect: return "The gateway redirected a credential request. Hormuz stopped without following it."
         case .responseTooLarge: return "The gateway response exceeded the client safety limit."
-        case .loginRejected: return "The gateway rejected sign-in. Check the team, client, and identity-provider configuration."
+        case .loginRejected: return "Hormuz could not connect this account. Check the sign-in page for details, or ask your team administrator to approve access."
         case .loginTimedOut: return "Sign-in timed out. Start again from Hormuz."
         case .loginRequired: return "Sign in to Hormuz to use this connection."
         case .alreadySignedIn: return "Sign out of the saved connection before changing its identity or client."

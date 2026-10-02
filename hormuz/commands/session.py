@@ -20,6 +20,7 @@ def add_session_commands(subparsers: argparse._SubParsersAction[argparse.Argumen
             parser.add_argument("--issuer", help="Configured OIDC issuer, required when the gateway has several")
             parser.add_argument("--organization", help="Configured organization, required for a shared issuer")
             parser.add_argument("--no-open", action="store_true", help="Print the login URL instead of opening a browser")
+            parser.add_argument("--join-team", action="store_true", help="Open the separate team-invitation flow")
             parser.add_argument("--wait-seconds", type=int, default=300)
 
 
@@ -40,7 +41,7 @@ def run(args: argparse.Namespace) -> int:
         if args.command == "login":
             if not 1 <= args.wait_seconds <= 600:
                 raise SessionClientError("invalid_login_wait")
-            login(**common, client=args.client, issuer=args.issuer, organization=args.organization, no_open=args.no_open, wait_seconds=args.wait_seconds)
+            login(**common, client=args.client, issuer=args.issuer, organization=args.organization, no_open=args.no_open, wait_seconds=args.wait_seconds, join_team=args.join_team)
             print("Signed in. Credentials are held in your operating system's secure store.")
         elif args.command == "logout":
             removed = logout(**common)

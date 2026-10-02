@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import html
 import http.client
 import json
-import re
 import tempfile
 import threading
 import time
@@ -227,9 +225,11 @@ class SessionHTTPTestCase(unittest.TestCase):
     def begin_browser(self, enrollment):
         url = urlsplit(enrollment["login_url"])
         status, headers, page = self.request("GET", url.path + "?" + url.query)
-        self.assertEqual(status, 200, page)
-        self.assertIn("Continue only if", page)
-        authorization_url = html.unescape(re.search(r'href="([^"]+)"', page)[1])
+        self.assertEqual(status, 302, page)
+        self.assertEqual(page, "")
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        authorization_url = headers["Location"]
         parsed = urlsplit(authorization_url)
         status, _, values = self.request("GET", parsed.path + "?" + parsed.query, origin=self.idp.origin)
         self.assertEqual(status, 200, values)

@@ -17,8 +17,9 @@ sessions never gain access to administrative APIs.
   random code is written once to a new private file for manual delivery. Hormuz
   does not send email. Only a keyed code hash and a keyed recipient-email hash
   enter the database; neither value is logged or returned by listing commands.
-- The client starts its existing login with the organization ID. The browser
-  confirmation page optionally accepts the invitation code in a same-origin
+- Normal client login redirects directly to the configured identity provider.
+  The explicit **Use team invitation** Mac action or `hormuz login --join-team`
+  opens `/v1/auth/join`, which accepts the invitation code in a same-origin
   form POST. The code never belongs in a URL. The form is bound to the browser
   cookie, OAuth state and enrollment; callback PKCE and nonce checks still apply.
 - Invitation form pages use `Referrer-Policy: strict-origin` so browser form
@@ -89,9 +90,10 @@ hormuz --config /private/operator/hormuz.json team invite \
 The output file must not exist. It contains the gateway origin, organization ID,
 member/invitation IDs, expiry and one-time code. Deliver it privately yourself;
 the command prints only non-secret status metadata. Default expiry is one hour,
-configurable with `--expires-in` from 300 to 86400 seconds. The Mac app's existing
-organization field or `hormuz login --organization acme` selects the organization.
-The recipient enters the code on the browser confirmation page, then follows the
+configurable with `--expires-in` from 300 to 86400 seconds. The Mac app's
+**Use team invitation** action lets the invitation select the organization;
+`hormuz login --organization acme --join-team` selects it explicitly in the CLI.
+The recipient enters the code on the separate invitation page, then follows the
 sign-in link and authenticates with the invited account. Ordinary future logins
 need no code. Client-specific sessions remain scoped to their chosen client.
 

@@ -42,6 +42,7 @@ actor FixtureTransport: GatewayTransport {
     var desktopProfileVersion = 1
     var desktopProfileUnavailable = false
     var desktopProfileRejected = false
+    var desktopEnrollmentRejected = false
 
     init(clock: TestClock) { self.clock = clock; absoluteExpiry = clock.now().addingTimeInterval(43_200) }
     func setRefreshFailure() { refreshFails = true }
@@ -56,6 +57,7 @@ actor FixtureTransport: GatewayTransport {
     func setDesktopProfileVersion(_ value: Int) { desktopProfileVersion = value }
     func setDesktopProfileUnavailable(_ value: Bool) { desktopProfileUnavailable = value }
     func setDesktopProfileRejected(_ value: Bool) { desktopProfileRejected = value }
+    func setDesktopEnrollmentRejected(_ value: Bool) { desktopEnrollmentRejected = value }
     func counts() -> (Int, Int) { (refreshCount, logoutCount) }
 
     func request(profile: ConnectionProfile, path: String, body: Data?, accessToken: String?) async throws -> GatewayReply {
@@ -66,6 +68,7 @@ actor FixtureTransport: GatewayTransport {
                 "login_url": (badLoginURL ? "https://attacker.test" : profile.gateway) + "/v1/auth/login?enrollment=" + enrollment,
                 "expires_at": iso(clock.now().addingTimeInterval(300)), "poll_interval_seconds": 1])
         case let value where value.hasPrefix("/v1/auth/desktop/enrollments/") && value.hasSuffix("/redeem"):
+            if desktopEnrollmentRejected { return try reply(400, ["error": "enrollment_failed"]) }
             var result = pairValue()
             result["desktop_profile"] = desktopProfile(client: profile.client)
             return try reply(200, result)

@@ -2,6 +2,36 @@ import XCTest
 @testable import HormuzClientCore
 
 final class SessionTests: PrivateStorageTestCase {
+    func testRejectedDesktopEnrollmentStopsWithoutSavingASession() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        await transport.setDesktopEnrollmentRejected(true)
+        do {
+            try await controller.signInDesktop(origin: "https://gateway.example.test", client: .codex) { _ in }
+            XCTFail("An enrollment without approved access must stop")
+        } catch { XCTAssertEqual(error as? ClientError, .loginRejected) }
+        XCTAssertNil(try store.load())
+    }
+
+    func testDesktopInvitationIsAnExplicitChoiceAndStillRejectsForeignLoginURLs() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        await transport.setBadLoginURL()
+        do {
+            try await controller.signInDesktop(origin: "https://gateway.example.test", client: .codex, joinTeam: true) { _ in
+                XCTFail("Foreign login URL must never be used for an invitation")
+            }
+            XCTFail("Expected browser URL rejection")
+        } catch { XCTAssertEqual(error as? ClientError, .invalidResponse) }
+        XCTAssertNil(try store.load())
+        await transport.setBadLoginURL(false)
+        try await controller.signInDesktop(origin: "https://gateway.example.test", client: .codex, joinTeam: true) { url in
+            XCTAssertEqual(url.absoluteString, "https://gateway.example.test/v1/auth/join?enrollment=" + String(repeating: "e", count: 32))
+        }
+        let status = try await controller.status()
+        XCTAssertEqual(status.profile?.desktopManaged, true)
+    }
+
     func testDesktopSignInDerivesProfileAndVerifiesItOnRestore() async throws {
         let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
         let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })

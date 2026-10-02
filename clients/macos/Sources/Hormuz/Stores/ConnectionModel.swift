@@ -85,7 +85,11 @@ import Observation
         run { try await self.performDesktopSignIn() }
     }
 
-    private func performDesktopSignIn() async throws {
+    func joinTeamDesktop() {
+        run { try await self.performDesktopSignIn(joinTeam: true) }
+    }
+
+    private func performDesktopSignIn(joinTeam: Bool = false) async throws {
         guard let configuredOrigin = desktopOrigin, desktopSignInAvailable,
               let controller else { throw ClientError.desktopUnavailable }
         let origin = try ConnectionProfile.normalizeGateway(configuredOrigin,
@@ -102,7 +106,7 @@ import Observation
             chosenClient = Self.installedClient()
         }
         try await controller.signInDesktop(origin: origin, client: chosenClient,
-            allowLoopbackHTTP: desktopAllowsLoopback) { url in
+            allowLoopbackHTTP: desktopAllowsLoopback, joinTeam: joinTeam) { url in
             await MainActor.run {
                 self.loginURL = url
                 self.awaitingBrowser = true

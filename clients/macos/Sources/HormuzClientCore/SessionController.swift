@@ -105,7 +105,7 @@ public actor SessionController {
         throw ClientError.loginTimedOut
     }
 
-    public func signInDesktop(origin: String, client: AIClient, allowLoopbackHTTP: Bool = false,
+    public func signInDesktop(origin: String, client: AIClient, allowLoopbackHTTP: Bool = false, joinTeam: Bool = false,
                               openBrowser: @Sendable (URL) async throws -> Void) async throws {
         let origin = try ConnectionProfile.normalizeGateway(origin, allowLoopbackHTTP: allowLoopbackHTTP)
         let lock = try await directory.lock()
@@ -125,7 +125,10 @@ public actor SessionController {
               loginURL.absoluteString == origin + "/v1/auth/login?enrollment=" + enrollment.enrollmentId
         else { throw ClientError.invalidResponse }
         try Task.checkCancellation()
-        try await openBrowser(loginURL)
+        guard let browserURL = joinTeam
+            ? URL(string: origin + "/v1/auth/join?enrollment=" + enrollment.enrollmentId)
+            : loginURL else { throw ClientError.invalidResponse }
+        try await openBrowser(browserURL)
         guard let pollingMilliseconds = Self.enrollmentPollingMilliseconds(
             expiresAt: enrollment.expiresAt, now: now()
         ) else { throw ClientError.loginTimedOut }
