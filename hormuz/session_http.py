@@ -101,21 +101,26 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
             raise SessionBrokerError("invalid_session_credential")
         handler._send_json(HTTPStatus.OK, broker.desktop_profile(authorization[0][7:]))
         return
-    if handler.command == "GET" and path == "/v1/auth/login":
+    if handler.command == "GET" and path in {"/v1/auth/login", "/v1/auth/join"}:
+        joining = path == "/v1/auth/join"
+        if joining and not broker.config.session_broker.onboarding_enabled:
+            raise SessionBrokerError("onboarding_disabled")
         values = _form(request.query, allowed={"enrollment"})
         enrollment_id = values.get("enrollment", "")
         if not _ENROLLMENT.fullmatch(enrollment_id):
             raise SessionBrokerError("invalid_enrollment")
         authorization_url, cookie = broker.begin_authorization(enrollment_id)
+        if not joining:
+            _browser_redirect(handler, authorization_url, cookie=cookie)
+            return
         _browser_page(
             handler,
-            "Connect your AI client",
-            "Continue only if you just started Hormuz login in your own app or terminal. "
-            "This connects that client to your organization's governed AI access.",
+            "Join your Hormuz team",
+            "Use the invitation provided by your team. If you already have team access, "
+            "you can continue to sign in without a code.",
             cookie=cookie,
             authorization_url=authorization_url,
-            invitation_form=(enrollment_id, parse_qs(urlsplit(authorization_url).query)["state"][0])
-                if broker.config.session_broker.onboarding_enabled else None,
+            invitation_form=(enrollment_id, parse_qs(urlsplit(authorization_url).query)["state"][0]),
         )
         return
     if request.query:
@@ -141,13 +146,23 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
     if handler.command == "POST" and path == "/v1/auth/callback":
         raw = _read_body(handler, "application/x-www-form-urlencoded")
         values = _form(raw.decode("utf-8"), allowed={"code", "state", "iss", "error", "error_description", "error_uri", "session_state"})
-        broker.complete_authorization(
-            state=values.get("state", ""),
-            browser_cookie=_browser_cookie(handler),
-            code=values.get("code"),
-            provider_error=values.get("error"),
-            response_issuer=values.get("iss"),
-        )
+        try:
+            broker.complete_authorization(
+                state=values.get("state", ""),
+                browser_cookie=_browser_cookie(handler),
+                code=values.get("code"),
+                provider_error=values.get("error"),
+                response_issuer=values.get("iss"),
+            )
+        except SessionBrokerError as error:
+            if error.code != "onboarding_membership_unavailable":
+                raise
+            LOGGER.info("session_request_denied reason=%s", error.code)
+            _browser_page(handler, "Team access required",
+                          "Your sign-in was verified, but this account is not approved for this Hormuz client. "
+                          "Ask your team administrator to approve access, then start sign-in again from Hormuz.",
+                          cookie="", status=HTTPStatus.BAD_REQUEST)
+            return
         _browser_page(handler, "Connected", "Return to Hormuz to finish. You can close this page.", cookie="")
         return
     if handler.command != "POST":
@@ -157,7 +172,8 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
     if handler.headers.get("Origin") is not None:
         raise SessionBrokerError("session_browser_api_forbidden")
     if path == "/v1/auth/enrollments":
-        value = _json(handler, allowed={"client", "enrollment_secret", "issuer", "organization_id"}, required={"client", "enrollment_secret"})
+        value = _json(handler, allowed={"client", "enrollment_secret", "issuer", "organization_id", "flow"}, required={"client", "enrollment_secret"})
+        _require_enrollment_flow(handler, value)
         enrollment, login_url = broker.create_enrollment(
             issuer_name=value.get("issuer"), organization_id=value.get("organization_id"),
             client_name=value["client"], enrollment_secret=value["enrollment_secret"],
@@ -168,7 +184,8 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
         })
         return
     if path == "/v1/auth/desktop/enrollments":
-        value = _json(handler, allowed={"client", "enrollment_secret"}, required={"client", "enrollment_secret"})
+        value = _json(handler, allowed={"client", "enrollment_secret", "flow"}, required={"client", "enrollment_secret"})
+        _require_enrollment_flow(handler, value)
         enrollment, login_url = broker.create_desktop_enrollment(
             client_name=value["client"], enrollment_secret=value["enrollment_secret"]
         )
@@ -205,6 +222,14 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
         handler._send_json(HTTPStatus.OK, {"revoked": True})
         return
     handler._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
+
+
+def _require_enrollment_flow(handler: GatewayRequestHandler, value: dict[str, str]) -> None:
+    flow = value.get("flow", "login")
+    if flow not in {"login", "join-team"}:
+        raise SessionBrokerError("invalid_session_request")
+    if flow == "join-team" and not handler.server.config.session_broker.onboarding_enabled:
+        raise SessionBrokerError("onboarding_disabled")
 
 
 def _read_body(handler: GatewayRequestHandler, content_type: str) -> bytes:
@@ -270,7 +295,29 @@ def _browser_cookie(handler: GatewayRequestHandler) -> str:
     return item.value if item is not None else ""
 
 
-def _browser_page(handler: GatewayRequestHandler, title: str, message: str, *, cookie: str, authorization_url: str | None = None, invitation_form: tuple[str, str] | None = None) -> None:
+def _browser_cookie_header(handler: GatewayRequestHandler, cookie: str) -> str:
+    config = handler.server.config.session_broker
+    secure = config.public_base_url.startswith("https:")
+    local_path = "/v1/auth" if config.onboarding_enabled else "/v1/auth/callback"
+    attrs = "; Path=/; Secure; HttpOnly; SameSite=None" if secure else f"; Path={local_path}; HttpOnly; SameSite=Lax"
+    max_age = config.enrollment_ttl_seconds if cookie else 0
+    return f"{_cookie_name(handler)}={cookie}; Max-Age={max_age}{attrs}"
+
+
+def _browser_redirect(handler: GatewayRequestHandler, authorization_url: str, *, cookie: str) -> None:
+    """Set the callback binding before sending normal sign-in directly to the IdP."""
+    handler.send_response(HTTPStatus.FOUND)
+    handler.send_header("Location", authorization_url)
+    handler.send_header("Content-Length", "0")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Referrer-Policy", "no-referrer")
+    handler.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.send_header("Set-Cookie", _browser_cookie_header(handler, cookie))
+    handler.end_headers()
+
+
+def _browser_page(handler: GatewayRequestHandler, title: str, message: str, *, cookie: str, authorization_url: str | None = None, invitation_form: tuple[str, str] | None = None, status: HTTPStatus = HTTPStatus.OK) -> None:
     content = f"<!doctype html><html lang='en'><meta charset='utf-8'><title>Hormuz</title><h1>{title}</h1><p>{message}</p>"
     if authorization_url is not None:
         content += f'<p><a href="{html.escape(authorization_url, quote=True)}" rel="noreferrer">Continue to sign in</a></p>'
@@ -287,12 +334,7 @@ def _browser_page(handler: GatewayRequestHandler, title: str, message: str, *, c
         )
     content += "</html>"
     body = content.encode("utf-8")
-    config = handler.server.config.session_broker
-    secure = config.public_base_url.startswith("https:")
-    local_path = "/v1/auth" if config.onboarding_enabled else "/v1/auth/callback"
-    attrs = "; Path=/; Secure; HttpOnly; SameSite=None" if secure else f"; Path={local_path}; HttpOnly; SameSite=Lax"
-    max_age = config.enrollment_ttl_seconds if cookie else 0
-    handler.send_response(HTTPStatus.OK)
+    handler.send_response(status)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
@@ -301,6 +343,6 @@ def _browser_page(handler: GatewayRequestHandler, title: str, message: str, *, c
     handler.send_header("Referrer-Policy", "strict-origin" if invitation_form is not None else "no-referrer")
     handler.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
     handler.send_header("X-Content-Type-Options", "nosniff")
-    handler.send_header("Set-Cookie", f"{_cookie_name(handler)}={cookie}; Max-Age={max_age}{attrs}")
+    handler.send_header("Set-Cookie", _browser_cookie_header(handler, cookie))
     handler.end_headers()
     handler.wfile.write(body)

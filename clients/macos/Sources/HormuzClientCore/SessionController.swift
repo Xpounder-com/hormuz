@@ -48,7 +48,7 @@ public actor SessionController {
         return ConnectionStatus(profile: try directory.loadProfile(), sessionState: nil, expiresAt: nil)
     }
 
-    public func signIn(profile: ConnectionProfile,
+    public func signIn(profile: ConnectionProfile, joinTeam: Bool = false,
                        openBrowser: @Sendable (URL) async throws -> Void) async throws {
         let profile = try profile.validated()
         let lock = try await directory.lock()
@@ -58,6 +58,7 @@ public actor SessionController {
         let secret = try Self.enrollmentSecret()
         var fields = ["client": profile.client.rawValue, "enrollment_secret": secret, "organization_id": profile.organization]
         if let issuer = profile.issuer { fields["issuer"] = issuer }
+        if joinTeam { fields["flow"] = "join-team" }
         let reply = try await post(profile, "/v1/auth/enrollments", fields)
         guard reply.status == 201 else { throw ClientError.loginRejected }
         let enrollment = try reply.decode(Enrollment.self)
@@ -67,7 +68,10 @@ public actor SessionController {
               loginURL.absoluteString == profile.gateway + "/v1/auth/login?enrollment=" + enrollment.enrollmentId
         else { throw ClientError.invalidResponse }
         try Task.checkCancellation()
-        try await openBrowser(loginURL)
+        guard let browserURL = joinTeam
+            ? URL(string: profile.gateway + "/v1/auth/join?enrollment=" + enrollment.enrollmentId)
+            : loginURL else { throw ClientError.invalidResponse }
+        try await openBrowser(browserURL)
         guard let pollingMilliseconds = Self.enrollmentPollingMilliseconds(
             expiresAt: enrollment.expiresAt, now: now()
         ) else { throw ClientError.loginTimedOut }
@@ -105,16 +109,18 @@ public actor SessionController {
         throw ClientError.loginTimedOut
     }
 
-    public func signInDesktop(origin: String, client: AIClient, allowLoopbackHTTP: Bool = false,
+    public func signInDesktop(origin: String, client: AIClient, allowLoopbackHTTP: Bool = false, joinTeam: Bool = false,
                               openBrowser: @Sendable (URL) async throws -> Void) async throws {
         let origin = try ConnectionProfile.normalizeGateway(origin, allowLoopbackHTTP: allowLoopbackHTTP)
         let lock = try await directory.lock()
         defer { lock.unlock() }
         guard try store.load() == nil else { throw ClientError.alreadySignedIn }
         let secret = try Self.enrollmentSecret()
-        let enrollmentBody = try JSONSerialization.data(withJSONObject: [
+        var enrollmentFields = [
             "client": client.rawValue, "enrollment_secret": secret,
-        ])
+        ]
+        if joinTeam { enrollmentFields["flow"] = "join-team" }
+        let enrollmentBody = try JSONSerialization.data(withJSONObject: enrollmentFields)
         let reply = try await transport.request(origin: origin, allowLoopbackHTTP: allowLoopbackHTTP,
             path: "/v1/auth/desktop/enrollments", body: enrollmentBody, accessToken: nil)
         guard reply.status == 201 else { throw ClientError.loginRejected }
@@ -125,7 +131,10 @@ public actor SessionController {
               loginURL.absoluteString == origin + "/v1/auth/login?enrollment=" + enrollment.enrollmentId
         else { throw ClientError.invalidResponse }
         try Task.checkCancellation()
-        try await openBrowser(loginURL)
+        guard let browserURL = joinTeam
+            ? URL(string: origin + "/v1/auth/join?enrollment=" + enrollment.enrollmentId)
+            : loginURL else { throw ClientError.invalidResponse }
+        try await openBrowser(browserURL)
         guard let pollingMilliseconds = Self.enrollmentPollingMilliseconds(
             expiresAt: enrollment.expiresAt, now: now()
         ) else { throw ClientError.loginTimedOut }

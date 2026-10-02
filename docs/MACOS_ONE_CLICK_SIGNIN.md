@@ -107,9 +107,12 @@ internal pilot. That does not qualify the preflight service for distribution.
    process path and common macOS install locations. It requests a short-lived
    desktop enrollment from the fixed Hormuz origin. Client detection is a hint;
    the server validates which client the signed-in person may use.
-3. Open the returned login URL in the system browser. The browser completes OIDC.
+3. Open the returned login URL in the system browser. The gateway sets its
+   callback cookie and redirects directly to the configured Okta sign-in page,
+   without an intermediate invitation form. The browser completes OIDC.
    When the person belongs to one active organization, continue automatically.
-   A managed invitation binds its organization in the browser; a returning
+   The secondary **Use team invitation** action opens a separate join page.
+   A managed invitation binds its organization there; a returning
    managed member can continue automatically when the issuer has one managed
    organization. Static identity mappings work alongside managed onboarding.
    A browser picker for multiple managed memberships remains to be built. Do
@@ -133,6 +136,38 @@ versions; the Mac UI does not yet show an install or version recovery screen.
 A session
 or profile failure retains the last trustworthy status and offers Retry or Sign
 out; it never falls back to an arbitrary gateway or provider credential.
+
+## Public account registration
+
+The selected account flow is public signup with team access approved separately:
+**Continue with Hormuz → Okta Sign up → verify email → return to Hormuz**.
+Users create a Hormuz account in the existing Okta organization; they do not
+need to create or administer their own Okta organization.
+
+For an Okta Identity Engine organization, create a dedicated user profile policy
+for the Hormuz OIDC application, allow self-service registration, require email
+verification, and assign that policy only to the Hormuz application. The hosted
+sign-in widget then offers the signup form. Keep registration and app assignment
+separate from team permissions, administrative groups and provider access. These
+are external Okta settings, not enabled by deploying this gateway change.
+See [Okta self-service registration](https://help.okta.com/oie/en-us/Content/Topics/identity-engine/policies/about-ssr.htm)
+and [user profile policies](https://help.okta.com/oie/en-us/content/topics/identity-engine/policies/configure-profile-enrollment-policy.htm).
+
+An Okta Integrator Free Plan organization supports only ten active users and is
+intended for non-production testing. Its registration policy can qualify the
+pilot signup flow, but public customer onboarding requires a production identity
+plan. Changing the identity plan is a separate cost decision.
+See [Integrator limits](https://developer.okta.com/docs/reference/org-defaults/)
+and [Okta's production-use boundary](https://developer.okta.com/blog/2025/05/13/okta-developer-edition-changes).
+
+The gateway continues to require an active Hormuz membership or configured
+identity. A new Okta account without approved team access sees **Team access
+required** after authentication and receives no gateway session, provider access
+or administrative privilege. A team administrator approves the person's access
+through the existing managed onboarding workflow. **Use team invitation** is the
+explicit join action for an approved invitation; returning members use normal
+sign-in. Public signup does not automatically enroll anyone in the internal pilot
+organization. The existing operator-issued invitation delivery remains manual.
 
 ## Hosted entry point
 

@@ -31,7 +31,7 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
 
     def invitation_page(self, enrollment):
         url = urlsplit(enrollment["login_url"])
-        status, headers, page = self.request("GET", url.path + "?" + url.query)
+        status, headers, page = self.request("GET", "/v1/auth/join?" + url.query)
         self.assertEqual(status, 200)
         self.assertIn("form-action 'self'", headers["Content-Security-Policy"])
         self.assertEqual(headers["Referrer-Policy"], "strict-origin")
@@ -68,6 +68,39 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
         status, _, pair = self.request("POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem", {"enrollment_secret": secret})
         self.assertEqual(status, 200)
         return pair
+
+    def test_returning_sign_in_redirects_without_an_invitation_and_keeps_callback_binding(self):
+        self.join_team()
+        enrollment, secret = self.enroll(organization="customer-a")
+        parsed_login = urlsplit(enrollment["login_url"])
+        status, headers, body = self.request("GET", parsed_login.path + "?" + parsed_login.query)
+        self.assertEqual((status, body), (302, ""))
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        self.assertIn("HttpOnly; SameSite=Lax", headers["Set-Cookie"])
+        authorization = urlsplit(headers["Location"])
+        self.assertEqual(authorization.netloc, urlsplit(self.idp.origin).netloc)
+        values = parse_qs(authorization.query)
+        self.assertEqual(values["code_challenge_method"], ["S256"])
+        self.assertEqual(values["response_mode"], ["form_post"])
+        self.assertNotIn("claims", values)
+        status, _, callback = self.request("GET", authorization.path + "?" + authorization.query, origin=self.idp.origin)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.callback(callback, "hormuz_login_local=" + "x" * 43)[0], 400)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        self.assertEqual(self.callback(callback, cookie)[0], 200)
+        status, _, pair = self.request("POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem", {"enrollment_secret": secret})
+        self.assertEqual(status, 200, pair)
+        self.assertEqual(self.idp.model_requests, 0)
+
+    def test_https_redirect_keeps_secure_cookie_and_does_not_forward_referrers(self):
+        enrollment, _ = self.enroll(organization="customer-a")
+        config = replace(self.config, session_broker=replace(self.config.session_broker, public_base_url="https://gateway.example.test"))
+        self.gateway.config = self.gateway.session_broker.config = config
+        status, headers, body = self.request("GET", "/v1/auth/login?" + urlsplit(enrollment["login_url"]).query, headers={"Host": "gateway.example.test"})
+        self.assertEqual((status, body), (302, ""))
+        self.assertIn("Path=/; Secure; HttpOnly; SameSite=None", headers["Set-Cookie"])
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
 
     def test_desktop_sign_in_uses_single_managed_organization(self):
         self.config = replace(self.config, session_broker=replace(
@@ -161,7 +194,7 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
         self.assertEqual(self.request(
             "POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem",
             {"enrollment_secret": secret},
-        )[0], 409)
+        )[0], 400)
 
     def test_userinfo_cannot_change_subject_or_override_an_id_token_claim(self):
         cases = (
@@ -179,12 +212,23 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
                 self.assertEqual(self.request(
                     "POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem",
                     {"enrollment_secret": secret},
-                )[0], 409)
+                )[0], 400)
 
     def test_unmapped_user_without_invite_cannot_self_enroll_and_legacy_user_still_works(self):
-        enrollment, _ = self.enroll(organization="customer-a")
+        enrollment, secret = self.enroll(organization="customer-a")
         values, cookie = self.begin_browser(enrollment)
-        self.assertEqual(self.callback(values, cookie)[0], 400)
+        status, headers, page = self.callback(values, cookie)
+        self.assertEqual(status, 400)
+        self.assertIn("Team access required", page)
+        self.assertIn("Your sign-in was verified", page)
+        self.assertNotIn("invitation_code", page)
+        self.assertIn("Max-Age=0", headers["Set-Cookie"])
+        path = "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem"
+        # Only the originating app may learn that this enrollment has failed.
+        self.assertEqual(self.request("POST", path, {"enrollment_secret": "wrong-" + "x" * 43})[0], 409)
+        self.assertEqual(self.request("POST", path, {"enrollment_secret": secret})[0], 400)
+        self.assertEqual(self.directory.list_records("memberships", organization_id="customer-a")["items"][0]["status"], "pending")
+        self.assertEqual(self.idp.model_requests, 0)
         self.idp.subject = "alice-subject"
         pair = self.browser_login()
         self.assertEqual(self.request("GET", "/v1/gateway/whoami", headers={"Authorization": "Bearer " + pair["access_token"]})[0], 200)
@@ -217,7 +261,7 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
                 enrollment, secret = self.enroll(organization="customer-a")
                 values, cookie = self.accept_in_browser(enrollment)
                 self.assertEqual(self.callback(values, cookie)[0], 400)
-                self.assertEqual(self.request("POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem", {"enrollment_secret": secret})[0], 409)
+                self.assertEqual(self.request("POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem", {"enrollment_secret": secret})[0], 400)
         self.assertEqual(self.directory.list_records("memberships", organization_id="customer-a")["items"][0]["status"], "pending")
 
     def test_disabling_between_callback_and_redemption_denies_credential(self):
@@ -252,12 +296,13 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
         backend = MemoryBackend()
         secure_store = SecureCredentialStore(backend, trust_injected_backend=True)
         def browser(url):
+            self.assertEqual(urlsplit(url).path, "/v1/auth/join")
             values, cookie = self.accept_in_browser({"login_url": url})
             self.assertEqual(self.callback(values, cookie)[0], 200)
             return True
         with mock.patch.dict("os.environ", {"XDG_CACHE_HOME": str(self.root)}):
             login(gateway=self.gateway_url, profile="onboarding-test", client="codex", issuer=None, organization="customer-a",
-                  no_open=False, allow_insecure_http=True, wait_seconds=5, store=secure_store, browser_open=browser)
+                  no_open=False, allow_insecure_http=True, wait_seconds=5, store=secure_store, browser_open=browser, join_team=True)
             self.assertIsNotNone(secure_store.get("onboarding-test"))
             token = access_token(gateway=self.gateway_url, profile="onboarding-test", allow_insecure_http=True,
                                  force_refresh=True, store=secure_store)
@@ -266,6 +311,21 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
             with self.assertRaises(SessionClientError):
                 access_token(gateway=self.gateway_url, profile="onboarding-test", allow_insecure_http=True,
                              force_refresh=True, store=secure_store)
+
+    def test_public_account_without_team_access_stops_helper_login_without_saving_credentials(self):
+        backend = MemoryBackend()
+        secure_store = SecureCredentialStore(backend, trust_injected_backend=True)
+        def browser(url):
+            values, cookie = self.begin_browser({"login_url": url})
+            self.assertEqual(self.callback(values, cookie)[0], 400)
+            return True
+        with mock.patch.dict("os.environ", {"XDG_CACHE_HOME": str(self.root)}):
+            with self.assertRaisesRegex(SessionClientError, "login_failed"):
+                login(gateway=self.gateway_url, profile="public-signup-test", client="codex", issuer=None,
+                      organization="customer-a", no_open=False, allow_insecure_http=True,
+                      wait_seconds=5, store=secure_store, browser_open=browser)
+        self.assertIsNone(secure_store.get("public-signup-test"))
+        self.assertEqual(self.idp.model_requests, 0)
 
     def test_invitation_and_idp_credentials_are_excluded_from_logs_and_usage(self):
         self.idp.omit_claims = {"email", "email_verified"}

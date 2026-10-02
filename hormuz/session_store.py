@@ -372,14 +372,17 @@ class SQLiteSessionStore:
                 """,
                 (enrollment_id,),
             ).fetchone()
+            secret_matches = (
+                row is not None and row["secret_hash"] is not None
+                and hmac.compare_digest(bytes(row["secret_hash"]), self._digest("enrollment", enrollment_secret))
+            )
+            if secret_matches and row["status"] == "failed" and _parse_time(row["expires_at"]) > now:
+                raise SessionStoreError("enrollment_failed")
             if (
                 row is None
                 or row["status"] != "authorized"
                 or _parse_time(row["expires_at"]) <= now
-                or not hmac.compare_digest(
-                    bytes(row["secret_hash"]),
-                    self._digest("enrollment", enrollment_secret),
-                )
+                or not secret_matches
             ):
                 raise SessionStoreError("enrollment_not_redeemable")
             self._require_active_membership(connection, row)

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import io
+import os
 import sqlite3
 from contextlib import closing, redirect_stdout
 from dataclasses import replace
 from unittest import mock
+from urllib.parse import urlsplit
 
 from hormuz.attribution_admission import RESULT_HEADER
 from hormuz.attribution_config import AttributionBinding, AttributionConfig, WorkScopeRef
@@ -15,7 +17,7 @@ from hormuz.portfolio_config import PortfolioConfig, PortfolioRoleBinding
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import ATTRIBUTIONS, SCOPES, canonical
-from hormuz.session_client import access_token, login, logout
+from hormuz.session_client import SessionClientError, access_token, login, logout
 from hormuz.store import UsageStore
 from tests._session_fixtures import CLIENT_SECRET, PROVIDER_KEY, SessionHTTPTestCase
 from tests.test_credential_store import MemoryBackend
@@ -98,6 +100,36 @@ class SessionPortfolioIntegrationTests(SessionHTTPTestCase):
 
 
 class SessionBrokerTests(SessionHTTPTestCase):
+    def test_disabled_join_intent_is_rejected_without_creating_an_enrollment(self):
+        for path in ("/v1/auth/enrollments", "/v1/auth/desktop/enrollments"):
+            for flow in ("join-team", "unknown", True):
+                with self.subTest(path=path, flow=flow):
+                    status, _, _ = self.request("POST", path, {
+                        "client": "codex", "enrollment_secret": "s" * 43, "flow": flow,
+                    })
+                    self.assertEqual(status, 400)
+        with closing(sqlite3.connect(self.config.session_broker.database_path)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM session_enrollments").fetchone()[0], 0)
+
+    def test_cli_disabled_join_stops_before_opening_the_browser(self):
+        backend = MemoryBackend()
+        secure_store = SecureCredentialStore(backend, trust_injected_backend=True)
+        browser = mock.Mock(return_value=True)
+        with mock.patch.dict("os.environ", {"XDG_CACHE_HOME": str(self.root)}):
+            with self.assertRaisesRegex(SessionClientError, "enrollment_rejected"):
+                login(gateway=self.gateway_url, profile="disabled-join-test", client="codex", issuer=None,
+                      organization="org-a", no_open=False, allow_insecure_http=True, wait_seconds=5,
+                      store=secure_store, browser_open=browser, join_team=True)
+        browser.assert_not_called()
+        self.assertIsNone(secure_store.get("disabled-join-test"))
+
+    def test_invitation_page_requires_onboarding_and_leaves_normal_login_available(self):
+        enrollment, _ = self.enroll()
+        query = urlsplit(enrollment["login_url"]).query
+        status, _, _ = self.request("GET", "/v1/auth/join?" + query)
+        self.assertEqual(status, 400)
+        self.begin_browser(enrollment)
+
     def test_login_with_client_secret_post_uses_body_authentication(self):
         issuer = self.config.oidc_issuers[self.idp.origin]
         self.config.oidc_issuers[self.idp.origin] = replace(
@@ -194,7 +226,7 @@ class SessionBrokerTests(SessionHTTPTestCase):
                 enrollment, secret = self.enroll()
                 values, cookie = self.begin_browser(enrollment)
                 self.assertEqual(self.callback(values, cookie)[0], 400)
-                self.assertEqual(self.request("POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem", {"enrollment_secret": secret})[0], 409)
+                self.assertEqual(self.request("POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem", {"enrollment_secret": secret})[0], 400)
 
     def test_idp_outage_blocks_new_login_but_does_not_extend_existing_session(self):
         pair = self.browser_login()

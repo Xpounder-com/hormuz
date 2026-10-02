@@ -77,7 +77,8 @@ def main():
         handoff_created = True
         with os.fdopen(descriptor, "w") as output:
             json.dump({"invitation_code": case.invitation.code}, output)
-        print(json.dumps({"login_url": enrollment["login_url"], "handoff_file": str(args.handoff_file), "local_simulator_only": True}), flush=True)
+        join_url = enrollment["login_url"].replace("/v1/auth/login?", "/v1/auth/join?", 1)
+        print(json.dumps({"login_url": join_url, "handoff_file": str(args.handoff_file), "local_simulator_only": True}), flush=True)
         for command in sys.stdin:
             if command.strip() == "exit":
                 break

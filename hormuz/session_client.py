@@ -97,6 +97,7 @@ def login(
     wait_seconds: int,
     store: SecureCredentialStore | None = None,
     browser_open: Callable[[str], bool] | None = None,
+    join_team: bool = False,
 ) -> str:
     with CredentialLock(profile):
         validate_profile(profile)
@@ -116,6 +117,8 @@ def login(
             request["issuer"] = issuer
         if organization is not None:
             request["organization_id"] = organization
+        if join_team:
+            request["flow"] = "join-team"
         status, response = gateway_client.post("/v1/auth/enrollments", request)
         if status != 201:
             raise SessionClientError("enrollment_rejected")
@@ -123,6 +126,11 @@ def login(
         login_url = _response_string(response, "login_url")
         if not _same_origin(gateway_client.gateway, login_url):
             raise SessionClientError("invalid_login_url")
+        if join_team:
+            parsed_login = urllib.parse.urlsplit(login_url)
+            if parsed_login.path != "/v1/auth/login":
+                raise SessionClientError("invalid_login_url")
+            login_url = urllib.parse.urlunsplit(parsed_login._replace(path="/v1/auth/join"))
         if no_open:
             opened = False
         else:
