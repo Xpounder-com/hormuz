@@ -1,7 +1,7 @@
 {
   "schema_id": "hormuz.native-client-fixtures",
   "schema_version": 1,
-  "source_revision": "68b0b978fabac90f0bc7c33228a5bd3c68c681ab",
+  "source_revision": "f4a4de0dd1a1432f47b0f488a01e5b30b226f31c",
   "cases": [
     {
       "code": "invalidProfile",
@@ -47,9 +47,9 @@
     },
     {
       "code": "loginRejected",
-      "swift_message": "The gateway rejected sign-in. Check the team, client, and identity-provider configuration.",
+      "swift_message": "Hormuz could not connect this account. Check the sign-in page for details, or ask your team administrator to approve access.",
       "native_message": "The gateway rejected sign-in. Check the team, client, and identity-provider configuration.",
-      "note": ""
+      "note": "Mac sign-in directs users to the browser result or separately approved team access."
     },
     {
       "code": "loginTimedOut",
