@@ -117,6 +117,8 @@ def login(
             request["issuer"] = issuer
         if organization is not None:
             request["organization_id"] = organization
+        if join_team:
+            request["flow"] = "join-team"
         status, response = gateway_client.post("/v1/auth/enrollments", request)
         if status != 201:
             raise SessionClientError("enrollment_rejected")

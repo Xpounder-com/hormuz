@@ -81,6 +81,11 @@ import Observation
         run { try await self.performSignIn() }
     }
 
+    func joinTeam() {
+        setup = .custom
+        run { try await self.performSignIn(joinTeam: true) }
+    }
+
     func signInDesktop() {
         run { try await self.performDesktopSignIn() }
     }
@@ -137,7 +142,7 @@ import Observation
         }
     }
 
-    private func performSignIn() async throws {
+    private func performSignIn(joinTeam: Bool = false) async throws {
         guard let controller else { throw ClientError.storageUnavailable }
         let profile = try ConnectionProfile(gateway: gateway, organization: organization,
             issuer: issuer.isEmpty ? nil : issuer, client: client, model: model,
@@ -145,7 +150,7 @@ import Observation
         dashboard = nil
         connector = nil
         connectorSaved = false
-        try await controller.signIn(profile: profile) { url in
+        try await controller.signIn(profile: profile, joinTeam: joinTeam) { url in
             await MainActor.run {
                 self.loginURL = url
                 self.awaitingBrowser = true

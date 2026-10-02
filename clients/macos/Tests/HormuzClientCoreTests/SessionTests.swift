@@ -2,6 +2,48 @@ import XCTest
 @testable import HormuzClientCore
 
 final class SessionTests: PrivateStorageTestCase {
+    func testDisabledJoiningStopsBothMacFlowsBeforeOpeningTheBrowser() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        await transport.setJoiningEnabled(false)
+        let profile = try profile()
+        do {
+            try await controller.signIn(profile: profile, joinTeam: true) { _ in
+                XCTFail("Disabled joining must stop before the manual browser opens")
+            }
+            XCTFail("Expected manual join rejection")
+        } catch { XCTAssertEqual(error as? ClientError, .loginRejected) }
+        do {
+            try await controller.signInDesktop(origin: profile.gateway, client: .codex, joinTeam: true) { _ in
+                XCTFail("Disabled joining must stop before the hosted browser opens")
+            }
+            XCTFail("Expected hosted join rejection")
+        } catch { XCTAssertEqual(error as? ClientError, .loginRejected) }
+        XCTAssertNil(try store.load())
+    }
+
+    func testManualInvitationUsesTheEnteredGatewayAndRejectsForeignLoginURLs() async throws {
+        let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        let profile = try ConnectionProfile(gateway: "https://self-hosted.example.test", organization: "org-a",
+                                            client: .codex, model: "approved-alias")
+        await transport.setBadLoginURL()
+        do {
+            try await controller.signIn(profile: profile, joinTeam: true) { _ in
+                XCTFail("Foreign login URLs must never open")
+            }
+            XCTFail("Expected browser URL rejection")
+        } catch { XCTAssertEqual(error as? ClientError, .invalidResponse) }
+        XCTAssertNil(try store.load())
+        await transport.setBadLoginURL(false)
+        try await controller.signIn(profile: profile, joinTeam: true) { url in
+            XCTAssertEqual(url.absoluteString, profile.gateway + "/v1/auth/join?enrollment=" + String(repeating: "e", count: 32))
+        }
+        let flow = await transport.enrollmentFlow()
+        XCTAssertEqual(flow, "join-team")
+        XCTAssertEqual(try store.load()?.profile.gateway, profile.gateway)
+    }
+
     func testRejectedDesktopEnrollmentStopsWithoutSavingASession() async throws {
         let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
         let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
@@ -30,6 +72,8 @@ final class SessionTests: PrivateStorageTestCase {
         }
         let status = try await controller.status()
         XCTAssertEqual(status.profile?.desktopManaged, true)
+        let flow = await transport.enrollmentFlow()
+        XCTAssertEqual(flow, "join-team")
     }
 
     func testDesktopSignInDerivesProfileAndVerifiesItOnRestore() async throws {

@@ -172,7 +172,8 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
     if handler.headers.get("Origin") is not None:
         raise SessionBrokerError("session_browser_api_forbidden")
     if path == "/v1/auth/enrollments":
-        value = _json(handler, allowed={"client", "enrollment_secret", "issuer", "organization_id"}, required={"client", "enrollment_secret"})
+        value = _json(handler, allowed={"client", "enrollment_secret", "issuer", "organization_id", "flow"}, required={"client", "enrollment_secret"})
+        _require_enrollment_flow(handler, value)
         enrollment, login_url = broker.create_enrollment(
             issuer_name=value.get("issuer"), organization_id=value.get("organization_id"),
             client_name=value["client"], enrollment_secret=value["enrollment_secret"],
@@ -183,7 +184,8 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
         })
         return
     if path == "/v1/auth/desktop/enrollments":
-        value = _json(handler, allowed={"client", "enrollment_secret"}, required={"client", "enrollment_secret"})
+        value = _json(handler, allowed={"client", "enrollment_secret", "flow"}, required={"client", "enrollment_secret"})
+        _require_enrollment_flow(handler, value)
         enrollment, login_url = broker.create_desktop_enrollment(
             client_name=value["client"], enrollment_secret=value["enrollment_secret"]
         )
@@ -220,6 +222,14 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
         handler._send_json(HTTPStatus.OK, {"revoked": True})
         return
     handler._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
+
+
+def _require_enrollment_flow(handler: GatewayRequestHandler, value: dict[str, str]) -> None:
+    flow = value.get("flow", "login")
+    if flow not in {"login", "join-team"}:
+        raise SessionBrokerError("invalid_session_request")
+    if flow == "join-team" and not handler.server.config.session_broker.onboarding_enabled:
+        raise SessionBrokerError("onboarding_disabled")
 
 
 def _read_body(handler: GatewayRequestHandler, content_type: str) -> bytes:

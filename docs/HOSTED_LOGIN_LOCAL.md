@@ -126,6 +126,11 @@ member who has an operator-issued invitation uses `hormuz login --join-team`
 with the same connection arguments. Only that explicit flow opens the separate
 invitation page. In the Mac app, the secondary **Use team invitation** action
 opens it; **Continue with Hormuz** always uses normal sign-in.
+The Advanced self-hosted form also has **Use team invitation**, scoped to the
+gateway entered in that form. Explicit joining adds `flow: "join-team"` to the
+enrollment request so a gateway with onboarding disabled rejects it before
+opening the browser or starting client polling. Normal enrollment remains valid
+without that optional field.
 
 Generated setup invokes `hormuz auth session --gateway ... --profile ...` as a
 credential helper. Its stdout is deliberately a secret channel for the client;
@@ -142,7 +147,7 @@ or duplicate fields, ambiguous body framing, and bodies over 16 KiB.
 
 | Method and route | Input | Success |
 | --- | --- | --- |
-| `POST /enrollments` | `client`, independent `enrollment_secret`, optional configured `issuer` and `organization_id` | 201: enrollment ID, login URL, expiry, polling interval |
+| `POST /enrollments` | `client`, independent `enrollment_secret`, optional configured `issuer`, `organization_id`, and `flow` (`login` or `join-team`) | 201: enrollment ID, login URL, expiry, polling interval |
 | `GET /login?enrollment=...` | Non-credential enrollment ID | 302: redirect to the configured IdP and temporary HTTP-only callback cookie; no invitation page |
 | `GET /join?enrollment=...` | Non-credential enrollment ID; onboarding enabled | 200: separate team-invitation page and temporary HTTP-only cookie |
 | `POST /invitations/accept` | Opt-in browser form: invitation code, enrollment and state; matching Origin and browser cookie | 200: sign-in confirmation link; no credential; invitation is consumed only after verified IdP callback |

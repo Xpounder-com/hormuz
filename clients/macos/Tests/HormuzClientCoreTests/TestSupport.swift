@@ -43,6 +43,8 @@ actor FixtureTransport: GatewayTransport {
     var desktopProfileUnavailable = false
     var desktopProfileRejected = false
     var desktopEnrollmentRejected = false
+    var joiningEnabled = true
+    var requestedEnrollmentFlow: String?
 
     init(clock: TestClock) { self.clock = clock; absoluteExpiry = clock.now().addingTimeInterval(43_200) }
     func setRefreshFailure() { refreshFails = true }
@@ -58,11 +60,18 @@ actor FixtureTransport: GatewayTransport {
     func setDesktopProfileUnavailable(_ value: Bool) { desktopProfileUnavailable = value }
     func setDesktopProfileRejected(_ value: Bool) { desktopProfileRejected = value }
     func setDesktopEnrollmentRejected(_ value: Bool) { desktopEnrollmentRejected = value }
+    func setJoiningEnabled(_ value: Bool) { joiningEnabled = value }
+    func enrollmentFlow() -> String? { requestedEnrollmentFlow }
     func counts() -> (Int, Int) { (refreshCount, logoutCount) }
 
     func request(profile: ConnectionProfile, path: String, body: Data?, accessToken: String?) async throws -> GatewayReply {
         switch path {
         case "/v1/auth/enrollments", "/v1/auth/desktop/enrollments":
+            let fields = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: String]
+            requestedEnrollmentFlow = fields?["flow"]
+            if requestedEnrollmentFlow == "join-team" && !joiningEnabled {
+                return try reply(400, ["error": "onboarding_disabled"])
+            }
             let enrollment = String(repeating: "e", count: 32)
             return try reply(201, ["enrollment_id": enrollment,
                 "login_url": (badLoginURL ? "https://attacker.test" : profile.gateway) + "/v1/auth/login?enrollment=" + enrollment,

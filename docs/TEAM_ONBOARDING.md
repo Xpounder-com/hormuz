@@ -22,6 +22,9 @@ sessions never gain access to administrative APIs.
   opens `/v1/auth/join`, which accepts the invitation code in a same-origin
   form POST. The code never belongs in a URL. The form is bound to the browser
   cookie, OAuth state and enrollment; callback PKCE and nonce checks still apply.
+  Mac self-hosted setup has its own invitation action for the entered gateway.
+  Explicit joining sends `flow: "join-team"` during enrollment creation; disabled
+  onboarding rejects that intent immediately without leaving a polling client.
 - Invitation form pages use `Referrer-Policy: strict-origin` so browser form
   posts retain the Origin required by that check without sending URL paths or
   queries as referrers. Identity-provider links remain `rel=noreferrer`; browser

@@ -64,6 +64,9 @@ struct SignInView: View {
                         .buttonStyle(.bordered)
                         .disabled(connection.gateway.isEmpty || connection.organization.isEmpty || connection.model.isEmpty)
                         .accessibilityIdentifier("sign-in-button")
+                    Button("Use team invitation", action: connection.joinTeam)
+                        .disabled(connection.gateway.isEmpty || connection.organization.isEmpty || connection.model.isEmpty)
+                        .accessibilityIdentifier("manual-join-team-button")
                 }
             }
         }
