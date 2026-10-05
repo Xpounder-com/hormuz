@@ -98,7 +98,15 @@ class OciReleaseProvenanceTests(unittest.TestCase):
             "linux/amd64",
         )
         dependencies = predicate["buildDefinition"]["resolvedDependencies"]
-        self.assertEqual(len(dependencies), 6)
+        self.assertEqual(len(dependencies), 7)
+        expected_patches = {
+            "https://deb.debian.org/debian-security/pool/updates/main/p/pcre2/libpcre2-8-0_10.42-1+deb12u2_amd64.deb":
+                "d2f7edfcc7689b9e0761c2742cc824ac86a20768bc5e8057818dc6875291fe76",
+            "https://deb.debian.org/debian-security/pool/updates/main/p/perl/perl-base_5.36.0-7+deb12u4_amd64.deb":
+                "d7d1943aec9597629bf73075efcc5ef6dc9bda96d78e80d843156ecd448478b8",
+        }
+        for uri, digest in expected_patches.items():
+            self.assertIn({"uri": uri, "digest": {"sha256": digest}}, dependencies)
         self.assertEqual(predicate["runDetails"]["metadata"]["invocationId"], (
             "https://github.com/Xpounder-com/hormuz/actions/runs/123/attempts/1"
         ))

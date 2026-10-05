@@ -318,17 +318,25 @@ The optional [Kubernetes + Helm profile](../deploy/kubernetes/README.md) uses
 this same exact digest behind a private ClusterIP and adds only its bounded
 disposable multi-replica proof; it does not change or expand the OCI contract.
 
-### Pinned Debian security correction
+### Pinned Debian security corrections
 
-The Python 3.14.7 base currently lacks Debian's `libpcre2-8-0`
-`10.42-1+deb12u1` correction for CVE-2026-86145 and CVE-2026-89161.
-Both container Dockerfiles install the exact linux/amd64 package from
-Debian's signed bookworm-security index, with Docker ADD verifying SHA-256
-`81c5502941118a24d47af69a17b8b0b9548d75cc6d72b3eb3fe01047b46fa10e`.
+The Python 3.14.7 base lacks current Debian security corrections. Both container
+Dockerfiles install these exact linux/amd64 packages from Debian's signed
+bookworm-security index, with Docker ADD verifying each SHA-256:
+
+| Package | Version | SHA-256 |
+| --- | --- | --- |
+| `libpcre2-8-0` | `10.42-1+deb12u2` | `d2f7edfcc7689b9e0761c2742cc824ac86a20768bc5e8057818dc6875291fe76` |
+| `perl-base` | `5.36.0-7+deb12u4` | `d7d1943aec9597629bf73075efcc5ef6dc9bda96d78e80d843156ecd448478b8` |
+
+The PCRE2 update retains the earlier fixes and corrects
+[CVE-2026-103111](https://security-tracker.debian.org/tracker/CVE-2026-103111).
+The Perl update addresses the fixed-version findings including
+[CVE-2026-13221](https://security-tracker.debian.org/tracker/CVE-2026-13221).
 No moving package index is resolved during the build. Generated dpkg logs are
 removed, as is ldconfig’s host-specific auxiliary cache, so generated timestamps
 and inode metadata do not enter reproducible images.
 The release provenance and its strict public-metadata validator include this
-sixth, checksum-bound dependency. Historical unpatched images are not qualified
+two checksum-bound package dependencies. Historical unpatched images are not qualified
 by this updated release verifier. Reproducibility and vulnerability scans remain
 required; this change does not waive either gate or publish an image.

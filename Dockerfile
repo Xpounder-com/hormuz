@@ -5,13 +5,15 @@ ARG SOURCE_DATE_EPOCH=0
 
 FROM ${PYTHON_BASE} AS patched-base
 ARG TARGETPLATFORM
-# Debian's signed bookworm-security index supplies this exact fixed package.
+# Debian's signed bookworm-security index supplies these exact fixed packages.
 # Keep the update reproducible while the official Python base awaits a rebuild.
-ADD --checksum=sha256:81c5502941118a24d47af69a17b8b0b9548d75cc6d72b3eb3fe01047b46fa10e \
-    https://deb.debian.org/debian-security/pool/updates/main/p/pcre2/libpcre2-8-0_10.42-1+deb12u1_amd64.deb /tmp/pcre2-security.deb
+ADD --checksum=sha256:d2f7edfcc7689b9e0761c2742cc824ac86a20768bc5e8057818dc6875291fe76 \
+    https://deb.debian.org/debian-security/pool/updates/main/p/pcre2/libpcre2-8-0_10.42-1+deb12u2_amd64.deb /tmp/pcre2-security.deb
+ADD --checksum=sha256:d7d1943aec9597629bf73075efcc5ef6dc9bda96d78e80d843156ecd448478b8 \
+    https://deb.debian.org/debian-security/pool/updates/main/p/perl/perl-base_5.36.0-7+deb12u4_amd64.deb /tmp/perl-security.deb
 RUN test "${TARGETPLATFORM}" = "linux/amd64" \
-    && dpkg -i /tmp/pcre2-security.deb \
-    && rm -f /tmp/pcre2-security.deb /var/log/dpkg.log /var/log/alternatives.log /var/cache/ldconfig/aux-cache
+    && dpkg -i /tmp/pcre2-security.deb /tmp/perl-security.deb \
+    && rm -f /tmp/pcre2-security.deb /tmp/perl-security.deb /var/log/dpkg.log /var/log/alternatives.log /var/cache/ldconfig/aux-cache
 
 FROM patched-base AS builder
 
@@ -82,7 +84,7 @@ ENV PATH="/opt/hormuz/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     HORMUZ_CONFIG=/etc/hormuz/hormuz.json
 
-# The pinned base plus checksum-pinned security package supplies the OS state.
+# The pinned base plus checksum-pinned security packages supply the OS state.
 # Never resolve moving Debian package indexes inside the build. Remove the unused global
 # installer so it is not shipped or scanned as a reachable application package.
 RUN rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14 \
