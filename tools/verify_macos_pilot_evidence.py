@@ -1399,7 +1399,10 @@ def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str,
         or authority != "Developer ID Application: Synthetic Fixture (ABCDEFGHIJ)"
     ):
         raise MacPilotEvidenceError("synthetic_distribution_proof_identity_invalid")
-    if tuple(int(part) for part in version.split(".")) >= (1, 2, 0) and schema_version < 3:
+    release_version = tuple(int(part) for part in version.split("."))
+    if release_version >= (1, 7, 0) and schema_version < 4:
+        raise MacPilotEvidenceError("distribution_proof_native_relay_contract_required")
+    if release_version >= (1, 2, 0) and schema_version < 3:
         raise MacPilotEvidenceError("distribution_proof_context_contract_required")
     if schema_version >= 3:
         if (

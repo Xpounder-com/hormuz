@@ -74,8 +74,11 @@ public struct ConnectorPlan: Sendable {
         for file in files where file.content != file.previous {
             // Preserve modifications to Hormuz-owned files as well.
             if let previous = file.previous {
-                let backup = "backup-" + UUID().uuidString.lowercased() + ".txt"
-                try directory.write(previous, to: backup, expected: nil)
+                let previousScript = Self.withoutOwnerLease(previous)
+                if previousScript == nil || previousScript != Self.withoutOwnerLease(file.content) {
+                    let backup = "backup-" + UUID().uuidString.lowercased() + ".txt"
+                    try directory.write(previous, to: backup, expected: nil)
+                }
             }
             try directory.write(file.content, to: file.name, expected: file.previous, executable: file.executable)
         }
@@ -83,6 +86,17 @@ public struct ConnectorPlan: Sendable {
 
     public var previewText: String {
         files.map { "# " + $0.name + "\n" + (String(data: $0.content, encoding: .utf8) ?? "") }.joined(separator: "\n\n")
+    }
+
+    private static func withoutOwnerLease(_ content: Data) -> Data? {
+        // Only an otherwise byte-identical generated launcher may replace its
+        // per-app UUID lease without a backup. Preserve every other edit.
+        let lease = " '--owner-socket' '/private/tmp/hormuz-owner-[0-9A-Fa-f]{8}"
+            + "(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}/lease'\\n$"
+        guard let script = String(data: content, encoding: .utf8),
+              let range = script.range(of: lease, options: .regularExpression),
+              range.upperBound == script.endIndex else { return nil }
+        return Data(script[..<range.lowerBound].utf8)
     }
 
     public static func shellQuote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'" }

@@ -13,12 +13,16 @@ HORMUZ_CONTEXT_HELPER="$HORMUZ_BUNDLE/Contents/Resources/ContextHelper/hormuz-co
 HORMUZ_REPO_ROOT="$(cd "$HORMUZ_MAC_ROOT/../.." && pwd)"
 HORMUZ_CARGO="${HORMUZ_CARGO:-cargo}"
 HORMUZ_RELAY_TARGET="${CARGO_TARGET_DIR:-$HORMUZ_REPO_ROOT/clients/rust/target}"
-(cd "$HORMUZ_REPO_ROOT/clients/rust"; "$HORMUZ_CARGO" build \
-  --target-dir "$HORMUZ_RELAY_TARGET" --locked --package hormuz-client-relay)
 if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Developer ]; then
   # Process-local selection only; do not change the machine-wide xcode-select.
   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
+case "$HORMUZ_RELAY_TARGET" in
+  /*) ;;
+  *) HORMUZ_RELAY_TARGET="$PWD/$HORMUZ_RELAY_TARGET" ;;
+esac
+(cd "$HORMUZ_REPO_ROOT/clients/rust"; "$HORMUZ_CARGO" build \
+  --target-dir "$HORMUZ_RELAY_TARGET" --locked --package hormuz-client-relay)
 
 # Stop only the GUI from this build directory, never a helper or another copy.
 if [ "$HORMUZ_MODE" != "--build-only" ]; then

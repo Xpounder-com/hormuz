@@ -197,6 +197,38 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         XCTAssertEqual(try directory.read(backups[0]), old.files[0].content)
     }
 
+    func testOwnerLeaseRebindDoesNotAccumulateBackups() async throws {
+        let profile = try profile()
+        try directory.saveProfile(profile)
+        for _ in 0..<3 {
+            let lease = URL(fileURLWithPath: "/private/tmp/hormuz-owner-\(UUID().uuidString)/lease")
+            let plan = try ConnectorPlan.preview(profile: profile, directory: directory,
+                helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"), ownerSocket: lease)
+            try await plan.apply(in: directory)
+            XCTAssertEqual(try directory.read(plan.files[0].name), plan.files[0].content)
+        }
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.root.path)
+            .contains(where: { $0.hasPrefix("backup-") }))
+    }
+
+    func testOwnerLeaseRebindPreservesUserModification() async throws {
+        let profile = try profile()
+        try directory.saveProfile(profile)
+        let helper = URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz")
+        let old = try ConnectorPlan.preview(profile: profile, directory: directory, helper: helper,
+            ownerSocket: URL(fileURLWithPath: "/private/tmp/hormuz-owner-\(UUID().uuidString)/lease"))
+        try await old.apply(in: directory)
+        let changed = Data("# User modification\n".utf8) + old.files[0].content
+        try directory.write(changed, to: old.files[0].name, expected: old.files[0].content, executable: true)
+        let new = try ConnectorPlan.preview(profile: profile, directory: directory, helper: helper,
+            ownerSocket: URL(fileURLWithPath: "/private/tmp/hormuz-owner-\(UUID().uuidString)/lease"))
+        try await new.apply(in: directory)
+        let backups = try FileManager.default.contentsOfDirectory(atPath: directory.root.path)
+            .filter { $0.hasPrefix("backup-") }
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(try directory.read(backups[0]), changed)
+    }
+
     func testShellQuotingProtectsHelperPathsAndLaunchDoesNotRewriteUserConfig() async throws {
         let profile = try profile()
         try directory.saveProfile(profile)
