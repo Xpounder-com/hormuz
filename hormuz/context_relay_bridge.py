@@ -12,6 +12,7 @@ import sys
 
 from .client_relay import RelayOptimizer, probe_gateway_capability
 from .compaction_formats import MAX_REQUEST_BYTES
+from .compaction_runtime import ContextRuntimeError, load_token_counters
 
 
 class _EnabledPreference:
@@ -30,20 +31,31 @@ def transform(body: bytes, path: str, client: str, gateway: str) -> tuple[bytes,
     }
     if path not in routes.get(client, ()) or len(body) > MAX_REQUEST_BYTES:
         return body, False
+    if not probe_gateway_capability(gateway):
+        return body, False
+    try:
+        # A one-shot helper has no warm request to amortize tokenizer setup.
+        # Initialize verified resources before the existing candidate-work
+        # guard. The native caller still bounds the entire helper lifetime,
+        # including startup; this is not a 100 ms end-to-end latency promise.
+        counters = load_token_counters()
+    except ContextRuntimeError:
+        return body, False
     optimizer = RelayOptimizer(
         preference_store=_PreferenceStore(),  # type: ignore[arg-type]
         client=client,
-        gateway_compatible=probe_gateway_capability(gateway),
+        gateway_compatible=True,
+        counters=counters,
     )
     changed, _headers = optimizer.prepare(body, path)
     return changed, changed != body and len(changed) <= MAX_REQUEST_BYTES
 
 
-def main() -> int:
+def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--client", choices=("codex", "claude-code"), required=True)
     parser.add_argument("--path", required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(arguments)
     length = sys.stdin.buffer.read(2)
     if len(length) != 2:
         return 2

@@ -27,7 +27,7 @@ class ReleaseIdentityTests(unittest.TestCase):
     def test_current_package_runtime_and_container_identity_are_consistent(self) -> None:
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         project = pyproject["project"]
-        expected_version = "1.6.0"
+        expected_version = "1.7.0"
         self.assertEqual(project["version"], expected_version)
         self.assertEqual(hormuz.__version__, expected_version)
         self.assertNotIn("Development Status :: 3 - Alpha", project["classifiers"])
@@ -72,13 +72,13 @@ class ReleaseIdentityTests(unittest.TestCase):
         )
 
     def test_current_release_preserves_native_preview_boundaries(self) -> None:
-        note = (ROOT / "docs/releases/v1.6.0-signin-and-usage.md").read_text(
+        note = (ROOT / "docs/releases/v1.7.0-native-mac-relay.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("unsigned, unsupported development preview", note)
         self.assertIn("1.5.0-dev.1", note)
         self.assertIn("No signed Windows installer is published", note)
-        self.assertIn("No v1.6 Mac app is submitted to Apple", note)
+        self.assertIn("No v1.7 Mac app is submitted to Apple", note)
         self.assertIn("does not complete the native Rust launch/relay milestone", note)
         self.assertIn("/issues/341", note)
         self.assertIn("releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip", note)
@@ -96,7 +96,7 @@ class ReleaseIdentityTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         opening = readme.split("## What works", 1)[0]
         self.assertIn("Hormuz 1.0", opening)
-        self.assertIn("> 1.6 preserves", opening)
+        self.assertIn("> 1.7 preserves", opening)
         self.assertIn("five isolated internal repetitions", opening)
         self.assertIn("does not prove external", opening)
         self.assertNotIn("public open-source alpha", opening)

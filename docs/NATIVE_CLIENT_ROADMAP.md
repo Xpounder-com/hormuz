@@ -7,12 +7,12 @@ AI sessions. The Python gateway remains server-side.
 
 ## Planned versions
 
-The current core release is v1.6.0; the latest notarized Mac download
-remains v1.3.0. v1.6.0 ships sign-in and usage improvements while Windows
+The current core release is v1.7.0; the latest notarized Mac download
+remains v1.3.0. v1.7.0 adds the development Mac's native relay integration while Windows
 stays an unsigned development preview. The original native-version targets
 below do not establish support or close #331/#337–#341. In particular, this
 core release does not complete the native Rust launch/relay milestone in #341.
-See the [release scope](releases/v1.6.0-signin-and-usage.md).
+See the [release scope](releases/v1.7.0-native-mac-relay.md).
 Later additive desktop improvements use minor-release targets. A target is
 neither a published release nor permission to change existing package/version identities. Patch
 releases are reserved for compatible fixes after a feature release.
@@ -46,9 +46,10 @@ releases are reserved for compatible fixes after a feature release.
    authorized sign-in, real scoped usage, complete native interactions,
    reliable folding/reopening, clean installation and a connected idle footprint.
    Preview publication does not satisfy those criteria.
-3. v1.6.0 ships core sign-in/usage improvements; the original native governed
-   launch/relay target remains open in #341. The v1.7.0 native target separately
-   qualifies a Rust optimizer; neither target is completed by a core release.
+3. v1.6.0 ships core sign-in/usage improvements; v1.7.0 adds the Mac source
+   integration and packaged loopback-client tests. The original native governed
+   launch/relay target remains open in #341. The planned Rust optimizer target
+   is separate; neither native milestone is completed by a core release.
 4. v1.8.0 adds Linux and capability fallbacks; v1.9.0 integrates the existing Mac
    views with Rust and qualifies platform distribution and performance.
 
@@ -160,10 +161,15 @@ Issue #341 adds the separate unpublished `1.6.0-dev.1`
 [governed relay](../clients/rust/relay/README.md). Its source tests exercise
 authenticated loopback forwarding, exact Off bytes, streamed responses,
 on-demand use of the existing Python optimizer, relay-owned first-party
-optimizer cancellation and a fake client's listener lifetime. **#341 remains
-open** for native-shell integration, installed-client proof, descendant
-containment and platform quit/update acceptance. Neither the Windows panel nor
-shipping Mac app launches this Rust relay yet.
+optimizer cancellation and a fake client's listener lifetime. The development
+Mac now packages and launches the relay, retains Swift's coordinated Keychain
+broker, and ties direct-client lifetime to an app-owned private socket rather
+than a panel. Extracted local release archives are tested with pinned installed
+Codex and Claude Code against a synthetic gateway, including lossless On and
+exact Off behavior. **#341 remains open** for client-descendant containment,
+abrupt Mac relay-death cleanup, interactive panel/quit/update acceptance, and
+the remaining platform integration. Neither the Windows panel nor the published
+v1.3.0 Mac app launches this Rust relay.
 The Linux terminal command now uses the native Secret Service adapter with
 optimization Off by default and an explicit absolute-interpreter opt-in for
 the installed-wheel Python helper. It verifies transient user-service

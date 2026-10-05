@@ -2,7 +2,7 @@ import { CampaignLink } from '../../components/CampaignLink';
 import { CodeBlock } from '../../components/CodeBlock';
 import { PageFrame, PageHero } from '../../components/PageFrame';
 import { pageMetadata } from '../../../lib/metadata';
-import { sitePath, sourcePath } from '../../../lib/site.mjs';
+import { sitePath, sourcePath, SOURCE_VERSION } from '../../../lib/site.mjs';
 
 export const metadata = pageMetadata(
   'Connect Codex & Claude Code to an AI Gateway | Hormuz',
@@ -43,7 +43,7 @@ export default function ClientGatewayGuide() {
           <CodeBlock code={claudeConfig} label="Generate Claude Code configuration" />
           <p>Review the generated shell settings. They set <code>ANTHROPIC_BASE_URL</code> to the gateway origin and <code>ANTHROPIC_AUTH_TOKEN</code> from the person’s Hormuz credential. Apply them in the employee’s intended shell or managed launcher, then run the generated <code>claude --model</code> command with a model your policy permits.</p>
           <p>Keep the company’s <code>ANTHROPIC_API_KEY</code> on the gateway. For short-lived OIDC access tokens, follow the <a href={sourcePath('docs/CLIENTS.md') + '#generic-oidc-credentials'}>client authentication reference ↗</a> rather than treating a static token example as automatic refresh.</p>
-          <p>The pinned client compatibility baseline and the current release have different evidence scopes. Hormuz v1.6.0 core passes provider-free release checks; the maintained live-provider evidence remains the v1.2.0 OpenAI-only qualification, and same-candidate Claude Code/Anthropic live qualification remains open. Check the <CampaignLink href={sitePath('/integrations/')}>integration support details</CampaignLink> for your client version and deployment.</p>
+          <p>The pinned client compatibility baseline and the current release have different evidence scopes. Hormuz {SOURCE_VERSION} core passes provider-free release checks; the maintained live-provider evidence remains the v1.2.0 OpenAI-only qualification, and same-candidate Claude Code/Anthropic live qualification remains open. Check the <CampaignLink href={sitePath('/integrations/')}>integration support details</CampaignLink> for your client version and deployment.</p>
         </section>
         <section id="verify" className="docs-section">
           <p className="section-label">04 / Verify the route</p><h2>Check an allowed request and a denial.</h2>

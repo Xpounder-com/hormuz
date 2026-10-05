@@ -181,6 +181,9 @@ _DISTRIBUTION_PROOF_V3_FIELDS = _DISTRIBUTION_PROOF_V2_FIELDS | {
     "context_helper_sha256",
     "context_helper_backend_sha256",
 }
+_DISTRIBUTION_PROOF_V4_FIELDS = _DISTRIBUTION_PROOF_V3_FIELDS | {
+    "native_relay_packaged", "native_relay_sha256", "native_relay_signature",
+}
 _NOTARIZATION_FIELDS = {
     "schema_id",
     "schema_version",
@@ -1325,6 +1328,7 @@ def _verify_production_archive(
             None,
             "notarized",
             PRODUCTION_BUNDLE_IDENTIFIER,
+            native_relay=proof["schema_version"] >= 4,
         )
     except (DistributionVerificationError, OSError) as error:
         raise MacPilotEvidenceError(f"{label}_platform_verification_failed") from error
@@ -1344,14 +1348,14 @@ def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str,
     schema_version = _require_int(
         value.get("schema_version"),
         2,
-        3,
+        4,
         "distribution_proof_schema_version",
     )
-    fields = (
-        _DISTRIBUTION_PROOF_V2_FIELDS
-        if schema_version == 2
-        else _DISTRIBUTION_PROOF_V3_FIELDS
-    )
+    fields = {
+        2: _DISTRIBUTION_PROOF_V2_FIELDS,
+        3: _DISTRIBUTION_PROOF_V3_FIELDS,
+        4: _DISTRIBUTION_PROOF_V4_FIELDS,
+    }[schema_version]
     proof = _require_fields(value, fields, "distribution_proof")
     if (
         proof["schema_id"] != "hormuz.macos-distribution-proof"
@@ -1395,9 +1399,9 @@ def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str,
         or authority != "Developer ID Application: Synthetic Fixture (ABCDEFGHIJ)"
     ):
         raise MacPilotEvidenceError("synthetic_distribution_proof_identity_invalid")
-    if tuple(int(part) for part in version.split(".")) >= (1, 2, 0) and schema_version != 3:
+    if tuple(int(part) for part in version.split(".")) >= (1, 2, 0) and schema_version < 3:
         raise MacPilotEvidenceError("distribution_proof_context_contract_required")
-    if schema_version == 3:
+    if schema_version >= 3:
         if (
             proof["context_helper_packaged"] is not True
             or proof["context_helper_architectures"]
@@ -1434,6 +1438,12 @@ def _validate_distribution_proof(value: object, evidence_kind: str) -> dict[str,
                 _SHA256_RE,
                 f"proof_context_helper_backend_{architecture}_sha256",
             )
+    if schema_version == 4:
+        if proof["native_relay_packaged"] is not True:
+            raise MacPilotEvidenceError("distribution_proof_native_relay_missing")
+        _require_pattern(proof["native_relay_sha256"], _SHA256_RE, "proof_native_relay_sha256")
+        if proof["native_relay_signature"] != {"team_identifier": team_id, "authority": authority}:
+            raise MacPilotEvidenceError("distribution_proof_native_relay_identity_invalid")
     _require_int(proof["archive_bytes"], 1, _MAX_ARCHIVE_BYTES, "proof_archive_bytes")
     for field in ("archive_sha256", "executable_sha256", "icon_sha256"):
         _require_pattern(proof[field], _SHA256_RE, f"proof_{field}")

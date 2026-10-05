@@ -66,8 +66,10 @@ An explicitly present `null`, an unknown setup string, or a hosted-pilot profile
 that selects Claude Code, loopback HTTP, or any other alias fails closed. Loading
 and re-saving a valid profile retains its setup and profile ID.
 
-The saved launcher invokes the version-matched context helper inside the app.
-That helper starts an authenticated loopback relay and gives Codex
+The current development launcher invokes the bundled Rust client relay, passing
+the Swift credential broker, packaged optimizer, and app-owned private socket.
+The published v1.3.0 app retains its earlier context-helper launcher. The relay
+starts an authenticated loopback listener and gives Codex
 invocation-local TOML overrides or Claude Code invocation-local environment
 overrides. Common ambient provider credential and backend selectors are cleared
 for that invocation. The launcher accepts no extra override arguments. It does
@@ -75,18 +77,24 @@ not weaken tool permissions, sandbox policies or approval settings, or modify
 unrelated user preferences.
 Managed/client settings and changing the tool configuration can still affect
 routing; this is not device enforcement. Moving the app requires regenerating
-the launcher so its absolute helper path remains valid.
+the launcher so its absolute helper path remains valid. After an app restart,
+an already-saved launcher is regenerated following successful connection refresh
+with the new app's lifetime lease. Keep the resident app running; hiding its
+panels does not close that lease.
 
 ## Session and network safety
 
-The app executable remains the Keychain credential helper. The separate context
-helper accepts only a profile ID, the explicit private state directory, and the
-fixed app-helper path supplied by the generated launcher. It starts one relay and
-one client process, then exits with the client. **Credential-helper stdout is a
+The app executable remains the Keychain credential helper. The Rust relay
+accepts only the profile ID, explicit private state directory, and the fixed
+helper/socket paths supplied by the generated launcher. It starts one relay and
+one client process, then exits with the client. App quit closes the owner lease
+and stops the direct client and owned optimizer work; deliberate detachment,
+abrupt relay death, and interactive quit/update qualification remain open in
+#341. **Credential-helper stdout is a
 machine credential channel. Do not paste, record, or print it.** Errors contain
 fixed diagnostics, not server bodies or credentials.
 
-The context helper binds an OS-selected IPv4 loopback port and creates a fresh
+The relay binds an OS-selected IPv4 loopback port and creates a fresh
 credential for each launch. It accepts only the expected local host, protocol
 paths, and methods, replaces that credential before gateway egress, follows no
 redirect, retries no inference request, and logs no model body. With optimization
@@ -95,9 +103,11 @@ On, selection, reconstruction checks, and token estimates stay on the device;
 only one chosen request representation reaches the gateway. See [client-side
 context optimization](CONTEXT_OPTIMIZATION.md).
 
-The app's credential-helper mode reads Keychain and validates the entire saved
-profile before returning an access token. Both the app and that mode take the
-same process lock. Before a
+The app's credential-helper mode validates the entire saved profile before
+returning an access token. The Rust relay also supplies its complete expected
+profile over bounded stdin; the broker compares it under the same process lock
+before reading Keychain or refreshing. A profile replacement with the same ID
+cannot rebind an active relay. Before a
 refresh it persists a pending state, so a crash or lost response cannot cause the
 next helper to replay a possibly consumed refresh token. Interrupted refresh
 requires sign-out/revocation and a new login. The native code does not replay
@@ -159,7 +169,28 @@ wrong-client denial, personal usage, token rotation, old-token rejection, logout
 redirect refusal, response bounds and no credentials in generated files. It is
 mechanical evidence, not external onboarding or real-IdP validation.
 
-For an actual local GUI and installed-client check:
+For the current Rust launcher's provider-free installed-client checks, extract
+an ad hoc local validation archive and select that archive's executables:
+
+```sh
+HORMUZ_NATIVE_RELAY_BINARY=/absolute/path/Hormuz.app/Contents/Helpers/hormuz-client-relay \
+HORMUZ_NATIVE_OPTIMIZER_HELPER=/absolute/path/Hormuz.app/Contents/Resources/ContextHelper/hormuz-context \
+HORMUZ_NATIVE_CREDENTIAL_HELPER=/absolute/path/Hormuz.app/Contents/MacOS/Hormuz \
+HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY=/absolute/path/pinned-clients/node_modules/.bin \
+  python -m unittest -v tests.test_native_macos_relay
+```
+
+The isolated client directory must contain Codex **0.147.0** and Claude Code
+**2.1.233**. The suite uses disposable configuration roots and synthetic
+credentials against loopback gateways. It tests extracted Rust/optimizer
+binaries, actual Codex tool compaction and Claude streaming, exact Off bytes,
+failed helpers, bad authentication, and owner-exit cancellation. The packaged
+Swift broker rejects malformed or mismatched profiles without reading an
+existing Keychain item. Positive credential custody is separately covered by
+the isolated Keychain and coordinated session tests; this suite does not
+establish interactive GUI, live-account, or clean-install acceptance.
+
+For a separate interactive local GUI check:
 
 ```sh
 python tools/verify_macos_client.py --serve
@@ -169,25 +200,13 @@ python tools/verify_macos_client.py --serve
 Select **Custom team gateway**, then use the printed loopback origin, `org-a`,
 and `safe-openai` for Codex or `safe-claude` for Claude Code. Enable local HTTP.
 The browser's **fixture Alice**
-button uses no real account or password. Save the connector, then run:
-
-```sh
-python tools/verify_macos_installed_client.py \
-  --state-directory "$HOME/Library/Application Support/Hormuz" \
-  --bundle clients/macos/dist/Hormuz.app \
-  --client-command /absolute/path/to/pinned/codex-or-claude \
-  --output /tmp/hormuz-macos-installed-client.json
-```
-
-The tool first requires the explicit test-fixture endpoint on loopback, captures
-the native helper without displaying its credential, forces rotation, confirms
-the old access token is rejected, and runs Codex **0.147.0** or Claude Code
-**2.1.233** against the simulator. It isolates `CODEX_HOME` / `CLAUDE_CONFIG_DIR`,
-preserves the login environment needed by Keychain, and compares the real user
-settings' fingerprints. It retains only booleans, versions and artifact digests.
-Read-only/safe client flags and a synthetic no-tools request are used. Sign out in
-the app before stopping the fixture or rebuilding. These fixture servers must
-never be deployed or exposed beyond loopback.
+button uses no real account or password. Save the connector and launch the
+pinned client through it. Check that hiding a panel preserves traffic and
+quitting ends the direct invocation. Those interactive checks are still open
+in #341. The historical `verify_macos_installed_client.py` targets the earlier
+direct-connector format and does not qualify the current Rust launcher.
+Sign out in the app before stopping the fixture or rebuilding. These fixture
+servers must never be deployed or exposed beyond loopback.
 
 The settings mechanisms follow the pinned clients' behavior and the [Claude Code
 CLI reference](https://code.claude.com/docs/en/cli-reference) and [settings reference](https://code.claude.com/docs/en/settings).

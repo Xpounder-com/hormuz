@@ -6,15 +6,20 @@ on:
     branches: [main]
     paths:
       - "clients/macos/**"
+      - "clients/rust/**"
       - "script/build_and_run.sh"
       - "script/package_macos_release.sh"
       - "script/notarize_macos_release.sh"
       - "tools/verify_macos_client.py"
       - "tools/verify_macos_distribution.py"
+      - "tools/verify_macos_pilot_evidence.py"
       - "tools/build_context_helper.sh"
       - "tools/context_helper_entry.py"
       - "tests/test_macos_distribution_verifier.py"
+      - "tests/test_macos_pilot_evidence.py"
       - "tests/test_client_relay.py"
+      - "tests/test_context_relay_bridge.py"
+      - "tests/test_native_macos_relay.py"
       - "tests/test_compaction*.py"
       - "tools/verify_macos_installed_client.py"
       - "pyproject.toml"
@@ -56,19 +61,24 @@ jobs:
             echo "macos=true" >> "$GITHUB_OUTPUT"
           elif git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
             clients/macos \
+            clients/rust \
             script/build_and_run.sh \
             script/package_macos_release.sh \
             script/notarize_macos_release.sh \
             tools/verify_macos_client.py \
             tools/verify_macos_distribution.py \
+            tools/verify_macos_pilot_evidence.py \
             tools/build_context_helper.sh \
             tools/context_helper_entry.py \
             tools/verify_macos_installed_client.py \
             tests/_session_fixtures.py \
             tests/test_client_relay.py \
+            tests/test_context_relay_bridge.py \
+            tests/test_native_macos_relay.py \
             tests/test_compaction*.py \
             tests/test_gateway.py \
             tests/test_macos_distribution_verifier.py \
+            tests/test_macos_pilot_evidence.py \
             pyproject.toml \
             hormuz \
             .github/workflows/macos-client.yml \
@@ -157,6 +167,9 @@ jobs:
           test "$(uname -m)" = arm64
           swift --version
           xcodebuild -version
+      - name: Install pinned Rust toolchain
+        working-directory: clients/rust
+        run: rustup toolchain install 1.98.1 --profile minimal
       - name: Test native session and storage contracts
         run: swift test --package-path clients/macos
       - name: Install client feature dependencies
@@ -186,8 +199,35 @@ jobs:
           --context-helper-directory "$RUNNER_TEMP/hormuz-context-helpers"
           --tokenizer-cache "$RUNNER_TEMP/hormuz-context-tokenizers"
           --output-directory "$RUNNER_TEMP/hormuz-macos-package"
+      - name: Set up Node.js for native launch conformance
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Verify packaged Rust relay with pinned official clients
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/hormuz-native-clients" \
+            --no-package-lock --no-save '@openai/codex@0.147.0' '@anthropic-ai/claude-code@2.1.233'
+          mkdir "$RUNNER_TEMP/hormuz-native-archive"
+          HORMUZ_PACKAGE_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          python tools/verify_macos_distribution.py \
+            --bundle "$RUNNER_TEMP/hormuz-macos-package/Hormuz.app" \
+            --archive "$RUNNER_TEMP/hormuz-macos-package/Hormuz-$HORMUZ_PACKAGE_VERSION-local-validation.zip" \
+            --mode ad-hoc --expected-bundle-id com.xpounder.hormuz \
+            --expected-version "$HORMUZ_PACKAGE_VERSION" --expected-build 1 \
+            --verify-executable-version --verify-context-helper \
+            --source-commit "${{ github.sha }}" \
+            --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --output "$RUNNER_TEMP/hormuz-macos-package/package-metadata.json"
+          ditto -x -k "$RUNNER_TEMP/hormuz-macos-package/Hormuz-$HORMUZ_PACKAGE_VERSION-local-validation.zip" \
+            "$RUNNER_TEMP/hormuz-native-archive"
+          HORMUZ_NATIVE_RELAY_BINARY="$RUNNER_TEMP/hormuz-native-archive/Hormuz.app/Contents/Helpers/hormuz-client-relay" \
+            HORMUZ_NATIVE_OPTIMIZER_HELPER="$RUNNER_TEMP/hormuz-native-archive/Hormuz.app/Contents/Resources/ContextHelper/hormuz-context" \
+            HORMUZ_NATIVE_CREDENTIAL_HELPER="$RUNNER_TEMP/hormuz-native-archive/Hormuz.app/Contents/MacOS/Hormuz" \
+            HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY="$RUNNER_TEMP/hormuz-native-clients/node_modules/.bin" \
+            python -m unittest -v tests.test_native_macos_relay
       - name: Test distribution archive contracts
-        run: python -m unittest tests.test_macos_distribution_verifier
+        run: python -m unittest tests.test_macos_distribution_verifier tests.test_macos_pilot_evidence
       - name: Test local optimizer and relay contracts
         run: >-
           python -m unittest
@@ -196,6 +236,7 @@ jobs:
           tests.test_compaction_enforcement
           tests.test_compaction_cli
           tests.test_client_relay
+          tests.test_context_relay_bridge
       - name: Verify native client against the local gateway
         run: >-
           python tools/verify_macos_client.py

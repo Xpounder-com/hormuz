@@ -85,7 +85,10 @@ func verify(gateway: String, idp: String, root: String) async throws {
     try require(old.status == 401)
     let new = try await transport.request(profile: profile, path: "/v1/gateway/whoami", body: nil, accessToken: rotated)
     try require(new.status == 200)
-    let plan = try ConnectorPlan.preview(profile: profile, directory: directory, helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"))
+    let owner = try RelayOwner()
+    defer { owner.stop() }
+    let plan = try ConnectorPlan.preview(profile: profile, directory: directory,
+        helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"), ownerSocket: owner.socketURL)
     try await plan.apply(in: directory)
     try require(FileManager.default.isExecutableFile(atPath: plan.launcher.path))
     try await controller.signOut()

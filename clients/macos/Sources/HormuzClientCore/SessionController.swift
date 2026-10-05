@@ -193,10 +193,12 @@ public actor SessionController {
 
     /// The only intentional secret output is the credential command's stdout.
     /// Calls are serialized across the app and all helper processes.
-    public func accessCredential(profileID: UUID, forceRefresh: Bool = false) async throws -> String {
+    public func accessCredential(profileID: UUID, forceRefresh: Bool = false,
+                                 expectedProfile: ConnectionProfile? = nil) async throws -> String {
         let lock = try await directory.lock()
         defer { lock.unlock() }
-        let record = try await credentialWhileLocked(profileID: profileID, forceRefresh: forceRefresh)
+        let record = try await credentialWhileLocked(profileID: profileID, forceRefresh: forceRefresh,
+                                                     expectedProfile: expectedProfile)
         try await validateDesktopProfile(record)
         return record.accessToken
     }
@@ -320,9 +322,11 @@ public actor SessionController {
         try store.delete()
     }
 
-    private func credentialWhileLocked(profileID: UUID, forceRefresh: Bool = false) async throws -> SessionRecord {
-        guard let profile = try directory.loadProfile(), profile.id == profileID,
-              let saved = try store.load() else { throw ClientError.loginRequired }
+    private func credentialWhileLocked(profileID: UUID, forceRefresh: Bool = false,
+                                       expectedProfile: ConnectionProfile? = nil) async throws -> SessionRecord {
+        guard let profile = try directory.loadProfile(), profile.id == profileID else { throw ClientError.loginRequired }
+        if let expectedProfile, profile != expectedProfile { throw ClientError.configurationChanged }
+        guard let saved = try store.load() else { throw ClientError.loginRequired }
         var record = try saved.validated(for: profile)
         if record.state == .revocationPending { throw ClientError.logoutPending }
         guard record.state == .active else { throw ClientError.refreshInterrupted }

@@ -7,11 +7,18 @@ not collect gateway-only dependencies or commands into either native backend.
 from __future__ import annotations
 
 import argparse
+import sys
 
 from hormuz.commands.context import add_context_commands, run
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["relay-bridge"]:
+        # Same bounded protocol as the installed-wheel bridge. This path does
+        # not start the Python launcher or request a gateway credential.
+        from hormuz.context_relay_bridge import main as bridge
+
+        return bridge(sys.argv[2:])
     parser = argparse.ArgumentParser(
         prog="hormuz-context",
         description="Hormuz client-side context optimization helper.",

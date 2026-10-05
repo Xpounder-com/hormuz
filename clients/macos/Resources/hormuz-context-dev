@@ -10,4 +10,8 @@ if [ ! -x "$HORMUZ_CONTEXT_PYTHON" ]; then
 fi
 PATH="$HORMUZ_CONTEXT_REPOSITORY/.venv/bin:$PATH"
 export PATH
+if [ "${1:-}" = relay-bridge ]; then
+  shift
+  exec "$HORMUZ_CONTEXT_PYTHON" -m hormuz.context_relay_bridge "$@"
+fi
 exec "$HORMUZ_CONTEXT_PYTHON" -m hormuz "$@"

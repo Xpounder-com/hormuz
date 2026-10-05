@@ -28,6 +28,39 @@ direct-child-only cleanup,
 and neither Unix path changes shell job control. A panel close must leave the
 launcher alive; a shell quit/update must coordinate its termination separately.
 
+### Mac development integration
+
+The development Mac app bundles this relay and supplies three absolute paths
+together: `--credential-helper`, `--optimizer-helper`, and `--owner-socket`.
+Partial combinations fail closed. A private 0700 socket directory belongs to
+the resident app, not its panel. The lease carries no data; its closure stops
+the direct client and cancels first-party optimizer work. Credential exchanges
+have a 30-second bound and runtime shutdown has its own 35-second bound; this
+does not promise instantaneous process-tree termination. Quit closes the old
+app's lease, but interactive quit/update acceptance and an authenticated
+automatic updater remain separate work.
+
+The credential helper is the existing Swift app executable, not a second
+Keychain owner. Each lookup receives the full non-secret launch profile over
+bounded stdin and compares it under the existing session lock before reading
+Keychain, refreshing, or returning one fixed-length access credential. This
+preserves Swift's pending-refresh recovery and server-approved profile checks.
+Replacing a profile while retaining its UUID cannot silently rebind the relay.
+
+On uses the packaged standalone optimizer with its bundled tokenizer resources;
+Off starts no Python process. Cold tokenizer initialization precedes the
+existing 100 ms candidate-work guard, inside the overall 30-second helper
+deadline. No 100 ms end-to-end latency is claimed. The helper starts in an owned
+process group. Its leader remains waitable until cleanup, so ordinary same-group
+descendants are stopped without relying on a recyclable PID. Deliberately
+detached descendants and abrupt relay death are not contained by this mechanism.
+
+The extracted ad hoc archive is tested with pinned installed Codex `0.147.0`
+and Claude Code `2.1.233` against a synthetic loopback gateway. That proof
+includes exact Off forwarding, lossless On reconstruction, authentication,
+owner cancellation and unavailable-helper fallback; it is not a live-account,
+clean-install, customer Mac distribution or complete #341 acceptance claim.
+
 ### Linux user-service containment source checkpoint
 
 The Linux terminal command first verifies its on-demand user service **before**
@@ -156,7 +189,7 @@ The existing private `context-optimization-<profile>.json` toggle is read for
 each eligible request when an optimizer is configured. Missing, invalid and
 Off settings keep the exact body. On attempts invoke the existing Python
 optimizer through bounded stdin/stdout only for requests at most 1 MiB. The
-helper must be available in the selected `python3` (macOS), `python.exe`
+helper must be available in the selected `python3` (standalone macOS), `python.exe`
 (Windows), or explicit absolute interpreter (Linux) as an installed Hormuz
 wheel; `-I` intentionally excludes imports from the current working
 directory. If the helper, gateway capability or tokenizer resources are
@@ -165,7 +198,8 @@ process runs while idle.
 Claude token-count requests remain governed but bypass the optimizer entirely.
 The configured `HORMUZ_CONTEXT_TOKENIZER_CACHE`, `SSL_CERT_FILE`, and
 `SSL_CERT_DIR` paths are retained for the helper; direct provider credentials
-and Python import overrides are not. On Linux, the helper gets the validated
+and Python import overrides are not. On Linux and the integrated Mac path,
+the helper gets the validated
 `--state-directory` as its child-only `HORMUZ_CLIENT_STATE_DIRECTORY` so the
 default tokenizer cache resolves under that private root when no explicit
 cache path is configured. An explicit `HORMUZ_CONTEXT_TOKENIZER_CACHE` keeps
@@ -179,11 +213,12 @@ helper exit.
 It drains output while writing input, rejects excess output, and kills/reaps
 the direct helper on failure or relay-owner cancellation. A process retaining
 inherited pipe ends cannot extend the I/O deadline through a reader/writer
-thread join. This owns and reaps only the direct Unix helper; it does not
-contain a helper descendant after fork. Linux's verified user-service cgroup
+thread join. Linux's exchange owns and reaps only the direct helper;
+its verified user-service cgroup
 contains ordinary helper descendants until unit exit; deliberate same-UID
-cgroup migration remains outside this source guarantee. macOS helper-tree
-containment remains a separate acceptance gate.
+cgroup migration remains outside this source guarantee. macOS also stops the
+owned helper process group; deliberate detachment and abrupt relay-death
+containment remain separate acceptance gates.
 
 On Windows, the optimizer helper starts suspended and is assigned to its own
 kill-on-close Job Object before running. The exchange reads and writes pipes
@@ -205,24 +240,27 @@ Abort handles stop jobs that remain queued. A closure scheduled concurrently
 with shutdown checks the sticky signal before calling the optimizer; an
 optimizer already running receives that signal and must return promptly. The
 first-party Unix implementation honors it by killing and reaping its direct
-helper, while the Windows Job Object stops the helper and its descendants
+helper (plus the owned helper group on macOS), while the Windows Job Object
+stops the helper and its descendants
 before pipe workers join. Rust cannot forcibly stop arbitrary in-process
 `RequestOptimizer` implementations that ignore the cooperative contract, so
 this checkpoint does not claim that broader guarantee.
 
-This source checkpoint is not loaded by the Windows panel or shipping Mac app.
+This source checkpoint is not loaded by the Windows panel or published v1.3.0
+Mac app. The current development Mac integration is described above.
 Windows Job Object descendant cleanup is covered by fake clients. Linux has
 synthetic direct-client launcher-death, pre-exec race and normal-exit tests,
 plus a host-conditional user-service test for a detached grandchild. macOS
-still has direct-child-only cleanup; Linux's new cgroup path needs real user
-manager and shell-wiring acceptance. Native-shell panel and quit/update wiring,
-packaged optimizer interpreter, real Codex/Claude sessions, Windows
+still has direct-client-only cleanup; Linux's new cgroup path needs real user
+manager and shell-wiring acceptance. Interactive native-panel and quit/update
+acceptance, remaining platform wiring, live-account Codex/Claude sessions, Windows
 accessibility and clean-machine acceptance
 remain open. The blocked-optimizer shutdown fixture proves that cancellation
 stops first-party work before gateway egress; it does not establish a general
 linearization boundary between cancellation and an upstream POST that is
 already starting or in flight. Such an uncertain POST is still never replayed.
-No release or package version is changed.
+The Rust crate remains unpublished `1.6.0-dev.1`; the v1.7.0 core/source release
+does not qualify native platform distribution.
 
 From `clients/rust`, run `cargo test --workspace --locked` and
 `cargo clippy --workspace --all-targets --locked -- -D warnings`. The relay
@@ -240,7 +278,8 @@ path and private preference are present; it never invokes a model or provider.
 Windows fake-helper tests cover Job Object containment, cancellation and
 pipe-worker completion without an installed optimizer or provider. These
 tests do not prove cancellation of an arbitrary non-cooperative in-process
-optimizer, Unix client or optimizer-helper descendant containment; the
+optimizer or Unix client-descendant containment; macOS optimizer tests cover
+ordinary same-group descendants only. The
 separate Linux user-service fixture above runs only with a real manager. These
 tests also do not prove macOS abrupt launcher-death
 cleanup, real optimizer/provider sessions, or packaged native-shell lifecycle

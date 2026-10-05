@@ -28,7 +28,7 @@ test('native paths and metadata use the dedicated organization root', () => {
   assert.throws(() => sitePath('//example.com'));
 });
 test('shared current-release labels derive from the source version', () => {
-  for (const file of ['app/components/SiteFooter.tsx', 'app/components/SetupExample.tsx', 'app/enterprise/page.tsx']) {
+  for (const file of ['app/components/SiteFooter.tsx', 'app/components/SetupExample.tsx', 'app/enterprise/page.tsx', 'app/docs/page.tsx', 'app/integrations/page.tsx', 'app/security/page.tsx', 'app/resources/page.tsx', 'app/guides/codex-claude-code-gateway/page.tsx']) {
     const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
     assert.match(source, /\{SOURCE_VERSION(?:\.slice\(1\))?\}/, file);
   }

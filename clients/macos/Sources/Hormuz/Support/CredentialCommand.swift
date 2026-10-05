@@ -13,13 +13,14 @@ enum CredentialCommand {
         let profileArgument: String?
         let stateDirectory: String
         let forceRefresh: Bool
-        if arguments.count == 5 || (arguments.count == 6 && arguments[5] == "--force-refresh"),
+        if arguments.count == 5 || (arguments.count == 6
+            && ["--force-refresh", "--expected-profile-stdin"].contains(arguments[5])),
            arguments[0] == "credential", arguments[1] == "--profile",
            arguments[3] == "--state-directory" {
             operation = "credential"
             profileArgument = arguments[2]
             stateDirectory = arguments[4]
-            forceRefresh = arguments.count == 6
+            forceRefresh = arguments.last == "--force-refresh"
         } else if arguments.count == 6, arguments[0] == "pilot-evidence",
                   arguments[2] == "--profile", arguments[4] == "--state-directory" {
             operation = arguments[1]
@@ -53,7 +54,10 @@ enum CredentialCommand {
                 switch operation {
                 case "credential":
                     guard let profileID else { fail(ClientError.invalidArguments) }
-                    let token = try await controller.accessCredential(profileID: profileID, forceRefresh: forceRefresh)
+                    let expectedProfile = arguments.last == "--expected-profile-stdin"
+                        ? try readExpectedProfile() : nil
+                    let token = try await controller.accessCredential(profileID: profileID, forceRefresh: forceRefresh,
+                                                                      expectedProfile: expectedProfile)
                     // Explicit machine credential channel, never mirrored to logs.
                     FileHandle.standardOutput.write(Data((token + "\n").utf8))
                 case "verify-session":
@@ -101,5 +105,18 @@ enum CredentialCommand {
     private static func fail(_ error: Error) -> Never {
         FileHandle.standardError.write(Data((ClientError.message(for: error) + "\n").utf8))
         exit(1)
+    }
+
+    private static func readExpectedProfile() throws -> ConnectionProfile {
+        // Non-secret launch binding, not a session record. Rust closes stdin
+        // after this bounded snapshot; no profile content enters diagnostics.
+        var bytes = Data()
+        while bytes.count <= 65_536 {
+            let chunk = try FileHandle.standardInput.read(upToCount: 65_537 - bytes.count) ?? Data()
+            if chunk.isEmpty { break }
+            bytes.append(chunk)
+        }
+        guard !bytes.isEmpty, bytes.count <= 65_536 else { throw ClientError.invalidArguments }
+        return try JSONDecoder().decode(ConnectionProfile.self, from: bytes).validated()
     }
 }
