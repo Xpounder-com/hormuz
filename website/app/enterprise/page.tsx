@@ -2,7 +2,7 @@ import { EnterprisePlans } from '../components/EnterprisePlans';
 import { CampaignLink } from '../components/CampaignLink';
 import { commercial, PILOT_PRICE, SUPPORT_PRICE, selfServiceSupport } from '../../lib/commercial.mjs';
 import { pageMetadata } from '../../lib/metadata';
-import { sitePath, sourcePath } from '../../lib/site.mjs';
+import { sitePath, sourcePath, SOURCE_VERSION } from '../../lib/site.mjs';
 import { PageFrame, PageHero } from '../components/PageFrame';
 
 export const metadata = pageMetadata('Enterprise & implementation services — Hormuz', 'Contact sales for custom gateway capacity, deployment, integration, and support. Self-hosted support and scoped pilots remain separate services.', '/enterprise/');
@@ -47,7 +47,7 @@ export default function EnterprisePage() {
       {commercial.pilotPaymentUrl && <a className="button button-primary" href={commercial.pilotPaymentUrl} rel="noreferrer"><span>Pay pilot fee · {PILOT_PRICE} USD</span><span aria-hidden="true">↗</span></a>}
       {commercial.supportPaymentUrl && <a className="button button-outline" href={commercial.supportPaymentUrl} rel="noreferrer"><span>Custom agreed support · {SUPPORT_PRICE} USD/month</span><span aria-hidden="true">↗</span></a>}
     </div><p>Checkout is operated by AI and Robotics Solutions. Your card statement may show LINKEDFULL.COM. Support renews monthly until canceled under your agreed cancellation terms. Provider charges and infrastructure are separate.</p></section>}
-    <section className="enterprise-truth section"><div><span className="status-ring" aria-hidden="true"><i /></span><strong>v1.5.0 core · preserved v1 contracts</strong></div><h2>Engineering evidence is not enterprise certification.</h2><p>Reference checks do not establish your TLS, credential custody, retention, recovery, high availability, compliance, or independent security review. No customer endorsements, certifications, invoice reconciliation, or production SLA are claimed.</p><CampaignLink href={sitePath('/security/')}>Review the security boundary →</CampaignLink></section>
+    <section className="enterprise-truth section"><div><span className="status-ring" aria-hidden="true"><i /></span><strong>{SOURCE_VERSION} core · preserved v1 contracts</strong></div><h2>Engineering evidence is not enterprise certification.</h2><p>Reference checks do not establish your TLS, credential custody, retention, recovery, high availability, compliance, or independent security review. No customer endorsements, certifications, invoice reconciliation, or production SLA are claimed.</p><CampaignLink href={sitePath('/security/')}>Review the security boundary →</CampaignLink></section>
     <section className="page-cta"><div><p className="section-label light">Founder-led · Mehrdad Zaker</p><h2>Bring your workload and its constraints.</h2><p>Discuss capacity, deployment, integration, and support before agreeing an Enterprise proposal.</p></div><CampaignLink className="button button-light" href={sitePath('/contact/?interest=enterprise')}>Contact sales →</CampaignLink></section>
   </PageFrame>;
 }
