@@ -27,6 +27,16 @@ outer app signature. The Mach-O backend remains nested code at
 This layout keeps the script's integrity in the bundle seal when ZIP transfer drops
 extended attributes used by standalone script signatures.
 
+Current development packaging also builds the Rust toolchain-pinned
+`Contents/Helpers/hormuz-client-relay`, checks exact arm64 architecture and
+system-only dynamic dependencies, and signs it before sealing the app. A
+`--prebuilt-binary` invocation must supply its matching `--prebuilt-relay` too.
+Proof schema v4 adds the native relay's packaging, signature identity, and
+digest; the pilot verifier continues accepting historical v2/v3 proofs and
+their original archive layouts. v1.7.0 is a core/source release, not a new
+customer Mac archive. Ordinary Mac CI uses ad hoc local validation and does
+not invoke the manual signing/notarization workflow or submit anything to Apple.
+
 ## Local packaging and notarization
 
 Confirm that exactly one intended identity is available:
@@ -70,8 +80,8 @@ a missing secure timestamp, or unexpected archive files. Notarization must retur
 `Accepted`; the ticket is then stapled to the app, Gatekeeper is assessed, and a
 new `Hormuz-<version>-notarized.zip` is produced. `distribution-proof.json`
 records only digests and content-free verification results. Historical pre-v1.2
-releases use the exact v2 shape. Context-capable v1.2.0 and later candidates
-require v3, which adds helper packaging, the arm64 helper signature and digest,
+releases use the exact v2 shape. Historical context-capable v1.2.0–v1.3.0
+artifacts use v3, which adds helper packaging, the arm64 helper signature and digest,
 the bundle-sealed launcher state and digest, tokenizer names, and an explicit runtime-verification boolean
 while retaining the exact source commit and GitHub Actions run URL.
 

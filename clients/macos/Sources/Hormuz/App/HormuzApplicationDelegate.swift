@@ -44,6 +44,7 @@ final class HormuzApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        connection.stopLaunchedClients()
         edgePanelController?.stop()
     }
 

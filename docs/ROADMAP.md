@@ -7,6 +7,17 @@ This roadmap is evidence-gated. A milestone is not complete because code exists 
 The additive native-companion program is tracked in [epic #329](https://github.com/Xpounder-com/hormuz/issues/329)
 and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md).
 
+## v1.7.0 native Mac relay integration; Windows preview
+
+Hormuz v1.7.0 wires development Mac launchers to the existing Rust relay and
+packaged on-demand Python optimizer, keeps Keychain custody in the Mac app,
+binds credentials to the launch profile, and stops ordinary helper descendants.
+Pinned official-client tests run through an extracted ad-hoc archive on loopback.
+The latest signed Mac download stays v1.3.0, with no new Apple submission.
+Windows remains a preview; #341 client-tree containment and platform lifecycle
+acceptance and #342's Rust optimizer remain separate. See the
+[v1.7.0 release note](releases/v1.7.0-native-mac-relay.md).
+
 ## v1.6.0 sign-in and usage improvements; Windows preview
 
 Hormuz v1.6.0 simplifies normal browser sign-in and introduces a separate,

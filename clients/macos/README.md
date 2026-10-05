@@ -32,7 +32,8 @@ same-provider model fallback; it does not qualify Claude Code, cross-provider
 failover, or protection from an OpenAI-wide outage. Customer distribution uses
 the separately documented signed and notarized release workflow.
 
-Build from the repository root with the installed Swift toolchain:
+Build from the repository root with Swift and the Rust toolchain pinned in
+`clients/rust/rust-toolchain.toml`:
 
 ```sh
 ./clients/macos/script/build_and_run.sh
@@ -48,6 +49,32 @@ The non-secret setup selector is stored in `profile.json`. A legacy profile
 without the field remains `custom`; an explicit null or unknown value is
 rejected. A hosted-pilot profile also fails closed if its client, alias, scheme,
 or loopback setting does not match the bounded preset.
+
+The development app bundles `hormuz-client-relay`. Its saved launcher binds
+the existing Swift Keychain broker to the complete launch profile under the
+session lock, and uses an app-owned private Unix socket as a no-data lifetime
+lease. Closing or hiding a panel does not close that lease; app quit does.
+Previously saved launchers are regenerated after a successful connection
+refresh, so restarting or moving the app requires that refresh before use.
+The Rust relay stops its direct client on lease closure and cancels owned
+optimizer work without replaying a model request. Ordinary optimizer process
+groups are cleaned up. Detached client descendants, abrupt relay death, and
+interactive quit/update acceptance remain open in #341.
+
+The standalone optimizer supports the Rust relay's bounded bridge protocol.
+Off never starts it. On starts it on demand and uses bundled tokenizer
+resources; cold tokenizer initialization is outside the existing 100 ms
+candidate-work guard, within the relay's overall 30-second helper deadline.
+This is not a 100 ms end-to-end latency promise.
+
+`tests.test_native_macos_relay` tests the extracted local archive when supplied
+`HORMUZ_NATIVE_RELAY_BINARY`, `HORMUZ_NATIVE_OPTIMIZER_HELPER`,
+`HORMUZ_NATIVE_CREDENTIAL_HELPER`, and
+`HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY`. It exercises pinned Codex `0.147.0`
+and Claude Code `2.1.233` against a synthetic loopback gateway, not real
+provider accounts. CI retains metadata only. The latest published notarized
+Mac app remains v1.3.0; v1.7.0 publishes core/source improvements, not a new
+customer Mac archive, and does not submit anything to Apple.
 
 On first launch without a saved session, Hormuz opens the edge Connection card. With a
 saved profile, it restores and refreshes the session behind the edge UI. The app's

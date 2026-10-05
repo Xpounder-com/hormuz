@@ -1338,15 +1338,19 @@ raise SystemExit(0 if response.status == 200 else 1)
         credential.write_text("#!/bin/sh\nprintf '%s\\n' '" + ACCESS_TOKEN + "'\n", encoding="utf-8")
         credential.chmod(0o700)
         codex = bin_directory / "codex"
+        codex_config = root / "codex-config"
+        codex_config.mkdir(mode=0o700)
         codex.write_text(
             "#!/usr/bin/env python3\n"
             "import os, sys\n"
             f"real = {real_codex!r}\n"
             "if sys.argv[1:] == ['--version']:\n"
             "    os.execv(real, [real, '--version'])\n"
+            f"os.environ['CODEX_HOME'] = {str(codex_config)!r}\n"
             f"root = {str(root)!r}\n"
-            "arguments = [real, 'exec', '--ignore-user-config', '--skip-git-repo-check', "
+            "arguments = [real, 'exec', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', "
             "'--ephemeral', '--dangerously-bypass-approvals-and-sandbox', '-C', root, *sys.argv[1:], "
+            "'-c', 'analytics.enabled=false', '-c', 'feedback.enabled=false', "
             "'Call exec_command with exactly `rg --files generated`, then finish.']\n"
             "os.execv(real, arguments)\n",
             encoding="utf-8",

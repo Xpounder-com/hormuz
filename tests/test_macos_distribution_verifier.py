@@ -47,6 +47,7 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
         executable.write_bytes(b"unexecuted-test-binary")
         context_helper.write_bytes(b"unexecuted-context-launcher")
         context_helper_arm64.write_bytes(b"unexecuted-arm64-context-helper")
+        (bundle / "Contents/Helpers/hormuz-client-relay").write_bytes(b"unexecuted-native-relay")
         icon.write_bytes(b"icon")
         tokenizers = bundle / "Contents/Resources/ContextTokenizers"
         tokenizers.mkdir()
@@ -95,6 +96,8 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
         if workflow_run_url is not None:
             arguments.extend(("--workflow-run-url", workflow_run_url))
         command_results = [
+            ("arm64\n", ""),
+            ("relay:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n", ""),
             ("arm64\n", ""),
             (
                 f"{executable}:\n"
@@ -166,6 +169,7 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
                     "/MacOS/Hormuz",
                     "/Resources/ContextHelper/hormuz-context",
                     "/Helpers/hormuz-context-arm64",
+                    "/Helpers/hormuz-client-relay",
                 )) else 0o644
                 entry.external_attr = (stat.S_IFREG | mode) << 16
                 output.writestr(entry, (root / name).read_bytes())
@@ -265,7 +269,7 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
             )
         runtime.assert_not_called()
         self.assertFalse(proof["executable_version_verified"])
-        self.assertEqual(proof["schema_version"], 3)
+        self.assertEqual(proof["schema_version"], 4)
         self.assertNotIn("source_commit", proof)
 
     def test_distribution_verifier_executes_payload_only_with_explicit_opt_in(self) -> None:
@@ -275,6 +279,14 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
             )
         runtime.assert_called_once()
         self.assertTrue(proof["executable_version_verified"])
+        self.assertTrue(proof["native_relay_packaged"])
+        self.assertEqual(len(proof["native_relay_sha256"]), 64)
+
+    def test_native_archive_requires_relay_without_changing_legacy_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive, bundle = self._write_archive(Path(temporary), include_ticket=False)
+            with self.assertRaisesRegex(VerificationError, "unexpected_archive_contents"):
+                verify_archive(archive, bundle, "ad-hoc", "com.xpounder.hormuz", native_relay=True)
 
     def test_distribution_verifier_executes_context_helper_only_with_explicit_opt_in(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -297,7 +309,7 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
                     "https://github.com/Xpounder-com/hormuz/actions/runs/12345"
                 ),
             )
-        self.assertEqual(proof["schema_version"], 3)
+        self.assertEqual(proof["schema_version"], 4)
         self.assertEqual(proof["source_commit"], "a" * 40)
         self.assertEqual(
             proof["workflow_run_url"],

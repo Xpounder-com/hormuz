@@ -326,15 +326,38 @@ pub(crate) fn valid_local_credential(value: &str) -> bool {
 pub(crate) struct OwnedClient(Option<Child>);
 #[cfg(not(windows))]
 impl OwnedClient {
-    pub(crate) fn wait(&mut self) -> Result<i32, RelayError> {
-        let status = self
-            .0
-            .as_mut()
-            .ok_or(RelayError::ClientLaunchFailed)?
-            .wait()
-            .map_err(|_| RelayError::ClientLaunchFailed)?;
-        self.0 = None;
-        Ok(status.code().unwrap_or(1))
+    pub(crate) fn wait_until(
+        &mut self,
+        _stopped: &mut dyn FnMut() -> bool,
+    ) -> Result<i32, RelayError> {
+        #[cfg(not(target_os = "macos"))]
+        {
+            let status = self
+                .0
+                .as_mut()
+                .ok_or(RelayError::ClientLaunchFailed)?
+                .wait()
+                .map_err(|_| RelayError::ClientLaunchFailed)?;
+            self.0 = None;
+            Ok(status.code().unwrap_or(1))
+        }
+        #[cfg(target_os = "macos")]
+        loop {
+            if _stopped() {
+                return Ok(130);
+            }
+            let status = self
+                .0
+                .as_mut()
+                .ok_or(RelayError::ClientLaunchFailed)?
+                .try_wait()
+                .map_err(|_| RelayError::ClientLaunchFailed)?;
+            if let Some(status) = status {
+                self.0 = None;
+                return Ok(status.code().unwrap_or(1));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 #[cfg(not(windows))]
@@ -364,6 +387,37 @@ fn run_with_executable(
     optimization: Optimization,
     executable: PathBuf,
 ) -> Result<i32, RelayError> {
+    run_with_executable_until(profile, credentials, optimization, executable, &mut || {
+        false
+    })
+}
+
+/// A native shell owns this lease independently of its panels. Owner exit or
+/// explicit quit ends the invocation without replaying any in-flight request.
+#[cfg(target_os = "macos")]
+pub fn run_client_until(
+    profile: &ConnectionProfile,
+    credentials: Arc<dyn CredentialSource>,
+    optimization: Optimization,
+    stopped: &mut dyn FnMut() -> bool,
+) -> Result<i32, RelayError> {
+    if stopped() {
+        return Ok(130);
+    }
+    let executable = discover_supported_client(profile.client())?;
+    run_with_executable_until(profile, credentials, optimization, executable, stopped)
+}
+
+fn run_with_executable_until(
+    profile: &ConnectionProfile,
+    credentials: Arc<dyn CredentialSource>,
+    optimization: Optimization,
+    executable: PathBuf,
+    _stopped: &mut dyn FnMut() -> bool,
+) -> Result<i32, RelayError> {
+    if _stopped() {
+        return Ok(130);
+    }
     let relay = LocalRelay::start(profile, credentials, optimization)?;
     let plan = LaunchPlan::new(
         profile,
@@ -381,7 +435,7 @@ fn run_with_executable(
     }
     #[cfg(not(windows))]
     {
-        client.wait()
+        client.wait_until(_stopped)
     }
 }
 

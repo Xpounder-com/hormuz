@@ -1,6 +1,6 @@
 //! Native command entry point for a supervised launch. No credential or model
 //! content is printed, passed on the process command line, or persisted here.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use hormuz_client_core::ConnectionProfile;
 #[cfg(target_os = "linux")]
 use hormuz_client_platform::{CredentialStore, RefreshCoordinator};
@@ -16,7 +16,7 @@ use serde::Deserialize;
 use std::ffi::OsStr;
 #[cfg(target_os = "linux")]
 use std::ffi::OsString;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(any(target_os = "macos", target_os = "linux", windows))]
@@ -44,7 +44,16 @@ pub fn main() -> ExitCode {
 
 #[cfg(any(target_os = "macos", windows))]
 fn execute() -> Result<i32, RelayError> {
-    let LaunchArguments { key, root, .. } = arguments()?;
+    let arguments = arguments()?;
+    #[cfg(target_os = "macos")]
+    if let (Some(broker), Some(optimizer), Some(owner)) = (
+        &arguments.credential_helper,
+        &arguments.optimizer_helper,
+        &arguments.owner_socket,
+    ) {
+        return execute_mac_broker(&arguments.key, &arguments.root, broker, optimizer, owner);
+    }
+    let LaunchArguments { key, root, .. } = arguments;
     let directory = PrivateDirectory::open(&root).map_err(|_| RelayError::InvalidConfiguration)?;
     let controller = Arc::new(SessionController::new(
         directory.clone(),
@@ -88,6 +97,10 @@ fn execute() -> Result<i32, RelayError> {
             .ok_or(RelayError::InvalidConfiguration)?
             .gateway()
             .to_owned(),
+        #[cfg(target_os = "macos")]
+        helper: None,
+        #[cfg(target_os = "macos")]
+        state_root: root,
     });
     let status_profile = status.profile().ok_or(RelayError::InvalidConfiguration)?;
     run_client(
@@ -95,6 +108,118 @@ fn execute() -> Result<i32, RelayError> {
         token_source,
         Optimization::OnDemand(optimizer),
     )
+}
+
+/// Keep custody in the signed Swift executable that created the Keychain item.
+/// Rust receives only a bounded credential over an anonymous pipe, never a
+/// session record, provider secret, credential argument or plaintext file.
+#[cfg(target_os = "macos")]
+fn execute_mac_broker(
+    key: &str,
+    root: &Path,
+    broker: &Path,
+    optimizer: &Path,
+    owner: &Path,
+) -> Result<i32, RelayError> {
+    use std::io::Read;
+    use std::os::unix::{fs::MetadataExt, net::UnixStream};
+    for executable in [broker, optimizer] {
+        validate_optimizer_python_executable(executable)?;
+    }
+    let parent = owner.parent().ok_or(RelayError::InvalidConfiguration)?;
+    let metadata = parent
+        .symlink_metadata()
+        .map_err(|_| RelayError::InvalidConfiguration)?;
+    if !metadata.is_dir()
+        || metadata.mode() & 0o777 != 0o700
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+    {
+        return Err(RelayError::InvalidConfiguration);
+    }
+    let mut lifetime = UnixStream::connect(owner).map_err(|_| RelayError::InvalidConfiguration)?;
+    lifetime
+        .set_nonblocking(true)
+        .map_err(|_| RelayError::InvalidConfiguration)?;
+    let directory = PrivateDirectory::open(root).map_err(|_| RelayError::InvalidConfiguration)?;
+    let profile_bytes = {
+        let guard = directory
+            .try_lock()
+            .map_err(|_| RelayError::InvalidConfiguration)?;
+        guard
+            .read("profile.json")
+            .map_err(|_| RelayError::InvalidConfiguration)?
+            .ok_or(RelayError::InvalidConfiguration)?
+    };
+    let profile = ConnectionProfile::from_json(&profile_bytes)
+        .map_err(|_| RelayError::InvalidConfiguration)?;
+    if profile.key() != key {
+        return Err(RelayError::InvalidConfiguration);
+    }
+    let source = Arc::new(MacCredentialBroker {
+        executable: broker.to_owned(),
+        root: root.to_owned(),
+        key: key.to_owned(),
+        profile_bytes,
+    }) as Arc<dyn CredentialSource>;
+    source.access_credential()?; // Fail before probing a client or opening a relay.
+    let optimization = Optimization::OnDemand(Arc::new(PythonOptimizer {
+        directory,
+        key: key.to_owned(),
+        client: profile.client().as_str().to_owned(),
+        gateway: profile.gateway().to_owned(),
+        helper: Some(optimizer.to_owned()),
+        state_root: root.to_owned(),
+    }));
+    hormuz_client_relay::run_client_until(&profile, source, optimization, &mut || {
+        match lifetime.read(&mut [0]) {
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
+            // Only EOF is expected. A broken or unexpected control channel is
+            // fail-closed; a panel close does not close this app-owned lease.
+            _ => true,
+        }
+    })
+}
+
+#[cfg(target_os = "macos")]
+struct MacCredentialBroker {
+    executable: PathBuf,
+    root: PathBuf,
+    key: String,
+    profile_bytes: Vec<u8>,
+}
+
+#[cfg(target_os = "macos")]
+impl CredentialSource for MacCredentialBroker {
+    fn access_credential(&self) -> Result<Zeroizing<String>, RelayError> {
+        let mut command = Command::new(&self.executable);
+        command
+            .args(["credential", "--profile", &self.key, "--state-directory"])
+            .arg(&self.root)
+            .arg("--expected-profile-stdin")
+            .env_clear()
+            .envs(std::env::vars_os().filter(|(name, _)| python_environment(name)));
+        let output = Zeroizing::new(
+            crate::helper_exchange::capture(
+                &mut command,
+                &self.profile_bytes,
+                TRANSFORM_BUDGET,
+                50,
+            )
+            .ok_or(RelayError::CredentialUnavailable)?,
+        );
+        if output.len() != 50
+            || !output.starts_with(b"hox_a_")
+            || output[49] != b'\n'
+            || !output[6..49]
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(b))
+        {
+            return Err(RelayError::CredentialUnavailable);
+        }
+        let token =
+            std::str::from_utf8(&output[..49]).map_err(|_| RelayError::CredentialUnavailable)?;
+        Ok(Zeroizing::new(token.to_owned()))
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -237,6 +362,12 @@ struct LaunchArguments {
     root: PathBuf,
     #[cfg(target_os = "linux")]
     optimizer_python: Option<PathBuf>,
+    #[cfg(target_os = "macos")]
+    credential_helper: Option<PathBuf>,
+    #[cfg(target_os = "macos")]
+    optimizer_helper: Option<PathBuf>,
+    #[cfg(target_os = "macos")]
+    owner_socket: Option<PathBuf>,
 }
 
 fn arguments() -> Result<LaunchArguments, RelayError> {
@@ -252,6 +383,8 @@ where
     let mut directory = None;
     #[cfg(target_os = "linux")]
     let mut optimizer_python = None;
+    #[cfg(target_os = "macos")]
+    let (mut credential_helper, mut optimizer_helper, mut owner_socket) = (None, None, None);
     while let Some(flag) = args.next() {
         let value = args.next().ok_or(RelayError::InvalidConfiguration)?;
         if flag == "--profile" && profile.is_none() {
@@ -276,6 +409,28 @@ where
                 return Err(RelayError::InvalidConfiguration);
             }
             directory = Some(value);
+        } else if cfg!(target_os = "macos")
+            && matches!(
+                flag.to_str(),
+                Some("--credential-helper" | "--optimizer-helper" | "--owner-socket")
+            )
+        {
+            #[cfg(target_os = "macos")]
+            {
+                let target = match flag.to_str() {
+                    Some("--credential-helper") => &mut credential_helper,
+                    Some("--optimizer-helper") => &mut optimizer_helper,
+                    _ => &mut owner_socket,
+                };
+                if target.is_some() {
+                    return Err(RelayError::InvalidConfiguration);
+                }
+                let path = PathBuf::from(value);
+                validate_optimizer_python_path(&path)?;
+                *target = Some(path);
+            }
+            #[cfg(not(target_os = "macos"))]
+            return Err(RelayError::InvalidConfiguration);
         } else if cfg!(target_os = "linux") && flag == "--optimizer-python" {
             #[cfg(target_os = "linux")]
             {
@@ -292,15 +447,27 @@ where
             return Err(RelayError::InvalidConfiguration);
         }
     }
+    #[cfg(target_os = "macos")]
+    if !(credential_helper.is_none() && optimizer_helper.is_none() && owner_socket.is_none()
+        || credential_helper.is_some() && optimizer_helper.is_some() && owner_socket.is_some())
+    {
+        return Err(RelayError::InvalidConfiguration);
+    }
     Ok(LaunchArguments {
         key: profile.ok_or(RelayError::InvalidConfiguration)?,
         root: directory.ok_or(RelayError::InvalidConfiguration)?,
         #[cfg(target_os = "linux")]
         optimizer_python,
+        #[cfg(target_os = "macos")]
+        credential_helper,
+        #[cfg(target_os = "macos")]
+        optimizer_helper,
+        #[cfg(target_os = "macos")]
+        owner_socket,
     })
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn validate_optimizer_python_path(path: &Path) -> Result<(), RelayError> {
     if !path.is_absolute() || path.as_os_str().as_encoded_bytes().len() > 4096 {
         return Err(RelayError::InvalidConfiguration);
@@ -310,7 +477,7 @@ fn validate_optimizer_python_path(path: &Path) -> Result<(), RelayError> {
 
 /// Inspect the executable only after the verified user-service and session
 /// checks, since an explicit path could itself reside below private state.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn validate_optimizer_python_executable(path: &Path) -> Result<(), RelayError> {
     use rustix::fs::{accessat, Access, AtFlags, CWD};
     validate_optimizer_python_path(path)?;
@@ -331,7 +498,9 @@ struct PythonOptimizer {
     gateway: String,
     #[cfg(target_os = "linux")]
     python: PathBuf,
-    #[cfg(target_os = "linux")]
+    #[cfg(target_os = "macos")]
+    helper: Option<PathBuf>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     state_root: PathBuf,
 }
 
@@ -347,20 +516,27 @@ impl RequestOptimizer for PythonOptimizer {
             return None;
         }
         #[cfg(target_os = "macos")]
-        let mut command = Command::new("python3");
+        let mut command = if let Some(helper) = &self.helper {
+            let mut command = Command::new(helper);
+            command.arg("relay-bridge");
+            command
+        } else {
+            let mut command = Command::new("python3");
+            command.args(["-I", "-m", "hormuz.context_relay_bridge"]);
+            command
+        };
         #[cfg(target_os = "linux")]
         let mut command = Command::new(&self.python);
+        #[cfg(target_os = "linux")]
+        command.args(["-I", "-m", "hormuz.context_relay_bridge"]);
         command
-            .arg("-I")
-            .arg("-m")
-            .arg("hormuz.context_relay_bridge")
             .arg("--client")
             .arg(&self.client)
             .arg("--path")
             .arg(path)
             .env_clear()
             .envs(std::env::vars_os().filter(|(name, _)| python_environment(name)));
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         command.env("HORMUZ_CLIENT_STATE_DIRECTORY", &self.state_root);
         let output = Zeroizing::new(crate::helper_exchange::run(
             &mut command,
@@ -503,6 +679,38 @@ mod tests {
         assert!(python_environment(OsStr::new("SSL_CERT_DIR")));
         assert!(!python_environment(OsStr::new("OPENAI_API_KEY")));
         assert!(!python_environment(OsStr::new("PYTHONPATH")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_broker_arguments_are_closed_absolute_and_all_or_none() {
+        let baseline = [
+            "--profile",
+            "12345678-1234-1234-1234-123456789abc",
+            "--state-directory",
+            "/private/tmp/state",
+        ];
+        let options = [
+            "--credential-helper",
+            "/Applications/Hormuz.app/Contents/MacOS/Hormuz",
+            "--optimizer-helper",
+            "/Applications/Hormuz.app/Contents/Resources/ContextHelper/hormuz-context",
+            "--owner-socket",
+            "/private/tmp/hormuz-owner-test/lease",
+        ];
+        let parse = |extra: &[&str]| {
+            parse_arguments(baseline.iter().chain(extra).map(std::ffi::OsString::from))
+        };
+        assert!(parse(&[]).is_ok());
+        assert!(parse(&options).is_ok());
+        for count in [2, 4] {
+            assert!(parse(&options[..count]).is_err());
+        }
+        assert!(parse(&[&options[..], &["--owner-socket", "/other"]].concat()).is_err());
+        assert!(parse(&[&options[..], &["--model", "override"]].concat()).is_err());
+        let mut relative = options;
+        relative[5] = "relative/lease";
+        assert!(parse(&relative).is_err());
     }
 }
 

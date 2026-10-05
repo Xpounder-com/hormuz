@@ -17,6 +17,8 @@ Options:
                        Package this previously built Apple Silicon Hormuz binary
                        instead of compiling on the signing machine.
   --prebuilt-dsym PATH Optional dSYM directory paired with --prebuilt-binary.
+  --prebuilt-relay PATH
+                       Previously built Apple Silicon Rust client relay.
   --context-helper-directory PATH
                        Directory containing the arm64 standalone helper built
                        from this Hormuz release.
@@ -38,6 +40,7 @@ HORMUZ_DESKTOP_ORIGIN_SPECIFIED=0
 HORMUZ_IDENTITY="${HORMUZ_CODESIGN_IDENTITY:-}"
 HORMUZ_PREBUILT_BINARY=""
 HORMUZ_PREBUILT_DSYM=""
+HORMUZ_PREBUILT_RELAY=""
 HORMUZ_CONTEXT_HELPER_DIRECTORY="${HORMUZ_CONTEXT_HELPER_DIRECTORY:-}"
 HORMUZ_TOKENIZER_CACHE="${HORMUZ_CONTEXT_TOKENIZER_CACHE:-}"
 HORMUZ_AD_HOC=0
@@ -52,6 +55,7 @@ while [ "$#" -gt 0 ]; do
     --identity) HORMUZ_IDENTITY="${2:-}"; shift 2 ;;
     --prebuilt-binary) HORMUZ_PREBUILT_BINARY="${2:-}"; shift 2 ;;
     --prebuilt-dsym) HORMUZ_PREBUILT_DSYM="${2:-}"; shift 2 ;;
+    --prebuilt-relay) HORMUZ_PREBUILT_RELAY="${2:-}"; shift 2 ;;
     --context-helper-directory) HORMUZ_CONTEXT_HELPER_DIRECTORY="${2:-}"; shift 2 ;;
     --tokenizer-cache) HORMUZ_TOKENIZER_CACHE="${2:-}"; shift 2 ;;
     --ad-hoc) HORMUZ_AD_HOC=1; shift ;;
@@ -154,6 +158,17 @@ if [ -n "$HORMUZ_PREBUILT_DSYM" ]; then
   fi
   HORMUZ_PREBUILT_DSYM="$(cd "$(dirname "$HORMUZ_PREBUILT_DSYM")" && pwd -P)/$(basename "$HORMUZ_PREBUILT_DSYM")"
 fi
+if [ -n "$HORMUZ_PREBUILT_BINARY" ] && [ -z "$HORMUZ_PREBUILT_RELAY" ]; then
+  echo "A prebuilt app requires its source-matched --prebuilt-relay." >&2
+  exit 2
+fi
+if [ -n "$HORMUZ_PREBUILT_RELAY" ]; then
+  if [ -L "$HORMUZ_PREBUILT_RELAY" ] || [ ! -f "$HORMUZ_PREBUILT_RELAY" ] || \
+     [ "$(lipo -archs "$HORMUZ_PREBUILT_RELAY")" != arm64 ]; then
+    echo "The prebuilt relay must be a regular Apple Silicon executable." >&2
+    exit 2
+  fi
+fi
 if [ "$HORMUZ_AD_HOC" -eq 0 ]; then
   case "$HORMUZ_IDENTITY" in
     "Developer ID Application: "*) ;;
@@ -211,6 +226,13 @@ else
     --configuration release --arch arm64 --show-bin-path)/Hormuz"
   HORMUZ_DSYM_SOURCE="$(dirname "$HORMUZ_BINARY_SOURCE")/Hormuz.dSYM"
 fi
+if [ -n "$HORMUZ_PREBUILT_RELAY" ]; then
+  HORMUZ_RELAY_SOURCE="$HORMUZ_PREBUILT_RELAY"
+else
+  (cd "$HORMUZ_REPO_ROOT/clients/rust"; "${HORMUZ_CARGO:-cargo}" build \
+    --target-dir "$HORMUZ_TEMPORARY/rust" --locked --release --package hormuz-client-relay)
+  HORMUZ_RELAY_SOURCE="$HORMUZ_TEMPORARY/rust/release/hormuz-client-relay"
+fi
 case "$(lipo -archs "$HORMUZ_BINARY_SOURCE")" in
   "arm64") ;;
   *)
@@ -223,12 +245,15 @@ HORMUZ_BUNDLE="$HORMUZ_OUTPUT_DIRECTORY/Hormuz.app"
 HORMUZ_BINARY="$HORMUZ_BUNDLE/Contents/MacOS/Hormuz"
 HORMUZ_CONTEXT_HELPER_BINARY="$HORMUZ_BUNDLE/Contents/Resources/ContextHelper/hormuz-context"
 HORMUZ_CONTEXT_HELPER_ARM64="$HORMUZ_BUNDLE/Contents/Helpers/hormuz-context-arm64"
+HORMUZ_RELAY="$HORMUZ_BUNDLE/Contents/Helpers/hormuz-client-relay"
 HORMUZ_CONTEXT_TOKENIZERS="$HORMUZ_BUNDLE/Contents/Resources/ContextTokenizers"
 mkdir -p "$HORMUZ_BUNDLE/Contents/MacOS" "$HORMUZ_BUNDLE/Contents/Helpers" \
   "$HORMUZ_BUNDLE/Contents/Resources/ContextHelper" "$HORMUZ_CONTEXT_TOKENIZERS"
 cp "$HORMUZ_BINARY_SOURCE" "$HORMUZ_BINARY"
 cp "$HORMUZ_MAC_ROOT/Resources/hormuz-context-release" "$HORMUZ_CONTEXT_HELPER_BINARY"
 cp "$HORMUZ_CONTEXT_HELPER_ARM64_SOURCE" "$HORMUZ_CONTEXT_HELPER_ARM64"
+cp "$HORMUZ_RELAY_SOURCE" "$HORMUZ_RELAY"
+test "$(lipo -archs "$HORMUZ_RELAY")" = arm64
 cp "$HORMUZ_TOKENIZER_CACHE/$HORMUZ_CL100K" "$HORMUZ_TOKENIZER_CACHE/$HORMUZ_O200K" "$HORMUZ_CONTEXT_TOKENIZERS/"
 case "$(lipo -archs "$HORMUZ_BINARY")" in
   "arm64") ;;
@@ -257,7 +282,7 @@ if [ -n "$HORMUZ_DESKTOP_ORIGIN" ]; then
   plutil -replace HormuzDesktopOrigin -string "$HORMUZ_DESKTOP_ORIGIN" "$HORMUZ_BUNDLE/Contents/Info.plist"
 fi
 chmod 755 "$HORMUZ_BINARY" "$HORMUZ_CONTEXT_HELPER_BINARY" \
-  "$HORMUZ_CONTEXT_HELPER_ARM64"
+  "$HORMUZ_CONTEXT_HELPER_ARM64" "$HORMUZ_RELAY"
 chmod 644 "$HORMUZ_CONTEXT_TOKENIZERS/$HORMUZ_CL100K" "$HORMUZ_CONTEXT_TOKENIZERS/$HORMUZ_O200K"
 xattr -cr "$HORMUZ_BUNDLE"
 
@@ -269,6 +294,7 @@ if [ "$HORMUZ_AD_HOC" -eq 1 ]; then
   # locally built ad-hoc internals remain loadable. Release inputs arrive fully
   # signed by PyInstaller with the Developer ID identity and are preserved below.
   codesign --force --sign - --identifier "$HORMUZ_BUNDLE_ID.context-helper.arm64" --timestamp=none "$HORMUZ_CONTEXT_HELPER_ARM64"
+  codesign --force --sign - --identifier "$HORMUZ_BUNDLE_ID.relay" --options runtime --timestamp=none "$HORMUZ_RELAY"
   codesign --force --sign - --identifier "$HORMUZ_BUNDLE_ID" --options runtime --timestamp=none "$HORMUZ_BUNDLE"
 else
   HORMUZ_MODE="developer-id"
@@ -277,6 +303,7 @@ else
   # extension binaries, which cannot be repaired by post-processing a one-file
   # executable. Their identity and hardened-runtime flags were checked above.
   codesign --verify --strict --verbose=4 "$HORMUZ_CONTEXT_HELPER_ARM64"
+  codesign --force --sign "$HORMUZ_IDENTITY" --identifier "$HORMUZ_BUNDLE_ID.relay" --options runtime --timestamp "$HORMUZ_RELAY"
   codesign --force --sign "$HORMUZ_IDENTITY" --identifier "$HORMUZ_BUNDLE_ID" --options runtime --timestamp "$HORMUZ_BUNDLE"
 fi
 codesign --verify --strict --verbose=4 "$HORMUZ_BUNDLE"

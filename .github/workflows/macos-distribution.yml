@@ -6,7 +6,7 @@ on:
       version:
         description: Three-component marketing version
         required: true
-        default: 1.6.0
+        default: 1.7.0
         type: string
 
 permissions:
@@ -172,6 +172,9 @@ jobs:
           test "$(uname -m)" = arm64
           swift --version
           xcodebuild -version
+      - name: Install pinned Rust toolchain
+        working-directory: clients/rust
+        run: rustup toolchain install 1.98.1 --profile minimal
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -221,6 +224,8 @@ jobs:
             --scratch-path "$HORMUZ_SCRATCH" --configuration release \
             --arch arm64 --show-bin-path)/Hormuz"
           cp "$HORMUZ_BINARY_SOURCE" "$HORMUZ_PAYLOAD/Hormuz"
+          (cd clients/rust; cargo build --locked --release --package hormuz-client-relay)
+          cp clients/rust/target/release/hormuz-client-relay "$HORMUZ_PAYLOAD/hormuz-client-relay"
           chmod 755 "$HORMUZ_PAYLOAD/Hormuz"
           HORMUZ_DSYM_SOURCE="$(dirname "$HORMUZ_BINARY_SOURCE")/Hormuz.dSYM"
           if [ -d "$HORMUZ_DSYM_SOURCE" ]; then
@@ -233,6 +238,7 @@ jobs:
             --version "$HORMUZ_VERSION"
             --build "$HORMUZ_BUILD_NUMBER"
             --prebuilt-binary "$HORMUZ_PAYLOAD/Hormuz"
+            --prebuilt-relay "$HORMUZ_PAYLOAD/hormuz-client-relay"
             --context-helper-directory "$HORMUZ_PAYLOAD/context-helpers"
             --tokenizer-cache "$HORMUZ_PAYLOAD/context-tokenizers"
             --ad-hoc
@@ -270,6 +276,7 @@ jobs:
           payload = Path(sys.argv[1])
           manifest = Path(sys.argv[2])
           binary = payload / "Hormuz"
+          relay = payload / "hormuz-client-relay"
           helpers = {
               "arm64": payload / "context-helpers/hormuz-context-arm64",
           }
@@ -281,7 +288,7 @@ jobs:
               "9b5ad71b2ce5302211f9c61530b329a4922fc6a4": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
               "fb374d419588a4632f3f557e76b4b70aebbca790": "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
           }
-          if any(not path.is_file() or path.is_symlink() for path in [binary, *helpers.values(), *tokenizers.values()]):
+          if any(not path.is_file() or path.is_symlink() for path in [binary, relay, *helpers.values(), *tokenizers.values()]):
               raise SystemExit("unsigned payload is incomplete or unsafe")
           architectures = sorted(
               subprocess.check_output(
@@ -290,6 +297,8 @@ jobs:
           )
           if architectures != ["arm64"]:
               raise SystemExit("unsigned payload is not exactly Apple Silicon")
+          if subprocess.check_output(["lipo", "-archs", str(relay)], text=True).split() != ["arm64"]:
+              raise SystemExit("unsigned relay is not exactly Apple Silicon")
           helper_architectures = {
               name: sorted(subprocess.check_output(["lipo", "-archs", str(path)], text=True).split())
               for name, path in helpers.items()
@@ -306,13 +315,14 @@ jobs:
               json.dumps(
                   {
                       "schema_id": "hormuz.macos-unsigned-payload",
-                      "schema_version": 2,
+                      "schema_version": 3,
                       "source_commit": os.environ["GITHUB_SHA"],
                       "bundle_identifier": os.environ["HORMUZ_BUNDLE_ID"],
                       "version": os.environ["HORMUZ_VERSION"],
                       "build": os.environ["HORMUZ_BUILD_NUMBER"],
                       "architectures": architectures,
                       "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                      "relay_sha256": hashlib.sha256(relay.read_bytes()).hexdigest(),
                       "context_helper_architectures": helper_architectures,
                       "context_helper_sha256": {
                           name: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -395,6 +405,7 @@ jobs:
 
           payload = Path(sys.argv[1])
           binary = payload / "Hormuz"
+          relay = payload / "hormuz-client-relay"
           manifest_path = payload / "payload-manifest.json"
           helpers = {
               "arm64": payload / "context-helpers/hormuz-context-arm64",
@@ -407,12 +418,12 @@ jobs:
               "9b5ad71b2ce5302211f9c61530b329a4922fc6a4": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
               "fb374d419588a4632f3f557e76b4b70aebbca790": "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
           }
-          expected_top_level = {"Hormuz", "context-helpers", "context-tokenizers", "payload-manifest.json"}
+          expected_top_level = {"Hormuz", "hormuz-client-relay", "context-helpers", "context-tokenizers", "payload-manifest.json"}
           if (payload / "Hormuz.dSYM").is_dir():
               expected_top_level.add("Hormuz.dSYM")
           if {path.name for path in payload.iterdir()} != expected_top_level:
               raise SystemExit("unsigned payload contains unexpected files")
-          if any(not path.is_file() or path.is_symlink() for path in [binary, manifest_path, *helpers.values(), *tokenizers.values()]):
+          if any(not path.is_file() or path.is_symlink() for path in [binary, relay, manifest_path, *helpers.values(), *tokenizers.values()]):
               raise SystemExit("unsigned payload is missing or unsafe")
           if {path.name for path in (payload / "context-helpers").iterdir()} != {path.name for path in helpers.values()}:
               raise SystemExit("unsigned helper payload contains unexpected files")
@@ -434,13 +445,14 @@ jobs:
           }
           expected = {
               "schema_id": "hormuz.macos-unsigned-payload",
-              "schema_version": 2,
+              "schema_version": 3,
               "source_commit": os.environ["GITHUB_SHA"],
               "bundle_identifier": os.environ["HORMUZ_BUNDLE_ID"],
               "version": os.environ["HORMUZ_VERSION"],
               "build": os.environ["HORMUZ_BUILD_NUMBER"],
               "architectures": ["arm64"],
               "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "relay_sha256": hashlib.sha256(relay.read_bytes()).hexdigest(),
               "context_helper_architectures": {"arm64": ["arm64"]},
               "context_helper_sha256": {
                   name: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -453,6 +465,7 @@ jobs:
           if (
               manifest != expected
               or architectures != ["arm64"]
+              or subprocess.check_output(["lipo", "-archs", str(relay)], text=True).split() != ["arm64"]
               or helper_architectures != expected["context_helper_architectures"]
               or tokenizer_digests != expected_tokenizers
           ):
@@ -536,6 +549,7 @@ jobs:
             --version "$HORMUZ_VERSION"
             --build "$HORMUZ_BUILD_NUMBER"
             --prebuilt-binary "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz"
+            --prebuilt-relay "$HORMUZ_UNSIGNED_PAYLOAD/hormuz-client-relay"
             --context-helper-directory "$HORMUZ_UNSIGNED_PAYLOAD/context-helpers"
             --tokenizer-cache "$HORMUZ_UNSIGNED_PAYLOAD/context-tokenizers"
           )

@@ -8,6 +8,8 @@ use hormuz_client_relay::OptimizerCancellation;
 use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
 use std::io::{self, Read, Write};
 use std::os::fd::AsFd;
+#[cfg(target_os = "macos")]
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -45,22 +47,56 @@ fn run_controlled<C: Fn() -> bool>(
     if original.len() > max_body_bytes {
         return None;
     }
-    let max_output_bytes = max_body_bytes.checked_add(1)?;
-    let deadline = Instant::now().checked_add(budget)?;
     let mut input = Zeroizing::new(Vec::new());
     input.extend_from_slice(&length);
     input.extend_from_slice(gateway);
     input.extend_from_slice(original);
+    capture_controlled(
+        command,
+        &input,
+        budget,
+        max_body_bytes.checked_add(1)?,
+        cancelled,
+    )
+}
+
+/// The Mac app remains the Keychain broker. Its one-line credential response
+/// uses the same bounded, memory-only pipe exchange as optimizer responses.
+#[cfg(target_os = "macos")]
+pub(super) fn capture(
+    command: &mut Command,
+    input: &[u8],
+    budget: Duration,
+    limit: usize,
+) -> Option<Vec<u8>> {
+    capture_controlled(command, input, budget, limit, &|| false)
+}
+
+fn capture_controlled<C: Fn() -> bool>(
+    command: &mut Command,
+    input: &[u8],
+    budget: Duration,
+    max_output_bytes: usize,
+    cancelled: &C,
+) -> Option<Vec<u8>> {
+    let deadline = Instant::now().checked_add(budget)?;
     if cancelled() {
         return None;
     }
+    #[cfg(target_os = "macos")]
+    command.process_group(0);
+    let process = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    #[cfg(target_os = "macos")]
+    let group = rustix::process::Pid::from_raw(process.id() as i32);
     let mut child = OwnedTransform(
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?,
+        process,
+        #[cfg(target_os = "macos")]
+        group,
     );
     let stdin = child.0.stdin.take()?;
     let stdout = child.0.stdout.take()?;
@@ -68,7 +104,7 @@ fn run_controlled<C: Fn() -> bool>(
         child,
         stdin,
         stdout,
-        &input,
+        input,
         deadline,
         max_output_bytes,
         cancelled,
@@ -83,7 +119,7 @@ fn nonblocking(pipe: &impl AsFd) -> io::Result<()> {
 }
 
 fn exchange<C: Fn() -> bool>(
-    mut child: OwnedTransform,
+    child: OwnedTransform,
     stdin: impl AsFd + Write,
     mut stdout: impl AsFd + Read,
     input: &[u8],
@@ -91,6 +127,8 @@ fn exchange<C: Fn() -> bool>(
     max_output_bytes: usize,
     cancelled: &C,
 ) -> io::Result<Vec<u8>> {
+    #[cfg(not(target_os = "macos"))]
+    let mut child = child;
     nonblocking(&stdin)?;
     nonblocking(&stdout)?;
     let mut stdin = Some(stdin);
@@ -143,6 +181,23 @@ fn exchange<C: Fn() -> bool>(
             }
         }
         if !exited {
+            #[cfg(target_os = "macos")]
+            if let Some(status) = rustix::process::waitid(
+                rustix::process::WaitId::Pid(
+                    rustix::process::Pid::from_raw(child.0.id() as i32).unwrap(),
+                ),
+                rustix::process::WaitIdOptions::EXITED
+                    | rustix::process::WaitIdOptions::NOHANG
+                    | rustix::process::WaitIdOptions::NOWAIT,
+            )? {
+                // Keep the exited leader waitable until Drop has stopped its
+                // group. Its PID cannot be recycled before that cleanup.
+                if status.exit_status() != Some(0) {
+                    return Err(io::Error::other("optimizer helper failed"));
+                }
+                exited = true;
+            }
+            #[cfg(not(target_os = "macos"))]
             if let Some(status) = child.0.try_wait()? {
                 if !status.success() {
                     return Err(io::Error::other("optimizer helper failed"));
@@ -166,12 +221,42 @@ fn retryable(error: &io::Error) -> bool {
     )
 }
 
-struct OwnedTransform(Child);
+struct OwnedTransform(
+    Child,
+    #[cfg(target_os = "macos")] Option<rustix::process::Pid>,
+);
+#[cfg(test)]
+impl OwnedTransform {
+    fn new(child: Child) -> Self {
+        Self(
+            child,
+            #[cfg(target_os = "macos")]
+            None,
+        )
+    }
+}
 impl Drop for OwnedTransform {
     fn drop(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            use rustix::process::{kill_process_group, waitid, Signal, WaitId, WaitIdOptions};
+            if let Some(pid) = self.1 {
+                // Only signal a group whose leader is still our waitable child;
+                // never enumerate or kill an arbitrary/recycled PID tree.
+                if waitid(
+                    WaitId::Pid(pid),
+                    WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+                )
+                .is_ok()
+                {
+                    let _ = kill_process_group(pid, Signal::KILL);
+                }
+            }
+        }
         // Child caches an observed exit status, so kill/wait after try_wait
         // has reaped it cannot target a recycled PID. This owns the direct
-        // child only; process-tree containment is a separate native adapter.
+        // child. Mac helper cleanup also covers ordinary same-group descendants,
+        // but not a deliberately detached process which calls setsid/setpgid.
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
@@ -214,6 +299,25 @@ mod tests {
         run_controlled(command, gateway, original, budget, max_body_bytes, &|| {
             false
         })
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn same_group_helper_descendants_stop_after_direct_exit() {
+        let temporary = tempfile::tempdir().unwrap();
+        let marker = temporary.path().join("descendant-survived");
+        let mut command = shell("(sleep 0.25; : > \"$1\") >/dev/null 2>&1 & printf ready");
+        command.arg("fixture").arg(&marker);
+        let output =
+            run_uncancelled(&mut command, b"origin", b"body", Duration::from_secs(2), 32).unwrap();
+        assert_eq!(output, b"ready");
+        // kill(pid, 0) also succeeds for an already dead, launchd-owned zombie.
+        // Observe the descendant's actual ability to keep doing work instead.
+        thread::sleep(Duration::from_millis(500));
+        assert!(
+            !marker.exists(),
+            "ordinary helper descendant survived cleanup"
+        );
     }
 
     #[test]
@@ -264,7 +368,7 @@ mod tests {
         // an assertion fails. No background orphan or PID-based kill is needed.
         let (input_read, input_write) = io::pipe().unwrap();
         let (output_read, output_write) = io::pipe().unwrap();
-        let mut holder = OwnedTransform(
+        let mut holder = OwnedTransform::new(
             Command::new("/bin/sleep")
                 .arg("10")
                 .stdin(input_read.try_clone().unwrap())
@@ -272,7 +376,7 @@ mod tests {
                 .spawn()
                 .unwrap(),
         );
-        let child = OwnedTransform(
+        let child = OwnedTransform::new(
             Command::new("/usr/bin/true")
                 .stdin(input_read)
                 .stdout(output_write)
@@ -299,7 +403,7 @@ mod tests {
 
     #[test]
     fn timeout_kills_and_reaps_helper_that_never_reads_input() {
-        let mut child = OwnedTransform(
+        let mut child = OwnedTransform::new(
             Command::new("/bin/sleep")
                 .arg("10")
                 .stdin(Stdio::piped())
@@ -328,7 +432,7 @@ mod tests {
 
     #[test]
     fn cancellation_kills_and_reaps_helper_before_deadline() {
-        let mut child = OwnedTransform(
+        let mut child = OwnedTransform::new(
             Command::new("/bin/sleep")
                 .arg("10")
                 .stdin(Stdio::piped())

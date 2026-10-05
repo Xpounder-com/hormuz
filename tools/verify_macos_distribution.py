@@ -41,6 +41,7 @@ BASE_EXPECTED_FILES = {
     "Hormuz.app/Contents/Resources/ContextTokenizers/fb374d419588a4632f3f557e76b4b70aebbca790",
     "Hormuz.app/Contents/_CodeSignature/CodeResources",
 }
+NATIVE_RELAY_FILE = "Hormuz.app/Contents/Helpers/hormuz-client-relay"
 CONTEXT_LAUNCHER_SHA256 = "d85c56b7143b1a47d8640a35b15a6915757473030e3e2fcd18f7fb84b204e1aa"
 TOKENIZER_SHA256 = {
     "9b5ad71b2ce5302211f9c61530b329a4922fc6a4": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
@@ -84,8 +85,10 @@ def stream_digest(source: BinaryIO) -> str:
     return value.hexdigest()
 
 
-def expected_files(mode: str) -> set[str]:
+def expected_files(mode: str, *, native_relay: bool = False) -> set[str]:
     files = set(BASE_EXPECTED_FILES)
+    if native_relay:
+        files.add(NATIVE_RELAY_FILE)
     if mode == "notarized":
         files.add(STAPLED_TICKET)
     return files
@@ -136,8 +139,10 @@ def verify_archive(
     bundle: Path | None,
     mode: str,
     expected_identifier: str,
+    *,
+    native_relay: bool = False,
 ) -> dict[str, object]:
-    required_files = expected_files(mode)
+    required_files = expected_files(mode, native_relay=native_relay)
     try:
         with zipfile.ZipFile(archive) as packaged:
             files: set[str] = set()
@@ -181,6 +186,7 @@ def verify_archive(
                     "Hormuz.app/Contents/MacOS/Hormuz",
                     "Hormuz.app/Contents/Resources/ContextHelper/hormuz-context",
                     "Hormuz.app/Contents/Helpers/hormuz-context-arm64",
+                    "Hormuz.app/Contents/Helpers/hormuz-client-relay",
                 } and not archived_mode & 0o111:
                     raise VerificationError("archive_executable_mode_missing")
     except VerificationError:
@@ -291,6 +297,20 @@ def main() -> int:
     if plist.get("NSAppTransportSecurity") != {"NSAllowsLocalNetworking": True}:
         raise VerificationError("unexpected_transport_security_configuration")
 
+    relay = bundle / "Contents/Helpers/hormuz-client-relay"
+    if not relay.is_file() or relay.is_symlink():
+        raise VerificationError("native_relay_missing")
+    relay_architecture, _ = run("lipo", "-archs", str(relay))
+    if relay_architecture.split() != ["arm64"]:
+        raise VerificationError("native_relay_architecture_mismatch")
+    relay_signature = signing_details(
+        relay, args.mode if args.mode != "notarized" else "developer-id",
+        args.expected_bundle_id + ".relay",
+    )
+    relay_dependencies, _ = run("otool", "-L", str(relay))
+    linked = [line.strip().split(" (", 1)[0] for line in relay_dependencies.splitlines() if line.startswith("\t")]
+    if not linked or any(not item.startswith(("/System/Library/", "/usr/lib/")) for item in linked):
+        raise VerificationError("non_system_relay_dependency")
     architecture_output, _ = run("lipo", "-archs", str(executable))
     architectures = sorted(architecture_output.split())
     if architectures != ["arm64"]:
@@ -319,6 +339,8 @@ def main() -> int:
             raise VerificationError("context_helper_runtime_check_failed")
 
     signature = signing_details(bundle, args.mode, args.expected_bundle_id)
+    if relay_signature["team_identifier"] != signature["team_identifier"]:
+        raise VerificationError("native_relay_team_mismatch")
     helper_signatures: dict[str, dict[str, object]] = {}
     if args.mode != "ad-hoc":
         for architecture, candidate in context_backends.items():
@@ -334,11 +356,11 @@ def main() -> int:
     if args.mode == "notarized":
         run("xcrun", "stapler", "validate", str(bundle))
         run("spctl", "--assess", "--type", "execute", "--verbose=4", str(bundle))
-    verify_archive(archive, bundle, args.mode, args.expected_bundle_id)
+    verify_archive(archive, bundle, args.mode, args.expected_bundle_id, native_relay=True)
 
     result = {
         "schema_id": "hormuz.macos-distribution-proof",
-        "schema_version": 3,
+        "schema_version": 4,
         "passed": True,
         "mode": args.mode,
         "distribution_ready": args.mode == "notarized",
@@ -352,6 +374,9 @@ def main() -> int:
         "entitlements": [],
         "system_runtime_dependencies_only": True,
         "context_helper_packaged": True,
+        "native_relay_packaged": True,
+        "native_relay_sha256": digest(relay),
+        "native_relay_signature": relay_signature,
         "context_helper_runtime_verified": args.verify_context_helper,
         "context_helper_launcher_sealed_by_bundle": True,
         "context_helper_signatures": helper_signatures,

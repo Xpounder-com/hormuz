@@ -32,7 +32,7 @@ class BridgeTests(unittest.TestCase):
             {"type": "function_call_output", "call_id": "records", "output": paths},
         ]}).encode()
         with mock.patch.object(context_relay_bridge, "probe_gateway_capability", return_value=True), \
-                mock.patch("hormuz.client_relay.load_token_counters", return_value={
+                mock.patch.object(context_relay_bridge, "load_token_counters", return_value={
                     "cl100k_base": len, "o200k_base": len,
                 }):
             changed, modified = context_relay_bridge.transform(
@@ -41,6 +41,29 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(modified)
         self.assertNotEqual(changed, body)
         self.assertEqual(restore_text(json.loads(changed)["input"][1]["output"]), paths)
+
+    def test_incompatible_gateway_never_initializes_tokenizers(self) -> None:
+        with mock.patch.object(context_relay_bridge, "probe_gateway_capability", return_value=False), \
+                mock.patch.object(context_relay_bridge, "load_token_counters") as counters:
+            self.assertEqual(context_relay_bridge.transform(
+                b"{}", "/v1/responses", "codex", "http://127.0.0.1:9"
+            ), (b"{}", False))
+        counters.assert_not_called()
+
+    def test_candidate_work_keeps_existing_overhead_guard(self) -> None:
+        paths = "src/repeated/file.py\n" * 160
+        body = json.dumps({"model": "approved", "input": [
+            {"type": "function_call", "call_id": "records", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "rg --files src"})},
+            {"type": "function_call_output", "call_id": "records", "output": paths},
+        ]}).encode()
+        with mock.patch.object(context_relay_bridge, "probe_gateway_capability", return_value=True), \
+                mock.patch.object(context_relay_bridge, "load_token_counters", return_value={
+                    "cl100k_base": len, "o200k_base": len,
+                }), mock.patch("hormuz.client_relay.time.perf_counter_ns", side_effect=[0, 101_000_000, 101_000_000]):
+            self.assertEqual(context_relay_bridge.transform(
+                body, "/v1/responses", "codex", "http://127.0.0.1:9"
+            ), (body, False))
 
     def test_subprocess_protocol_fails_open_to_exact_request_without_gateway_support(self) -> None:
         command = [

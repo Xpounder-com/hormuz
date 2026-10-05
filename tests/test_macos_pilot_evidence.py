@@ -1084,6 +1084,33 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 proof, "synthetic_test_fixture"
             )
 
+    def test_native_distribution_proof_v4_preserves_old_proofs_and_binds_relay(self) -> None:
+        proof = self._json(CONTEXT_PROOF_PATH)
+        proof.update(version="1.7.0", schema_version=4, native_relay_packaged=True, native_relay_sha256="d" * 64,
+                     native_relay_signature={"team_identifier": proof["team_identifier"],
+                                             "authority": proof["signing_authority"]})
+        self.assertEqual(pilot._validate_distribution_proof(proof, "synthetic_test_fixture")["schema_version"], 4)
+        for field, value, message in [
+            ("native_relay_packaged", False, "distribution_proof_native_relay_missing"),
+            ("native_relay_sha256", "invalid", "proof_native_relay_sha256"),
+            ("native_relay_signature", {}, "distribution_proof_native_relay_identity_invalid"),
+        ]:
+            with self.subTest(field=field), self.assertRaisesRegex(pilot.MacPilotEvidenceError, message):
+                pilot._validate_distribution_proof({**proof, field: value}, "synthetic_test_fixture")
+
+    def test_release_1_7_requires_native_distribution_proof_v4(self) -> None:
+        for version in ("1.7.0", "1.7.1", "1.8.0", "2.0.0"):
+            for path in (PROOF_PATH, CONTEXT_PROOF_PATH):
+                proof = self._json(path)
+                proof["version"] = version
+                with self.subTest(version=version, schema=proof["schema_version"]):
+                    with self.assertRaisesRegex(pilot.MacPilotEvidenceError,
+                                                "distribution_proof_native_relay_contract_required"):
+                        pilot._validate_distribution_proof(proof, "synthetic_test_fixture")
+        proof = self._json(CONTEXT_PROOF_PATH)
+        proof["version"] = "1.6.999"
+        self.assertEqual(pilot._validate_distribution_proof(proof, "synthetic_test_fixture")["schema_version"], 3)
+
     def test_apple_silicon_requires_real_gatekeeper_conditions(self) -> None:
         inputs = list(self._inputs())
         evidence = copy.deepcopy(inputs[0])
@@ -1911,7 +1938,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), archive_payload)
             self.assertEqual((size, digest), (proof["archive_bytes"], proof["archive_sha256"]))
 
-            def replace_verified_archive(*_args: object) -> dict[str, object]:
+            def replace_verified_archive(*_args: object, native_relay: bool = False) -> dict[str, object]:
                 snapshot.write_bytes(b"changed during platform verification")
                 return {
                     "team_identifier": pilot.PRODUCTION_TEAM_IDENTIFIER,

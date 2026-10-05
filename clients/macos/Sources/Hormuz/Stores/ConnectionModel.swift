@@ -27,6 +27,7 @@ import Observation
     var message: String?
     private var controller: SessionController?
     private var directory: PrivateDirectory?
+    private var relayOwner: RelayOwner?
     private var operation: Task<Void, Never>?
     private var didRestore = false
     private let desktopOrigin = Bundle.main.object(forInfoDictionaryKey: "HormuzDesktopOrigin") as? String
@@ -70,6 +71,7 @@ import Observation
         do {
             let directory = try PrivateDirectory()
             self.directory = directory
+            relayOwner = try RelayOwner()
             controller = SessionController(directory: directory)
             try await syncStatus()
             if hasSession { refresh() }
@@ -125,7 +127,7 @@ import Observation
         try await syncStatus()
         guard let profile else { throw ClientError.loginRequired }
         dashboard = try await controller.dashboard(profileID: profile.id)
-        try await prepareDesktopLauncher()
+        try await prepareLauncher()
     }
 
     func reconnect() {
@@ -188,7 +190,14 @@ import Observation
             self.dashboard = nil
             self.dashboard = try await controller.dashboard(profileID: profile.id)
             try await self.syncStatus()
-            if profile.desktopManaged { try await self.prepareDesktopLauncher() }
+            // A saved launcher holds this app lifetime's lease. Rebind it after
+            // restart only once the restored session is gateway-verified. First
+            // manual setup still requires its normal preview/save action.
+            let savedLauncher = profile.client.rawValue + "-" + profile.key + ".command"
+            let wasSaved = try self.directory?.read(savedLauncher) != nil
+            if profile.desktopManaged || wasSaved {
+                try await self.prepareLauncher()
+            }
         }
     }
 
@@ -207,9 +216,10 @@ import Observation
     @discardableResult
     func previewConnector(presentSheet: Bool = true) -> Bool {
         do {
-            guard let profile, let directory, hasSession, sessionState == .active,
+            guard let profile, let directory, let relayOwner, hasSession, sessionState == .active,
                   let executable = Bundle.main.executableURL else { throw ClientError.loginRequired }
-            connector = try ConnectorPlan.preview(profile: profile, directory: directory, helper: executable)
+            connector = try ConnectorPlan.preview(profile: profile, directory: directory, helper: executable,
+                ownerSocket: relayOwner.socketURL)
             showingPreview = presentSheet
             return true
         } catch {
@@ -243,14 +253,17 @@ import Observation
         }
     }
 
-    private func prepareDesktopLauncher() async throws {
-        guard let profile, profile.desktopManaged, let directory,
+    private func prepareLauncher() async throws {
+        guard let profile, let directory, let relayOwner,
               let executable = Bundle.main.executableURL else { throw ClientError.storageUnavailable }
-        let plan = try ConnectorPlan.preview(profile: profile, directory: directory, helper: executable)
+        let plan = try ConnectorPlan.preview(profile: profile, directory: directory, helper: executable,
+            ownerSocket: relayOwner.socketURL)
         try await plan.apply(in: directory)
         connector = plan
         connectorSaved = true
     }
+
+    func stopLaunchedClients() { relayOwner?.stop() }
 
     func setContextOptimization(enabled: Bool) {
         run {

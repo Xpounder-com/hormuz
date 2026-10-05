@@ -10,10 +10,19 @@ HORMUZ_MAC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HORMUZ_BUNDLE="$HORMUZ_MAC_ROOT/dist/Hormuz.app"
 HORMUZ_BINARY="$HORMUZ_BUNDLE/Contents/MacOS/Hormuz"
 HORMUZ_CONTEXT_HELPER="$HORMUZ_BUNDLE/Contents/Resources/ContextHelper/hormuz-context"
+HORMUZ_REPO_ROOT="$(cd "$HORMUZ_MAC_ROOT/../.." && pwd)"
+HORMUZ_CARGO="${HORMUZ_CARGO:-cargo}"
+HORMUZ_RELAY_TARGET="${CARGO_TARGET_DIR:-$HORMUZ_REPO_ROOT/clients/rust/target}"
 if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Developer ]; then
   # Process-local selection only; do not change the machine-wide xcode-select.
   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
+case "$HORMUZ_RELAY_TARGET" in
+  /*) ;;
+  *) HORMUZ_RELAY_TARGET="$PWD/$HORMUZ_RELAY_TARGET" ;;
+esac
+(cd "$HORMUZ_REPO_ROOT/clients/rust"; "$HORMUZ_CARGO" build \
+  --target-dir "$HORMUZ_RELAY_TARGET" --locked --package hormuz-client-relay)
 
 # Stop only the GUI from this build directory, never a helper or another copy.
 if [ "$HORMUZ_MODE" != "--build-only" ]; then
@@ -29,6 +38,7 @@ mkdir -p "$HORMUZ_BUNDLE/Contents/MacOS"
 mkdir -p "$HORMUZ_BUNDLE/Contents/Resources/ContextHelper"
 mkdir -p "$HORMUZ_BUNDLE/Contents/Helpers"
 cp "$HORMUZ_BUILD_DIR/Hormuz" "$HORMUZ_BINARY"
+cp "$HORMUZ_RELAY_TARGET/debug/hormuz-client-relay" "$HORMUZ_BUNDLE/Contents/Helpers/hormuz-client-relay"
 cp "$HORMUZ_MAC_ROOT/Resources/Info.plist" "$HORMUZ_BUNDLE/Contents/Info.plist"
 if [ -n "${HORMUZ_DESKTOP_ORIGIN:-}" ]; then
   python3 - "$HORMUZ_DESKTOP_ORIGIN" <<'PY'
@@ -57,6 +67,8 @@ chmod 755 "$HORMUZ_BINARY" "$HORMUZ_CONTEXT_HELPER"
 # The shell launcher is a sealed app resource. Shell scripts cannot carry a
 # durable embedded signature, so signing it separately would rely on extended
 # attributes that are lost during ordinary archive transfer.
+codesign --force --sign - --identifier com.hormuz.mac.local.relay --options runtime --timestamp=none \
+  "$HORMUZ_BUNDLE/Contents/Helpers/hormuz-client-relay"
 codesign --force --sign - --identifier com.hormuz.mac.local --options runtime --timestamp=none "$HORMUZ_BUNDLE"
 codesign --verify --strict "$HORMUZ_BUNDLE"
 

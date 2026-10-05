@@ -391,4 +391,25 @@ final class SessionTests: PrivateStorageTestCase {
         try await controller.signOut()
         XCTAssertNil(try store.load())
     }
+
+    func testRelayBindingRejectsAReplacedProfileEvenWithANewValidSession() async throws {
+        let clock = TestClock(), store = MemorySessions()
+        let transport = FixtureTransport(clock: clock)
+        let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
+        let original = try profile()
+        try await controller.signIn(profile: original) { _ in }
+        _ = try await controller.accessCredential(profileID: original.id, expectedProfile: original)
+        let changed = try ConnectionProfile(id: original.id, gateway: original.gateway,
+            organization: original.organization, client: original.client, model: "another-approved-model")
+        try directory.saveProfile(changed)
+        let record = try XCTUnwrap(store.load())
+        try store.save(SessionRecord(profile: changed, accessToken: record.accessToken,
+            refreshToken: record.refreshToken, accessExpiresAt: record.accessExpiresAt,
+            sessionExpiresAt: record.sessionExpiresAt))
+        do {
+            _ = try await controller.accessCredential(profileID: original.id, expectedProfile: original)
+            XCTFail("A running relay must not acquire a replacement profile's credential")
+        } catch { XCTAssertEqual(error as? ClientError, .configurationChanged) }
+        _ = try await controller.accessCredential(profileID: changed.id, expectedProfile: changed)
+    }
 }

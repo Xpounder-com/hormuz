@@ -3,6 +3,7 @@ import XCTest
 @testable import HormuzClientCore
 
 final class StorageAndConnectorTests: PrivateStorageTestCase {
+    private let ownerSocket = URL(fileURLWithPath: "/private/tmp/synthetic-owner/lease")
     private struct LegacyProfile: Codable, Equatable {
         let id: UUID
         let gateway: String
@@ -50,18 +51,20 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         let profile = try profile(client: .claudeCode)
         try directory.saveProfile(profile)
         let plan = try ConnectorPlan.preview(profile: profile, directory: directory,
-                                             helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"))
+                                             helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"), ownerSocket: ownerSocket)
         XCTAssertFalse(FileManager.default.fileExists(atPath: plan.launcher.path))
         try await plan.apply(in: directory)
         let namesBefore = try FileManager.default.contentsOfDirectory(atPath: directory.root.path).sorted()
         let again = try ConnectorPlan.preview(profile: profile, directory: directory,
-                                              helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"))
+                                              helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"), ownerSocket: ownerSocket)
         try await again.apply(in: directory)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.root.path).sorted(), namesBefore)
         XCTAssertEqual(plan.files.count, 1)
         XCTAssertTrue(plan.previewText.contains("hormuz-context"))
         XCTAssertTrue(plan.previewText.contains("context"))
-        XCTAssertTrue(plan.previewText.contains("run"))
+        XCTAssertTrue(plan.previewText.contains("hormuz-client-relay"))
+        XCTAssertFalse(plan.previewText.contains("'context' 'run'"))
+        XCTAssertTrue(plan.previewText.contains("--owner-socket"))
         XCTAssertTrue(plan.previewText.contains("--credential-helper"))
         XCTAssertFalse(plan.previewText.contains("hox_"))
     }
@@ -80,7 +83,7 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
                 directory: directory,
                 helper: URL(
                     fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"
-                )
+                ), ownerSocket: ownerSocket
             )
             XCTAssertEqual(plan.profile.setup, .openAIPilot)
             XCTAssertEqual(plan.files.count, 1)
@@ -144,7 +147,7 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         let profile = try profile()
         try directory.saveProfile(profile)
         let plan = try ConnectorPlan.preview(profile: profile, directory: directory,
-                                             helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"))
+                                             helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"), ownerSocket: ownerSocket)
         let ownChange = Data("# my local change\n".utf8)
         try directory.write(ownChange, to: plan.files[0].name, expected: nil)
         do { try await plan.apply(in: directory); XCTFail("Expected stale preview rejection") }
@@ -184,14 +187,46 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         let profile = try profile()
         try directory.saveProfile(profile)
         let old = try ConnectorPlan.preview(profile: profile, directory: directory,
-                                            helper: URL(fileURLWithPath: "/old/Hormuz"))
+                                            helper: URL(fileURLWithPath: "/old/Hormuz"), ownerSocket: ownerSocket)
         try await old.apply(in: directory)
         let new = try ConnectorPlan.preview(profile: profile, directory: directory,
-                                            helper: URL(fileURLWithPath: "/new/Hormuz"))
+                                            helper: URL(fileURLWithPath: "/new/Hormuz"), ownerSocket: ownerSocket)
         try await new.apply(in: directory)
         let backups = try FileManager.default.contentsOfDirectory(atPath: directory.root.path).filter { $0.hasPrefix("backup-") }
         XCTAssertEqual(backups.count, 1)
         XCTAssertEqual(try directory.read(backups[0]), old.files[0].content)
+    }
+
+    func testOwnerLeaseRebindDoesNotAccumulateBackups() async throws {
+        let profile = try profile()
+        try directory.saveProfile(profile)
+        for _ in 0..<3 {
+            let lease = URL(fileURLWithPath: "/private/tmp/hormuz-owner-\(UUID().uuidString)/lease")
+            let plan = try ConnectorPlan.preview(profile: profile, directory: directory,
+                helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"), ownerSocket: lease)
+            try await plan.apply(in: directory)
+            XCTAssertEqual(try directory.read(plan.files[0].name), plan.files[0].content)
+        }
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.root.path)
+            .contains(where: { $0.hasPrefix("backup-") }))
+    }
+
+    func testOwnerLeaseRebindPreservesUserModification() async throws {
+        let profile = try profile()
+        try directory.saveProfile(profile)
+        let helper = URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz")
+        let old = try ConnectorPlan.preview(profile: profile, directory: directory, helper: helper,
+            ownerSocket: URL(fileURLWithPath: "/private/tmp/hormuz-owner-\(UUID().uuidString)/lease"))
+        try await old.apply(in: directory)
+        let changed = Data("# User modification\n".utf8) + old.files[0].content
+        try directory.write(changed, to: old.files[0].name, expected: old.files[0].content, executable: true)
+        let new = try ConnectorPlan.preview(profile: profile, directory: directory, helper: helper,
+            ownerSocket: URL(fileURLWithPath: "/private/tmp/hormuz-owner-\(UUID().uuidString)/lease"))
+        try await new.apply(in: directory)
+        let backups = try FileManager.default.contentsOfDirectory(atPath: directory.root.path)
+            .filter { $0.hasPrefix("backup-") }
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(try directory.read(backups[0]), changed)
     }
 
     func testShellQuotingProtectsHelperPathsAndLaunchDoesNotRewriteUserConfig() async throws {
@@ -203,7 +238,7 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         try directory.write(Data("#!/bin/sh\ntest -z \"${OPENAI_API_KEY+x}\" || exit 9\nprintf '%s\\n' \"$@\"\n".utf8),
                             to: "hormuz-context", expected: nil, executable: true)
         let plan = try ConnectorPlan.preview(profile: profile, directory: directory, helper: helper,
-                                             contextHelper: contextHelper)
+                                             contextHelper: contextHelper, relay: contextHelper, ownerSocket: ownerSocket)
         try await plan.apply(in: directory)
         let userSettings = temporary.appendingPathComponent("config.toml")
         let original = Data("# Personal config\nmodel = \"my-model\"\n".utf8)
@@ -219,7 +254,9 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0)
         let args = String(decoding: output, as: UTF8.self)
-        XCTAssertTrue(args.contains("context\nrun\n--profile"))
+        XCTAssertTrue(args.hasPrefix("--profile\n"))
+        XCTAssertTrue(args.contains("--optimizer-helper\n" + contextHelper.path))
+        XCTAssertTrue(args.contains("--owner-socket\n" + ownerSocket.path))
         XCTAssertTrue(args.contains(helper.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
         XCTAssertEqual(try Data(contentsOf: userSettings), original)
