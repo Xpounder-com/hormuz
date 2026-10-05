@@ -27,6 +27,12 @@ test('native paths and metadata use the dedicated organization root', () => {
   assert.throws(() => sitePath('https://example.com'));
   assert.throws(() => sitePath('//example.com'));
 });
+test('shared current-release labels derive from the source version', () => {
+  for (const file of ['app/components/SiteFooter.tsx', 'app/components/SetupExample.tsx', 'app/enterprise/page.tsx']) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert.match(source, /\{SOURCE_VERSION(?:\.slice\(1\))?\}/, file);
+  }
+});
 test('inquiries encode user text as body, never additional recipients or headers', () => {
   const value = buildInquiry({ name: 'A & B', workflow: 'Budget? &bcc=someone@example.com\n#test', interest: 'pilot' });
   const url = new URL(value.mailto);

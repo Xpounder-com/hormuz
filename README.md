@@ -18,11 +18,11 @@ written to the usage database.
 
 > [!IMPORTANT]
 > Hormuz 1.0 established the stable CLI and policy/evidence contracts. Hormuz
-> 1.5 preserves those contracts and the terminal-first Personal Optimizer,
-> its adapter SDK, and Aider support. It adds verified desktop enrollment
-> contracts and Windows usage detail cards in development source. Windows
+> 1.6 preserves those contracts and the terminal-first Personal Optimizer,
+> its adapter SDK, and Aider support. It simplifies normal sign-in, separates
+> team invitations, and fixes hosted usage and desktop-profile handling. Windows
 > remains an unsigned, unsupported preview; the notarized Mac download remains
-> v1.3.0. See the [v1.5 release boundaries](docs/releases/v1.5.0-verified-improvements.md). The original
+> v1.3.0. See the [v1.6 release boundaries](docs/releases/v1.6.0-signin-and-usage.md). The original
 > release qualification included five isolated internal repetitions of one exact
 > offline policy workflow plus exact-byte candidate custody. That bounded result
 > does not prove external human usability, blanket production fitness, customer
@@ -61,7 +61,7 @@ The provider-free demo exercises the real HTTP gateway, policy, redaction,
 request-attempt, and SQLite evidence paths with disposable loopback providers:
 
 ~~~bash
-git clone --branch v1.5.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
+git clone --branch v1.6.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
 cd hormuz
 python3 -m venv .venv
 source .venv/bin/activate
@@ -69,7 +69,7 @@ python -m pip install --editable .
 hormuz demo
 ~~~
 
-The commands above select the stable v1.5.0 source tag. Installation downloads
+The commands above select the stable v1.6.0 source tag. Installation downloads
 Python dependencies; the demo itself uses only disposable local loopback
 providers. No OpenAI or Anthropic account is required. A successful run reports:
 
@@ -392,7 +392,7 @@ python3 -m hormuz contract manifest
 
 | Status | Current boundary |
 | --- | --- |
-| Stable public contract | v1.5.0 preserves the v1.0 CLI and policy/evidence contracts and the v1.3 Personal Optimizer, adapter SDK, and Aider integration. The Windows shell remains an unsigned, unqualified development preview; see the [release boundaries](docs/releases/v1.5.0-verified-improvements.md). |
+| Stable public contract | v1.6.0 preserves the v1.0 CLI and policy/evidence contracts and the v1.3 Personal Optimizer, adapter SDK, and Aider integration. The Windows shell remains an unsigned, unqualified development preview; see the [release boundaries](docs/releases/v1.6.0-signin-and-usage.md). |
 | Production certification | None claimed; deployment fitness remains operator- and environment-specific. |
 | Verified references | Only the exact profiles documented in [SUPPORT.md](SUPPORT.md) and their retained evidence. |
 | Unfinished | Independent external onboarding, general production HA/DR, cloud certification, complete provider-account coverage, and independent review. |

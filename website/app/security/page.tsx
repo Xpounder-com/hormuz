@@ -30,7 +30,7 @@ export default function SecurityPage() {
         <div className="subpage-hero-inner wide">
           <p className="eyebrow"><span className="pulse-dot" aria-hidden="true" />Security & trust</p>
           <h1>Controls, evidence,<br /><span>and the gaps between them.</span></h1>
-          <p>Hormuz documents what the v1.5.0 source release enforces, what your deployment must own, and what still requires independent proof.</p>
+          <p>Hormuz documents what the v1.6.0 source release enforces, what your deployment must own, and what still requires independent proof.</p>
           <div className="hero-actions">
             <a className="button button-primary" href="#data-handling">Review data handling <span aria-hidden="true">↓</span></a>
             <a className="button button-ghost" href="https://github.com/Xpounder-com/hormuz/blob/main/SECURITY.md" target="_blank" rel="noreferrer">Read SECURITY.md <span aria-hidden="true">↗</span></a>
@@ -39,7 +39,7 @@ export default function SecurityPage() {
       </section>
 
       <section className="security-status section" id="status">
-        <div><span>Source release</span><strong>v1.5.0</strong><i className="status-amber">Deployment qualification required</i></div>
+        <div><span>Source release</span><strong>v1.6.0</strong><i className="status-amber">Deployment qualification required</i></div>
         <div><span>Routine telemetry</span><strong>Content-free</strong><i>Schema-bound</i></div>
         <div><span>Provider keys</span><strong>Server-side</strong><i>Not sent to employees</i></div>
         <div><span>Independent review</span><strong>Open gate</strong><i className="status-amber">Not yet completed</i></div>

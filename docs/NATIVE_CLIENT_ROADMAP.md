@@ -7,11 +7,12 @@ AI sessions. The Python gateway remains server-side.
 
 ## Planned versions
 
-The current core release is v1.5.0; the latest notarized Mac download
-remains v1.3.0. v1.5.0 ships verified improvements while Windows stays an
-unsigned development preview. The original connected-Windows target below
-does not establish support or close #331/#337–#340. See the
-[release scope](releases/v1.5.0-verified-improvements.md).
+The current core release is v1.6.0; the latest notarized Mac download
+remains v1.3.0. v1.6.0 ships sign-in and usage improvements while Windows
+stays an unsigned development preview. The original native-version targets
+below do not establish support or close #331/#337–#341. In particular, this
+core release does not complete the native Rust launch/relay milestone in #341.
+See the [release scope](releases/v1.6.0-signin-and-usage.md).
 Later additive desktop improvements use minor-release targets. A target is
 neither a published release nor permission to change existing package/version identities. Patch
 releases are reserved for compatible fixes after a feature release.
@@ -45,7 +46,9 @@ releases are reserved for compatible fixes after a feature release.
    authorized sign-in, real scoped usage, complete native interactions,
    reliable folding/reopening, clean installation and a connected idle footprint.
    Preview publication does not satisfy those criteria.
-3. v1.6.0 adds governed launch/relay; v1.7.0 separately qualifies a Rust optimizer.
+3. v1.6.0 ships core sign-in/usage improvements; the original native governed
+   launch/relay target remains open in #341. The v1.7.0 native target separately
+   qualifies a Rust optimizer; neither target is completed by a core release.
 4. v1.8.0 adds Linux and capability fallbacks; v1.9.0 integrates the existing Mac
    views with Rust and qualifies platform distribution and performance.
 
