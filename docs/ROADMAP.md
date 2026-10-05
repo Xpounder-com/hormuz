@@ -7,6 +7,20 @@ This roadmap is evidence-gated. A milestone is not complete because code exists 
 The additive native-companion program is tracked in [epic #329](https://github.com/Xpounder-com/hormuz/issues/329)
 and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md).
 
+## v1.6.0 sign-in and usage improvements; Windows preview
+
+Hormuz v1.6.0 simplifies normal browser sign-in and introduces a separate,
+explicit team-invitation flow for CLI and development Mac clients. It fixes
+hosted client selection, desktop-managed profile compatibility and PostgreSQL
+usage JSON without changing the stable policy/evidence contracts or storage
+schemas. See the [v1.6.0 release note](releases/v1.6.0-signin-and-usage.md).
+
+Windows remains an unsigned, unsupported development preview. This core
+release does not complete the originally targeted native Rust launch/relay
+milestone in [#341](https://github.com/Xpounder-com/hormuz/issues/341).
+The latest signed and notarized Mac archive remains v1.3.0; no v1.6 Mac app
+is submitted to Apple. Native-platform acceptance continues separately.
+
 ## v1.5.0 verified improvements; Windows preview
 
 Hormuz v1.5.0 ships the verified core and website improvements, including
