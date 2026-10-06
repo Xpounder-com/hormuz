@@ -1,37 +1,36 @@
 import { OfferingPaths } from '../components/OfferingPaths';
+import { EnterprisePlans } from '../components/EnterprisePlans';
 import { CampaignLink } from '../components/CampaignLink';
 import { PageFrame, PageHero } from '../components/PageFrame';
 import { pageMetadata } from '../../lib/metadata';
-import { PRO_PRICE, PRO_INCLUDED_REQUESTS, PRO_OVERAGE_PRICE, PRO_OVERAGE_REQUESTS } from '../../lib/commercial.mjs';
-import { sitePath } from '../../lib/site.mjs';
+import { SOFTWARE_PRICE, CLOUD_PRICE, APPLIANCE_PRICE, ONBOARDING_PRICE, MANAGED_SITE_PRICE, RESERVATION_PRICE, pricing } from '../../lib/commercial.mjs';
+import { CONTACT_EMAIL, sitePath } from '../../lib/site.mjs';
+import { StripeCheckoutLink } from '../components/StripeCheckoutLink';
 
-export const metadata = pageMetadata('Personal, Pro & Enterprise plans — Hormuz', 'Personal use is free. Hosted Pro is accepting inquiries at $99 per workspace per month, including 100,000 gateway requests, plus $10 per additional 100,000. Enterprise pricing is custom. Model usage is separate.', '/plans/');
+export const metadata = pageMetadata('Pricing & Stripe checkout — Hormuz', 'Software ' + SOFTWARE_PRICE + '. Pay through Stripe for Cloud at ' + CLOUD_PRICE + ' per workspace per month, an SSD-equipped appliance at ' + APPLIANCE_PRICE + ', scoped onboarding at ' + ONBOARDING_PRICE + ', or a managed site at ' + MANAGED_SITE_PRICE + ' per month. Reserve an appliance for ' + RESERVATION_PRICE + '.', '/plans/');
 
 export default function PlansPage() {
   return <PageFrame active="plans">
-    <PageHero eyebrow="Personal · Pro · Enterprise" title={<>Personal use starts free.<br /><span>Pro is planned for your production APIs.</span></>}>
-      <p>Keep personal optimization local, request a gateway operated by Hormuz for your API workflows, or discuss a custom Enterprise deployment. Connect your own model-provider accounts on every path.</p>
-      <div className="hero-actions"><a className="button button-primary" href="#offers">Compare plans ↓</a><CampaignLink className="button button-ghost" href={sitePath('/contact/?interest=pro')}>Request Pro access →</CampaignLink></div>
+    <PageHero eyebrow="Software · Cloud · Appliance" title={<>Free software.<br /><span>Clear prices for hosting and hardware.</span></>}>
+      <p>Choose your offer below and pay securely through Stripe. Software is free. Appliances are coming soon, with rollout planned for {pricing.reservation.plannedRollout}; reserve with a fully refundable {RESERVATION_PRICE} deposit.</p>
+      <p>For services and full appliance purchases, confirm your scope and start date with Hormuz before paying. Checkout does not automatically activate a workspace or establish a shipping date.</p>
+      <div className="hero-actions"><a className="button button-primary" href="#offers">Choose and pay ↓</a><CampaignLink className="button button-ghost" href={sitePath('/contact/')}>Discuss your setup →</CampaignLink></div>
     </PageHero>
     <OfferingPaths />
-    <section className="section prose-section" id="pro-billing">
-      <p className="section-label">PRO · HOSTED GATEWAY PRICING</p>
-      <h2>A workspace fee.<br />Gateway usage that grows with you.</h2>
-      <p><strong>{PRO_PRICE} USD per workspace per month</strong> includes {PRO_INCLUDED_REQUESTS} gateway requests. Additional traffic is priced at <strong>{PRO_OVERAGE_PRICE} per {PRO_OVERAGE_REQUESTS} requests</strong>, prorated by request. Administrative users are included; there is no per-member fee.</p>
-      <p>For example, 1,000,000 gateway requests in one billing month would cost <strong>$189 for Hormuz</strong>: $99 base plus $90 for the additional 900,000 requests. Your model-provider bill and applicable taxes are separate.</p>
-      <h3>What counts as a request?</h3>
-      <p>The planned billing unit is one accepted client request to the model API gateway. Streaming chunks and internal retries do not add billable requests. The handling of failed, canceled, and rejected requests is confirmed in the Pro terms before activation.</p>
-      <h3>Traffic and support coverage</h3>
-      <p>Monthly usage is separate from capacity. Supported API routes, request rates, concurrent streams, payload limits, and email support coverage are confirmed for your workload. Usage alerts and customer-approved overages are part of the planned service. Higher capacity and custom availability or incident-response requirements follow an <CampaignLink href={sitePath('/contact/?interest=enterprise')}>Enterprise proposal</CampaignLink>.</p>
-      <h3>Availability</h3>
-      <p><strong>Pro is accepting inquiries.</strong> Hosted onboarding, subscriptions, request metering, and production qualification must be completed before activation. Requesting access does not activate a production gateway or create a subscription. Compatibility, capacity, and commercial terms are agreed before payment.</p>
-      <CampaignLink className="button button-primary" href={sitePath('/contact/?interest=pro')}>Request Pro access →</CampaignLink>
+    <EnterprisePlans />
+    <section className="section prose-section" id="cloud"><p className="section-label">CLOUD</p><h2>One workspace subscription.</h2>
+      <p><strong>{CLOUD_PRICE} USD per workspace per month.</strong> You connect your own provider accounts and pay providers directly for model usage. Supported routes, traffic limits, and service coverage are confirmed for your workload before activation.</p>
+      <p><strong>Cloud is accepting inquiries.</strong> Hosted onboarding, subscriptions, and production qualification must pass before activation. An inquiry creates no subscription or production gateway.</p>
+      <StripeCheckoutLink offer="cloud">Subscribe to Cloud — {CLOUD_PRICE}/month</StripeCheckoutLink>
+      <p className="field-hint">Monthly billing begins at checkout and renews until canceled. Email <a href={`mailto:${CONTACT_EMAIL}?subject=Cancel%20Hormuz%20Cloud`}>{CONTACT_EMAIL}</a> before the next renewal with your subscription reference to stop renewal; your current paid period remains available.</p>
+      <CampaignLink className="text-link" href={sitePath('/contact/?interest=cloud')}>Confirm your workflow and activation →</CampaignLink>
     </section>
-    <section className="section prose-section" id="details">
-      <p className="section-label">HOW PAYMENT WORKS</p>
-      <h2>Your provider bill remains yours.</h2>
-      <p>Personal Optimizer and the self-hosted Apache-2.0 gateway have no Hormuz software license fee. Pro is a hosted service operated by Hormuz; its base subscription covers shared gateway hosting. You connect your own provider accounts and pay providers directly for model usage.</p>
-      <p>Personal use has no paid subscription or included model usage. Local token estimates and byte reductions are not a promise of lower provider charges. Existing <CampaignLink href={sitePath('/enterprise/')}>implementation, support, and pilot services</CampaignLink> have separate terms. Enterprise capacity, deployment, and support are priced by written proposal.</p>
+    <section className="section prose-section" id="details"><p className="section-label">WHAT YOUR PURCHASE COVERS</p><h2>Your provider accounts remain yours.</h2>
+      <p>The software has no Hormuz license fee. An appliance purchase includes SSD and the stated hardware package. The onboarding package includes that appliance and the defined remote installation scope.</p>
+      <p>Managed-site service includes its associated Cloud workspace. The monthly site fee covers the stated monitoring, update, recovery, and support allowance. Provider usage, customer networking, electricity, and applicable taxes are separate.</p>
+      <p>Every paid offer has a Stripe checkout button on this page. Reservations are one-time payments; Cloud and managed sites are monthly subscriptions. The onboarding package includes the appliance, and managed-site service includes its associated Cloud workspace.</p>
+      <p>Already reserved? Use the Stripe invoice provided for your remaining appliance balance. The full-price appliance buttons are for purchases without a reservation deposit. An inquiry takes no payment, and a return page is not proof of payment; Hormuz verifies the Stripe payment before fulfillment or activation.</p>
+      <p>Cloud and hardware require completed technical qualification. Local token estimates and byte reductions do not establish a reduction in your provider bill.</p>
     </section>
   </PageFrame>;
 }

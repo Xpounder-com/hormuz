@@ -415,19 +415,25 @@ customer acceptance. The earlier v1.0.0 source-archive study remains as the
 was not reclassified. This post-release validation does not block v1.2.0 and
 does not create a production-readiness or SLA claim.
 
-## Open source and enterprise evaluation
+## Software, Cloud, and appliances
 
-The core gateway is Apache-2.0 and independently useful. Existing identity,
-policy, budget, secret-control, and evidence features remain in the open core.
-The initial paid offer is a scoped, founder-led evaluation or integration
-engagement around the same product—not an established proprietary edition,
-hosted service, certification, or 24/7 SLA.
+The core gateway remains Apache-2.0. Software is **$0**, Cloud is
+**$49.99 per workspace per month**, an appliance including SSD is **$999**, and
+an appliance including SSD with scoped onboarding is **$1,499**. A managed site
+is **$499 per month**, including the associated Cloud workspace and one hour of
+remote support per billing month, with a response within two business days.
 
-See the [OSS/support comparison](https://usehormuz.github.io/enterprise/),
-[proposed pilot scope](marketing/PILOT.md),
+See [all prices](https://usehormuz.github.io/plans/),
+[appliance onboarding scope](marketing/PILOT.md),
+[commercial scope and support terms](marketing/COMMERCIAL_SETUP.md),
 [buyer resources](https://usehormuz.github.io/resources/), and
-[security brief](marketing/TRUST.md). Scope, price, capacity, support hours,
-response targets, and terms must be agreed before work begins.
+[security brief](marketing/TRUST.md). Model-provider usage, customer
+infrastructure, and applicable taxes are separate. Appliances are **coming soon**,
+with rollout planned for **early 2027**. Reserve with a **$49** one-time deposit,
+fully refundable and credited toward the purchase. Cancel anytime before
+fulfillment for a full refund. All payments use Stripe. Compatibility, capacity,
+qualification, scope, and delivery are confirmed before the balance or service
+payment is collected. Cloud and managed services are accepting inquiries.
 
 Public maintainer: **Mehrdad Zaker**. For evaluation inquiries, use
 `mehrdadz@neuralint.io` or the

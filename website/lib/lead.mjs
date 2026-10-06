@@ -1,5 +1,5 @@
-import { INTERESTS, CAMPAIGN_TAGS, campaignSource } from './contact.mjs';
-import { validateCommercialConfig } from './commercial.mjs';
+import { INTERESTS, CAMPAIGN_TAGS, campaignSource, normalizeInterest } from './contact.mjs';
+import { validateCommercialConfig, PAYMENT_KEYS } from './commercial.mjs';
 import { SITE_ROUTES, sitePath } from './site.mjs';
 
 export function campaignLink(href, search) {
@@ -29,7 +29,7 @@ export function buildLead(fields, source = '', { reference = '', testSubmission 
   const organization = clean(fields.organization, 150);
   const workflow = clean(fields.workflow, 1200);
   if (!name || !organization || !workflow || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Add your name, work email, organization, and a short workflow description.');
-  const interest = Object.hasOwn(INTERESTS, fields.interest) ? INTERESTS[fields.interest] : INTERESTS.pilot;
+  const interest = INTERESTS[normalizeInterest(fields.interest)];
   return { name, email, organization, workflow, interest, timeframe: clean(fields.timeframe, 100),
     ...(source ? { campaign: campaignSource(source) } : {}),
     ...(reference ? { request_reference: reference } : {}),
@@ -46,7 +46,7 @@ export function prepareLeadAttempt(fields, source = '', { reference = '', testSu
 
 /** A transport failure is ambiguous. Never retry automatically or claim delivery. */
 export async function submitLead(endpoint, payload, fetcher = fetch) {
-  validateCommercialConfig({ formEndpoint: endpoint, bookingUrl: '', pilotPaymentUrl: '', supportPaymentUrl: '' });
+  validateCommercialConfig({ formEndpoint: endpoint, bookingUrl: '', ...Object.fromEntries(PAYMENT_KEYS.map(key => [key, ''])) });
   if (!endpoint) throw new Error('Application submission is not connected. Please use email.');
   try {
     const response = await fetcher(endpoint, {

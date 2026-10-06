@@ -52,25 +52,39 @@ preserves the visitor's experiment. Arrow keys, Home, and End select tabs.
 | Compaction chapter | Inspect exactly what changes | Download Mac; read setup/status reference |
 | Setup chapter/integrations | Recognize a stack and setup role | Mac joining guide or gateway quickstart |
 | Docs | Download → configure → first governed request → report | Supported client instructions or paid help |
-| Plans | Choose free software, ongoing support, or pilot | Install; support terms; pilot inquiry |
-| Payment | Start fixed support or finish an agreed engagement | Separate self-service checkout; retained custom/pilot links; activation and cancellation instructions |
-| FAQ | Answer 32 practical questions in context | Link to the relevant example or next action |
+| Plans | Choose software, Cloud, an appliance, or a managed site | Install; request Cloud; discuss appliance scope |
+| Payment | Confirm the selected catalog offer | Qualified delivery; verified checkout; activation and cancellation instructions |
+| FAQ | Answer 38 practical questions in context | Link to the relevant example or next action |
 | Resources/security/footer | Resolve evaluation questions | Install, supported setup, or paid engagement |
 
 ## Commercial boundary
 
-The owner approved a fixed self-service support offer during this task:
-$2,000/month, one self-hosted gateway, up to four support hours per billing
-month, response within two business days, cancellation before the next renewal.
-It uses a separate Stripe checkout from the existing agreed-proposal support
-link. The public paid benefit is human support, not a proprietary entitlement.
+The canonical price catalog is `lib/pricing.json`: software $0, Cloud
+$49.99/workspace/month, SSD-equipped appliance $999, appliance with SSD and
+scoped onboarding $1,499, and managed site $499/site/month. Onboarding includes
+up to three hours of remote setup for one provider and one supported application.
+Managed sites include the associated Cloud workspace and one hour of remote
+assistance per billing month, with a response within two business days.
 
-The activation page requires Stripe confirmation and a receipt reference;
-it never trusts a return URL as payment evidence. The founder verifies payment
-and provides the support channel. Cancellation is available through the named
-seller's email before renewal. Existing custom-support agreements and the
-$15,000 one-time 90-day pilot retain their own scoped payment links. Software,
-provider costs, and infrastructure responsibilities remain distinct.
+Business hours are Monday–Friday, 9 am–5 pm America/Chicago, excluding local
+public holidays. Unused support time does not roll over. On-site work, custom
+development, round-the-clock response, replacement hardware, and work beyond
+the allowance are excluded. Provider usage, customer infrastructure, and
+applicable taxes are separate. Monthly services renew until canceled before
+the next renewal through the owner's email.
+
+Appliances are coming soon, with rollout planned for early 2027. The $49
+one-time reservation deposit is fully refundable and credited toward purchase;
+customers can cancel anytime before fulfillment for a full refund. All payments
+use Stripe. **Pricing & pay** links directly to all five paid checkouts, with
+matching buttons on service cards and in the inquiry selector. Software has a
+free install path. Submitting an inquiry is optional for checkout; activation
+and full-price hardware purchases still require confirmed scope and delivery.
+A checkout click or inquiry receipt is not a paid reservation.
+Payment destinations stay blank until verified against this catalog. The static
+site does not verify payment, provision accounts, or qualify hardware. Cloud,
+ARM64 appliance delivery, and managed monitoring require qualification before
+activation. See `marketing/COMMERCIAL_SETUP.md` for the complete scope.
 
 ## Measurement and verification
 

@@ -4,12 +4,26 @@ Static Next.js export for **https://usehormuz.github.io/**. This repository
 remains the authoritative website source; the dedicated
 [`usehormuz/usehormuz.github.io`](https://github.com/usehormuz/usehormuz.github.io)
 repository pins a reviewed source commit for publication.
-The site presents free Personal Optimizer, planned hosted Pro, and custom
-Enterprise proposals alongside open-source documentation, demos, and community.
-Pro is inquiry-only until hosted onboarding, billing, and production qualification
-are complete. The static site does not provision a gateway or activate a Pro
-subscription. Existing external support and pilot checkouts are separate services;
-inquiries use Formspree with an email fallback.
+The site presents free software, planned Cloud, SSD-equipped appliances,
+scoped onboarding, and managed sites alongside documentation, demos, and community.
+The single price catalog is `lib/pricing.json`: software $0, Cloud
+$49.99/workspace/month, appliance $999, appliance with scoped onboarding $1,499,
+and managed site $499/site/month. The appliance prices include SSD.
+Appliances are coming soon, with rollout planned for early 2027. The $49
+one-time reservation deposit per appliance is fully refundable and credited
+toward the purchase. Cancel anytime before fulfillment for a full refund.
+All paid offers have direct Stripe checkout buttons on **Pricing & pay**,
+the service cards, and the matching inquiry selection. Customers can pay without
+submitting an inquiry. Cloud and managed-site billing starts at checkout;
+scope, capacity, and activation must be confirmed before subscribing. Full-price
+appliance buttons are for confirmed orders without a reservation deposit;
+reserved buyers pay their specific Stripe balance invoice. Hardware delivery
+requires qualification.
+The static site does not provision accounts or verify payments.
+Superseded checkout links are removed; inquiries use Formspree with an email fallback.
+Managed sites include the associated Cloud workspace and one hour of remote
+assistance per billing month, with a response within two business days.
+See `marketing/COMMERCIAL_SETUP.md` for the support boundaries and activation gates.
 
 ## Build and check
 

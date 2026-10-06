@@ -136,14 +136,34 @@ Compatibility: Does Hormuz govern the coding tool’s shell and MCP traffic?
 Hormuz governs supported model requests routed through it. It does not govern every shell command, Git operation, MCP server, browser request, or direct-provider connection. Review those paths separately when defining coverage.
 https://usehormuz.github.io/security/#controls
 
-Billing: What stays free, and what do I pay for?
-The Apache-2.0 gateway, policy controls, budgets, evidence, and client software remain available without a software license fee. Paid services add human integration, evaluation, and operating help. You still pay your own provider and infrastructure costs.
-https://usehormuz.github.io/enterprise/#plans
+Billing: What are the Hormuz prices?
+Software is $0. Cloud is $49.99 per workspace per month. An appliance including SSD is $999, or $1,499 per appliance with SSD and scoped onboarding. A managed site is $499 per month. Prices are USD; model-provider usage and applicable taxes are separate.
+https://usehormuz.github.io/plans/#offers
 
-Billing: How does a paid pilot start?
-Discuss one team and workflow, agree scope, acceptance criteria, capacity, and start date, then pay the $15,000 one-time 90-day pilot fee. Payment follows the agreed engagement; it does not create a hosted account or certify production readiness.
-https://usehormuz.github.io/enterprise/#pilot
+Billing: What does an appliance purchase include?
+The $999 appliance includes SSD, enclosure, cooling, power supply, installed gateway software, and setup guidance. The $1,499 bundle includes the same appliance plus up to 3 hours of remote onboarding for one provider and one supported application, initial policy setup, acceptance checks, and handoff. It replaces the standalone appliance purchase for that unit.
+https://usehormuz.github.io/enterprise/#onboarding
 
-Billing: How does support activate, renew, or cancel?
-Self-service support costs $2,000/month for one gateway, up to four hours per billing month, and a response within two business days. After Stripe confirms payment, email the founder with your receipt to activate support. Cancel by email before the next renewal. Free software access remains available.
+Billing: When will appliances be available?
+Appliances are coming soon, with rollout planned for early 2027. The date is a target, not a guaranteed shipping date. Hardware and workload qualification must pass before delivery. Cloud is accepting inquiries; compatibility, capacity, and activation are confirmed before service payment. An inquiry creates no gateway, subscription, or paid reservation.
+https://usehormuz.github.io/enterprise/#reserve
+
+Billing: How do I reserve an appliance?
+Reserve yours with a one-time $49 USD deposit per appliance through Stripe. The deposit is fully refundable and credited toward either appliance package. It is not a subscription and does not trigger an automatic balance charge. We confirm compatibility, your package, delivery arrangements, and applicable taxes before collecting the balance through Stripe. A paid reservation is confirmed only after successful payment, with a Stripe receipt.
+https://usehormuz.github.io/enterprise/#reserve
+
+Billing: Can I cancel my appliance reservation?
+Yes. Cancel anytime before fulfillment for a full refund. Email mehrdadz@neuralint.io with your Stripe receipt reference. We refund the deposit to the original payment method and cancel the reservation. You can cancel if the timing or scope does not suit you. Refund processing time depends on the payment method and processor.
+https://usehormuz.github.io/enterprise/#reserve
+
+Billing: Does a managed site pay for Cloud separately?
+No. The $499 monthly site fee includes one associated Cloud workspace. There is no additional Cloud subscription for that workspace. Standalone Cloud is $49.99 per workspace per month. Model-provider usage remains the customer’s bill.
+https://usehormuz.github.io/plans/#details
+
+Billing: What is the managed-site support allowance?
+A managed site includes up to 1 hour of remote assistance per billing month for configuration, policy guidance, troubleshooting, and recovery. Business hours are Monday–Friday, 9 am–5 pm America/Chicago, excluding local public holidays. Response target: within 2 business days. Unused time does not roll over. Custom development, on-site work, round-the-clock response, replacement hardware, and work beyond the allowance are excluded.
 https://usehormuz.github.io/enterprise/#support
+
+Billing: How do sites, renewal, and cancellation work?
+A site is one agreed physical location or isolated customer deployment. Additional appliances in that site do not create another site subscription; capacity must still be confirmed. Cloud and managed sites renew monthly until canceled. Email the owner before the next renewal with your subscription reference. The current paid period, appliance ownership, and free software access remain available.
+https://usehormuz.github.io/enterprise/#cancel
