@@ -71,6 +71,8 @@ include hormuz/portfolio-association-wire-v1.json
 include hormuz/portfolio-intelligence-wire-v1.json
 include hormuz/secret-inventory-v1.json
 include hormuz/console.css
+include hormuz/workspace.css
+include WORKSPACE_ADDRESSES.md
 include tools/_verification_runtime.py
 include tools/verify_secret_inventory.py
 include tools/verify_public_community_paths.py
@@ -123,6 +125,8 @@ include deploy/render/gateway/Dockerfile.dockerignore
 include deploy/render/gateway/active.Caddyfile
 include deploy/render/gateway/maintenance.Caddyfile
 include deploy/render/gateway/provider-pilot.Caddyfile
+include deploy/render/gateway/workspace.Caddyfile
+include deploy/render/gateway/workspace-profile.example.json
 include deploy/render/gateway/profile.example.json
 include deploy/render/gateway/provider-profile.example.json
 include deploy/render/gateway/README.md

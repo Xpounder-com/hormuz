@@ -35,7 +35,7 @@ class ConsoleMigrationTests(unittest.TestCase):
     def test_frozen_v3_database_upgrades_and_old_binary_ceiling_refuses_v4(self):
         self.open()
         with closing(sqlite3.connect(self.path)) as connection, connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], session_store.SESSION_STORE_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT name FROM onboarding_organizations").fetchone()[0], "Legacy organization")
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM console_sessions").fetchone()[0], 0)
         with mock.patch.object(session_store, "SESSION_STORE_SCHEMA_VERSION", 3):
@@ -80,7 +80,7 @@ class ConsoleMigrationTests(unittest.TestCase):
             for future in futures:
                 future.result(timeout=10)
         with closing(sqlite3.connect(self.path)) as connection, connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], session_store.SESSION_STORE_SCHEMA_VERSION)
 
 
 if __name__ == "__main__":

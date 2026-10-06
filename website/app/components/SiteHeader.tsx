@@ -9,6 +9,7 @@ const navigation = [
   { key: 'plans', label: 'Plans', href: '/plans/' },
   { key: 'security', label: 'Security', href: '/security/' },
   { key: 'resources', label: 'Resources', href: '/resources/' },
+  { key: 'workspace', label: 'Workspace', href: '/workspace/' },
 ];
 
 export function SiteHeader({

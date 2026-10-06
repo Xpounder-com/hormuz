@@ -57,7 +57,7 @@ RUN rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14 \
     && install --directory --owner=root --group=root --mode=0755 /etc/hormuz/caddy
 COPY --from=builder /opt/hormuz /opt/hormuz
 COPY --from=proxy /usr/bin/caddy /usr/bin/caddy
-COPY --chmod=0444 deploy/render/gateway/active.Caddyfile deploy/render/gateway/maintenance.Caddyfile deploy/render/gateway/provider-pilot.Caddyfile /etc/hormuz/caddy/
+COPY --chmod=0444 deploy/render/gateway/active.Caddyfile deploy/render/gateway/maintenance.Caddyfile deploy/render/gateway/provider-pilot.Caddyfile deploy/render/gateway/workspace.Caddyfile /etc/hormuz/caddy/
 # Render mounts secret files for group 1000. State stays owner-only (UID 65532).
 # The named shell account and private home enable Render's injected SSH transport;
 # the image neither installs nor runs an SSH server, and the disk does not cover HOME.

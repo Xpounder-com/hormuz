@@ -118,6 +118,8 @@ _SESSION_BROKER_FIELDS = frozenset({
     "enabled", "public_base_url", "database", "master_key_env", "access_ttl_seconds",
     "absolute_ttl_seconds", "enrollment_ttl_seconds", "allow_insecure_http", "trusted_parent_path",
     "onboarding_enabled", "console_enabled", "policy_impact_enabled", "desktop_defaults",
+    "workspace_enabled", "workspace_signup_issuer", "workspace_domain_target",
+    "workspace_domain_service_id", "workspace_domain_api_key_env",
 })
 _MODEL_ROUTE_FIELDS = frozenset(
     {

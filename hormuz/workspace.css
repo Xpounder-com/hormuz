@@ -1,0 +1,8 @@
+.workspace-domain{margin-top:16px}
+.domain-records{margin:0 0 16px}
+.domain-records>div{display:grid;grid-template-columns:70px minmax(0,1fr) minmax(0,1.5fr);gap:16px;padding:18px 0;border-bottom:1px solid var(--line)}
+.domain-records dt{font-size:13px;font-weight:600}
+.domain-records dd{margin:0;min-width:0}
+.domain-records dd span{display:block;font-size:11px;color:var(--muted);margin-bottom:6px}
+.domain-records code{display:block;white-space:normal;overflow-wrap:anywhere}
+@media(max-width:600px){.domain-records>div{grid-template-columns:1fr;gap:12px}.domain-records dt{font-size:14px}.domain-records code{font-size:13px}}

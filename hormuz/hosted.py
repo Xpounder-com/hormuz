@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
-from ._hosted_config import BACKEND_PORT, SECRET_NAMES, HostedError, load_profile
+from ._hosted_config import BACKEND_PORT, SECRET_NAMES, WORKSPACE_SECRET_NAMES, HostedError, load_profile, load_workspace_profile
 from ._hosted_provider import (
     PROVIDER_CHILD_ENV_NAMES,
     PROVIDER_CONFIG_ENV,
@@ -38,6 +38,7 @@ from ._hosted_state import (
     check_recovered_closed,
     initialize,
     migrate_usage,
+    migrate_sessions,
     restore,
     snapshot,
     state_lock,
@@ -48,7 +49,7 @@ from .postgres import PostgresStorageError
 def runtime_settings() -> dict[str, str]:
     # The inventory reviews each direct read. Never inherit the full deployment
     # environment into the proxy or into the private gateway child.
-    return {
+    settings = {
         "HORMUZ_CONFIG": os.environ.get("HORMUZ_CONFIG", "/etc/secrets/hormuz-hosted.json"),
         "HORMUZ_HOSTED_MODE": os.environ.get("HORMUZ_HOSTED_MODE", "maintenance"),
         "PORT": os.environ.get("PORT", "10000"),
@@ -74,6 +75,9 @@ def runtime_settings() -> dict[str, str]:
         "RENDER_SERVICE_TYPE": os.environ.get("RENDER_SERVICE_TYPE", ""),
         "RENDER_WEB_CONCURRENCY": os.environ.get("RENDER_WEB_CONCURRENCY", ""),
     }
+    if settings["HORMUZ_HOSTED_MODE"] == "workspace":
+        settings["HORMUZ_DOMAIN_API_KEY"] = os.environ.get("HORMUZ_DOMAIN_API_KEY", "")
+    return settings
 
 
 def proxy_settings(settings: dict[str, str], *, active: bool) -> dict[str, str]:
@@ -124,7 +128,7 @@ def _backend_ready(process, config, stopped) -> None:
 
 def supervise(settings: dict[str, str], config_path: Path, provider_config_path: Path) -> int:
     mode = settings["HORMUZ_HOSTED_MODE"]
-    if mode not in {"maintenance", "active", "provider-pilot"}:
+    if mode not in {"maintenance", "active", "workspace", "provider-pilot"}:
         raise HostedError("hosted_mode_invalid")
     child_settings = proxy_settings(settings, active=mode != "maintenance")
     stopped = threading.Event()
@@ -133,11 +137,11 @@ def supervise(settings: dict[str, str], config_path: Path, provider_config_path:
     successful = False
     try:
         inference_enabled = mode == "provider-pilot"
-        if mode == "active":
-            config = load_profile(config_path, settings)
+        if mode in {"active", "workspace"}:
+            config = (load_workspace_profile if mode == "workspace" else load_profile)(config_path, settings)
             check_initialized(config)
-            backend = _spawn([sys.executable, "-I", "-m", "hormuz.hosted", "--config", str(config_path), "backend"],
-                             {name: settings[name] for name in SECRET_NAMES})
+            backend = _spawn([sys.executable, "-I", "-m", "hormuz.hosted", "--config", str(config_path), "workspace-backend" if mode == "workspace" else "backend"],
+                             {name: settings[name] for name in (WORKSPACE_SECRET_NAMES if mode == "workspace" else SECRET_NAMES)})
             _backend_ready(backend, config, stopped)
         elif mode == "provider-pilot":
             config = load_provider_profile(config_path, provider_config_path, settings)
@@ -168,13 +172,13 @@ def supervise(settings: dict[str, str], config_path: Path, provider_config_path:
 
 
 def backend(config, *, provider: bool = False, environ=None) -> None:
-    from ._hosted_server import ProviderPilotGatewayServer, StagingGatewayServer
+    from ._hosted_server import ProviderPilotGatewayServer, StagingGatewayServer, WorkspaceGatewayServer
 
     with state_lock(config, exclusive=False):
         server = (
             ProviderPilotGatewayServer(config, environ=environ or {})
             if provider
-            else StagingGatewayServer(config)
+            else WorkspaceGatewayServer(config) if config.session_broker.workspace_enabled else StagingGatewayServer(config)
         )
         stopping = threading.Event()
 
@@ -203,14 +207,16 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Maintenance-first hosted authentication and provider pilot.")
     parser.add_argument("--config", type=Path, default=Path(settings["HORMUZ_CONFIG"]))
     parser.add_argument("--provider-config", type=Path, default=Path(settings[PROVIDER_CONFIG_ENV]))
+    parser.add_argument("--workspace-profile", action="store_true", help="Use the workspace profile for offline operator commands")
     commands = parser.add_subparsers(dest="command")
     for name in (
-        "serve", "backend", "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate",
+        "serve", "backend", "workspace-backend", "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate",
         "initialize", "check", "recovery-check",
     ):
         commands.add_parser(name)
     commands.add_parser("snapshot").add_argument("--output-directory", type=Path, required=True)
     commands.add_parser("migrate").add_argument("--snapshot-directory", type=Path, required=True)
+    commands.add_parser("sessions-migrate").add_argument("--snapshot-directory", type=Path, required=True)
     commands.add_parser("restore").add_argument("--snapshot-directory", type=Path, required=True)
     for name in ("backup-export", "backup-verify", "backup-restore"):
         command = commands.add_parser(name)
@@ -222,6 +228,8 @@ def main(argv=None) -> int:
         )
     add_onboarding_commands(commands)
     args = parser.parse_args(argv)
+    if args.workspace_profile or args.command == "workspace-backend":
+        settings["HORMUZ_DOMAIN_API_KEY"] = os.environ.get("HORMUZ_DOMAIN_API_KEY", "")
     try:
         if args.command in {None, "serve"}:
             return supervise(settings, args.config, args.provider_config)
@@ -235,10 +243,10 @@ def main(argv=None) -> int:
             if args.command in {
                 "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate"
             }
-            else load_profile(args.config, settings)
+            else load_workspace_profile(args.config, settings) if args.workspace_profile or args.command == "workspace-backend" or settings["HORMUZ_HOSTED_MODE"] == "workspace" else load_profile(args.config, settings)
         )
         result = {}
-        if args.command == "backend":
+        if args.command in {"backend", "workspace-backend"}:
             backend(config)
         elif args.command == "provider-backend":
             backend(
@@ -364,6 +372,10 @@ def main(argv=None) -> int:
             if settings["HORMUZ_HOSTED_MODE"] != "maintenance":
                 raise HostedError("hosted_migration_requires_maintenance")
             result = migrate_usage(config, args.snapshot_directory)
+        elif args.command == "sessions-migrate":
+            if settings["HORMUZ_HOSTED_MODE"] != "maintenance":
+                raise HostedError("hosted_migration_requires_maintenance")
+            result = migrate_sessions(config, args.snapshot_directory)
         elif args.command == "restore":
             restore(config, args.snapshot_directory)
         elif args.command == "backup-export":

@@ -24,6 +24,8 @@ from .config import (
 
 SECRET_NAMES = ("HORMUZ_INGRESS_CREDENTIAL", "HORMUZ_SESSION_MASTER_KEY", "HORMUZ_OIDC_CLIENT_SECRET")
 PROFILE_SCHEMA = "hormuz.hosted-auth-staging/v1"
+WORKSPACE_PROFILE_SCHEMA = "hormuz.hosted-workspaces/v1"
+WORKSPACE_SECRET_NAMES = (*SECRET_NAMES, "HORMUZ_DOMAIN_API_KEY")
 BACKEND_PORT = 8787
 
 
@@ -52,18 +54,29 @@ def _https_url(value: object, *, origin: bool = False) -> str:
 
 
 def load_profile(path: Path, credentials: dict[str, str]) -> GatewayConfig:
+    return _load_profile(path, credentials, workspace=False)
+
+
+def load_workspace_profile(path: Path, credentials: dict[str, str]) -> GatewayConfig:
+    return _load_profile(path, credentials, workspace=True)
+
+
+def _load_profile(path: Path, credentials: dict[str, str], *, workspace: bool) -> GatewayConfig:
     details = path.lstat()
     if not stat.S_ISREG(details.st_mode) or details.st_mode & 0o022 or details.st_size > 16384:
         raise HostedError("hosted_configuration_file_unsafe")
     raw = _load_configuration_json(path)
-    if set(raw) != {
+    expected = {
         "schema",
         "public_origin",
         "oidc_issuer",
         "oidc_client_id",
         "state_directory",
         "trusted_parent_path",
-    } or raw["schema"] != PROFILE_SCHEMA:
+    }
+    if workspace and ("domain_target" in raw or "domain_service_id" in raw):
+        expected.update({"domain_target", "domain_service_id"})
+    if set(raw) != expected or raw["schema"] != (WORKSPACE_PROFILE_SCHEMA if workspace else PROFILE_SCHEMA):
         raise HostedError("hosted_configuration_invalid")
     public_origin = _https_url(raw["public_origin"], origin=True)
     issuer = _https_url(raw["oidc_issuer"])
@@ -90,6 +103,8 @@ def load_profile(path: Path, credentials: dict[str, str]) -> GatewayConfig:
     if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", ingress):
         raise HostedError("hosted_ingress_credential_invalid")
     values = [credentials.get(name, "") for name in SECRET_NAMES]
+    if workspace and raw.get("domain_target"):
+        values.append(credentials.get("HORMUZ_DOMAIN_API_KEY", ""))
     if len(set(values)) != len(values):
         raise HostedError("hosted_credentials_must_be_distinct")
     config = GatewayConfig(
@@ -109,6 +124,10 @@ def load_profile(path: Path, credentials: dict[str, str]) -> GatewayConfig:
             enabled=True, public_base_url=public_origin, database_path=state / "sessions.sqlite3",
             trusted_parent_path=trusted_parent,
             onboarding_enabled=True, console_enabled=True,
+            workspace_enabled=workspace,
+            workspace_signup_issuer=issuer if workspace else None,
+            workspace_domain_target=raw.get("domain_target") if workspace else None,
+            workspace_domain_service_id=raw.get("domain_service_id") if workspace else None,
         ),
         max_request_bytes=16384, upstream_timeout_seconds=10,
     )
