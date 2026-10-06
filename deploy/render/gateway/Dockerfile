@@ -25,7 +25,7 @@ RUN test "${TARGETPLATFORM}" = "linux/amd64"
 COPY requirements/oci-build-linux-amd64.lock requirements/oci-runtime-linux-amd64.lock ./requirements/
 RUN python -m pip install --only-binary=:all: --require-hashes --no-deps -r requirements/oci-build-linux-amd64.lock \
     && python -m pip download --only-binary=:all: --require-hashes --dest /wheelhouse -r requirements/oci-runtime-linux-amd64.lock
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml MANIFEST.in README.md LICENSE ./
 COPY hormuz/ ./hormuz/
 RUN python -m pip wheel --no-build-isolation --no-deps --wheel-dir /wheelhouse . \
     && python -m venv /opt/hormuz \

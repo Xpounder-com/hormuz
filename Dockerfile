@@ -49,7 +49,7 @@ RUN python -m pip install \
 # The Docker build context allowlist admits only these core packaging inputs.
 # Configuration, credentials, usage data, tests, and the context experiment
 # never enter either build stage.
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml MANIFEST.in README.md LICENSE ./
 COPY hormuz/ ./hormuz/
 
 RUN python -m pip wheel \

@@ -5,6 +5,7 @@
 !Dockerfile
 !Dockerfile.dockerignore
 !pyproject.toml
+!MANIFEST.in
 !README.md
 !LICENSE
 !requirements/
