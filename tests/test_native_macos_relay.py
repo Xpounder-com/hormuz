@@ -293,10 +293,12 @@ os.execv(real, [real, *{arguments!r}, *sys.argv[1:]])
         generated.mkdir(parents=True)
         for index in range(48):
             (generated / f"file_{index:03}.py").write_text("# synthetic context probe\n")
+        # Unrelated marketplace cloning must not race this fixture's cleanup.
         self._official_client("codex", [
             "exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
             "--ephemeral", "--sandbox", "read-only", "-C", str(self.root),
             "-c", "analytics.enabled=false", "-c", "feedback.enabled=false",
+            "-c", "features.plugins=false",
             "Call exec_command with exactly `rg --files generated`, then finish.",
         ])
         outputs = {}

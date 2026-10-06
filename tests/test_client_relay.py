@@ -1340,6 +1340,7 @@ raise SystemExit(0 if response.status == 200 else 1)
         codex = bin_directory / "codex"
         codex_config = root / "codex-config"
         codex_config.mkdir(mode=0o700)
+        # Unrelated marketplace cloning must not race this fixture's cleanup.
         codex.write_text(
             "#!/usr/bin/env python3\n"
             "import os, sys\n"
@@ -1351,6 +1352,7 @@ raise SystemExit(0 if response.status == 200 else 1)
             "arguments = [real, 'exec', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', "
             "'--ephemeral', '--dangerously-bypass-approvals-and-sandbox', '-C', root, *sys.argv[1:], "
             "'-c', 'analytics.enabled=false', '-c', 'feedback.enabled=false', "
+            "'-c', 'features.plugins=false', "
             "'Call exec_command with exactly `rg --files generated`, then finish.']\n"
             "os.execv(real, arguments)\n",
             encoding="utf-8",
