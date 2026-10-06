@@ -48,6 +48,7 @@ pub enum RelayError {
     TooManyClients,
     RelayUnavailable,
     ClientLaunchFailed,
+    ClientLaunchCancelled,
     NativeSupervisionUnavailable,
     NativeServiceStopFailed,
     ClientExitedUnsuccessfully,
@@ -62,6 +63,7 @@ impl fmt::Display for RelayError {
             Self::TooManyClients => "The local relay is at capacity.",
             Self::RelayUnavailable => "The local relay is unavailable.",
             Self::ClientLaunchFailed => "The AI client could not be launched.",
+            Self::ClientLaunchCancelled => "The AI client launch was cancelled.",
             Self::NativeSupervisionUnavailable => {
                 "A verified on-demand user service is required before launching an AI client."
             }
