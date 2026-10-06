@@ -89,17 +89,26 @@ index status. Search impressions and clicks are separate from paid X reporting.
 | Independent demo completion | The existing study accepts a qualifying exact-archive session with appropriate evidence | A website click, recording play, assisted demo, or internal run |
 | Returning evaluator | A qualifying evaluator completes the study's returning-user criterion | Repeat pageviews |
 | Qualified buyer conversation | An actual conversation identifies a workflow, responsible owner, material control need, and possible next step | An email draft, generic interest, or star |
-| Pilot agreed | Scope, capacity, commercial terms, and acceptance are agreed by the parties | Download, inquiry, or proposed brief |
-| Pilot outcome | Agreed acceptance evidence and go/no-go decision are recorded | Unmeasured ROI or token consumption |
+| Paid appliance reservation | Stripe confirms a successful $49 deposit; count quantity and exclude canceled or refunded reservations | A checkout click, form acknowledgment, return URL, or a fulfilled appliance sale |
+| Appliance or onboarding paid | Stripe confirms the matching package's successful payment, including any invoice applying the verified reservation deposit | A deposit alone, a checkout click, or a return URL |
+| Cloud or managed site subscribed | Stripe confirms an active subscription and successful initial payment for the matching workspace or site | An incomplete checkout or an included Cloud workspace counted as another sale |
+| Service activated or appliance fulfilled | Agreed acceptance evidence and activation or customer delivery are recorded by the named operator | Payment alone, a rollout target, or an internal demonstration |
+| Cancellation requested | An actual customer request and date are recorded | A link click or assumed billing change |
+| Subscription canceled | Stripe confirms cancellation and its effective date; the current paid period is recorded separately | A request alone or immediate removal of the current paid period |
+| Payment or reservation refunded | Stripe confirms a successful refund against the original payment; refunded reservations leave the outstanding count | A promise, a draft refund, or a deposit applied to a purchase invoice |
 
 Suggested weekly review: source of each actual conversation, one named problem,
 next step and owner, blockers, and evaluator friction. Do not infer individual
 productivity from usage data. Keep study evidence separate from sales notes.
+Use Stripe's dated records for payment, subscription, cancellation, and refund
+totals. The inquiry ledger does not support the current catalog's paid stages;
+keep activation and delivery evidence in private operating notes. Do not count
+applying a reservation deposit as another payment.
 
 ## Consent-aware source handling
 
 Campaign URLs may use bounded `utm_source`, `utm_medium`, `utm_campaign`, and `utm_content`
-values, for example `?interest=pilot&utm_source=x&utm_medium=paid_social&utm_campaign=enterprise_pilot`.
+values, for example `?interest=onboarding&utm_source=x&utm_medium=paid_social&utm_campaign=appliance_onboarding`.
 The browser sends the requested URL, including its query string, to GitHub Pages
 when it loads the page; those values can be processed in hosting/security logs.
 The contact page then reads them locally and offers an **unchecked** checkbox to
@@ -134,7 +143,7 @@ before use. No real lead records were created by this task.
 - Page-location suppression is set before pixel configuration. No application
   fields, hashed identities, prices, or campaign tags are passed as event data.
 - A single Lead event follows `submitLead` resolving with HTTP success and
-  `ok: true` for a review, pilot, or support inquiry. General integration,
+  `ok: true` for a workflow review, Cloud, appliance, onboarding, or managed-site inquiry. General integration,
   security, and community inquiries and explicit QA mode do not trigger it.
   Validation failures, rejected/ambiguous responses, honeypot input,
   button clicks, and repeated renders do not create conversion events.
@@ -148,15 +157,18 @@ and [privacy controls](https://business.x.com/en/help/campaign-measurement-and-a
 
 ## Commercial funnel activation
 
-The approved offer is a $15,000 USD 90-day pilot for one team/workflow and
-ongoing enterprise support from $2,000 USD/month under a separate agreement.
+The approved catalog is software $0, Cloud $49.99/workspace/month, appliance
+at $999, appliance with scoped onboarding $1,499,
+and managed site $499/site/month. Managed sites include the associated Cloud
+workspace and one hour of remote assistance per billing month, with a response
+within two business days.
 See [activation and verification](COMMERCIAL_SETUP.md) for public destination configuration.
 
 - Application received: the form service acknowledges the submission; verify a
   non-spam record in the private dashboard before counting it as an actual lead.
 - Review booked: a booking appears in the calendar service, not a booking-link click.
-- Pilot paid: a successful live Stripe payment for the agreed pilot, not a return URL.
-- Support subscribed: an active subscription and successful initial payment in Stripe.
+- Appliance or onboarding paid: a verified payment for the corresponding appliance bundle, not a return URL.
+- Cloud or managed site subscribed: an active subscription and verified initial payment.
 
 The X Lead event measures consented, acknowledged sales inquiries. Explicit
 `?qa=1` submissions are visibly marked, excluded from the event, and must be

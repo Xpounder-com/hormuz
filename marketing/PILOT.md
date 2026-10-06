@@ -1,90 +1,73 @@
-# Proposed Hormuz evaluation pilot
+# Hormuz appliance with scoped onboarding
 
-Status: discussion brief, not a quote, service agreement, SLA, or certification.
+Status: **coming soon**, with rollout planned for **early 2027**. Confirm
+compatibility, capacity, and delivery before the balance is collected.
 Owner: Mehrdad Zaker · mehrdadz@neuralint.io.
 
-## Fit and entry criteria
+**$1,499 USD per appliance, one time**, including up to three hours of
+remote onboarding. The bundle replaces the standalone **$999 appliance** purchase for that unit.
 
-The initial buyer hypothesis is a platform/engineering lead adopting Codex or
-Claude Code with company provider accounts. A pilot needs a named sponsor,
-operator, policy owner, and security reviewer; one non-production workflow;
-authorized accounts and unique user/workload identities; approved synthetic or
-otherwise explicitly authorized test data; and an agreed evidence boundary.
+Reserve with a **$49 USD one-time deposit per appliance**, fully refundable and
+credited toward the chosen package. Cancel anytime before fulfillment for a
+full refund by emailing the owner with your Stripe receipt reference. The date
+is a target, not a guaranteed shipping date. All payments use Stripe; no automatic
+balance charge or reservation subscription is created. See
+[reservation terms](COMMERCIAL_SETUP.md#appliance-reservations).
 
-A short fit discussion comes first. A shorter evaluation can be scoped before
-a 90-day commitment. Timing starts only after scope, prerequisites, delivery
-capacity, and commercial terms are agreed.
+## Included work
 
-## Proposed 90-day sequence
+1. Review a named site's ready network, power, authorized provider account,
+   operator, and approved test inputs.
+2. Connect one provider and one supported application to the appliance.
+3. Configure the initial identity, model, budget, and deterministic secret rules
+   agreed for that workflow.
+4. Check an allowed request, a denied request with zero upstream calls, and
+   attributable metadata with no prompt/response bodies or credentials.
+5. Hand over operator instructions, available recovery steps, and an issue list.
 
-| Phase | Work | Deliverable and decision |
-| --- | --- | --- |
-| Days 1–15: Map | Inventory one client/identity/provider route; define policy, secret rules, budget, retention, and operator responsibilities | Control map, written acceptance plan, prerequisite checklist; stop or rescope if fit is poor |
-| Days 16–45: Prove | Configure the non-production route; exercise allowed and denied requests, routing/caps, attribution, usage export, and agreed policy changes | Versioned evidence pack, issue log, and reproducible operator walkthrough |
-| Days 46–90: Decide | Review actual friction and operating effort; exercise agreed operational checks; identify production gaps | Go/no-go memo, remaining gates with owners, handoff and post-pilot scope if warranted |
+Calls, configuration, acceptance checks, and handoff count toward the three-hour
+allowance. If prerequisites are missing, pause and document them. Record open
+work when the allowance is exhausted; no extra charge is authorized by this
+scope. Ongoing operations are not included in the one-time bundle.
 
-## Acceptance criteria to agree before starting
+## Customer responsibilities
 
-1. The named, pinned client/protocol path works in the agreed environment.
-2. A forbidden request is rejected without an upstream model-provider call.
-3. Configured routing/caps and deterministic secret modes behave as agreed on
-   approved test inputs; no comprehensive DLP guarantee is inferred.
-4. A unique identity, policy version, outcome, and captured usage can be traced
-   in metadata-only evidence; prompt/response bodies and credentials are absent.
-5. The operator can reproduce the agreed checks and identify the next action
-   after a failure. Deployment-specific recovery/rollback is tested only to the
-   extent explicitly included in the scope.
-6. Gaps have named owners and an explicit decision to resolve, defer, or stop.
+The customer provides working network access and power, authorizes provider
+accounts and charges, supplies unique identities and approved test inputs,
+approves policy and retention rules, and names an operator.
+Do not send keys, raw prompts, customer content, production databases, or full
+private configurations through the public inquiry form or public issues.
+Private access uses an approved method, minimal privileges, and a documented
+data-handling scope.
 
-Numerical latency, throughput, availability, RPO/RTO, billing accuracy, and
-business-value targets must be separately agreed and measured. The public
-demo's elapsed time and internal five-run result are not acceptance evidence
-for those targets or for independent human usability.
+## Exclusions and qualification
 
-## Responsibilities
+Custom integrations, network redesign, data migration, on-site visits,
+round-the-clock operations, high availability, certifications, comprehensive
+semantic DLP, invoice reconciliation, and guaranteed savings are excluded.
+Latency, throughput, thermal behavior, update/recovery behavior, and ARM64
+packaging must be qualified before delivery. An acceptance demonstration does
+not establish compliance or production readiness.
 
-| Area | Customer | Engagement, only as scoped |
-| --- | --- | --- |
-| Infrastructure | Hosts gateway/store, TLS/ingress, access, patching, backups, retention | Configuration review and bounded assistance |
-| Provider and identity accounts | Account authorization, charges, credentials, JWT issuance/refresh, unique identities | Integration guidance, without custody of customer secrets by default |
-| Policy and data | Approves model/budget/secret rules and test data; decides acceptable use | Helps map requirements to implemented controls |
-| Evidence | Controls access and retention; approves any sharing | Produces agreed, content-free test results and gap summary |
-| Security and production | Owns risk acceptance, independent review, compliance, HA/DR qualification | Identifies gaps; no certification is supplied |
+## Optional ongoing service
 
-Do not send credentials, raw prompts, customer content, production databases,
-or full configurations through the marketing inquiry form or public issues.
-Any access to private environments or data requires an approved access method,
-minimal privileges, a written data-handling scope, and appropriate review.
+**$499 USD per managed site per month**, including the associated Cloud workspace,
+monitoring, qualified updates, recovery guidance, and one hour of remote
+assistance per billing month. Business hours are Monday–Friday, 9 am–5 pm
+America/Chicago, excluding local public holidays. Response target: within two
+business days; unused time does not roll over. Custom development, on-site work,
+round-the-clock response, replacement hardware, and work beyond the allowance
+are excluded. Additional appliances in the same agreed site do not create
+another site subscription.
 
-## Explicit exclusions unless separately established
+Standalone Cloud is **$49.99 USD per workspace per month**. A managed site's
+included workspace is not billed separately. Software is **$0**. Provider usage,
+customer infrastructure, and applicable taxes are separate.
 
-Managed hosting, fleet-wide coverage, client-side tool governance, 24/7 on-call,
-certifications, legal/compliance determinations, comprehensive semantic DLP,
-per-inference human approvals, provider invoice reconciliation, guaranteed
-savings, and future portfolio features.
+Monthly services renew until canceled. Email the owner before the next renewal
+with the subscription reference; the current paid period remains available.
+Confirm applicable delivery and cancellation terms before payment.
 
-## Price and terms
-
-The 90-day pilot is $15,000 USD for one team and one workflow. Scope,
-availability, and start date are agreed before payment or work begins.
-Provider usage, infrastructure, and applicable taxes are additional.
-The pilot does not automatically renew. Enterprise support starts at $2,000
-USD/month under a separate agreement.
-
-Agree the payment schedule; start/end dates; time budget; meeting cadence;
-support hours/time zone and response targets; named delivery contact; customer
-prerequisites and delays; acceptance procedure; change control; confidentiality;
-data processing/access; liability; termination; and post-pilot support.
-No default SLA or additional legal terms are implied. Obtain appropriate
-contractual review before signing an engagement.
-
-## Post-pilot decision
-
-Choose one: stop and retain the documented lessons; continue self-service;
-resolve specific gaps in another bounded engagement; or propose an expanded
-deployment after its qualification gates are satisfied. Expansion is not the
-automatic outcome of a successful demonstration.
-
-Sources: [support](../SUPPORT.md), [client boundary](../docs/CLIENTS.md),
-[operations](../docs/OPERATIONS.md), [deployment](../docs/DEPLOYMENT.md),
-[trust brief](TRUST.md).
+Sources: [commercial setup](COMMERCIAL_SETUP.md), [support](../SUPPORT.md),
+[client boundary](../docs/CLIENTS.md), [operations](../docs/OPERATIONS.md),
+[deployment](../docs/DEPLOYMENT.md), and [trust brief](TRUST.md).

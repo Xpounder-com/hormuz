@@ -14,8 +14,14 @@ DOWNLOADS = Path(__file__).resolve().parents[1] / "public" / "downloads"
 
 
 class DownloadTests(unittest.TestCase):
+    def test_previous_download_url_serves_the_revised_appliance_brief(self):
+        self.assertEqual(
+            (DOWNLOADS / 'hormuz-pilot-brief.pdf').read_bytes(),
+            (DOWNLOADS / 'hormuz-appliance-brief.pdf').read_bytes(),
+        )
+
     def test_pdf_link_annotations_use_the_new_hostname(self):
-        for name in ("hormuz-overview.pdf", "hormuz-pilot-brief.pdf", "hormuz-trust-brief.pdf"):
+        for name in ("hormuz-overview.pdf", "hormuz-appliance-brief.pdf", "hormuz-trust-brief.pdf"):
             with self.subTest(name=name):
                 raw = (DOWNLOADS / name).read_bytes()
                 self.assertTrue(raw.startswith(b"%PDF-"))

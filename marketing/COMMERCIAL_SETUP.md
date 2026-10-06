@@ -1,130 +1,163 @@
-# Enterprise conversion setup
+# Hormuz commercial setup
 
-## Hosted Pro inquiry offer
+Approved October 6, 2026. The website price catalog is
+[website/lib/pricing.json](../website/lib/pricing.json). Pages, inquiry summaries,
+FAQs, and buyer-download builders consume that catalog.
 
-Approved October 1, 2026: Pro is planned at **$99 USD/workspace/month** with
-100,000 gateway requests included, then **$10 per additional 100,000 requests**,
-prorated by request. Administrative users are included; model usage and taxes
-are separate. Enterprise requirements follow a custom proposal.
+## The complete offer
 
-The website's `interest=pro` path requests access through the existing inquiry
-form. It does not create a subscription or production gateway. Do not use the
-support or pilot Payment Links for Pro. Before adding Pro checkout, qualify
-workspace provisioning, tenant-specific provider credentials, supported production
-API routes and application identities, subscriptions and verified payment events,
-durable request billing, usage alerts and approved overages, traffic limits,
-recovery, and operating support. Define failed/canceled/rejected request handling
-and confirm merchant terms before payment. Streaming chunks and internal retries
-are not additional billable requests.
-
-Render hosting is the intended service direction, not a claim of current
-production readiness. This website change does not provision paid resources,
-change credentials, or alter existing service payment configuration.
-
-Approved offer, September 6, 2026:
-
-- Free AI governance review to establish fit.
-- 90-day pilot: $15,000 USD total, one team and one workflow.
-- Ongoing enterprise support: from $2,000 USD/month, separately agreed scope.
-- Provider usage, infrastructure, and applicable taxes are additional.
-- No automatic conversion from pilot to subscription; no implied 24/7 support.
-
-## Public configuration
-
-Set only verified public destinations in `website/lib/commercial-config.mjs`:
-
-| Setting | Purpose | Activation check |
+| Offer | Price in USD | Included scope |
 | --- | --- | --- |
-| formEndpoint | Formspree `/f/<id>` endpoint | Owner identity, recipient, domain restriction, spam filtering, and test receipt verified |
-| bookingUrl | Public Calendly, Cal.com, or Google Calendar appointment schedule | Correct owner, availability, timezone, duration, and notification recipient |
-| pilotPaymentUrl | Public live Stripe Payment Link | Correct merchant, USD 15,000, one-time, fixed quantity, no optional upsells |
-| supportPaymentUrl | Public live Stripe Payment Link | Correct merchant, USD 2,000 monthly, fixed quantity, disclosed recurring and cancellation terms |
+| Software | **$0** | Personal Optimizer and Apache-2.0 gateway; customer operates their infrastructure |
+| Cloud | **$49.99 per workspace per month** | One hosted workspace and dashboard, administrative users included |
+| Appliance | **$999 per appliance, one time** | enclosure, cooling, power supply, and installed Hormuz gateway |
+| Appliance with scoped onboarding | **$1,499 per appliance, one time** | The same appliance plus up to three hours of remote onboarding |
+| Managed site | **$499 per site per month** | Associated Cloud workspace, device-health monitoring, qualified updates, recovery guidance, and the support allowance below |
 
-Blank destinations remain unavailable. The contact page uses the existing email
-fallback until an endpoint is connected. No credentials belong in this public
-configuration. Customer-specific invoice links must be shared privately and must
-never be committed here. Payments are shown under Enterprise only for customers
-with agreed scope and start date; they do not provision a hosted service.
+The onboarding bundle includes the appliance; it replaces the standalone
+appliance purchase for that unit. The managed-site fee includes its associated
+Cloud workspace, with no additional Cloud subscription for that workspace.
+Additional appliances at the same agreed site do not add a site subscription.
+Confirm supported workloads and capacity before adding devices.
 
-## Account setup and acceptance
+Model-provider usage is billed by the customer's provider. Customer networking,
+electricity, self-hosted infrastructure, and applicable taxes remain separate.
+No additional Hormuz usage, seat, software-edition, or separately priced support
+tier is offered.
 
-1. Confirm the existing Stripe merchant is the appropriate seller for Hormuz.
-   Review current account status before creating products. Do not change banking,
-   legal identity, tax registrations, or accept new terms as part of website work.
-2. Create or reuse `Hormuz Enterprise — 90-Day Pilot` at USD 15,000 one-time and
-   `Hormuz Enterprise Support` at USD 2,000/month. State scope and exclusions in
-   descriptions. Final support hours, cancellation/refund terms, and tax settings
-   must match the agreement; do not invent them from the starting price.
-3. Verify checkout in Stripe test mode, including a failure/cancel path, then
-   inspect the live Payment Links without making a real charge. Only configure
-   the matching live links after verification. A Stripe success redirect is not
-   evidence of a completed payment; inspect Stripe’s payment/subscription record.
-4. In the owner’s Formspree account, create a private Hormuz enterprise form.
-   Configure the owner-approved notification inbox, domain allowlist, spam
-   protection, appropriate account access, and retention policy. Submit a clearly
-   marked synthetic inquiry; confirm the record and notification. Do not count it
-   as a customer lead. Frontend tests alone do not verify delivery.
-   The website request must retain `strict-origin-when-cross-origin`: Formspree's
-   domain restriction uses the Referer header and marks submissions without it as
-   spam. This sends only the HTTPS website origin on the cross-origin request,
-   excluding paths and campaign query parameters. See [Formspree's domain
-   restriction documentation](https://help.formspree.io/articles/form-and-project-settings/restrict-to-domain).
-5. Connect an existing booking event or agree availability and timezone before
-   creating one. Follow any authentication or terms prompts with the owner.
-6. Run `npm test`, `npm run build`, `npm run typecheck`, and `npm run verify`.
-   Check desktop/mobile CTA navigation, validation, pending/error states, receipt,
-   booking destination, checkout amount/currency/interval, and privacy copy.
-7. Publish via the repository’s review and Pages workflow. The canonical
-   `usehormuz/usehormuz.github.io` deployment pins a source revision; updating the
-   product repository alone does not publish the canonical site. Verify the live
-   source pin and every enabled commercial destination after publication.
+## Appliance reservations
 
-## Measurement
+Appliances are **coming soon**, with rollout planned for **early 2027**. This is
+a target, not a guaranteed shipping date. The **$49 USD one-time deposit per
+appliance** is fully refundable and credited toward either appliance package.
+It is a reservation deposit, not another hardware tier or a subscription.
+No automatic balance charge is authorized.
 
-Application tags (`utm_source`, `utm_medium`, `utm_campaign`) are bounded and
-forwarded along commercial CTAs. Form submission includes them only when the
-visitor selects the unchecked attribution checkbox. Separately, visitor consent
-in supported browsers enables X Ads measurement of visits and acknowledged
-applications. Safari and browsers on iPhone and iPad keep X Ads measurement off.
-Application contents are never sent in an analytics event. Use verified non-spam submissions, actual
-bookings, successful payments, and active subscriptions as distinct funnel stages.
-See [measurement setup](MEASUREMENT.md) for consent and event details.
+Customers can **cancel anytime before fulfillment for a full refund** by emailing
+**mehrdadz@neuralint.io** with their Stripe receipt reference. Verify the payment,
+refund the full reservation payment, including any tax collected, to the original payment method through Stripe, and mark
+the reservation canceled. Refund settlement depends on the processor and payment
+method. Never retain a fee from the advertised full refund.
 
-## Current activation status
+Stripe's existing automatic tax collection remains enabled. The checkout
+displays any applicable tax separately. The catalog deposit amount is credited
+toward the hardware purchase; reconcile any tax already collected on the final
+invoice instead of charging it twice.
 
-Stripe products and live Payment Links were created and inspected in the owner's
-signed-in Safari session on September 6, 2026:
+Confirm compatibility, the chosen package, delivery arrangements, applicable
+taxes, and the customer's decision to proceed before collecting the balance
+through Stripe. Use a Stripe invoice that explicitly credits the verified
+deposit against the catalog purchase price. Do not send a reserved customer a
+full-price appliance Payment Link and collect the deposit twice. If delivery
+cannot proceed, refund the deposit. Track payment and refund references privately;
+never put customer-specific receipt or invoice URLs in public source.
 
-- Pilot: USD 15,000 one-time, fixed quantity, no upsells or renewal.
-- Support: USD 2,000 monthly, fixed quantity, no trial or upsells.
-- Both require customer name, business name, and an agreed proposal reference.
-- Both public checkout pages loaded with the expected product, amount, and interval.
-- The existing automatic tax setting and preset product tax category were retained;
-  this does not validate tax classification or registrations.
-- Mercury was visibly listed as the default USD payments-balance payout account.
-  No banking details were changed and no payout was initiated.
-- Successful-payment email notifications were enabled for the signed-in Stripe user.
-  Actual delivery has not been tested.
-- The merchant is AI and Robotics Solutions; the existing statement descriptor is
-  LINKEDFULL.COM. The draft website discloses this without rebranding other products.
+The deposit-credit workflow is manual. Match the successful, unrefunded Stripe
+payment to the customer and chosen package, create that customer's draft
+appliance invoice, and add a negative `Reservation deposit applied` invoice item
+to that specific draft invoice. Check the remaining balance and any previously
+collected tax before finalizing and sending its Stripe payment page. Record the
+deposit as applied once; a canceled or refunded reservation receives no credit.
+Do not add a generic customer credit balance: Stripe applies that balance to the
+next finalized invoice, which could be a Cloud renewal. Stripe documents the
+[invoice-specific item](https://docs.stripe.com/api/invoiceitems/create) and
+[customer balance behavior](https://docs.stripe.com/invoicing/customer/balance).
+No automatic deposit reconciliation or fulfillment is implemented by the static
+website.
 
-The live Stripe links were published with the full-site design at source
-`af578c4a9519614856f4c6bb4bb7919995476e82`. No live charge, test-mode transaction,
-subscription lifecycle, or refund has been exercised.
+## Scoped onboarding
 
-Formspree configuration, September 6, 2026:
+Up to three hours of remote assistance for one provider and one supported
+application: prerequisites, initial identity and policy configuration,
+allowed/denied request acceptance checks, and administrator handoff.
+The customer supplies a ready network, power, authorized provider account,
+approved test inputs, and a named operator. Custom integration, network redesign,
+data migration, on-site visits, and ongoing operations are excluded.
+Document open issues when the included allowance is exhausted. Confirm scope,
+acceptance, prerequisites, delivery arrangements, and the start date before payment.
 
-- Separate project `Hormuz`, form `Hormuz Enterprise Applications`, endpoint
-  `https://formspree.io/f/xoeqnbyq`.
-- Verified owner inbox `mehrdadz@neuralint.io`; email notifications, submission
-  archive, and Formshield enabled. Domain restricted to `usehormuz.github.io`.
-- Current free account quota: 50 submissions/month shared across forms; dashboard
-  archive: 30 days. Existing unrelated forms were not changed.
-- Applicant autoresponses require Professional: USD 30 monthly, or USD 240/year.
-  No upgrade has been purchased; on-page receipt works without an upgrade.
-- Google Calendar review booking is connected for Wednesday and Thursday,
-  10:00–15:00 America/Chicago, 30-minute appointments, subject to live availability.
-- A clearly marked QA submission produced a live Formspree record and the owner
-  confirmed delivery to `mehrdadz@neuralint.io`. QA remains excluded from sales
-  counts. X event activity still requires separate Events Manager verification;
-  configuration or a browser request alone is not attribution proof.
+## Managed-site support allowance
+
+One agreed physical location or isolated customer deployment, recorded at
+activation, includes up to **one hour of remote assistance per billing month**.
+Count calls, troubleshooting, investigation, and configuration work against this
+allowance. Unused time does not roll over.
+
+Support hours: Monday–Friday, 9 am–5 pm America/Chicago, excluding local public
+holidays. Response target: **within two business days**, meaning acknowledgment
+and a next step, with no guaranteed resolution time.
+
+Included: configuration and policy guidance, troubleshooting, recovery guidance,
+and assistance with qualified updates. Excluded: custom development, on-site
+work, round-the-clock response, replacement hardware, and work beyond the
+allowance. Document unresolved work and agree the next action before proceeding.
+This catalog does not authorize extra charges.
+
+## Availability and activation
+
+Software remains available through supported installation paths.
+Cloud and managed-site services are accepting inquiries. Appliances and
+onboarding are coming soon; refundable reservations do not establish delivery
+readiness. Confirm appliance ARM64 packaging,
+capacity, thermal behavior, updates, and recovery before hardware delivery.
+Cloud onboarding, billing, compatibility, traffic limits, and operating coverage
+must be qualified before activation. Managed monitoring must be implemented and
+validated before promising coverage to a paying site.
+
+The static website submits inquiries through Formspree and offers a public
+review booking. It does not provision accounts, verify payments, or activate
+subscriptions. The founder verifies confirmed payment, records the covered
+site/appliances, and supplies the support channel. Never infer payment from a
+return URL or charge again after an ambiguous result without checking.
+
+## Public destination configuration
+
+[website/lib/commercial-config.mjs](../website/lib/commercial-config.mjs) owns
+public destination URLs. Inquiry and booking destinations remain configured.
+All paid offers use Stripe. Payment destinations stay blank until their merchant,
+catalog amount, billing interval, and terms are verified. The website's
+**Pricing & pay** page exposes every paid offer's checkout; the matching service
+cards and inquiry selector also link directly to Stripe. Customers do not need
+to submit an inquiry to open checkout. Software remains free with an install
+button and no card requirement.
+
+Reservation checkout is available before appliance rollout. Full-price appliance
+checkouts are for confirmed orders without a reservation deposit; reserved
+buyers use their specific Stripe balance invoice. Cloud and managed-site billing
+starts at checkout, so confirm compatibility, scope, operating capacity, start
+date, and applicable taxes before the customer subscribes. Checkout does not
+provision a workspace or confirm shipping. Public configuration URLs do not
+enforce activation eligibility.
+
+| Setting | Destination | Verification before enabling |
+| --- | --- | --- |
+| formEndpoint | Formspree form | Correct owner, domain restriction, positive acknowledgment, privacy behavior |
+| bookingUrl | Public scheduling page | Correct organizer, timezone, availability, invitation behavior |
+| reservationPaymentUrl | Live Stripe Payment Link | USD 49 one time per appliance; fully refundable, credited toward purchase; early 2027 target and cancellation contact disclosed |
+| cloudPaymentUrl | Live Stripe Payment Link | USD 49.99 monthly per workspace; confirmed activation and cancellation terms |
+| appliancePaymentUrl | Live Stripe Payment Link | USD 999 one time per appliance; confirmed delivery arrangements |
+| onboardingPaymentUrl | Live Stripe Payment Link | USD 1,499 one time per appliance with the stated onboarding bundle |
+| managedSitePaymentUrl | Live Stripe Payment Link | USD 499 monthly per managed site; included Cloud and support allowance disclosed |
+
+Superseded payment links are removed from the website source. New Stripe
+products and Payment Links use this catalog; existing Stripe products, active
+subscriptions, and customer agreements have not been repriced. Only enable a
+new destination after verifying its merchant,
+amount, quantity unit, billing interval, scope, and cancellation terms.
+
+Cloud and managed sites renew monthly until canceled. The customer emails
+**mehrdadz@neuralint.io** before the next renewal with their subscription reference.
+Cancellation stops the next renewal; the current paid period remains available.
+Appliance ownership and free software access remain available after cancellation.
+
+## Verification and publication
+
+Run website tests, type checking, production export, link verification, and buyer
+download checks. Render revised PDFs and the editable deck. Check every current
+commercial surface against the catalog, including inquiry options and the demo
+walkthrough. Keep provider-spend teaching examples separate from Hormuz prices.
+
+A product-source update does not publish the canonical website. Publish only
+through the dedicated website repository's reviewed source pin and verify the
+live pin and downloads afterward. Do not claim payment setup, delivery readiness,
+customer demand, or measured savings from a pricing-copy change.

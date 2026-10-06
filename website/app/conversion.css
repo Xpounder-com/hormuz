@@ -34,6 +34,7 @@
 .hero-price-card > .price-card-note { font-size: 11px; line-height: 1.65; margin: 12px 0 18px; }
 .price-card-details { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: #dceda6; text-underline-offset: 4px; }
 .landing-redesign .conversion-offers { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 20px; }
+.landing-redesign .conversion-offers.offer-grid-two { grid-template-columns: repeat(2,minmax(0,1fr)); }
 .landing-redesign .conversion-offers .offer-card { padding: 30px; }
 .landing-redesign .conversion-offers h3 { margin-bottom: 26px; }
 .landing-redesign .conversion-offers .price-amount { min-height: 108px; justify-content: flex-end; }
@@ -61,6 +62,23 @@
 .selected-offer { display: flex; flex-direction: column; gap: 6px; padding: 17px 20px; background: #e8ede2; border: 1px solid #cdd7c3; border-radius: 12px; }
 .selected-offer strong { font-size: 30px; font-weight: 550; letter-spacing: -.045em; line-height: 1.1; }
 .selected-offer span { font-size: 12px; color: #526046; }
+.conversion-offers .button[data-stripe-offer] { white-space: normal; min-height: 48px; gap: 10px; line-height: 1.5; }
+.conversion-offers .text-link { font-size: 13px; margin-top: 12px; }
+.confirmed-order { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #cdd7c3; }
+.selected-offer .button { white-space: normal; min-height: 48px; margin-top: 8px; }
+.appliance-reservation .reservation-details { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(260px, 1fr); gap: 32px; padding: 32px; background: #e8ede2; border: 1px solid #cdd7c3; border-radius: 18px; }
+.reservation-details p { font-size: 14px; line-height: 1.75; margin: 0 0 16px; }
+.reservation-details p:last-child { margin-bottom: 0; }
+.reservation-details .field-hint, .reservation-inquiry .field-hint { font-size: 12px; line-height: 1.7; color: #526046; }
+.reservation-action { display: flex; flex-direction: column; gap: 16px; align-self: center; }
+.reservation-action .button { width: 100%; justify-content: space-between; min-height: 48px; }
+.reservation-action .text-link { font-size: 13px; }
+.reservation-inquiry { padding: 18px 20px; border: 1px solid #cdd7c3; border-radius: 12px; }
+.reservation-inquiry p { font-size: 13px; line-height: 1.7; }
+@media (max-width: 800px) {
+  .appliance-reservation .reservation-details { grid-template-columns: 1fr; gap: 24px; padding: 24px; }
+  .contact-offer-summary small { white-space: normal; }
+}
 @media (max-width: 1080px) {
   .hero-conversion-grid { gap: 30px; width: min(100% - 48px,1200px); grid-template-columns: minmax(0,1.15fr) minmax(320px,1fr); }
   .hero-conversion-grid h1 { font-size: 60px; }
@@ -75,7 +93,7 @@
   .hero-conversion-grid .landing-deck { margin-inline: auto; }
   .hero-conversion-grid .landing-actions { justify-content: center; }
   .hero-price-card { padding: 30px; }
-  .landing-redesign .conversion-offers { grid-template-columns: 1fr; max-width: 540px; }
+  .landing-redesign .conversion-offers, .landing-redesign .conversion-offers.offer-grid-two { grid-template-columns: 1fr; max-width: 540px; }
   .landing-redesign .conversion-offers .offer-card { padding: 30px; }
   .landing-redesign .conversion-offers .price-amount { min-height: 0; }
   .open-source-option { flex-direction: column; align-items: flex-start; max-width: 540px; margin-inline: auto; }

@@ -4,12 +4,29 @@ import { CampaignLink } from './CampaignLink';
 
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { INTERESTS, campaignSource, isSalesInquiry } from '../../lib/contact.mjs';
+import { INTERESTS, campaignSource, isSalesInquiry, normalizeInterest } from '../../lib/contact.mjs';
 import { prepareLeadAttempt, submitLead } from '../../lib/lead.mjs';
 import { trackConfirmedApplication } from '../../lib/x-ads.mjs';
 import { trackAnalyticsLead } from '../../lib/analytics.mjs';
-import { PILOT_PRICE, SUPPORT_PRICE, PRO_PRICE, PRO_INCLUDED_REQUESTS, PRO_OVERAGE_PRICE } from '../../lib/commercial.mjs';
+import { CLOUD_PRICE, APPLIANCE_PRICE, ONBOARDING_PRICE, MANAGED_SITE_PRICE, RESERVATION_PRICE, commercial, pricing } from '../../lib/commercial.mjs';
 import { CONTACT_EMAIL, sitePath } from '../../lib/site.mjs';
+import { StripeCheckoutLink, type PaidOffer } from './StripeCheckoutLink';
+
+const offers: Record<string, { price: string; detail: string; action: string }> = {
+  reservation: { price: RESERVATION_PRICE, detail: `USD/appliance · one-time refundable deposit · credited toward purchase · planned rollout: ${pricing.reservation.plannedRollout}`, action: 'Send my reservation question →' },
+  cloud: { price: `${CLOUD_PRICE}/month`, detail: 'USD/workspace · hosting and administrative users included · accepting inquiries', action: 'Discuss my Cloud workspace →' },
+  appliance: { price: APPLIANCE_PRICE, detail: `USD/appliance, one time · Preconfigured gateway · coming soon: ${pricing.reservation.plannedRollout}`, action: 'Discuss my appliance →' },
+  onboarding: { price: ONBOARDING_PRICE, detail: `USD/appliance, one time · Appliance and up to ${pricing.onboarding.remoteHours} hours of scoped remote onboarding included · coming soon: ${pricing.reservation.plannedRollout}`, action: 'Discuss my onboarding →' },
+  managed: { price: `${MANAGED_SITE_PRICE}/month`, detail: `USD/site · Cloud workspace and ${pricing.managedSite.supportHoursPerMonth} hour of remote assistance per billing month included`, action: 'Discuss my managed site →' },
+};
+
+const paymentLabels: Record<PaidOffer, string> = {
+  reservation: `Reserve yours — ${RESERVATION_PRICE}`,
+  cloud: `Subscribe to Cloud — ${CLOUD_PRICE}/month`,
+  appliance: `Pay for appliance — ${APPLIANCE_PRICE}`,
+  onboarding: `Pay for onboarding package — ${ONBOARDING_PRICE}`,
+  managed: `Subscribe to managed site — ${MANAGED_SITE_PRICE}/month`,
+};
 
 export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUrl: string }) {
   const [interest, setInterest] = useState('review');
@@ -20,13 +37,14 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
   const [reference, setReference] = useState('');
   const requestReference = useRef('');
   const testSubmission = new URLSearchParams(search).get('qa') === '1';
-  const selectedOffer = interest === 'pro' ? { price: PRO_PRICE + '/mo', detail: 'USD / workspace · ' + PRO_INCLUDED_REQUESTS + ' requests included · ' + PRO_OVERAGE_PRICE + ' per additional 100,000 · accepting inquiries', action: 'Request Pro access →' } : interest === 'review' ? { price: '$0', detail: 'Free AI governance review · no obligation', action: 'Request my free review →' } : interest === 'pilot' ? { price: PILOT_PRICE, detail: 'USD · one-time fee for a scoped 90-day pilot', action: 'Discuss my pilot →' } : interest === 'support' ? { price: `${SUPPORT_PRICE}/mo`, detail: 'USD · fixed support scope', action: 'Request support details →' } : interest === 'enterprise' ? { price: 'Custom quote', detail: 'Scope and pricing agreed in a written proposal before payment', action: 'Contact sales →' } : null;
+  const selectedOffer = offers[interest];
+  const selectedPayment = Object.hasOwn(paymentLabels, interest) ? interest as PaidOffer : null;
   const pending = useRef(false);
   const confirmation = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     setSearch(window.location.search);
     const selected = new URLSearchParams(window.location.search).get('interest');
-    if (selected && Object.hasOwn(INTERESTS, selected)) setInterest(selected);
+    if (selected) setInterest(normalizeInterest(selected));
   }, []);
   useEffect(() => { if (state === 'success') confirmation.current?.focus(); }, [state]);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -63,6 +81,7 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
     <p>Mehrdad will review your workflow and reply personally. Response target: one business day. This page is your receipt; an automatic application email is not sent.</p>
     {bookingUrl && isSalesInquiry(interest) && <><p>Choose a 30-minute Google Meet review on Wednesday or Thursday, 10 am–3 pm Central. Include your request reference when booking.</p><a className="button button-primary" href={bookingUrl} rel="noreferrer">Choose my review time ↗</a><p>Google Calendar emails both of us an invitation after you complete the booking.</p></>}
     <p>No payment has been taken. A meeting is confirmed only after booking; any paid scope is agreed separately. Questions? <a href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(`Hormuz inquiry ${reference}`)}`}>Email Mehrdad</a>.</p>
+    {interest === 'reservation' && <p>This is a received inquiry. A paid appliance reservation is confirmed separately through Stripe after successful deposit payment. <CampaignLink href={sitePath('/enterprise/#reserve')}>Reservation details →</CampaignLink>.</p>}
   </section>;
   return <div className="contact-flow">
     {testSubmission && <p role="status" className="form-status">QA test mode: this sends a clearly marked test inquiry to the owner. It does not count as an X Ads lead.</p>}
@@ -71,9 +90,11 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
         <legend className="sr-only">Hormuz inquiry</legend>
         <input type="hidden" name="_subject" value="Hormuz website inquiry" />
         <label>I am interested in<select name="interest" value={interest} onChange={e => setInterest(e.target.value)}>{Object.entries(INTERESTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        {selectedOffer && <div className="selected-offer" aria-live="polite"><strong>{selectedOffer.price}</strong><span>{selectedOffer.detail}</span></div>}
-        {interest === 'pro' && <p className="field-hint">Pro is a planned hosted service for production API workloads. Provider usage is separate. API compatibility, traffic limits, support coverage, and activation are confirmed before payment. <CampaignLink href={sitePath('/plans/#pro-billing')}>Review Pro pricing →</CampaignLink>.</p>}
-        {interest === 'support' && <p className="field-hint">Ready to subscribe? <CampaignLink href={sitePath('/enterprise/#support')}>See the self-service plan and start directly →</CampaignLink>. This form sends an inquiry.</p>}
+        {selectedOffer && <div className="selected-offer" aria-live="polite"><strong>{selectedOffer.price}</strong><span>{selectedOffer.detail}</span>{selectedPayment && <StripeCheckoutLink offer={selectedPayment}>{paymentLabels[selectedPayment]}</StripeCheckoutLink>}<p className="field-hint">The checkout button opens Stripe directly. You can pay without submitting this inquiry form. Payment is confirmed separately by Stripe.</p></div>}
+        {interest === 'reservation' && <div className="reservation-inquiry"><p>Cancel your reservation anytime before fulfillment for a full refund. The deposit is credited toward either appliance package. This form sends a question and takes no payment.</p>{!commercial.reservationPaymentUrl && <p className="field-hint">Stripe checkout is being prepared. We will reply when a verified reservation checkout is available.</p>}<p className="field-hint"><CampaignLink href={sitePath('/enterprise/#reserve')}>Read reservation and cancellation terms →</CampaignLink>.</p></div>}
+        {['appliance', 'onboarding'].includes(interest) && <p className="field-hint">Coming soon: {pricing.reservation.plannedRollout}. Use full-price checkout only after scope and delivery are confirmed, without a reservation deposit. If you have reserved, pay the Stripe balance invoice provided by Hormuz. <CampaignLink href={sitePath('/enterprise/#reserve')}>Reservation details →</CampaignLink>.</p>}
+        {interest === 'cloud' && <p className="field-hint">Confirm compatibility, traffic limits, support coverage, and activation before subscribing. Provider usage is separate. Monthly billing starts at checkout and renews until canceled. <CampaignLink href={sitePath('/plans/#cloud')}>Cloud and cancellation details →</CampaignLink>.</p>}
+        {interest === 'managed' && <p className="field-hint">Confirm site scope, operating capacity, and activation before subscribing. Monthly billing starts at checkout and renews until canceled. Includes the associated Cloud workspace. <CampaignLink href={sitePath('/enterprise/#support')}>Support allowance and cancellation →</CampaignLink>.</p>}
         <label>Your name<input name="name" autoComplete="name" required maxLength={100} /></label>
         <label>Work email<input name="email" type="email" autoComplete="email" required maxLength={254} /></label>
         <label>Organization<input name="organization" autoComplete="organization" required maxLength={150} /></label>

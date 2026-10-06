@@ -6,7 +6,7 @@ const navigation = [
   { key: 'platform', label: 'Product', href: '/' },
   { key: 'demo', label: 'Try Hormuz', href: '/demo/' },
   { key: 'docs', label: 'Install & docs', href: '/docs/' },
-  { key: 'plans', label: 'Plans', href: '/plans/' },
+  { key: 'plans', label: 'Pricing & pay', href: '/plans/' },
   { key: 'security', label: 'Security', href: '/security/' },
   { key: 'resources', label: 'Resources', href: '/resources/' },
 ];

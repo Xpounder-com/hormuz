@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { BASE_PATH, SITE_ORIGIN, SITE_ROUTES, siteUrl } from '../lib/site.mjs';
 import { GA_MEASUREMENT_ID, GOOGLE_SITE_VERIFICATION } from '../lib/measurement-config.mjs';
 
-import { commercial } from '../lib/commercial.mjs';
+import { commercial, PAYMENT_KEYS, CLOUD_PRICE, APPLIANCE_PRICE, ONBOARDING_PRICE, MANAGED_SITE_PRICE, RESERVATION_PRICE } from '../lib/commercial.mjs';
 
 const siteRoot = fileURLToPath(new URL('../', import.meta.url));
 const out = path.join(siteRoot, 'out');
@@ -60,5 +60,26 @@ const contactSource = await readFile(path.join(siteRoot, 'app/components/Contact
 assert.ok(contactSource.includes('Nothing has been sent.'));
 assert.doesNotMatch(contactSource, /fetch\(|sendBeacon|localStorage|sessionStorage/);
 assert.ok((await readdir(path.join(out, 'downloads'))).length >= 4, 'Missing buyer downloads');
+
+// Configured payment URLs must be reachable controls in the static pricing page,
+// including before JavaScript loads. A URL in the bundle alone is not a checkout.
+const checkoutOffers = [
+  ['cloud', 'cloudPaymentUrl', CLOUD_PRICE, true],
+  ['appliance', 'appliancePaymentUrl', APPLIANCE_PRICE, false],
+  ['onboarding', 'onboardingPaymentUrl', ONBOARDING_PRICE, false],
+  ['managed', 'managedSitePaymentUrl', MANAGED_SITE_PRICE, true],
+  ['reservation', 'reservationPaymentUrl', RESERVATION_PRICE, false],
+];
+const pricingLinks = [...pages.get('/plans/').matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)];
+for (const [offer, key, amount, monthly] of checkoutOffers) {
+  const links = pricingLinks.filter(([, attrs]) => attrs.includes(`data-stripe-offer="${offer}"`));
+  if (!commercial[key] || !links.length) failures.push(`/plans/: missing ${offer} checkout`);
+  for (const [, attrs, inner] of links) {
+    const href = decode(attrs.match(/\bhref="([^"]+)"/)?.[1] || '');
+    const label = decode(inner.replace(/<[^>]+>/g, ''));
+    if (href !== commercial[key]) failures.push(`/plans/: ${offer} checkout uses another offer's destination`);
+    if (!label.includes(amount) || label.includes('/month') !== monthly) failures.push(`/plans/: ${offer} checkout has the wrong amount or billing unit`);
+  }
+}
 if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }
-else console.log(JSON.stringify({ verdict: 'passed', pages: pages.size, local_link_occurrences: localLinks, source_targets: sourceLinks.size, tracking: GA_MEASUREMENT_ID ? 'ga4_and_x_independent_opt_in' : 'x_ads_opt_in_non_webkit', search_console_tag: Boolean(GOOGLE_SITE_VERIFICATION), contact: commercial.formEndpoint ? 'formspree_submission' : 'local_email_draft_only', booking: Boolean(commercial.bookingUrl), payments: Boolean(commercial.pilotPaymentUrl || commercial.supportPaymentUrl) }, null, 2));
+else console.log(JSON.stringify({ verdict: 'passed', pages: pages.size, local_link_occurrences: localLinks, source_targets: sourceLinks.size, tracking: GA_MEASUREMENT_ID ? 'ga4_and_x_independent_opt_in' : 'x_ads_opt_in_non_webkit', search_console_tag: Boolean(GOOGLE_SITE_VERIFICATION), contact: commercial.formEndpoint ? 'formspree_submission' : 'local_email_draft_only', booking: Boolean(commercial.bookingUrl), payments: PAYMENT_KEYS.every(key => Boolean(commercial[key])), payable_offers: checkoutOffers.length }, null, 2));

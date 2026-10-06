@@ -1,11 +1,11 @@
-# Hormuz inquiry to paid pilot
+# Hormuz inquiry to appliance or Cloud delivery
 
 Owner: Mehrdad Zaker. Operating response target: one business day. This is a founder-operated workflow, not an automated CRM or a promise that a lead has been qualified.
 
 ## Incoming inquiries and notifications
 
 1. Formspree stores applications and emails **mehrdadz@neuralint.io** (recipient observed in the live form settings on September 6, 2026). Email Notifications and Submission Archive are enabled. Review the inbox and Formspree submissions each business day; include the spam folder when checking a missing inquiry.
-2. A successful website submission shows a receipt and random `HZ-…` reference. It offers Google Calendar booking for review, pilot, and support interests. It explicitly does not promise an automatic applicant email. Formspree's paid autoresponder has not been purchased.
+2. A successful website submission shows a receipt and random `HZ-…` reference. It offers Google Calendar booking for workflow review, Cloud, appliance, onboarding, and managed-site interests. It explicitly does not promise an automatic applicant email. Formspree's paid autoresponder has not been purchased.
 3. Reply personally within the operating target, acknowledge the reference, and confirm the next step. Draft below; do not send without reviewing the person's actual request.
 4. A completed Google Calendar booking sends both parties an invitation with Google Meet details. The attendee receives a one-day reminder. Booking availability: Wednesday and Thursday, 10:00–15:00 **America/Chicago**, 30-minute appointments, 60-day horizon, four-hour minimum notice. The organizer calendar is checked for busy events; email verification is required for unsigned visitors.
 5. Save the reference in the private ledger. A direct booking without a website inquiry gets a local `CAL-…` reference linked to the actual calendar event. Do not count a booking-link click as a booking.
@@ -33,16 +33,21 @@ python3 scripts/sales_pipeline.py upsert --input marketing/private/reviewed-inqu
 | qualified | Outcome, measurable success, technical owner, decision owner, budget evidence and timing documented | Agree evaluation boundaries and proposal date |
 | proposal | Written scope and unique proposal reference delivered | Dated decision conversation |
 | agreed | Written acceptance and agreement reference | Verify capacity and send the corresponding payment link |
-| paid_pilot | Successful Stripe payment matched to the agreement | Kickoff, day-60 review and day-90 decision scheduled |
-| support | Separate support agreement and subscription/payment verified | Record renewal/cancellation owner and next review |
-| closed_won / closed_lost / not_fit | Actual decision and reason documented | Record retention review in notes |
+| closed_lost / not_fit | Actual decision and reason documented | Record retention review in notes |
 | qa / spam | Explicit test or reviewed spam classification | Excluded from sales reports |
 
-Every open record requires an owner, next action and date. Qualification and commercial stages have required evidence fields. The ledger does not estimate close probability or recognize revenue from an inquiry.
+Every open record requires an owner, next action and date. Use this ledger for
+inquiries through written agreement, plus reviewed losses, not-fit decisions,
+QA, and spam. It does not support the current catalog's reservation, appliance,
+subscription, activation, or refund stages. Do not classify those payments under
+its older paid stages or infer qualification from a payment. Keep verified
+payments, deposits, credits, subscriptions, cancellations, and refunds in Stripe;
+record agreed delivery and activation evidence in private operating notes. The
+ledger does not estimate close probability or recognize revenue from an inquiry.
 
 ## Review agenda and value case
 
-Use the free 30 minutes to decide whether a scoped pilot is useful:
+Use the 30-minute discussion to decide which catalog offer fits:
 
 - 0–5 minutes: team, AI clients/providers, current route, and the concrete trigger for this inquiry.
 - 5–15: one material control problem; current baseline and cost of the problem. Ask who operates the system and who decides on a purchase.
@@ -51,32 +56,64 @@ Use the free 30 minutes to decide whether a scoped pilot is useful:
 
 Record business value as a customer estimate with assumptions: for example, hours per month spent preparing usage evidence multiplied by an agreed loaded hourly cost. Keep cost savings, risk exposure, and control coverage separate. Do not invent expected savings or convert a technical PASS into ROI.
 
-## Pricing validation
+## Pricing and evidence
 
-Keep the displayed **$15,000 USD / 90-day pilot** and **support from $2,000 USD/month** while collecting the next 5–10 qualified conversations. These are offer hypotheses, not market-validated prices. Ask about the cost of the problem, approved budget, buying process and alternatives before asking whether the offer feels expensive. Record an explicit objection, proposal outcome, loss reason, agreed scope and delivery hours.
+Use the approved catalog only: software **$0**, Cloud **$49.99/workspace/month**,
+appliance **$999**, appliance with scoped onboarding
+**$1,499**, and managed site **$499/site/month**. Managed sites include the associated
+Cloud workspace, with no additional Cloud subscription charge, and one hour of
+remote assistance per billing month. See [commercial setup](COMMERCIAL_SETUP.md)
+for the complete support allowance, business hours, exclusions, and cancellation.
 
-Review evidence at five conversations and again at ten. Separate weak fit, missing proof, insufficient urgency, procurement friction and price resistance. A pilot with excessive delivery work may need narrower scope rather than a lower price. Discount only against a concrete scope or contractual tradeoff agreed by the owner; never change live prices from click-through rate or a handful of unqualified inquiries.
+These prices are owner decisions, not evidence of willingness to pay or measured
+customer savings. Record objections, agreed scope, customer outcomes, and delivery
+effort from actual conversations. Do not introduce another price, discount,
+usage fee, seat fee, or service tier through a sales message.
 
-## Proposal and pilot operation
+## Delivery and onboarding
 
-Before requesting payment, record: one team/workflow; deliverables; exclusions; dependencies; named customer operator; approved synthetic/non-sensitive test data; customer staff-time budget; delivery cadence; acceptance measures; kickoff date; cancellation/refund terms; and the legal contracting entity. Explain Neuralint's relationship to Hormuz and match the seller name to the actual legal/Stripe records. The current checkout merchant and statement descriptor are disclosed in [commercial setup](COMMERCIAL_SETUP.md); resolve any mismatch in the written proposal before sending a payment request.
+Appliances are coming soon, with rollout planned for early 2027. A **$49**
+one-time deposit per appliance is fully refundable and credited toward the
+purchase. Cancel anytime before fulfillment for a full refund. Verify deposits
+and refunds in Stripe, track reservations privately, and disclose that the date
+is a target. All payments use Stripe. Send reserved buyers a balance invoice
+crediting the verified deposit; never collect the full catalog price again.
 
-Preserve the [90-day pilot plan](PILOT.md). Add these commercial checkpoints to each signed mutual action plan:
+Before requesting the appliance balance or service payment, record the selected catalog offer, site, appliance
+quantity, supported application/provider, prerequisites, acceptance checks,
+named operator, delivery capacity, start date, exclusions, and cancellation terms.
+Match the seller to verified payment records. Payment destinations remain blank
+until their catalog amounts and billing units are verified. Customers can open
+all catalog checkouts directly from the website's **Pricing & pay** page or the
+matching service card. An inquiry is not required to pay. Monthly billing starts
+at checkout; confirm activation before the customer subscribes. Reserved buyers
+use their specific balance invoice instead of a full-price appliance button.
 
-- By day 15: agreed baseline, controlled workflow, readiness blockers, and a dated first evidence demonstration.
-- By day 30: early evidence review against the agreed success measure; identify remaining risks while there is time to adjust.
-- Day 60: review results, remaining work and whether separately priced support is useful. No automatic conversion to a subscription.
-- Day 90: record acceptance evidence and a go/no-go decision. Close, extend under a written change, or start separately agreed support.
+Follow the [scoped onboarding brief](PILOT.md). The appliance bundle includes up
+to three hours of remote setup for one provider and one supported application.
+Confirm a ready network and approved test data, configure the initial policies,
+run agreed acceptance checks, and hand over operator instructions and open issues.
+
+A managed site includes one hour of remote assistance per billing month, a
+response within two business days during the stated business hours, monitoring,
+qualified updates, and recovery guidance. Unused time does not roll over.
+Record the allowance used and unresolved work. Custom development, on-site work,
+round-the-clock response, replacement hardware, and work beyond the allowance
+are excluded. No extra charge is authorized by this catalog.
+
+Cloud and managed services remain inquiry-stage until technical and operating
+qualification pass. Never turn a reservation deposit, a booking, or a successful demonstration
+into a claim of production readiness or a guaranteed delivery commitment.
 
 ## Reviewed message drafts
 
 **Acknowledgment** — Subject: Hormuz inquiry [reference]
 
-Hi [name], thanks for describing [specific workflow]. I have your inquiry [reference]. The next step is a free 30-minute review to understand [control need] and decide whether a pilot would help. You can choose a Wednesday or Thursday time here: [booking link]. If that schedule does not work, reply with a suitable time. Please keep credentials and customer data out of email. — Mehrdad
+Hi [name], thanks for describing [specific workflow]. I have your inquiry [reference]. The next step is a 30-minute review to understand [control need] and decide which catalog offer fits. You can choose a Wednesday or Thursday time here: [booking link]. If that schedule does not work, reply with a suitable time. Please keep credentials and customer data out of email. — Mehrdad
 
 **After the review** — Subject: Hormuz — agreed next step for [organization]
 
-We agreed to evaluate [one workflow] against [baseline and success measure]. [Customer owner] will confirm [environment, approved data and staff time] by [date]. I will send [scope/proposal] by [date]. The proposed pilot fee is $15,000 USD for 90 days, with provider usage, infrastructure and applicable taxes additional. Scope, capacity and terms must be agreed before payment. Our next decision point is [date].
+We agreed to evaluate [one workflow] against [baseline and success measure]. [Customer owner] will confirm [environment, approved data and staff time] by [date]. I will send [scope/proposal] by [date]. The selected offer is [approved catalog offer and price], with provider usage, customer infrastructure and applicable taxes separate. Scope, capacity, delivery and terms must be confirmed before payment. Our next decision point is [date].
 
 **Follow-up** — Send only when due and relevant, ordinarily after three business days and once more after seven. Stop after a decline or opt-out; do not subscribe the person to marketing.
 
