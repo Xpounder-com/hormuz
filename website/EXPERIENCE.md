@@ -60,7 +60,7 @@ preserves the visitor's experiment. Arrow keys, Home, and End select tabs.
 ## Commercial boundary
 
 The canonical price catalog is `lib/pricing.json`: software $0, Cloud
-$49.99/workspace/month, SSD-equipped appliance $999, appliance with SSD and
+$49.99/workspace/month, appliance $999, appliance with
 scoped onboarding $1,499, and managed site $499/site/month. Onboarding includes
 up to three hours of remote setup for one provider and one supported application.
 Managed sites include the associated Cloud workspace and one hour of remote

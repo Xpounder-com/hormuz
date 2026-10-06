@@ -8,7 +8,7 @@ export function ApplianceReservation() {
     <div className="section-heading">
       <p className="section-label">COMING SOON · PLANNED ROLLOUT: {pricing.reservation.plannedRollout.toUpperCase()}</p>
       <h2 id="reserve-title">Reserve yours — {RESERVATION_PRICE}.</h2>
-      <p className="offer-intro">An SSD-equipped Hormuz appliance for supported AI traffic inside your network. Choose the {APPLIANCE_PRICE} appliance or the {ONBOARDING_PRICE} package with scoped onboarding when delivery is confirmed.</p>
+      <p className="offer-intro">An Hormuz appliance for supported AI traffic inside your network. Choose the {APPLIANCE_PRICE} appliance or the {ONBOARDING_PRICE} package with scoped onboarding when delivery is confirmed.</p>
     </div>
     <div className="reservation-details">
       <div>

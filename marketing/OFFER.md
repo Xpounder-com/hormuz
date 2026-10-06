@@ -16,12 +16,11 @@ Demand and willingness to pay remain unvalidated.
 | --- | --- |
 | Software | **$0** |
 | Cloud | **$49.99 per workspace per month** |
-| Appliance, including SSD | **$999 per appliance, one time** |
-| Appliance, including SSD and scoped onboarding | **$1,499 per appliance, one time** |
+| Appliance | **$999 per appliance, one time** |
+| Appliance with scoped onboarding | **$1,499 per appliance, one time** |
 | Managed site | **$499 per site per month** |
 
-The software remains Apache-2.0. A standalone appliance includes the SSD,
-enclosure, cooling, power supply, and installed Hormuz gateway.
+The software remains Apache-2.0. A standalone appliance includes the enclosure, cooling, power supply, and installed Hormuz gateway.
 The onboarding bundle includes that appliance plus up to three hours of remote
 setup for one provider and one supported application, initial policies,
 acceptance checks, and administrator handoff. The bundle replaces the standalone

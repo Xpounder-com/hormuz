@@ -33,11 +33,17 @@ python3 scripts/sales_pipeline.py upsert --input marketing/private/reviewed-inqu
 | qualified | Outcome, measurable success, technical owner, decision owner, budget evidence and timing documented | Agree evaluation boundaries and proposal date |
 | proposal | Written scope and unique proposal reference delivered | Dated decision conversation |
 | agreed | Written acceptance and agreement reference | Verify capacity and send the corresponding payment link |
-| support | Managed-site subscription and initial payment verified | Record covered site, appliances, allowance, renewal/cancellation owner, and next review |
-| closed_won / closed_lost / not_fit | Actual decision and reason documented | Record retention review in notes |
+| closed_lost / not_fit | Actual decision and reason documented | Record retention review in notes |
 | qa / spam | Explicit test or reviewed spam classification | Excluded from sales reports |
 
-Every open record requires an owner, next action and date. Qualification and commercial stages have required evidence fields. The ledger does not estimate close probability or recognize revenue from an inquiry.
+Every open record requires an owner, next action and date. Use this ledger for
+inquiries through written agreement, plus reviewed losses, not-fit decisions,
+QA, and spam. It does not support the current catalog's reservation, appliance,
+subscription, activation, or refund stages. Do not classify those payments under
+its older paid stages or infer qualification from a payment. Keep verified
+payments, deposits, credits, subscriptions, cancellations, and refunds in Stripe;
+record agreed delivery and activation evidence in private operating notes. The
+ledger does not estimate close probability or recognize revenue from an inquiry.
 
 ## Review agenda and value case
 
@@ -53,7 +59,7 @@ Record business value as a customer estimate with assumptions: for example, hour
 ## Pricing and evidence
 
 Use the approved catalog only: software **$0**, Cloud **$49.99/workspace/month**,
-appliance including SSD **$999**, appliance including SSD and scoped onboarding
+appliance **$999**, appliance with scoped onboarding
 **$1,499**, and managed site **$499/site/month**. Managed sites include the associated
 Cloud workspace, with no additional Cloud subscription charge, and one hour of
 remote assistance per billing month. See [commercial setup](COMMERCIAL_SETUP.md)

@@ -4,9 +4,8 @@ Status: **coming soon**, with rollout planned for **early 2027**. Confirm
 compatibility, capacity, and delivery before the balance is collected.
 Owner: Mehrdad Zaker · mehrdadz@neuralint.io.
 
-**$1,499 USD per appliance, one time**, including SSD and up to three hours of
-remote onboarding. The bundle replaces the standalone **$999 SSD-equipped
-appliance** purchase for that unit.
+**$1,499 USD per appliance, one time**, including up to three hours of
+remote onboarding. The bundle replaces the standalone **$999 appliance** purchase for that unit.
 
 Reserve with a **$49 USD one-time deposit per appliance**, fully refundable and
 credited toward the chosen package. Cancel anytime before fulfillment for a

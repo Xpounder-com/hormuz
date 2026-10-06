@@ -137,11 +137,11 @@ Hormuz governs supported model requests routed through it. It does not govern ev
 https://usehormuz.github.io/security/#controls
 
 Billing: What are the Hormuz prices?
-Software is $0. Cloud is $49.99 per workspace per month. An appliance including SSD is $999, or $1,499 per appliance with SSD and scoped onboarding. A managed site is $499 per month. Prices are USD; model-provider usage and applicable taxes are separate.
+Software is $0. Cloud is $49.99 per workspace per month. An appliance is $999, or $1,499 per appliance with scoped onboarding. A managed site is $499 per month. Prices are USD; model-provider usage and applicable taxes are separate.
 https://usehormuz.github.io/plans/#offers
 
 Billing: What does an appliance purchase include?
-The $999 appliance includes SSD, enclosure, cooling, power supply, installed gateway software, and setup guidance. The $1,499 bundle includes the same appliance plus up to 3 hours of remote onboarding for one provider and one supported application, initial policy setup, acceptance checks, and handoff. It replaces the standalone appliance purchase for that unit.
+The $999 appliance includes enclosure, cooling, power supply, installed gateway software, and setup guidance. The $1,499 bundle includes the same appliance plus up to 3 hours of remote onboarding for one provider and one supported application, initial policy setup, acceptance checks, and handoff. It replaces the standalone appliance purchase for that unit.
 https://usehormuz.github.io/enterprise/#onboarding
 
 Billing: When will appliances be available?

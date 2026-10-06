@@ -7,7 +7,7 @@ import { SOFTWARE_PRICE, CLOUD_PRICE, APPLIANCE_PRICE, ONBOARDING_PRICE, MANAGED
 import { CONTACT_EMAIL, sitePath } from '../../lib/site.mjs';
 import { StripeCheckoutLink } from '../components/StripeCheckoutLink';
 
-export const metadata = pageMetadata('Pricing & Stripe checkout — Hormuz', 'Software ' + SOFTWARE_PRICE + '. Pay through Stripe for Cloud at ' + CLOUD_PRICE + ' per workspace per month, an SSD-equipped appliance at ' + APPLIANCE_PRICE + ', scoped onboarding at ' + ONBOARDING_PRICE + ', or a managed site at ' + MANAGED_SITE_PRICE + ' per month. Reserve an appliance for ' + RESERVATION_PRICE + '.', '/plans/');
+export const metadata = pageMetadata('Pricing & Stripe checkout — Hormuz', 'Software ' + SOFTWARE_PRICE + '. Pay through Stripe for Cloud at ' + CLOUD_PRICE + ' per workspace per month, an appliance at ' + APPLIANCE_PRICE + ', scoped onboarding at ' + ONBOARDING_PRICE + ', or a managed site at ' + MANAGED_SITE_PRICE + ' per month. Reserve an appliance for ' + RESERVATION_PRICE + '.', '/plans/');
 
 export default function PlansPage() {
   return <PageFrame active="plans">
@@ -26,7 +26,7 @@ export default function PlansPage() {
       <CampaignLink className="text-link" href={sitePath('/contact/?interest=cloud')}>Confirm your workflow and activation →</CampaignLink>
     </section>
     <section className="section prose-section" id="details"><p className="section-label">WHAT YOUR PURCHASE COVERS</p><h2>Your provider accounts remain yours.</h2>
-      <p>The software has no Hormuz license fee. An appliance purchase includes SSD and the stated hardware package. The onboarding package includes that appliance and the defined remote installation scope.</p>
+      <p>The software has no Hormuz license fee. An appliance purchase includes the stated hardware package. The onboarding package includes that appliance and the defined remote installation scope.</p>
       <p>Managed-site service includes its associated Cloud workspace. The monthly site fee covers the stated monitoring, update, recovery, and support allowance. Provider usage, customer networking, electricity, and applicable taxes are separate.</p>
       <p>Every paid offer has a Stripe checkout button on this page. Reservations are one-time payments; Cloud and managed sites are monthly subscriptions. The onboarding package includes the appliance, and managed-site service includes its associated Cloud workspace.</p>
       <p>Already reserved? Use the Stripe invoice provided for your remaining appliance balance. The full-price appliance buttons are for purchases without a reservation deposit. An inquiry takes no payment, and a return page is not proof of payment; Hormuz verifies the Stripe payment before fulfillment or activation.</p>

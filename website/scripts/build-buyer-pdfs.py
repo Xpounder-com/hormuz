@@ -98,8 +98,8 @@ overview = [
         ["<b>Offer</b>", "<b>Price in USD</b>"],
         ["Software", money("software")],
         ["Cloud", money("cloud") + " / workspace / month"],
-        ["Appliance, including SSD", money("appliance") + " / appliance, one time"],
-        ["Appliance with SSD and scoped onboarding", money("onboarding") + " / appliance, one time"],
+        ["Appliance", money("appliance") + " / appliance, one time"],
+        ["Appliance with scoped onboarding", money("onboarding") + " / appliance, one time"],
         ["Managed site", money("managedSite") + " / site / month"],
     ], [284, 240]),
     p(f'Onboarding includes up to {PRICING["onboarding"]["remoteHours"]} hours of remote setup for one provider and one supported application. A managed site includes its Cloud workspace and {PRICING["managedSite"]["supportHoursPerMonth"]} hour of remote assistance per billing month, with a response within {PRICING["managedSite"]["responseBusinessDays"]} business days.'),
@@ -112,9 +112,9 @@ overview = [
 appliance = [
     p("APPLIANCE / SCOPED ONBOARDING", "label"),
     p("Your network. Your appliance.<br/>A bounded setup.", "title"),
-    p(f'{money("appliance")} per appliance including SSD, or {money("onboarding")} per appliance including SSD and scoped onboarding. Both prices are USD and one time.', "deck"),
+    p(f'{money("appliance")} per appliance, or {money("onboarding")} per appliance with scoped onboarding. Both prices are USD and one time.', "deck"),
     p("Hardware included", "h2"),
-    p(f'SSD, enclosure, cooling, power supply, installed gateway, and setup guidance. <b>Coming soon: planned rollout early 2027.</b> Reserve with a fully refundable {money("reservation")} deposit, credited toward purchase. Cancel anytime before fulfillment for a full refund; email the owner with your Stripe receipt. All payments use Stripe. The date is a target; delivery requires hardware qualification and confirmed arrangements.'),
+    p(f'Enclosure, cooling, power supply, installed gateway, and setup guidance. <b>Coming soon: planned rollout early 2027.</b> Reserve with a fully refundable {money("reservation")} deposit, credited toward purchase. Cancel anytime before fulfillment for a full refund; email the owner with your Stripe receipt. All payments use Stripe. The date is a target; delivery requires hardware qualification and confirmed arrangements.'),
     p("The onboarding bundle", "h2"),
     p(f'Includes the appliance and up to {PRICING["onboarding"]["remoteHours"]} hours of remote onboarding for one provider and one supported application. It replaces the standalone appliance purchase for that unit. Calls, configuration, checks, and handoff count against this allowance.'),
     table([
@@ -181,4 +181,8 @@ trust = [
 if __name__ == "__main__":
     build("hormuz-overview.pdf", "Hormuz — buyer overview", overview)
     build("hormuz-appliance-brief.pdf", "Hormuz — appliance and scoped onboarding", appliance)
+    # Keep the existing download URL synchronized with the revised hardware offer.
+    (OUTPUT / "hormuz-pilot-brief.pdf").write_bytes(
+        (OUTPUT / "hormuz-appliance-brief.pdf").read_bytes()
+    )
     build("hormuz-trust-brief.pdf", "Hormuz — trust and data-flow brief", trust)

@@ -72,8 +72,8 @@ s = slide('Software, Cloud, and hardware', 'One clear price catalog.', 4, ['webs
 const priceRows = [
   ['Software', SOFTWARE_PRICE, 'Apache-2.0 software'],
   ['Cloud', CLOUD_PRICE, 'Per workspace / month'],
-  ['Appliance', APPLIANCE_PRICE, 'Per appliance / one time / SSD included'],
-  ['Appliance + scoped onboarding', ONBOARDING_PRICE, 'Per appliance / one time / SSD included'],
+  ['Appliance', APPLIANCE_PRICE, 'Per appliance / one time'],
+  ['Appliance + scoped onboarding', ONBOARDING_PRICE, 'Per appliance / one time'],
   ['Managed site', MANAGED_SITE_PRICE, 'Per site / month / Cloud included'],
 ];
 priceRows.forEach(([label, amount, unit], i) => {
@@ -102,7 +102,7 @@ phases.forEach(([n, title, detail], i) => {
   text(s, `phase-title-${n}`, title, 204, y, 1012, 42, 31, C.ink, true);
   text(s, `phase-body-${n}`, detail, 204, y + 50, 1012, 45, 26);
 });
-text(s, 'onboarding-boundary', `Up to ${pricing.onboarding.remoteHours} hours of remote setup. Appliance and SSD included.
+text(s, 'onboarding-boundary', `Up to ${pricing.onboarding.remoteHours} hours of remote setup. Appliance included.
 Custom integrations, on-site work, and ongoing operations are excluded.`, 64, 605, 1152, 58, 22, C.muted);
 
 s = slide('Planned rollout: early 2027', 'Coming soon. Reserve your appliance.', 7, [site + 'enterprise/#reserve', 'marketing/COMMERCIAL_SETUP.md', 'website/lib/pricing.json'], true);

@@ -10,8 +10,8 @@ FAQs, and buyer-download builders consume that catalog.
 | --- | --- | --- |
 | Software | **$0** | Personal Optimizer and Apache-2.0 gateway; customer operates their infrastructure |
 | Cloud | **$49.99 per workspace per month** | One hosted workspace and dashboard, administrative users included |
-| Appliance | **$999 per appliance, one time** | SSD, enclosure, cooling, power supply, and installed Hormuz gateway |
-| Appliance with scoped onboarding | **$1,499 per appliance, one time** | The same SSD-equipped appliance plus up to three hours of remote onboarding |
+| Appliance | **$999 per appliance, one time** | enclosure, cooling, power supply, and installed Hormuz gateway |
+| Appliance with scoped onboarding | **$1,499 per appliance, one time** | The same appliance plus up to three hours of remote onboarding |
 | Managed site | **$499 per site per month** | Associated Cloud workspace, device-health monitoring, qualified updates, recovery guidance, and the support allowance below |
 
 The onboarding bundle includes the appliance; it replaces the standalone
@@ -135,7 +135,7 @@ enforce activation eligibility.
 | bookingUrl | Public scheduling page | Correct organizer, timezone, availability, invitation behavior |
 | reservationPaymentUrl | Live Stripe Payment Link | USD 49 one time per appliance; fully refundable, credited toward purchase; early 2027 target and cancellation contact disclosed |
 | cloudPaymentUrl | Live Stripe Payment Link | USD 49.99 monthly per workspace; confirmed activation and cancellation terms |
-| appliancePaymentUrl | Live Stripe Payment Link | USD 999 one time per SSD-equipped appliance; confirmed delivery arrangements |
+| appliancePaymentUrl | Live Stripe Payment Link | USD 999 one time per appliance; confirmed delivery arrangements |
 | onboardingPaymentUrl | Live Stripe Payment Link | USD 1,499 one time per appliance with the stated onboarding bundle |
 | managedSitePaymentUrl | Live Stripe Payment Link | USD 499 monthly per managed site; included Cloud and support allowance disclosed |
 

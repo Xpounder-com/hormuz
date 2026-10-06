@@ -15,8 +15,8 @@ import { StripeCheckoutLink, type PaidOffer } from './StripeCheckoutLink';
 const offers: Record<string, { price: string; detail: string; action: string }> = {
   reservation: { price: RESERVATION_PRICE, detail: `USD/appliance · one-time refundable deposit · credited toward purchase · planned rollout: ${pricing.reservation.plannedRollout}`, action: 'Send my reservation question →' },
   cloud: { price: `${CLOUD_PRICE}/month`, detail: 'USD/workspace · hosting and administrative users included · accepting inquiries', action: 'Discuss my Cloud workspace →' },
-  appliance: { price: APPLIANCE_PRICE, detail: `USD/appliance, one time · SSD included · coming soon: ${pricing.reservation.plannedRollout}`, action: 'Discuss my appliance →' },
-  onboarding: { price: ONBOARDING_PRICE, detail: `USD/appliance, one time · SSD and up to ${pricing.onboarding.remoteHours} hours of scoped remote onboarding included · coming soon: ${pricing.reservation.plannedRollout}`, action: 'Discuss my onboarding →' },
+  appliance: { price: APPLIANCE_PRICE, detail: `USD/appliance, one time · Preconfigured gateway · coming soon: ${pricing.reservation.plannedRollout}`, action: 'Discuss my appliance →' },
+  onboarding: { price: ONBOARDING_PRICE, detail: `USD/appliance, one time · Appliance and up to ${pricing.onboarding.remoteHours} hours of scoped remote onboarding included · coming soon: ${pricing.reservation.plannedRollout}`, action: 'Discuss my onboarding →' },
   managed: { price: `${MANAGED_SITE_PRICE}/month`, detail: `USD/site · Cloud workspace and ${pricing.managedSite.supportHoursPerMonth} hour of remote assistance per billing month included`, action: 'Discuss my managed site →' },
 };
 

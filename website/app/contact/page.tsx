@@ -6,7 +6,7 @@ import { PageFrame, PageHero } from '../components/PageFrame';
 import { ContactForm } from '../components/ContactForm';
 import { LeadForm } from '../components/LeadForm';
 
-export const metadata = pageMetadata('Cloud, appliance & managed-site inquiries — Hormuz', 'Discuss Cloud, an SSD-equipped appliance, scoped onboarding, or a managed site with a defined support allowance.', '/contact/');
+export const metadata = pageMetadata('Cloud, appliance & managed-site inquiries — Hormuz', 'Discuss Cloud, an appliance, scoped onboarding, or a managed site with a defined support allowance.', '/contact/');
 
 export default function ContactPage() {
   return <PageFrame active="contact">
@@ -26,8 +26,8 @@ export default function ContactPage() {
         <dl className="contact-offer-summary">
           <div><dt>Software</dt><dd>{SOFTWARE_PRICE}</dd></div>
           <div><dt>Cloud</dt><dd>{CLOUD_PRICE}<small>USD/workspace/month</small></dd></div>
-          <div><dt>Appliance</dt><dd>{APPLIANCE_PRICE}<small>USD/unit, one time · SSD included</small></dd></div>
-          <div><dt>Appliance with onboarding</dt><dd>{ONBOARDING_PRICE}<small>USD/unit, one time · SSD and scoped setup included</small></dd></div>
+          <div><dt>Appliance</dt><dd>{APPLIANCE_PRICE}<small>USD/unit, one time · Preconfigured gateway</small></dd></div>
+          <div><dt>Appliance with onboarding</dt><dd>{ONBOARDING_PRICE}<small>USD/unit, one time · Appliance and scoped setup included</small></dd></div>
           <div><dt>Appliance reservation</dt><dd>{RESERVATION_PRICE}<small>USD/unit · refundable deposit credited toward purchase</small></dd></div>
           <div><dt>Managed site</dt><dd>{MANAGED_SITE_PRICE}<small>USD/site/month · Cloud workspace included</small></dd></div>
         </dl>

@@ -6,11 +6,11 @@ import { pageMetadata } from '../../lib/metadata';
 import { CONTACT_EMAIL, sitePath, sourcePath, SOURCE_VERSION } from '../../lib/site.mjs';
 import { PageFrame, PageHero } from '../components/PageFrame';
 
-export const metadata = pageMetadata('Appliances & managed sites — Hormuz', 'Appliances coming soon, with rollout planned for early 2027. Reserve with a refundable ' + RESERVATION_PRICE + ' deposit, credited toward your purchase. SSD included.', '/enterprise/');
+export const metadata = pageMetadata('Appliances & managed sites — Hormuz', 'Appliances coming soon, with rollout planned for early 2027. Reserve with a refundable ' + RESERVATION_PRICE + ' deposit, credited toward your purchase.', '/enterprise/');
 
 const comparison = [
   ['Software controls', 'The Personal Optimizer and Apache-2.0 gateway', 'The same software on an appliance'],
-  ['Hardware', 'Your own compatible device', 'SSD, enclosure, cooling, power supply, and installed gateway software'],
+  ['Hardware', 'Your own compatible device', 'enclosure, cooling, power supply, and installed gateway software'],
   ['Initial setup', 'Documentation and self-service configuration', 'The onboarding bundle includes one provider, one supported application, and initial policy setup'],
   ['Ongoing assistance', 'Public, best-effort community channels', `${pricing.managedSite.supportHoursPerMonth} hour of remote support per managed site per billing month; response within ${pricing.managedSite.responseBusinessDays} business days`],
   ['Cloud dashboard', `Optional Cloud at ${CLOUD_PRICE}/workspace/month`, 'One associated Cloud workspace included in the managed-site fee'],
@@ -20,7 +20,7 @@ const comparison = [
 export default function EnterprisePage() {
   return <PageFrame active="enterprise">
     <PageHero eyebrow="Appliances · Scoped onboarding · Managed sites" title={<>Your AI gateway.<br /><span>In your environment.</span></>}>
-      <p>Coming soon: an SSD-equipped appliance, with optional scoped onboarding and site management. Rollout is planned for {pricing.reservation.plannedRollout}. Reserve with a refundable deposit while hardware and operating capacity are qualified.</p>
+      <p>Coming soon: an appliance, with optional scoped onboarding and site management. Rollout is planned for {pricing.reservation.plannedRollout}. Reserve with a refundable deposit while hardware and operating capacity are qualified.</p>
       <div className="hero-actions"><a className="button button-primary" href="#reserve">Reserve yours — {RESERVATION_PRICE} ↓</a><CampaignLink className="button button-ghost" href={sitePath('/plans/')}>All prices →</CampaignLink></div>
     </PageHero>
     <EnterprisePlans />
@@ -29,7 +29,7 @@ export default function EnterprisePage() {
       <div className="table-scroll"><table className="comparison-table"><caption>Self-service software and appliance services</caption><thead><tr><th scope="col">Area</th><th scope="col">Self-service software</th><th scope="col">Appliance and managed site</th></tr></thead><tbody>{comparison.map(([area, software, service]) => <tr key={area}><th scope="row">{area}</th><td>{software}</td><td>{service}</td></tr>)}</tbody></table></div>
     </section>
     <section className="pilot-section section" id="onboarding">
-      <div className="pilot-heading"><p className="section-label">Appliance with scoped onboarding · {ONBOARDING_PRICE}</p><h2>Connect one workflow and hand it over.</h2><p>The bundle includes the SSD-equipped appliance and up to {pricing.onboarding.remoteHours} hours of remote onboarding. Confirm the supported application, provider, prerequisites, acceptance criteria, and start date before payment. It replaces the standalone appliance price for that unit.</p></div>
+      <div className="pilot-heading"><p className="section-label">Appliance with scoped onboarding · {ONBOARDING_PRICE}</p><h2>Connect one workflow and hand it over.</h2><p>The bundle includes the appliance and up to {pricing.onboarding.remoteHours} hours of remote onboarding. Confirm the supported application, provider, prerequisites, acceptance criteria, and start date before payment. It replaces the standalone appliance price for that unit.</p></div>
       <div className="pilot-steps">
         <article><span>01</span><h3>Prepare</h3><p>Name the site owner and review the customer network, power, authorized provider account, and approved test inputs.</p><strong>Prerequisites and agreed scope</strong></article>
         <article><span>02</span><h3>Connect</h3><p>Connect one provider and one supported application. Set initial identity, secret, and budget policies for the agreed workflow.</p><strong>Configured appliance and application</strong></article>

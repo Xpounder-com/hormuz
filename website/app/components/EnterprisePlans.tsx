@@ -14,15 +14,15 @@ export function EnterprisePlans() {
     <div className="offer-grid conversion-offers">
       <article className="offer-card"><p className="section-label">COMING SOON · CUSTOMER IT INSTALLS</p><h3>Appliance</h3>
         <PriceAmount amount={APPLIANCE_PRICE} period="USD / appliance · one-time" />
-        <p>An assembled appliance including SSD, enclosure, cooling, power supply, and a tested Hormuz installation.</p>
-        <ul><li>SSD included</li><li>Setup guide and supported configuration</li><li>Local processing for qualified workflows</li><li>Your IT team handles deployment</li></ul>
+        <p>An assembled appliance including enclosure, cooling, power supply, and a tested Hormuz installation.</p>
+        <ul><li>Setup guide and supported configuration</li><li>Local processing for qualified workflows</li><li>Your IT team handles deployment</li></ul>
         <a className="button button-primary" href="#reserve">Reserve yours <span aria-hidden="true">↓</span></a>
         <div className="confirmed-order"><StripeCheckoutLink offer="appliance" className="button button-outline">Pay for appliance — {APPLIANCE_PRICE}</StripeCheckoutLink>
           <p className="field-hint">For a confirmed delivery without a reservation deposit. Coming soon; full-price checkout does not establish a shipping date. Reserved buyers pay their balance through the Stripe invoice Hormuz provides.</p></div>
       </article>
       <article className="offer-card offer-featured"><p className="section-label">COMING SOON · ASSISTED INSTALLATION</p><h3>Appliance with scoped onboarding</h3>
         <PriceAmount amount={ONBOARDING_PRICE} period="USD / appliance · one-time" />
-        <p>The same appliance with SSD, plus remote assistance for the agreed installation.</p>
+        <p>The same appliance, plus remote assistance for the agreed installation.</p>
         <ul><li>Up to {pricing.onboarding.remoteHours} hours of remote onboarding</li><li>One provider and one supported application</li><li>Initial policy configuration and acceptance checks</li><li>Administrator handoff</li></ul>
         <a className="button button-primary" href="#reserve">Reserve yours <span aria-hidden="true">↓</span></a>
         <div className="confirmed-order"><StripeCheckoutLink offer="onboarding" className="button button-outline">Pay for onboarding package — {ONBOARDING_PRICE}</StripeCheckoutLink>

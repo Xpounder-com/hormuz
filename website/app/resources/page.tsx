@@ -8,7 +8,7 @@ export const metadata = pageMetadata('Project & buyer resources — Hormuz', 'Do
 
 const downloads = [
   ['Overview', 'The buyer one-pager', 'The problem, open-source boundary, evaluation fit, and next step.', '/downloads/hormuz-overview.pdf'],
-  ['Appliance', 'Hardware and scoped onboarding', 'SSD-equipped hardware, bounded remote setup, acceptance checks, and managed-site coverage.', '/downloads/hormuz-appliance-brief.pdf'],
+  ['Appliance', 'Hardware and scoped onboarding', 'hardware, bounded remote setup, acceptance checks, and managed-site coverage.', '/downloads/hormuz-appliance-brief.pdf'],
   ['Trust', 'Data flow & security brief', 'Transient content, retained metadata, credentials, operator duties, and review questions.', '/downloads/hormuz-trust-brief.pdf'],
   ['Presentation', 'The short buyer deck', 'A seven-slide editable briefing for an engineering or security evaluation.', '/downloads/hormuz-buyer-briefing.pptx'],
 ];

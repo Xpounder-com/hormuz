@@ -4,11 +4,11 @@ Static Next.js export for **https://usehormuz.github.io/**. This repository
 remains the authoritative website source; the dedicated
 [`usehormuz/usehormuz.github.io`](https://github.com/usehormuz/usehormuz.github.io)
 repository pins a reviewed source commit for publication.
-The site presents free software, planned Cloud, SSD-equipped appliances,
+The site presents free software, planned Cloud, appliances,
 scoped onboarding, and managed sites alongside documentation, demos, and community.
 The single price catalog is `lib/pricing.json`: software $0, Cloud
 $49.99/workspace/month, appliance $999, appliance with scoped onboarding $1,499,
-and managed site $499/site/month. The appliance prices include SSD.
+and managed site $499/site/month.
 Appliances are coming soon, with rollout planned for early 2027. The $49
 one-time reservation deposit per appliance is fully refundable and credited
 toward the purchase. Cancel anytime before fulfillment for a full refund.

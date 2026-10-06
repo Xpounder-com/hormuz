@@ -39,7 +39,7 @@ test('lead payload excludes unknown fields and unconsented campaign data', () =>
   const tagged = buildLead(fields, '?utm_source=linkedin&email=private');
   assert.equal(tagged.campaign, 'utm_source=linkedin');
   assert.equal(buildLead({ ...fields, interest: 'support' }).interest, 'Managed site');
-  assert.equal(buildLead({ ...fields, interest: 'enterprise' }).interest, 'SSD-equipped appliance');
+  assert.equal(buildLead({ ...fields, interest: 'enterprise' }).interest, 'Appliance');
   assert.equal(buildLead({ ...fields, interest: 'pro' }).interest, 'Cloud workspace');
   assert.equal(buildLead({ ...fields, interest: 'reservation' }).interest, 'Appliance reservation');
 });

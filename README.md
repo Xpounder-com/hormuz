@@ -418,8 +418,8 @@ does not create a production-readiness or SLA claim.
 ## Software, Cloud, and appliances
 
 The core gateway remains Apache-2.0. Software is **$0**, Cloud is
-**$49.99 per workspace per month**, an appliance including SSD is **$999**, and
-an appliance including SSD with scoped onboarding is **$1,499**. A managed site
+**$49.99 per workspace per month**, an appliance is **$999**, and
+an appliance with scoped onboarding is **$1,499**. A managed site
 is **$499 per month**, including the associated Cloud workspace and one hour of
 remote support per billing month, with a response within two business days.
 

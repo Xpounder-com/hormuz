@@ -8,8 +8,7 @@
     "unit": "workspace/month"
   },
   "appliance": {
-    "amount": 999,
-    "includesSSD": true
+    "amount": 999
   },
   "reservation": {
     "amount": 49,
@@ -20,7 +19,6 @@
   },
   "onboarding": {
     "amount": 1499,
-    "includesSSD": true,
     "remoteHours": 3,
     "providers": 1,
     "applications": 1

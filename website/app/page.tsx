@@ -13,7 +13,7 @@ import { QuestionIndex } from './components/QuestionIndex';
 import { ApplianceReservation } from './components/ApplianceReservation';
 
 export const metadata = {
-  ...pageMetadata('Hormuz | Free Software, Cloud & Appliances', 'Use the free Personal Optimizer on your Mac, request a Cloud workspace, or discuss an SSD-equipped appliance and managed site.', '/'),
+  ...pageMetadata('Hormuz | Free Software, Cloud & Appliances', 'Use the free Personal Optimizer on your Mac, request a Cloud workspace, or discuss an appliance and managed site.', '/'),
   verification: { google: 'qauQXsmCOtWfE0ar7muWwlqPmMfW5F7uaI28QGz30v4' },
 };
 

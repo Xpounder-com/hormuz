@@ -1,6 +1,6 @@
 import { CONTACT_EMAIL } from './site.mjs';
 
-export const INTERESTS = Object.freeze({ reservation: 'Appliance reservation', cloud: 'Cloud workspace', appliance: 'SSD-equipped appliance', onboarding: 'Appliance with scoped onboarding', managed: 'Managed site', review: 'Workflow fit discussion', integration: 'Client integration', security: 'Security requirements', community: 'Open-source feedback' });
+export const INTERESTS = Object.freeze({ reservation: 'Appliance reservation', cloud: 'Cloud workspace', appliance: 'Appliance', onboarding: 'Appliance with scoped onboarding', managed: 'Managed site', review: 'Workflow fit discussion', integration: 'Client integration', security: 'Security requirements', community: 'Open-source feedback' });
 const LEGACY_INTERESTS = Object.freeze({ pro: 'cloud', pilot: 'onboarding', support: 'managed', enterprise: 'appliance' });
 export function normalizeInterest(value) {
   const key = String(value ?? '');

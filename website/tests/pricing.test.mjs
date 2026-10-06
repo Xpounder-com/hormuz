@@ -7,17 +7,17 @@ import { customerQuestions } from '../lib/customer-questions.mjs';
 const allowedPrices = new Set(['$0', '$49.99', '$999', '$1,499', '$499', '$49']);
 const pricePattern = /\$(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
 
-test('the catalog contains the approved offers, SSD inclusion, and bounded support', () => {
+test('the catalog contains the approved offers and bounded support', () => {
   assert.equal(pricing.currency, 'USD');
   assert.deepEqual(Object.fromEntries(Object.entries(pricing).filter(([, v]) => typeof v === 'object').map(([key, v]) => [key, v.amount])), {
     software: 0, cloud: 49.99, appliance: 999, reservation: 49, onboarding: 1499, managedSite: 499,
   });
   assert.equal(pricing.cloud.unit, 'workspace/month');
-  assert.equal(pricing.appliance.includesSSD, true);
+  assert.equal(Object.hasOwn(pricing.appliance, 'includesSSD'), false);
   assert.equal(pricing.reservation.type, 'refundable-deposit');
   assert.equal(pricing.reservation.creditedToPurchase, true);
   assert.equal(pricing.reservation.plannedRollout, 'early 2027');
-  assert.equal(pricing.onboarding.includesSSD, true);
+  assert.equal(Object.hasOwn(pricing.onboarding, 'includesSSD'), false);
   assert.equal(pricing.onboarding.remoteHours, 3);
   assert.equal(pricing.managedSite.includesCloudWorkspace, true);
   assert.equal(pricing.managedSite.supportHoursPerMonth, 1);

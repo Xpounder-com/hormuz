@@ -90,12 +90,20 @@ index status. Search impressions and clicks are separate from paid X reporting.
 | Returning evaluator | A qualifying evaluator completes the study's returning-user criterion | Repeat pageviews |
 | Qualified buyer conversation | An actual conversation identifies a workflow, responsible owner, material control need, and possible next step | An email draft, generic interest, or star |
 | Paid appliance reservation | Stripe confirms a successful $49 deposit; count quantity and exclude canceled or refunded reservations | A checkout click, form acknowledgment, return URL, or a fulfilled appliance sale |
-| Pilot agreed | Scope, capacity, commercial terms, and acceptance are agreed by the parties | Download, inquiry, or proposed brief |
-| Pilot outcome | Agreed acceptance evidence and go/no-go decision are recorded | Unmeasured ROI or token consumption |
+| Appliance or onboarding paid | Stripe confirms the matching package's successful payment, including any invoice applying the verified reservation deposit | A deposit alone, a checkout click, or a return URL |
+| Cloud or managed site subscribed | Stripe confirms an active subscription and successful initial payment for the matching workspace or site | An incomplete checkout or an included Cloud workspace counted as another sale |
+| Service activated or appliance fulfilled | Agreed acceptance evidence and activation or customer delivery are recorded by the named operator | Payment alone, a rollout target, or an internal demonstration |
+| Cancellation requested | An actual customer request and date are recorded | A link click or assumed billing change |
+| Subscription canceled | Stripe confirms cancellation and its effective date; the current paid period is recorded separately | A request alone or immediate removal of the current paid period |
+| Payment or reservation refunded | Stripe confirms a successful refund against the original payment; refunded reservations leave the outstanding count | A promise, a draft refund, or a deposit applied to a purchase invoice |
 
 Suggested weekly review: source of each actual conversation, one named problem,
 next step and owner, blockers, and evaluator friction. Do not infer individual
 productivity from usage data. Keep study evidence separate from sales notes.
+Use Stripe's dated records for payment, subscription, cancellation, and refund
+totals. The inquiry ledger does not support the current catalog's paid stages;
+keep activation and delivery evidence in private operating notes. Do not count
+applying a reservation deposit as another payment.
 
 ## Consent-aware source handling
 
@@ -150,7 +158,7 @@ and [privacy controls](https://business.x.com/en/help/campaign-measurement-and-a
 ## Commercial funnel activation
 
 The approved catalog is software $0, Cloud $49.99/workspace/month, appliance
-including SSD $999, appliance including SSD and scoped onboarding $1,499,
+at $999, appliance with scoped onboarding $1,499,
 and managed site $499/site/month. Managed sites include the associated Cloud
 workspace and one hour of remote assistance per billing month, with a response
 within two business days.
