@@ -2,7 +2,7 @@
 
 Hormuz's first customer distribution path is a Developer ID signed and Apple-notarized download. It does not require Mac App Store review, App Sandbox adoption, or an App Store listing; Apple's [notarization overview](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) describes this automated trust check as separate from App Review. The existing local preview remains an ad hoc build with bundle identifier `com.hormuz.mac.local`; it is never a customer artifact.
 
-The current customer artifact is [Hormuz v1.3.0 for Apple Silicon](https://github.com/Xpounder-com/hormuz/releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip). Verify it against the release's [SHA-256 manifest](https://github.com/Xpounder-com/hormuz/releases/download/v1.3.0/SHA256SUMS.txt) before installation. The [release page](https://github.com/Xpounder-com/hormuz/releases/tag/v1.3.0) publishes the exact source commit, qualification boundaries, and content-free evidence. No v1.4.0 notarized Mac archive has been published.
+The v1.8.0 customer artifact is [Hormuz for Apple Silicon](https://github.com/Xpounder-com/hormuz/releases/download/v1.8.0/Hormuz-1.8.0-notarized.zip). Verify it against the release's [SHA-256 manifest](https://github.com/Xpounder-com/hormuz/releases/download/v1.8.0/SHA256SUMS.txt) before installation. The [release page](https://github.com/Xpounder-com/hormuz/releases/tag/v1.8.0) records the exact source commit, original archive, notarization and qualification boundaries. Historical v1.3.0 archives remain available for rollback; there is no automatic updater.
 
 The permanent identifier is `com.xpounder.hormuz`, registered as an explicit App ID in Apple Developer team `R267LZMUTY`. Treat both values as identity decisions: changing the identifier or signing team later changes the app's designated requirement and can disrupt Keychain access, updates, and rollback behavior. The current app has no custom entitlements and uses no provisioning profile. Apple's [Developer ID guidance](https://developer.apple.com/support/developer-id/) requires a Developer ID provisioning profile only when an app adopts advanced capabilities such as CloudKit; registering the explicit App ID now reserves the customer identity without adding such a profile to this build.
 
@@ -27,15 +27,16 @@ outer app signature. The Mach-O backend remains nested code at
 This layout keeps the script's integrity in the bundle seal when ZIP transfer drops
 extended attributes used by standalone script signatures.
 
-Current development packaging also builds the Rust toolchain-pinned
+Current packaging also builds the Rust toolchain-pinned
 `Contents/Helpers/hormuz-client-relay`, checks exact arm64 architecture and
 system-only dynamic dependencies, and signs it before sealing the app. A
 `--prebuilt-binary` invocation must supply its matching `--prebuilt-relay` too.
 Proof schema v4 adds the native relay's packaging, signature identity, and
 digest; the pilot verifier continues accepting historical v2/v3 proofs and
-their original archive layouts. v1.7.0 is a core/source release, not a new
-customer Mac archive. Ordinary Mac CI uses ad hoc local validation and does
-not invoke the manual signing/notarization workflow or submit anything to Apple.
+their original archive layouts. v1.8.0 packages this native relay in the
+notarized Mac archive. Ordinary Mac CI still uses ad hoc local validation;
+only the explicitly authorized protected distribution workflow signs and
+submits an app to Apple. See the [release boundaries](releases/v1.8.0-notarized-mac.md).
 
 ## Local packaging and notarization
 
@@ -50,9 +51,9 @@ Store notarization credentials in Keychain using `xcrun notarytool store-credent
 ```sh
 HORMUZ_CODESIGN_IDENTITY='Developer ID Application: Company Name (TEAMID)' \
   ./script/package_macos_release.sh \
-  --output-directory /private/tmp/hormuz-macos-1.3.0 \
+  --output-directory /private/tmp/hormuz-macos-1.8.0 \
   --bundle-id com.xpounder.hormuz \
-  --version 1.3.0 \
+  --version 1.8.0 \
   --build 1 \
   --context-helper-directory /private/path/context-helpers \
   --tokenizer-cache /private/path/context-tokenizers
@@ -62,8 +63,8 @@ Submit, staple, and repackage the same app:
 
 ```sh
 ./script/notarize_macos_release.sh \
-  --bundle /private/tmp/hormuz-macos-1.3.0/Hormuz.app \
-  --upload-archive /private/tmp/hormuz-macos-1.3.0/Hormuz-1.3.0-notarization-upload.zip \
+  --bundle /private/tmp/hormuz-macos-1.8.0/Hormuz.app \
+  --upload-archive /private/tmp/hormuz-macos-1.8.0/Hormuz-1.8.0-notarization-upload.zip \
   --keychain-profile hormuz-notary
 ```
 
@@ -124,7 +125,8 @@ identifier, CI-derived build number, architecture, tokenizer digests, and payloa
 digests. A fresh protected runner independently repeats the manifest, commit,
 architecture, helper signature, team, resource, and digest checks before receiving
 notarization credentials. That final runner never executes the transferred
-payload; its v3 proof therefore records `context_helper_runtime_verified: false`,
+payload; its v4 proof therefore records `context_helper_runtime_verified: false`
+and `executable_version_verified: false`,
 while the earlier jobs supply separate runtime execution gates. Its bundle and
 archive checks are static plus Apple signature, notarization, stapler, and
 Gatekeeper verification.

@@ -1,5 +1,5 @@
 import { CampaignLink } from './CampaignLink';
-import { AUTHOR, CONTACT_EMAIL, OWNER_NAME, OWNER_URL, REPOSITORY, SOURCE_VERSION, sitePath, sourcePath } from '../../lib/site.mjs';
+import { AUTHOR, CONTACT_EMAIL, OWNER_NAME, OWNER_URL, REPOSITORY, SOURCE_VERSION, MACOS_VERSION, sitePath, sourcePath } from '../../lib/site.mjs';
 import { AdPreferencesButton } from './AdConsent';
 import { BrandLockup } from './Brand';
 
@@ -12,7 +12,7 @@ export function SiteFooter() {
         </CampaignLink>
         <p className="footer-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a></p>
         <p>Understand AI usage. Set the policy for what happens next.</p>
-        <span>Apache-2.0 · Core {SOURCE_VERSION.slice(1)} · Mac 1.3.0<br />Production qualification remains deployment-specific.</span>
+        <span>Apache-2.0 · Core {SOURCE_VERSION.slice(1)} · Mac {MACOS_VERSION.slice(1)}<br />Production qualification remains deployment-specific.</span>
       </div>
 
       <div className="footer-column">

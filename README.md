@@ -18,11 +18,11 @@ written to the usage database.
 
 > [!IMPORTANT]
 > Hormuz 1.0 established the stable CLI and policy/evidence contracts. Hormuz
-> 1.7 preserves those contracts and the terminal-first Personal Optimizer,
-> its adapter SDK, and Aider support. It integrates the native Mac launch path
-> with the Rust relay in development source and fixes one-shot optimizer setup. Windows
-> remains an unsigned, unsupported preview; the notarized Mac download remains
-> v1.3.0. See the [v1.7 release boundaries](docs/releases/v1.7.0-native-mac-relay.md). The original
+> 1.8 preserves those contracts and the terminal-first Personal Optimizer,
+> its adapter SDK, and Aider support. The notarized Apple Silicon Mac app includes
+> the native Rust relay and cancels stalled startup helpers when its owner exits.
+> Windows remains an unsigned, unsupported preview. See the
+> [v1.8 release boundaries](docs/releases/v1.8.0-notarized-mac.md). The original
 > release qualification included five isolated internal repetitions of one exact
 > offline policy workflow plus exact-byte candidate custody. That bounded result
 > does not prove external human usability, blanket production fitness, customer
@@ -61,7 +61,7 @@ The provider-free demo exercises the real HTTP gateway, policy, redaction,
 request-attempt, and SQLite evidence paths with disposable loopback providers:
 
 ~~~bash
-git clone --branch v1.7.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
+git clone --branch v1.8.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
 cd hormuz
 python3 -m venv .venv
 source .venv/bin/activate
@@ -69,7 +69,7 @@ python -m pip install --editable .
 hormuz demo
 ~~~
 
-The commands above select the stable v1.7.0 source tag. Installation downloads
+The commands above select the stable v1.8.0 source tag. Installation downloads
 Python dependencies; the demo itself uses only disposable local loopback
 providers. No OpenAI or Anthropic account is required. A successful run reports:
 
@@ -353,7 +353,7 @@ concurrency, rollback, and compatibility behavior.
 | --- | --- | --- |
 | Source + SQLite | Local evaluation and one-process operation | Not a shared or HA store |
 | [Signed OCI image](docs/OCI.md) | Version-matched Linux `amd64` reference | Digest is the artifact contract; no mutable `latest` tag |
-| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | Latest notarized download remains [v1.3.0](https://github.com/Xpounder-com/hormuz/releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip); [checksums and qualification evidence](https://github.com/Xpounder-com/hormuz/releases/tag/v1.3.0); no v1.4 Mac archive is published; Intel Macs are unsupported |
+| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | [v1.8.0 notarized archive](https://github.com/Xpounder-com/hormuz/releases/download/v1.8.0/Hormuz-1.8.0-notarized.zip); [checksums and qualification evidence](https://github.com/Xpounder-com/hormuz/releases/tag/v1.8.0); Intel Macs are unsupported |
 | [Docker Compose](deploy/compose/README.md) | Provider-free single-VM evaluation or pilot | One gateway replica; not HA or production certification |
 | [Kubernetes + Helm](deploy/kubernetes/README.md) | Bounded multi-replica reference | Customer-operated PostgreSQL and ingress; not general HA/DR certification |
 
@@ -392,7 +392,7 @@ python3 -m hormuz contract manifest
 
 | Status | Current boundary |
 | --- | --- |
-| Stable public contract | v1.7.0 preserves the v1.0 CLI and policy/evidence contracts and the v1.3 Personal Optimizer, adapter SDK, and Aider integration. The Windows shell remains an unsigned, unqualified development preview; see the [release boundaries](docs/releases/v1.7.0-native-mac-relay.md). |
+| Stable public contract | v1.8.0 preserves the v1.0 CLI and policy/evidence contracts and the v1.3 Personal Optimizer, adapter SDK, and Aider integration. The Windows shell remains an unsigned, unqualified development preview; see the [release boundaries](docs/releases/v1.8.0-notarized-mac.md). |
 | Production certification | None claimed; deployment fitness remains operator- and environment-specific. |
 | Verified references | Only the exact profiles documented in [SUPPORT.md](SUPPORT.md) and their retained evidence. |
 | Unfinished | Independent external onboarding, general production HA/DR, cloud certification, complete provider-account coverage, and independent review. |

@@ -7,18 +7,29 @@ This roadmap is evidence-gated. A milestone is not complete because code exists 
 The additive native-companion program is tracked in [epic #329](https://github.com/Xpounder-com/hormuz/issues/329)
 and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md).
 
-## v1.7.0 native Mac relay integration; Windows preview
+## v1.8.0 notarized Mac companion; Windows preview
+
+Hormuz v1.8.0 publishes the signed and notarized Apple Silicon archive with
+the native Rust relay and packaged on-demand Python optimizer. Owner exit
+cancels stalled startup credential helpers before client launch or gateway
+egress. Windows stays an unsigned, unsupported preview. The remaining #341
+lifecycle/platform criteria, #342 Rust optimizer port and #343 GTK4 shell
+are separate work. See the [v1.8.0 release scope](releases/v1.8.0-notarized-mac.md).
+
+## Previous release scopes
+
+### v1.7.0 native Mac relay integration; Windows preview
 
 Hormuz v1.7.0 wires development Mac launchers to the existing Rust relay and
 packaged on-demand Python optimizer, keeps Keychain custody in the Mac app,
 binds credentials to the launch profile, and stops ordinary helper descendants.
 Pinned official-client tests run through an extracted ad-hoc archive on loopback.
-The latest signed Mac download stays v1.3.0, with no new Apple submission.
+At v1.7.0 publication, the latest signed Mac download was v1.3.0, with no new Apple submission.
 Windows remains a preview; #341 client-tree containment and platform lifecycle
 acceptance and #342's Rust optimizer remain separate. See the
 [v1.7.0 release note](releases/v1.7.0-native-mac-relay.md).
 
-## v1.6.0 sign-in and usage improvements; Windows preview
+### v1.6.0 sign-in and usage improvements; Windows preview
 
 Hormuz v1.6.0 simplifies normal browser sign-in and introduces a separate,
 explicit team-invitation flow for CLI and development Mac clients. It fixes
@@ -29,31 +40,31 @@ schemas. See the [v1.6.0 release note](releases/v1.6.0-signin-and-usage.md).
 Windows remains an unsigned, unsupported development preview. This core
 release does not complete the originally targeted native Rust launch/relay
 milestone in [#341](https://github.com/Xpounder-com/hormuz/issues/341).
-The latest signed and notarized Mac archive remains v1.3.0; no v1.6 Mac app
-is submitted to Apple. Native-platform acceptance continues separately.
+At v1.6.0 publication, the latest notarized Mac archive was v1.3.0; no v1.6 Mac app
+was submitted to Apple. Native-platform acceptance continued separately.
 
-## v1.5.0 verified improvements; Windows preview
+### v1.5.0 verified improvements; Windows preview
 
 Hormuz v1.5.0 ships the verified core and website improvements, including
 the gateway's desktop enrollment/discovery contracts and the Next.js security
 update. Windows usage detail cards are available in development source and
 automated native evidence, not as a supported Windows distribution.
-The latest signed and notarized Mac archive remains v1.3.0; no v1.5 Mac app
-is submitted to Apple. Manual Windows acceptance and connected-product
+At v1.5.0 publication, the latest notarized Mac archive was v1.3.0; no v1.5 Mac app
+was submitted to Apple. Manual Windows acceptance and connected-product
 qualification remain open in #331 and #337–#340. See the
 [v1.5.0 release note](releases/v1.5.0-verified-improvements.md).
 
-## v1.4.0 native client baseline release
+### v1.4.0 native client baseline release
 
 Hormuz v1.4.0 aligns the package and gateway image release identity and
-publishes bounded native-client footprint regression evidence. The latest
-notarized Mac download remains v1.3.0.
+publishes bounded native-client footprint regression evidence. At that
+publication, the latest notarized Mac download was v1.3.0.
 The Windows development shell remains an unsigned preview; manual platform
 acceptance is tracked in [#331](https://github.com/Xpounder-com/hormuz/issues/331).
 See the [v1.4.0 release note](releases/v1.4.0-native-baseline.md) for installation
 and claim boundaries.
 
-## v1.3.0 Personal Optimizer release
+### v1.3.0 Personal Optimizer release
 
 Hormuz v1.3.0 packages the terminal-first Personal Optimizer, its adapter SDK,
 and Aider support without making organization setup, PostgreSQL, GitHub, Linear,

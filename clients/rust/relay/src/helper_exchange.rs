@@ -68,8 +68,9 @@ pub(super) fn capture(
     input: &[u8],
     budget: Duration,
     limit: usize,
+    cancelled: &impl Fn() -> bool,
 ) -> Option<Vec<u8>> {
-    capture_controlled(command, input, budget, limit, &|| false)
+    capture_controlled(command, input, budget, limit, cancelled)
 }
 
 fn capture_controlled<C: Fn() -> bool>(
@@ -273,6 +274,16 @@ mod tests {
 
     const BUDGET: Duration = Duration::from_millis(150);
     const TEST_LIMIT: Duration = Duration::from_secs(2);
+
+    #[test]
+    fn cancelled_capture_never_starts_a_helper() {
+        let temporary = tempfile::tempdir().unwrap();
+        let marker = temporary.path().join("helper-started");
+        let mut command = Command::new("/usr/bin/touch");
+        command.arg(&marker);
+        assert!(capture_controlled(&mut command, b"", BUDGET, 50, &|| true).is_none());
+        assert!(!marker.exists());
+    }
 
     fn shell(script: &str) -> Command {
         let mut command = Command::new("/bin/sh");

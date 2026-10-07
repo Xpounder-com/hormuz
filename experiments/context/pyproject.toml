@@ -21,7 +21,7 @@ classifiers = [
   "Topic :: Security"
 ]
 dependencies = [
-  "hormuz>=1.7.0,<1.8.0"
+  "hormuz>=1.8.0,<1.9.0"
 ]
 
 [project.scripts]

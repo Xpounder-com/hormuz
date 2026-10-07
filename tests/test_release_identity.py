@@ -27,7 +27,7 @@ class ReleaseIdentityTests(unittest.TestCase):
     def test_current_package_runtime_and_container_identity_are_consistent(self) -> None:
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         project = pyproject["project"]
-        expected_version = "1.7.0"
+        expected_version = "1.8.0"
         self.assertEqual(project["version"], expected_version)
         self.assertEqual(hormuz.__version__, expected_version)
         self.assertNotIn("Development Status :: 3 - Alpha", project["classifiers"])
@@ -72,16 +72,18 @@ class ReleaseIdentityTests(unittest.TestCase):
         )
 
     def test_current_release_preserves_native_preview_boundaries(self) -> None:
-        note = (ROOT / "docs/releases/v1.7.0-native-mac-relay.md").read_text(
+        note = (ROOT / "docs/releases/v1.8.0-notarized-mac.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("unsigned, unsupported development preview", note)
         self.assertIn("1.5.0-dev.1", note)
         self.assertIn("No signed Windows installer is published", note)
-        self.assertIn("No v1.7 Mac app is submitted to Apple", note)
+        self.assertIn("Developer ID signed and notarized", note)
         self.assertIn("does not complete the native Rust launch/relay milestone", note)
         self.assertIn("/issues/341", note)
-        self.assertIn("releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip", note)
+        self.assertIn("releases/download/v1.8.0/Hormuz-1.8.0-notarized.zip", note)
+        self.assertIn("Request-time credential", note)
+        self.assertIn("30-second bound", note)
         windows = tomllib.loads(
             (ROOT / "clients/rust/windows/Cargo.toml").read_text(encoding="utf-8")
         )
@@ -92,11 +94,40 @@ class ReleaseIdentityTests(unittest.TestCase):
         )
         self.assertFalse(workspace["workspace"]["package"]["publish"])
 
+    def test_current_mac_guides_match_the_release_identity(self) -> None:
+        distribution = (ROOT / "docs/MACOS_DISTRIBUTION.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--version 1.8.0", distribution)
+        self.assertIn("/private/tmp/hormuz-macos-1.8.0/Hormuz.app", distribution)
+        self.assertNotIn("--version 1.3.0", distribution)
+        self.assertNotIn("/private/tmp/hormuz-macos-1.3.0", distribution)
+        mac = (ROOT / "clients/macos/README.md").read_text(encoding="utf-8")
+        self.assertIn("v1.8.0 notarized app", mac)
+        self.assertNotIn("Mac app remains v1.3.0", mac)
+        roadmap = (ROOT / "docs/NATIVE_CLIENT_ROADMAP.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("core package is v1.8.0", roadmap)
+        self.assertIn("v1.8.0-notarized-mac.md", roadmap)
+        relay = (ROOT / "clients/rust/relay/README.md").read_text(encoding="utf-8")
+        self.assertIn("v1.8.0 notarized Mac archive includes this relay", relay)
+        self.assertIn("not Windows or Linux native", relay)
+        for filename in (
+            "docs/ROADMAP.md",
+            "docs/MACOS_CLIENT_LOCAL.md",
+            "clients/contracts/README.md",
+        ):
+            guide = (ROOT / filename).read_text(encoding="utf-8")
+            self.assertIn("v1.8.0", guide, filename)
+            self.assertNotIn("Mac app remains v1.3.0", guide, filename)
+            self.assertNotIn("Mac download stays v1.3.0", guide, filename)
+
     def test_current_readme_uses_the_bounded_v1_claim(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         opening = readme.split("## What works", 1)[0]
         self.assertIn("Hormuz 1.0", opening)
-        self.assertIn("> 1.7 preserves", opening)
+        self.assertIn("> 1.8 preserves", opening)
         self.assertIn("five isolated internal repetitions", opening)
         self.assertIn("does not prove external", opening)
         self.assertNotIn("public open-source alpha", opening)
