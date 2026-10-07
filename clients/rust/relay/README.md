@@ -250,8 +250,9 @@ before pipe workers join. Rust cannot forcibly stop arbitrary in-process
 `RequestOptimizer` implementations that ignore the cooperative contract, so
 this checkpoint does not claim that broader guarantee.
 
-This source checkpoint is not loaded by the Windows panel or published v1.3.0
-Mac app. The current development Mac integration is described above.
+The v1.8.0 notarized Mac archive includes this relay and the development Mac
+integration described above. The Windows panel does not load it; historical
+v1.3.0 Mac rollback archives do not contain it.
 Windows Job Object descendant cleanup is covered by fake clients. Linux has
 synthetic direct-client launcher-death, pre-exec race and normal-exit tests,
 plus a host-conditional user-service test for a detached grandchild. macOS
@@ -263,8 +264,9 @@ remain open. The blocked-optimizer shutdown fixture proves that cancellation
 stops first-party work before gateway egress; it does not establish a general
 linearization boundary between cancellation and an upstream POST that is
 already starting or in flight. Such an uncertain POST is still never replayed.
-The Rust crate remains unpublished `1.6.0-dev.1`; the v1.7.0 core/source release
-does not qualify native platform distribution.
+The Rust crate remains unpublished `1.6.0-dev.1`. The v1.8.0 Mac release
+qualifies only its signed Apple Silicon archive, not Windows or Linux native
+distribution. See the [release scope](../../../docs/releases/v1.8.0-notarized-mac.md).
 
 From `clients/rust`, run `cargo test --workspace --locked` and
 `cargo clippy --workspace --all-targets --locked -- -D warnings`. The relay

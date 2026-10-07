@@ -1,4 +1,4 @@
-# Hormuz Mac — local development preview
+# Hormuz Mac — native companion and local development
 
 A small native connector for a team's Hormuz gateway. It signs in through an
 external browser, stores a revocable session in macOS Keychain, prepares a
@@ -20,9 +20,10 @@ The next hosted first-run flow is **Continue with Hormuz**. The app opens the
 system browser, receives the approved organization and model from the gateway,
 saves the session in Keychain, and prepares its own client launcher. Manual
 self-hosted setup is under Advanced. This flow requires an injected
-`HormuzDesktopOrigin` in the app bundle and is currently local source only;
-see [one sign-in path](../../docs/MACOS_ONE_CLICK_SIGNIN.md). To preview it
-against a local fixture, set `HORMUZ_DESKTOP_ORIGIN` to an HTTPS or loopback
+`HormuzDesktopOrigin` in the app bundle. The v1.8.0 archive retains manual setup;
+hosted activation and its installed-account qualification are separate. For
+development, see [one sign-in path](../../docs/MACOS_ONE_CLICK_SIGNIN.md).
+To preview it against a local fixture, set `HORMUZ_DESKTOP_ORIGIN` to an HTTPS or loopback
 origin before running `./clients/macos/script/build_and_run.sh`.
 
 Previously saved **Hormuz hosted pilot — Codex/OpenAI** profiles remain
@@ -50,10 +51,10 @@ without the field remains `custom`; an explicit null or unknown value is
 rejected. A hosted-pilot profile also fails closed if its client, alias, scheme,
 or loopback setting does not match the bounded preset.
 
-The development app bundles `hormuz-client-relay`. Its saved launcher binds
-the existing Swift Keychain broker to the complete launch profile under the
-session lock, and uses an app-owned private Unix socket as a no-data lifetime
-lease. Closing or hiding a panel does not close that lease; app quit does.
+The v1.8.0 notarized app and the development app bundle `hormuz-client-relay`.
+Their saved launcher binds the existing Swift Keychain broker to the complete
+launch profile under the session lock, and uses an app-owned private Unix socket
+as a no-data lifetime lease. Closing or hiding a panel does not close that lease; app quit does.
 Previously saved launchers are regenerated after a successful connection
 refresh, so restarting or moving the app requires that refresh before use.
 The Rust relay stops its direct client on lease closure and cancels owned
@@ -72,9 +73,11 @@ This is not a 100 ms end-to-end latency promise.
 `HORMUZ_NATIVE_CREDENTIAL_HELPER`, and
 `HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY`. It exercises pinned Codex `0.147.0`
 and Claude Code `2.1.233` against a synthetic loopback gateway, not real
-provider accounts. CI retains metadata only. The latest published notarized
-Mac app remains v1.3.0; v1.7.0 publishes core/source improvements, not a new
-customer Mac archive, and does not submit anything to Apple.
+provider accounts. Ordinary CI retains development metadata only. The v1.8.0
+customer download is a Developer ID signed and notarized Apple Silicon archive;
+its release page records the final-source archive and separate runtime proof.
+v1.7.0's public core release did not include a customer Mac archive. See the
+[v1.8.0 release scope](../../docs/releases/v1.8.0-notarized-mac.md).
 
 On first launch without a saved session, Hormuz opens the edge Connection card. With a
 saved profile, it restores and refreshes the session behind the edge UI. The app's
@@ -95,8 +98,8 @@ not install Python or keep a copy of the server configuration. The local
 development bundle uses this checkout's `.venv` through a clearly labeled
 development wrapper. Codex or Claude Code is installed separately. The signed
 customer app supports Apple Silicon (`arm64`) on macOS 14 or later; Intel Macs are
-neither built nor tested. Clean-machine and exact-architecture distribution
-validation remain release gates.
+neither built nor tested. Exact arm64 archive validation is a release gate;
+clean-machine installation and live-account pilot qualification remain separate.
 
 For deterministic visual QA, contributors can launch the local bundle with
 `--companion-preview connected|empty|expired|offline`, optionally adding

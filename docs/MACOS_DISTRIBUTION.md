@@ -51,9 +51,9 @@ Store notarization credentials in Keychain using `xcrun notarytool store-credent
 ```sh
 HORMUZ_CODESIGN_IDENTITY='Developer ID Application: Company Name (TEAMID)' \
   ./script/package_macos_release.sh \
-  --output-directory /private/tmp/hormuz-macos-1.3.0 \
+  --output-directory /private/tmp/hormuz-macos-1.8.0 \
   --bundle-id com.xpounder.hormuz \
-  --version 1.3.0 \
+  --version 1.8.0 \
   --build 1 \
   --context-helper-directory /private/path/context-helpers \
   --tokenizer-cache /private/path/context-tokenizers
@@ -63,8 +63,8 @@ Submit, staple, and repackage the same app:
 
 ```sh
 ./script/notarize_macos_release.sh \
-  --bundle /private/tmp/hormuz-macos-1.3.0/Hormuz.app \
-  --upload-archive /private/tmp/hormuz-macos-1.3.0/Hormuz-1.3.0-notarization-upload.zip \
+  --bundle /private/tmp/hormuz-macos-1.8.0/Hormuz.app \
+  --upload-archive /private/tmp/hormuz-macos-1.8.0/Hormuz-1.8.0-notarization-upload.zip \
   --keychain-profile hormuz-notary
 ```
 
@@ -125,7 +125,8 @@ identifier, CI-derived build number, architecture, tokenizer digests, and payloa
 digests. A fresh protected runner independently repeats the manifest, commit,
 architecture, helper signature, team, resource, and digest checks before receiving
 notarization credentials. That final runner never executes the transferred
-payload; its v3 proof therefore records `context_helper_runtime_verified: false`,
+payload; its v4 proof therefore records `context_helper_runtime_verified: false`
+and `native_relay_runtime_verified: false`,
 while the earlier jobs supply separate runtime execution gates. Its bundle and
 archive checks are static plus Apple signature, notarization, stapler, and
 Gatekeeper verification.

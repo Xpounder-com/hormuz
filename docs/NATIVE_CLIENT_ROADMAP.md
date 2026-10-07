@@ -5,14 +5,14 @@ The architecture is one resident native app per OS containing a shared Rust
 client library. A supervised relay and optional optimizer run only for active
 AI sessions. The Python gateway remains server-side.
 
-## Planned versions
+## Release scope and original targets
 
-The current core release is v1.7.0; the latest notarized Mac download
-remains v1.3.0. v1.7.0 adds the development Mac's native relay integration while Windows
-stays an unsigned development preview. The original native-version targets
+The v1.8.0 core release includes a signed and notarized Apple Silicon Mac
+download with the native relay. Windows stays an unsigned, unsupported
+`1.5.0-dev.1` development preview. The original native-version targets
 below do not establish support or close #331/#337–#341. In particular, this
 core release does not complete the native Rust launch/relay milestone in #341.
-See the [release scope](releases/v1.7.0-native-mac-relay.md).
+See the [release scope](releases/v1.8.0-notarized-mac.md).
 Later additive desktop improvements use minor-release targets. A target is
 neither a published release nor permission to change existing package/version identities. Patch
 releases are reserved for compatible fixes after a feature release.
@@ -50,8 +50,9 @@ releases are reserved for compatible fixes after a feature release.
    integration and packaged loopback-client tests. The original native governed
    launch/relay target remains open in #341. The planned Rust optimizer target
    is separate; neither native milestone is completed by a core release.
-4. v1.8.0 adds Linux and capability fallbacks; v1.9.0 integrates the existing Mac
-   views with Rust and qualifies platform distribution and performance.
+4. The shipped v1.8.0 scope is the notarized Mac archive and bounded startup
+   credential cancellation. The original Linux/capability-fallback target and
+   v1.9.0 all-platform distribution/performance targets remain planned work.
 
 Issues contain the dependency graph, verification commands/evidence requirements,
 and explicit closure boundaries. Work may proceed independently where the graph
@@ -91,8 +92,9 @@ regression alarms for the measured synthetic scope, not performance promises.
 Issue #334 adds a separate unpublished `1.5.0-dev.1`
 [Rust transport](../clients/rust/transport/README.md) with one bounded runtime,
 verified TLS, request cancellation and no automatic replay after an ambiguous
-outcome. It is not loaded by the shipped Mac app. The gateway package is v1.5.0;
-a library test pass is not a connected-companion or release claim.
+outcome. This transport library is not loaded by the shipped Mac app; the Mac
+relay uses its own bounded transport. A library test pass is not a
+connected-companion or release claim.
 
 Issue #335 adds the unpublished `1.5.0-dev.1`
 [session controller](../clients/rust/session/README.md): bounded browser
@@ -154,7 +156,7 @@ implementation and test boundaries. Source integration and synthetic CI do not
 complete #339/#340 or #331 manual Windows acceptance: login/helper adapters,
 authorized-account end-to-end proof, native desktop acceptance, connected
 measurements, signing and clean installation remain separate. The Windows
-package stays `1.5.0-dev.1`; the core package is v1.5.0. Its development
+package stays `1.5.0-dev.1`; the core package is v1.8.0. Its development
 identity is not promoted to stable Windows support by the core release.
 
 Issue #341 adds the separate unpublished `1.6.0-dev.1`
@@ -162,14 +164,14 @@ Issue #341 adds the separate unpublished `1.6.0-dev.1`
 authenticated loopback forwarding, exact Off bytes, streamed responses,
 on-demand use of the existing Python optimizer, relay-owned first-party
 optimizer cancellation and a fake client's listener lifetime. The development
-Mac now packages and launches the relay, retains Swift's coordinated Keychain
-broker, and ties direct-client lifetime to an app-owned private socket rather
-than a panel. Extracted local release archives are tested with pinned installed
-Codex and Claude Code against a synthetic gateway, including lossless On and
+and v1.8.0 notarized Mac apps package and launch the relay, retain Swift's
+coordinated Keychain broker, and tie direct-client lifetime to an app-owned
+private socket rather than a panel. Extracted local release archives are tested
+with pinned installed Codex and Claude Code against a synthetic gateway, including lossless On and
 exact Off behavior. **#341 remains open** for client-descendant containment,
 abrupt Mac relay-death cleanup, interactive panel/quit/update acceptance, and
-the remaining platform integration. Neither the Windows panel nor the published
-v1.3.0 Mac app launches this Rust relay.
+the remaining platform integration. The Windows panel does not load this Rust
+relay. The v1.8.0 Mac archive includes it; v1.3.0 rollback archives do not.
 The Linux terminal command now uses the native Secret Service adapter with
 optimization Off by default and an explicit absolute-interpreter opt-in for
 the installed-wheel Python helper. It verifies transient user-service

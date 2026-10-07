@@ -94,6 +94,26 @@ class ReleaseIdentityTests(unittest.TestCase):
         )
         self.assertFalse(workspace["workspace"]["package"]["publish"])
 
+    def test_current_mac_guides_match_the_release_identity(self) -> None:
+        distribution = (ROOT / "docs/MACOS_DISTRIBUTION.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--version 1.8.0", distribution)
+        self.assertIn("/private/tmp/hormuz-macos-1.8.0/Hormuz.app", distribution)
+        self.assertNotIn("--version 1.3.0", distribution)
+        self.assertNotIn("/private/tmp/hormuz-macos-1.3.0", distribution)
+        mac = (ROOT / "clients/macos/README.md").read_text(encoding="utf-8")
+        self.assertIn("v1.8.0 notarized app", mac)
+        self.assertNotIn("Mac app remains v1.3.0", mac)
+        roadmap = (ROOT / "docs/NATIVE_CLIENT_ROADMAP.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("core package is v1.8.0", roadmap)
+        self.assertIn("v1.8.0-notarized-mac.md", roadmap)
+        relay = (ROOT / "clients/rust/relay/README.md").read_text(encoding="utf-8")
+        self.assertIn("v1.8.0 notarized Mac archive includes this relay", relay)
+        self.assertIn("not Windows or Linux native", relay)
+
     def test_current_readme_uses_the_bounded_v1_claim(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         opening = readme.split("## What works", 1)[0]
