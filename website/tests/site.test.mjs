@@ -2,22 +2,33 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { sitePath, siteUrl, CONTACT_EMAIL, SOURCE_VERSION, OCI_VERSION } from '../lib/site.mjs';
+import { sitePath, siteUrl, CONTACT_EMAIL, SOURCE_VERSION, OCI_VERSION, MACOS_VERSION } from '../lib/site.mjs';
 import { buildInquiry, campaignSource } from '../lib/contact.mjs';
 
-test('core download versions agree with packaging without promoting Windows or Mac', () => {
+test('core and notarized Mac downloads agree with packaging while Windows stays preview', () => {
   const core = readFileSync(new URL('../../pyproject.toml', import.meta.url), 'utf8');
   const version = core.match(/^version = "([^"]+)"$/m)?.[1];
   assert.equal(SOURCE_VERSION, `v${version}`);
   assert.equal(OCI_VERSION, SOURCE_VERSION);
+  assert.equal(MACOS_VERSION, SOURCE_VERSION);
   const docs = readFileSync(new URL('../app/docs/page.tsx', import.meta.url), 'utf8');
   assert.match(docs, /Windows development preview/);
   assert.match(docs, /Unsigned, unsupported/);
-  assert.match(docs, /releases\/download\/v1\.3\.0\/Hormuz-1\.3\.0-notarized\.zip/);
+  assert.ok(docs.includes('releases/download/${MACOS_VERSION}/Hormuz-${MACOS_VERSION.slice(1)}-notarized.zip'));
+  assert.ok(docs.includes('releases/download/${MACOS_VERSION}/SHA256SUMS.txt'));
+  assert.doesNotMatch(docs, /77d463869f35c5bd|releases\/download\/v1\.3\.0/);
   assert.match(docs, /\/issues\/340/);
   assert.match(docs, /comparison-table release-downloads/);
   const styles = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(styles, /\.release-downloads\s*\{\s*min-width:\s*720px;/);
+});
+
+test('current Mac labels and links derive from the explicit notarized release version', () => {
+  for (const file of ['app/page.tsx', 'app/docs/page.tsx', 'app/components/SiteFooter.tsx', 'app/components/CompanionPreview.tsx', 'app/components/SetupExample.tsx', 'lib/customer-questions.mjs']) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert.match(source, /MACOS_VERSION/, file);
+    assert.doesNotMatch(source, /releases\/(?:download|tag)\/v1\.3\.0|Mac (?:companion )?1\.3\.0/, file);
+  }
 });
 
 test('native paths and metadata use the dedicated organization root', () => {

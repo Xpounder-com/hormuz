@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { sitePath, sourcePath, REPOSITORY, SOURCE_VERSION } from '../../lib/site.mjs';
+import { sitePath, sourcePath, REPOSITORY, SOURCE_VERSION, MACOS_VERSION } from '../../lib/site.mjs';
 
 export function SetupExample() {
   const [client, setClient] = useState('Codex');
@@ -30,6 +30,6 @@ export function SetupExample() {
       ['Verify the first governed workflow', 'Check an allowed request, a denied request with zero upstream calls, and the team/model usage report. Qualify recovery, credential custody, and operations before production rollout.'],
     ]).map(([title, copy], index) => <li key={title}><span>{String(index + 1).padStart(2, '0')}</span><div><h4>{title}</h4><p>{copy}</p></div></li>)}</ol>
     <div className="experience-bottom-actions"><a className="button landing-primary" href={sitePath(role === 'join' ? '/docs/#mac' : '/docs/#quickstart')}>{role === 'join' ? 'Install free for Mac' : 'Install the gateway'} →</a><a className="button landing-secondary" href={sitePath('/enterprise/')}>See team services & setup help →</a></div>
-    <details className="experience-details"><summary>What if setup or the gateway fails?</summary><p>A Mac installation does not create a provider account or provision a hosted gateway. Check the gateway URL, client version, model allowlist, identity expiry, and connection status. A failed connection does not grant a direct-provider bypass. Do not blindly replay a request whose provider outcome is unknown.</p><p>The Mac app has no automatic updater; use versioned archives. Windows/Linux users can use the documented CLI/client configuration path; the Mac app itself supports Apple Silicon only. <a href={sourcePath('docs/CLIENTS.md')}>Client setup and baselines ↗</a> · <a href={`${REPOSITORY}/releases/tag/v1.3.0`}>Mac release and download ↗</a></p></details>
+    <details className="experience-details"><summary>What if setup or the gateway fails?</summary><p>A Mac installation does not create a provider account or provision a hosted gateway. Check the gateway URL, client version, model allowlist, identity expiry, and connection status. A failed connection does not grant a direct-provider bypass. Do not blindly replay a request whose provider outcome is unknown.</p><p>The Mac app has no automatic updater; use versioned archives. Windows/Linux users can use the documented CLI/client configuration path; the Mac app itself supports Apple Silicon only. <a href={sourcePath('docs/CLIENTS.md')}>Client setup and baselines ↗</a> · <a href={`${REPOSITORY}/releases/tag/${MACOS_VERSION}`}>Mac release and download ↗</a></p></details>
   </div>;
 }

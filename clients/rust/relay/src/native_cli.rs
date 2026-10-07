@@ -136,7 +136,7 @@ fn execute_mac_broker(
     {
         return Err(RelayError::InvalidConfiguration);
     }
-    let mut lifetime = UnixStream::connect(owner).map_err(|_| RelayError::InvalidConfiguration)?;
+    let lifetime = UnixStream::connect(owner).map_err(|_| RelayError::InvalidConfiguration)?;
     lifetime
         .set_nonblocking(true)
         .map_err(|_| RelayError::InvalidConfiguration)?;
@@ -155,13 +155,23 @@ fn execute_mac_broker(
     if profile.key() != key {
         return Err(RelayError::InvalidConfiguration);
     }
+    let mut stopped = || match (&lifetime).read(&mut [0]) {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
+        // Only EOF is expected. A broken or unexpected control channel is
+        // fail-closed; a panel close does not close this app-owned lease.
+        _ => true,
+    };
     let source = Arc::new(MacCredentialBroker {
         executable: broker.to_owned(),
         root: root.to_owned(),
         key: key.to_owned(),
         profile_bytes,
-    }) as Arc<dyn CredentialSource>;
-    source.access_credential()?; // Fail before probing a client or opening a relay.
+    });
+    // Fail before probing a client or opening a relay, but do not keep a
+    // stalled custody helper alive after its owning app exits.
+    if let Err(error) = source.access_credential_until(&stopped) {
+        return if stopped() { Ok(130) } else { Err(error) };
+    }
     let optimization = Optimization::OnDemand(Arc::new(PythonOptimizer {
         directory,
         key: key.to_owned(),
@@ -170,14 +180,7 @@ fn execute_mac_broker(
         helper: Some(optimizer.to_owned()),
         state_root: root.to_owned(),
     }));
-    hormuz_client_relay::run_client_until(&profile, source, optimization, &mut || {
-        match lifetime.read(&mut [0]) {
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
-            // Only EOF is expected. A broken or unexpected control channel is
-            // fail-closed; a panel close does not close this app-owned lease.
-            _ => true,
-        }
-    })
+    hormuz_client_relay::run_client_until(&profile, source, optimization, &mut stopped)
 }
 
 #[cfg(target_os = "macos")]
@@ -191,6 +194,16 @@ struct MacCredentialBroker {
 #[cfg(target_os = "macos")]
 impl CredentialSource for MacCredentialBroker {
     fn access_credential(&self) -> Result<Zeroizing<String>, RelayError> {
+        self.access_credential_until(&|| false)
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl MacCredentialBroker {
+    fn access_credential_until(
+        &self,
+        stopped: &impl Fn() -> bool,
+    ) -> Result<Zeroizing<String>, RelayError> {
         let mut command = Command::new(&self.executable);
         command
             .args(["credential", "--profile", &self.key, "--state-directory"])
@@ -204,6 +217,7 @@ impl CredentialSource for MacCredentialBroker {
                 &self.profile_bytes,
                 TRANSFORM_BUDGET,
                 50,
+                stopped,
             )
             .ok_or(RelayError::CredentialUnavailable)?,
         );

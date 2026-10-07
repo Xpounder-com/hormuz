@@ -35,10 +35,11 @@ together: `--credential-helper`, `--optimizer-helper`, and `--owner-socket`.
 Partial combinations fail closed. A private 0700 socket directory belongs to
 the resident app, not its panel. The lease carries no data; its closure stops
 the direct client and cancels first-party optimizer work. The lease is also
-checked during client-version discovery: owner exit cancels and reaps the direct
-version probe rather than waiting for its normal 15-second budget. Cancellation
+checked during the initial credential exchange and client-version discovery:
+owner exit cancels and reaps the credential helper or direct version probe rather
+than waiting for its normal 30-second or 15-second budget. Startup cancellation
 returns exit status 130 without launching a client or starting optimization.
-Credential exchanges have a 30-second bound and runtime shutdown has its own
+Request-time credential exchanges retain a 30-second bound; runtime shutdown has its own
 35-second bound; this does not promise instantaneous process-tree termination.
 Quit closes the old app's lease, but interactive quit/update acceptance and an
 authenticated automatic updater remain separate work.
