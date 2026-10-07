@@ -126,7 +126,7 @@ digests. A fresh protected runner independently repeats the manifest, commit,
 architecture, helper signature, team, resource, and digest checks before receiving
 notarization credentials. That final runner never executes the transferred
 payload; its v4 proof therefore records `context_helper_runtime_verified: false`
-and `native_relay_runtime_verified: false`,
+and `executable_version_verified: false`,
 while the earlier jobs supply separate runtime execution gates. Its bundle and
 archive checks are static plus Apple signature, notarization, stapler, and
 Gatekeeper verification.
