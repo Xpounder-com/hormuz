@@ -50,10 +50,12 @@ test('missing routes, wrong canonicals, HTML downloads, and incomplete metadata 
   for (const [route, replacement] of [
     ['/docs/', undefined],
     ['/plans/', undefined],
+    ['/workspace/', undefined],
     ['/guides/team-ai-budgets/', undefined],
     ['/guides/codex-claude-code-gateway/', '<h1>Guide</h1><link rel="canonical" href="https://wrong.example/"/>'],
     ['/enterprise/', '<h1>Hormuz</h1><link rel="canonical" href="https://wrong.example/"/>'],
     ['/downloads/hormuz-overview.pdf', '<html>Error</html>'],
+    ['/downloads/hormuz-appliance-brief.pdf', undefined],
     ['/downloads/hormuz-buyer-briefing.pptx', '<html>Error</html>'],
     ['/robots.txt', 'User-agent: *\nDisallow: /'],
     ['/sitemap.xml', `<loc>${LIVE_ORIGIN}/</loc>`],

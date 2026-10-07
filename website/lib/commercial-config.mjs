@@ -3,9 +3,9 @@
 export const commercialConfig = Object.freeze({
   formEndpoint: 'https://formspree.io/f/xoeqnbyq',
   bookingUrl: 'https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ2tGl0VwnWcSXzbxkYkEuryVb1t4EH-xZOk65SPpVJNdCAnmPHPhwjixF-XJp8PRhOUj03zmav1',
-  pilotPaymentUrl: 'https://buy.stripe.com/3cI9AUddYaIRej44l78og01',
-  supportPaymentUrl: 'https://buy.stripe.com/3cIeVeddY9ENej47xj8og00',
+  cloudPaymentUrl: 'https://buy.stripe.com/8x23cwgqaaIR8YK7xj8og03',
+  appliancePaymentUrl: 'https://buy.stripe.com/eVq3cw4Hs18hgrceZL8og04',
+  onboardingPaymentUrl: 'https://buy.stripe.com/8x26oIc9U3gp8YK2cZ8og05',
+  managedSitePaymentUrl: 'https://buy.stripe.com/fZu28sb5Q2clej42cZ8og06',
+  reservationPaymentUrl: 'https://buy.stripe.com/8x28wQ1vgcQZ4Iu9Fr8og02',
 });
-
-// Separate from the existing proposal-based support link. Populate after verification.
-export const selfServiceSupportPaymentUrl = '';

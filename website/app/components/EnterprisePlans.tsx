@@ -1,45 +1,42 @@
 import { sitePath } from '../../lib/site.mjs';
-import { PILOT_PRICE, SUPPORT_PRICE } from '../../lib/commercial.mjs';
+import { APPLIANCE_PRICE, ONBOARDING_PRICE, MANAGED_SITE_PRICE, pricing } from '../../lib/commercial.mjs';
 import { CampaignLink } from './CampaignLink';
 import { PriceAmount } from './PriceCard';
+import { ApplianceReservation } from './ApplianceReservation';
+import { StripeCheckoutLink } from './StripeCheckoutLink';
 
 export function EnterprisePlans() {
-  return <section className="section offer-section" id="plans" aria-labelledby="plans-title">
-    <div className="section-heading">
-      <p className="section-label">SEPARATE IMPLEMENTATION & SUPPORT SERVICES</p>
-      <h2 id="plans-title">Operate your own gateway.<br />Choose the help you need.</h2>
-      <p className="offer-intro">The existing controls stay open source. Add ongoing support or a guided pilot for a deployment you operate. For Hormuz-operated hosting, <CampaignLink href={sitePath('/plans/#pro-billing')}>see the planned Pro offer →</CampaignLink>.</p>
+  return <><section className="section offer-section" id="plans" aria-labelledby="plans-title">
+    <div className="section-heading"><p className="section-label">APPLIANCE AND SITE MANAGEMENT</p>
+      <h2 id="plans-title">Local processing.<br />Choose the setup and support you need.</h2>
+      <p className="offer-intro">Coming soon: a preconfigured gateway appliance for supported requests inside your network. Rollout is planned for {pricing.reservation.plannedRollout}. Local compaction and secret redaction are part of the planned appliance. Hardware and workflow qualification must pass before delivery.</p>
     </div>
     <div className="offer-grid conversion-offers">
-      <article className="offer-card">
-        <p className="section-label">01 / INSTALL AND EXPLORE</p><h3>Self-hosted gateway</h3>
-        <PriceAmount amount="$0" period="Software license · Apache-2.0" />
-        <p>Operate a gateway with your own provider accounts. Start with a local demo or join an existing team gateway on Mac.</p>
-        <ul><li>Gateway, policy, model access, and budgets</li><li>Token, estimated-cost, and outcome reports</li><li>Mac companion for configured team gateways</li><li>Documentation and community support</li></ul>
-        <CampaignLink className="button button-primary" href={sitePath('/docs/')}>Install free <span aria-hidden="true">↗</span></CampaignLink>
-        <p className="field-hint">No card required. You operate your infrastructure and pay your providers. <CampaignLink href={sitePath('/plans/#offers')}>Using Hormuz personally? See the free personal path →</CampaignLink></p>
+      <article className="offer-card"><p className="section-label">COMING SOON · CUSTOMER IT INSTALLS</p><h3>Appliance</h3>
+        <PriceAmount amount={APPLIANCE_PRICE} period="USD / appliance · one-time" />
+        <p>An assembled appliance including enclosure, cooling, power supply, and a tested Hormuz installation.</p>
+        <ul><li>Setup guide and supported configuration</li><li>Local processing for qualified workflows</li><li>Your IT team handles deployment</li></ul>
+        <a className="button button-primary" href="#reserve">Reserve yours <span aria-hidden="true">↓</span></a>
+        <div className="confirmed-order"><StripeCheckoutLink offer="appliance" className="button button-outline">Pay for appliance — {APPLIANCE_PRICE}</StripeCheckoutLink>
+          <p className="field-hint">For a confirmed delivery without a reservation deposit. Coming soon; full-price checkout does not establish a shipping date. Reserved buyers pay their balance through the Stripe invoice Hormuz provides.</p></div>
       </article>
-      <article className="offer-card offer-featured">
-        <p className="section-label">02 / KEEP MOVING</p>
-        <h3>Self-service support</h3>
-        <PriceAmount amount={SUPPORT_PRICE} period="USD / month · cancel before renewal" />
-        <p>Buy ongoing help for one self-hosted gateway. The product stays free; this plan adds direct founder support.</p>
-        <ul><li>One self-hosted gateway</li><li>Up to 4 support hours per billing month</li><li>Response within 2 business days</li><li>Policy, upgrade, and troubleshooting help</li></ul>
-        <CampaignLink className="button button-primary" href={sitePath('/enterprise/#support')}>See terms & start support <span aria-hidden="true">↗</span></CampaignLink>
-        <p className="field-hint">Monthly renewal. Cancel before the next renewal. Provider usage, hosting, and 24/7 operations are separate.</p>
+      <article className="offer-card offer-featured"><p className="section-label">COMING SOON · ASSISTED INSTALLATION</p><h3>Appliance with scoped onboarding</h3>
+        <PriceAmount amount={ONBOARDING_PRICE} period="USD / appliance · one-time" />
+        <p>The same appliance, plus remote assistance for the agreed installation.</p>
+        <ul><li>Up to {pricing.onboarding.remoteHours} hours of remote onboarding</li><li>One provider and one supported application</li><li>Initial policy configuration and acceptance checks</li><li>Administrator handoff</li></ul>
+        <a className="button button-primary" href="#reserve">Reserve yours <span aria-hidden="true">↓</span></a>
+        <div className="confirmed-order"><StripeCheckoutLink offer="onboarding" className="button button-outline">Pay for onboarding package — {ONBOARDING_PRICE}</StripeCheckoutLink>
+          <p className="field-hint">Includes the appliance and replaces its standalone purchase. Use after scope and delivery are confirmed, without a reservation deposit. Reserved buyers pay the Stripe balance invoice.</p></div>
       </article>
-      <article className="offer-card">
-        <p className="section-label">03 / PUT IT TO THE TEST</p>
-        <h3>90-day pilot</h3>
-        <PriceAmount amount={PILOT_PRICE} period="USD · one-time fee for 90 days" />
-        <p>Evaluate one workflow with founder-led guidance and evidence for your rollout decision.</p>
-        <ul><li>Policy map and agreed acceptance criteria</li><li>Non-production integration guidance</li><li>Allowed and blocked request checks</li><li>Evidence pack, go / no-go review, and handoff</li></ul>
-        <CampaignLink className="button button-primary" href={sitePath('/contact/?interest=pilot')}>Discuss my pilot <span aria-hidden="true">↗</span></CampaignLink>
-        <p className="field-hint">One team, one workflow. Scope, availability, and terms agreed before payment. No automatic renewal.</p>
-        <CampaignLink className="text-link" href={sitePath('/enterprise/#pilot')}>See the 90-day plan →</CampaignLink>
+      <article className="offer-card"><p className="section-label">OPTIONAL ONGOING SERVICE</p><h3>Managed site</h3>
+        <PriceAmount amount={MANAGED_SITE_PRICE} period="USD / managed site / month" />
+        <p>Management for one agreed site, including the associated Cloud workspace.</p>
+        <ul><li>Dashboard and appliance health monitoring</li><li>Qualified updates and recovery guidance</li><li>Up to {pricing.managedSite.supportHoursPerMonth} hour of remote assistance per billing month</li><li>Support response within {pricing.managedSite.responseBusinessDays} business days</li></ul>
+        <StripeCheckoutLink offer="managed">Subscribe to managed site — {MANAGED_SITE_PRICE}/month</StripeCheckoutLink>
+        <p className="field-hint">Business-hours support. The included workspace has no separate Cloud subscription charge. Appliance hardware is purchased separately.</p>
+        <p className="field-hint">Confirm the site, operating coverage, capacity, and activation date before subscribing. Monthly billing starts at checkout and renews until canceled. <CampaignLink href={sitePath('/enterprise/#support')}>Support allowance and cancellation →</CampaignLink></p>
       </article>
     </div>
-    <div className="open-source-option"><div><span className="section-label">WANT TO TALK IT THROUGH?</span><h3>Bring one workflow and one question.</h3><p>A free fit discussion with Mehrdad Zaker. No obligation to buy a pilot.</p></div><CampaignLink className="button button-outline" href={sitePath('/contact/?interest=review')}>Ask the founder <span aria-hidden="true">↗</span></CampaignLink></div>
-    <p className="pricing-cost-note">All paid prices are in USD. Provider usage, infrastructure, and applicable taxes are additional.</p>
-  </section>;
+    <p className="pricing-cost-note">Prices are in USD. Model-provider usage, customer infrastructure, and applicable taxes are separate. Availability and supported workloads are confirmed before payment.</p>
+  </section><ApplianceReservation /></>;
 }

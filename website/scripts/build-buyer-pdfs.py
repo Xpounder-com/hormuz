@@ -1,12 +1,20 @@
 """Generate the three source-linked buyer briefs; render and inspect before release."""
 from pathlib import Path
+import json
+import os
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 
-OUTPUT = Path(__file__).resolve().parents[1] / "public/downloads"
+WEBSITE = Path(__file__).resolve().parents[1]
+PRICING = json.loads((WEBSITE / "lib/pricing.json").read_text())
+OUTPUT = Path(os.environ.get("PDF_OUTPUT_DIR", str(WEBSITE / "public/downloads")))
+
+def money(key):
+    amount = PRICING[key]["amount"]
+    return f"${amount:,.2f}" if amount != int(amount) else f"${amount:,.0f}"
 OUTPUT.mkdir(parents=True, exist_ok=True)
 INK = colors.HexColor("#202723")
 TEAL = colors.HexColor("#31684b")
@@ -39,7 +47,7 @@ def footer(canvas, doc):
     canvas.rect(0, 0, 612, 792, fill=1, stroke=0)
     # Use the approved export, preserving the same geometry as the website.
     canvas.setFillColor(TEAL)
-    canvas.drawImage(str(OUTPUT.parent / 'brand/icons/transparent/hormuz-transparent-512.png'), 40, 742, width=32, height=32, mask='auto')
+    canvas.drawImage(str(WEBSITE / 'public/brand/icons/transparent/hormuz-transparent-512.png'), 40, 742, width=32, height=32, mask='auto')
     canvas.setFont("Helvetica-Bold", 10)
     canvas.drawString(77, 754, "H O R M U Z")
     canvas.setFont("Helvetica", 7)
@@ -51,7 +59,7 @@ def footer(canvas, doc):
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(TEAL)
     canvas.linkURL("https://neuralint.io", (44, 29, 245, 41), relative=0)
-    canvas.drawString(44, 32, "HORMUZ  /  A product of Neuralint  /  September 10, 2026")
+    canvas.drawString(44, 32, "HORMUZ  /  A product of Neuralint  /  October 6, 2026")
     canvas.drawRightString(568, 32, f"{doc.page}")
     canvas.linkURL(URL, (44, 24, 440, 43), relative=0)
     canvas.restoreState()
@@ -80,64 +88,61 @@ def build(name, title, story):
 
 
 overview = [
-    p("OPEN SOURCE + SUPPORTED EVALUATION", "label"),
+    p("SOFTWARE / CLOUD / APPLIANCES", "label"),
     p("Keep the coding clients.<br/>Govern their model requests.", "title"),
-    p("Hormuz is a self-hosted, Apache-2.0 policy, usage, and evidence gateway for Codex and Claude Code.", "deck"),
-    p("The problem", "h2"),
-    p("AI access fragments across clients and provider accounts. Platform teams need an enforceable answer to who may use which model, under what budget and secret-egress policy, with what retained evidence."),
+    p("Hormuz is an Apache-2.0 policy, usage, and evidence gateway for supported coding-client workflows.", "deck"),
     p("The governed path", "h2"),
-    p("Client to Hormuz identity, policy, secret and budget checks to allowed provider request. Company provider keys stay on the gateway. Routine ledgers retain metadata, not prompts or response bodies. Requests that bypass Hormuz are outside its coverage."),
+    p("Client requests pass through identity, policy, secret and budget checks before allowed provider egress. Company provider keys stay on the gateway. Routine ledgers retain metadata rather than prompts or responses. Bypassed traffic is outside coverage."),
+    p("The complete price catalog", "h2"),
     table([
-        ["<b>Useful open core</b>", "<b>Proposed enterprise engagement</b>"],
-        ["Gateway, OIDC JWT verification, policy overlays, budgets, deterministic secret controls, usage reports, and evidence exports.", "Scoped workflow mapping, configuration assistance, one non-production integration, acceptance evidence, gap review, and handoff."],
-        ["Self-hosted; community support is best effort.", "Same open core. Scope, price, capacity, support hours, response targets, and terms agreed before work."],
-    ], [262, 262]),
-    p("Try it before a sales conversation", "h2"),
-    p(f'The <link href="{URL}demo/" color="#31684b">real provider-free recording</link> demonstrates allow, fallback/cap, redact, deny with no upstream call, and synthetic metadata evidence. The complete quickstart needs no provider account.'),
-    p("Know the boundary", "h2"),
-    p("v1.3.0 preserves the stable v1 CLI, policy, and evidence contracts. It adds the Personal Optimizer, adapter SDK, and Aider integration. Personal Optimizer support is limited to macOS 14+ on Apple Silicon. The matching signed OCI reference is linux/amd64 and does not imply optimizer support in that image. No blanket production certification, managed service, 24/7 SLA, invoice reconciliation, independent security review, or customer endorsement is claimed.", "small"),
-    p('<b>Discuss one workflow:</b> Mehrdad Zaker · <link href="mailto:mehrdadz@neuralint.io" color="#31684b">mehrdadz@neuralint.io</link><br/>' + f'<link href="{URL}" color="#31684b">usehormuz.github.io</link>'),
-    p("Sources: " + link("Architecture", "docs/ARCHITECTURE.md") + " · " + link("Clients", "docs/CLIENTS.md") + " · " + link("Support", "SUPPORT.md") + " · " + link("Offer", "marketing/OFFER.md"), "small"),
+        ["<b>Offer</b>", "<b>Price in USD</b>"],
+        ["Software", money("software")],
+        ["Cloud", money("cloud") + " / workspace / month"],
+        ["Appliance", money("appliance") + " / appliance, one time"],
+        ["Appliance with scoped onboarding", money("onboarding") + " / appliance, one time"],
+        ["Managed site", money("managedSite") + " / site / month"],
+    ], [284, 240]),
+    p(f'Onboarding includes up to {PRICING["onboarding"]["remoteHours"]} hours of remote setup for one provider and one supported application. A managed site includes its Cloud workspace and {PRICING["managedSite"]["supportHoursPerMonth"]} hour of remote assistance per billing month, with a response within {PRICING["managedSite"]["responseBusinessDays"]} business days.'),
+    p("Availability and responsibilities", "h2"),
+    p(f'Appliances: <b>coming soon, planned rollout early 2027</b> (not a guaranteed shipping date). <b>Reserve yours: {money("reservation")} one-time refundable deposit</b>, credited toward purchase. Cancel anytime before fulfillment for a full refund; email the owner with your Stripe receipt. All payments use Stripe. Delivery and qualification are confirmed before the balance. Cloud and managed services accept inquiries. Provider usage, infrastructure, and taxes are separate.', "small"),
+    p('<b>Discuss your workflow:</b> Mehrdad Zaker · <link href="mailto:mehrdadz@neuralint.io" color="#31684b">mehrdadz@neuralint.io</link><br/>' + f'<link href="{URL}plans/" color="#31684b">usehormuz.github.io/plans</link>'),
+    p("Sources: " + link("Architecture", "docs/ARCHITECTURE.md") + " · " + link("Offer", "marketing/OFFER.md") + " · " + link("Scope and support terms", "marketing/COMMERCIAL_SETUP.md"), "small"),
 ]
 
-pilot = [
-    p("PILOT DISCUSSION BRIEF / NOT AN AGREEMENT", "label"),
-    p("Prove one workflow<br/>before widening the route.", "title"),
-    p("A proposed 90-day, founder-led evaluation around the same Apache-2.0 core. Begin with fit and scope; a shorter evaluation may come first.", "deck"),
-    p("Who this is for", "h2"),
-    p("A platform or engineering lead adopting Codex or Claude Code under company provider accounts, with a named operator, policy owner, and security reviewer. This is the initial buyer hypothesis, not validated market demand."),
-    p("Prerequisites", "h2"),
-    p("One non-production workflow; authorized provider and identity accounts; unique identities; approved test inputs; a safe access method; agreed evidence/retention boundaries; and written acceptance criteria. Timing begins after scope, prerequisites, capacity, and terms are agreed."),
+appliance = [
+    p("APPLIANCE / SCOPED ONBOARDING", "label"),
+    p("Your network. Your appliance.<br/>A bounded setup.", "title"),
+    p(f'{money("appliance")} per appliance, or {money("onboarding")} per appliance with scoped onboarding. Both prices are USD and one time.', "deck"),
+    p("Hardware included", "h2"),
+    p(f'Enclosure, cooling, power supply, installed gateway, and setup guidance. <b>Coming soon: planned rollout early 2027.</b> Reserve with a fully refundable {money("reservation")} deposit, credited toward purchase. Cancel anytime before fulfillment for a full refund; email the owner with your Stripe receipt. All payments use Stripe. The date is a target; delivery requires hardware qualification and confirmed arrangements.'),
+    p("The onboarding bundle", "h2"),
+    p(f'Includes the appliance and up to {PRICING["onboarding"]["remoteHours"]} hours of remote onboarding for one provider and one supported application. It replaces the standalone appliance purchase for that unit. Calls, configuration, checks, and handoff count against this allowance.'),
     table([
-        ["<b>Phase</b>", "<b>Work</b>", "<b>Deliverable</b>"],
-        ["Days 1–15<br/><b>Map</b>", "Identify client, identity, provider, policy, secret, budget and evidence boundaries.", "Control map and acceptance plan; stop or rescope if fit is poor."],
-        ["Days 16–45<br/><b>Prove</b>", "Configure and exercise the bounded non-production route.", "Versioned evidence pack, reproducible walkthrough, and issue log."],
-        ["Days 46–90<br/><b>Decide</b>", "Review friction, operating effort, agreed operational checks and remaining gates.", "Go/no-go memo, named gap owners, and handoff."],
-    ], [95, 216, 213]),
-    p("Agree the acceptance test", "h2"),
-    p("The pinned client works; a forbidden request makes no upstream call; agreed model/secret/budget policies behave as expected; identity and policy are attributable; exported evidence excludes prompt/response bodies and credentials; the operator can reproduce the checks; remaining gaps have owners."),
-    p("Latency, throughput, availability, RPO/RTO, billing accuracy, and business-value targets require separate agreement and measurement. Public demo timings and internal repeatability runs are not evidence for those goals.", "small"),
+        ["<b>Step</b>", "<b>Included work</b>"],
+        ["Prepare", "Name the operator; check ready network, power, authorized provider account, approved test inputs, and acceptance scope."],
+        ["Connect", "Connect one provider and one supported application; configure initial identity, model, secret, and budget policies."],
+        ["Verify and hand over", "Run an allowed and denied request; inspect attributable metadata; hand over operator instructions and open issues."],
+    ], [130, 394]),
+    p("Customer responsibilities", "h2"),
+    p("Supply the network, power, authorized accounts, unique identities, approved policy/test data, and a named operator. Do not send credentials or customer prompts through public forms or issues. Private access requires an approved method and minimal privileges."),
+    p("Scope limits", "h2"),
+    p("Custom integrations, network redesign, data migration, on-site visits, and ongoing operations are excluded. Pause for missing prerequisites and record unfinished work when the allowance is exhausted. No extra charge is authorized by this scope."),
     PageBreak(),
-    p("PILOT / RESPONSIBILITIES AND TERMS", "label"),
-    p("Keep ownership explicit.", "title"),
-    table([
-        ["<b>Customer owns</b>", "<b>Assistance, only as scoped</b>"],
-        ["Hosting, TLS/ingress, access, patching, backup, metadata retention.", "Configuration review and bounded integration help."],
-        ["Provider charges and authorization; credential custody; JWT issuance/refresh; unique identities.", "Guidance without custody of customer secrets by default."],
-        ["Policy decisions, acceptable use, and approved test data.", "Mapping requirements to implemented controls."],
-        ["Evidence access, sharing approval, security risk acceptance and production qualification.", "Content-free test results, open-gap review and handoff."],
-    ], [262, 262]),
-    p("Not included or established", "h2"),
-    p("Generally available managed hosting; fleet-wide coverage; client-side shell/MCP governance; 24/7 on-call; certification; legal/compliance determinations; comprehensive semantic DLP; per-inference human approval; invoice reconciliation; guaranteed savings; or future portfolio features."),
-    p("Price and terms", "h2"),
-    p("The 90-day pilot is $15,000 USD for one team and one workflow. Provider usage, infrastructure, and applicable taxes are additional. No automatic renewal. Enterprise support starts at $2,000 USD/month under a separate agreement."),
-    p("Agree scope, availability, and payment schedule before paying; dates; time budget; meeting cadence; support hours/time zone and response targets; named contact; customer prerequisites; acceptance; change control; confidentiality; approved access/data handling; liability; termination; and post-pilot support. Obtain appropriate contract review. No default SLA is implied."),
-    p("Protect sensitive information", "h2"),
-    p("Do not send tokens, raw prompts, customer content, production databases, or full configurations through the marketing form or public issues. Private access requires an approved method, minimal privilege, and a written handling scope."),
-    p("The next decision", "h2"),
-    p("Stop and retain the lessons; continue self-service; resolve specific gaps in another bounded engagement; or propose a wider deployment after its gates are satisfied. Expansion is not automatic."),
-    p('<b>Mehrdad Zaker</b> · <link href="mailto:mehrdadz@neuralint.io" color="#31684b">mehrdadz@neuralint.io</link>'),
-    p("Sources: " + link("Full pilot scope", "marketing/PILOT.md") + " · " + link("Support", "SUPPORT.md") + " · " + link("Operations", "docs/OPERATIONS.md"), "small"),
+    p("MANAGED SITE / SUPPORT ALLOWANCE", "label"),
+    p("Defined help for one site.", "title"),
+    p(f'{money("managedSite")} USD per site per month, including the associated Cloud workspace, device-health monitoring, qualified updates, recovery guidance, and {PRICING["managedSite"]["supportHoursPerMonth"]} hour of remote assistance per billing month.', "deck"),
+    p("Site and allowance", "h2"),
+    p("A site is one agreed physical location or isolated customer deployment recorded at activation. Additional appliances at that site do not create another site subscription; operating capacity must still be confirmed. Calls, investigation, troubleshooting, and configuration work count toward the allowance. Unused time does not roll over."),
+    p("Business hours and response", "h2"),
+    p(f'Support hours are Monday-Friday, 9 am-5 pm America/Chicago, excluding local public holidays. Response target: within {PRICING["managedSite"]["responseBusinessDays"]} business days, meaning acknowledgment and a next step. Resolution time depends on the issue.'),
+    p("Included and excluded work", "h2"),
+    p("Included: configuration and policy guidance, troubleshooting, recovery guidance, and qualified update assistance. Excluded: custom development, on-site work, round-the-clock response, replacement hardware, and work beyond the allowance. Appliance hardware, model-provider usage, customer infrastructure, and applicable taxes are separate."),
+    p("Cloud and renewal", "h2"),
+    p(f'Standalone Cloud is {money("cloud")} USD per workspace per month. A managed site has no additional subscription charge for its included workspace. Software is {money("software")}. Cloud and managed sites renew monthly until canceled; email the owner before the next renewal with your subscription reference. The current paid period, appliance ownership, and free software remain available.'),
+    p("Activation follows qualification", "h2"),
+    p("Confirm the covered site, appliances, supported workflow, delivery capacity, operating coverage, and start date before payment. Cloud activation and managed monitoring require validation. Pricing does not establish a production SLA, compliance certification, guaranteed savings, or customer demand."),
+    p('<b>Mehrdad Zaker</b> · <link href="mailto:mehrdadz@neuralint.io" color="#31684b">mehrdadz@neuralint.io</link><br/>' + f'<link href="{URL}enterprise/" color="#31684b">usehormuz.github.io/enterprise</link>'),
+    p("Sources: " + link("Onboarding scope", "marketing/PILOT.md") + " · " + link("Commercial terms", "marketing/COMMERCIAL_SETUP.md") + " · " + link("Operations", "docs/OPERATIONS.md"), "small"),
 ]
 
 trust = [
@@ -175,5 +180,9 @@ trust = [
 
 if __name__ == "__main__":
     build("hormuz-overview.pdf", "Hormuz — buyer overview", overview)
-    build("hormuz-pilot-brief.pdf", "Hormuz — proposed evaluation pilot", pilot)
+    build("hormuz-appliance-brief.pdf", "Hormuz — appliance and scoped onboarding", appliance)
+    # Keep the existing download URL synchronized with the revised hardware offer.
+    (OUTPUT / "hormuz-pilot-brief.pdf").write_bytes(
+        (OUTPUT / "hormuz-appliance-brief.pdf").read_bytes()
+    )
     build("hormuz-trust-brief.pdf", "Hormuz — trust and data-flow brief", trust)

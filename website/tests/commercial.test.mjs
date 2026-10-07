@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateCommercialConfig } from '../lib/commercial.mjs';
+import { validateCommercialConfig, PAYMENT_KEYS } from '../lib/commercial.mjs';
 import { buildLead, campaignLink, createRequestReference, prepareLeadAttempt, submitLead } from '../lib/lead.mjs';
 
-const blank = { formEndpoint: '', bookingUrl: '', pilotPaymentUrl: '', supportPaymentUrl: '' };
+const blank = { formEndpoint: '', bookingUrl: '', ...Object.fromEntries(PAYMENT_KEYS.map(key => [key, ''])) };
 const endpoint = 'https://formspree.io/f/testfixture';
 const fields = { name: 'Test Person', email: 'test@example.com', organization: 'Example', workflow: 'Evaluate model limits', interest: 'pilot' };
 
@@ -14,7 +14,8 @@ test('unconfigured commercial paths stay absent and configured destinations are 
     assert.throws(() => validateCommercialConfig({ ...blank, formEndpoint: url }));
   }
   for (const url of ['https://buy.stripe.com/test_123', 'https://checkout.stripe.com/customer-specific', 'https://buy.stripe.com/abc?prefilled_email=a@example.com']) {
-    assert.throws(() => validateCommercialConfig({ ...blank, pilotPaymentUrl: url }));
+    assert.throws(() => validateCommercialConfig({ ...blank, appliancePaymentUrl: url }));
+    assert.throws(() => validateCommercialConfig({ ...blank, reservationPaymentUrl: url }));
   }
   assert.throws(() => validateCommercialConfig({ ...blank, bookingUrl: 'https://evil.example' }));
 });
@@ -31,15 +32,16 @@ test('campaign links keep intent and fragment, forward only bounded campaign tag
 test('lead payload excludes unknown fields and unconsented campaign data', () => {
   const payload = buildLead({ ...fields, secret: 'do-not-forward', url: 'private', email: ' test@example.com ' });
   assert.equal(payload.email, 'test@example.com');
-  assert.equal(payload.interest, 'Enterprise pilot');
+  assert.equal(payload.interest, 'Appliance with scoped onboarding');
   assert.equal(Object.hasOwn(payload, 'secret'), false);
   assert.equal(Object.hasOwn(payload, 'url'), false);
   assert.equal(Object.hasOwn(payload, 'campaign'), false);
   const tagged = buildLead(fields, '?utm_source=linkedin&email=private');
   assert.equal(tagged.campaign, 'utm_source=linkedin');
-  assert.equal(buildLead({ ...fields, interest: 'support' }).interest, 'Enterprise support subscription');
-  assert.equal(buildLead({ ...fields, interest: 'enterprise' }).interest, 'Custom enterprise engagement');
-  assert.equal(buildLead({ ...fields, interest: 'pro' }).interest, 'Hosted Pro access');
+  assert.equal(buildLead({ ...fields, interest: 'support' }).interest, 'Managed site');
+  assert.equal(buildLead({ ...fields, interest: 'enterprise' }).interest, 'Appliance');
+  assert.equal(buildLead({ ...fields, interest: 'pro' }).interest, 'Cloud workspace');
+  assert.equal(buildLead({ ...fields, interest: 'reservation' }).interest, 'Appliance reservation');
 });
 
 test('creative attribution survives multiple page hops while downloads and external paths stay clean', () => {
@@ -87,7 +89,7 @@ test('lead validation requires reply contact and rejects invalid fields before s
   for (const field of ['name', 'email', 'organization', 'workflow']) assert.throws(() => buildLead({ ...fields, [field]: ' ' }));
   assert.throws(() => buildLead({ ...fields, email: 'invalid' }));
   assert.equal(buildLead({ ...fields, workflow: 'w'.repeat(2000) }).workflow.length, 1200);
-  assert.equal(buildLead({ ...fields, interest: '__proto__' }).interest, 'Enterprise pilot');
+  assert.equal(buildLead({ ...fields, interest: '__proto__' }).interest, 'Appliance with scoped onboarding');
 });
 
 test('a lead is acknowledged only after a positive service response', async () => {

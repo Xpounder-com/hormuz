@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { buildInquiry, campaignSource, INTERESTS } from '../../lib/contact.mjs';
+import { buildInquiry, campaignSource, INTERESTS, normalizeInterest } from '../../lib/contact.mjs';
 import { CONTACT_EMAIL } from '../../lib/site.mjs';
 
 export function ContactForm() {
-  const [interest, setInterest] = useState('pilot');
+  const [interest, setInterest] = useState('onboarding');
   const [source, setSource] = useState('');
   const [includeSource, setIncludeSource] = useState(false);
   const [draft, setDraft] = useState<{ subject: string; body: string; mailto: string } | null>(null);
@@ -13,7 +13,7 @@ export function ContactForm() {
   useEffect(() => {
     const search = window.location.search;
     const selected = new URLSearchParams(search).get('interest');
-    if (selected && Object.hasOwn(INTERESTS, selected)) setInterest(selected);
+    if (selected) setInterest(normalizeInterest(selected));
     setSource(campaignSource(search));
   }, []);
   function prepare(event: React.FormEvent<HTMLFormElement>) {

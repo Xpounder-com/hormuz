@@ -201,6 +201,60 @@ os.execv(real, [real, *{arguments!r}, *sys.argv[1:]])
         with self.assertRaises(OSError):
             socket.create_connection((address[0], int(address[1])), timeout=1)
 
+    def test_owner_exit_interrupts_client_discovery_before_launch(self) -> None:
+        import time
+
+        probe_pid = self.root / "probe-pid"
+        client_started = self.root / "client-was-started"
+        optimizer_started = self.root / "optimizer-was-started"
+        self._script(self.client, f"#!{sys.executable}\n" + f"""
+import os, sys, time
+from pathlib import Path
+if sys.argv[1:] == ["--version"]:
+    Path({str(probe_pid)!r}).write_text(str(os.getpid()))
+    time.sleep(4)
+    print("codex 0.147.0")
+else:
+    Path({str(client_started)!r}).touch()
+""")
+        self.optimizer = self.root / "optimizer"
+        self._script(self.optimizer, f"#!{sys.executable}\n" +
+                     f"from pathlib import Path\nPath({str(optimizer_started)!r}).touch()\n")
+        self._preference(True)
+        process, lease = self._start()
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                pid = int(probe_pid.read_text())
+            except (FileNotFoundError, ValueError):
+                self.assertLess(time.monotonic(), deadline, "Version probe did not start")
+                time.sleep(0.01)
+            else:
+                break
+        cancelled_at = time.monotonic()
+        lease.close()
+        output, diagnostic = process.communicate(timeout=8)
+        self.assertEqual((process.returncode, output, diagnostic), (130, b"", b""))
+        self.assertLess(time.monotonic() - cancelled_at, 2,
+                        "Owner exit must interrupt discovery, not wait for the version probe")
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+        self.assertFalse(client_started.exists())
+        self.assertFalse(optimizer_started.exists())
+        self.assertEqual(self.gateway.requests, [])
+
+    def test_unsupported_client_version_is_not_reported_as_cancellation(self) -> None:
+        self._script(self.client, "#!/bin/sh\n"
+                     'if [ "$1" = "--version" ]; then\n'
+                     "  printf 'codex 0.146.0\\n'\n"
+                     "else\n  touch client-was-started\nfi\n")
+        process, _ = self._start()
+        output, diagnostic = process.communicate(timeout=10)
+        self.assertEqual((process.returncode, output, diagnostic),
+                         (1, b"", b"relay error: The installed AI client version is unsupported.\n"))
+        self.assertFalse((self.root / "client-was-started").exists())
+        self.assertEqual(self.gateway.requests, [])
+
     def test_on_uses_packaged_bridge_and_preserves_lossless_tool_output(self) -> None:
         from hormuz.compaction_formats import restore_text
 

@@ -1,0 +1,33 @@
+{
+  "currency": "USD",
+  "software": {
+    "amount": 0
+  },
+  "cloud": {
+    "amount": 49.99,
+    "unit": "workspace/month"
+  },
+  "appliance": {
+    "amount": 999
+  },
+  "reservation": {
+    "amount": 49,
+    "unit": "appliance",
+    "type": "refundable-deposit",
+    "creditedToPurchase": true,
+    "plannedRollout": "early 2027"
+  },
+  "onboarding": {
+    "amount": 1499,
+    "remoteHours": 3,
+    "providers": 1,
+    "applications": 1
+  },
+  "managedSite": {
+    "amount": 499,
+    "unit": "site/month",
+    "supportHoursPerMonth": 1,
+    "responseBusinessDays": 2,
+    "includesCloudWorkspace": true
+  }
+}

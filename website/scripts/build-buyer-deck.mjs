@@ -1,11 +1,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { Presentation, PresentationFile } from '@oai/artifact-tool';
+import { pathToFileURL } from 'node:url';
+import { SOFTWARE_PRICE, CLOUD_PRICE, APPLIANCE_PRICE, ONBOARDING_PRICE, MANAGED_SITE_PRICE, RESERVATION_PRICE, pricing } from '../lib/commercial.mjs';
+const artifactModule = process.env.RUNTIME_NODE_MODULES ? pathToFileURL(path.join(process.env.RUNTIME_NODE_MODULES, '@oai/artifact-tool/dist/artifact_tool.mjs')).href : '@oai/artifact-tool';
+const { Presentation, PresentationFile } = await import(artifactModule);
 
 // Run from website/ using the bundled artifact runtime. Keep all intermediates
 // in .artifacts/; only the reviewed final deck is a public download.
-const output = path.resolve('public/downloads/hormuz-buyer-briefing.pptx');
-const scratch = path.resolve('.artifacts/deck');
+const output = path.resolve(process.env.DECK_OUTPUT_PATH || 'public/downloads/hormuz-buyer-briefing.pptx');
+const scratch = path.resolve(process.env.DECK_SCRATCH_DIR || '.artifacts/deck');
 await fs.mkdir(scratch, { recursive: true });
 await fs.mkdir(path.dirname(output), { recursive: true });
 const presentation = Presentation.create({ slideSize: { width: 1280, height: 720 } });
@@ -30,7 +33,7 @@ function slide(kicker, title, number, sources, dark = false) {
   s.images.add({ svg: dark ? brandMarks.dark : brandMarks.light, alt: 'Hormuz passage H', fit: 'contain', position: { left: 1176, top: 35, width: 40, height: 40 } });
   text(s, 'section', kicker.toUpperCase(), 64, 44, 1130, 30, 19, dark ? C.cyan : C.teal, true);
   if (title) text(s, 'takeaway', title, 64, 106, 1152, 124, 48, dark ? C.white : C.ink, true);
-  text(s, 'footer', 'HORMUZ  /  A product of Neuralint  /  Mehrdad Zaker  /  September 2026', 64, 672, 1000, 24, 17, dark ? '#dce6d5' : C.muted);
+  text(s, 'footer', 'HORMUZ  /  A product of Neuralint  /  Mehrdad Zaker  /  October 2026', 64, 672, 1000, 24, 17, dark ? '#dce6d5' : C.muted);
   text(s, 'page-number', `${String(number).padStart(2, '0')} / 07`, 1152, 672, 64, 24, 17, dark ? '#dce6d5' : C.muted);
   const urls = sources.map(source => source.startsWith('https:') ? source : repo + source);
   s.speakerNotes.textFrame.setText(`[Sources]\n${urls.join('\n')}\n[/Sources]\nScope: public v1 source contracts and synthetic evidence. No customer outcome, certification, SLA, validated demand, or future software availability is implied.`);
@@ -38,7 +41,7 @@ function slide(kicker, title, number, sources, dark = false) {
   return s;
 }
 
-let s = slide('Open source + supported evaluation', '', 1, ['marketing/OFFER.md', 'LICENSE', 'docs/CLIENTS.md'], true);
+let s = slide('Software + Cloud + appliances', '', 1, ['marketing/OFFER.md', 'LICENSE', 'docs/CLIENTS.md'], true);
 text(s, 'cover-title', 'Give your team AI.\nKeep control.', 64, 156, 1140, 222, 76, C.white, true);
 text(s, 'cover-summary', 'Self-hosted policy, budgets, secret controls,\nand metadata-only evidence for Codex and Claude Code.', 68, 438, 1110, 106, 31, '#d9e1df');
 text(s, 'cover-boundary', 'Apache-2.0 core  •  v1.3.0 source release', 68, 582, 1110, 42, 25, C.cyan, true);
@@ -65,24 +68,33 @@ text(s, 'zero-label', 'external provider calls', 64, 446, 360, 70, 30, C.white, 
 text(s, 'checks', 'Allow an approved request\nReroute and cap an unapproved model\nRedact a detected secret before egress\nDeny without an upstream call', 492, 266, 704, 252, 31, C.white);
 text(s, 'proof-boundary', 'Four usage events + one secret-control event. Download the real recording and a schema-checked synthetic export. Not a benchmark, customer case study, or independent-user result.', 64, 553, 1152, 86, 25, '#d9e1df');
 
-s = slide('What is free. What is paid.', 'Keep a useful core open source.', 4, ['LICENSE', 'marketing/OFFER.md', 'marketing/PILOT.md']);
-text(s, 'oss-title', 'Apache-2.0 product', 64, 268, 514, 50, 34, C.teal, true);
-text(s, 'oss-body', 'Gateway and client paths\nOIDC JWT verification\nPolicy overlays and budgets\nDeterministic secret controls\nUsage reports and evidence', 64, 337, 516, 224, 28);
-text(s, 'paid-title', '90-day pilot · $15,000', 684, 268, 532, 50, 34, C.teal, true);
-text(s, 'paid-body', 'Workflow and control mapping\nConfiguration and integration help\nAgreed non-production checks\nEvidence pack and gap review\nOperator handoff', 684, 337, 532, 224, 28);
-text(s, 'same-core', 'USD · one team, one workflow. Optional support from $2,000/month. Provider usage, infrastructure, and applicable taxes are additional.', 64, 588, 1152, 68, 24, C.muted);
+s = slide('Software, Cloud, and hardware', 'One clear price catalog.', 4, ['website/lib/pricing.json', 'marketing/OFFER.md', 'marketing/COMMERCIAL_SETUP.md']);
+const priceRows = [
+  ['Software', SOFTWARE_PRICE, 'Apache-2.0 software'],
+  ['Cloud', CLOUD_PRICE, 'Per workspace / month'],
+  ['Appliance', APPLIANCE_PRICE, 'Per appliance / one time'],
+  ['Appliance + scoped onboarding', ONBOARDING_PRICE, 'Per appliance / one time'],
+  ['Managed site', MANAGED_SITE_PRICE, 'Per site / month / Cloud included'],
+];
+priceRows.forEach(([label, amount, unit], i) => {
+  const y = 260 + i * 60;
+  text(s, `offer-${i}`, label, 64, y, 502, 48, 27, C.ink, true);
+  text(s, `price-${i}`, amount, 584, y, 230, 48, 32, C.teal, true);
+  text(s, `unit-${i}`, unit, 850, y, 366, 54, 23, C.muted);
+});
+text(s, 'price-scope', `Managed site: ${pricing.managedSite.supportHoursPerMonth} support hour/month; response within ${pricing.managedSite.responseBusinessDays} business days.\nUSD. Provider usage, customer infrastructure, and applicable taxes are separate.`, 64, 575, 1152, 74, 23, C.muted);
 
 s = slide('Maturity and responsibility', 'Stable contracts are not certification.', 5, ['SUPPORT.md', 'docs/OIDC.md', 'docs/SECRET_CONTROLS.md', 'docs/USAGE.md', 'marketing/TRUST.md']);
 text(s, 'release', 'v1.3.0 source + Apple Silicon app', 64, 268, 1152, 64, 42, C.teal, true);
 text(s, 'oci', 'Personal Optimizer: macOS 14+ on Apple Silicon. Signed OCI: v1.3.0 linux/amd64.', 64, 346, 1152, 52, 28);
 text(s, 'operators', 'You still qualify TLS, custody, retention, backups, recovery, availability, access controls, and independent security review in your environment.', 64, 432, 1152, 102, 31, C.ink, true);
-text(s, 'nonclaims', 'Not claimed: complete semantic DLP, per-inference human approval, reconciled provider invoices, generally available managed SaaS, or a 24/7 SLA.', 64, 569, 1152, 81, 25, C.muted);
+text(s, 'nonclaims', 'Not claimed: complete semantic DLP, per-inference human approval, reconciled provider invoices, qualified ARM64 appliance delivery, generally available Cloud, or a 24/7 SLA.', 64, 569, 1152, 81, 25, C.muted);
 
-s = slide('Proposed 90-day pilot', 'Prove one workflow before expanding.', 6, ['marketing/PILOT.md']);
+s = slide('Scoped appliance onboarding', 'One appliance. One supported workflow.', 6, ['marketing/PILOT.md', 'website/lib/pricing.json']);
 const phases = [
-  ['01', 'Days 1–15 / Map', 'Control map, prerequisites, and agreed acceptance criteria.'],
-  ['02', 'Days 16–45 / Prove', 'One non-production integration, evidence pack, and issue log.'],
-  ['03', 'Days 46–90 / Decide', 'Go/no-go decision, named gap owners, and operator handoff.'],
+  ['01', 'Prepare', 'Named operator, ready network, provider account, and acceptance scope.'],
+  ['02', 'Connect', 'One provider, one supported application, and initial policies.'],
+  ['03', 'Verify and hand over', 'Allowed and denied request checks, operator instructions, and open issues.'],
 ];
 phases.forEach(([n, title, detail], i) => {
   const y = 267 + i * 112;
@@ -90,12 +102,14 @@ phases.forEach(([n, title, detail], i) => {
   text(s, `phase-title-${n}`, title, 204, y, 1012, 42, 31, C.ink, true);
   text(s, `phase-body-${n}`, detail, 204, y + 50, 1012, 45, 26);
 });
-text(s, 'pilot-boundary', 'Start with fit and scope. A shorter evaluation may come first. No work is confirmed by an inquiry.', 64, 620, 1152, 40, 22, C.muted);
+text(s, 'onboarding-boundary', `Up to ${pricing.onboarding.remoteHours} hours of remote setup. Appliance included.
+Custom integrations, on-site work, and ongoing operations are excluded.`, 64, 605, 1152, 58, 22, C.muted);
 
-s = slide('A bounded next step', 'Name one workflow worth governing.', 7, [site, 'marketing/PILOT.md', 'marketing/TRUST.md'], true);
-text(s, 'next-step', 'Which client? Which team?\nWhich control is missing?\nWho operates the route?', 64, 280, 1140, 198, 44, C.white);
-text(s, 'contact', 'Mehrdad Zaker\nmehrdadz@neuralint.io', 64, 510, 1140, 86, 31, C.cyan, true);
-text(s, 'website', 'usehormuz.github.io', 64, 613, 1140, 40, 25, '#d9e1df');
+s = slide('Planned rollout: early 2027', 'Coming soon. Reserve your appliance.', 7, [site + 'enterprise/#reserve', 'marketing/COMMERCIAL_SETUP.md', 'website/lib/pricing.json'], true);
+text(s, 'next-step', `Reserve yours — ${RESERVATION_PRICE}\nFully refundable. Credited toward purchase.\nCancel anytime before fulfillment.`, 64, 270, 1140, 178, 38, C.white);
+text(s, 'reservation-terms', 'One-time deposit per appliance. All payments use Stripe.\nRollout is a target, not a guaranteed shipping date.', 64, 461, 1152, 70, 24, '#d9e1df');
+text(s, 'contact', 'Mehrdad Zaker\nmehrdadz@neuralint.io', 64, 551, 1140, 75, 27, C.cyan, true);
+text(s, 'website', 'usehormuz.github.io/enterprise/#reserve', 64, 634, 1140, 28, 20, '#d9e1df');
 
 await fs.writeFile(path.join(scratch, 'source-notes.txt'), JSON.stringify(sourceNotes, null, 2));
 for (const [i, item] of presentation.slides.items.entries()) {

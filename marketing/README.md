@@ -16,7 +16,7 @@ Showcase submission are not implied.
 
 - [Project website](https://usehormuz.github.io/)
 - [Real recorded demo and synthetic evidence](https://usehormuz.github.io/demo/)
-- [OSS / enterprise-service comparison](https://usehormuz.github.io/enterprise/)
+- [Software / appliance-service comparison](https://usehormuz.github.io/enterprise/)
 - [Buyer downloads](https://usehormuz.github.io/resources/)
 - [Editable Figma marketing handoff](https://www.figma.com/design/Ax2HWqdWzVnMANEOmB5Z4z)
 
@@ -25,7 +25,7 @@ Showcase submission are not implied.
 | Material | Purpose |
 | --- | --- |
 | [Positioning and offer](OFFER.md) | The buyer hypothesis, useful open core, and paid services boundary |
-| [Pilot scope](PILOT.md) | Eligibility, acceptance, responsibilities, and terms still to agree |
+| [Appliance onboarding](PILOT.md) | Included setup, acceptance, responsibilities, and managed-site support allowance |
 | [Trust brief](TRUST.md) | Content, metadata, credentials, deployment duties, and review questions |
 | [Client tutorial](tutorials/client-integration.md) | A narrow, source-linked integration path |
 | [Policy tutorial](tutorials/policy-and-evidence.md) | Offline preview before managed administration |

@@ -19,10 +19,20 @@ const MAX_VERSION_OUTPUT: u64 = 4096;
 /// Only the client versions already qualified by the Python reference are
 /// admitted. Never fall through to an unverified executable on PATH.
 pub fn discover_supported_client(client: AIClient) -> Result<PathBuf, RelayError> {
+    discover_supported_client_until(client, &mut || false)
+}
+
+fn discover_supported_client_until(
+    client: AIClient,
+    stopped: &mut dyn FnMut() -> bool,
+) -> Result<PathBuf, RelayError> {
+    if stopped() {
+        return Err(RelayError::ClientLaunchCancelled);
+    }
     #[cfg(target_os = "linux")]
     require_linux_user_service()?;
     let path = std::env::var_os("PATH").ok_or(RelayError::UnsupportedClient)?;
-    discover_in_path(client, &path)
+    discover_in_path(client, &path, stopped)
 }
 
 /// Verify the transient user service before any Linux native CLI custody or
@@ -33,7 +43,11 @@ pub fn require_linux_user_service() -> Result<(), RelayError> {
         .map_err(|_| RelayError::NativeSupervisionUnavailable)
 }
 
-fn discover_in_path(client: AIClient, path: &OsStr) -> Result<PathBuf, RelayError> {
+fn discover_in_path(
+    client: AIClient,
+    path: &OsStr,
+    stopped: &mut dyn FnMut() -> bool,
+) -> Result<PathBuf, RelayError> {
     let (command, version) = match client {
         AIClient::Codex => ("codex", "0.147.0"),
         AIClient::ClaudeCode => ("claude", "2.1.233"),
@@ -59,7 +73,7 @@ fn discover_in_path(client: AIClient, path: &OsStr) -> Result<PathBuf, RelayErro
     if !executable.is_absolute() {
         return Err(RelayError::UnsupportedClient);
     }
-    let output = bounded_version_output(&executable)?;
+    let output = bounded_version_output(&executable, stopped)?;
     let text = std::str::from_utf8(&output).map_err(|_| RelayError::UnsupportedClient)?;
     if first_version(text) != Some(version) {
         return Err(RelayError::UnsupportedClient);
@@ -97,7 +111,10 @@ fn first_version(text: &str) -> Option<&str> {
     None
 }
 
-fn bounded_version_output(executable: &Path) -> Result<Vec<u8>, RelayError> {
+fn bounded_version_output(
+    executable: &Path,
+    stopped: &mut dyn FnMut() -> bool,
+) -> Result<Vec<u8>, RelayError> {
     // Files avoid an unbounded pipe join if a version command exits after a
     // descendant inherits stdout or stderr. They carry only version text.
     let mut stdout = tempfile::tempfile().map_err(|_| RelayError::UnsupportedClient)?;
@@ -118,6 +135,9 @@ fn bounded_version_output(executable: &Path) -> Result<Vec<u8>, RelayError> {
                 .try_clone()
                 .map_err(|_| RelayError::UnsupportedClient)?,
         ));
+    if stopped() {
+        return Err(RelayError::ClientLaunchCancelled);
+    }
     #[cfg(windows)]
     let mut child = OwnedClient::spawn(&mut command).map_err(|_| RelayError::UnsupportedClient)?;
     #[cfg(target_os = "linux")]
@@ -131,6 +151,10 @@ fn bounded_version_output(executable: &Path) -> Result<Vec<u8>, RelayError> {
     ));
     let deadline = Instant::now() + VERSION_BUDGET;
     let status = loop {
+        if stopped() {
+            // OwnedClient kills and reaps the direct probe on this exit path.
+            return Err(RelayError::ClientLaunchCancelled);
+        }
         #[cfg(windows)]
         let next = child
             .try_wait_status()
@@ -401,10 +425,11 @@ pub fn run_client_until(
     optimization: Optimization,
     stopped: &mut dyn FnMut() -> bool,
 ) -> Result<i32, RelayError> {
-    if stopped() {
-        return Ok(130);
-    }
-    let executable = discover_supported_client(profile.client())?;
+    let executable = match discover_supported_client_until(profile.client(), stopped) {
+        Ok(executable) => executable,
+        Err(RelayError::ClientLaunchCancelled) => return Ok(130),
+        Err(error) => return Err(error),
+    };
     run_with_executable_until(profile, credentials, optimization, executable, stopped)
 }
 
@@ -477,12 +502,14 @@ mod tests {
         let executable = temporary.path().join("codex");
         fake_client(&executable, "printf 'codex 0.146.0\\n'");
         assert_eq!(
-            discover_in_path(AIClient::Codex, temporary.path().as_os_str()).unwrap_err(),
+            discover_in_path(AIClient::Codex, temporary.path().as_os_str(), &mut || false)
+                .unwrap_err(),
             RelayError::UnsupportedClient
         );
         fake_client(&executable, "printf 'codex 0.146.0 (protocol 0.147.0)\\n'");
         assert_eq!(
-            discover_in_path(AIClient::Codex, temporary.path().as_os_str()).unwrap_err(),
+            discover_in_path(AIClient::Codex, temporary.path().as_os_str(), &mut || false)
+                .unwrap_err(),
             RelayError::UnsupportedClient
         );
         fake_client(
@@ -490,12 +517,13 @@ mod tests {
             &format!("printf 'codex 0.147.0{}'", "x".repeat(4096)),
         );
         assert_eq!(
-            discover_in_path(AIClient::Codex, temporary.path().as_os_str()).unwrap_err(),
+            discover_in_path(AIClient::Codex, temporary.path().as_os_str(), &mut || false)
+                .unwrap_err(),
             RelayError::UnsupportedClient
         );
         fake_client(&executable, "printf 'codex 0.147.0\\n'");
         assert_eq!(
-            discover_in_path(AIClient::Codex, temporary.path().as_os_str()).unwrap(),
+            discover_in_path(AIClient::Codex, temporary.path().as_os_str(), &mut || false).unwrap(),
             executable.canonicalize().unwrap()
         );
     }
@@ -507,8 +535,57 @@ mod tests {
         let executable = temporary.path().join("codex.cmd");
         std::fs::write(&executable, b"@echo off\r\necho codex 0.147.0\r\n").unwrap();
         assert_eq!(
-            discover_in_path(AIClient::Codex, temporary.path().as_os_str()).unwrap(),
+            discover_in_path(AIClient::Codex, temporary.path().as_os_str(), &mut || false).unwrap(),
             executable.canonicalize().unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelled_discovery_never_starts_a_version_probe() {
+        let temporary = tempfile::tempdir().unwrap();
+        let executable = temporary.path().join("codex");
+        let marker = temporary.path().join("probe-started");
+        let quoted = marker.display().to_string().replace('\'', "'\\''");
+        fake_client(&executable, &format!("touch '{quoted}'"));
+        assert_eq!(
+            discover_in_path(AIClient::Codex, temporary.path().as_os_str(), &mut || true)
+                .unwrap_err(),
+            RelayError::ClientLaunchCancelled
+        );
+        assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelled_version_probe_is_killed_and_reaped() {
+        use rustix::process::{waitpid, Pid, WaitOptions};
+
+        let temporary = tempfile::tempdir().unwrap();
+        let executable = temporary.path().join("codex");
+        let pid_file = temporary.path().join("probe-pid");
+        let quoted = pid_file.display().to_string().replace('\'', "'\\''");
+        fake_client(
+            &executable,
+            &format!("printf '%s' \"$$\" > '{quoted}'\nexec /bin/sleep 30"),
+        );
+        let started = Instant::now();
+        assert_eq!(
+            bounded_version_output(&executable, &mut || {
+                std::fs::read_to_string(&pid_file)
+                    .ok()
+                    .is_some_and(|text| text.parse::<i32>().is_ok())
+            })
+            .unwrap_err(),
+            RelayError::ClientLaunchCancelled
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let pid =
+            Pid::from_raw(std::fs::read_to_string(&pid_file).unwrap().parse().unwrap()).unwrap();
+        assert_eq!(
+            waitpid(Some(pid), WaitOptions::NOHANG).unwrap_err(),
+            rustix::io::Errno::CHILD,
+            "the direct version probe must already have been reaped"
         );
     }
 
