@@ -1,9 +1,9 @@
 # Native Mac client
 
-Hormuz v1.2.0 publishes a Developer ID signed and notarized Apple Silicon client
+Hormuz v1.8.0 publishes a Developer ID signed and notarized Apple Silicon client
 for the opt-in [browser-login broker](HOSTED_LOGIN_LOCAL.md). This document also
 keeps the local development and verification path explicit. Context optimization
-ships Off by default while the separate v1.3 portfolio program remains
+ships Off by default while the separate portfolio program remains
 independently gated. Building and testing locally requires no paid cloud service.
 The app alone does not create hosted signup, billing, provider credential custody,
 automatic failover, an availability promise, or general production readiness.
@@ -66,9 +66,9 @@ An explicitly present `null`, an unknown setup string, or a hosted-pilot profile
 that selects Claude Code, loopback HTTP, or any other alias fails closed. Loading
 and re-saving a valid profile retains its setup and profile ID.
 
-The current development launcher invokes the bundled Rust client relay, passing
+The v1.8.0 and development launchers invoke the bundled Rust client relay, passing
 the Swift credential broker, packaged optimizer, and app-owned private socket.
-The published v1.3.0 app retains its earlier context-helper launcher. The relay
+Historical v1.3.0 rollback archives retain the earlier context-helper launcher. The relay
 starts an authenticated loopback listener and gives Codex
 invocation-local TOML overrides or Claude Code invocation-local environment
 overrides. Common ambient provider credential and backend selectors are cleared

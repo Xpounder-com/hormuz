@@ -113,6 +113,15 @@ class ReleaseIdentityTests(unittest.TestCase):
         relay = (ROOT / "clients/rust/relay/README.md").read_text(encoding="utf-8")
         self.assertIn("v1.8.0 notarized Mac archive includes this relay", relay)
         self.assertIn("not Windows or Linux native", relay)
+        for filename in (
+            "docs/ROADMAP.md",
+            "docs/MACOS_CLIENT_LOCAL.md",
+            "clients/contracts/README.md",
+        ):
+            guide = (ROOT / filename).read_text(encoding="utf-8")
+            self.assertIn("v1.8.0", guide, filename)
+            self.assertNotIn("Mac app remains v1.3.0", guide, filename)
+            self.assertNotIn("Mac download stays v1.3.0", guide, filename)
 
     def test_current_readme_uses_the_bounded_v1_claim(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
