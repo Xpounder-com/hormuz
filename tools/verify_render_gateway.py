@@ -48,6 +48,12 @@ PROVIDER_METADATA_NAMES = {
     "RENDER_SERVICE_TYPE",
     "RENDER_WEB_CONCURRENCY",
 }
+# The supervisor has explicit, reviewed slots for the opt-in AI Work billing
+# child. This fixture leaves billing unconfigured, so their values must be empty.
+PROVIDER_OPTIONAL_BILLING_NAMES = {
+    "HORMUZ_WORK_BILLING_WEBHOOK_SECRET",
+    "HORMUZ_WORK_BILLING_API_KEY",
+}
 POSTGRES_MIGRATION_DSN = (
     "postgresql://hormuz_migration_direct:synthetic-migration-password"
     "@database:5432/hormuz"
@@ -136,6 +142,7 @@ PROCESS_BOUNDARY = '''
 import json
 from pathlib import Path
 caddy = backend = None
+backend_work_billing_populated = []
 for path in Path('/proc').iterdir():
     if not path.name.isdecimal():
         continue
@@ -144,11 +151,16 @@ for path in Path('/proc').iterdir():
         if command[:2] == [b'/usr/bin/caddy', b'run']:
             caddy = {item.split(b'=', 1)[0].decode() for item in (path / 'environ').read_bytes().split(b'\\0') if item}
         elif b'hormuz.hosted' in command and any(item in {b'backend', b'workspace-backend', b'provider-backend'} for item in command):
-            backend = {item.split(b'=', 1)[0].decode() for item in (path / 'environ').read_bytes().split(b'\\0') if item}
+            values = dict(item.split(b'=', 1) for item in (path / 'environ').read_bytes().split(b'\\0') if item)
+            backend = {name.decode() for name in values}
+            backend_work_billing_populated = [name for name in
+                ('HORMUZ_WORK_BILLING_WEBHOOK_SECRET', 'HORMUZ_WORK_BILLING_API_KEY')
+                if values.get(name.encode(), b'')]
     except FileNotFoundError:
         continue
 print(json.dumps({'uid': __import__('os').getuid(), 'caddy_names': sorted(caddy or []),
-    'backend_names': sorted(backend or []), 'backend_present': backend is not None}))
+    'backend_names': sorted(backend or []), 'backend_present': backend is not None,
+    'backend_work_billing_populated': backend_work_billing_populated}))
 '''
 IMAGE_SOURCES = '''
 import hashlib, json, hormuz
@@ -216,6 +228,19 @@ def docker(
             + code
         )
     return (result.stdout + (result.stderr if arguments[0] == "logs" or expected != 0 else "")).strip()
+
+
+def provider_backend_boundary_matches(boundary: dict) -> bool:
+    """Match every reviewed child name and reject populated inactive billing."""
+    expected = (
+        set(SECRETS) | set(PROVIDER_SECRETS) | PROVIDER_METADATA_NAMES
+        | PROVIDER_OPTIONAL_BILLING_NAMES
+    )
+    return (
+        boundary.get("backend_present") is True
+        and set(boundary.get("backend_names", ())) - {"LC_CTYPE"} == expected
+        and boundary.get("backend_work_billing_populated") == []
+    )
 
 
 def verify(image: str) -> dict:
@@ -530,15 +555,18 @@ def verify(image: str) -> dict:
         passed("provider_proxy_has_only_ingress_secret",
                set(boundary["caddy_names"]) == {"PORT", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HORMUZ_INGRESS_CREDENTIAL"})
         passed("provider_backend_has_only_owned_secrets_and_metadata",
-               boundary["backend_present"]
-               and set(boundary["backend_names"]) - {"LC_CTYPE"}
-               == set(SECRETS) | set(PROVIDER_SECRETS) | PROVIDER_METADATA_NAMES)
+               provider_backend_boundary_matches(boundary))
         status, headers, body = request(
             provider_pilot, "POST", "/v1/responses",
             body=b'{"model":"openai-primary","input":"synthetic-no-egress"}',
         )
         passed("provider_route_requires_session_before_egress",
                status == 401 and b"synthetic-no-egress" not in body and "Server" not in headers)
+        passed("provider_model_catalog_requires_session",
+               request(provider_pilot, "GET", "/v1/models")[0] == 401)
+        passed("provider_chat_requires_session_before_egress",
+               request(provider_pilot, "POST", "/v1/chat/completions",
+                       body=b'{"model":"openai-primary","messages":[]}')[0] == 401)
         status, headers, body = request(provider_pilot, "POST", "/v1/models", body=CANARY.encode())
         passed("provider_unknown_route_fails_closed",
                status == 503 and b'"inference_enabled":true' in body
@@ -582,8 +610,7 @@ target.chmod(0o600)
         passed("openai_only_supervisor_has_no_anthropic_credential", absent == "True")
         boundary = json.loads(execute(openai_pilot, PYTHON, "-I", "-", input_text=PROCESS_BOUNDARY))
         passed("openai_only_backend_keeps_exact_environment_boundary",
-               boundary["backend_present"] and set(boundary["backend_names"]) - {"LC_CTYPE"}
-               == set(SECRETS) | set(PROVIDER_SECRETS) | PROVIDER_METADATA_NAMES)
+               provider_backend_boundary_matches(boundary))
         stop(openai_pilot)
         workspace_profile = "/var/lib/hormuz/private/config/workspace-profile.json"
         operator("--config", workspace_profile, "--workspace-profile", "initialize")
@@ -592,6 +619,9 @@ target.chmod(0o600)
         passed("workspace_health_contract", health[0] == 200 and json.loads(health[2])["schema_id"] == "hormuz.hosted-workspaces")
         passed("workspace_public_ready", request(workspace, "GET", "/ready")[0] == 200)
         passed("workspace_public_entry", request(workspace, "GET", "/workspace")[0] == 200)
+        work_entry = request(workspace, "GET", "/work")
+        passed("workspace_work_entry_remains_provider_free_provisioning",
+               work_entry[0] == 303 and work_entry[1].get("Location") == "/workspace")
         passed("workspace_stylesheet_packaged", request(workspace, "GET", "/workspace/styles.css")[0] == 200)
         passed("workspace_identity_requires_session", request(workspace, "GET", "/v1/workspaces/me")[0] == 401)
         passed("workspace_forged_forwarding_is_replaced", request(workspace, "GET", "/ready", fields=forged)[0] == 200)
