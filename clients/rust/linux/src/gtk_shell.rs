@@ -136,6 +136,26 @@ impl Observation {
     fn lost_owner(&mut self) {
         self.lock_generation = self.lock_generation.wrapping_add(1);
     }
+    fn manager(&mut self, owner_present: bool, sleeping: Option<bool>) {
+        let was_seen = self.manager_seen;
+        self.manager_seen = owner_present && sleeping.is_some();
+        if let Some(sleeping) = sleeping.filter(|_| owner_present) {
+            self.sleep(sleeping);
+        }
+        if was_seen && !self.manager_seen {
+            self.lost_owner();
+        }
+    }
+    fn session(&mut self, owner_present: bool, locked: Option<bool>) {
+        let was_seen = self.session_seen;
+        self.session_seen = owner_present && locked.is_some();
+        if let Some(locked) = locked.filter(|_| owner_present) {
+            self.lock(locked);
+        }
+        if was_seen && !self.session_seen {
+            self.lost_owner();
+        }
+    }
 }
 
 pub struct Ui {
@@ -145,6 +165,11 @@ pub struct Ui {
     controls: RefCell<Controls>,
     started: Instant,
     quitting: Cell<bool>,
+    waiting_to_quit: Cell<bool>,
+    quit_confirmation: gtk::Box,
+    quit_wait: gtk::Button,
+    quit_cancel: gtk::Button,
+    quit_stop: gtk::Button,
     minimized: Cell<bool>,
     profile_loaded: Cell<bool>,
     timers: RefCell<Vec<(TimerToken, glib::SourceId)>>,
@@ -312,6 +337,16 @@ impl Ui {
         content.append(&stop_terminal);
         let quit = gtk::Button::with_mnemonic("_Quit Hormuz");
         content.append(&quit);
+        let quit_confirmation = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        quit_confirmation.append(&label("A governed client is active or still stopping. Wait leaves its lease open and quits after confirmed completion. Cancel keeps Hormuz open. Stop and Quit interrupts the client and stops its exact owned service."));
+        let quit_wait = gtk::Button::with_mnemonic("_Wait for client, then quit");
+        let quit_cancel = gtk::Button::with_mnemonic("_Cancel quit / keep client running");
+        let quit_stop = gtk::Button::with_mnemonic("_Stop client and Quit");
+        for button in [&quit_wait, &quit_cancel, &quit_stop] {
+            quit_confirmation.append(button);
+        }
+        quit_confirmation.set_visible(false);
+        content.append(&quit_confirmation);
         window.set_default_widget(Some(&sign_in));
         let ui = Rc::new(Self {
             window,
@@ -320,6 +355,11 @@ impl Ui {
             controls: RefCell::new(Controls::default()),
             started: Instant::now(),
             quitting: Cell::new(false),
+            waiting_to_quit: Cell::new(false),
+            quit_confirmation,
+            quit_wait,
+            quit_cancel,
+            quit_stop,
             minimized: Cell::new(false),
             profile_loaded: Cell::new(false),
             timers: RefCell::new(Vec::new()),
@@ -451,6 +491,31 @@ impl Ui {
             }
         });
         let weak = Rc::downgrade(&ui);
+        ui.quit_wait.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.waiting_to_quit.set(true);
+                ui.quit_wait.set_sensitive(false);
+                ui.render();
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.quit_cancel.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.waiting_to_quit.set(false);
+                ui.quit_confirmation.set_visible(false);
+                ui.quit_wait.set_sensitive(true);
+                ui.render();
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.quit_stop.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.waiting_to_quit.set(false);
+                ui.quit_confirmation.set_visible(false);
+                ui.begin_shutdown();
+            }
+        });
+        let weak = Rc::downgrade(&ui);
         ui.window.connect_close_request(move |_| {
             if let Some(ui) = weak.upgrade() {
                 ui.shutdown();
@@ -507,6 +572,7 @@ impl Ui {
                 let Some(ui) = weak.upgrade() else {
                     break;
                 };
+                ui.cleanup_finished_terminal();
                 ui.apply_observation();
                 ui.render();
             }
@@ -615,7 +681,8 @@ impl Ui {
                 && !busy
                 && self.launch_context.is_some()
                 && self.terminal.borrow().is_none()
-                && !self.terminal_busy.get(),
+                && !self.terminal_busy.get()
+                && !self.waiting_to_quit.get(),
         );
         self.stop_terminal
             .set_sensitive(self.terminal.borrow().is_some() && !self.terminal_busy.get());
@@ -678,8 +745,8 @@ impl Ui {
         );
         let previous = self.last_observation.replace(next);
         if let Some(worker) = self.worker.borrow().as_ref() {
-            // A short lock/sleep followed by resume must still cancel active
-            // work even if both observations share one coalesced UI wake.
+            // A short lock/sleep followed by resume must still pause scheduling
+            // even if both observations share one coalesced UI wake.
             let saw_lock = next.2 != previous.2;
             let saw_sleep = next.3 != previous.3;
             if saw_lock {
@@ -714,6 +781,25 @@ impl Ui {
     }
 
     fn shutdown(self: &Rc<Self>) {
+        if self.quitting.get() {
+            return;
+        }
+        let active = self.terminal_busy.get()
+            || self
+                .terminal
+                .borrow()
+                .as_ref()
+                .is_some_and(|terminal| !terminal.phase().finished());
+        if active {
+            self.quit_confirmation.set_visible(true);
+            self.window.present();
+            self.quit_cancel.grab_focus();
+            return;
+        }
+        self.begin_shutdown();
+    }
+
+    fn begin_shutdown(self: &Rc<Self>) {
         if self.quitting.replace(true) {
             return;
         }
@@ -728,8 +814,26 @@ impl Ui {
         self.finish_shutdown();
     }
 
+    fn cleanup_finished_terminal(self: &Rc<Self>) {
+        if !self.terminal_busy.get()
+            && self
+                .terminal
+                .borrow()
+                .as_ref()
+                .is_some_and(|terminal| terminal.phase().finished())
+        {
+            // Even a final phase can precede the thread's return. Join through
+            // the existing bounded blocking path, never on GTK's main context.
+            self.stop_owned_terminal(false);
+        }
+    }
+
     fn launch_terminal(self: &Rc<Self>) {
-        if self.terminal.borrow().is_some() || self.terminal_busy.get() || self.quitting.get() {
+        if self.terminal.borrow().is_some()
+            || self.terminal_busy.get()
+            || self.quitting.get()
+            || self.waiting_to_quit.get()
+        {
             return;
         }
         let Some(context) = &self.launch_context else {
@@ -788,10 +892,12 @@ impl Ui {
             ui.terminal_busy.set(false);
             match result {
                 Ok((terminal, Ok(()))) => {
+                    let phase = terminal.phase();
                     drop(terminal); // Already drained: no join on GTK's thread.
-                    ui.terminal_status
-                        .set_text("Governed client and owned service stopped.");
-                    if quitting || ui.quitting.get() {
+                    ui.terminal_status.set_text(phase.description());
+                    ui.quit_confirmation.set_visible(false);
+                    ui.quit_wait.set_sensitive(true);
+                    if quitting || ui.quitting.get() || ui.waiting_to_quit.replace(false) {
                         ui.finish_shutdown();
                     } else {
                         ui.render();
@@ -800,11 +906,15 @@ impl Ui {
                 Ok((terminal, Err(_))) => {
                     *ui.terminal.borrow_mut() = Some(terminal);
                     ui.quitting.set(false);
+                    ui.waiting_to_quit.set(false);
+                    ui.quit_wait.set_sensitive(true);
                     ui.window.set_sensitive(true);
                     ui.render();
                 }
                 Err(_) => {
                     ui.quitting.set(false);
+                    ui.waiting_to_quit.set(false);
+                    ui.quit_wait.set_sensitive(true);
                     ui.window.set_sensitive(true);
                     ui.terminal_status.set_text(
                         "Terminal shutdown worker failed. App ownership has not been released.",
@@ -815,6 +925,9 @@ impl Ui {
     }
 
     fn finish_shutdown(self: &Rc<Self>) {
+        self.quitting.set(true);
+        self.waiting_to_quit.set(false);
+        self.window.set_sensitive(false);
         self.status.set_text("Stopping the owned session worker…");
         self.notifications.close();
         self.proxies.borrow_mut().clear();
@@ -858,43 +971,22 @@ fn watch_desktop(ui: &Rc<Ui>) {
         else {
             return;
         };
-        let Some(locked) = session
-            .cached_property("LockedHint")
-            .and_then(|value| value.get::<bool>())
-        else {
-            return;
-        };
         {
             let mut state = observation.lock().unwrap();
-            state.session_seen = session.name_owner().is_some();
-            state.lock(locked);
+            observe_session(&session, &mut state);
         }
         let _ = sender.try_send(());
         let values = observation.clone();
         let events = sender.clone();
         session.connect_g_properties_changed(move |proxy, _, _| {
-            let mut state = values.lock().unwrap();
-            if let Some(locked) = proxy
-                .cached_property("LockedHint")
-                .and_then(|value| value.get::<bool>())
-            {
-                state.session_seen = proxy.name_owner().is_some();
-                state.lock(locked);
-            } else {
-                state.session_seen = false;
-                state.lost_owner();
-            }
+            observe_session(proxy, &mut values.lock().unwrap());
             let _ = events.try_send(());
         });
         let values = observation.clone();
         let events = sender.clone();
         session.connect_g_name_owner_notify(move |proxy| {
-            if proxy.name_owner().is_none() {
-                let mut state = values.lock().unwrap();
-                state.session_seen = false;
-                state.lost_owner();
-                let _ = events.try_send(());
-            }
+            observe_session(proxy, &mut values.lock().unwrap());
+            let _ = events.try_send(());
         });
         let Ok(manager) = gio::DBusProxy::for_bus_future(
             gio::BusType::System,
@@ -908,39 +1000,46 @@ fn watch_desktop(ui: &Rc<Ui>) {
         else {
             return;
         };
-        let Some(sleeping) = manager
-            .cached_property("PreparingForSleep")
-            .and_then(|value| value.get::<bool>())
-        else {
-            return;
-        };
         {
             let mut state = observation.lock().unwrap();
-            state.manager_seen = manager.name_owner().is_some();
-            state.sleep(sleeping);
+            observe_manager(&manager, &mut state);
         }
         let _ = sender.try_send(());
         let values = observation.clone();
         let events = sender.clone();
-        manager.connect_g_signal(move |_, _, signal, parameters| {
+        manager.connect_g_signal(move |proxy, _, signal, parameters| {
             if signal == "PrepareForSleep" {
                 if let Some((sleeping,)) = parameters.get::<(bool,)>() {
-                    values.lock().unwrap().sleep(sleeping);
+                    values
+                        .lock()
+                        .unwrap()
+                        .manager(proxy.name_owner().is_some(), Some(sleeping));
                     let _ = events.try_send(());
                 }
             }
         });
-        let values = observation;
-        manager.connect_g_name_owner_notify(move |proxy| {
-            if proxy.name_owner().is_none() {
-                let mut state = values.lock().unwrap();
-                state.manager_seen = false;
-                state.lost_owner();
-                let _ = sender.try_send(());
+        let values = observation.clone();
+        let events = sender.clone();
+        manager.connect_g_properties_changed(move |proxy, changed, invalidated| {
+            // PrepareForSleep is an authoritative signal. An unrelated cached
+            // property change must not replace that observation with an older
+            // PreparingForSleep value from the same owner.
+            if glib::VariantDict::new(Some(changed)).contains("PreparingForSleep")
+                || invalidated.iter().any(|name| *name == "PreparingForSleep")
+            {
+                observe_manager(proxy, &mut values.lock().unwrap());
+                let _ = events.try_send(());
             }
         });
+        let values = observation;
+        manager.connect_g_name_owner_notify(move |proxy| {
+            observe_manager(proxy, &mut values.lock().unwrap());
+            let _ = sender.try_send(());
+        });
         if let Some(ui) = weak.upgrade() {
-            ui.proxies.borrow_mut().extend([session, manager]);
+            if !ui.quitting.get() {
+                ui.proxies.borrow_mut().extend([session, manager]);
+            }
         }
     });
     let weak = Rc::downgrade(ui);
@@ -951,6 +1050,24 @@ fn watch_desktop(ui: &Rc<Ui>) {
             }
         }
     });
+}
+
+fn observe_manager(proxy: &gio::DBusProxy, state: &mut Observation) {
+    state.manager(
+        proxy.name_owner().is_some(),
+        proxy
+            .cached_property("PreparingForSleep")
+            .and_then(|value| value.get::<bool>()),
+    );
+}
+
+fn observe_session(proxy: &gio::DBusProxy, state: &mut Observation) {
+    state.session(
+        proxy.name_owner().is_some(),
+        proxy
+            .cached_property("LockedHint")
+            .and_then(|value| value.get::<bool>()),
+    );
 }
 
 pub fn run() -> glib::ExitCode {

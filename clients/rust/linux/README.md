@@ -42,14 +42,20 @@ in the shared session worker; no view-refresh timer is introduced.
 The shell deliberately remains an ordinary recoverable window on X11, Wayland
 and other GTK displays. No layer-shell or tray is implemented or claimed.
 Folding/closing details does not hide the application or stop a client. Closing
-the application window means Quit; there is no invisible resident state that
-depends on an unavailable tray extension.
+the application window requests Quit; there is no invisible resident state that
+depends on an unavailable tray extension. With an active, starting or stopping
+client it presents Wait, Cancel and Stop-and-Quit choices. Wait keeps the lease
+open and quits only after confirmed natural completion; its pending quit can be
+cancelled. Cancel and hiding/minimizing the window do not stop the client. Stop
+and Quit explicitly interrupts the client and retains ownership if stop fails.
 
 Actual logind lock/sleep observations and Gio network-change signals feed the
 existing scheduler. Missing logind properties, missing owners or lost services
 pause automatic refresh and show an explicit notice. Focus alone is never
 presented as proof that a desktop is unlocked. Session restore/sign-in and
-sign-out still work when desktop lifecycle monitoring is unavailable.
+sign-out still work when desktop lifecycle monitoring is unavailable. A logind
+Manager reconnect restores refresh only with an owner and a valid current sleep
+property or signal; missing/invalidated properties stay conservatively paused.
 
 ## Explicit governed terminal launch
 
@@ -66,6 +72,8 @@ The Linux relay must receive byte `0x01` from the app before custody/discovery,
 then watches socket EOF for its lifetime. The app ACKs only an accepted same-UID
 peer while still launching. Quit closes the lease and uses the existing
 exact-unit stop command; failed stop retains ownership for an explicit retry.
+Finished and failed launch handles are joined off GTK's thread and release the
+Launch control; a completed launch never requires an extra Stop click to retry.
 Sign-out also requests terminal stop. A panel fold, details dismissal or hidden
 window never closes this lease. There is only one on-demand terminal manager,
 one pending stop command and coalesced non-secret status notifications. Native
@@ -83,13 +91,19 @@ releasing the app's instance lease; no installer may replace a live binary.
 
 The native-client workflow builds and lints the actual GTK feature on Ubuntu,
 runs its actual GTK controls under Xvfb with isolated custody/transport/browser,
-and records original binary/relay hashes, compiler, GTK runtime, dependencies,
+and records original release binary/relay hashes, compiler, GTK runtime, dependencies,
 logs and desktop/narrow/details screenshots. It exercises successful readings,
 retained offline time, wrong-scope clearing, sign-out clearing, shutdown and
 native accessible roles. Linux-only native socket/child fixtures additionally
 check accepted owner ACK, quit-before-ACK, exact-unit stop and retained ownership
 on failure without retrying unchanged errors. These tests make no paid provider
 request and do not expose a production test CLI or alternate credential target.
+The widget fixtures run in an actual **debug Rust test executable**, whose exact
+executed bytes and hash are included separately in schema-2 proof. They exercise
+production GTK controls with isolated session/terminal peers, including final
+handle drain and Wait/Cancel/Stop-and-Quit. The release executable is built and
+hashed but its GUI startup, GApplication/Secret Service and real governed-client
+paths are **not exercised by those screenshots or fixture tests**.
 
 Before claiming supported Linux, verify the original exact-head/main GTK CI
 artifact and screenshots, real GNOME/Wayland and X11 desktop rendering, native

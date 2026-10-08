@@ -44,6 +44,9 @@ pub enum Phase {
 }
 
 impl Phase {
+    pub fn finished(self) -> bool {
+        matches!(self, Self::Finished | Self::Failed)
+    }
     pub fn description(self) -> &'static str {
         match self {
             Self::Starting => "Opening the governed client in GNOME Terminal…",
@@ -191,7 +194,7 @@ impl Terminal {
     /// Bounded and called off GTK's thread. Failure keeps the handle and exact
     /// unit token alive; it is not treated as completed app shutdown.
     pub fn stop(&mut self) -> io::Result<()> {
-        if matches!(self.phase(), Phase::Finished | Phase::Failed) {
+        if self.phase().finished() {
             return self.join();
         }
         let (answer, result) = mpsc::sync_channel(1);
@@ -485,6 +488,66 @@ fn manage(
 }
 
 #[cfg(test)]
+pub(super) mod test_support {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    pub struct Fixture {
+        pub launched: Arc<AtomicBool>,
+        pub stop_ok: Arc<AtomicBool>,
+        pub stops: Arc<AtomicUsize>,
+        pub delay: bool,
+    }
+    impl Backend for Fixture {
+        fn launch(&self, plan: &Plan) -> io::Result<Child> {
+            self.launched.store(true, Ordering::SeqCst);
+            if self.delay {
+                thread::sleep(Duration::from_millis(150));
+            }
+            // A real same-UID Unix peer: completion is explicitly controlled by
+            // a private fixture file, while socket EOF still ends the client.
+            Command::new("/usr/bin/python3")
+                .args(["-c", "import socket,sys,pathlib\ns=socket.socket(socket.AF_UNIX)\ns.connect(sys.argv[1])\nif s.recv(1)!=b'\\x01': sys.exit(0)\npathlib.Path(sys.argv[2]).touch()\ns.settimeout(.02)\nwhile not pathlib.Path(sys.argv[3]).exists():\n try:\n  s.recv(1)\n  break\n except TimeoutError: pass\n"])
+                .arg(&plan.socket)
+                .arg(plan.root.join("client-started"))
+                .arg(plan.root.join("client-finished"))
+                .env_clear()
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        }
+        fn stop(&self, _: &str) -> bool {
+            self.stops.fetch_add(1, Ordering::SeqCst);
+            self.stop_ok.load(Ordering::SeqCst)
+        }
+    }
+    pub fn root() -> tempfile::TempDir {
+        let directory = tempfile::tempdir().unwrap();
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        directory
+    }
+    pub fn start(directory: &Path, fixture: Fixture, notify: Notifier) -> Terminal {
+        Terminal::start_with(
+            directory.to_owned(),
+            "d23f09e0-783b-457d-854f-27e3660f84af".into(),
+            "/opt/hormuz/hormuz-client-relay".into(),
+            Arc::new(fixture),
+            notify,
+        )
+        .unwrap()
+    }
+    #[cfg(target_os = "linux")]
+    pub fn wait(condition: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !condition() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
@@ -537,51 +600,11 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     mod lifecycle {
+        use super::super::test_support::{root, wait, Fixture};
         use super::*;
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-        struct Fixture {
-            launched: Arc<AtomicBool>,
-            stop_ok: Arc<AtomicBool>,
-            stops: Arc<AtomicUsize>,
-            delay: bool,
-        }
-        impl Backend for Fixture {
-            fn launch(&self, plan: &Plan) -> io::Result<Child> {
-                self.launched.store(true, Ordering::SeqCst);
-                if self.delay {
-                    thread::sleep(Duration::from_millis(150));
-                }
-                Command::new("/usr/bin/python3").args(["-c", "import socket,sys,pathlib\ns=socket.socket(socket.AF_UNIX)\ns.connect(sys.argv[1])\nif s.recv(1)!=b'\\x01': sys.exit(0)\npathlib.Path(sys.argv[2]).touch()\ns.recv(1)\n"])
-                    .arg(&plan.socket).arg(plan.root.join("client-started"))
-                    .env_clear().stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
-            }
-            fn stop(&self, _: &str) -> bool {
-                self.stops.fetch_add(1, Ordering::SeqCst);
-                self.stop_ok.load(Ordering::SeqCst)
-            }
-        }
-        fn root() -> tempfile::TempDir {
-            let directory = tempfile::tempdir().unwrap();
-            fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
-            directory
-        }
         fn start(directory: &Path, fixture: Fixture) -> Terminal {
-            Terminal::start_with(
-                directory.to_owned(),
-                "d23f09e0-783b-457d-854f-27e3660f84af".into(),
-                "/opt/hormuz/hormuz-client-relay".into(),
-                Arc::new(fixture),
-                Box::new(|| true),
-            )
-            .unwrap()
-        }
-        fn wait(condition: impl Fn() -> bool) {
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while !condition() {
-                assert!(Instant::now() < deadline);
-                thread::sleep(Duration::from_millis(2));
-            }
+            super::super::test_support::start(directory, fixture, Box::new(|| true))
         }
         #[test]
         fn accepted_same_uid_lease_is_owned_until_explicit_stop() {
