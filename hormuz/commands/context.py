@@ -47,6 +47,7 @@ from ..compaction_runtime import (
     default_state_directory,
     default_tokenizer_cache_directory,
     load_token_counters,
+    validate_tokenizer_resources,
 )
 
 
@@ -257,7 +258,11 @@ def _status(args: argparse.Namespace) -> int:
                 if getattr(sys, "frozen", False)
                 else default_tokenizer_cache_directory(args.state_directory)
             )
-            load_token_counters(cache)
+            if args.readiness_only:
+                # Resident UI readiness must not construct the optimizer.
+                validate_tokenizer_resources(cache)
+            else:
+                load_token_counters(cache)
     except ContextRuntimeError:
         print("context_optimization setting=on status=resources_unavailable")
         return 3

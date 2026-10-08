@@ -39,8 +39,14 @@ checked during the initial credential exchange and client-version discovery:
 owner exit cancels and reaps the credential helper or direct version probe rather
 than waiting for its normal 30-second or 15-second budget. Startup cancellation
 returns exit status 130 without launching a client or starting optimization.
-Request-time credential exchanges retain a 30-second bound; runtime shutdown has its own
-35-second bound; this does not promise instantaneous process-tree termination.
+Request-time credential exchanges receive the same cancellation signal. Both
+credential and optimizer work share one bounded blocking registry: shutdown
+rejects new work, aborts queued work and signals running helpers before draining
+the runtime. Synthetic tests exercise eight concurrent requests against its
+two workers and a stalled request-time Mac broker. Uncancelled credential
+exchanges retain a 30-second bound; runtime shutdown has a 35-second fallback
+for synchronous credential-store adapters. This does not promise instantaneous
+process-tree termination for an arbitrary adapter that ignores cancellation.
 Quit closes the old app's lease, but interactive quit/update acceptance and an
 authenticated automatic updater remain separate work.
 

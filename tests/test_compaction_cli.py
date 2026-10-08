@@ -12,7 +12,7 @@ from unittest import mock
 
 from hormuz.cli import main
 from hormuz.compaction_formats import restore_text
-from hormuz.compaction_runtime import ContextPreferenceStore
+from hormuz.compaction_runtime import ContextPreferenceStore, ContextRuntimeError
 
 
 COUNTERS = {"cl100k_base": len, "o200k_base": len}
@@ -123,6 +123,49 @@ class ContextCommandTests(unittest.TestCase):
         self.assertEqual(output.stat().st_mode & 0o777, 0o600)
         self.assertEqual(metadata.stat().st_mode & 0o777, 0o600)
         self.assertEqual(json.loads(metadata.read_text())["reason"], "disabled")
+
+    def test_readiness_only_checks_resources_without_constructing_tokenizers_or_client(self) -> None:
+        state = self.root / "readiness-state"
+        self._write_profile(state)
+        ContextPreferenceStore(state, self.profile).save(True)
+        for compatible in (False, True):
+            with (
+                self.subTest(compatible=compatible),
+                mock.patch("hormuz.commands.context.supported_client_executable",
+                           side_effect=AssertionError("client was probed")),
+                mock.patch("hormuz.commands.context.load_token_counters",
+                           side_effect=AssertionError("tokenizers were constructed")),
+                mock.patch("hormuz.commands.context.validate_tokenizer_resources") as resources,
+                mock.patch("hormuz.commands.context.probe_gateway_capability",
+                           return_value=compatible),
+            ):
+                code, output, error = self._run(
+                    "context", "status", "--profile", self.profile,
+                    "--state-directory", str(state), "--readiness-only",
+                )
+            self.assertEqual((code, error), (0, ""))
+            expected = "ready" if compatible else "gateway_incompatible"
+            self.assertEqual(output, f"context_optimization setting=on status={expected}\n")
+            resources.assert_called_once_with(state / "context-tokenizers-0.14.0")
+
+    def test_readiness_only_rejects_bad_resources_before_gateway_probe(self) -> None:
+        state = self.root / "bad-readiness-state"
+        self._write_profile(state)
+        ContextPreferenceStore(state, self.profile).save(True)
+        with (
+            mock.patch("hormuz.commands.context.load_token_counters",
+                       side_effect=AssertionError("tokenizers were constructed")),
+            mock.patch("hormuz.commands.context.validate_tokenizer_resources",
+                       side_effect=ContextRuntimeError("resources_unavailable")),
+            mock.patch("hormuz.commands.context.probe_gateway_capability",
+                       side_effect=AssertionError("gateway was probed")),
+        ):
+            code, output, error = self._run(
+                "context", "status", "--profile", self.profile,
+                "--state-directory", str(state), "--readiness-only",
+            )
+        self.assertEqual((code, error), (3, ""))
+        self.assertEqual(output, "context_optimization setting=on status=resources_unavailable\n")
 
     def test_enabled_compaction_writes_lossless_request_and_content_free_metadata(self) -> None:
         request = self.root / "request.json"

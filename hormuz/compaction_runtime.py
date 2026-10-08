@@ -274,7 +274,8 @@ class ContextPreferenceStore:
             pass
 
 
-def load_token_counters(cache_directory: Path | None = None) -> Mapping[str, Callable[[str], int]]:
+def validate_tokenizer_resources(cache_directory: Path | None = None) -> Path:
+    """Check pinned local vocabularies without importing or initializing BPE."""
     cache = cache_directory or _configured_tokenizer_cache()
     if cache is None or not cache.is_dir() or cache.is_symlink():
         raise ContextRuntimeError("resources_unavailable")
@@ -287,6 +288,11 @@ def load_token_counters(cache_directory: Path | None = None) -> Mapping[str, Cal
             or _sha256_file(resource) != ENCODING_SHA256[name]
         ):
             raise ContextRuntimeError("resources_unavailable")
+    return cache
+
+
+def load_token_counters(cache_directory: Path | None = None) -> Mapping[str, Callable[[str], int]]:
+    cache = validate_tokenizer_resources(cache_directory)
     try:
         import tiktoken
     except ImportError as error:
