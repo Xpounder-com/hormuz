@@ -62,16 +62,18 @@ bound bytes while reading; a parser size check is not streaming transport.
 `hormuz.native-client-fixtures` version 1 versions the test corpus, not an HTTP
 API, persisted credential, or released application. The existing identity and
 usage HTTP schema IDs and versions stay unchanged. The unpublished Rust package
-is `1.4.0-dev.1` (`publish = false`); the gateway is v1.6.0 and the latest
-notarized Mac app remains v1.3.0. The core release does not promote these
-unpublished libraries or qualify Windows support.
+is `1.4.0-dev.1` (`publish = false`); the core and notarized Apple Silicon
+Mac archive are v1.8.0. Shipping the relay binary does not publish these crates
+to a registry or qualify Windows support. The existing Swift UI and session
+remain in place. See the [release scope](../../docs/releases/v1.8.0-notarized-mac.md).
 
 Additive cases may be added to this corpus with all consumers updated. Changing
 an existing expectation requires an explicit compatibility decision and a
 successor fixture version; never silently rewrite reference behavior to make a
 port pass. New response fields, durable state, or adapters need their own schema
-and migration review. The initial crate is not linked into the existing app, so
-rollback removes development/test files without a data migration.
+and migration review. The initial fixture checkpoint did not link the crate
+into the existing app; its rollback removed development/test files without a
+data migration. The v1.8.0 relay integration retains the existing native formats.
 
 ## Profiles, preferences and display state
 

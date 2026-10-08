@@ -7,8 +7,9 @@ export const AUTHOR = 'Mehrdad Zaker';
 export const CONTACT_EMAIL = 'mehrdadz@neuralint.io';
 export const OWNER_NAME = 'Neuralint';
 export const OWNER_URL = 'https://neuralint.io';
-export const SOURCE_VERSION = 'v1.7.0';
-export const OCI_VERSION = 'v1.7.0';
+export const SOURCE_VERSION = 'v1.8.0';
+export const OCI_VERSION = 'v1.8.0';
+export const MACOS_VERSION = 'v1.8.0';
 
 /** Keep native anchors and metadata aligned with the canonical root site. */
 export function sitePath(path = '/') {

@@ -17,7 +17,7 @@ RUN test "${TARGETPLATFORM}" = "linux/amd64" \
     && rm -f /tmp/pcre2-security.deb /tmp/perl-security.deb /var/log/dpkg.log /var/log/alternatives.log /var/cache/ldconfig/aux-cache
 
 FROM patched-base AS builder
-ARG HORMUZ_VERSION=1.7.0
+ARG HORMUZ_VERSION=1.8.0
 ARG TARGETPLATFORM
 WORKDIR /build
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 PIP_NO_COMPILE=1 PYTHONDONTWRITEBYTECODE=1
@@ -36,7 +36,7 @@ RUN python -m pip wheel --no-build-isolation --no-deps --wheel-dir /wheelhouse .
     && /opt/hormuz/bin/pip uninstall --yes pip setuptools
 
 FROM patched-base
-ARG HORMUZ_VERSION=1.7.0
+ARG HORMUZ_VERSION=1.8.0
 LABEL org.opencontainers.image.title="Hormuz hosted single-node pilot" \
       org.opencontainers.image.description="Maintenance-first login and opt-in provider-pilot qualification" \
       org.opencontainers.image.source="https://github.com/Xpounder-com/hormuz" \

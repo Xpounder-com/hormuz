@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { BrandMark } from './Brand';
-import { REPOSITORY, sitePath } from '../../lib/site.mjs';
+import { REPOSITORY, MACOS_VERSION, sitePath } from '../../lib/site.mjs';
 
 type Panel = 'home' | 'connection' | 'client' | 'appearance' | 'cost' | 'tokens' | 'requests';
 const metrics = [
@@ -125,11 +125,11 @@ export function CompanionPreview() {
     <div className="companion-intro">
       <p className="landing-eyebrow">HORMUZ FOR APPLE SILICON · INTERACTIVE PREVIEW</p>
       <h2 id="companion-title">A little presence.<br /><em>Everything within reach.</em></h2>
-      <p>Usage at the edge of your screen. Your connection, client setup, and session controls a click away. The signed v1.3.0 app supports Apple Silicon on macOS 14 or later.</p>
+      <p>Usage at the edge of your screen. Your connection, client setup, and session controls a click away. The signed {MACOS_VERSION} app supports Apple Silicon on macOS 14 or later.</p>
       <div className="companion-intro-actions">
         <button type="button" className="companion-launch" aria-controls={controlsId} aria-expanded={panel !== null}
           onClick={event => open('home', event.currentTarget)}>Explore the controls <span aria-hidden="true">↗</span></button>
-        <a className="companion-setup-link" href={`${REPOSITORY}/releases/download/v1.3.0/Hormuz-1.3.0-notarized.zip`}>Download v1.3.0 <span aria-hidden="true">↓</span></a>
+        <a className="companion-setup-link" href={`${REPOSITORY}/releases/download/${MACOS_VERSION}/Hormuz-${MACOS_VERSION.slice(1)}-notarized.zip`}>Download {MACOS_VERSION} <span aria-hidden="true">↓</span></a>
         <a className="companion-setup-link" href={sitePath('/integrations/')}>Explore client setup <span aria-hidden="true">↗</span></a>
       </div>
       <p className="companion-hint">Try it right here. Example data, no sign-in needed.</p>

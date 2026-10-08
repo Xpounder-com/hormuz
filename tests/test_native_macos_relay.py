@@ -178,8 +178,9 @@ os.execv(real, [real, *{arguments!r}, *sys.argv[1:]])
         self._script(self.broker, "#!/bin/sh\nprintf 'not-a-credential\\n'\n")
         self._script(self.client, "#!/bin/sh\ntouch client-was-started\n")
         process, _ = self._start()
-        process.communicate(timeout=10)
-        self.assertNotEqual(process.returncode, 0)
+        output, diagnostic = process.communicate(timeout=10)
+        self.assertEqual((process.returncode, output, diagnostic),
+                         (1, b"", b"relay error: The gateway session credential is unavailable.\n"))
         self.assertFalse((self.root / "client-was-started").exists())
         self.assertEqual(self.gateway.requests, [])
 
@@ -241,6 +242,44 @@ else:
             os.kill(pid, 0)
         self.assertFalse(client_started.exists())
         self.assertFalse(optimizer_started.exists())
+        self.assertEqual(self.gateway.requests, [])
+
+    def test_owner_exit_interrupts_startup_credential_helper(self) -> None:
+        import time
+
+        helper_pid = self.root / "credential-helper-pid"
+        self._script(self.broker, f"#!{sys.executable}\n" + f"""
+import os, sys, time
+from pathlib import Path
+sys.stdin.buffer.read()
+Path({str(helper_pid)!r}).write_text(str(os.getpid()))
+time.sleep(4)
+print({ACCESS_TOKEN!r})
+""")
+        self._script(self.client, "#!/bin/sh\ntouch client-was-started\n")
+        self.optimizer = self.root / "optimizer"
+        self._script(self.optimizer, "#!/bin/sh\ntouch optimizer-was-started\n")
+        self._preference(True)
+        process, lease = self._start()
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                pid = int(helper_pid.read_text())
+            except (FileNotFoundError, ValueError):
+                self.assertLess(time.monotonic(), deadline, "Credential helper did not start")
+                time.sleep(0.01)
+            else:
+                break
+        cancelled_at = time.monotonic()
+        lease.close()
+        output, diagnostic = process.communicate(timeout=8)
+        self.assertEqual((process.returncode, output, diagnostic), (130, b"", b""))
+        self.assertLess(time.monotonic() - cancelled_at, 2,
+                        "Owner exit must interrupt the startup credential exchange")
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+        self.assertFalse((self.root / "client-was-started").exists())
+        self.assertFalse((self.root / "optimizer-was-started").exists())
         self.assertEqual(self.gateway.requests, [])
 
     def test_unsupported_client_version_is_not_reported_as_cancellation(self) -> None:
