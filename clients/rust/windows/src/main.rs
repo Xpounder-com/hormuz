@@ -15,6 +15,8 @@ mod options;
 mod placement;
 #[cfg(windows)]
 use hormuz_client_desktop::presentation;
+#[cfg(all(windows, test))]
+mod connection_tests;
 #[cfg(windows)]
 mod startup;
 
