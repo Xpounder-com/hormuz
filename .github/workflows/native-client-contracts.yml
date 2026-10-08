@@ -43,6 +43,51 @@ jobs:
       - name: Lint shared Rust libraries
         working-directory: clients/rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build the optimizer qualification helper
+        working-directory: clients/rust
+        run: cargo build --release --locked -p hormuz-context-optimizer
+      - name: Install the pinned Python optimizer reference
+        run: python -m pip install --disable-pip-version-check --editable '.[context]'
+      - name: Install hash-verified optimizer resources
+        shell: bash
+        env:
+          HORMUZ_QUALIFICATION_CACHE: ${{ runner.temp }}/rust-context-tokenizers
+        run: |
+          # Disposable public test resources, not production private state.
+          # The production installer deliberately retains POSIX custody checks.
+          python - <<'PY'
+          import hashlib
+          import os
+          import urllib.request
+          from pathlib import Path
+          from hormuz.compaction_runtime import ENCODING_SHA256, ENCODING_URLS
+
+          target = Path(os.environ["HORMUZ_QUALIFICATION_CACHE"])
+          target.mkdir(mode=0o700, exist_ok=False)
+          for name, url in ENCODING_URLS.items():
+              with urllib.request.urlopen(url, timeout=30) as response:
+                  if response.status != 200:
+                      raise ValueError("Qualification resource download failed")
+                  data = response.read(8 * 1024 * 1024 + 1)
+              if len(data) > 8 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != ENCODING_SHA256[name]:
+                  raise ValueError("Qualification resource digest mismatch")
+              destination = target / hashlib.sha1(url.encode()).hexdigest()
+              with destination.open("xb") as output:
+                  output.write(data)
+          PY
+      - name: Compare Rust optimizer against the Python reference
+        run: >-
+          python -m tools.verify_rust_context_optimizer
+          --helper clients/rust/target/release/hormuz-context-optimizer${{ runner.os == 'Windows' && '.exe' || '' }}
+          --tokenizer-cache "${{ runner.temp }}/rust-context-tokenizers"
+          --output "${{ runner.temp }}/rust-context-parity.json"
+      - name: Save content-free optimizer qualification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-context-parity-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/rust-context-parity.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Build native Windows development candidate
         if: runner.os == 'Windows'
         working-directory: clients/rust
