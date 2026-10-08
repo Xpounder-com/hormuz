@@ -1,6 +1,6 @@
 import { CampaignLink } from '../components/CampaignLink';
 import { pageMetadata } from '../../lib/metadata';
-import { sitePath, SOURCE_VERSION } from '../../lib/site.mjs';
+import { sitePath, sourcePath, SOURCE_VERSION } from '../../lib/site.mjs';
 import { PageFrame } from '../components/PageFrame';
 
 export const metadata = pageMetadata('Security & data handling — Hormuz', 'Review the implemented controls, metadata-only evidence, deployment responsibilities, and open security-review boundaries.', '/security/');
@@ -10,6 +10,8 @@ const handlingRows = [
   ['Employee credentials', 'Validated at Hormuz', 'Never forwarded to model providers'],
   ['Provider credentials', 'Server-side environment or managed custody boundary', 'Never distributed to employees'],
   ['Usage & cost', 'Bounded identity, model, token, status, and cost metadata', 'No prompt or response body'],
+  ['AI Work ledger', 'SQLite work ownership, supplied labels/title, budgets, attempts and observations', 'No automatic prompt capture, response body, patch, or tool output'],
+  ['Exact answer reuse', 'Separately opt-in, bounded process memory with expiry', 'Response content stays in memory; no cache body in SQLite; restart clears it'],
   ['Secret-control evidence', 'Rule, action, outcome, and bounded counts', 'No matched value or raw request material'],
 ];
 
@@ -30,7 +32,7 @@ export default function SecurityPage() {
         <div className="subpage-hero-inner wide">
           <p className="eyebrow"><span className="pulse-dot" aria-hidden="true" />Security & trust</p>
           <h1>Controls, evidence,<br /><span>and the gaps between them.</span></h1>
-          <p>Hormuz documents what the {SOURCE_VERSION} source release enforces, what your deployment must own, and what still requires independent proof.</p>
+          <p>Hormuz documents its published {SOURCE_VERSION} release and newer AI Work source path, what your deployment must own, and what still requires independent proof.</p>
           <div className="hero-actions">
             <a className="button button-primary" href="#data-handling">Review data handling <span aria-hidden="true">↓</span></a>
             <a className="button button-ghost" href="https://github.com/Xpounder-com/hormuz/blob/main/SECURITY.md" target="_blank" rel="noreferrer">Read SECURITY.md <span aria-hidden="true">↗</span></a>
@@ -49,15 +51,15 @@ export default function SecurityPage() {
         <div className="section-heading narrow">
           <p className="section-label">Data handling</p>
           <h2>Keep the control record. Leave the conversation out.</h2>
-          <p>Hormuz inspects request material transiently where policy requires it, while routine ledgers retain bounded operational evidence rather than the content itself.</p>
+          <p>Hormuz inspects request material in memory where policy requires it. Routine ledgers retain bounded operational metadata; optional exact answer reuse has a separate, explicit in-memory retention boundary.</p>
         </div>
-
         <div className="data-table">
           <div className="data-table-head"><span>Data class</span><span>Current handling</span><span>Routine evidence boundary</span></div>
           {handlingRows.map(([dataClass, handling, boundary]) => (
             <div key={dataClass}><strong>{dataClass}</strong><span>{handling}</span><span>{boundary}</span></div>
           ))}
         </div>
+        <p className="after-grid">AI Work titles and context references are caller-supplied metadata; they are not extracted from prompts. Exact answer reuse is Off by default, uses bounded process memory, and expires or clears on restart. <a href={sourcePath('docs/AI_WORK_RUNTIME.md')}>Inspect the full ledger and cache contract ↗</a>.</p>
       </section>
 
       <section className="security-controls" id="controls">

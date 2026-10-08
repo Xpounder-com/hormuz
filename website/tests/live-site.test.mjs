@@ -12,7 +12,7 @@ function publishedSite() {
     ['/sitemap.xml', LIVE_ROUTES.map(route => `<loc>${LIVE_ORIGIN}${route}</loc>`).join('')],
   ]);
   for (const route of LIVE_ROUTES) bodies.set(route, `<link rel="canonical" href="${LIVE_ORIGIN}${route}"/><h1>Hormuz</h1>`);
-  for (const name of LIVE_DOWNLOADS) bodies.set(`/downloads/${name}`, name.endsWith('.pdf') ? '%PDF-fixture' : Buffer.from([0x50, 0x4b, 0x03, 0x04, 0]));
+  for (const name of LIVE_DOWNLOADS) bodies.set(`/downloads/${name}`, name.endsWith('.pdf') ? '%PDF-fixture' : name.endsWith('.json') ? JSON.stringify({ schema_id: 'hormuz.ai-work-proof', schema_version: 1, conditions: { real_provider_calls: 0, real_payments: 0, customer_savings_validated: false, production_quality_validated: false }, checks: [{ check: 'synthetic_verifier_fixture', passed: true }] }) : Buffer.from([0x50, 0x4b, 0x03, 0x04, 0]));
   const requests = [];
   return {
     bodies, requests,
@@ -29,12 +29,12 @@ function publishedSite() {
   };
 }
 
-test('post-deploy verification checks the pinned source, all routes, metadata, and four downloads', async () => {
+test('post-deploy verification checks the pinned source, all routes, metadata, and five downloads', async () => {
   assert.equal(LIVE_ORIGIN, SITE_ORIGIN);
   assert.deepEqual(LIVE_ROUTES, SITE_ROUTES);
   const site = publishedSite();
-  assert.deepEqual(await verifyLiveSite(pin, site.fetcher), { verdict: 'passed', source_revision: pin.revision, pages: 14, downloads: 4 });
-  assert.equal(site.requests.length, 21);
+  assert.deepEqual(await verifyLiveSite(pin, site.fetcher), { verdict: 'passed', source_revision: pin.revision, pages: 16, downloads: 5 });
+  assert.equal(site.requests.length, 24);
 });
 
 test('a stale or invalid deployed pin fails before any page is accepted', async () => {
@@ -57,6 +57,8 @@ test('missing routes, wrong canonicals, HTML downloads, and incomplete metadata 
     ['/downloads/hormuz-overview.pdf', '<html>Error</html>'],
     ['/downloads/hormuz-appliance-brief.pdf', undefined],
     ['/downloads/hormuz-buyer-briefing.pptx', '<html>Error</html>'],
+    ['/downloads/ai-work-proof.json', '<html>Error</html>'],
+    ['/downloads/ai-work-proof.json', '{"schema_id":"invented-proof"}'],
     ['/robots.txt', 'User-agent: *\nDisallow: /'],
     ['/sitemap.xml', `<loc>${LIVE_ORIGIN}/</loc>`],
   ]) {

@@ -326,6 +326,26 @@ customer operators and providers remain authoritative.
 
 ## Verify the inventory
 
+### AI work databases
+
+`ai_work_metadata` owns authenticated job, plan, attempt and observation
+metadata in `ai_work_database_file`. `ai_work_billing_metadata` owns approved
+subscription/customer bindings, entitlement state and signed event digests in
+`ai_work_billing_database_file`. Both are explicitly enabled, separate local
+SQLite stores with owner-only files. Neither persists prompts or model answers.
+Operators must consistently back up and restore these alongside the usage
+store with processes stopped. Existing hosted snapshot tooling does not include
+these stores automatically; paid operation requires that explicit recovery step.
+Deleting the work ledger removes budget history and must not be used to reset
+an active customer's allowance. Retention, exported metadata, backups and
+offline deletion remain operator responsibilities. Request/answer reuse is
+bounded process memory; stopping the runtime clears it.
+
+Work tables are `ai_work_schema`, `ai_work_plans`, `ai_work_jobs`,
+`ai_work_attempts` and `ai_work_observations`. Payment metadata tables are
+`work_billing_events` and `work_entitlements`. These local stores have no
+PostgreSQL replicas and require one owning gateway process per database.
+
 ```bash
 python tools/verify_durable_data_inventory.py
 python -m unittest -v tests.test_durable_data_inventory

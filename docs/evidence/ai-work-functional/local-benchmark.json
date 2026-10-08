@@ -1,0 +1,36 @@
+{
+  "attempts": 99990,
+  "background_build_ms": 24.711583,
+  "benchmark_episodes": 1000,
+  "displayed_jobs": 100,
+  "expected_selection_passed": true,
+  "fixture": "synthetic_local_sqlite_metadata",
+  "jobs": 10000,
+  "limitations": [
+    "local_metadata_mechanics_only",
+    "single_process_single_machine",
+    "not_production_load_or_provider_latency",
+    "not_customer_savings_or_quality_evidence"
+  ],
+  "measured_at": "2026-10-08T19:43:10.569893+00:00",
+  "provider_calls": 0,
+  "report_json_bytes": 530525,
+  "report_ms": 43.346834,
+  "route_max_ms": 0.488917,
+  "route_p50_ms": 0.303917,
+  "route_p95_ms": 0.392541,
+  "routing_samples": 500,
+  "routing_target_ms": 30,
+  "routing_target_passed": true,
+  "schema_id": "hormuz.ai-work-local-benchmark",
+  "schema_version": 1,
+  "selected_models": [
+    "cheap"
+  ],
+  "source_boundary": "working_tree_files_identified_by_sha256",
+  "source_files": {
+    "hormuz/work_runtime.py": "6fe979abc7f0a0ba93931b319565edd6287be84220251b964b43cdb80a98cecd",
+    "tools/ai_work_benchmark.py": "ce60dd0d59acb31e14142c954b8e646d76d797ef7fd7a72bbc46193135ead933"
+  },
+  "total_jobs": 10000
+}

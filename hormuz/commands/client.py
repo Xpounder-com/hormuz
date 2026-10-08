@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import sys
 from urllib.parse import urlparse
@@ -46,6 +47,7 @@ def _client_config_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--profile", default="default", help="Session secure-store profile")
     parser.add_argument("--model", help="Configured Codex model alias when using session authentication")
+    parser.add_argument("--work-id", help="Attach an existing owned AI Work job to every request in this configuration")
     parser.add_argument("--allow-insecure-http", action="store_true", help="Allow loopback HTTP for local session development")
 
 
@@ -59,6 +61,7 @@ def _client(config: GatewayConfig, args: argparse.Namespace) -> int:
         actor_id=args.actor,
         auth_mode=args.auth_mode,
         credential_env=args.credential_env,
+        work_id=getattr(args, "work_id", None),
     )
 
 
@@ -70,7 +73,9 @@ def _client_config(
     actor_id: str | None = None,
     auth_mode: str = "auto",
     credential_env: str | None = None,
+    work_id: str | None = None,
 ) -> int:
+    work_headers = _work_headers(work_id)
     base_url = _client_base_url(url or f"http://{config.listen.host}:{config.listen.port}")
     if actor_id is None:
         identity = next(iter(config.identities_by_actor.values()))
@@ -132,6 +137,8 @@ def _client_config(
             f"base_url = {json.dumps(base_url + '/v1')}",
             'wire_api = "responses"',
         ]
+        if work_headers:
+            lines.append('http_headers = { "X-Hormuz-Work-Id" = ' + json.dumps(work_id) + ' }')
         if uses_oidc:
             lines.extend(
                 [
@@ -155,6 +162,7 @@ def _client_config(
                         "env": {
                             "ANTHROPIC_BASE_URL": base_url,
                             "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                            **({"ANTHROPIC_CUSTOM_HEADERS": "X-Hormuz-Work-Id: " + work_id} if work_headers else {}),
                         },
                     },
                     indent=2,
@@ -164,8 +172,18 @@ def _client_config(
         else:
             print(f"export ANTHROPIC_BASE_URL={shlex.quote(base_url)}")
             print(f'export ANTHROPIC_AUTH_TOKEN="${{{env_name}}}"')
+            if work_headers:
+                print("export ANTHROPIC_CUSTOM_HEADERS=" + shlex.quote("X-Hormuz-Work-Id: " + work_id))
         print("claude")
     return 0
+
+
+def _work_headers(work_id: str | None) -> dict[str, str]:
+    if work_id is None:
+        return {}
+    if not isinstance(work_id, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", work_id) is None:
+        raise ConfigError("work ID must be a bounded ASCII job identifier")
+    return {"X-Hormuz-Work-Id": work_id}
 
 
 def _auth_token(env_name: str) -> int:

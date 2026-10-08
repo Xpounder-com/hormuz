@@ -1,0 +1,19 @@
+{
+  "schema_id": "hormuz.ai-work-installed-package-smoke",
+  "schema_version": 1,
+  "package_version": "1.8.0",
+  "package_status": "local source build; existing version unchanged",
+  "checks": [
+    "fresh temporary environment installs declared dependencies",
+    "imports outside source checkout",
+    "wheel source modules match final execution receipt",
+    "source archive includes proof and verification tools",
+    "dashboard CSS resources packaged",
+    "work CLI command group runs",
+    "installed gateway ready",
+    "authenticated installed gateway creates owned work"
+  ],
+  "real_provider_calls": 0,
+  "payment_calls": 0,
+  "release_qualification": false
+}

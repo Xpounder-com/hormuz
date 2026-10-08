@@ -1,6 +1,6 @@
 import { CONTACT_EMAIL } from './site.mjs';
 
-export const INTERESTS = Object.freeze({ reservation: 'Appliance reservation', cloud: 'Cloud workspace', appliance: 'Appliance', onboarding: 'Appliance with scoped onboarding', managed: 'Managed site', review: 'Workflow fit discussion', integration: 'Client integration', security: 'Security requirements', community: 'Open-source feedback' });
+export const INTERESTS = Object.freeze({ work: 'Engineering AI work', reservation: 'Appliance reservation', cloud: 'Cloud workspace', appliance: 'Appliance', onboarding: 'Appliance with scoped onboarding', managed: 'Managed site', review: 'Workflow fit discussion', integration: 'Client integration', security: 'Security requirements', community: 'Open-source feedback' });
 const LEGACY_INTERESTS = Object.freeze({ pro: 'cloud', pilot: 'onboarding', support: 'managed', enterprise: 'appliance' });
 export function normalizeInterest(value) {
   const key = String(value ?? '');
@@ -8,7 +8,7 @@ export function normalizeInterest(value) {
   return Object.hasOwn(LEGACY_INTERESTS, key) ? LEGACY_INTERESTS[key] : 'onboarding';
 }
 export const CAMPAIGN_TAGS = Object.freeze(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content']);
-export const isSalesInquiry = interest => ['reservation', 'cloud', 'appliance', 'onboarding', 'managed', 'review', ...Object.keys(LEGACY_INTERESTS)].includes(interest);
+export const isSalesInquiry = interest => ['work', 'reservation', 'cloud', 'appliance', 'onboarding', 'managed', 'review', ...Object.keys(LEGACY_INTERESTS)].includes(interest);
 
 function clean(value, max) {
   return String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max);

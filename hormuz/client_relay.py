@@ -1084,7 +1084,10 @@ def run_client(
     state_directory: Path,
     credential_helper: Path,
     counters: Mapping[str, Callable[[str], int]] | None = None,
+    work_id: str | None = None,
 ) -> int:
+    if work_id is not None and (profile.client not in {"codex", "claude-code"} or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", work_id) is None):
+        raise ClientRelayError("invalid_work_binding")
     if not credential_helper.is_absolute() or not credential_helper.is_file() or not os.access(credential_helper, os.X_OK):
         raise ClientRelayError("credential_helper_invalid")
     client_executable = supported_client_executable(profile.client)
@@ -1125,7 +1128,7 @@ def run_client(
     thread.start()
     try:
         command, environment = _client_command(
-            profile, server.origin, local_credential, executable=client_executable
+            profile, server.origin, local_credential, executable=client_executable, work_id=work_id
         )
         process = subprocess.run(command, env=environment, check=False)
         return int(process.returncode)
@@ -1143,6 +1146,7 @@ def _client_command(
     local_credential: str,
     *,
     executable: str | None = None,
+    work_id: str | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     try:
         adapter = adapter_for(profile.client)
@@ -1157,7 +1161,17 @@ def _client_command(
         local_credential=local_credential,
         model=profile.model,
     )
-    return list(plan.argv), plan.environment
+    command, environment = list(plan.argv), dict(plan.environment)
+    if work_id is not None:
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", work_id) is None:
+            raise ClientRelayError("invalid_work_binding")
+        if profile.client == "codex":
+            command.extend(["-c", 'model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"=' + json.dumps(work_id) + '}'])
+        elif profile.client == "claude-code":
+            environment["ANTHROPIC_CUSTOM_HEADERS"] = "X-Hormuz-Work-Id: " + work_id
+        else:
+            raise ClientRelayError("unsupported_work_binding")
+    return command, environment
 
 
 def supported_client_executable(
@@ -1273,6 +1287,12 @@ def _forward_headers(
         value = headers.get(name)
         if value is not None and "\r" not in value and "\n" not in value:
             result[name] = value
+    # Job identity is meaningful only to an authenticated Hormuz gateway. Never
+    # send it to a direct provider, nor copy a client's upstream credentials.
+    if upstream_auth == "hormuz":
+        work_ids = headers.get_all("X-Hormuz-Work-Id", [])
+        if len(work_ids) == 1 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", work_ids[0]):
+            result["X-Hormuz-Work-Id"] = work_ids[0]
     result.update(context_headers)
     return result
 

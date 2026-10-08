@@ -153,6 +153,11 @@ recursive-include docs *.md
 include examples/policy-admin-usability-baseline.json
 include examples/policy-admin-usability-scenarios.json
 recursive-include docs/evidence *.json
+include tools/ai_work_proof.py
+include tools/ai_work_benchmark.py
+include docs/ai-work-source-successor-v1.json
+include tools/_ai_work_source_successor.py
+include hormuz/work.css
 include docs/evidence/reconciliation_scope_probe.py
 recursive-include tests *.py *.json
 recursive-include hormuz/migrations/postgresql *.sql

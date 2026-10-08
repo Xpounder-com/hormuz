@@ -1,43 +1,32 @@
-import { OfferingPaths } from './components/OfferingPaths';
 import { CampaignLink } from './components/CampaignLink';
 import { pageMetadata } from '../lib/metadata';
 import { sitePath, OWNER_NAME, OWNER_URL, MACOS_VERSION } from '../lib/site.mjs';
 import { SiteFooter } from './components/SiteFooter';
 import { SiteHeader } from './components/SiteHeader';
-import { BrandMark } from './components/Brand';
-import { CompanionPreview } from './components/CompanionPreview';
-import { CustomerExperience } from './components/CustomerExperience';
-import { SpendHookPreview } from './components/SpendHookPreview';
-import { ContextOptimizationPreview } from './components/ContextOptimizationPreview';
-import { QuestionIndex } from './components/QuestionIndex';
-import { ApplianceReservation } from './components/ApplianceReservation';
+import { WorkPriorities } from './components/WorkPriorities';
 
-export const metadata = {
-  ...pageMetadata('Hormuz | Free Software, Cloud & Appliances', 'Use the free Personal Optimizer on your Mac, request a Cloud workspace, or discuss an appliance and managed site.', '/'),
-  verification: { google: 'qauQXsmCOtWfE0ar7muWwlqPmMfW5F7uaI28QGz30v4' },
-};
+export const metadata = pageMetadata('Hormuz — Keep your agents. Choose your budget and pace.', 'Control supported AI traffic, understand what work consumes, and choose cost or speed priorities. Connect your existing coding agents to Hormuz.', '/');
 
 export default function Home() {
-  return <div className="landing-home"><SiteHeader active="platform" /><main id="content" tabIndex={-1}>
-    <section className="landing-hero customer-hero" id="top">
-      <div className="customer-hero-grid"><div className="landing-hero-copy">
-        <p className="landing-eyebrow"><span className="mini-dot" /> FREE SOFTWARE + HORMUZ CLOUD</p>
-        <h1>Start with your own work.<br /><em>See what Hormuz improves.</em></h1>
-        <p className="landing-deck">Use the free Personal Optimizer on a supported Mac with your own provider account and measure qualified local context reductions. For production API workflows, request a Cloud workspace: a gateway operated by Hormuz, with team controls and usage reporting.</p>
-        <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/#personal')}>Set up personal use <span aria-hidden="true">↗</span></CampaignLink><a className="button landing-secondary" href="#spend">Explore the team example <span aria-hidden="true">↓</span></a></div>
-        <p className="landing-reassurance">Software is free · Provider charges separate · Cloud accepting inquiries</p>
-      </div><SpendHookPreview /></div>
+  return <div className="landing-home ai-work-home"><SiteHeader active="platform" /><main id="content" tabIndex={-1}>
+    <section className="landing-hero work-hero" id="top">
+      <div className="work-hero-grid"><div className="landing-hero-copy">
+        <h1>Keep your agents.<br /><em>Choose your budget and pace.</em></h1>
+        <p className="landing-deck">Bring your existing coding tools through Hormuz. Set the spending boundary, see what your work consumes, and keep control as AI usage grows.</p>
+        <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=work')}>Discuss your workflow <span aria-hidden="true">↗</span></CampaignLink><CampaignLink className="button landing-secondary" href={sitePath('/evidence/')}>Inspect the evidence <span aria-hidden="true">→</span></CampaignLink></div>
+        <p className="landing-reassurance">Free software · Your provider accounts · Provider charges separate<br />AI Work requires qualification on your exact workflow.</p>
+      </div><div className="work-passage" aria-label="The governed request path">
+        <div><span>01</span><h2>Your agents</h2><p>Use a qualified client connection.</p></div><div><span>02</span><h2>Hormuz</h2><p>Identity, spending limits, and request controls before dispatch.</p></div><div><span>03</span><h2>Your providers</h2><p>Eligible requests continue; usage returns to the work record.</p></div>
+      </div></div>
       <p className="hero-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a> · Led by Mehrdad Zaker</p>
     </section>
-    <OfferingPaths />
-    <ApplianceReservation />
-    <CustomerExperience />
-    <section className="passage-story" aria-labelledby="passage-title"><figure className="passage-art"><img src={sitePath('/brand/controlled-passage.webp')} width="1536" height="1024" loading="lazy" alt="Layered sage and cream contours around a clear, open channel" /><figcaption><BrandMark /><span>YOUR TOOLS. YOUR BOUNDARIES. YOUR EVIDENCE.</span><span aria-hidden="true">↗</span></figcaption></figure><div className="passage-story-copy"><p className="landing-eyebrow">FROM INSIGHT TO ACTION</p><h2 id="passage-title">A budget is useful<br /><em>when it can act.</em></h2><p>A manager can explain the spend. A policy administrator can set the boundary. An employee can keep using their coding tool through the governed connection.</p><dl className="passage-principles"><div><dt><span>01</span> See the driver</dt><dd>Break down captured usage by team, person, model, client, and provider.</dd></div><div><dt><span>02</span> Change a control</dt><dd>Set model access, output caps, scoped budgets, and secret handling.</dd></div><div><dt><span>03</span> Inspect the result</dt><dd>Trace request outcomes and estimates without routine prompt or response logging.</dd></div></dl><CampaignLink href={sitePath('/demo/#policy')}>Try setting up a policy <span aria-hidden="true">↗</span></CampaignLink></div></section>
-    <CompanionPreview />
-    <ContextOptimizationPreview />
-    <section className="landing-section" id="install"><div className="landing-heading"><p className="landing-eyebrow">FOR TEAMS · YOUR FIRST GOVERNED REQUEST</p><h2>Start with your role.<br /><em>Then connect your tools.</em></h2><p>The team Mac app connects to a configured gateway. The gateway applies your organization’s policies. For direct use on your own Mac, follow the <CampaignLink href={sitePath('/docs/#personal')}>Personal Optimizer setup</CampaignLink>.</p></div><div className="install-paths"><article><p className="landing-eyebrow">JOIN AN EXISTING TEAM</p><h3>Get the Mac companion.</h3><p>Install Hormuz {MACOS_VERSION.slice(1)} on Apple Silicon, macOS 14+. Use your team’s gateway address and identity, review the client launcher, then see your own usage.</p><CampaignLink className="button landing-primary" href={sitePath('/docs/#mac')}>Install free for Mac ↗</CampaignLink></article><article><p className="landing-eyebrow">SET UP YOUR ORGANIZATION</p><h3>Run your own gateway.</h3><p>Install from source or a signed OCI image. Start with the provider-free demo, configure identities and provider accounts, and verify your first governed client request.</p><CampaignLink className="button landing-secondary" href={sitePath('/docs/#quickstart')}>Install the gateway →</CampaignLink></article></div><p className="after-grid">Using Ollama or another endpoint? <CampaignLink href={sitePath('/demo/#setup')}>Check your exact stack and its current compatibility status →</CampaignLink></p>
-    <p className="after-grid">Practical guides: <CampaignLink href={sitePath('/guides/team-ai-budgets/')}>Manage AI costs and team budgets</CampaignLink> · <CampaignLink href={sitePath('/guides/codex-claude-code-gateway/')}>Connect Codex and Claude Code</CampaignLink></p></section>
-    <QuestionIndex compact />
-    <section className="landing-final"><p className="landing-eyebrow">TRY IT WITH YOUR WORKFLOW</p><h2>Your tools.<br /><em>Your control.</em></h2><p>Start with the free Personal Optimizer or choose Cloud, an appliance, and site management. Every paid offer has a secure Stripe checkout.</p><div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/#personal')}>Set up personal use ↗</CampaignLink><CampaignLink className="button landing-secondary" href={sitePath('/plans/')}>Pricing & pay →</CampaignLink></div></section>
+    <section className="landing-section work-journey" id="spend" aria-labelledby="work-journey-title">
+      <div className="landing-heading"><h2 id="work-journey-title">A budget.<br /><em>A piece of work. A result.</em></h2><p>The AI bill belongs beside the work that consumed it. Follow the whole episode, including attempts and uncertain provider outcomes.</p></div>
+      <ol className="work-steps"><li id="policy"><span>01 / SET THE BOUNDARY</span><h3>Choose the commitment.</h3><p>Apply scoped gateway budgets using configured cost estimates and approved-model policies. Reservations account for requests in flight before dispatch.</p></li><li><span>02 / RUN THE WORK</span><h3>Keep your familiar tools.</h3><p>Connect a supported agent and attribute its requests to the work. Protocol, model, and credential compatibility remain part of the route.</p></li><li><span>03 / INSPECT THE RECORD</span><h3>See what happened.</h3><p>Review captured spending estimates, attempts, elapsed time, and available outcome evidence. A response or cache hit does not automatically mean a task is complete.</p></li></ol>
+      <WorkPriorities />
+    </section>
+    <section className="landing-section work-proof-band" id="proof"><div><h2>See the controls<br /><em>actually execute.</em></h2><p>Our recorded provider-free runs exercise the real gateway with synthetic inputs. Open the transcript, provenance, and qualification boundaries.</p><p>These prove control mechanics. Customer savings and faster completion need measured customer work.</p></div><CampaignLink className="button landing-primary" href={sitePath('/evidence/')}>Open the proof <span aria-hidden="true">→</span></CampaignLink></section>
+    <section className="landing-section work-coverage" id="setup"><span id="compaction" className="anchor-target" /><div className="landing-heading"><h2>Your exact stack.<br /><em>A clear boundary.</em></h2><p>Hormuz controls requests that pass through its governed route. Closed applications and unrelated subscriptions do not become controllable by connecting GitHub.</p></div><dl className="coverage-rows"><div><dt>Current gateway paths</dt><dd>OpenAI Responses and Anthropic Messages protocol paths, plus OpenAI-compatible Chat Completions in the AI Work source path. Verify your client version, tool behavior, streaming, and model configuration before expanding usage.</dd></div><div><dt>Personal and team connections</dt><dd>The Personal Optimizer runs from the terminal on Apple Silicon Macs, with pinned Codex CLI and your own OpenAI API account. Automatic compaction covers narrowly eligible repetitive tool output. The separate Mac gateway companion is version {MACOS_VERSION.slice(1)}.</dd></div><div><dt>Cost and speed decisions</dt><dd>The AI Work runtime uses explicit priorities and eligible routes. Real-provider outcome and performance qualification remains workflow-specific.</dd></div><div><dt>Cache and completion</dt><dd>Provider prompt caching remains a model execution. Opt-in exact answer reuse is bounded by work, identity, context, model, and policy. Reuse counts stay separate from task outcomes.</dd></div></dl><div className="resource-actions"><CampaignLink className="text-link" href={sitePath('/integrations/')}>Check supported connections →</CampaignLink><CampaignLink className="text-link" href={sitePath('/security/')}>Data and credential boundaries →</CampaignLink></div></section>
+    <section className="landing-section work-start" id="install"><div><h2>Connect the workflow<br /><em>you already have.</em></h2><p>Run the open-source software yourself, or discuss a Cloud workspace for your supported traffic. Confirm scope and activation before paying; subscription billing starts at checkout.</p></div><div className="work-start-actions"><CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=work')}>Discuss your workflow ↗</CampaignLink><CampaignLink className="text-link" href={sitePath('/docs/')}>Install the software →</CampaignLink><CampaignLink className="text-link" href={sitePath('/work/')}>Open AI Work →</CampaignLink><CampaignLink className="text-link" href={sitePath('/plans/#cloud')}>Cloud pricing and cancellation →</CampaignLink></div></section>
   </main><SiteFooter /></div>;
 }

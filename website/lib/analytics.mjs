@@ -15,6 +15,8 @@ const eventDetails = Object.freeze({
   demo_interaction: ['spend', 'policy', 'compaction', 'setup'],
   install_click: ['setup_guide', 'mac_download'],
   inquiry_open: ['contact'],
+  evidence_open: ['mechanics'],
+  work_open: ['gateway_entry'],
 });
 
 export function analyticsConfigured(id = GA_MEASUREMENT_ID) {
@@ -111,6 +113,8 @@ export function trackedDestination(href) {
   try {
     const url = new URL(href, SITE_ORIGIN);
     if (url.origin === SITE_ORIGIN) {
+      if (url.pathname === '/evidence/') return ['evidence_open', 'mechanics'];
+      if (url.pathname === '/work/') return ['work_open', 'gateway_entry'];
       if (url.pathname === '/demo/') return ['demo_open', 'website_demo'];
       if (url.pathname === '/' && ['#spend', '#policy', '#compaction', '#setup'].includes(url.hash)) return ['demo_open', 'website_demo'];
       if (url.pathname === '/docs/') return ['install_click', 'setup_guide'];

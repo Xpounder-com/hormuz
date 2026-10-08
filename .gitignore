@@ -20,3 +20,4 @@ clients/rust/target/
 apps/macos/HormuzCompanion/.build/
 apps/macos/HormuzCompanion/.swiftpm/
 marketing/private/
+website/node_modules

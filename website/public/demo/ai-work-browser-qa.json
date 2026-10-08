@@ -1,0 +1,32 @@
+{
+  "schema_id": "hormuz.ai-work-browser-validation",
+  "schema_version": 1,
+  "fixture": "actual gateway with synthetic local identity and provider",
+  "provider_calls": "one local simulated provider response; zero real or paid provider calls",
+  "viewports": [
+    "1440x1000",
+    "390x844"
+  ],
+  "checks": [
+    "authenticated dashboard renders",
+    "create form persists owned job",
+    "supported API request attaches work ID",
+    "workspace priority form saves speed",
+    "owned job pause and resume",
+    "real work CLI checks passed before submitted workflow completion",
+    "completed state visible",
+    "mobile horizontal overflow absent",
+    "no browser console errors or failed requests"
+  ],
+  "seeded_cost_microusd": 1250000,
+  "artifacts": [
+    "AI_WORK_DEMO.webm",
+    "AI_WORK_DESKTOP.png",
+    "AI_WORK_MOBILE.png",
+    "AI_WORK_JOB.png"
+  ],
+  "limitations": [
+    "synthetic seeded cost is not a provider invoice",
+    "local fixture does not qualify deployment, payment or native client version"
+  ]
+}

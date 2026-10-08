@@ -11,7 +11,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from hormuz.config import ConfigError, GatewayConfig
+from hormuz.config import AIWorkConfig, ConfigError, GatewayConfig
 from hormuz.custody_lifecycle import CustodyAssetCatalog
 
 
@@ -53,6 +53,12 @@ def _canonical(value: Any, *, config_directory: Path) -> object:
                 field.name: _canonical(getattr(value, field.name), config_directory=config_directory)
                 for field in fields(value)
                 if not (
+                    # An absent/default-off additive runtime preserves the
+                    # original snapshot; every nondefault value is retained.
+                    type(value).__name__ == "GatewayConfig"
+                    and field.name == "ai_work"
+                    and getattr(value, field.name) == AIWorkConfig()
+                ) and not (
                     type(value).__name__ == "ModelRoute"
                     and field.name == "failover_alias"
                     and getattr(value, field.name) is None

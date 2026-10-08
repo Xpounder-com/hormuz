@@ -79,6 +79,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "outcome_connectors",
         "attribution_control",
         "finance_account_bindings",
+        "ai_work",
     }
 )
 _LISTEN_FIELDS = frozenset({"host", "port"})
@@ -328,6 +329,11 @@ def _reject_deprecated_context_configuration(raw: dict[str, Any]) -> None:
 
 def _validate_configuration_schema(raw: dict[str, Any]) -> None:
     _schema_object(raw, _ROOT_CONFIGURATION_FIELDS)
+    _schema_optional_object(raw, "ai_work", frozenset({
+        "enabled", "database", "cache_enabled", "minimum_samples",
+        "administrator_actor_ids", "require_paid", "billing_price_id", "billing_webhook_secret_env",
+        "billing_api_key_env", "billing_bindings", "tool_capable_aliases",
+    }))
 
     _schema_optional_object(raw, "listen", _LISTEN_FIELDS)
     _schema_optional_object(raw, "ingress", _INGRESS_FIELDS)

@@ -36,6 +36,7 @@ from hormuz.recommendation_kernel import (
 )
 from hormuz.recommendation_repository import _CURSOR_TTL, _MAX_CONFLICTS
 from tools._verification_runtime import runtime_plan_source_sha256
+from tools import _ai_work_source_successor as work_successor
 from tools import verify_role_view_runtime as role_verifier
 
 
@@ -206,6 +207,7 @@ REQUIRED_FILES = tuple(dict.fromkeys((
     "docs/portfolio-intelligence-wire-v1.json",
     "hormuz/portfolio-intelligence-wire-v1.json",
     "tools/verify_recommendation_runtime.py",
+    *work_successor.REQUIRED_FILES,
     *SOURCE_PATHS,
     *role_verifier.REQUIRED_FILES,
 )))
@@ -548,11 +550,11 @@ def _validate_inventory(root: Path) -> None:
         inventory = validate_durable_data_inventory(root)
     except (ImportError, ValueError, OSError):
         _fail("recommendation_runtime_inventory_invalid")
-    if (
-        inventory.get("database_class_count") != 42
-        or inventory.get("sqlite_table_count") != 90
-        or inventory.get("postgresql_table_count") != 92
-    ):
+    try:
+        expected = work_successor.inventory_counts(root)
+    except ValueError:
+        _fail("recommendation_runtime_inventory_invalid")
+    if (inventory.get("database_class_count"), inventory.get("sqlite_table_count"), inventory.get("postgresql_table_count")) != expected:
         _fail("recommendation_runtime_inventory_invalid")
 
 
@@ -766,7 +768,12 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         except (OSError, ValueError):
             _fail("recommendation_runtime_source_kit_incomplete")
         if actual != expected:
-            _fail("recommendation_runtime_source_changed")
+            try:
+                actual = work_successor.projected_sha256(root, relative, expected)
+            except (OSError, ValueError):
+                _fail("recommendation_runtime_source_changed")
+            if actual != expected:
+                _fail("recommendation_runtime_source_changed")
     _validate_predecessor(root)
     _validate_migration(root, plan)
     _validate_wire(root)

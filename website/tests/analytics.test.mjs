@@ -100,6 +100,8 @@ test('withdrawal immediately disables collection and blocked storage keeps an ex
 });
 
 test('link measurement identifies allowed destinations without passing URLs or arbitrary labels', () => {
+  assert.deepEqual(trackedDestination('/evidence/?workflow=private'), ['evidence_open', 'mechanics']);
+  assert.deepEqual(trackedDestination('/work/?token=private'), ['work_open', 'gateway_entry']);
   assert.deepEqual(trackedDestination('/demo/?utm_source=x#policy'), ['demo_open', 'website_demo']);
   assert.deepEqual(trackedDestination('/?utm_source=x#spend'), ['demo_open', 'website_demo']);
   assert.deepEqual(trackedDestination('/docs/#mac'), ['install_click', 'setup_guide']);

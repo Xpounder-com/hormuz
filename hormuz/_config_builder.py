@@ -29,6 +29,7 @@ from ._config_policy import (
     resolve_secret_controls,
 )
 from ._config_routing import build_model_route_domain, build_upstream_domain
+from ._config_work import build_ai_work
 from ._config_values import _integer
 from .portfolio_config import build_portfolio_config
 from .outcome_connector_config import (
@@ -228,6 +229,7 @@ def _build_gateway_config(
             parse_finance_account_bindings(raw["finance_account_bindings"])
             if "finance_account_bindings" in raw else None
         ),
+        ai_work=build_ai_work(raw, source_path=source_path),
         key_custody=key_custody,
         audit_anchor=external_custody_domain.audit_anchor,
         audit_chain=external_custody_domain.audit_chain,

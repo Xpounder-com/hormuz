@@ -1,0 +1,18 @@
+{
+  "schema_id": "hormuz.ai-work-css-wheel-check",
+  "schema_version": 1,
+  "builder_setuptools": "84.0.0",
+  "fixture": "temporary_source_copy_no_network",
+  "locked_release_build": false,
+  "wheel": "hormuz-1.8.0-py3-none-any.whl",
+  "css_matches_source": {
+    "hormuz/workspace.css": true,
+    "hormuz/work.css": true
+  },
+  "manifest_sha256": "0219fbd4271fe003efed49b7aa9f254199bbf1539e7cfe1a870fdc0c2c05d9ce",
+  "pyproject_sha256": "a491df23dc78b4373baec7f4ff3347059bd7038396f30d9c0889fbd6bc568848",
+  "limitations": [
+    "mechanical_package_inclusion_only",
+    "no_release_distribution_or_notarization_claim"
+  ]
+}

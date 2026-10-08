@@ -96,6 +96,43 @@ test('synthetic evidence has the expected bounded outcomes and no content fields
     for (const forbidden of ['prompt', 'response', 'messages', 'content', 'api_key', 'token']) assert.equal(Object.hasOwn(event, forbidden), false);
   }
 });
+test('published AI Work proof matches the executed receipt and keeps its conditions explicit', () => {
+  const published = readFileSync(new URL('../public/downloads/ai-work-proof.json', import.meta.url));
+  const executed = readFileSync(new URL('../../docs/evidence/ai-work-functional/receipt.json', import.meta.url));
+  assert.deepEqual(published, executed, 'Copy the regenerated execution receipt before publishing');
+  const proof = JSON.parse(published);
+  assert.equal(proof.schema_id, 'hormuz.ai-work-proof');
+  assert.equal(proof.schema_version, 1);
+  assert.equal(proof.conditions.provider, 'loopback_synthetic_fixture');
+  assert.equal(proof.conditions.real_provider_calls, 0);
+  assert.equal(proof.conditions.real_payments, 0);
+  assert.equal(proof.conditions.production_quality_validated, false);
+  assert.equal(proof.conditions.customer_savings_validated, false);
+  assert.ok(proof.checks.length > 0 && proof.checks.every(check => check.passed === true));
+  assert.match(proof.source_commit, /^[a-f0-9]{40}$/);
+  const sourceFiles = ['hormuz/work_runtime.py', 'hormuz/work_gateway.py', 'hormuz/server.py', 'hormuz/usage.py'];
+  assert.deepEqual(Object.keys(proof.source_files).sort(), [...sourceFiles].sort());
+  for (const path of sourceFiles) {
+    const digest = proof.source_files[path];
+    assert.match(digest, /^[a-f0-9]{64}$/);
+    const actual = createHash('sha256').update(readFileSync(new URL(`../../${path}`, import.meta.url))).digest('hex');
+    assert.equal(digest, actual, `${path}: regenerate the receipt after changing executed source`);
+  }
+  const forbidden = new Set(['prompt', 'messages', 'response_body', 'content', 'api_key', 'access_token', 'authorization']);
+  function checkMetadata(value) {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, child] of Object.entries(value)) {
+      assert.equal(forbidden.has(key.toLowerCase()), false, key);
+      checkMetadata(child);
+    }
+  }
+  checkMetadata(proof.covered_work);
+  for (const [publishedName, originalName] of [['ai-work-demo.webm', 'AI_WORK_DEMO.webm'], ['ai-work-desktop.png', 'AI_WORK_DESKTOP.png'], ['ai-work-browser-qa.json', 'AI_WORK_BROWSER_QA.json']]) {
+    const publishedMedia = readFileSync(new URL(`../public/demo/${publishedName}`, import.meta.url));
+    const originalMedia = readFileSync(new URL(`../../docs/evidence/ai-work-functional/${originalName}`, import.meta.url));
+    assert.ok(publishedMedia.equals(originalMedia), `${publishedName}: public media must match the actual validation artifact`);
+  }
+});
 test('claim ledger sources exist and social/commercial boundaries remain explicit', () => {
   const ledger = JSON.parse(readFileSync(new URL('../../marketing/claims-v1.json', import.meta.url), 'utf8'));
   assert.equal(ledger.public_author, 'Mehrdad Zaker');

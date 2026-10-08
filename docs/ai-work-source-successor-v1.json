@@ -1,0 +1,79 @@
+{
+  "schema_id": "hormuz.ai-work-source-successor",
+  "schema_version": 1,
+  "predecessor": "docs/recommendation-runtime-plan-v1.json",
+  "source_edits": {
+    "MANIFEST.in": {
+      "predecessor_sha256": "c7491a666807ae2670702bde04a9150ba7027e645ca3388776b909d32cd73d45",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "include tools/ai_work_proof.py\ninclude tools/ai_work_benchmark.py\ninclude docs/ai-work-source-successor-v1.json\ninclude tools/_ai_work_source_successor.py\ninclude hormuz/work.css\n"
+        }
+      ]
+    },
+    "docs/DURABLE_DATA.md": {
+      "predecessor_sha256": "bbeea3aabaacf19c126d8ece53763cb529f7b0e5478b97754f9f393ae6cfa4a1",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "### AI work databases\n\n`ai_work_metadata` owns authenticated job, plan, attempt and observation\nmetadata in `ai_work_database_file`. `ai_work_billing_metadata` owns approved\nsubscription/customer bindings, entitlement state and signed event digests in\n`ai_work_billing_database_file`. Both are explicitly enabled, separate local\nSQLite stores with owner-only files. Neither persists prompts or model answers.\nOperators must consistently back up and restore these alongside the usage\nstore with processes stopped. Existing hosted snapshot tooling does not include\nthese stores automatically; paid operation requires that explicit recovery step.\nDeleting the work ledger removes budget history and must not be used to reset\nan active customer's allowance. Retention, exported metadata, backups and\noffline deletion remain operator responsibilities. Request/answer reuse is\nbounded process memory; stopping the runtime clears it.\n\nWork tables are `ai_work_schema`, `ai_work_plans`, `ai_work_jobs`,\n`ai_work_attempts` and `ai_work_observations`. Payment metadata tables are\n`work_billing_events` and `work_entitlements`. These local stores have no\nPostgreSQL replicas and require one owning gateway process per database.\n\n"
+        }
+      ]
+    },
+    "docs/durable-data-v1.json": {
+      "predecessor_sha256": "a3ba153c06507f949ef4f1b65e6152e65b39f4dc2c382e8bd114ee3ec0159df5",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "    },\n    {\n      \"id\": \"ai_work_metadata\",\n      \"content_boundary\": \"identity_and_policy_metadata\",\n      \"contains_prompt_or_response_body\": false,\n      \"sqlite_tables\": [\n        \"ai_work_attempts\",\n        \"ai_work_jobs\",\n        \"ai_work_observations\",\n        \"ai_work_plans\",\n        \"ai_work_schema\"\n      ],\n      \"postgresql_tables\": []\n    },\n    {\n      \"id\": \"ai_work_billing_metadata\",\n      \"content_boundary\": \"identity_and_policy_metadata\",\n      \"contains_prompt_or_response_body\": false,\n      \"sqlite_tables\": [\n        \"work_billing_events\",\n        \"work_entitlements\"\n      ],\n      \"postgresql_tables\": []\n"
+        },
+        {
+          "predecessor": "",
+          "addition": "    },\n    {\n      \"id\": \"ai_work_database_file\",\n      \"created_when\": \"explicit_ai_work_enablement\",\n      \"storage_location\": \"separate_owner_only_sqlite_file_in_configured_ai_work_directory\",\n      \"content_boundary\": \"owned_jobs_scoped_plans_attempts_observations_and_nonexported_request_fingerprints\",\n      \"prompt_or_response_body_boundary\": \"excluded_by_hormuz_contract\",\n      \"customer_operator_authority\": \"stopped_process_consistent_backup_restore_export_retention_and_deletion\"\n    },\n    {\n      \"id\": \"ai_work_billing_database_file\",\n      \"created_when\": \"explicit_ai_work_billing_configuration\",\n      \"storage_location\": \"separate_owner_only_sqlite_file_in_configured_ai_work_directory\",\n      \"content_boundary\": \"approved_customer_subscription_binding_entitlement_state_and_signed_event_digests\",\n      \"prompt_or_response_body_boundary\": \"excluded_by_hormuz_contract\",\n      \"customer_operator_authority\": \"stopped_process_consistent_backup_restore_export_retention_and_deletion\"\n"
+        }
+      ]
+    },
+    "tests/test_durable_data_inventory.py": {
+      "predecessor_sha256": "6542791b7c1294f1a9f100b725e62c9bf3fb4a6a0ccdbf3d716d8b8aaeeac1f0",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "            \"hormuz/work_runtime.py\",\n            \"hormuz/work_billing.py\",\n"
+        },
+        {
+          "predecessor": "        self.assertEqual(result[\"database_class_count\"], 42)\n        self.assertEqual(result[\"sqlite_table_count\"], 90)\n",
+          "addition": "        self.assertEqual(result[\"database_class_count\"], 44)\n        self.assertEqual(result[\"sqlite_table_count\"], 97)\n"
+        },
+        {
+          "predecessor": "        self.assertEqual(result[\"operator_artifact_count\"], 18)\n",
+          "addition": "        self.assertEqual(result[\"operator_artifact_count\"], 20)\n"
+        }
+      ]
+    },
+    "tools/verify_durable_data_inventory.py": {
+      "predecessor_sha256": "85b642700e60ce93441e755f53cf8af7a718d24aeeaf0b8f2e7ed5dae6a05456",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "    \"ai_work_database_file\",\n    \"ai_work_billing_database_file\",\n"
+        },
+        {
+          "predecessor": "    for path in (\"hormuz/_onboarding_schema.py\", \"hormuz/_console_schema.py\", \"hormuz/_workspace_schema.py\", \"hormuz/policy_impact.py\"):\n",
+          "addition": "    for path in (\"hormuz/_onboarding_schema.py\", \"hormuz/_console_schema.py\", \"hormuz/_workspace_schema.py\", \"hormuz/policy_impact.py\", \"hormuz/work_runtime.py\", \"hormuz/work_billing.py\"):\n"
+        }
+      ]
+    }
+  },
+  "addition_counts": {
+    "database_classes": 2,
+    "sqlite_tables": 7,
+    "postgresql_tables": 0,
+    "operator_artifacts": 2
+  },
+  "nonclaims": [
+    "historic_plans_wires_fixtures_schemas_and_source_guards_remain_frozen",
+    "new_ai_work_state_is_separate_from_existing_usage_schema",
+    "no_release_activation_customer_savings_or_live_model_quality_claim"
+  ]
+}

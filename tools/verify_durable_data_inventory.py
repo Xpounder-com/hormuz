@@ -37,6 +37,8 @@ EXPECTED_ARTIFACT_IDS = {
     "sqlite_database_file",
     "session_database_file",
     "policy_impact_database_file",
+    "ai_work_database_file",
+    "ai_work_billing_database_file",
     "client_session_secure_store",
     "team_invitation_file",
     "console_browser_cookies",
@@ -273,7 +275,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
     sqlite.update(finance_attempt_tables)
     session_tables = set(SQLITE_TABLE.findall(_read_text(root / SESSION_SCHEMA_PATH)))
-    for path in ("hormuz/_onboarding_schema.py", "hormuz/_console_schema.py", "hormuz/_workspace_schema.py", "hormuz/policy_impact.py"):
+    for path in ("hormuz/_onboarding_schema.py", "hormuz/_console_schema.py", "hormuz/_workspace_schema.py", "hormuz/policy_impact.py", "hormuz/work_runtime.py", "hormuz/work_billing.py"):
         additions = set(SQLITE_TABLE.findall(_read_text(root / path)))
         if session_tables.intersection(additions):
             raise DurableDataInventoryError("sqlite_table_owned_more_than_once")

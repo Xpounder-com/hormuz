@@ -14,8 +14,9 @@ export default function PlansPage() {
     <PageHero eyebrow="Software · Cloud · Appliance" title={<>Free software.<br /><span>Clear prices for hosting and hardware.</span></>}>
       <p>Choose your offer below and pay securely through Stripe. Software is free. Appliances are coming soon, with rollout planned for {pricing.reservation.plannedRollout}; reserve with a fully refundable {RESERVATION_PRICE} deposit.</p>
       <p>For services and full appliance purchases, confirm your scope and start date with Hormuz before paying. Checkout does not automatically activate a workspace or establish a shipping date.</p>
-      <div className="hero-actions"><a className="button button-primary" href="#offers">Choose and pay ↓</a><CampaignLink className="button button-ghost" href={sitePath('/contact/')}>Discuss your setup →</CampaignLink></div>
+      <div className="hero-actions"><CampaignLink className="button button-primary" href={sitePath('/contact/?interest=work')}>Confirm your workflow →</CampaignLink><a className="button button-ghost" href="#offers">Compare existing offers ↓</a></div>
     </PageHero>
+    <section className="section prose-section" id="activation"><h2>Confirm. Subscribe. Activate.</h2><ol className="numbered-list"><li>Confirm your supported workflow, coverage, capacity, and activation date with Hormuz.</li><li>Use the matching Stripe checkout after that agreement. Monthly billing starts immediately at checkout.</li><li>Hormuz verifies the payment and agreed qualification before activating the workspace. Payment alone does not provision a production gateway.</li></ol></section>
     <OfferingPaths />
     <EnterprisePlans />
     <section className="section prose-section" id="cloud"><p className="section-label">CLOUD</p><h2>One workspace subscription.</h2>

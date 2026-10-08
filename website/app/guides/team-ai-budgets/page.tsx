@@ -63,7 +63,7 @@ export default function TeamBudgetsGuide() {
           <p>For your own data, run these reports in a configured gateway environment with an existing usage store and captured requests. Replace the configuration path and team ID with your deployment’s values:</p>
           <CodeBlock label="Inspect captured AI costs by team, model, and provider" code={'hormuz --config /etc/hormuz/hormuz.json status --group-by team\nhormuz --config /etc/hormuz/hormuz.json status --group-by model --team engineering\nhormuz --config /etc/hormuz/hormuz.json status --group-by provider --team engineering --json'} />
           <p>The report covers the current UTC calendar month. Cache-read and reasoning tokens can be subcategories of reported input or output; do not add them to total tokens a second time. Cost estimates use configured rates and need reconciliation with provider invoices, including discounts, credits, and other charges. Requests that bypass Hormuz are outside its coverage. <a href={sourcePath('docs/USAGE.md')}>Read the usage and cost definitions ↗</a></p>
-          <p>New to the gateway? <CampaignLink href={sitePath('/demo/#spend')}>Explore the cost example</CampaignLink>, then follow the local budget walkthrough below. It creates a policy candidate you can inspect before activation.</p>
+          <p>New to the gateway? <CampaignLink href={sitePath('/demo/#policy')}>Explore the policy controls</CampaignLink>, then follow the local budget walkthrough below. It creates a policy candidate you can inspect before activation.</p>
         </section>
         <section id="scopes" className="docs-section">
           <p className="section-label">02 / Choose the limits</p><h2>Three scopes. One governed request.</h2>
@@ -75,7 +75,7 @@ export default function TeamBudgetsGuide() {
             <tr><th scope="row">Engineering response</th><td>2,000 output tokens</td><td>The response cap for each governed request.</td></tr>
           </tbody></table></div>
           <p>For example, suppose Engineering has used $140 with no outstanding reservations. A request requiring a $12 reservation exceeds the team’s remaining $10, even if that person and the organization have room. These are invented values to explain the check, not customer spending or measured savings.</p>
-          <p>Budget accounting uses configured model rates and captured usage in the current UTC month. Provider invoices can differ, and traffic that bypasses Hormuz is outside this budget. <CampaignLink href={sitePath('/demo/#spend')}>Explore the interactive spend example →</CampaignLink></p>
+          <p>Budget accounting uses configured model rates and captured usage in the current UTC month. Provider invoices can differ, and traffic that bypasses Hormuz is outside this budget. <CampaignLink href={sitePath('/evidence/#work-proof')}>Inspect the executed work receipt →</CampaignLink></p>
         </section>
         <section id="create" className="docs-section">
           <p className="section-label">03 / Create a baseline</p><h2>Start with a policy you can inspect.</h2>

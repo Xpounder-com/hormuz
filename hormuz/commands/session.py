@@ -8,6 +8,7 @@ import shlex
 import sys
 
 from ..credential_store import CredentialStoreError, validate_profile
+from ..config import ConfigError
 from ..session_client import SessionClientError, access_token, login, logout, validate_session_gateway
 
 
@@ -65,6 +66,12 @@ def client_config(args: argparse.Namespace) -> int:
         if not args.url:
             raise SessionClientError("gateway_url_required")
         gateway = validate_session_gateway(args.url, allow_insecure_http=args.allow_insecure_http)
+        from .client import _work_headers
+        work_id = getattr(args, "work_id", None)
+        try:
+            work_headers = _work_headers(work_id)
+        except ConfigError as error:
+            raise SessionClientError("invalid_work_id") from error
         command = ["auth", "session", "--gateway", gateway, "--profile", args.profile]
         if args.allow_insecure_http:
             command.append("--allow-insecure-http")
@@ -76,13 +83,14 @@ def client_config(args: argparse.Namespace) -> int:
                 "model = " + json.dumps(args.model), 'model_provider = "hormuz"',
                 "", "[model_providers.hormuz]", 'name = "Hormuz"',
                 "base_url = " + json.dumps(gateway + "/v1"), 'wire_api = "responses"',
+                *(['http_headers = { "X-Hormuz-Work-Id" = ' + json.dumps(work_id) + ' }'] if work_headers else []),
                 "", "[model_providers.hormuz.auth]", 'command = "hormuz"',
                 "args = " + json.dumps(command), "refresh_interval_ms = 300000",
             ]))
         else:
             print(json.dumps({
                 "apiKeyHelper": shlex.join(["hormuz", *command]),
-                "env": {"ANTHROPIC_BASE_URL": gateway, "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000"},
+                "env": {"ANTHROPIC_BASE_URL": gateway, "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000", **({"ANTHROPIC_CUSTOM_HEADERS": "X-Hormuz-Work-Id: " + work_id} if work_headers else {})},
             }, indent=2))
         return 0
     except (CredentialStoreError, SessionClientError) as error:

@@ -1,61 +1,55 @@
-# Customer experience and conversion map
+# Engineering AI work: customer experience and conversion map
 
-The public walkthrough starts with a fictional company planning $1M/year in AI,
-then follows a manager's decision: spend → Engineering → token/model driver →
-candidate policy → next request → install. Existing fonts, palette, illustrations,
-brand files, and companion interaction are retained. The opening report derives
-Engineering’s rounded 13% output-token share and 55% cost share from the same
-fixture as the tour, labels the data as fictional, and links directly to the
-spend and policy chapters. It renders without JavaScript.
+The primary experience is homepage → inspect actual provider-free evidence →
+confirm a supported workflow → open the configured AI Work gateway. The customer
+keeps existing coding tools, chooses cost or speed priorities, and inspects the
+whole work episode. The public priority selector explains those choices locally;
+it does not change a workspace policy.
 
-## Capability and availability map
+## Journey and product boundary
 
-| Promoted capability | User and actual interface | Prerequisites and evidence | Public representation |
-| --- | --- | --- | --- |
-| Team/person/model/client/provider usage, token categories, cost, outcomes | Administrator; `hormuz status` CLI, JSON export | Unique identities, configured rates, routed requests; `docs/USAGE.md` | Fictional report illustration; current UTC month; configured estimates, gateway coverage only |
-| Organization/team browser usage and member administration | Explicit console roles; opt-in `/console` preview | Scoped access; `docs/ADMIN_CONSOLE_LOCAL.md` | Labeled preview; no policy-editor authority |
-| Active work plan, committed/pending/uncertain/available, scope and plan changes | Internal work-budget owner/report | `docs/WORK_BUDGETS.md`, current internal implementation | Preview; no public CLI or HTTP delivery claimed |
-| Model/client access, output caps, scoped budgets, secret handling | Policy administrator; configuration and managed policy CLI | Real Standard/Strict/Lockdown templates, validated document, scoped admin credential for activation; `docs/POLICY_CONTROL.md` | Teaching editor; apply/undo mutate only the example, with fixed historical usage |
-| Connection, client launcher, personal counters | Team member; Mac companion | Configured gateway, unique identity, supported client; `docs/MACOS_CLIENT_LOCAL.md` | Existing companion illustration plus concrete joining steps |
-| Local context optimization | Team member; Client → Context optimization | v1.3.0, supported mappings, matching helper/resources; `docs/CONTEXT_OPTIMIZATION.md` | Real 127-path transform, exact restore, default-Off switch, unchanged small result |
-| Mac/source/OCI downloads | Member or gateway operator | v1.8.0 Mac archive, source and signed OCI with separate checksums and release evidence | Mac Apple Silicon/macOS 14+; Python 3.11+ source; Linux AMD64 OCI |
-| Codex/OpenAI | Member and operator | Documented protocol baseline; v1.3.0 provider-free qualification plus maintained v1.2.0 OpenAI-only live evidence | Qualified release path with version boundaries |
-| Claude Code/Anthropic | Member and operator | Messages/streaming/counting protocol contract | Same-candidate v1.3.0 live qualification explicitly open |
-| Ollama/other endpoints | Operator evaluating compatibility | Ollama official Responses/Messages documentation and Hormuz configurable upstream routes | Candidate only; native Ollama/Chat Completions routes absent; no GPU cost accounting claim |
-
-## Numeric and policy example
-
-`public/demo/customer-example.json` is the shared fictional fixture. All team and
-model drilldowns reconcile through `lib/customer-example.mjs`. Current estimates
-are immutable while controls change. Straight-line pace is a teaching calculation,
-not a released forecasting feature or a savings prediction. Cached input is counted
-once. The policy comparison separates maximum output charge, conservative request
-reservation, and provider calls. An unadmitted request cannot reduce available
-budget. Tests include invalid input, model access, secrets, lockdown, and undo's
-underlying unchanged historical fixture.
-
-`public/demo/compaction-example.json` contains the full original and compact
-representations. Its 3,108 → 1,679 byte block measurement and exact restoration were
-reproduced with v1.2.0. It makes no whole-request token, quality, or invoice claim.
-The default-Off interactive switch mirrors the real setting; sample/view selectors
-are teaching controls. All four panels remain mounted so switching chapters
-preserves the visitor's experiment. Arrow keys, Home, and End select tabs.
-
-## Copy and CTA map
-
-| Surface | Job | Next step |
+| Surface | Customer purpose | Next step and boundary |
 | --- | --- | --- |
-| Home hero | Recognize the $1M buyer and see the first cost finding | Install free; Try the $1M example; Try an output cap |
-| Header | Reach installation and commercial options throughout the journey | Install free; Plans |
-| Spend chapter | Explain the cost driver | Try Engineering output cap; inspect usage CLI |
-| Policy chapter | Compare and apply a safe example | Inspect real template/validation workflow |
-| Compaction chapter | Inspect exactly what changes | Download Mac; read setup/status reference |
-| Setup chapter/integrations | Recognize a stack and setup role | Mac joining guide or gateway quickstart |
-| Docs | Download → configure → first governed request → report | Supported client instructions or paid help |
-| Plans | Choose software, Cloud, an appliance, or a managed site | Install; request Cloud; discuss appliance scope |
-| Payment | Confirm the selected catalog offer | Qualified delivery; verified checkout; activation and cancellation instructions |
-| FAQ | Answer 38 practical questions in context | Link to the relevant example or next action |
-| Resources/security/footer | Resolve evaluation questions | Install, supported setup, or paid engagement |
+| Homepage | Understand budget → work → result | Discuss the engineering workflow or inspect actual mechanics |
+| Evidence | Inspect an executed gateway run and its provenance | Download the recording; confirm live-provider and workload qualification |
+| AI Work entry | Reach the organization's trusted gateway | Build-time configured HTTPS origin, then authenticated `/work`; no public credential or task form |
+| Gateway AI Work | Create attributed work, choose a budget and priority, inspect attempts | Work ownership and configured administrator permissions; agent enrollment and supported routes remain operator responsibilities |
+| Integrations and docs | Check exact client and protocol coverage | Generate a supported connection and qualify allowed, denied, streamed, and tool traffic |
+| Inquiry | Explain current agents, spending concern, and cost or speed preference | Formspree acknowledgment, reply, and optional booking; no payment or activation claim |
+| Pricing and pay | Confirm an existing catalog offer and billing commitment | Qualified scope, matching Stripe checkout, verified payment, activation, and cancellation terms |
+
+Requests must pass through Hormuz to be governed. A GitHub connection alone
+cannot control closed applications or unrelated subscriptions. OpenAI Responses
+and Anthropic Messages are protocol paths, with release and live-provider
+qualification boundaries on the integrations page. Personal Optimizer compaction
+is narrower: the supported terminal Codex workflow and eligible repetitive tool
+output. The signed Mac app is the separate team gateway companion.
+
+The AI Work runtime is represented as implemented mechanics requiring qualification
+on the exact customer workflow. Provider-free proof establishes the declared
+execution and control behavior. It does not establish actual paid-provider
+savings, model quality superiority, faster customer completion, or production
+reliability. A cache hit is an execution observation; passing checks credit their
+stated outcome. Absent corrective follow-ups remain an absence of observed rework.
+
+## Existing teaching surfaces
+
+The actual authenticated AI Work recording leads `/demo/`. Optional compaction,
+policy, companion, and older recorded gateway examples sit in a technical
+disclosure; direct `#compaction` and `#policy` links reveal their sections.
+The fictional company walkthrough is no longer rendered in the primary demo.
+Its fixture and legacy downloads remain available as archival teaching artifacts.
+Policy controls change only the next browser example request.
+
+`public/demo/compaction-example.json` contains original and compact
+representations. The recorded 3,108 → 1,679 byte block measurement and exact
+restoration make no whole-request token, quality, or invoice claim. The
+interactive switch mirrors the real default-Off setting. Sample selectors and
+the companion's usage amounts are explicitly teaching controls.
+
+These surfaces support explanation after a visitor understands the primary
+workflow. Appliance deployment and broad consulting are secondary options; their
+approved prices and required terms remain reachable.
 
 ## Commercial boundary
 
@@ -88,15 +82,22 @@ activation. See `marketing/COMMERCIAL_SETUP.md` for the complete scope.
 
 ## Measurement and verification
 
-Existing opt-in X Ads inquiry measurement and native Formspree fallback remain.
-The new tour and search do not send telemetry or customer content. Installation
-intent, verified activation, checkout intent, verified payment, and service delivery
-are different stages; the static site does not manufacture those conversions.
-There is no new payment callback/backend or provider call in the tour.
+Public measurement uses the existing separate consent controls and bounded
+campaign labels. `evidence_open` and `work_open` identify the acquisition path;
+acknowledged workflow inquiries qualify for the existing lead event. QA traffic,
+failed or ambiguous submissions, and unconsented campaign data remain excluded.
+No public analytics payload includes task descriptions, repository contents,
+gateway tokens, provider keys, form text, or private work records.
 
-Run the existing Node/Python website checks, production export/typecheck/link
-verification, and the customer-example tests. Browser acceptance exercises team
-and model filters, policy caps/denials/apply/undo, compaction/restore/unchanged,
-Ollama/client mismatch, install and payment navigation, question search, keyboard
-tabs, no-JavaScript fallback, desktop/mobile, Chromium, and WebKit. Publication
-uses the normal source PR and an exact commit pin in the Pages repository.
+Private product evidence must establish qualified connection, first attributed
+work, usable receipt, repeated work, and verified payment separately. A website
+click, inquiry acknowledgment, cache hit, or checkout navigation cannot substitute
+for those outcomes. The public site verifies no payment and provisions no account.
+
+Verification covers the Node/Python website suites, type checking, static export,
+local links, trusted-origin validation, and rendered desktop/mobile flows. Browser
+acceptance exercises the public priority chooser, source-attributed inquiry with
+intercepted transport, the acknowledgment and booking state, AI Work entry,
+evidence, pricing, consent boundaries, overflow, and console health. The companion
+regression follows its moved `/demo/` entry. Publication still requires the normal
+source review and a separate exact commit pin in the Pages repository.

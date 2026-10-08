@@ -60,6 +60,8 @@ def runtime_settings() -> dict[str, str]:
         PROVIDER_CONFIG_ENV: os.environ.get(PROVIDER_CONFIG_ENV, "/etc/secrets/hormuz-provider.json"),
         "HORMUZ_OPENAI_PROVIDER_KEY": os.environ.get("HORMUZ_OPENAI_PROVIDER_KEY", ""),
         "HORMUZ_ANTHROPIC_PROVIDER_KEY": os.environ.get("HORMUZ_ANTHROPIC_PROVIDER_KEY", ""),
+        "HORMUZ_WORK_BILLING_WEBHOOK_SECRET": os.environ.get("HORMUZ_WORK_BILLING_WEBHOOK_SECRET", ""),
+        "HORMUZ_WORK_BILLING_API_KEY": os.environ.get("HORMUZ_WORK_BILLING_API_KEY", ""),
         PROVIDER_FAILOVER_REHEARSAL_ENV: os.environ.get(PROVIDER_FAILOVER_REHEARSAL_ENV, ""),
         PROVIDER_RUNTIME_DSN_ENV: os.environ.get(PROVIDER_RUNTIME_DSN_ENV, ""),
         PROVIDER_MIGRATION_DSN_ENV: os.environ.get(PROVIDER_MIGRATION_DSN_ENV, ""),

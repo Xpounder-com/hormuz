@@ -6,6 +6,11 @@
 - Historical tracking issue: [#3](https://github.com/Xpounder-com/hormuz/issues/3)
 - Superseding release gate: [#23](https://github.com/Xpounder-com/hormuz/issues/23)
 
+The 2026-10-08 `ai_work` exact-answer-reuse contract is separately authorized
+by [ADR 0014](0014-customer-local-ai-work-and-exact-reuse.md). The historical
+context-pack proposal below remains retired. Its prohibition does not apply
+to that explicitly enabled, bounded, process-memory-only work contract.
+
 ## Decision
 
 The former proposal mixed provider prompt-caching controls with a Hormuz-owned context-pack cache. Hormuz core no longer implements or plans to implement the latter. The detailed historical proposal is archived with the separately packaged experiment at [`../../experiments/context/docs/decisions/0003-cache-privacy-tiers.md`](../../experiments/context/docs/decisions/0003-cache-privacy-tiers.md).

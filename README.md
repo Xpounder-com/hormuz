@@ -1,11 +1,18 @@
 # Hormuz
 
+The AI work experience adds an opt-in customer-owned job ledger, workspace,
+repository and job budgets, fast local routing for cost/speed/outcome priorities,
+and correction-aware exact answer reuse. Existing compaction and secret controls
+still govern every provider request. See [the product operating guide](docs/AI_WORK_PRODUCT.md)
+and [runtime configuration](docs/AI_WORK_RUNTIME.md) for implemented behavior,
+supported agent/API connections and the remaining production qualification gates.
+
 [![CI](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Xpounder-com/hormuz)](https://github.com/Xpounder-com/hormuz/releases)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**Self-hosted AI policy, usage, and evidence control for Codex and Claude Code.**
+**Keep your agents. Choose your budget and pace.**
 
 Keep the AI clients people already use. Put organization policy between those
 clients and model providers.
@@ -40,7 +47,7 @@ written to the usage database.
 
 | Benefit | What Hormuz provides |
 | --- | --- |
-| Preserve developer workflows | Codex and Claude Code continue to use their native OpenAI- and Anthropic-compatible protocols. |
+| Preserve developer workflows | Supported API agents use OpenAI Responses, Chat Completions or Anthropic Messages; Codex and Claude Code retain their native protocol paths. |
 | Centralize AI policy | Enforce allowed clients and models, policy-bounded one-hop capacity failover, output caps, monthly token limits, and USD budgets at organization, team, and person scope. |
 | Preview a policy change | Opt-in local console compares a proposed team/model output cap with captured requests, requires review, and shows request receipts and rollback. [Setup and limits](docs/POLICY_IMPACT.md). |
 | Understand adoption and spend | Group current-month requests, tokens, and estimated cost by organization, team, person, model, client, or provider. |
