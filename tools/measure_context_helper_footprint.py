@@ -24,6 +24,9 @@ from pathlib import Path
 from hormuz.compaction_formats import canonical_json, restore_text
 from hormuz.compaction_runtime import ENCODING_SHA256, TOKENIZER_VERSION, validate_tokenizer_resources
 
+SNAPSHOT_TIMEOUT_SECONDS = 2
+OBSERVER_JOIN_TIMEOUT_SECONDS = SNAPSHOT_TIMEOUT_SECONDS + 1
+
 
 class SyntheticGateway(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
@@ -41,7 +44,8 @@ class SyntheticGateway(BaseHTTPRequestHandler):
 
 
 def process_table() -> dict[int, tuple[int, int]]:
-    output = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid=,rss="], text=True)
+    output = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid=,rss="], text=True,
+                                     timeout=SNAPSHOT_TIMEOUT_SECONDS)
     return {int(pid): (int(parent), int(rss)) for pid, parent, rss in (line.split() for line in output.splitlines())}
 
 
@@ -65,16 +69,21 @@ def measured_run(helper: Path, cache: Path, wire: bytes) -> tuple[dict[str, obje
                                env=environment, start_new_session=True)
     samples: list[dict[str, int | float]] = []
     observed: set[int] = set()
+    observer_errors: list[BaseException] = []
     stop = threading.Event()
 
     def sample() -> None:
-        while not stop.is_set():
-            table = process_table()
-            selected = descendants(process.pid, table)
-            observed.update(selected)
-            samples.append({"elapsed_seconds": round(time.perf_counter() - started, 6),
-                            "helper_processes": len(selected), "rss_sum_bytes": sum(table[pid][1] * 1024 for pid in selected)})
-            stop.wait(0.005)
+        try:
+            while not stop.is_set():
+                table = process_table()
+                selected = descendants(process.pid, table)
+                observed.update(selected)
+                samples.append({"elapsed_seconds": round(time.perf_counter() - started, 6),
+                                "helper_processes": len(selected), "rss_sum_bytes": sum(table[pid][1] * 1024 for pid in selected)})
+                stop.wait(0.005)
+        except BaseException as error:
+            observer_errors.append(error)
+            stop.set()
 
     observer = threading.Thread(target=sample, daemon=True)
     observer.start()
@@ -86,7 +95,11 @@ def measured_run(helper: Path, cache: Path, wire: bytes) -> tuple[dict[str, obje
         raise ValueError("Synthetic helper timed out") from None
     finally:
         stop.set()
-        observer.join(timeout=5)
+        observer.join(timeout=OBSERVER_JOIN_TIMEOUT_SECONDS)
+    if observer.is_alive():
+        raise ValueError("Process observer did not stop")
+    if observer_errors:
+        raise ValueError("Process observer failed") from observer_errors[0]
     elapsed = time.perf_counter() - started
     if process.returncode != 0 or not output.startswith(b"\x01"):
         raise ValueError("Synthetic eligible helper request failed or did not optimize")
@@ -98,7 +111,7 @@ def measured_run(helper: Path, cache: Path, wire: bytes) -> tuple[dict[str, obje
     if clocks is None or memory is None or not any(sample["helper_processes"] for sample in samples):
         raise ValueError("Incomplete macOS process/time measurement")
     return {
-        "result": "passed", "wall_seconds_observed": round(elapsed, 6),
+        "result": "passed", "observer_status": "passed", "wall_seconds_observed": round(elapsed, 6),
         "wall_seconds_time": float(clocks[1]), "user_cpu_seconds": float(clocks[2]),
         "system_cpu_seconds": float(clocks[3]), "time_max_rss_bytes": int(memory[1]),
         "sampled_tree_peak_rss_sum_bytes": max(sample["rss_sum_bytes"] for sample in samples),
