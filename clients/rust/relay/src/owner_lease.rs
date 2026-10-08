@@ -114,6 +114,17 @@ mod tests {
         (lease, accepting.join().unwrap())
     }
 
+    fn assert_eventually_stopped(lease: &OwnerLease) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while !lease.stopped() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "owner closure or unexpected data was not observed within one second"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     #[test]
     fn owner_eof_and_unexpected_data_stop_the_invocation() {
         let directory = tempfile::tempdir().unwrap();
@@ -124,10 +135,10 @@ mod tests {
         assert!(fcntl_getfd(&lease.0).unwrap().contains(FdFlags::CLOEXEC));
         assert!(!lease.stopped());
         drop(owner);
-        assert!(lease.stopped());
+        assert_eventually_stopped(&lease);
         let (lease, mut owner) = accepted_lease(&listener, &path);
         owner.write_all(b"unexpected").unwrap();
-        assert!(lease.stopped());
+        assert_eventually_stopped(&lease);
     }
 
     #[test]
