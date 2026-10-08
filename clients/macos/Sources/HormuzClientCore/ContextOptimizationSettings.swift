@@ -3,6 +3,8 @@ import Foundation
 
 public enum ContextOptimizationStatus: String, Sendable {
     case off
+    // Display-only: no helper or tokenizer is started to predict readiness.
+    case onDemand = "on_demand"
     case ready
     case resourcesUnavailable = "resources_unavailable"
     case unsupportedClient = "unsupported_client"
@@ -13,6 +15,7 @@ public enum ContextOptimizationStatus: String, Sendable {
     public var label: String {
         switch self {
         case .off: "Off"
+        case .onDemand: "Checked on next client request"
         case .ready: "Ready for eligible tool results"
         case .resourcesUnavailable: "Tokenizer resources need setup"
         case .unsupportedClient: "This client version is not supported"

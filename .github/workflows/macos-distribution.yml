@@ -192,7 +192,10 @@ jobs:
           python -m hormuz context resources install \
             --directory "$RUNNER_TEMP/hormuz-context-tokenizers"
       - name: Test native client without signing credentials
-        run: swift test --package-path clients/macos
+        run: |
+          (cd clients/rust; cargo build --locked --package hormuz-client-ui)
+          HORMUZ_RUST_UI_LIBRARY_DIR="$GITHUB_WORKSPACE/clients/rust/target/debug" \
+            swift test --package-path clients/macos
       - name: Build unsigned Apple Silicon payload
         env:
           HORMUZ_VERSION: ${{ steps.release.outputs.version }}
@@ -218,6 +221,8 @@ jobs:
             printf '%s\n' "$HORMUZ_CONTEXT_SIGNATURE_DETAILS" | grep -Eq '^CodeDirectory .*flags=.*runtime'
             printf '%s\n' "$HORMUZ_CONTEXT_SIGNATURE_DETAILS" | grep -Eq '^Timestamp=.+$'
           done
+          (cd clients/rust; cargo build --locked --release --package hormuz-client-ui)
+          export HORMUZ_RUST_UI_LIBRARY_DIR="$GITHUB_WORKSPACE/clients/rust/target/release"
           swift build --package-path clients/macos --scratch-path "$HORMUZ_SCRATCH" \
             --configuration release --arch arm64 --product Hormuz
           HORMUZ_BINARY_SOURCE="$(swift build --package-path clients/macos \

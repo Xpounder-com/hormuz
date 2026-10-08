@@ -8,7 +8,7 @@ extension ConnectionModel {
         }
 
         let usage = dashboard.usage
-        let tokens = usage.inputTokens + usage.outputTokens
+        let tokens = UInt64(usage.inputTokens) + UInt64(usage.outputTokens)
         let checked = dashboard.checkedAt.formatted(date: .omitted, time: .shortened)
         let readingStatus: CompanionReadingStatus
         if sessionState == .refreshPending || sessionExpired {
@@ -16,7 +16,7 @@ extension ConnectionModel {
         } else if sessionState == .revocationPending {
             readingStatus = .offline
         } else {
-            readingStatus = .current
+            readingStatus = self.readingStatus
         }
         let connectionMessage = readingStatus == .current ? nil : statusLabel
 
@@ -133,6 +133,10 @@ extension ConnectionModel {
     }
 
     private static func compactCount(_ value: Int) -> String {
+        compactCount(UInt64(value))
+    }
+
+    private static func compactCount(_ value: UInt64) -> String {
         switch value {
         case 1_000_000...:
             return compact(Double(value) / 1_000_000) + "M"
