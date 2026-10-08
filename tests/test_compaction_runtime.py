@@ -17,6 +17,7 @@ from hormuz.compaction_runtime import (
     ContextRuntimeError,
     _configured_tokenizer_cache,
     load_token_counters,
+    validate_tokenizer_resources,
 )
 
 
@@ -130,6 +131,27 @@ class MappingTests(unittest.TestCase):
 
 
 class TokenResourceTests(unittest.TestCase):
+    def test_readiness_validates_both_hashes_without_importing_tokenizer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            expected = {}
+            for name, url in ENCODING_URLS.items():
+                content = name.encode()
+                (cache / hashlib.sha1(url.encode()).hexdigest()).write_bytes(content)
+                expected[name] = hashlib.sha256(content).hexdigest()
+            with (
+                mock.patch.dict("sys.modules", {"tiktoken": None}),
+                mock.patch("hormuz.compaction_runtime.ENCODING_SHA256", expected),
+            ):
+                self.assertEqual(validate_tokenizer_resources(cache), cache)
+                for url in ENCODING_URLS.values():
+                    resource = cache / hashlib.sha1(url.encode()).hexdigest()
+                    content = resource.read_bytes()
+                    resource.write_bytes(b"corrupt")
+                    with self.assertRaisesRegex(ContextRuntimeError, "resources_unavailable"):
+                        validate_tokenizer_resources(cache)
+                    resource.write_bytes(content)
+
     def test_frozen_helper_uses_its_bundled_resources_before_environment_overrides(self) -> None:
         executable = "/Applications/Hormuz.app/Contents/Helpers/hormuz-context-arm64"
         with (
