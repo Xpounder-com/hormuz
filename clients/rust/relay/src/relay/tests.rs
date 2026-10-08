@@ -38,11 +38,78 @@ fn call(relay: &LocalRelay, path: &str, body: &[u8], extra: &str, token: &str) -
         "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\nContent-Type: application/json\r\n{extra}\r\n",
         relay.address().port(), body.len()
     );
-    stream.write_all(header.as_bytes()).unwrap();
-    stream.write_all(body).unwrap();
-    let mut result = String::new();
-    stream.read_to_string(&mut result).unwrap();
-    result
+    let request = [header.as_bytes(), body].concat();
+    stream.write_all(&request).unwrap();
+    read_response(&mut stream).unwrap()
+}
+
+fn read_response(mut input: impl Read) -> std::io::Result<String> {
+    // Rejected requests deliberately leave the body unread. macOS may reset
+    // that socket after sending a complete response, so fixed-length replies
+    // must be checked by HTTP framing, not an additional read waiting for EOF.
+    let mut headers = Vec::new();
+    while !headers.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        input.read_exact(&mut byte)?;
+        headers.push(byte[0]);
+        assert!(headers.len() <= 8192);
+    }
+    let mut result = String::from_utf8(headers).unwrap();
+    let length = result.lines().find_map(|line| {
+        line.to_ascii_lowercase()
+            .strip_prefix("content-length: ")
+            .map(|value| value.parse::<usize>().unwrap())
+    });
+    if let Some(length) = length {
+        assert!(length <= MAX_REQUEST_BYTES);
+        let mut body = vec![0; length];
+        input.read_exact(&mut body)?;
+        result.push_str(std::str::from_utf8(&body).unwrap());
+    } else {
+        input.read_to_string(&mut result)?;
+    }
+    Ok(result)
+}
+
+#[test]
+fn framed_test_replies_require_complete_bodies_not_an_extra_eof_read() {
+    // A reset after the declared body is complete is not an HTTP truncation.
+    // The same reset before the last declared byte must still fail the test.
+    struct ResetAtEnd(std::io::Cursor<Vec<u8>>);
+    impl Read for ResetAtEnd {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            if self.0.position() == self.0.get_ref().len() as u64 {
+                Err(ErrorKind::ConnectionReset.into())
+            } else {
+                self.0.read(output)
+            }
+        }
+    }
+
+    let complete = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 4\r\n\r\ndata";
+    assert_eq!(
+        read_response(ResetAtEnd(std::io::Cursor::new(complete.to_vec()))).unwrap(),
+        std::str::from_utf8(complete).unwrap()
+    );
+    let truncated = complete[..complete.len() - 1].to_vec();
+    assert_eq!(
+        read_response(std::io::Cursor::new(truncated.clone()))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::UnexpectedEof
+    );
+    assert_eq!(
+        read_response(ResetAtEnd(std::io::Cursor::new(truncated)))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::ConnectionReset
+    );
+    assert_eq!(
+        read_response(std::io::Cursor::new(b"HTTP/1.1 403\r\n"))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::UnexpectedEof
+    );
 }
 
 #[test]
@@ -73,8 +140,7 @@ fn rejects_bad_local_auth_host_routes_and_size_before_gateway_or_custody() {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     write!(stream, "POST /v1/responses HTTP/1.1\r\nHost: other.invalid\r\nAuthorization: Bearer {}\r\nContent-Length: 0\r\n\r\n", relay.local_credential()).unwrap();
-    let mut text = String::new();
-    stream.read_to_string(&mut text).unwrap();
+    let text = read_response(&mut stream).unwrap();
     assert!(text.starts_with("HTTP/1.1 403"));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
