@@ -34,7 +34,8 @@ pub fn stop_linux_user_service(token: &str) -> Result<(), RelayError> {
 pub use launch::run_client_until;
 pub use launch::{discover_supported_client, run_client};
 pub use relay::{
-    CredentialSource, LocalRelay, Optimization, OptimizerCancellation, RequestOptimizer,
+    CredentialSource, LocalRelay, Optimization, OptimizerCancellation, RelayCancellation,
+    RequestOptimizer,
 };
 
 use std::fmt;

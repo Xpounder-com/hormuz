@@ -282,6 +282,65 @@ print({ACCESS_TOKEN!r})
         self.assertFalse((self.root / "optimizer-was-started").exists())
         self.assertEqual(self.gateway.requests, [])
 
+    def test_owner_exit_interrupts_request_credential_helper(self) -> None:
+        import time
+
+        first_lookup = self.root / "startup-lookup-complete"
+        helper_pid = self.root / "request-credential-helper-pid"
+        client_pid = self.root / "client-pid"
+        self._script(self.broker, f"#!{sys.executable}\n" + f"""
+import os, sys, time
+from pathlib import Path
+sys.stdin.buffer.read()
+first_lookup = Path({str(first_lookup)!r})
+if first_lookup.exists():
+    Path({str(helper_pid)!r}).write_text(str(os.getpid()))
+    time.sleep(4)
+else:
+    first_lookup.touch()
+print({ACCESS_TOKEN!r})
+""")
+        self._script(self.client, f"#!{sys.executable}\n" + f"""
+import http.client, os, sys, tomllib
+from pathlib import Path
+from urllib.parse import urlsplit
+if sys.argv[1:] == ["--version"]:
+    print("codex 0.147.0")
+    raise SystemExit(0)
+settings = tomllib.loads("\\n".join(sys.argv[2::2]))
+endpoint = urlsplit(settings["model_providers"]["hormuz_context_relay"]["base_url"])
+Path({str(client_pid)!r}).write_text(str(os.getpid()))
+Path({str(self.root / 'address')!r}).write_text(endpoint.netloc)
+connection = http.client.HTTPConnection(endpoint.hostname, endpoint.port, timeout=10)
+connection.request("POST", "/v1/responses", body=b"{{}}",
+                   headers={{"Authorization": "Bearer " + os.environ["HORMUZ_LOCAL_RELAY_TOKEN"],
+                             "Content-Type": "application/json"}})
+connection.getresponse().read()
+""")
+        process, lease = self._start()
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                pid = int(helper_pid.read_text())
+            except (FileNotFoundError, ValueError):
+                self.assertLess(time.monotonic(), deadline, "Request credential helper did not start")
+                time.sleep(0.01)
+            else:
+                break
+        cancelled_at = time.monotonic()
+        lease.close()
+        output, diagnostic = process.communicate(timeout=8)
+        self.assertEqual((process.returncode, output, diagnostic), (130, b"", b""))
+        self.assertLess(time.monotonic() - cancelled_at, 2,
+                        "Owner exit must interrupt request-time custody, not wait for its deadline")
+        for owned_pid in (pid, int(client_pid.read_text())):
+            with self.assertRaises(ProcessLookupError):
+                os.kill(owned_pid, 0)
+        address = (self.root / "address").read_text().split(":")
+        with self.assertRaises(OSError):
+            socket.create_connection((address[0], int(address[1])), timeout=1)
+        self.assertEqual(self.gateway.requests, [])
+
     def test_unsupported_client_version_is_not_reported_as_cancellation(self) -> None:
         self._script(self.client, "#!/bin/sh\n"
                      'if [ "$1" = "--version" ]; then\n'

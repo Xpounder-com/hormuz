@@ -169,7 +169,7 @@ fn execute_mac_broker(
     });
     // Fail before probing a client or opening a relay, but do not keep a
     // stalled custody helper alive after its owning app exits.
-    if let Err(error) = source.access_credential_until(&stopped) {
+    if let Err(error) = source.capture_credential_until(&stopped) {
         return if stopped() { Ok(130) } else { Err(error) };
     }
     let optimization = Optimization::OnDemand(Arc::new(PythonOptimizer {
@@ -194,13 +194,20 @@ struct MacCredentialBroker {
 #[cfg(target_os = "macos")]
 impl CredentialSource for MacCredentialBroker {
     fn access_credential(&self) -> Result<Zeroizing<String>, RelayError> {
-        self.access_credential_until(&|| false)
+        self.capture_credential_until(&|| false)
+    }
+
+    fn access_credential_until(
+        &self,
+        cancellation: &hormuz_client_relay::RelayCancellation,
+    ) -> Result<Zeroizing<String>, RelayError> {
+        self.capture_credential_until(&|| cancellation.is_cancelled())
     }
 }
 
 #[cfg(target_os = "macos")]
 impl MacCredentialBroker {
-    fn access_credential_until(
+    fn capture_credential_until(
         &self,
         stopped: &impl Fn() -> bool,
     ) -> Result<Zeroizing<String>, RelayError> {

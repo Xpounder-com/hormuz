@@ -294,17 +294,36 @@ impl RequestOptimizer for BlockingOptimizer {
     }
 }
 
+struct BlockingCredentials {
+    started: Arc<AtomicUsize>,
+    finished: Arc<AtomicUsize>,
+}
+impl CredentialSource for BlockingCredentials {
+    fn access_credential(&self) -> Result<Zeroizing<String>, RelayError> {
+        panic!("request lookup must receive relay-owner cancellation");
+    }
+
+    fn access_credential_until(
+        &self,
+        cancellation: &RelayCancellation,
+    ) -> Result<Zeroizing<String>, RelayError> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        while !cancellation.is_cancelled() {
+            thread::sleep(Duration::from_millis(1));
+        }
+        self.finished.fetch_add(1, Ordering::SeqCst);
+        Err(RelayError::CredentialUnavailable)
+    }
+}
+
 #[test]
-fn optimizer_registry_rejects_work_after_shutdown() {
-    let jobs = Arc::new(OptimizerJobs::new());
+fn blocking_registry_rejects_work_after_shutdown() {
+    let jobs = Arc::new(BlockingJobs::new());
     let calls = Arc::new(AtomicUsize::new(0));
     jobs.cancel();
+    let optimizer = CountOptimizationCalls(calls.clone());
     assert!(jobs
-        .spawn(
-            Arc::new(CountOptimizationCalls(calls.clone())),
-            "/v1/responses".to_owned(),
-            b"{}".to_vec(),
-        )
+        .spawn(move |cancellation| optimizer.prepare("/v1/responses", b"{}", cancellation))
         .is_none());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(jobs.active_count(), 0);
@@ -312,19 +331,48 @@ fn optimizer_registry_rejects_work_after_shutdown() {
 
 #[test]
 fn shutdown_cancels_running_and_prevents_queued_optimizer_prepare_without_egress() {
-    const REQUESTS: usize = 8;
-    let gateway = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    gateway.set_nonblocking(true).unwrap();
-    let address = gateway.local_addr().unwrap();
     let started = Arc::new(AtomicUsize::new(0));
     let finished = Arc::new(AtomicUsize::new(0));
-    let relay = LocalRelay::start(
-        &profile(&format!("http://{address}"), "codex"),
+    assert_shutdown_cancels_blocking_jobs(
         credential(Arc::new(AtomicUsize::new(0))),
         Optimization::OnDemand(Arc::new(BlockingOptimizer {
             started: started.clone(),
             finished: finished.clone(),
         })),
+        started,
+        finished,
+    );
+}
+
+#[test]
+fn shutdown_cancels_running_and_prevents_queued_credentials_without_egress() {
+    let started = Arc::new(AtomicUsize::new(0));
+    let finished = Arc::new(AtomicUsize::new(0));
+    assert_shutdown_cancels_blocking_jobs(
+        Arc::new(BlockingCredentials {
+            started: started.clone(),
+            finished: finished.clone(),
+        }),
+        Optimization::Off,
+        started,
+        finished,
+    );
+}
+
+fn assert_shutdown_cancels_blocking_jobs(
+    credentials: Arc<dyn CredentialSource>,
+    optimization: Optimization,
+    started: Arc<AtomicUsize>,
+    finished: Arc<AtomicUsize>,
+) {
+    const REQUESTS: usize = 8;
+    let gateway = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    gateway.set_nonblocking(true).unwrap();
+    let address = gateway.local_addr().unwrap();
+    let relay = LocalRelay::start(
+        &profile(&format!("http://{address}"), "codex"),
+        credentials,
+        optimization,
     )
     .unwrap();
     let relay_address = relay.address();
@@ -349,12 +397,12 @@ fn shutdown_cancels_running_and_prevents_queued_optimizer_prepare_without_egress
         })
         .collect::<Vec<_>>();
 
-    let jobs = relay.optimizer_jobs.clone();
+    let jobs = relay.blocking_jobs.clone();
     let deadline = Instant::now() + Duration::from_secs(5);
     while jobs.active_count() != REQUESTS {
         assert!(
             Instant::now() < deadline,
-            "not all optimizer jobs registered before shutdown: {}",
+            "not all blocking jobs registered before shutdown: {}",
             jobs.active_count()
         );
         thread::sleep(Duration::from_millis(1));
