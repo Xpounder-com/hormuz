@@ -318,6 +318,127 @@ class RepositoryGovernanceTests(unittest.TestCase):
             with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow is required"):
                 validate_repository_governance(root)
 
+    def test_linux_gtk_job_is_required_and_cannot_be_optional_or_change_platform(self) -> None:
+        mutations = (
+            ("  linux-gtk:\n", "  renamed-linux-gtk:\n"),
+            (
+                "    name: Linux GTK shell (native synthetic session)\n",
+                "    name: Linux GTK shell (native synthetic session)\n    if: false\n",
+            ),
+            ("    timeout-minutes: 20\n", "    timeout-minutes: 20\n    continue-on-error: true\n"),
+            (
+                "    name: Linux GTK shell (native synthetic session)\n    runs-on: ubuntu-latest\n",
+                "    name: Linux GTK shell (native synthetic session)\n    runs-on: macos-15\n",
+            ),
+            (
+                "    name: Linux GTK shell (native synthetic session)\n",
+                "    name: Linux GTK shell (native synthetic session)\n    permissions: read-all\n",
+            ),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/native-client-contracts.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertEqual(value.count(original), 1)
+                workflow.write_text(value.replace(original, replacement, 1), encoding="utf-8")
+                with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                    validate_repository_governance(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/native-client-contracts.yml"
+            value = workflow.read_text(encoding="utf-8")
+            prefix, marker, tail = value.partition("  linux-gtk:\n")
+            _, contracts, remainder = tail.partition("  contracts:\n")
+            self.assertTrue(marker and contracts)
+            workflow.write_text(prefix + contracts + remainder, encoding="utf-8")
+            with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                validate_repository_governance(root)
+
+    def test_linux_gtk_build_tests_hash_binding_and_artifacts_cannot_be_weakened(self) -> None:
+        mutations = (
+            ("libgtk-4-dev libssl-dev pkg-config xvfb xauth dbus-x11 at-spi2-core", "libssl-dev pkg-config"),
+            ("      - name: Build the actual Linux GTK executable\n", "      - name: Build the actual Linux GTK executable\n        if: false\n"),
+            ("cargo build -p hormuz-linux -p hormuz-client-relay --features hormuz-linux/gtk-ui --release --locked", "cargo check -p hormuz-linux --locked"),
+            ("cargo build -p hormuz-linux -p hormuz-client-relay --features hormuz-linux/gtk-ui --release --locked", "cargo build -p hormuz-linux --release --locked"),
+            ("cargo clippy -p hormuz-linux --features gtk-ui --all-targets --locked -- -D warnings", "cargo clippy -p hormuz-linux --locked || true"),
+            ("        shell: bash\n", "        shell: bash {0}\n"),
+            ("          GDK_BACKEND: x11\n", "          GDK_BACKEND: broadway\n"),
+            ("          HORMUZ_GTK_PROOF_DIRECTORY: ${{ github.workspace }}/clients/rust/target/linux-gtk-proof\n", ""),
+            ("xvfb-run -a dbus-run-session -- cargo test -p hormuz-linux --features gtk-ui --locked -- --test-threads=1", "cargo test -p hormuz-linux --locked"),
+            ("cargo test -p hormuz-linux --features gtk-ui --locked -- --test-threads=1", "cargo test -p hormuz-linux --features gtk-ui --locked -- missing_or_locked --test-threads=1"),
+            ("tee target/linux-gtk-proof/gtk-tests.txt\n", "tee target/linux-gtk-proof/gtk-tests.txt || true\n"),
+            ("      - name: Bind GTK fixture proof to its original development executable\n", "      - name: Bind GTK fixture proof to its original development executable\n        continue-on-error: true\n"),
+            ("run: python3 linux/verify-gtk-proof.py target/linux-gtk-proof", "run: echo passed"),
+            ("          name: native-linux-gtk-candidate-${{ github.sha }}\n", "          name: native-linux-gtk-candidate\n"),
+            ("            clients/rust/target/release/hormuz-linux\n", ""),
+            ("            clients/rust/target/release/hormuz-client-relay\n", ""),
+            ("            clients/rust/target/linux-gtk-proof\n", ""),
+            (
+                "            clients/rust/target/linux-gtk-proof\n          if-no-files-found: error\n",
+                "            clients/rust/target/linux-gtk-proof\n          if-no-files-found: warn\n",
+            ),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/native-client-contracts.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertEqual(value.count(original), 1)
+                workflow.write_text(value.replace(original, replacement, 1), encoding="utf-8")
+                with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                    validate_repository_governance(root)
+
+    def test_linux_gtk_proof_cannot_precede_the_native_session_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/native-client-contracts.yml"
+            value = workflow.read_text(encoding="utf-8")
+            start = value.index("      - name: Exercise actual GTK controls with an isolated session\n")
+            proof = value.index("      - name: Bind GTK fixture proof to its original development executable\n")
+            upload = value.index("      - name: Save native Linux development proof\n")
+            reordered = value[:start] + value[proof:upload] + value[start:proof] + value[upload:]
+            workflow.write_text(reordered, encoding="utf-8")
+            with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow Linux GTK"):
+                validate_repository_governance(root)
+
+    def test_linux_gtk_proof_keeps_the_exact_proposed_head(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/native-client-contracts.yml"
+            value = workflow.read_text(encoding="utf-8")
+            proof = "      - name: Bind GTK fixture proof to its original development executable\n"
+            before, marker, after = value.partition(proof)
+            source = "          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n"
+            self.assertTrue(marker)
+            self.assertIn(source, after)
+            after = after.replace(source, "          HORMUZ_PR_HEAD: unverified\n", 1)
+            workflow.write_text(before + marker + after, encoding="utf-8")
+            with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow Linux GTK"):
+                validate_repository_governance(root)
+
+    def test_linux_checkout_cannot_mask_persisted_matrix_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/native-client-contracts.yml"
+            value = workflow.read_text(encoding="utf-8")
+            linux, marker, contracts = value.partition("  contracts:\n")
+            checkout = "          persist-credentials: false\n"
+            self.assertTrue(marker)
+            self.assertIn(checkout, linux)
+            self.assertEqual(contracts.count(checkout), 1)
+            contracts = contracts.replace(checkout, "          persist-credentials: true\n", 1)
+            workflow.write_text(linux + marker + contracts, encoding="utf-8")
+            with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                validate_repository_governance(root)
+
     def test_windows_preview_steps_keep_their_named_platform_gates(self) -> None:
         names = (
             "Build native Windows development candidate",
@@ -408,7 +529,10 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ("            clients/rust/target/release/windows-rebuild.json\n", ""),
             ("rebuild_sha256 = (Get-FileHash target/release/windows-rebuild.json -Algorithm SHA256).Hash.ToLowerInvariant()", 'rebuild_sha256 = "unverified"'),
             ("acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()", 'acceptance_sha256 = "unverified"'),
-            ("          if-no-files-found: error", "          if-no-files-found: warn"),
+            (
+                "            clients/rust/target/release/windows-rebuild.json\n          if-no-files-found: error",
+                "            clients/rust/target/release/windows-rebuild.json\n          if-no-files-found: warn",
+            ),
         )
         for original, replacement in mutations:
             with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
