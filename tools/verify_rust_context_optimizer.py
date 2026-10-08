@@ -11,6 +11,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import os
 import random
 import subprocess
 import sys
@@ -37,6 +38,7 @@ def verify(helper: Path, cache: Path) -> dict[str, object]:
         result = subprocess.run(
             [str(helper), "qualify", "--tokenizer-cache", str(cache)],
             input=canonical_json(job).encode(), capture_output=True, timeout=30, check=False,
+            env={"PATH": os.defpath},
         )
         if valid:
             if result.returncode != 0 or json.loads(result.stdout) != expected:

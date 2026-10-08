@@ -57,8 +57,9 @@ def descendants(root: int, table: dict[int, tuple[int, int]]) -> set[int]:
 
 def measured_run(helper: Path, cache: Path, wire: bytes) -> tuple[dict[str, object], bytes]:
     command = ["/usr/bin/time", "-l", str(helper), "relay-bridge", "--client", "codex", "--path", "/v1/responses"]
-    environment = os.environ.copy()
-    environment["HORMUZ_CONTEXT_TOKENIZER_CACHE"] = str(cache)
+    # Match the native relay's credential-free child boundary, not ambient
+    # developer API keys, proxy settings or application configuration.
+    environment = {"PATH": os.defpath, "HORMUZ_CONTEXT_TOKENIZER_CACHE": str(cache)}
     started = time.perf_counter()
     process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                env=environment, start_new_session=True)
