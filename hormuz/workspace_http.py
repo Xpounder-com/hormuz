@@ -87,7 +87,7 @@ def _dispatch(handler):
         raise WorkspaceError("workspace_invalid_request")
     if any(key.lower() in {"authorization", "proxy-authorization", "x-forwarded-host", "forwarded"} or key.lower().startswith(("x-hormuz-organization", "x-hormuz-team", "x-hormuz-actor", "x-hormuz-role")) for key in handler.headers):
         raise WorkspaceError("workspace_invalid_request")
-    if not handler.server.workspace_request_limit.allow():
+    if not service.request_limit.allow():
         raise WorkspaceError("workspace_rate_limited")
     canonical = service.sessions.origin
     if handler.command == "GET":

@@ -6,6 +6,7 @@ import hashlib
 from .auth import AuthenticationError
 from .session import SessionBrokerError, _build_authorization_url, _complete_onboarding_claims, _exchange_code
 from .session_store import SessionStoreError
+from .session_http import SessionRequestLimit
 from .workspace_store import WorkspaceError, WorkspaceStore
 from .workspace_domains import WorkspaceDomains
 
@@ -15,6 +16,7 @@ class WorkspaceService:
         if not broker.config.session_broker.public_base_url.startswith("https://"):
             raise SessionBrokerError("workspace_https_required")
         self.broker = broker
+        self.request_limit = SessionRequestLimit()
         self.sessions = WorkspaceStore(broker)
         self.domains = WorkspaceDomains(self.sessions)
 

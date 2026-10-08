@@ -286,7 +286,6 @@ class GatewayServer(ThreadingHTTPServer):
         self.session_broker: SessionBroker | None = None
         self.session_request_limit = SessionRequestLimit()
         self.console_request_limit = SessionRequestLimit()
-        self.workspace_request_limit = SessionRequestLimit()
         self.console: ConsoleService | None = None
         self.workspace: WorkspaceService | None = None
         self.impact_recorder = None

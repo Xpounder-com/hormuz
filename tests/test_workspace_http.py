@@ -159,11 +159,11 @@ class WorkspaceHTTPTests(SessionHTTPTestCase):
 
     def test_workspace_and_console_request_limits_are_independent(self):
         for _ in range(600):
-            self.assertTrue(self.gateway.workspace_request_limit.allow())
+            self.assertTrue(self.service.request_limit.allow())
         self.assertEqual(self.request("GET", "/workspace")[0], 429)
         self.assertEqual(self.request("GET", "/console")[0], 200)
         from hormuz.session_http import SessionRequestLimit
-        self.gateway.workspace_request_limit = SessionRequestLimit()
+        self.service.request_limit = SessionRequestLimit()
         for _ in range(599):
             self.assertTrue(self.gateway.console_request_limit.allow())
         self.assertEqual(self.request("GET", "/console")[0], 429)
