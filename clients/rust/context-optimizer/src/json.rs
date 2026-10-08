@@ -74,7 +74,21 @@ fn parse(
                 .collect::<Result<Vec<_>, _>>()
                 .map(Value::Array)
         }
-        _ => serde_json::from_str(raw.get()).map_err(|_| Error::InvalidJson),
+        _ => {
+            let scalar = raw.get();
+            // Packaged Python 3.12 uses its default 4,300-digit decimal integer
+            // cap. A larger Rust envelope would be undecodable by that peer.
+            if !scalar.contains(['.', 'e', 'E'])
+                && scalar
+                    .trim_start_matches('-')
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit())
+                && scalar.trim_start_matches('-').len() > 4300
+            {
+                return Err(Error::LimitExceeded);
+            }
+            serde_json::from_str(scalar).map_err(|_| Error::InvalidJson)
+        }
     }
 }
 
@@ -207,6 +221,15 @@ mod tests {
             r#"{"nested":[{"$serde_json::private::Number":"NaN"}],"n":100000000000000000000001}"#,
         ] {
             assert_eq!(canonical(&strict(input).unwrap()).unwrap(), input);
+        }
+    }
+
+    #[test]
+    fn decimal_integer_limit_matches_the_packaged_python_decoder() {
+        for sign in ["", "-"] {
+            let boundary = format!("{sign}{}", "9".repeat(4300));
+            assert_eq!(canonical(&strict(&boundary).unwrap()).unwrap(), boundary);
+            assert!(strict(&format!("{sign}{}", "9".repeat(4301))).is_err());
         }
     }
 }

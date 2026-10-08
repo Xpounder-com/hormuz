@@ -32,13 +32,17 @@ def verify(helper: Path, cache: Path) -> dict[str, object]:
     counters = load_token_counters(cache)
     checked = 0
     started = time.monotonic()
+    child_environment = {"PATH": os.defpath}
+    if sys.platform == "win32":
+        # Windows executable/SxS loading requires this non-secret OS path.
+        child_environment["SystemRoot"] = os.environ["SystemRoot"]
 
     def compare(case: str, job: dict[str, object], expected: object, *, valid: bool = True) -> None:
         nonlocal checked
         result = subprocess.run(
             [str(helper), "qualify", "--tokenizer-cache", str(cache)],
             input=canonical_json(job).encode(), capture_output=True, timeout=30, check=False,
-            env={"PATH": os.defpath},
+            env=child_environment,
         )
         if valid:
             if result.returncode != 0 or json.loads(result.stdout) != expected:
@@ -100,6 +104,14 @@ def verify(helper: Path, cache: Path) -> dict[str, object]:
             compare(f"unsupported-{index}-{format_name}", {
                 "operation": "compact_text", "text": text, "format": format_name,
             }, {"text": compact_text(text, format_name)})
+
+    for digits in (4300, 4301):
+        for sign in ("", "-"):
+            row = '{"repeated_long_column_name":' + sign + "9" * digits + "}"
+            text = "[" + ",".join([row] * 10) + "]"
+            compare(f"integer-decoder-boundary-{sign}-{digits}", {
+                "operation": "compact_text", "text": text, "format": "json_table",
+            }, {"text": compact_text(text, "json_table")})
 
     # Token IDs need not be public; exact counts protect the guard's decisions.
     randomizer = random.Random(342)

@@ -16,6 +16,8 @@ savings guards for both `cl100k_base` and `o200k_base`. JSON order, arbitrary-si
 integers, float spelling, Unicode, newlines, duplicate results and opaque
 Responses history have regression coverage. Search-line decoding matches the
 packaged Python 3.12 Unicode 15.0 digit semantics.
+Decimal integers retain that reference decoder's 4,300-digit limit; rejected
+larger literals pass through rather than becoming incompatible envelopes.
 
 The existing limits remain: 64 KiB blocks, 1 MiB requests, 4,096 rows, 64 columns,
 32 JSON levels, 50,000 nodes, 64 selections and 256-byte minimum candidates.
