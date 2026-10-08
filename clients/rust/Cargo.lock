@@ -557,6 +557,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "hormuz-client-desktop"
+version = "1.5.0-dev.1"
+dependencies = [
+ "getrandom 0.4.3",
+ "hormuz-client-core",
+ "hormuz-client-interaction",
+ "hormuz-client-platform",
+ "hormuz-client-session",
+ "hormuz-client-transport",
+ "serde_json",
+ "tempfile",
+ "time",
+]
+
+[[package]]
 name = "hormuz-client-interaction"
 version = "1.5.0-dev.1"
 dependencies = [
@@ -647,6 +662,7 @@ version = "1.5.0-dev.1"
 dependencies = [
  "getrandom 0.4.3",
  "hormuz-client-core",
+ "hormuz-client-desktop",
  "hormuz-client-interaction",
  "hormuz-client-platform",
  "hormuz-client-session",

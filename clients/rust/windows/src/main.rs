@@ -1,8 +1,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-#[cfg(any(windows, test))]
-mod connection;
+#[cfg(windows)]
+use hormuz_client_desktop::connection;
 #[cfg(any(windows, test))]
 mod interaction;
 #[cfg(windows)]
@@ -13,8 +13,8 @@ mod network;
 mod options;
 #[cfg(any(windows, test))]
 mod placement;
-#[cfg(any(windows, test))]
-mod presentation;
+#[cfg(windows)]
+use hormuz_client_desktop::presentation;
 #[cfg(windows)]
 mod startup;
 

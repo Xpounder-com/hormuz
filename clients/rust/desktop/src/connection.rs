@@ -53,8 +53,8 @@ struct Shared {
     notify: Box<dyn Fn() -> bool + Send + Sync>,
 }
 impl Shared {
-    // Called only with the state mutex held. The native callback is exclusively
-    // a nonblocking PostMessage; it cannot access this mutex or GUI allocations.
+    // Called only with the state mutex held. The shell callback must exclusively
+    // enqueue a nonblocking notification, never access this mutex or GUI objects.
     fn publish(&self, state: &mut State) {
         if !state.quitting && !state.notified {
             state.notified = (self.notify)();
@@ -291,10 +291,9 @@ impl<C, S, T, K, B> Drop for Connection<C, S, T, K, B> {
 #[path = "connection_tests.rs"]
 mod tests;
 
-/// Credential-free native view boundary. Type erasure lets Windows tests drive
+/// Credential-free native view boundary. Type erasure lets shell tests drive
 /// the identical controls with an isolated store/transport, without a test CLI
 /// or an override for the production credential target.
-#[cfg(windows)]
 pub trait DesktopConnection {
     fn view(&self) -> View;
     fn sign_in(&self, profile: ConnectionProfile) -> bool;
@@ -303,7 +302,6 @@ pub trait DesktopConnection {
     fn visibility(&self, visibility: DashboardVisibility);
     fn lifecycle(&self, event: LifecycleEvent);
 }
-#[cfg(windows)]
 impl<C, S, T, K, B> DesktopConnection for Connection<C, S, T, K, B>
 where
     C: RefreshCoordinator + Send + Sync + 'static,
