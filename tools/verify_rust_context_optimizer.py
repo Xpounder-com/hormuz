@@ -91,7 +91,8 @@ def verify(helper: Path, cache: Path) -> dict[str, object]:
     unsupported = ["a\nb\nc", "src/a.py\r\nsrc/b.py\r\n" * 20,
         '[ {"id":1}, {"id":2} ]', '[{"id":1,"id":2},{"id":3}]',
         '[{"id":NaN},{"id":1}]', "same\n" * 4097, "x" * (64 * 1024 + 1),
-        'literal format-looking text: {"format":"hormuz-line-runs-v1"}\n' * 40]
+        'literal format-looking text: {"format":"hormuz-line-runs-v1"}\n' * 40,
+        canonical_json({"$serde_json::private::Number": "1" * 400})]
     for index, text in enumerate(unsupported):
         for format_name in ("json_table", "line_runs", "search_lines", "path_list"):
             compare(f"unsupported-{index}-{format_name}", {
@@ -136,6 +137,11 @@ def verify(helper: Path, cache: Path) -> dict[str, object]:
         compare(f"reserved-metadata-{protocol}", {
             "operation": "optimize_request", "payload": payload, "protocol": protocol,
             "selections": [dataclasses.asdict(selection)], "enabled": True,
+        }, dataclasses.asdict(expected))
+        expected = optimize_request(reserved, protocol, [], counters, enabled=True)
+        compare(f"unsupported-reserved-object-{protocol}", {
+            "operation": "optimize_request", "payload": reserved, "protocol": protocol,
+            "selections": [], "enabled": True,
         }, dataclasses.asdict(expected))
 
     unicode_16_digits = [chr(value) for value in (0x10D40, 0x116D0, 0x11BF0, 0x16130, 0x16D70, 0x1CCF0, 0x1E5F1)]

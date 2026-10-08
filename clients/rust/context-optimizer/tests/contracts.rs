@@ -86,6 +86,35 @@ fn unsupported_and_noncanonical_input_passes_through() {
 }
 
 #[test]
+fn unsupported_reserved_number_tag_objects_keep_exact_bytes_and_types() {
+    let text = format!(
+        r#"{{"$serde_json::private::Number":"{}"}}"#,
+        "1".repeat(400)
+    );
+    assert_eq!(restore_text(&text), Ok(None));
+    for format in [
+        Format::JsonTable,
+        Format::LineRuns,
+        Format::SearchLines,
+        Format::PathList,
+    ] {
+        assert_eq!(compact_text(&text, format), text);
+    }
+    let unsupported = json::strict(&text).unwrap();
+    assert!(unsupported.is_object());
+    for protocol in [Protocol::Chat, Protocol::Responses, Protocol::Anthropic] {
+        let result = optimize_request(&unsupported, protocol, &[], Some(&Counters), true).unwrap();
+        assert!(!result.changed);
+        assert_eq!(result.reason, "unsupported_shape");
+        assert_eq!(result.payload, unsupported);
+        assert_eq!(
+            json::canonical(&result.payload).unwrap().as_bytes(),
+            text.as_bytes()
+        );
+    }
+}
+
+#[test]
 fn malformed_envelopes_cannot_expand_beyond_bounds_or_coerce_types() {
     for value in [
         json!({"format":"hormuz-line-runs-v1","runs":[["x", true]]}),
