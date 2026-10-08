@@ -252,6 +252,43 @@ where
         self.shared.wake.notify_one();
         true
     }
+    /// Cancel local enrollment/refresh work, then reread durable state. This
+    /// never rolls back a request already received by the gateway or discards
+    /// an accepted sign-out's revocation intent.
+    pub fn cancel(&self) -> bool {
+        let mut state = self.shared.state.lock().unwrap();
+        if state.quitting || state.view.phase == Phase::SigningOut {
+            return false;
+        }
+        state.epoch += 1;
+        if let Some(operation) = &state.operation {
+            operation.cancel();
+        }
+        state.command = Some(Command::Restore);
+        state.view.phase = Phase::Checking;
+        self.shared.publish(&mut state);
+        self.shared.wake.notify_one();
+        true
+    }
+    /// Deliberate content-free refresh hint through the existing shared
+    /// scheduling gate. Hidden, locked, sleeping and busy views still cannot
+    /// start duplicate or unscheduled polling.
+    pub fn refresh(&self) -> bool {
+        let state = self.shared.state.lock().unwrap();
+        if state.quitting
+            || state.view.phase.busy()
+            || !state
+                .view
+                .connection
+                .as_ref()
+                .is_some_and(|status| status.session_state() == Some(SessionState::Active))
+        {
+            return false;
+        }
+        self.controller.local_request_completed();
+        self.shared.wake.notify_one();
+        true
+    }
     pub fn visibility(&self, visibility: DashboardVisibility) {
         let _state = self.shared.state.lock().unwrap();
         self.controller.set_dashboard_visibility(visibility);
@@ -299,6 +336,8 @@ pub trait DesktopConnection {
     fn sign_in(&self, profile: ConnectionProfile) -> bool;
     fn sign_out(&self);
     fn retry(&self) -> bool;
+    fn cancel(&self) -> bool;
+    fn refresh(&self) -> bool;
     fn visibility(&self, visibility: DashboardVisibility);
     fn lifecycle(&self, event: LifecycleEvent);
 }
@@ -321,6 +360,12 @@ where
     }
     fn retry(&self) -> bool {
         self.retry()
+    }
+    fn cancel(&self) -> bool {
+        self.cancel()
+    }
+    fn refresh(&self) -> bool {
+        self.refresh()
     }
     fn visibility(&self, visibility: DashboardVisibility) {
         self.visibility(visibility)

@@ -3,6 +3,41 @@ use crate::presentation;
 use hormuz_client_core::ClientError;
 
 #[test]
+fn explicit_cancel_reloads_without_replaying_enrollment() {
+    let store = Store::default();
+    let transport = Transport::default();
+    transport.mode.store(4, Ordering::SeqCst);
+    let connection = start(store.clone(), transport.clone(), TestClock::default());
+    wait(&connection, |v| v.phase == Phase::Ready);
+    assert!(connection.sign_in(profile()));
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while !transport.entered.load(Ordering::SeqCst) {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(connection.cancel());
+    wait(&connection, |v| v.phase == Phase::Ready && !v.has_session());
+    assert!(store.load().unwrap().is_none());
+    assert_eq!(transport.requests.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn refresh_hints_remain_coalesced_and_paused_while_hidden() {
+    let transport = Transport::default();
+    let connection = start(Store::default(), transport.clone(), TestClock::default());
+    assert!(!connection.refresh());
+    sign_in(&connection);
+    for _ in 0..100 {
+        assert!(connection.refresh());
+    }
+    thread::sleep(Duration::from_millis(20));
+    assert_eq!(transport.usage.load(Ordering::SeqCst), 0);
+    open(&connection);
+    current(&connection);
+    assert_eq!(transport.usage.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn sign_in_usage_logout_and_reconnect_use_the_real_controller() {
     let store = Store::default();
     let transport = Transport::default();
