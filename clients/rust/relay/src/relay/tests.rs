@@ -38,10 +38,32 @@ fn call(relay: &LocalRelay, path: &str, body: &[u8], extra: &str, token: &str) -
         "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\nContent-Type: application/json\r\n{extra}\r\n",
         relay.address().port(), body.len()
     );
-    stream.write_all(header.as_bytes()).unwrap();
-    stream.write_all(body).unwrap();
-    let mut result = String::new();
-    stream.read_to_string(&mut result).unwrap();
+    let request = [header.as_bytes(), body].concat();
+    stream.write_all(&request).unwrap();
+    // Rejected requests deliberately leave the body unread. macOS may reset
+    // that socket after sending a complete response, so fixed-length replies
+    // must be checked by HTTP framing, not an additional read waiting for EOF.
+    let mut headers = Vec::new();
+    while !headers.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        stream.read_exact(&mut byte).unwrap();
+        headers.push(byte[0]);
+        assert!(headers.len() <= 8192);
+    }
+    let mut result = String::from_utf8(headers).unwrap();
+    let length = result.lines().find_map(|line| {
+        line.to_ascii_lowercase()
+            .strip_prefix("content-length: ")
+            .map(|value| value.parse::<usize>().unwrap())
+    });
+    if let Some(length) = length {
+        assert!(length <= MAX_REQUEST_BYTES);
+        let mut body = vec![0; length];
+        stream.read_exact(&mut body).unwrap();
+        result.push_str(std::str::from_utf8(&body).unwrap());
+    } else {
+        stream.read_to_string(&mut result).unwrap();
+    }
     result
 }
 

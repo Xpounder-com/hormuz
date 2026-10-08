@@ -30,7 +30,7 @@ pub fn stop_linux_user_service(token: &str) -> Result<(), RelayError> {
         }
     })
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use launch::run_client_until;
 pub use launch::{discover_supported_client, run_client};
 pub use relay::{
