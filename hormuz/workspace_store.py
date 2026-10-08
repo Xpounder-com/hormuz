@@ -38,6 +38,14 @@ class WorkspaceStore:
     def origin(self):
         return self.broker.config.session_broker.public_base_url
 
+    def _prune_login_state(self, connection, now):
+        # These rows hold transient browser authority, not audit history.
+        # Reclaim them before admission so repeated expired starts cannot grow
+        # the store indefinitely. Delete flows first because they may refer to
+        # handoffs; keep a handoff while an unexpired flow still needs it.
+        connection.execute("DELETE FROM workspace_login_flows WHERE expires_at <= ? OR status IN ('completed', 'failed')", (_isoformat(now),))
+        connection.execute("DELETE FROM workspace_handoffs WHERE (expires_at <= ? OR consumed_at IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM workspace_login_flows WHERE handoff_id = workspace_handoffs.id)", (_isoformat(now),))
+
     def begin_login(self, *, workspace_id=None, handoff_id=None):
         settings = self.broker.config.session_broker
         issuer = settings.workspace_signup_issuer
@@ -46,7 +54,7 @@ class WorkspaceStore:
         now = self.store._now()
         with self.store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute("UPDATE workspace_login_flows SET status = 'failed', state_hash = NULL, browser_cookie_hash = NULL, encrypted_flow = NULL WHERE expires_at <= ? AND status IN ('pending', 'exchanging')", (_isoformat(now),))
+            self._prune_login_state(connection, now)
             if connection.execute("SELECT COUNT(*) FROM workspace_login_flows WHERE status IN ('pending', 'exchanging')").fetchone()[0] >= 1000:
                 raise WorkspaceError("workspace_login_capacity")
             if workspace_id:
@@ -76,7 +84,7 @@ class WorkspaceStore:
 
     def fail_login(self, flow_id):
         with self.store._connection() as connection:
-            connection.execute("UPDATE workspace_login_flows SET status = 'failed', state_hash = NULL, browser_cookie_hash = NULL, encrypted_flow = NULL WHERE id = ? AND status IN ('pending', 'exchanging')", (flow_id,))
+            connection.execute("DELETE FROM workspace_login_flows WHERE id = ? AND status IN ('pending', 'exchanging')", (flow_id,))
 
     def complete_login(self, flow, claims):
         """Called only after signature, audience, issuer and nonce verification."""
@@ -104,7 +112,7 @@ class WorkspaceStore:
             else:
                 credential = self._new_session(connection, workspace, authority, self.origin)
                 result = {"credential": credential, "slug": workspace["slug"]}
-            connection.execute("UPDATE workspace_login_flows SET status = 'completed' WHERE id = ?", (flow.id,))
+            connection.execute("DELETE FROM workspace_login_flows WHERE id = ?", (flow.id,))
             return result
 
     def _provision(self, connection, issuer, subject, email):
@@ -196,6 +204,7 @@ class WorkspaceStore:
         now = self.store._now()
         with self.store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            self._prune_login_state(connection, now)
             candidate = connection.execute("SELECT id FROM workspace_domains WHERE hostname = ?", (hostname,)).fetchone()
             if candidate is None:
                 raise WorkspaceError("workspace_host_rejected")

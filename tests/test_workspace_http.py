@@ -45,18 +45,34 @@ class FakeDomains:
 
 
 class WorkspaceHTTPTests(SessionHTTPTestCase):
+    workspace_origin = "https://workspace.example.com"
+
     def configure_gateway(self, config):
         issuer_name = next(iter(config.oidc_issuers))
         issuer = config.oidc_issuers[issuer_name]
-        return replace(config, session_broker=replace(config.session_broker, onboarding_enabled=True, workspace_enabled=True, workspace_signup_issuer=issuer_name), oidc_issuers={issuer_name: replace(issuer, login=replace(issuer.login, scopes=("openid", "email")))})
+        return replace(config, session_broker=replace(config.session_broker, public_base_url=self.workspace_origin, onboarding_enabled=True, console_enabled=True, workspace_enabled=True, workspace_signup_issuer=issuer_name), oidc_issuers={issuer_name: replace(issuer, login=replace(issuer.login, scopes=("openid", "email")))})
 
     def setUp(self):
         super().setUp()
+        # Model the private HTTP hop behind an HTTPS terminator. Browser-facing
+        # Host, Origin, callbacks and cookies always use the canonical HTTPS URL.
+        self.transport_url, self.gateway_url = self.gateway_url, self.workspace_origin
+        self.config = replace(self.config, session_broker=replace(self.config.session_broker, public_base_url=self.gateway_url))
+        self.gateway.config = self.config
+        self.gateway.session_broker.config = self.config
+        self.gateway.session_broker.callback_url = self.gateway_url + "/v1/auth/callback"
         self.idp.claims_overrides = {"email": "alice@example.com", "email_verified": True}
         self.service = self.gateway.workspace
         self.sessions = self.service.sessions
         self.fake = FakeDomains(self.service.domains)
         self.service.domains.provider = self.fake
+
+    def request(self, method, path, value=None, headers=None, *, origin=None):
+        headers = dict(headers or {})
+        if origin is None:
+            headers.setdefault("Host", urlsplit(self.gateway_url).netloc)
+            origin = self.transport_url
+        return super().request(method, path, value, headers, origin=origin)
 
     def post(self, path, values, *, cookie="", host=None, origin=None):
         if path == "/v1/workspaces/auth/start" and not values:
@@ -127,6 +143,66 @@ class WorkspaceHTTPTests(SessionHTTPTestCase):
         self.assertEqual(self.post("/v1/workspaces/auth/callback", values, cookie="")[0], 400)
         self.assertEqual(self.post("/v1/workspaces/auth/callback", values, cookie=cookie)[0], 303)
         self.assertEqual(self.post("/v1/workspaces/auth/callback", values, cookie=cookie)[0], 400)
+
+    def test_workspace_flow_cookie_supports_cross_site_form_post_and_requires_https(self):
+        from hormuz.session import SessionBrokerError
+        from hormuz.workspace import WorkspaceService
+        status, headers, _ = self.post("/v1/workspaces/auth/start", {})
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"]
+        for attribute in ("__Host-hormuz_workspace_flow=", "Path=/", "HttpOnly", "SameSite=None", "; Secure"):
+            self.assertIn(attribute, cookie)
+        invalid = replace(self.config, session_broker=replace(self.config.session_broker, public_base_url="http://127.0.0.1:8787"))
+        with mock.patch.object(self.service.broker, "config", invalid):
+            with self.assertRaisesRegex(SessionBrokerError, "workspace_https_required"):
+                WorkspaceService(self.service.broker)
+
+    def test_workspace_and_console_request_limits_are_independent(self):
+        for _ in range(600):
+            self.assertTrue(self.gateway.workspace_request_limit.allow())
+        self.assertEqual(self.request("GET", "/workspace")[0], 429)
+        self.assertEqual(self.request("GET", "/console")[0], 200)
+        from hormuz.session_http import SessionRequestLimit
+        self.gateway.workspace_request_limit = SessionRequestLimit()
+        for _ in range(599):
+            self.assertTrue(self.gateway.console_request_limit.allow())
+        self.assertEqual(self.request("GET", "/console")[0], 429)
+        self.assertEqual(self.request("GET", "/workspace")[0], 200)
+
+    def test_transient_userinfo_failure_returns_unavailable_and_consumes_callback(self):
+        self.idp.omit_claims = {"email", "email_verified"}
+        self.idp.userinfo_unavailable = True
+        values, cookie = self.begin()
+        status, _, page = self.post("/v1/workspaces/auth/callback", values, cookie=cookie)
+        self.assertEqual(status, 503, page)
+        self.assertIn("Sign-in is temporarily unavailable", page)
+        self.idp.userinfo_unavailable = False
+        self.assertEqual(self.post("/v1/workspaces/auth/callback", values, cookie=cookie)[0], 400)
+        self.login()
+
+    def test_login_flow_storage_is_bounded_across_expiry_completion_and_failure(self):
+        now = self.sessions.store._now()
+        with mock.patch.object(self.sessions.store, "_now", side_effect=lambda: now):
+            for cycle in range(3):
+                flow, state, cookie = self.sessions.begin_login()
+                with self.sessions.store._connection() as connection:
+                    # Fill the remaining allowance without 999 encryption calls.
+                    connection.executemany("INSERT INTO workspace_login_flows (id, issuer, status, created_at, expires_at) VALUES (?, ?, 'pending', ?, ?)", ((f"capacity-{cycle}-{i}", self.idp.origin, _isoformat(now), _isoformat(now + timedelta(minutes=5))) for i in range(999)))
+                    self.assertEqual(connection.execute("SELECT COUNT(*) FROM workspace_login_flows").fetchone()[0], 1000)
+                with self.assertRaisesRegex(WorkspaceError, "workspace_login_capacity"):
+                    self.sessions.begin_login()
+                now += timedelta(minutes=6)
+                with self.assertRaisesRegex(WorkspaceError, "workspace_login_invalid"):
+                    self.sessions.consume_callback(state, cookie)
+            flow, state, cookie = self.sessions.begin_login()
+            flow = self.sessions.consume_callback(state, cookie)
+            self.sessions.complete_login(flow, {"iss": self.idp.origin, "sub": "retention-account", "email": "retention@example.com", "email_verified": True})
+            failed, _, _ = self.sessions.begin_login()
+            self.sessions.fail_login(failed.id)
+            with self.sessions.store._connection() as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM workspace_login_flows").fetchone()[0], 0)
+            with self.assertRaisesRegex(WorkspaceError, "workspace_login_invalid"):
+                self.sessions.consume_callback(state, cookie)
 
     def test_verified_email_and_userinfo_subject_binding(self):
         self.idp.claims_overrides["email_verified"] = False
@@ -226,7 +302,7 @@ class WorkspaceHTTPTests(SessionHTTPTestCase):
         self.assertIn("__Host-hormuz_workspace=", custom_cookie)
         self.assertIn("HttpOnly", headers["Set-Cookie"])
         self.assertEqual(self.request("GET", path, headers={"Host": "ai.customer.com", "Cookie": custom_cookie})[0], 200)
-        self.assertEqual(self.request("GET", "/v1/workspaces/me", headers={"Cookie": "hormuz_workspace_local=" + custom_cookie.split("=", 1)[1]})[0], 401)
+        self.assertEqual(self.request("GET", "/v1/workspaces/me", headers={"Cookie": custom_cookie})[0], 401)
         self.assertEqual(self.post("/v1/workspaces/auth/handoff", {"token": token}, cookie=handoff_cookie, host="ai.customer.com", origin=self.gateway_url)[0], 400)
         self.assertEqual(self.request("GET", path, headers={"Cookie": cookie})[0], 200)
 
@@ -256,6 +332,65 @@ class WorkspaceHTTPTests(SessionHTTPTestCase):
         self.fake.ownership = False
         self.service.domains.check(cookie.split("=", 1)[1], self.gateway_url, domain["id"])
         self.assertEqual(self.service.domains.list(cookie.split("=", 1)[1], self.gateway_url)[0]["status"], "pending")
+
+    def test_custom_domain_capacity_can_renew_every_lease_with_slow_checks(self):
+        from hormuz.workspace_domains import MAX_LIVE_DOMAINS
+        self.assertEqual(MAX_LIVE_DOMAINS, 20)
+        now = self.sessions.store._now()
+        domains = []
+        with mock.patch.object(self.sessions.store, "_now", side_effect=lambda: now):
+            for account in range(MAX_LIVE_DOMAINS // 2 + 1):
+                flow, state, cookie = self.sessions.begin_login()
+                flow = self.sessions.consume_callback(state, cookie)
+                result = self.sessions.complete_login(flow, {"iss": self.idp.origin, "sub": f"capacity-{account}", "email": f"owner{account}@example.com", "email_verified": True})
+                for index in range(2):
+                    hostname = f"ai{account}-{index}.customer.com"
+                    if len(domains) == MAX_LIVE_DOMAINS:
+                        with self.assertRaisesRegex(WorkspaceError, "workspace_domain_capacity"):
+                            self.service.domains.claim(result["credential"], self.gateway_url, hostname)
+                        break
+                    domain = self.service.domains.claim(result["credential"], self.gateway_url, hostname)
+                    self.service.domains.check(result["credential"], self.gateway_url, domain["id"])
+                    domains.append(domain)
+
+            def slow_probe(hostname, domain_id, nonce):
+                nonlocal now
+                now += timedelta(seconds=50)
+                # Even the last record keeps serving until its renewal begins.
+                for domain in domains:
+                    self.service.domains.resolve(domain["hostname"])
+                return self.service.domains.proof(hostname, domain_id, nonce)
+
+            now += timedelta(minutes=5)
+            with mock.patch.object(self.fake, "tls_probe", side_effect=slow_probe):
+                for _ in range(2):
+                    now += timedelta(seconds=30)
+                    self.service.domains.reconcile_due()
+            with self.sessions.store._connection() as connection:
+                rows = connection.execute("SELECT status, updated_at FROM workspace_domains").fetchall()
+            self.assertEqual(len(rows), MAX_LIVE_DOMAINS)
+            self.assertTrue(all(row["status"] == "active" and row["updated_at"] > _isoformat(now - timedelta(minutes=20)) for row in rows))
+            self.assertEqual(self.fake.creates, MAX_LIVE_DOMAINS * 2)
+
+    def test_expired_handoffs_are_reclaimed_without_deleting_a_live_flow_binding(self):
+        cookie, identity, _ = self.login()
+        domain = self.activate_domain(cookie, identity)
+        now = self.sessions.store._now()
+        with mock.patch.object(self.sessions.store, "_now", side_effect=lambda: now):
+            handoff, _, workspace = self.sessions.begin_handoff(domain["hostname"])
+            flow, state, browser = self.sessions.begin_login(workspace_id=workspace, handoff_id=handoff)
+            with self.sessions.store._connection() as connection:
+                connection.execute("UPDATE workspace_handoffs SET consumed_at = ? WHERE id = ?", (_isoformat(now), handoff))
+            self.sessions.begin_login()
+            with self.sessions.store._connection() as connection:
+                self.assertIsNotNone(connection.execute("SELECT 1 FROM workspace_handoffs WHERE id = ?", (handoff,)).fetchone())
+            now += timedelta(minutes=6)
+            self.sessions.begin_handoff(domain["hostname"])
+            with self.sessions.store._connection() as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM workspace_handoffs").fetchone()[0], 1)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM workspace_login_flows").fetchone()[0], 0)
+            with self.assertRaisesRegex(WorkspaceError, "workspace_login_invalid"):
+                self.sessions.consume_callback(state, browser)
 
     def test_transport_csrf_host_and_claimed_authority(self):
         cookie, identity, path = self.login()

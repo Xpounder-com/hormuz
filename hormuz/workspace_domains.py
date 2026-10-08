@@ -14,6 +14,14 @@ from .session_store import _isoformat, _parse_time
 from .workspace_store import WorkspaceError
 
 
+# One sequential worker admits only a small initial deployment. Even two
+# batches of ten checks at 50 seconds each, plus the five-minute due age and
+# worker waits, fit within the 30-minute serving lease. Raising this capacity
+# requires a corresponding reconciliation-throughput qualification.
+MAX_LIVE_DOMAINS = 20
+RECONCILIATION_BATCH_SIZE = 10
+
+
 def normalize_hostname(value):
     if not isinstance(value, str) or len(value) > 253 or not value.isascii():
         raise WorkspaceError("workspace_domain_invalid")
@@ -72,7 +80,7 @@ class WorkspaceDomains:
                 if existing["workspace_id"] != current["workspace_id"]:
                     raise WorkspaceError("workspace_domain_claimed")
                 return self._public(existing)
-            if connection.execute("SELECT COUNT(*) FROM workspace_domains WHERE workspace_id = ? AND status != 'removed'", (current["workspace_id"],)).fetchone()[0] >= 2 or connection.execute("SELECT COUNT(*) FROM workspace_domains WHERE status != 'removed'").fetchone()[0] >= 1000:
+            if connection.execute("SELECT COUNT(*) FROM workspace_domains WHERE workspace_id = ? AND status != 'removed'", (current["workspace_id"],)).fetchone()[0] >= 2 or connection.execute("SELECT COUNT(*) FROM workspace_domains WHERE status != 'removed'").fetchone()[0] >= MAX_LIVE_DOMAINS:
                 raise WorkspaceError("workspace_domain_capacity")
             challenge = secrets.token_urlsafe(32)
             domain_id = existing["id"] if existing else "wdm_" + secrets.token_urlsafe(24)
@@ -203,7 +211,7 @@ class WorkspaceDomains:
             return
         now = self.store._now()
         with self.store._connection() as connection:
-            rows = connection.execute("SELECT id FROM workspace_domains WHERE status != 'removed' AND updated_at <= ? ORDER BY updated_at LIMIT 10", (_isoformat(now - timedelta(minutes=5)),)).fetchall()
+            rows = connection.execute("SELECT id FROM workspace_domains WHERE status != 'removed' AND updated_at <= ? ORDER BY updated_at LIMIT ?", (_isoformat(now - timedelta(minutes=5)), RECONCILIATION_BATCH_SIZE)).fetchall()
         for row in rows:
             if self._stop.is_set():
                 return

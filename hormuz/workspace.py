@@ -12,6 +12,8 @@ from .workspace_domains import WorkspaceDomains
 
 class WorkspaceService:
     def __init__(self, broker):
+        if not broker.config.session_broker.public_base_url.startswith("https://"):
+            raise SessionBrokerError("workspace_https_required")
         self.broker = broker
         self.sessions = WorkspaceStore(broker)
         self.domains = WorkspaceDomains(self.sessions)
@@ -56,7 +58,7 @@ class WorkspaceService:
             return self.sessions.complete_login(flow, claims)
         except (AuthenticationError, SessionBrokerError) as failure:
             self.sessions.fail_login(flow.id)
-            code = "workspace_login_unavailable" if failure.code in {"oidc_metadata_unavailable", "oidc_token_exchange_failed"} else "workspace_login_invalid"
+            code = "workspace_login_unavailable" if failure.code in {"oidc_metadata_unavailable", "oidc_token_exchange_failed", "oidc_userinfo_failed"} else "workspace_login_invalid"
             raise WorkspaceError(code) from None
         except SessionStoreError:
             self.sessions.fail_login(flow.id)

@@ -38,6 +38,9 @@ class SessionConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "email login issuer"):
             self.load(raw)
         raw["authentication"]["oidc"]["issuers"][0]["login"]["scopes"] = ["openid", "email"]
+        with self.assertRaisesRegex(ConfigError, "HTTPS for form-post"):
+            self.load(raw)
+        settings["public_base_url"] = "https://workspace.example.com"
         self.assertTrue(self.load(raw).session_broker.workspace_enabled)
         settings["workspace_domain_target"] = "fixture.onrender.com"
         with self.assertRaisesRegex(ConfigError, "both Render service"):

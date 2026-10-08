@@ -118,6 +118,8 @@ def validate_session_references(config: GatewayConfig) -> None:
         issuer = config.oidc_issuers.get(broker.workspace_signup_issuer)
         if not broker.onboarding_enabled or issuer is None or issuer.login is None or "email" not in issuer.login.scopes:
             raise ConfigError("workspace signup requires onboarding and a configured email login issuer")
+        if not broker.public_base_url.startswith("https://"):
+            raise ConfigError("workspace signup requires HTTPS for form-post browser cookies")
     elif broker.workspace_signup_issuer or broker.workspace_domain_target or broker.workspace_domain_service_id:
         raise ConfigError("workspace settings require enabled workspaces")
     if bool(broker.workspace_domain_target) != bool(broker.workspace_domain_service_id):
