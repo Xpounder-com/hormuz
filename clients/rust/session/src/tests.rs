@@ -22,6 +22,31 @@ fn record() -> SessionRecord {
     )
     .unwrap()
 }
+
+#[test]
+fn legacy_manual_record_round_trip_preserves_credentials_and_pending_states() {
+    for state in ["active", "refreshPending", "revocationPending"] {
+        let mut value = fixtures()["record"].clone();
+        value["state"] = json!(state);
+        let profile = value["profile"].as_object_mut().unwrap();
+        profile.remove("setup");
+        profile.remove("desktopManaged");
+        profile.remove("desktopProfileVersion");
+        let secret = SecretRecord::new(serde_json::to_vec(&value).unwrap()).unwrap();
+        let record = SessionRecord::from_secret(&secret).unwrap();
+        assert!(!record.profile().desktop_managed());
+        let output: Value = serde_json::from_slice(record.to_secret().unwrap().expose()).unwrap();
+        assert_eq!(output["accessToken"], value["accessToken"]);
+        assert_eq!(output["refreshToken"], value["refreshToken"]);
+        assert_eq!(output["state"], value["state"]);
+        assert_eq!(output["accessExpiresAt"], value["accessExpiresAt"]);
+        assert_eq!(output["sessionExpiresAt"], value["sessionExpiresAt"]);
+        assert_eq!(output["profile"]["id"], value["profile"]["id"]);
+        assert_eq!(output["profile"]["setup"], "custom");
+        assert!(output["profile"].get("desktopManaged").is_none());
+        assert!(output["profile"].get("desktopProfileVersion").is_none());
+    }
+}
 fn iso(value: f64) -> String {
     time::OffsetDateTime::from_unix_timestamp(value as i64)
         .unwrap()
@@ -272,6 +297,61 @@ fn enrollment() -> Vec<Step> {
         step("/redeem", 200, pair("a", NOW + 1.0)),
         step("/v1/gateway/whoami", 200, identity()),
     ]
+}
+
+fn desktop_record() -> SessionRecord {
+    let mut value = record();
+    let mut profile = serde_json::to_value(&value.profile).unwrap();
+    profile["desktopManaged"] = json!(true);
+    profile["desktopProfileVersion"] = json!(7);
+    value.profile = ConnectionProfile::from_json(&serde_json::to_vec(&profile).unwrap()).unwrap();
+    value
+}
+fn desktop_profile() -> Value {
+    json!({"schema_id":"hormuz.desktop-profile","schema_version":1,
+        "gateway_origin":"https://gateway.example.test","organization_id":"org-a",
+        "allowed_clients":["codex"],"client":"codex","model_alias":profile().model(),"profile_version":7})
+}
+#[test]
+fn hosted_rotation_preserves_swift_fields_and_checks_server_profile_before_handoff() {
+    let h = Harness::new(vec![
+        step("/v1/auth/refresh", 200, pair("z", NOW)),
+        step("/v1/auth/desktop/profile", 200, desktop_profile()),
+    ]);
+    let mut value = desktop_record();
+    value.session_expires = NOW - FOUNDATION_EPOCH + 43_200.0;
+    h.seed(&value);
+    let c = h.controller();
+    assert!(c
+        .access_credential(&value.profile, true, &Operation::default())
+        .is_ok());
+    let saved = SessionRecord::from_secret(&h.store.load().unwrap().unwrap()).unwrap();
+    assert!(saved.profile == value.profile);
+    assert!(saved.profile.desktop_managed());
+    assert_eq!(saved.profile.desktop_profile_version(), Some(7));
+    h.done();
+}
+#[test]
+fn changed_hosted_profile_rejects_handoff_and_clears_display_without_replay() {
+    let mut changed = desktop_profile();
+    changed["profile_version"] = json!(8);
+    let h = Harness::new(vec![step("/v1/auth/desktop/profile", 200, changed)]);
+    let value = desktop_record();
+    h.seed(&value);
+    let c = h.controller();
+    assert!(matches!(
+        c.access_credential(&value.profile, false, &Operation::default()),
+        Err(ClientError::DesktopProfileChanged)
+    ));
+    assert_eq!(
+        c.snapshot().reading().status(),
+        ReadingStatus::NeedsAuthentication
+    );
+    assert_eq!(
+        h.store.load().unwrap().unwrap().expose(),
+        value.to_secret().unwrap().expose()
+    );
+    h.done();
 }
 
 #[test]

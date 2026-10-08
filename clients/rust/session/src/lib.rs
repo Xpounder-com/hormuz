@@ -266,6 +266,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
         let result = (|| {
             let guard = self.lock(operation)?;
             let record = self.credential(&guard, profile, force_refresh, operation)?;
+            self.validate_desktop_profile(&record, operation)?;
             self.check_enabled(operation)?;
             Ok(AccessCredential(record.access))
         })();
@@ -433,6 +434,7 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
                 return Err(ClientError::ConfigurationChanged);
             }
             let record = self.credential(&guard, profile, false, operation)?;
+            self.validate_desktop_profile(&record, operation)?;
             let identity = self.identity(&record, operation)?;
             self.snapshots.verify_identity(ticket, &identity)?;
             self.check_enabled(operation)?;
@@ -475,6 +477,32 @@ impl<C: RefreshCoordinator, S: CredentialStore, T: SessionTransport, K: Clock>
             self.snapshots.failure(ticket, error);
         }
         result
+    }
+
+    fn validate_desktop_profile(
+        &self,
+        record: &SessionRecord,
+        operation: &Operation,
+    ) -> Result<(), ClientError> {
+        if !record.profile.desktop_managed() {
+            return Ok(());
+        }
+        let reply = self
+            .transport
+            .request(
+                &record.profile,
+                "/v1/auth/desktop/profile",
+                None,
+                Some(&record.access),
+                operation,
+            )
+            .map_err(transport_error)?;
+        match reply.status {
+            200 => hormuz_client_core::DesktopProfile::validate(reply.body(), &record.profile),
+            401 => Err(ClientError::LoginRequired),
+            400 => Err(ClientError::DesktopProfileChanged),
+            _ => Err(ClientError::GatewayUnavailable),
+        }
     }
 
     fn identity(
