@@ -483,11 +483,14 @@ SESSION_PROOF_TEST_MODULES = (
     "tests.test_console_store", "tests.test_console_http", "tests.test_console_migration",
     "tests.test_hosted_backup", "tests.test_hosted_state", "tests.test_hosted_http",
     "tests.test_hosted_provider",
+    "tests.test_workspace_http", "tests.test_workspace_migration",
+    "tests.test_workspace_hosted", "tests.test_workspace_domain_provider",
 )
 SESSION_PROOF_SDIST_PATHS = (
     "tests/__init__.py", "tests/_session_fixtures.py", "tests/fixtures/session-store-v2.json",
     "tests/_console_fixtures.py", "tests/fixtures/session-store-v3.json",
     "tests/_hosted_fixtures.py", "deploy/render/gateway/provider-pilot.Caddyfile",
+    "tests/fixtures/session-store-v4.json",
     *(name.replace(".", "/") + ".py" for name in SESSION_PROOF_TEST_MODULES),
 )
 
@@ -511,6 +514,17 @@ def main(argv: list[str] | None = None) -> int:
     python = args.python.resolve()
     _assert_archive_boundary(wheel, _wheel_members)
     _assert_archive_boundary(sdist, _sdist_members)
+    workspace_modules = ("_workspace_schema", "_workspace_domain_provider", "workspace", "workspace_store", "workspace_domains", "workspace_http", "workspace_pages")
+    _assert_required_archive_paths(
+        wheel, _wheel_members,
+        ("hormuz/workspace.css", *("hormuz/" + module + ".py" for module in workspace_modules)),
+        "Customer workspace wheel",
+    )
+    _assert_required_archive_paths(
+        sdist, _sdist_members,
+        ("WORKSPACE_ADDRESSES.md", "deploy/render/gateway/workspace.Caddyfile", "deploy/render/gateway/workspace-profile.example.json"),
+        "Customer workspace source kit",
+    )
     _assert_compose_sdist_boundary(sdist)
     _assert_helm_sdist_boundary(sdist)
     _assert_policy_admin_usability_sdist_boundary(sdist)

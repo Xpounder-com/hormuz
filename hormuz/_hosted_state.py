@@ -37,6 +37,11 @@ RECOVERY_AUTHORITY_QUERIES = {
     "active_console_login_flows": (
         "SELECT count(*) FROM console_login_flows WHERE status IN ('pending', 'exchanging')"
     ),
+    "active_workspaces": "SELECT count(*) FROM workspaces WHERE status = 'active'",
+    "active_workspace_domains": "SELECT count(*) FROM workspace_domains WHERE status IN ('active', 'pending', 'removing')",
+    "unrevoked_workspace_sessions": "SELECT count(*) FROM workspace_sessions WHERE revoked_at IS NULL",
+    "active_workspace_login_flows": "SELECT count(*) FROM workspace_login_flows WHERE status IN ('pending', 'exchanging')",
+    "unconsumed_workspace_handoffs": "SELECT count(*) FROM workspace_handoffs WHERE consumed_at IS NULL",
 }
 
 
@@ -150,6 +155,7 @@ def _check_initialized(
     config: GatewayConfig,
     *,
     require_current_usage_schema: bool,
+    require_current_session_schema: bool = True,
 ) -> tuple[tuple[tuple[int, int], ...], int]:
     directory = config.database_path.parent
     _private(directory, directory=True)
@@ -170,7 +176,9 @@ def _check_initialized(
                     raise HostedError("hosted_state_database_invalid")
     # Read-only checks precede any constructor that could initialize a database.
     with closing(sqlite3.connect(config.session_broker.database_path.as_uri() + "?mode=ro", uri=True, timeout=5)) as connection:
-        if connection.execute("PRAGMA user_version").fetchone()[0] != SESSION_STORE_SCHEMA_VERSION:
+        session_version = connection.execute("PRAGMA user_version").fetchone()[0]
+        from ._session_schema import validate_session_schema
+        if (session_version != SESSION_STORE_SCHEMA_VERSION if require_current_session_schema else session_version not in {4, SESSION_STORE_SCHEMA_VERSION}) or not validate_session_schema(connection, version=session_version):
             raise HostedError("hosted_state_schema_mismatch")
         connection.execute("SELECT id FROM human_sessions LIMIT 0")
         connection.execute("SELECT id FROM onboarding_memberships LIMIT 0")
@@ -249,10 +257,12 @@ def _snapshot_locked(
     destination: Path,
     *,
     require_current_usage_schema: bool,
+    require_current_session_schema: bool = True,
 ) -> int:
     _, usage_schema_version = _check_initialized(
         config,
         require_current_usage_schema=require_current_usage_schema,
+        require_current_session_schema=require_current_session_schema,
     )
     directory = config.database_path.parent
     _destination(destination, directory, trusted_parent_path=config.session_broker.trusted_parent_path)
@@ -318,6 +328,20 @@ def migrate_usage(config: GatewayConfig, snapshot_directory: Path) -> dict[str, 
         }
 
 
+def migrate_sessions(config: GatewayConfig, snapshot_directory: Path) -> dict[str, int | bool]:
+    """Snapshot both stores before an explicit offline v4-to-v5 migration."""
+    with state_lock(config):
+        _check_initialized(config, require_current_usage_schema=True, require_current_session_schema=False)
+        with closing(sqlite3.connect(config.session_broker.database_path.as_uri() + "?mode=ro", uri=True)) as connection:
+            source_version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if source_version == SESSION_STORE_SCHEMA_VERSION:
+            raise HostedError("hosted_state_migration_not_required")
+        _snapshot_locked(config, snapshot_directory, require_current_usage_schema=True, require_current_session_schema=False)
+        sessions(config)
+        check_initialized(config)
+        return {"snapshot_created": True, "source_session_schema_version": source_version, "target_session_schema_version": SESSION_STORE_SCHEMA_VERSION}
+
+
 def restore(config: GatewayConfig, source: Path) -> dict[str, int | bool]:
     with state_lock(config):
         _private(source, directory=True)
@@ -358,6 +382,11 @@ def restore(config: GatewayConfig, source: Path) -> dict[str, int | bool]:
             connection.execute("UPDATE console_grants SET status = 'revoked', authorization_version = authorization_version + 1, updated_at = ? WHERE status = 'active'", (now,))
             connection.execute("UPDATE console_sessions SET revoked_at = ? WHERE revoked_at IS NULL", (now,))
             connection.execute("UPDATE console_login_flows SET status = 'failed', state_hash = NULL, browser_cookie_hash = NULL, encrypted_flow = NULL WHERE status IN ('pending', 'exchanging')")
+            connection.execute("UPDATE workspaces SET status = 'closed'")
+            connection.execute("UPDATE workspace_domains SET status = 'removed', version = version + 1, verified_until = NULL, check_started_at = NULL, updated_at = ?", (now,))
+            connection.execute("UPDATE workspace_sessions SET revoked_at = ? WHERE revoked_at IS NULL", (now,))
+            connection.execute("UPDATE workspace_login_flows SET status = 'failed', state_hash = NULL, browser_cookie_hash = NULL, encrypted_flow = NULL WHERE status IN ('pending', 'exchanging')")
+            connection.execute("UPDATE workspace_handoffs SET consumed_at = ?, secret_hash = NULL WHERE consumed_at IS NULL", (now,))
         counts = _assert_recovery_closed(config)
         # A crash before this last write leaves an unactivatable partial restore.
         _write(destination / MARKER, _marker(config, recovered=True))

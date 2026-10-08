@@ -296,7 +296,7 @@ class StagingRequestHandler(GatewayRequestHandler):
         original_target = self.requestline.split()[1]
         lengths = self.headers.get_all("Content-Length", [])
         if (
-            self.headers.get_all("Host", []) != [origin.netloc]
+            not self._host_allowed(origin)
             or self.headers.get_all("Transfer-Encoding", [])
             or any(len(self.headers.get_all(name, [])) > 1 for name in ("Content-Type", "Authorization", "Origin", "Cookie"))
             or len(lengths) > 1 or (self.command == "POST" and len(lengths) != 1)
@@ -316,7 +316,7 @@ class StagingRequestHandler(GatewayRequestHandler):
         if request.fragment:
             self.send_error(HTTPStatus.BAD_REQUEST)
             return False
-        allowed = request.path in {"/health", "/ready", "/console", "/v1/gateway/whoami", "/v1/gateway/usage"} or request.path.startswith(("/v1/auth/", "/v1/admin/", "/console/"))
+        allowed = self._path_allowed(request)
         if not allowed:
             self._stage_response(HTTPStatus.SERVICE_UNAVAILABLE, "route_disabled")
             return False
@@ -325,6 +325,12 @@ class StagingRequestHandler(GatewayRequestHandler):
             self._stage_response(HTTPStatus.SERVICE_UNAVAILABLE, "not_ready")
             return False
         return True
+
+    def _host_allowed(self, origin):
+        return self.headers.get_all("Host", []) == [origin.netloc]
+
+    def _path_allowed(self, request):
+        return request.path in {"/health", "/ready", "/console", "/v1/gateway/whoami", "/v1/gateway/usage"} or request.path.startswith(("/v1/auth/", "/v1/admin/", "/console/"))
 
     def do_GET(self):  # noqa: N802
         if urlsplit(self.path).path in {"/health", "/ready"}:
@@ -345,6 +351,52 @@ class StagingRequestHandler(GatewayRequestHandler):
 
     def log_message(self, format, *args):
         pass
+
+
+class WorkspaceGatewayServer(StagingGatewayServer):
+    """Separate provider-free profile for opt-in customer dashboard hosting."""
+
+    def __init__(self, config):
+        if not config.session_broker.workspace_enabled:
+            raise HostedError("hosted_workspace_configuration_required")
+        super().__init__(config)
+        self.RequestHandlerClass = WorkspaceRequestHandler
+
+
+class WorkspaceRequestHandler(StagingRequestHandler):
+    def _stage_response(self, status, state):
+        body = json.dumps({"schema_id": "hormuz.hosted-workspaces", "schema_version": 1,
+                           "status": "workspace" if state == "authentication_staging" else state,
+                           "inference_enabled": False}, separators=(",", ":")).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _host_allowed(self, origin):
+        from .workspace_http import is_workspace_path, request_origin
+        from .workspace_store import WorkspaceError
+        if super()._host_allowed(origin):
+            return True
+        path = urlsplit(self.path).path
+        if path in {"/health", "/ready"}:
+            hosts = self.headers.get_all("Host", [])
+            return len(hosts) == 1 and self.server.workspace.domains.health_host(hosts[0])
+        if not is_workspace_path(path):
+            return False
+        try:
+            request_origin(self, probe=path.startswith("/.well-known/hormuz-domain/"))
+            return True
+        except WorkspaceError:
+            return False
+
+    def _path_allowed(self, request):
+        from .workspace_http import is_workspace_path
+        return is_workspace_path(request.path) or request.path in {"/health", "/ready"}
 
 
 class ProviderPilotRequestHandler(StagingRequestHandler):

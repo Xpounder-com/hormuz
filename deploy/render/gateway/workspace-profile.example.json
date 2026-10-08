@@ -1,0 +1,8 @@
+{
+  "schema": "hormuz.hosted-workspaces/v1",
+  "public_origin": "https://your-dashboard.onrender.com",
+  "oidc_issuer": "https://your-identity-provider.example.com",
+  "oidc_client_id": "your-workspace-browser-client",
+  "state_directory": "/var/lib/hormuz/state",
+  "trusted_parent_path": "/var/lib/hormuz"
+}

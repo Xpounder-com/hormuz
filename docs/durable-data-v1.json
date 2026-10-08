@@ -526,6 +526,28 @@
         "previews"
       ],
       "postgresql_tables": []
+    },
+    {
+      "id": "workspace_identity_and_domains",
+      "content_boundary": "identity_and_policy_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "workspace_accounts",
+        "workspace_domains",
+        "workspaces"
+      ],
+      "postgresql_tables": []
+    },
+    {
+      "id": "workspace_browser_authority",
+      "content_boundary": "session_identity_and_encrypted_transient_auth",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "workspace_handoffs",
+        "workspace_login_flows",
+        "workspace_sessions"
+      ],
+      "postgresql_tables": []
     }
   ],
   "operator_artifacts": [
@@ -664,6 +686,14 @@
       "content_boundary": "bounded_request_metadata_and_membership_bound_signed_proposals_no_request_content",
       "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
       "customer_operator_authority": "seven_day_retention_and_offline_deletion_no_restore_required_no_effect_on_immutable_policy_history"
+    },
+    {
+      "id": "workspace_browser_cookies",
+      "created_when": "customer_starts_or_completes_workspace_login_or_verified_domain_handoff",
+      "storage_location": "browser_http_only_cookie_store",
+      "content_boundary": "opaque_short_lived_origin_bound_workspace_session_login_flow_and_handoff_credentials",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "member_or_operator_revocation_browser_logout_and_expiry_no_credential_export"
     }
   ],
   "customer_operator_responsibilities": [

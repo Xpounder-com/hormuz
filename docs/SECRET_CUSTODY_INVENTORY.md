@@ -48,6 +48,16 @@ The active core has seven custody categories:
    revocation and file retention; reinvitation never changes an established subject.
    The shared master key cannot be rotated in place without a recipient-hash
    migration plan; see [managed-directory recovery limits](TEAM_ONBOARDING.md).
+
+   The opt-in workspace profile adds separate HttpOnly browser cookies,
+   keyed account fingerprints, encrypted login state, domain challenge proofs,
+   and one-use hashed handoffs in that same session database. Account fingerprints
+   use a master-key purpose independent of the public origin; browser credentials
+   remain origin-bound. A dedicated, externally injected `HORMUZ_DOMAIN_API_KEY`
+   is used only for the configured service at the fixed Render API origin. It is
+   absent from the proxy and existing provider-pilot child environments, and never
+   persisted or sent to a customer domain. Customer-domain TLS probes carry only a
+   random challenge. See [workspace setup and recovery](../WORKSPACE_ADDRESSES.md).
 4. **Hosted off-disk backup.** The offline operator imports a distinct random
    `data_encryption` key from an owner-only file and streams the fixed hosted
    snapshot into an AES-256-GCM archive. The key is never an environment value,

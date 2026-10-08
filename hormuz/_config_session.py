@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -93,6 +94,11 @@ def build_session_broker(raw: dict[str, Any], *, source_path: Path) -> SessionBr
         onboarding_enabled=_boolean(item.get("onboarding_enabled", False), f"{prefix}.onboarding_enabled"),
         console_enabled=_boolean(item.get("console_enabled", False), f"{prefix}.console_enabled"),
         policy_impact_enabled=_boolean(item.get("policy_impact_enabled", False), f"{prefix}.policy_impact_enabled"),
+        workspace_enabled=_boolean(item.get("workspace_enabled", False), f"{prefix}.workspace_enabled"),
+        workspace_signup_issuer=_string(item["workspace_signup_issuer"], f"{prefix}.workspace_signup_issuer") if "workspace_signup_issuer" in item else None,
+        workspace_domain_target=_string(item["workspace_domain_target"], f"{prefix}.workspace_domain_target") if "workspace_domain_target" in item else None,
+        workspace_domain_service_id=_string(item["workspace_domain_service_id"], f"{prefix}.workspace_domain_service_id") if "workspace_domain_service_id" in item else None,
+        workspace_domain_api_key_env=_environment_name(item.get("workspace_domain_api_key_env", "HORMUZ_DOMAIN_API_KEY"), f"{prefix}.workspace_domain_api_key_env"),
         desktop_defaults=desktop_defaults,
     )
 
@@ -108,6 +114,22 @@ def validate_session_references(config: GatewayConfig) -> None:
         raise ConfigError("session broker requires at least one OIDC login issuer")
     if broker.console_enabled and not broker.onboarding_enabled:
         raise ConfigError("administrator console requires managed team onboarding")
+    if broker.workspace_enabled:
+        issuer = config.oidc_issuers.get(broker.workspace_signup_issuer)
+        if not broker.onboarding_enabled or issuer is None or issuer.login is None or "email" not in issuer.login.scopes:
+            raise ConfigError("workspace signup requires onboarding and a configured email login issuer")
+        if not broker.public_base_url.startswith("https://"):
+            raise ConfigError("workspace signup requires HTTPS for form-post browser cookies")
+    elif broker.workspace_signup_issuer or broker.workspace_domain_target or broker.workspace_domain_service_id:
+        raise ConfigError("workspace settings require enabled workspaces")
+    if bool(broker.workspace_domain_target) != bool(broker.workspace_domain_service_id):
+        raise ConfigError("custom domains require both Render service id and DNS target")
+    if broker.workspace_domain_target:
+        if (not broker.public_base_url.startswith("https://")
+                or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.onrender\.com", broker.workspace_domain_target)
+                or urlsplit(broker.public_base_url).netloc != broker.workspace_domain_target
+                or not re.fullmatch(r"srv-[a-z0-9]{8,64}", broker.workspace_domain_service_id)):
+            raise ConfigError("custom domains require the canonical HTTPS Render origin and service id")
     if broker.policy_impact_enabled and (not broker.console_enabled or config.policy_control.mode != "postgresql"):
         raise ConfigError("policy impact requires the administrator console and managed PostgreSQL policies")
     if broker.database_path is None or broker.database_path.resolve() == config.database_path.resolve():
@@ -134,6 +156,8 @@ def validate_session_references(config: GatewayConfig) -> None:
             raise ConfigError("OIDC login secrets must use dedicated environment variables")
     if broker.master_key_env in secret_envs:
         raise ConfigError("session master key must use a dedicated environment variable")
+    if broker.workspace_domain_target and broker.workspace_domain_api_key_env in secret_envs | {broker.master_key_env} | {issuer.login.client_secret_env for issuer in issuers}:
+        raise ConfigError("domain API key must use a dedicated environment variable")
 
 
 def resolve_session_credentials(config: GatewayConfig, environ: dict[str, str]) -> GatewayConfig:
@@ -156,4 +180,7 @@ def resolve_session_credentials(config: GatewayConfig, environ: dict[str, str]) 
         if not 1 <= len(secret.encode("utf-8")) <= 4096 or any(ord(c) < 32 or ord(c) == 127 for c in secret):
             raise ConfigError("OIDC login client secret is missing or invalid")
         issuers[name] = replace(issuer, login=replace(login, client_secret=secret))
-    return replace(config, session_broker=replace(broker, master_key=master_key), oidc_issuers=issuers)
+    domain_key = environ.get(broker.workspace_domain_api_key_env, "") if broker.workspace_domain_target else ""
+    if broker.workspace_domain_target and (not 1 <= len(domain_key) <= 4096 or any(ord(c) < 33 or ord(c) == 127 for c in domain_key)):
+        raise ConfigError("domain API key is missing or invalid")
+    return replace(config, session_broker=replace(broker, master_key=master_key, workspace_domain_api_key=domain_key), oidc_issuers=issuers)

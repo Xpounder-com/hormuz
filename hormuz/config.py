@@ -293,6 +293,12 @@ class SessionBrokerConfig:
     onboarding_enabled: bool = False
     console_enabled: bool = False
     policy_impact_enabled: bool = False
+    workspace_enabled: bool = False
+    workspace_signup_issuer: str | None = None
+    workspace_domain_target: str | None = None
+    workspace_domain_service_id: str | None = None
+    workspace_domain_api_key_env: str = "HORMUZ_DOMAIN_API_KEY"
+    workspace_domain_api_key: str = field(default="", repr=False)
     desktop_defaults: dict[str, dict[str, str]] = field(default_factory=dict)
 
 

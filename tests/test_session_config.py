@@ -31,6 +31,27 @@ class SessionConfigTests(unittest.TestCase):
         self.assertNotIn(CLIENT_SECRET, repr(config))
         self.assertNotIn("mmmmmmmm", repr(config))
 
+    def test_workspace_json_settings_are_opt_in_and_require_an_email_issuer(self):
+        raw = copy.deepcopy(self.value)
+        settings = raw["authentication"]["session_broker"]
+        settings.update(workspace_enabled=True, onboarding_enabled=True, workspace_signup_issuer="http://127.0.0.1:9000")
+        with self.assertRaisesRegex(ConfigError, "email login issuer"):
+            self.load(raw)
+        raw["authentication"]["oidc"]["issuers"][0]["login"]["scopes"] = ["openid", "email"]
+        with self.assertRaisesRegex(ConfigError, "HTTPS for form-post"):
+            self.load(raw)
+        settings["public_base_url"] = "https://workspace.example.com"
+        self.assertTrue(self.load(raw).session_broker.workspace_enabled)
+        settings["workspace_domain_target"] = "fixture.onrender.com"
+        with self.assertRaisesRegex(ConfigError, "both Render service"):
+            self.load(raw)
+        settings["workspace_domain_service_id"] = "srv-fixture123"
+        settings["public_base_url"] = "https://fixture.onrender.com"
+        environment = {**fixture_environment(), "HORMUZ_DOMAIN_API_KEY": "synthetic-domain-api-key"}
+        config = self.load(raw, environ=environment)
+        self.assertEqual(config.session_broker.workspace_domain_api_key, "synthetic-domain-api-key")
+        self.assertNotIn("synthetic-domain-api-key", repr(config))
+
     def test_invalid_schema_and_ttl_fail_before_secret_resolution(self):
         for field, value in (("access_ttl_seconds", 60), ("absolute_ttl_seconds", 86400), ("enrollment_ttl_seconds", 999999), ("enabled", "true"), ("master_key", "never-reflect-this")):
             raw = copy.deepcopy(self.value)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from ._workspace_schema import TABLE_COLUMNS as WORKSPACE_TABLE_COLUMNS
 
 
 SESSION_V2_TABLE_COLUMNS = {
@@ -50,7 +51,7 @@ SESSION_V3_TABLE_COLUMNS = {
 }
 
 
-SESSION_TABLE_COLUMNS = {
+SESSION_V4_TABLE_COLUMNS = {
     **SESSION_V3_TABLE_COLUMNS,
     "console_grants": (
         "id", "organization_id", "membership_id", "role", "status",
@@ -70,10 +71,12 @@ SESSION_TABLE_COLUMNS = {
     ),
 }
 
+SESSION_TABLE_COLUMNS = {**SESSION_V4_TABLE_COLUMNS, **WORKSPACE_TABLE_COLUMNS}
 
-def validate_session_schema(connection: sqlite3.Connection, *, version: int = 4) -> bool:
+
+def validate_session_schema(connection: sqlite3.Connection, *, version: int = 5) -> bool:
     """Reject unexpected durable fields, tables, views, or triggers at startup."""
-    tables = {2: SESSION_V2_TABLE_COLUMNS, 3: SESSION_V3_TABLE_COLUMNS, 4: SESSION_TABLE_COLUMNS}.get(version)
+    tables = {2: SESSION_V2_TABLE_COLUMNS, 3: SESSION_V3_TABLE_COLUMNS, 4: SESSION_V4_TABLE_COLUMNS, 5: SESSION_TABLE_COLUMNS}.get(version)
     if tables is None:
         return False
     objects = connection.execute(

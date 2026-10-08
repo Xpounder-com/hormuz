@@ -33,8 +33,8 @@ test('post-deploy verification checks the pinned source, all routes, metadata, a
   assert.equal(LIVE_ORIGIN, SITE_ORIGIN);
   assert.deepEqual(LIVE_ROUTES, SITE_ROUTES);
   const site = publishedSite();
-  assert.deepEqual(await verifyLiveSite(pin, site.fetcher), { verdict: 'passed', source_revision: pin.revision, pages: 13, downloads: 4 });
-  assert.equal(site.requests.length, 20);
+  assert.deepEqual(await verifyLiveSite(pin, site.fetcher), { verdict: 'passed', source_revision: pin.revision, pages: 14, downloads: 4 });
+  assert.equal(site.requests.length, 21);
 });
 
 test('a stale or invalid deployed pin fails before any page is accepted', async () => {
@@ -50,10 +50,12 @@ test('missing routes, wrong canonicals, HTML downloads, and incomplete metadata 
   for (const [route, replacement] of [
     ['/docs/', undefined],
     ['/plans/', undefined],
+    ['/workspace/', undefined],
     ['/guides/team-ai-budgets/', undefined],
     ['/guides/codex-claude-code-gateway/', '<h1>Guide</h1><link rel="canonical" href="https://wrong.example/"/>'],
     ['/enterprise/', '<h1>Hormuz</h1><link rel="canonical" href="https://wrong.example/"/>'],
     ['/downloads/hormuz-overview.pdf', '<html>Error</html>'],
+    ['/downloads/hormuz-appliance-brief.pdf', undefined],
     ['/downloads/hormuz-buyer-briefing.pptx', '<html>Error</html>'],
     ['/robots.txt', 'User-agent: *\nDisallow: /'],
     ['/sitemap.xml', `<loc>${LIVE_ORIGIN}/</loc>`],

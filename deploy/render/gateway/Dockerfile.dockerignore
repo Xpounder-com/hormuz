@@ -1,5 +1,6 @@
 **
 !pyproject.toml
+!MANIFEST.in
 !README.md
 !LICENSE
 !requirements/
@@ -14,4 +15,5 @@
 !deploy/render/gateway/active.Caddyfile
 !deploy/render/gateway/maintenance.Caddyfile
 !deploy/render/gateway/provider-pilot.Caddyfile
+!deploy/render/gateway/workspace.Caddyfile
 # No profile, credentials, state, tests or local artifacts enter any layer.

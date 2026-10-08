@@ -62,6 +62,22 @@ def _canonical(value: Any, *, config_directory: Path) -> object:
                     and field.name == "policy_impact_enabled"
                     and getattr(value, field.name) is False
                 ) and not (
+                    # Default-off workspace settings preserve the original
+                    # gateway snapshot; any opt-in value remains fingerprinted.
+                    type(value).__name__ == "SessionBrokerConfig"
+                    and field.name in {
+                        "workspace_enabled": False, "workspace_signup_issuer": None,
+                        "workspace_domain_target": None, "workspace_domain_service_id": None,
+                        "workspace_domain_api_key_env": "HORMUZ_DOMAIN_API_KEY",
+                        "workspace_domain_api_key": "",
+                    }
+                    and getattr(value, field.name) == {
+                        "workspace_enabled": False, "workspace_signup_issuer": None,
+                        "workspace_domain_target": None, "workspace_domain_service_id": None,
+                        "workspace_domain_api_key_env": "HORMUZ_DOMAIN_API_KEY",
+                        "workspace_domain_api_key": "",
+                    }[field.name]
+                ) and not (
                     # Desktop defaults are opt-in; the empty value keeps the legacy snapshot.
                     type(value).__name__ == "SessionBrokerConfig"
                     and field.name == "desktop_defaults"

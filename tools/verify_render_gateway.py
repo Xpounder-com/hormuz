@@ -70,6 +70,12 @@ for filename, state in [('profile.json', 'state'), ('restored-profile.json', 're
         'oidc_client_id': 'fixture-login', 'state_directory': str(root / 'private' / state),
         'trusted_parent_path': str(root)}))
     path.chmod(0o600)
+workspace = config / 'workspace-profile.json'
+workspace.write_text(json.dumps({'schema': 'hormuz.hosted-workspaces/v1',
+    'public_origin': 'https://gateway.example.test', 'oidc_issuer': 'https://idp.example.test',
+    'oidc_client_id': 'fixture-login', 'state_directory': str(root / 'private' / 'workspace-state'),
+    'trusted_parent_path': str(root)}))
+workspace.chmod(0o600)
 routes = {
     'openai-primary': {'protocol': 'openai', 'upstream_model': 'openai-primary-model',
         'input_cost_per_million': 1, 'cache_read_cost_per_million': 1,
@@ -137,7 +143,7 @@ for path in Path('/proc').iterdir():
         command = (path / 'cmdline').read_bytes().split(b'\\0')
         if command[:2] == [b'/usr/bin/caddy', b'run']:
             caddy = {item.split(b'=', 1)[0].decode() for item in (path / 'environ').read_bytes().split(b'\\0') if item}
-        elif b'hormuz.hosted' in command and any(item in {b'backend', b'provider-backend'} for item in command):
+        elif b'hormuz.hosted' in command and any(item in {b'backend', b'workspace-backend', b'provider-backend'} for item in command):
             backend = {item.split(b'=', 1)[0].decode() for item in (path / 'environ').read_bytes().split(b'\\0') if item}
     except FileNotFoundError:
         continue
@@ -151,7 +157,7 @@ package = Path(hormuz.__file__).parent
 paths = {'hormuz/' + name: package / name for name in
     ('hosted.py', '_config_routing.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_provider.py', '_hosted_server.py', '_hosted_state.py', 'secret-inventory-v1.json')}
 paths.update({'deploy/render/gateway/' + name: Path('/etc/hormuz/caddy') / name
-    for name in ('active.Caddyfile', 'maintenance.Caddyfile', 'provider-pilot.Caddyfile')})
+    for name in ('active.Caddyfile', 'maintenance.Caddyfile', 'provider-pilot.Caddyfile', 'workspace.Caddyfile')})
 print(json.dumps({name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}))
 '''
 SSH_ACCOUNT_BOUNDARY = '''
@@ -439,7 +445,7 @@ def verify(image: str) -> dict:
         # Elevated permissions apply ONLY to this disposable fixture setup.
         docker("run", "--rm", *common, "--user", "0:0", "--cap-add", "CHOWN", "--cap-add", "DAC_OVERRIDE",
                "--entrypoint", PYTHON, image, "-I", "-c",
-               "import os; from pathlib import Path; files=[Path('/var/lib/hormuz/private/config')/name for name in ('profile.json','restored-profile.json','provider.json')]; [(os.chown(path,0,1000),path.chmod(0o640)) for path in files]")
+               "import os; from pathlib import Path; files=[Path('/var/lib/hormuz/private/config')/name for name in ('profile.json','restored-profile.json','workspace-profile.json','provider.json')]; [(os.chown(path,0,1000),path.chmod(0o640)) for path in files]")
         uninitialized = start("uninitialized", "active")
         passed("uninitialized_active_start_refused", docker("wait", uninitialized, timeout=25) == "1")
         maintenance = start("maintenance", "maintenance")
@@ -579,6 +585,23 @@ target.chmod(0o600)
                boundary["backend_present"] and set(boundary["backend_names"]) - {"LC_CTYPE"}
                == set(SECRETS) | set(PROVIDER_SECRETS) | PROVIDER_METADATA_NAMES)
         stop(openai_pilot)
+        workspace_profile = "/var/lib/hormuz/private/config/workspace-profile.json"
+        operator("--config", workspace_profile, "--workspace-profile", "initialize")
+        workspace = start("workspace", "workspace", extra_environment=("--env", "HORMUZ_CONFIG=" + workspace_profile))
+        health = await_health(workspace, "workspace")
+        passed("workspace_health_contract", health[0] == 200 and json.loads(health[2])["schema_id"] == "hormuz.hosted-workspaces")
+        passed("workspace_public_ready", request(workspace, "GET", "/ready")[0] == 200)
+        passed("workspace_public_entry", request(workspace, "GET", "/workspace")[0] == 200)
+        passed("workspace_stylesheet_packaged", request(workspace, "GET", "/workspace/styles.css")[0] == 200)
+        passed("workspace_identity_requires_session", request(workspace, "GET", "/v1/workspaces/me")[0] == 401)
+        passed("workspace_forged_forwarding_is_replaced", request(workspace, "GET", "/ready", fields=forged)[0] == 200)
+        passed("workspace_foreign_host_denied", request(workspace, "GET", "/workspace", fields=(("Host", "foreign.example.test"),))[0] == 400)
+        for path in ("/v1/responses", "/v1/messages", "/v1/models", "/console", "/v1/gateway/whoami"):
+            passed("workspace_closed_" + path, request(workspace, "GET", path)[0] == 503)
+        boundary = json.loads(execute(workspace, PYTHON, "-I", "-", input_text=PROCESS_BOUNDARY))
+        passed("workspace_backend_has_only_owned_secrets", boundary["backend_present"] and set(boundary["backend_names"]) - {"LC_CTYPE"} == set(SECRETS) | {"HORMUZ_DOMAIN_API_KEY"})
+        passed("workspace_proxy_has_only_ingress_secret", set(boundary["caddy_names"]) == {"PORT", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HORMUZ_INGRESS_CREDENTIAL"})
+        stop(workspace)
         exported = json.loads(operator("backup-export", "--key-file", "/var/lib/hormuz/private/config/backup.key",
                                        "--output-file", "/var/lib/hormuz/private/config/offsite.hzb"))
         verified = json.loads(operator("backup-verify", "--key-file", "/var/lib/hormuz/private/config/backup.key",

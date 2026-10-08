@@ -564,7 +564,7 @@ def _validate_managed_materials(
             and not personal_provider_mode
         )
         if mode == "browser_http_only_cookie" and (
-            coordinate.source_module != "hormuz/console_http.py"
+            coordinate.source_module not in {"hormuz/console_http.py", "hormuz/workspace_http.py"}
             or coordinate.source_qualname != "_cookie_header"
             or entry.get("storage_owner") != "client_browser"
             or entry.get("runtime_consumer") != "admin_console"

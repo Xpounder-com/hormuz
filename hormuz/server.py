@@ -98,6 +98,8 @@ from .session_http import SessionRequestLimit, handle_session_request
 from .session_store import SQLiteSessionStore, SessionStoreError
 from .console import ConsoleService
 from .console_http import handle_console_request
+from .workspace import WorkspaceService
+from .workspace_http import handle_workspace_request, is_workspace_path
 from .usage import ResponseUsageParser
 
 
@@ -285,6 +287,7 @@ class GatewayServer(ThreadingHTTPServer):
         self.session_request_limit = SessionRequestLimit()
         self.console_request_limit = SessionRequestLimit()
         self.console: ConsoleService | None = None
+        self.workspace: WorkspaceService | None = None
         self.impact_recorder = None
         # Keep injected-process tests and the hosted child's reviewed secret
         # inventory authoritative. Falling back to ``os.environ`` here would
@@ -340,6 +343,8 @@ class GatewayServer(ThreadingHTTPServer):
                 self.store, portfolio = repositories.usage, repositories.portfolio
             if self.session_broker is not None and config.session_broker.console_enabled:
                 self.console = ConsoleService(self.session_broker, self.store)
+            if self.session_broker is not None and config.session_broker.workspace_enabled:
+                self.workspace = WorkspaceService(self.session_broker)
             self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
             self.github_outcome_receiver = (
                 GitHubOutcomeReceiver(config, portfolio.outcomes)
@@ -409,6 +414,8 @@ class GatewayServer(ThreadingHTTPServer):
                 for issuer in config.oidc_issuers.values()
                 if issuer.login is not None and len(issuer.login.client_secret) >= 8
             )
+            if config.session_broker.workspace_domain_api_key:
+                protected_values.append(("workspace_domain_api_key", config.session_broker.workspace_domain_api_key))
             if config.outcome_connectors is not None:
                 protected_values.extend(config.outcome_connectors.protected_values())
             self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
@@ -425,6 +432,8 @@ class GatewayServer(ThreadingHTTPServer):
             self._close_postgres_pool()
             raise
         self._accepting_requests.set()
+        if self.workspace is not None:
+            self.workspace.domains.start()
         if self.postgres_pool is not None:
             settings = self.postgres_pool.settings
             LOGGER.info(
@@ -484,6 +493,8 @@ class GatewayServer(ThreadingHTTPServer):
         try:
             super().server_close()
         finally:
+            if self.workspace is not None:
+                self.workspace.domains.close()
             if self.impact_recorder is not None:
                 self.impact_recorder.close()
             self._close_postgres_pool()
@@ -566,6 +577,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         self._attribution_result = None
         path = urlsplit(self.path).path
+        if is_workspace_path(path):
+            handle_workspace_request(self)
+            return
         if path.startswith(PORTFOLIO_PREFIX + "/"):
             handle_registry(self)
             return
@@ -727,6 +741,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._response_started = False
         self._attribution_result = None
         path = urlsplit(self.path).path
+        if is_workspace_path(path):
+            handle_workspace_request(self)
+            return
         if path.startswith(PORTFOLIO_PREFIX + "/"):
             handle_registry(self)
             return
