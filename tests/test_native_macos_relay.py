@@ -1,6 +1,7 @@
 """Mac Rust launch integration, with synthetic credentials and loopback only."""
 from __future__ import annotations
 
+import inspect
 import json
 from contextlib import closing, ExitStack
 from dataclasses import replace
@@ -48,6 +49,54 @@ def _group_absent(group):
             return True
         time.sleep(0.05)
     return False
+
+
+def _codex_provider_origin(overrides):
+    # Codex applies each -c override independently. Joining them would attempt
+    # to extend the inline provider table with the separate http_headers key.
+    import tomllib
+    from urllib.parse import urlsplit
+
+    providers = [value for value in overrides
+                 if value.partition("=")[0] == "model_providers.hormuz_context_relay"]
+    if len(providers) != 1:
+        raise ValueError("native_provider_override_invalid")
+    try:
+        origin = tomllib.loads(providers[0])["model_providers"]["hormuz_context_relay"]["base_url"]
+    except (tomllib.TOMLDecodeError, KeyError, TypeError):
+        raise ValueError("native_provider_override_invalid") from None
+    try:
+        endpoint = urlsplit(origin) if isinstance(origin, str) else None
+        port = endpoint.port if endpoint is not None else None
+        valid = (port is not None and 1 <= port <= 65535
+                 and origin == f"http://127.0.0.1:{port}/v1")
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError("native_provider_url_invalid")
+    return origin
+
+
+def _terminal_output_diagnostics(stdout_size, stderr_size, stderr_prefix):
+    # Keep only fixed classifications from a bounded stderr prefix. Never
+    # publish arbitrary client output, prompts, bodies, paths or credentials.
+    markers = (
+        (b"native_provider_override_invalid", "provider_override_invalid"),
+        (b"native_provider_url_invalid", "provider_url_invalid"),
+        (b"TOMLDecodeError", "toml_decode_error"),
+        (b"Traceback (most recent call last):", "python_traceback"),
+        (b"KeyError:", "python_key_error"),
+        (b"ValueError:", "python_value_error"),
+        (b"unexpected argument", "client_argument_invalid"),
+        (b"Operation not permitted", "operation_denied"),
+        (b"The gateway session credential is unavailable.", "native_credential_unavailable"),
+        (b"401 Unauthorized", "unauthorized"),
+    )
+    prefix = bytes(stderr_prefix[:8192])
+    return json.dumps({"stdout_bytes": stdout_size, "stderr_bytes": stderr_size,
+        "stderr_prefix_bytes": len(prefix), "stderr_prefix_truncated": stderr_size > len(prefix),
+        "stderr_markers": [code for pattern, code in markers if pattern in prefix] or ["unclassified"]},
+        sort_keys=True, separators=(",", ":"))
 
 
 class _WorkTerminalProvider(BaseHTTPRequestHandler):
@@ -385,15 +434,15 @@ print({ACCESS_TOKEN!r})
 
     def _fake_client(self, body: bytes, *, hold: bool = False, bad_auth: bool = False) -> None:
         self._script(self.client, f"#!{sys.executable}\n" + f"""
-import http.client, os, sys, tomllib
+import http.client, os, sys
 from urllib.parse import urlsplit
+{inspect.getsource(_codex_provider_origin)}
 if sys.argv[1:] == ["--version"]:
     print("codex 0.147.0")
     raise SystemExit(0)
 assert "OPENAI_API_KEY" not in os.environ
 assert "ANTHROPIC_AUTH_TOKEN" not in os.environ
-settings = tomllib.loads("\\n".join(sys.argv[2::2]))
-origin = settings["model_providers"]["hormuz_context_relay"]["base_url"]
+origin = _codex_provider_origin(sys.argv[2::2])
 endpoint = urlsplit(origin)
 connection = http.client.HTTPConnection(endpoint.hostname, endpoint.port, timeout=10)
 token = "wrong" if {bad_auth!r} else os.environ["HORMUZ_LOCAL_RELAY_TOKEN"]
@@ -403,7 +452,8 @@ response = connection.getresponse()
 assert response.status == {401 if bad_auth else 200}
 response.read()
 connection.close()
-open({str(self.root / 'address')!r}, "w").write(endpoint.netloc)
+with open({str(self.root / 'address')!r}, "w") as address:
+    address.write(endpoint.netloc)
 if {hold!r}:
     sys.stdin.buffer.read()
 """)
@@ -453,6 +503,7 @@ if {hold!r}:
         (self.root / "home").mkdir(mode=0o700, exist_ok=True)
         self._script(self.root / name, f"#!{sys.executable}\n" + f"""
 import os, sys
+{inspect.getsource(_codex_provider_origin)}
 real = {real!r}
 os.environ["DISABLE_AUTOUPDATER"] = "1"
 os.environ["DISABLE_TELEMETRY"] = "1"
@@ -479,11 +530,10 @@ if {bare_claude!r}:
     os.environ["ANTHROPIC_API_KEY"] = os.environ.pop("ANTHROPIC_AUTH_TOKEN")
 command = [real, *{arguments!r}, *sys.argv[1:]]
 if {terminal_only!r}:
-    import json, tomllib
+    import json
     from urllib.parse import urlsplit
     if {name!r} == "codex":
-        settings = tomllib.loads("\\n".join(sys.argv[2::2]))
-        origin = settings["model_providers"]["hormuz_context_relay"]["base_url"]
+        origin = _codex_provider_origin(sys.argv[2::2])
         command.extend(["-c", "model_providers.hormuz_context_relay.request_max_retries=0",
                         "-c", "model_providers.hormuz_context_relay.stream_max_retries=0"])
         if {omit_work_header!r}:
@@ -494,7 +544,8 @@ if {terminal_only!r}:
         origin = os.environ["ANTHROPIC_BASE_URL"]
     endpoint = urlsplit(origin)
     assert endpoint.scheme == "http" and endpoint.hostname == "127.0.0.1" and endpoint.port
-    open({str(self.root / 'terminal-relay-address.json')!r}, "w").write(json.dumps([endpoint.hostname, endpoint.port]))
+    with open({str(self.root / 'terminal-relay-address.json')!r}, "w") as address:
+        address.write(json.dumps([endpoint.hostname, endpoint.port]))
     policy = ('(version 1) (allow default) (deny network*) '
               '(allow network-outbound (remote ip "localhost:' + str(endpoint.port) + '"))')
     os.execv("/usr/bin/sandbox-exec", ["sandbox-exec", "-p", policy, *command])
@@ -622,6 +673,8 @@ os.execv(real, command)
         process = self._launch(work_id=work_id, terminal_only=True)
         lease = None
         output = bytearray()
+        stdout_size = stderr_size = 0
+        stderr_prefix = bytearray()
         selector = selectors.DefaultSelector()
         try:
             lease, _ = self.owner.accept()
@@ -639,12 +692,18 @@ os.execv(real, command)
                     else:
                         output.extend(data)
                         self.assertLessEqual(len(output), 1024 * 1024, "bounded native output")
+                        if key.fileobj is process.stderr:
+                            stderr_size += len(data)
+                            stderr_prefix.extend(data[:max(0, 8192 - len(stderr_prefix))])
+                        else:
+                            stdout_size += len(data)
         finally:
             if lease is not None:
                 lease.close()
             selector.close()
             self._terminal_stop(process, self.root)
-        self.assertEqual(process.returncode, 0, "native terminal invocation failed")
+        self.assertEqual(process.returncode, 0, "native terminal invocation failed; "
+            + _terminal_output_diagnostics(stdout_size, stderr_size, stderr_prefix))
         host, port = json.loads((self.root / "terminal-relay-address.json").read_text())
         # This one bounded closure probe is to this invocation's actual endpoint.
         with self.assertRaises(OSError):
@@ -1055,6 +1114,166 @@ connection.getresponse().read()
 
 
 class NativeMacRelayFixtureTests(unittest.TestCase):
+    def test_terminal_codex_preserves_independent_overrides_and_arguments(self) -> None:
+        from unittest.mock import patch
+
+        provider = ('model_providers.hormuz_context_relay={name="Hormuz",'
+                    'base_url="http://127.0.0.1:43210/v1",wire_api="responses"}')
+        original = ["-c", 'model_provider="hormuz_context_relay"', "-c", provider,
+                    "-c", 'model="approved"', "-c",
+                    'model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-owned"}',
+                    "-c", "unrelated_override={ deliberately malformed"]
+        arguments = ["exec", "--ephemeral", "synthetic prompt with spaces"]
+        for omit_work_header in (False, True):
+            with self.subTest(omit_work_header=omit_work_header), \
+                    tempfile.TemporaryDirectory(prefix="hormuz-native-overrides-fixture-") as folder, \
+                    patch.dict(os.environ, {"HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY": "/synthetic/pinned-clients"},
+                               clear=True):
+                fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+                fixture.root = Path(folder)
+                fixture._official_client("codex", arguments, terminal_only=True,
+                                         omit_work_header=omit_work_header)
+                source = (fixture.root / "codex").read_text()
+                with patch.object(sys, "argv", ["codex", *original]), \
+                        patch.object(os, "execv", side_effect=RuntimeError("fixed exec boundary")) as execute:
+                    with self.assertRaisesRegex(RuntimeError, "fixed exec boundary"):
+                        exec(compile(source, "generated-native-codex", "exec"), {})
+                execute.assert_called_once()
+                program, command = execute.call_args.args
+                self.assertEqual(program, "/usr/bin/sandbox-exec")
+                self.assertEqual(command[3:3 + 1 + len(arguments) + len(original)],
+                                 ["/synthetic/pinned-clients/codex", *arguments, *original])
+                expected = ["-c", "model_providers.hormuz_context_relay.request_max_retries=0",
+                            "-c", "model_providers.hormuz_context_relay.stream_max_retries=0"]
+                if omit_work_header:
+                    expected += ["-c", "model_providers.hormuz_context_relay.http_headers={}"]
+                self.assertEqual(command[3 + 1 + len(arguments) + len(original):], expected)
+                self.assertIn('(remote ip "localhost:43210")', command[2])
+                self.assertIn("(deny network*)", command[2])
+                self.assertEqual(json.loads((fixture.root / "terminal-relay-address.json").read_text()),
+                                 ["127.0.0.1", 43210])
+
+    def test_terminal_codex_refuses_missing_multiple_or_malformed_provider(self) -> None:
+        from unittest.mock import patch
+
+        provider = 'model_providers.hormuz_context_relay={base_url="http://127.0.0.1:43210/v1"}'
+        cases = ([], [provider, provider],
+                 [provider.replace("hormuz_context_relay=", "hormuz_context_relay_extra=")],
+                 ['model_providers.hormuz_context_relay={bad syntax'],
+                 ['model_providers.hormuz_context_relay=false'],
+                 ['model_providers.hormuz_context_relay={name="Hormuz"}'])
+        for overrides in cases:
+            with self.subTest(overrides=overrides), \
+                    tempfile.TemporaryDirectory(prefix="hormuz-native-provider-refusal-") as folder, \
+                    patch.dict(os.environ, {"HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY": "/synthetic/pinned-clients"},
+                               clear=True):
+                fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+                fixture.root = Path(folder)
+                fixture._official_client("codex", ["exec", "synthetic"], terminal_only=True)
+                source = (fixture.root / "codex").read_text()
+                original = [item for value in overrides for item in ("-c", value)]
+                with patch.object(sys, "argv", ["codex", *original]), patch.object(os, "execv") as execute:
+                    with self.assertRaisesRegex(ValueError, "^native_provider_override_invalid$"):
+                        exec(compile(source, "generated-native-codex", "exec"), {})
+                execute.assert_not_called()
+                self.assertFalse((fixture.root / "terminal-relay-address.json").exists())
+
+    def test_terminal_codex_refuses_noncanonical_provider_url_before_exec(self) -> None:
+        from unittest.mock import patch
+
+        values = ("https://127.0.0.1:43210/v1", "http://localhost:43210/v1", "http://example.test:43210/v1",
+                  "http://127.0.0.1:0/v1", "http://127.0.0.1:65536/v1", "http://127.0.0.1/v1",
+                  "http://user:secret@127.0.0.1:43210/v1", "http://127.0.0.1:43210/v1?token=secret",
+                  "http://127.0.0.1:43210/v1#fragment", "http://127.0.0.1:43210/other",
+                  "http://127.0.0.1:43210/v1/", "http://127.0.0.1:043210/v1", 42, ["http://127.0.0.1:43210/v1"])
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-url-refusal-") as folder, \
+                patch.dict(os.environ, {"HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY": "/synthetic/pinned-clients"},
+                           clear=True):
+            fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+            fixture.root = Path(folder)
+            fixture._official_client("codex", ["exec", "synthetic"], terminal_only=True)
+            source = (fixture.root / "codex").read_text()
+            for value in values:
+                with self.subTest(value=value):
+                    provider = "model_providers.hormuz_context_relay={base_url=" + json.dumps(value) + "}"
+                    with patch.object(sys, "argv", ["codex", "-c", provider]), \
+                            patch.object(os, "execv") as execute:
+                        with self.assertRaisesRegex(ValueError, "^native_provider_url_invalid$"):
+                            exec(compile(source, "generated-native-codex", "exec"), {})
+                    execute.assert_not_called()
+                    self.assertFalse((fixture.root / "terminal-relay-address.json").exists())
+
+    def test_fake_codex_accepts_separate_bound_work_header_override(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-fake-overrides-") as folder, \
+                patch.dict(os.environ, {"HORMUZ_LOCAL_RELAY_TOKEN": "synthetic-local-token"}, clear=True):
+            fixture = NativeMacRelayTests("test_off_is_exact_and_listener_ends_with_client")
+            fixture.root = Path(folder)
+            fixture.client = fixture.root / "codex"
+            fixture._fake_client(b"synthetic fixture body")
+            source = fixture.client.read_text()
+            overrides = ["-c", 'model_provider="hormuz_context_relay"', "-c",
+                'model_providers.hormuz_context_relay={base_url="http://127.0.0.1:43210/v1"}', "-c",
+                'model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-owned"}']
+            with patch.object(sys, "argv", ["codex", *overrides]), \
+                    patch("http.client.HTTPConnection") as connection:
+                connection.return_value.getresponse.return_value.status = 200
+                exec(compile(source, "generated-fake-codex", "exec"), {})
+            connection.assert_called_once_with("127.0.0.1", 43210, timeout=10)
+            connection.return_value.close.assert_called_once()
+            self.assertEqual((fixture.root / "address").read_text(), "127.0.0.1:43210")
+
+    def test_terminal_failure_diagnostics_are_bounded_fixed_markers_only(self) -> None:
+        secret = b"synthetic-credential-must-never-be-exported"
+        body = b"synthetic-prompt-and-body-must-never-be-exported"
+        diagnostic = (b"Traceback (most recent call last):\nValueError: native_provider_override_invalid\n"
+                      + secret + b"\n" + body + b"\n" + b"x" * 20000 + b"401 Unauthorized")
+        rendered = _terminal_output_diagnostics(123, len(diagnostic), diagnostic)
+        decoded = json.loads(rendered)
+        self.assertEqual(decoded["stderr_markers"],
+                         ["provider_override_invalid", "python_traceback", "python_value_error"])
+        self.assertEqual((decoded["stdout_bytes"], decoded["stderr_bytes"], decoded["stderr_prefix_bytes"]),
+                         (123, len(diagnostic), 8192))
+        self.assertTrue(decoded["stderr_prefix_truncated"])
+        self.assertLess(len(rendered), 512)
+        self.assertNotIn(secret.decode(), rendered)
+        self.assertNotIn(body.decode(), rendered)
+        self.assertNotIn("401 Unauthorized", rendered)
+        self.assertEqual(json.loads(_terminal_output_diagnostics(0, 7, b"unknown"))["stderr_markers"],
+                         ["unclassified"])
+
+    def test_terminal_exit_reports_sanitized_diagnostics_after_owned_cleanup(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+
+        fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+        fixture.root = Path("/private/tmp/synthetic-native-fixture")
+        fixture.work_fixture = SimpleNamespace(failed=False)
+        lease = Mock()
+        fixture.owner = Mock()
+        fixture.owner.accept.return_value = (lease, None)
+        process = Mock(returncode=1)
+        fixture._launch = Mock(return_value=process)
+        fixture._terminal_stop = Mock()
+        selector = Mock()
+        selector.get_map.side_effect = [{1: process.stdout, 2: process.stderr}, {}]
+        selector.select.return_value = [(SimpleNamespace(fileobj=process.stdout), None),
+                                        (SimpleNamespace(fileobj=process.stderr), None)]
+        stdout = b"private synthetic prompt/body"
+        stderr = b"ValueError: native_provider_url_invalid synthetic-private-credential"
+        with patch("tests.test_native_macos_relay.selectors.DefaultSelector", return_value=selector), \
+                patch.object(os, "set_blocking"), patch.object(os, "read", side_effect=[stdout, stderr]):
+            with self.assertRaises(AssertionError) as raised:
+                fixture._run_terminal("work-owned", deadline=time.monotonic() + 100)
+        fixture._terminal_stop.assert_called_once_with(process, fixture.root)
+        lease.close.assert_called_once()
+        selector.close.assert_called_once()
+        diagnostic = json.loads(str(raised.exception).split("native terminal invocation failed; ", 1)[1])
+        self.assertEqual(diagnostic["stderr_markers"], ["provider_url_invalid", "python_value_error"])
+        self.assertEqual((diagnostic["stdout_bytes"], diagnostic["stderr_bytes"]), (len(stdout), len(stderr)))
+        self.assertNotIn("private", str(raised.exception))
+
     def test_terminal_cleanup_retains_leader_and_observes_helpers_only(self) -> None:
         from unittest.mock import Mock, patch
 
