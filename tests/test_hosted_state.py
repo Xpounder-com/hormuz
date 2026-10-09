@@ -315,12 +315,13 @@ class HostedStateTests(unittest.TestCase):
         with patch("hormuz._hosted_state._write", side_effect=OSError("synthetic interrupted final write")):
             with self.assertRaises(OSError):
                 restore(destination, source)
-        self.assertTrue(destination.database_path.exists())
+        self.assertFalse(destination.database_path.parent.exists())
         self.assertFalse((destination.database_path.parent / MARKER).exists())
         with self.assertRaises(FileNotFoundError):
             check_initialized(destination)
-        with self.assertRaises(FileExistsError):
-            initialize(destination)
+        # Failed restore is rolled back completely, so a fresh explicit
+        # initialization remains possible.
+        initialize(destination)
 
     def test_snapshot_requires_the_original_identity_key_binding(self):
         initialize(self.config)

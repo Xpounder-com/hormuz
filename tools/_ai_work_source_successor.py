@@ -13,12 +13,12 @@ from pathlib import Path
 import re
 
 CONTRACT_PATH = "docs/ai-work-source-successor-v1.json"
-CONTRACT_SHA256 = "18f8369c4e04a86e390c8cf15db07acd34f6907a028924793cac3381caf73928"
+CONTRACT_SHA256 = "059cff2e0a18aa99cf0463c182221051dc89795c7f4a3092ce1669e762dfff2a"
 SOURCE_PATHS = frozenset({"MANIFEST.in", "docs/DURABLE_DATA.md", "docs/durable-data-v1.json",
                           "pyproject.toml", "tests/test_durable_data_inventory.py",
                           "tools/verify_durable_data_inventory.py"})
 REQUIRED_FILES = (CONTRACT_PATH, "tools/_ai_work_source_successor.py", "hormuz/work_runtime.py",
-                  "hormuz/work_billing.py")
+                  "hormuz/work_billing.py", "hormuz/work_workflow.py", "hormuz/work_activation.py")
 _VERSION = re.compile(rb'(?m)^version[ \t]*=[ \t]*"[^"\r\n]+"[ \t]*$')
 
 
@@ -45,7 +45,7 @@ def contract(root: Path) -> dict:
                 or value["schema_id"] != "hormuz.ai-work-source-successor" or value["schema_version"] != 1 \
                 or value["predecessor"] != "docs/recommendation-runtime-plan-v1.json" \
                 or not isinstance(value["source_edits"], dict) or not set(value["source_edits"]).issubset(SOURCE_PATHS) \
-                or value["addition_counts"] != {"database_classes": 2, "sqlite_tables": 7, "postgresql_tables": 0, "operator_artifacts": 2}:
+                or value["addition_counts"] != {"database_classes": 2, "sqlite_tables": 18, "postgresql_tables": 0, "operator_artifacts": 2}:
             raise ValueError()
         return value
     except (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError):

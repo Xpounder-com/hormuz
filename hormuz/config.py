@@ -447,6 +447,10 @@ class AIWorkConfig:
     billing_api_key_env: str = "HORMUZ_WORK_BILLING_API_KEY"
     billing_bindings: tuple[tuple[str, str, str], ...] = ()
     tool_capable_aliases: tuple[str, ...] = ()
+    exploration_enabled: bool = False
+    exploration_aliases: tuple[str, ...] = ()
+    exploration_rate_percent: int = 5
+    exploration_max_cost_microusd: int = 0
 
 
 @dataclass(frozen=True)

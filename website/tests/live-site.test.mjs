@@ -12,6 +12,8 @@ function publishedSite() {
     ['/sitemap.xml', LIVE_ROUTES.map(route => `<loc>${LIVE_ORIGIN}${route}</loc>`).join('')],
   ]);
   for (const route of LIVE_ROUTES) bodies.set(route, `<link rel="canonical" href="${LIVE_ORIGIN}${route}"/><h1>Hormuz</h1>`);
+  bodies.set('/demo/', bodies.get('/demo/') + '<section id="work-demo"><video src="/demo/ai-work-demo.webm"></video></section>');
+  bodies.set('/evidence/', bodies.get('/evidence/') + '<section id="work-proof"><a href="/downloads/ai-work-proof.json">Receipt</a></section>');
   for (const name of LIVE_DOWNLOADS) bodies.set(`/downloads/${name}`, name.endsWith('.pdf') ? '%PDF-fixture' : name.endsWith('.json') ? JSON.stringify({ schema_id: 'hormuz.ai-work-proof', schema_version: 1, conditions: { real_provider_calls: 0, real_payments: 0, customer_savings_validated: false, production_quality_validated: false }, checks: [{ check: 'synthetic_verifier_fixture', passed: true }] }) : Buffer.from([0x50, 0x4b, 0x03, 0x04, 0]));
   const requests = [];
   return {
@@ -71,4 +73,25 @@ test('missing routes, wrong canonicals, HTML downloads, and incomplete metadata 
 test('redirects and network failures cannot be accepted as a successful publication', async () => {
   await assert.rejects(verifyLiveSite(pin, async () => new Response('', { status: 302 })), /Expected HTTP 200/);
   await assert.rejects(verifyLiveSite(pin, async () => { throw new Error('network detail is not emitted'); }), /Public request failed: \/site-source\.json/);
+});
+
+
+test('configured gateway destination is checked without probing the private backend', async () => {
+  const site = publishedSite();
+  const options = { dashboardOrigin: 'https://gateway.example.test' };
+  await assert.rejects(verifyLiveSite(pin, site.fetcher, options), /configured gateway/);
+  site.bodies.set('/work/', site.bodies.get('/work/') + '<a href="https://gateway.example.test/work">Open AI Work</a>');
+  assert.equal((await verifyLiveSite(pin, site.fetcher, options)).verdict, 'passed');
+  for (const origin of ['http://gateway.example.test', 'https://user:pass@gateway.example.test', 'https://gateway.example.test/private', 'https://usehormuz.github.io']) {
+    await assert.rejects(verifyLiveSite(pin, site.fetcher, { dashboardOrigin: origin }));
+  }
+  assert.ok(site.requests.every(route => !route.startsWith('https://gateway')));
+});
+
+test('a generic demo or missing proof link cannot satisfy work publication checks', async () => {
+  for (const route of ['/demo/', '/evidence/']) {
+    const site = publishedSite();
+    site.bodies.set(route, `<link rel="canonical" href="${LIVE_ORIGIN}${route}"/><h1>Hormuz</h1>`);
+    await assert.rejects(verifyLiveSite(pin, site.fetcher), /missing the/);
+  }
 });

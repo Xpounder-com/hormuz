@@ -21,6 +21,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+PROOF_SOURCE_FILES = ('hormuz/work_runtime.py', 'hormuz/work_learning.py', 'hormuz/work_accounting.py', 'hormuz/work_provider_costs.py', 'hormuz/work_gateway.py', 'hormuz/work_workflow.py', 'hormuz/work_workflow_http.py', 'hormuz/work_http.py', 'hormuz/work_billing.py', 'hormuz/work_activation.py', 'hormuz/work_recovery.py', 'hormuz/work_pages.py', 'hormuz/work.css', 'hormuz/work_client.py', 'hormuz/commands/work.py', 'hormuz/config.py', 'hormuz/_config_work.py', 'hormuz/server.py', 'hormuz/usage.py', 'hormuz/_hosted_server.py', 'hormuz/_hosted_state.py', 'hormuz/_hosted_config.py', 'hormuz/_hosted_backup.py', 'hormuz/hosted.py', 'tools/ai_work_proof.py', 'tools/ai_work_browser_fixture.py', 'website/scripts/ai-work-browser-qa.mjs')
 sys.path.insert(0, str(ROOT))
 from hormuz.config import GatewayConfig
 from hormuz.server import GatewayServer, serve_in_thread
@@ -168,7 +169,7 @@ def execute():
                 return {"schema_id": "hormuz.ai-work-proof", "schema_version": 1, "generated_at": datetime.now(timezone.utc).isoformat(),
                     "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                     "source_boundary": "working_tree_files_identified_by_sha256",
-                    "source_files": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (ROOT / "hormuz/work_runtime.py", ROOT / "hormuz/work_gateway.py", ROOT / "hormuz/server.py", ROOT / "hormuz/usage.py")},
+                    "source_files": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (ROOT / name for name in PROOF_SOURCE_FILES)},
                     "conditions": {"provider": "loopback_synthetic_fixture", "real_provider_calls": 0, "real_payments": 0, "billing_basis": "synthetic_configured_rate_estimate", "observations": "declared_executed_fixture_check_and_correction", "minimum_samples": 3, "production_quality_validated": False, "customer_savings_validated": False},
                     "checks": assertions, "provider_fixture_calls": len(FixtureProvider.calls), "trace": trace,
                     "covered_work": state}

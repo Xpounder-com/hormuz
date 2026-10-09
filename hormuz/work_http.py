@@ -32,7 +32,7 @@ class WorkPrincipal:
 
 
 def is_work_path(path):
-    return path in {"/work", "/work/", "/work.css"} or path.startswith(("/work/jobs/", "/v1/work/"))
+    return path in {"/work", "/work/", "/work.css", "/work/acquisition"} or path.startswith(("/work/jobs/", "/v1/work/"))
 
 
 def handle_work_request(handler):
@@ -62,7 +62,7 @@ def _dispatch(handler):
     if runtime is None:
         raise WorkRuntimeError("work_not_enabled", 404)
     request = urlsplit(handler.path)
-    if request.scheme or request.netloc or request.fragment or request.query or "\\" in handler.path or handler.path.startswith("//"):
+    if request.scheme or request.netloc or request.fragment or (request.query and not (request.path == "/work/acquisition" and handler.command == "GET")) or "\\" in handler.path or handler.path.startswith("//"):
         raise WorkRuntimeError("work_invalid_request")
     if any(len(handler.headers.get_all(name, [])) > 1 for name in ("Host", "Authorization", "Cookie", "Origin", "Content-Length", "Content-Type")) or handler.headers.get_all("Transfer-Encoding", []):
         raise WorkRuntimeError("work_invalid_request")
@@ -75,24 +75,61 @@ def _dispatch(handler):
     if path == "/work.css" and handler.command == "GET":
         _send(handler, 200, files("hormuz").joinpath("console.css").read_text() + "\n" + files("hormuz").joinpath("work.css").read_text(), "text/css; charset=utf-8")
         return
+    labels = None
+    if path == "/work/acquisition" and handler.command == "GET":
+        from .work_workflow_http import request_labels
+        labels = request_labels(request)
     principal = _authenticate(handler)
     if principal is None:
+        if not handler.headers.get("Authorization") and labels is not None:
+            from .work_workflow_http import anonymous_handoff
+            anonymous_handoff(handler, labels)
+            return
         if not handler.headers.get("Authorization") and path in {"/work", "/work/"} and handler.command == "GET":
             _send(handler, 200, work_pages.login(**_navigation(handler)))
         return
+    if getattr(handler.server, "work_workflow", None) is not None:
+        from .work_workflow_http import dispatch
+        if dispatch(handler, principal, request):
+            return
     if handler.command == "GET":
         if path in {"/work", "/work/"}:
+            from .work_workflow_http import consume_handoff
+            if consume_handoff(handler, principal):
+                return
             _dashboard(handler, principal)
         elif re.fullmatch(r"/work/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}", path):
             work = runtime.get_work(principal.identity, path.rsplit("/", 1)[1])
+            _work_capabilities(handler, principal, work)
+            _receipt_opened(handler, principal, work)
             _send(handler, 200, work_pages.job_detail(work, csrf=principal.csrf, can_manage=principal.can_mutate_work, **_navigation(handler)))
-        elif path in {"/v1/work/state", "/v1/work/connect", "/v1/work/jobs"}:
+        elif path in {"/v1/work/state", "/v1/work/connect", "/v1/work/jobs", "/v1/work/activation", "/v1/work/support/receipt"}:
             state = _state(handler, principal)
             if path.endswith("/connect"):
+                workflow = getattr(handler.server, "work_workflow", None)
+                if workflow is not None:
+                    for route in state["connection"]["routes"]:
+                        client = "codex" if route["protocol"] == "openai" else "claude-code"
+                        if route["eligible"] and client in principal.identity.allowed_clients:
+                            workflow.event(principal.identity, "qualified_connection", route["model"] + ":" + client)
                 state = {"schema_id": "hormuz.ai-work-connect", "schema_version": 1, "connection": state["connection"], "billing": state["billing"]}
+            if path == "/v1/work/activation":
+                state = state["onboarding"]
+            elif path == "/v1/work/support/receipt":
+                # No title, repository name, response, checkout URL, credential,
+                # invoice/customer identifier or arbitrary reference is exported.
+                state = {"schema_id": "hormuz.ai-work-support-receipt", "schema_version": 1,
+                    "gateway_version": __import__('hormuz').__version__,
+                    "scope": "authenticated_owner", "billing_status": state["billing"]["status"],
+                    "activation_state": state["onboarding"]["state"],
+                    "jobs": [{"work_id": job["work_id"], "state": job["state"], "costs": job["costs"],
+                        "outcome_evidence": job["outcome_evidence"]} for job in state.get("works", []) if job.get("actor_id") == principal.identity.actor_id]}
             _json(handler, 200, state)
         elif re.fullmatch(r"/v1/work/jobs/[^/]{1,128}", path):
-            _json(handler, 200, runtime.get_work(principal.identity, path.rsplit("/", 1)[1]))
+            work = runtime.get_work(principal.identity, path.rsplit("/", 1)[1])
+            _work_capabilities(handler, principal, work)
+            _receipt_opened(handler, principal, work)
+            _json(handler, 200, work)
         else:
             raise WorkRuntimeError("work_not_found", 404)
         return
@@ -100,29 +137,40 @@ def _dispatch(handler):
         raise WorkRuntimeError("work_not_found", 404)
     action = re.fullmatch(r"/v1/work/jobs/([^/]{1,128})/(actions|observations)", path)
     if path == "/v1/work/jobs":
-        allowed, required = {"repository", "title", "task_type", "context_revision"}, {"repository"}
+        allowed, required = {"repository", "title", "task_type", "context_revision", "completion_condition"}, {"repository"}
     elif path == "/v1/work/policies":
-        allowed, required = {"scope_type", "scope_id", "budget_microusd", "budget_usd", "objective", "expected_version"}, {"scope_type", "scope_id", "objective"}
+        allowed, required = {"scope_type", "scope_id", "budget_microusd", "budget_usd", "objective", "expected_version", "exploration_enabled"}, {"scope_type", "scope_id", "objective"}
     elif action:
         allowed = {"action", "budget_microusd", "budget_usd", "expected_version"} if action[2] == "actions" else {"status", "source", "reference"}
         required = {"action"} if action[2] == "actions" else {"status", "source"}
-    elif path == "/v1/work/billing/portal":
+    elif path in {"/v1/work/billing/portal", "/v1/work/billing/checkout"}:
+        allowed, required = set(), set()
+    elif path == "/v1/work/activation/request":
+        allowed, required = {"model", "client"}, {"model", "client"}
+    elif path == "/v1/work/activation/review":
+        allowed, required = {"action", "reference"}, {"action", "reference"}
+    elif path == "/v1/work/activation/reset":
+        allowed, required = {"reference"}, {"reference"}
+    elif path == "/v1/work/activation/reverify":
         allowed, required = set(), set()
     else:
         raise WorkRuntimeError("work_not_found", 404)
     values = _values(handler, allowed | {"csrf_token"}, required)
     _verify_mutation(handler, principal, values.pop("csrf_token", ""))
-    if path == "/v1/work/billing/portal":
+    if path.startswith("/v1/work/activation/"):
+        _activation_action(handler, principal, path, values)
+        return
+    if path in {"/v1/work/billing/portal", "/v1/work/billing/checkout"}:
         if not principal.can_manage_plans:
             raise WorkRuntimeError("work_administrator_required", 403)
         billing = getattr(handler.server, "work_billing", None)
         if billing is None:
             raise WorkRuntimeError("billing_not_configured", 409)
         origin = principal.origin or handler.server.config.session_broker.public_base_url
-        target = billing.portal(principal.identity.organization_id, origin + "/work")
+        target = billing.activation.checkout(principal.identity.organization_id, origin + "/work") if path.endswith("/checkout") else billing.portal(principal.identity.organization_id, origin + "/work")
         if isinstance(target, dict):
             target = target["url"]
-        if not isinstance(target, str) or urlsplit(target).scheme != "https" or urlsplit(target).hostname != "billing.stripe.com":
+        if not isinstance(target, str) or urlsplit(target).scheme != "https" or urlsplit(target).hostname != ("checkout.stripe.com" if path.endswith("/checkout") else "billing.stripe.com"):
             raise WorkRuntimeError("billing_portal_unavailable", 503)
         if handler.headers.get_content_type() == "application/x-www-form-urlencoded":
             _send(handler, 303, "", location=target)
@@ -130,6 +178,8 @@ def _dispatch(handler):
             _json(handler, 200, {"url": target})
         return
     if path == "/v1/work/jobs":
+        if values.get("completion_condition") == "":
+            values.pop("completion_condition")
         for name in ("title", "context_revision"):
             if values.get(name) == "":
                 values[name] = None
@@ -210,7 +260,7 @@ def _authenticate(handler):
             current = console.sessions.authenticate(credential)
             identity = _browser_identity(handler, current.organization_id, current.membership_id, current.name)
             return WorkPrincipal(identity, current.role == "member_admin", console.sessions.csrf_token(credential), credential, "console", origin, current.role == "member_admin")
-    if handler.path not in {"/work", "/work/"} or handler.command != "GET":
+    if urlsplit(handler.path).path not in {"/work", "/work/", "/work/acquisition"} or handler.command != "GET":
         _failure(handler, 401, "work_session_required")
     return None
 
@@ -221,6 +271,8 @@ def _browser_identity(handler, organization_id, membership_id, name):
     broker = handler.server.session_broker
     with broker.store._connection() as connection:
         member = broker.directory._member(connection, organization_id, membership_id)
+        if member["status"] != "active":
+            raise WorkRuntimeError("activation_membership_inactive", 403)
         return Identity(token_env="", token="", actor_id=membership_id, actor_name=name, team_id=member["team_id"], team_name="", organization_id=organization_id, allowed_clients=tuple(json.loads(member["allowed_clients"])), clearance=member["clearance"], authentication_source="browser_session")
 
 
@@ -267,6 +319,18 @@ def _values(handler, allowed, required):
                 value[key] = int(item)
             elif type(item) is not int or item < 0 or item > 10**18:
                 raise WorkRuntimeError("work_invalid_request")
+        elif key == "exploration_enabled":
+            if item is None or item == "inherit":
+                value[key] = None
+            elif isinstance(item, str) and item in {"true", "false"}:
+                value[key] = item == "true"
+            elif type(item) is not bool:
+                raise WorkRuntimeError("work_invalid_request")
+        elif key == "analytics_consent":
+            if isinstance(item, str) and item in {"true", "false"}:
+                value[key] = item == "true"
+            elif type(item) is not bool:
+                raise WorkRuntimeError("work_invalid_request")
         elif not isinstance(item, str) or len(item) > 4096 or any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in item):
             raise WorkRuntimeError("work_invalid_request")
     return value
@@ -300,11 +364,124 @@ def _state(handler, principal):
         if route:
             routes.append({"model": alias, "protocol": route.protocol, "credential_configured": bool(handler.server.upstream_credentials.get(route.protocol)), "eligible": bool(handler.server.upstream_credentials.get(route.protocol))})
     state["connection"] = {"endpoint": getattr(handler, "_workspace_origin", handler.server.config.session_broker.public_base_url), "routes": routes, "supported_protocols": ["openai-responses", "openai-chat-completions", "anthropic-messages"], "credential_location": "gateway_server", "application_access_enabled": bool(principal.identity.allowed_clients), "coverage": "only_authenticated_requests_attached_to_a_work_id", "billing_basis": "configured_provider_rates_estimate"}
+    state["connection"]["supported_inputs"] = ["text"]
+    state["connection"]["unsupported_budgeted_inputs"] = ["image", "audio", "document", "provider_resolved_input"]
+    connectors = _connector_choices(handler, principal)
+    state["connection"]["connectors"] = connectors
     state["billing"] = {"status": "self_hosted", "provider_fees": "separate", "paid_activation": "not_configured"}
     billing = getattr(handler.server, "work_billing", None)
     if billing is not None:
         state["billing"] = billing.status(principal.identity.organization_id)
+    activation = billing.activation.status(principal.identity.organization_id) if billing else {"state": "not_configured", "version": 0}
+    if state["billing"].get("entitled"):
+        activation["state"] = "active"
+    choices = [{**route, "client": "codex" if route["protocol"] == "openai" else "claude-code"} for route in routes if route["credential_configured"] and (policy.allowed_clients is None or ("codex" if route["protocol"] == "openai" else "claude-code") in policy.allowed_clients)]
+    operator = principal.can_manage_plans and principal.identity.actor_id in handler.server.config.ai_work.administrator_actor_ids
+    activation.update({"identity_verified": True, "application_access_enabled": bool(principal.identity.allowed_clients),
+        "choices": choices, "can_request_qualification": bool(billing and choices and principal.can_manage_plans and state["billing"].get("status") != "configuration_changed" and activation["state"] in {"qualification_required", "requested", "rejected", "recovery_required"}),
+        "can_review_qualification": bool(billing and operator and activation["state"] in {"requested", "qualified", "rejected", "recovery_required"}),
+        "can_checkout": bool(billing and principal.can_manage_plans and activation["state"] in {"qualified", "checkout_pending"} and billing.binding(principal.identity.organization_id) is None and billing.management_binding(principal.identity.organization_id) is None),
+        "can_open_portal": bool(state["billing"].get("portal_available") and principal.can_manage_plans),
+        "can_reset": bool(billing and operator), "can_reverify": bool(billing and operator and billing.binding(principal.identity.organization_id) is not None and activation["state"] in {"qualified", "payment_unverified"}), "next_step": "connect_application" if activation["state"] == "active" and not principal.identity.allowed_clients else "create_first_job" if activation["state"] == "active" else "checkout" if activation["state"] in {"qualified", "checkout_pending"} else "await_signed_payment" if activation["state"] == "payment_unverified" else "operator_review" if activation["state"] in {"requested", "recovery_required"} else "request_qualification"})
+    if not billing:
+        activation["next_step"] = "create_first_job" if principal.identity.allowed_clients and choices else "connect_application" if choices else "configure_provider"
+    elif state["billing"].get("status") == "configuration_changed":
+        activation["next_step"] = "manage_subscription" if activation["can_open_portal"] else "operator_review"
+    elif activation["state"] in {"qualified", "payment_unverified"} and billing.management_binding(principal.identity.organization_id) is not None:
+        activation["next_step"] = "reverify_payment" if operator else "await_payment_verification"
+    elif activation["state"] == "recovery_required" and not activation.get("model"):
+        activation["next_step"] = "request_qualification"
+    workflow = getattr(handler.server, "work_workflow", None)
+    if workflow is not None:
+        state["funnel"] = workflow.funnel(principal.identity)
+        if billing is not None and state["funnel"].get("consent"):
+            # Billing facts remain private to the verified organization; the
+            # browser cannot submit conversion claims or payment identifiers.
+            state["funnel"]["events"].update(billing.funnel(principal.identity.organization_id))
+    activation["activation"] = {key: activation.get(key) for key in ("state", "model", "client", "reference")}
+    activation["routes"] = choices
+    activation["client_choices"] = sorted({row["client"] for row in choices})
+    state["support"] = {"receipt_available": True, "recovery_state": activation["state"], "can_reset": activation["can_reset"]}
+    state["capabilities"] = {"completion_condition": True, "workflow_bindings": bool(connectors)}
+    for work in state.get("works", []):
+        _work_capabilities(handler, principal, work, connectors=connectors)
+    state["onboarding"] = activation
     return state
+
+
+def _receipt_opened(handler, principal, work):
+    workflow = getattr(handler.server, "work_workflow", None)
+    if workflow is not None:
+        workflow.event(principal.identity, "receipt_opened", work["work_id"])
+
+
+def _connector_choices(handler, principal):
+    channels = handler.server.config.outcome_connectors
+    portfolio = handler.server.config.portfolio_control
+    if channels is None or portfolio is None:
+        return []
+    result = []
+    for provider in ("github", "linear"):
+        active = {(row.organization_id, row.connector_id) for row in getattr(channels, provider)}
+        for binding in portfolio.connectors:
+            if binding.organization_id == principal.identity.organization_id and binding.provider == provider and (binding.organization_id, binding.connector_id) in active:
+                result.append({"provider": provider, "connector_id": binding.connector_id,
+                    "container_ids": list(binding.external_object_ids[:100]), "container_ids_truncated": len(binding.external_object_ids) > 100,
+                    "qualification": "configured_signed_channel"})
+    return result[:100]
+
+
+def _work_capabilities(handler, principal, work, *, connectors=None):
+    from .work_workflow import CONDITIONS
+    owned = work.get("actor_id") == principal.identity.actor_id
+    choices = _connector_choices(handler, principal) if connectors is None else connectors
+    choices = [row for row in choices if row["provider"] == CONDITIONS.get(work.get("completion_condition"))]
+    work["receipt_available"] = owned
+    work["binding_available"] = bool(owned and choices)
+    work["connector_choices"] = choices if owned else []
+    workflow = getattr(handler.server, "work_workflow", None)
+    work["bindings"] = workflow.bindings(principal.identity, work["work_id"])["bindings"] if owned and workflow is not None else []
+
+
+def _activation_action(handler, principal, path, values):
+    billing = getattr(handler.server, "work_billing", None)
+    if billing is None:
+        raise WorkRuntimeError("billing_not_configured", 409)
+    if not principal.can_manage_plans:
+        raise WorkRuntimeError("work_administrator_required", 403)
+    organization, actor = principal.identity.organization_id, principal.identity.actor_id
+    if path.endswith("/request"):
+        choices = _state(handler, principal)["onboarding"]["choices"]
+        if not any(row["model"] == values["model"] and row["client"] == values["client"] for row in choices):
+            raise WorkRuntimeError("activation_unsupported_application", 403)
+        result = billing.activation.request(organization, actor, **values)
+    else:
+        if actor not in handler.server.config.ai_work.administrator_actor_ids:
+            raise WorkRuntimeError("activation_operator_required", 403)
+        if path.endswith("/reverify"):
+            result = billing.reverify(organization)
+        elif path.endswith("/reset"):
+            result = billing.activation.reset(organization, actor, values["reference"])
+        else:
+            current = billing.activation.status(organization)
+            owner = None
+            if values["action"] == "approve":
+                with billing._connect() as connection:
+                    owner = connection.execute("SELECT actor_id FROM work_activation WHERE organization_id=?", (organization,)).fetchone()
+                applicant = _browser_identity(handler, organization, owner[0], "") if owner and getattr(handler.server, "session_broker", None) else principal.identity
+                choices = _state(handler, WorkPrincipal(applicant, False))["onboarding"]["choices"]
+                if not any(row["model"] == current.get("model") and row["client"] == current.get("client") for row in choices):
+                    raise WorkRuntimeError("activation_unsupported_application", 403)
+            # Commit the proof-bound, version-checked approval before expanding
+            # membership authority. A raced/rejected review must grant nothing.
+            result = billing.activation.review(organization, actor, **values, expected_version=current["version"])
+            if values["action"] == "approve" and owner and getattr(handler.server, "session_broker", None):
+                from .work_activation import grant_reviewed_application
+                grant_reviewed_application(handler.server.session_broker.directory, organization, owner[0], current["client"], actor)
+    if handler.headers.get_content_type() == "application/x-www-form-urlencoded":
+        _dashboard(handler, principal, message="Qualification updated. Expanded application access requires signing in/enrolling again.")
+    else:
+        _json(handler, 200, result)
 
 
 def _navigation(handler):
@@ -327,15 +504,18 @@ def _json(handler, status, value):
     _send(handler, status, json.dumps(value, separators=(",", ":")), "application/json; charset=utf-8")
 
 
-def _send(handler, status, body, content_type="text/html; charset=utf-8", *, location=None):
+def _send(handler, status, body, content_type="text/html; charset=utf-8", *, location=None, set_cookie=None):
     encoded = body.encode("utf-8")
     handler.send_response(status)
+    handler.send_header("Connection", "close")
     # Native form POSTs need their actual Origin; no-referrer serializes it as
     # null in browsers. API responses do not need browser form authority.
     referrer = "strict-origin" if content_type.startswith("text/html") else "no-referrer"
-    for key, value in {"Content-Type": content_type, "Content-Length": str(len(encoded)), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": referrer, "X-Frame-Options": "DENY", "Content-Security-Policy": "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://billing.stripe.com"}.items():
+    for key, value in {"Content-Type": content_type, "Content-Length": str(len(encoded)), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": referrer, "X-Frame-Options": "DENY", "Content-Security-Policy": "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://billing.stripe.com https://checkout.stripe.com"}.items():
         handler.send_header(key, value)
     if location:
         handler.send_header("Location", location)
+    if set_cookie:
+        handler.send_header("Set-Cookie", set_cookie)
     handler.end_headers()
     handler.wfile.write(encoded)

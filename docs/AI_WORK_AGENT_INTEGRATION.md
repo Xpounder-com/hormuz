@@ -114,6 +114,10 @@ follow_up = job.request("/v1/chat/completions", {
 ```
 
 `WorkJob.request` attaches `X-Hormuz-Work-Id` and the client's authorized credential.
+Use `request_kind="polling"`, `"automatic_retry"` or `"legitimate_iteration"`
+for machine repeats and legitimate continuations; the corresponding CLI flag is
+`--request-kind`. These classifications exclude recurrence from quality evidence,
+while every request still consumes its ordinary applicable allowance.
 It supports non-streaming OpenAI Responses, OpenAI Chat Completions, and Anthropic
 Messages. For streaming or an existing agent SDK, pass `job.headers` as its
 additional HTTP headers and configure its normal gateway credential separately.
@@ -128,6 +132,10 @@ tool, privacy, and identity policy checks continue to apply.
 discovery. With a work budget enabled, Chat requests support one text completion
 (`n` omitted or `1`); audio, image URL inputs and hosted search options are rejected
 before dispatch because their cost is not covered by the text reservation.
+Responses images and Anthropic image/document blocks are also unbounded, even
+when supplied as inline base64. Compressed bytes cannot bound image tokens or
+document expansion. Budgeted AI Work accepts supported text requests; additional
+modalities require independently validated reservation rules before admission.
 
 ## Scoped plans and continuation
 
@@ -153,9 +161,13 @@ and does not raise workspace or repository limits. Zero blocks paid calls;
 normal policy remain enforced on subsequent requests. Stop/pause controls cannot
 cancel already dispatched provider work.
 
-Cost first, speed first, and outcome first select the local routing objective.
+Cost first, speed first, and quality within budget select the local routing objective.
 Routing uses available observations and retains compatibility/state boundaries;
 it does not promise correctness or faster completion from insufficient evidence.
+Optional `plan --exploration` permits only operator-approved aliases and rate within
+a configured monthly exploration reservation allowance. Parent opt-outs dominate;
+`--no-exploration` opts out and `--inherit-exploration` clears this plan override.
+A budget-only edit preserves the existing exploration setting.
 
 ## Passive observations from actual checks
 
@@ -187,6 +199,35 @@ References deduplicate repeat events. A check passing establishes that specified
 condition; it does not prove all aspects of software quality. To connect existing
 GitHub/Linear outcomes, bind their actual identifiers to the work ID explicitly.
 This client does not infer that association through textual similarity.
+
+## Automatic signed workflow evidence
+
+For an enrolled signed source in the full gateway profile, declare the condition
+when creating the job, then associate exactly one actual object:
+
+```sh
+hormuz work create --repository company/service \
+  --completion-condition github.pull_request.merged.v1
+hormuz work bind --work-id work-REPLACE_WITH_RETURNED_ID --provider github \
+  --connector-id REVIEWED_CONNECTOR --container-id REVIEWED_REPOSITORY_ID \
+  --object-id ACTUAL_PULL_REQUEST_OBJECT_ID \
+  --completion-condition github.pull_request.merged.v1
+```
+
+Use immutable provider object IDs, not a pull request's displayed number. The
+operator must first enroll the tenant-qualified connector, source binding and
+signed channel. The dashboard lists only that organization's configured choices.
+GitHub merge, GitHub successful check and Linear issue completion are separate
+conditions. A review approval cannot satisfy a merge/check condition. Verified
+reopen/correction events invalidate cache generations; late events cannot override
+newer source facts. No textual similarity guesses an object association.
+
+The existing source endpoint verifies exact signed bytes before the work bridge
+journals metadata; source delivery replay can complete an interrupted observation
+without duplicating it. Raw events, issue text, prompts and plain object IDs are
+not retained in this work store. The fixed hosted provider-pilot excludes enrolled
+portfolio connectors and supports explicit workflow checks instead; do not present
+it as automatic signed-source coverage.
 
 ## Dashboard and API
 

@@ -275,7 +275,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
     sqlite.update(finance_attempt_tables)
     session_tables = set(SQLITE_TABLE.findall(_read_text(root / SESSION_SCHEMA_PATH)))
-    for path in ("hormuz/_onboarding_schema.py", "hormuz/_console_schema.py", "hormuz/_workspace_schema.py", "hormuz/policy_impact.py", "hormuz/work_runtime.py", "hormuz/work_billing.py"):
+    for path in ("hormuz/_onboarding_schema.py", "hormuz/_console_schema.py", "hormuz/_workspace_schema.py", "hormuz/policy_impact.py", "hormuz/work_runtime.py", "hormuz/work_billing.py", "hormuz/work_workflow.py", "hormuz/work_activation.py"):
         additions = set(SQLITE_TABLE.findall(_read_text(root / path)))
         if session_tables.intersection(additions):
             raise DurableDataInventoryError("sqlite_table_owned_more_than_once")

@@ -206,9 +206,11 @@ private paths or workspace credentials in these public settings.
 
 `/evidence/` presents real provider-free executions with synthetic inputs,
 original transcripts, source provenance, and qualification boundaries. It also
-plays the actual authenticated dashboard recording from the local synthetic
-identity/provider fixture, with its seeded estimate and zero paid-provider calls
-labelled in the caption. These
+plays the actual authenticated journey against local synthetic identity, provider,
+Stripe and signed GitHub fixtures. The current recording passed 12 checks with
+three simulated provider responses and zero external network calls or real
+payments. Its estimate is calculated from captured fixture usage and configured
+synthetic rates; no amount is seeded. These
 are functional control demonstrations, not customer savings or completion-time
 results. New AI Work proof must come from actual recorded runtime execution;
 never populate this page with invented output. The public AI Work receipt at
@@ -216,6 +218,22 @@ never populate this page with invented output. The public AI Work receipt at
 executed `docs/evidence/ai-work-functional/receipt.json`; recopy it after any
 regenerated execution before building. It records synthetic configured estimates
 and local timings, not customer savings or production model quality.
+
+Both execution receipts identify the same 27 gateway, billing, identity, CLI,
+UI and runner files by SHA-256. Website tests enforce exact current source hashes
+and byte-identical public recording, poster and browser-check copies. Reproduce
+the browser journey from the source root with installed test dependencies,
+Playwright and Chrome:
+
+```sh
+HORMUZ_QA_PYTHON=/path/to/project-venv/bin/python \
+HORMUZ_QA_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs \
+node website/scripts/ai-work-browser-qa.mjs
+```
+
+See [the browser validation guide](../docs/AI_WORK_BROWSER_VALIDATION.md) for
+interception and qualification boundaries. Regenerate the browser run and gateway
+receipt after source changes, then copy their public artifacts before building.
 
 The cost/speed/outcome chooser on the public home page only explains the policy. Live
 work creation and preference changes happen on the authenticated gateway.

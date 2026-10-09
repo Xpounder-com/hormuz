@@ -65,7 +65,7 @@ class WorkBilling:
                   paid_at INTEGER NOT NULL DEFAULT 0,paid_until INTEGER NOT NULL DEFAULT 0,paid_from INTEGER NOT NULL DEFAULT 0);
             """)
             columns = {row[1] for row in connection.execute("PRAGMA table_info(work_entitlements)")}
-            for name, declaration in (("price_id", "TEXT NOT NULL DEFAULT ''"), ("subscription_from", "INTEGER NOT NULL DEFAULT 0"), ("paid_from", "INTEGER NOT NULL DEFAULT 0")):
+            for name, declaration in (("price_id", "TEXT NOT NULL DEFAULT ''"), ("subscription_from", "INTEGER NOT NULL DEFAULT 0"), ("paid_from", "INTEGER NOT NULL DEFAULT 0"), ("recovery_after", "INTEGER NOT NULL DEFAULT 0")):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE work_entitlements ADD COLUMN {name} {declaration}")
             for organization, (customer, subscription) in self.bindings.items():
@@ -76,6 +76,64 @@ class WorkBilling:
                 connection.execute("INSERT INTO work_entitlements(organization_id,customer,subscription,price_id) VALUES(?,?,?,?) "
                     "ON CONFLICT(organization_id) DO UPDATE SET customer=excluded.customer,subscription=excluded.subscription,price_id=excluded.price_id," + resets,
                     (organization, customer, subscription, self.price_id))
+
+        from .work_activation import WorkActivation
+        self.activation = WorkActivation(self)
+
+    def binding(self, organization):
+        if organization in self.bindings:
+            return self.bindings[organization]
+        with self._connect() as connection:
+            row = connection.execute("SELECT customer,subscription,price_id FROM work_entitlements WHERE organization_id=?", (organization,)).fetchone()
+        return (row[0], row[1]) if row and row[2] == self.price_id else None
+
+    def management_binding(self, organization):
+        """Retain cancellation access without turning a price change into access."""
+        with self._connect() as connection:
+            row = connection.execute("SELECT customer,subscription FROM work_entitlements WHERE organization_id=?", (organization,)).fetchone()
+        if row is None or organization in self.bindings and row != self.bindings[organization]:
+            return None
+        return row
+
+    def funnel(self, organization):
+        """Private current states derived from trusted billing evidence only."""
+        with self._connect() as connection:
+            reviewed = connection.execute("SELECT state,reviewer,reference FROM work_activation WHERE organization_id=?", (organization,)).fetchone()
+            checkout = connection.execute("SELECT 1 FROM work_checkouts WHERE organization_id=? AND state='completed' LIMIT 1", (organization,)).fetchone()
+        active = self.entitled(organization)
+        return {"operator_qualified": int(bool(reviewed and reviewed[1] and reviewed[2] and reviewed[0] in {"qualified", "checkout_pending", "payment_unverified", "active"})),
+            "checkout_payment_received": int(checkout is not None), "payment_verified": int(active), "paid_activation": int(active)}
+
+    @staticmethod
+    def _validate_stripe_url(url, host, path):
+        try:
+            parsed = urlsplit(url)
+            if not isinstance(url, str) or len(url) > 4096 or parsed.scheme != "https" or parsed.netloc != host or not parsed.path.startswith(path) or any(ord(char) < 32 for char in url):
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise WorkRuntimeError("billing_invalid_redirect", 503) from None
+
+    def _stripe(self, path, values, *, idempotency=None, method="POST"):
+        if not self._api_key or not re.fullmatch(r"/v1/[A-Za-z0-9/_-]+", path):
+            raise WorkRuntimeError("billing_api_unavailable", 503)
+        headers = {"Authorization": "Bearer " + self._api_key, "Stripe-Version": STRIPE_VERSION,
+            "Content-Type": "application/x-www-form-urlencoded"}
+        if idempotency:
+            headers["Idempotency-Key"] = idempotency
+        request = urllib.request.Request("https://api.stripe.com" + path + ("?" + urlencode(values) if method == "GET" and values else ""),
+            data=None if method == "GET" else urlencode(values).encode(), headers=headers, method=method)
+        from .work_client import _NoRedirect
+        try:
+            with urllib.request.build_opener(_NoRedirect).open(request, timeout=10) as response:
+                raw = response.read(262_145)
+                if len(raw) > 262_144:
+                    raise ValueError()
+                result = json.loads(raw)
+                if not isinstance(result, dict):
+                    raise ValueError()
+                return result
+        except (ValueError, TypeError, OSError, urllib.error.URLError):
+            raise WorkRuntimeError("billing_api_unavailable", 503) from None
 
     @contextmanager
     def _connect(self):
@@ -111,18 +169,26 @@ class WorkBilling:
     def status(self, organization):
         value = {"status": "payment_unverified", "provider_fees": "separate",
             "paid_activation": "requires_signed_subscription_and_paid_invoice", "portal_available": False}
-        if organization not in self.bindings:
+        binding = self.binding(organization)
+        if binding is None:
+            if self.management_binding(organization) is not None:
+                return {**value, "status": "configuration_changed", "entitled": False, "portal_available": bool(self._api_key)}
             return {**value, "status": "qualification_required"}
         with self._connect() as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute("SELECT * FROM work_entitlements WHERE organization_id=?", (organization,)).fetchone()
         if row is None:
             return value
-        if (row["customer"], row["subscription"]) != self.bindings[organization] or row["price_id"] != self.price_id:
+        if (row["customer"], row["subscription"]) != binding or row["price_id"] != self.price_id:
             return {**value, "status": "configuration_changed", "entitled": False}
         now = self.clock()
         active = row["price_id"] == self.price_id and row["subscription_state"] == "active" and max(row["subscription_from"], row["paid_from"]) <= now < min(row["subscription_until"], row["paid_until"])
+        activation_state = self.activation.status(organization)["state"]
+        if activation_state in {"recovery_required", "rejected", "requested"}:
+            active = False
         state = "active" if active else "payment_unverified" if row["subscription_state"] == "active" and row["paid_until"] == 0 else "expired" if row["subscription_state"] == "active" else row["subscription_state"]
+        if activation_state == "recovery_required":
+            state = "recovery_required"
         return {**value, "status": state, "entitled": active,
             "paid_until": row["paid_until"], "portal_available": bool(self._api_key)}
 
@@ -163,6 +229,9 @@ class WorkBilling:
         organization = next((org for org, pair in self.bindings.items() if pair == (customer, subscription)), None)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            if organization is None:
+                owned = connection.execute("SELECT organization_id FROM work_entitlements WHERE customer=? AND subscription=? AND price_id=?", (customer, subscription, self.price_id)).fetchone()
+                organization = owned[0] if owned else None
             previous = connection.execute("SELECT digest FROM work_billing_events WHERE id=?", (identifier,)).fetchone()
             if previous:
                 if previous[0] != digest:
@@ -172,57 +241,120 @@ class WorkBilling:
             # events must never prevent an authenticated cancellation. Each
             # stored record remains bounded; no raw payment body is retained.
             applied = False
-            if organization and kind in {"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"}:
-                items = _object(item.get("items")).get("data", [])
-                accepted = isinstance(items, list) and len(items) == 1 and isinstance(items[0], dict) and _price(items[0]) == self.price_id and type(items[0].get("quantity", 1)) is int and items[0].get("quantity", 1) == 1
-                end = items[0].get("current_period_end", item.get("current_period_end")) if accepted else 0
-                start = items[0].get("current_period_start", item.get("current_period_start")) if accepted else 0
-                state = item.get("status") if accepted and _integer(start) and _integer(end) and start < end else "price_unverified"
-                if kind.endswith("deleted"):
-                    state = "canceled"
-                if state not in {"active", "canceled", "past_due", "unpaid", "incomplete", "incomplete_expired", "paused", "trialing"}:
-                    state = "unverified"
-                end, start = end if _integer(end) else 0, start if _integer(start) else 0
-                applied = connection.execute("UPDATE work_entitlements SET subscription_state=?,subscription_at=?,subscription_until=?,subscription_from=? "
-                    "WHERE organization_id=? AND customer=? AND subscription=? AND price_id=? AND (subscription_state!='canceled' OR ?!='active') AND (subscription_at<? OR (subscription_at=? AND (?!='active' OR (subscription_state='active' AND (?<subscription_until OR ?>subscription_from)))))",
-                    (state, created, end, start, organization, customer, subscription, self.price_id, state, created, created, state, end, start)).rowcount > 0
-            elif organization and kind in {"invoice.paid", "invoice.payment_failed", "invoice.voided"}:
-                lines = _object(item.get("lines")).get("data", [])
-                accepted = isinstance(lines, list) and len(lines) == 1 and isinstance(lines[0], dict) and _price(lines[0]) == self.price_id
-                end = _object(lines[0].get("period")).get("end") if accepted else None
-                start = _object(lines[0].get("period")).get("start") if accepted else None
-                paid = kind == "invoice.paid" and item.get("status") == "paid" and _integer(item.get("amount_paid")) and item["amount_paid"] > 0
-                if accepted and _integer(start) and _integer(end) and start < end:
-                    applied = connection.execute("UPDATE work_entitlements SET paid_at=?,paid_until=?,paid_from=? WHERE organization_id=? AND customer=? AND subscription=? AND price_id=? AND (paid_at<? OR (paid_at=? AND ?=0))",
-                        (created, end if paid else 0, start if paid else 0, organization, customer, subscription, self.price_id, created, created, int(paid))).rowcount > 0
+            if kind == "checkout.session.completed":
+                bound = self.activation.bind_checkout(connection, item)
+                if bound:
+                    organization, customer, subscription = bound
+                    for fact in connection.execute("SELECT kind,created_at,value FROM work_payment_facts WHERE customer=? AND subscription=? ORDER BY created_at", (customer, subscription)).fetchall():
+                        self._apply_payment(connection, organization, customer, subscription, json.loads(fact[2])["type"], fact[1], json.loads(fact[2])["item"])
+                    applied = True
+            elif kind in {"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "invoice.paid", "invoice.payment_failed", "invoice.voided"}:
+                if organization:
+                    applied = self._apply_payment(connection, organization, customer, subscription, kind, created, item)
+                self._retain_fact(connection, customer, subscription, kind, created, identifier, item)
             connection.execute("INSERT INTO work_billing_events VALUES(?,?)", (identifier, digest))
         return {"status": "applied" if applied else "ignored"}
 
+    def _apply_payment(self, connection, organization, customer, subscription, kind, created, item):
+        applied = False
+        if kind in {"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"}:
+            items = _object(item.get("items")).get("data", [])
+            accepted = isinstance(items, list) and len(items) == 1 and isinstance(items[0], dict) and _price(items[0]) == self.price_id and type(items[0].get("quantity", 1)) is int and items[0].get("quantity", 1) == 1
+            end = items[0].get("current_period_end", item.get("current_period_end")) if accepted else 0
+            start = items[0].get("current_period_start", item.get("current_period_start")) if accepted else 0
+            state = item.get("status") if accepted and _integer(start) and _integer(end) and start < end else "price_unverified"
+            if kind.endswith("deleted"):
+                state = "canceled"
+            if state not in {"active", "canceled", "past_due", "unpaid", "incomplete", "incomplete_expired", "paused", "trialing"}:
+                state = "unverified"
+            end, start = end if _integer(end) else 0, start if _integer(start) else 0
+            applied = connection.execute("UPDATE work_entitlements SET subscription_state=?,subscription_at=?,subscription_until=?,subscription_from=? "
+                "WHERE organization_id=? AND customer=? AND subscription=? AND price_id=? AND ?>recovery_after AND (subscription_state!='canceled' OR ?!='active') AND (subscription_at<? OR (subscription_at=? AND (?!='active' OR (subscription_state='active' AND (?<subscription_until OR ?>subscription_from)))))",
+                (state, created, end, start, organization, customer, subscription, self.price_id, created, state, created, created, state, end, start)).rowcount > 0
+        elif kind in {"invoice.paid", "invoice.payment_failed", "invoice.voided"}:
+            lines = _object(item.get("lines")).get("data", [])
+            accepted = isinstance(lines, list) and len(lines) == 1 and isinstance(lines[0], dict) and _price(lines[0]) == self.price_id
+            end = _object(lines[0].get("period")).get("end") if accepted else None
+            start = _object(lines[0].get("period")).get("start") if accepted else None
+            paid = kind == "invoice.paid" and item.get("status") == "paid" and _integer(item.get("amount_paid")) and item["amount_paid"] > 0
+            if accepted and _integer(start) and _integer(end) and start < end:
+                applied = connection.execute("UPDATE work_entitlements SET paid_at=?,paid_until=?,paid_from=? WHERE organization_id=? AND customer=? AND subscription=? AND price_id=? AND ?>recovery_after AND (paid_at<? OR (paid_at=? AND ?=0))",
+                    (created, end if paid else 0, start if paid else 0, organization, customer, subscription, self.price_id, created, created, created, int(paid))).rowcount > 0
+        return applied
+
+    def _retain_fact(self, connection, customer, subscription, kind, created, event_id, item):
+        if not isinstance(customer, str) or re.fullmatch(r"cus_[A-Za-z0-9]{1,128}", customer) is None or not isinstance(subscription, str) or re.fullmatch(r"sub_[A-Za-z0-9]{1,128}", subscription) is None:
+            return
+        if kind.startswith("customer.subscription."):
+            entries = _object(item.get("items")).get("data", [])
+            if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
+                return
+            entry = entries[0]
+            value = {"id": subscription, "customer": customer, "status": item.get("status"), "items": {"data": [{
+                "price": {"id": _price(entry)}, "quantity": entry.get("quantity", 1),
+                "current_period_start": entry.get("current_period_start", item.get("current_period_start")),
+                "current_period_end": entry.get("current_period_end", item.get("current_period_end"))}]}}
+            category = "subscription"
+        else:
+            entries = _object(item.get("lines")).get("data", [])
+            if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
+                return
+            entry = entries[0]
+            value = {"customer": customer, "parent": {"subscription_details": {"subscription": subscription}},
+                "status": item.get("status"), "amount_paid": item.get("amount_paid"), "lines": {"data": [{
+                "price": {"id": _price(entry)}, "period": {key: _object(entry.get("period")).get(key) for key in ("start", "end")}}]}}
+            category = "invoice"
+        if _price(entries[0]) != self.price_id:
+            return
+        # Store only bounded billing inputs, not raw event bodies, metadata or PII.
+        encoded = json.dumps({"type": kind, "item": value}, separators=(",", ":"))
+        if len(encoded) > 4096:
+            return
+        previous = connection.execute("SELECT created_at,value FROM work_payment_facts WHERE customer=? AND subscription=? AND kind=?", (customer, subscription, category)).fetchone()
+        negative = kind in {"customer.subscription.deleted", "invoice.payment_failed", "invoice.voided"} or kind.startswith("customer.subscription.") and item.get("status") != "active"
+        if previous and (previous[0] > created or previous[0] == created and not negative):
+            return
+        connection.execute("INSERT INTO work_payment_facts VALUES(?,?,?,?,?,?) ON CONFLICT(customer,subscription,kind) DO UPDATE SET created_at=excluded.created_at,event_id=excluded.event_id,value=excluded.value", (customer, subscription, category, created, event_id, encoded))
+
+    def reverify(self, organization):
+        binding = self.binding(organization)
+        if binding is None or self.activation.status(organization)["state"] not in {"qualified", "payment_unverified"}:
+            raise WorkRuntimeError("activation_qualification_required", 409)
+        subscription = self._stripe("/v1/subscriptions/" + binding[1], {}, method="GET")
+        invoice_id = subscription.get("latest_invoice")
+        if subscription.get("id") != binding[1] or subscription.get("customer") != binding[0] or subscription.get("livemode") is not True or not isinstance(invoice_id, str) or re.fullmatch(r"in_[A-Za-z0-9]{1,128}", invoice_id) is None:
+            raise WorkRuntimeError("billing_reverification_invalid", 503)
+        invoice = self._stripe("/v1/invoices/" + invoice_id, {}, method="GET")
+        if invoice.get("id") != invoice_id or invoice.get("customer") != binding[0] or invoice.get("livemode") is not True or _object(_object(invoice.get("parent")).get("subscription_details")).get("subscription") != binding[1]:
+            raise WorkRuntimeError("billing_reverification_invalid", 503)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT customer,subscription,price_id,recovery_after FROM work_entitlements WHERE organization_id=?", (organization,)).fetchone()
+            if row is None or row[:3] != (*binding, self.price_id):
+                raise WorkRuntimeError("billing_configuration_changed", 409)
+            # This evidence comes from current authenticated Stripe API reads,
+            # never a browser body or an old restored webhook. Exact bindings
+            # and current periods are still checked by the normal applier.
+            verified_at = int(self.clock())
+            if verified_at <= row[3]:
+                raise WorkRuntimeError("billing_reverification_retry", 409)
+            self._apply_payment(connection, organization, *binding, "customer.subscription.updated", verified_at, subscription)
+            self._apply_payment(connection, organization, *binding, "invoice.paid", verified_at, invoice)
+        return self.status(organization)
+
     def portal(self, organization, return_url):
-        if organization not in self.bindings or not self._api_key:
+        binding = self.management_binding(organization)
+        if binding is None or not self._api_key:
             raise WorkRuntimeError("billing_portal_unavailable", 503)
-        if self.status(organization).get("status") == "configuration_changed":
-            raise WorkRuntimeError("billing_configuration_changed", 503)
         origin = urlsplit(return_url)
         if origin.scheme != "https" or not origin.hostname or origin.username or origin.password or origin.query or origin.fragment or origin.path != "/work":
             raise WorkRuntimeError("billing_return_url_invalid", 400)
-        request = urllib.request.Request("https://api.stripe.com/v1/billing_portal/sessions",
-            data=urlencode({"customer": self.bindings[organization][0], "return_url": return_url}).encode(),
-            headers={"Authorization": "Bearer " + self._api_key, "Stripe-Version": STRIPE_VERSION, "Content-Type": "application/x-www-form-urlencoded"})
-        from .work_client import _NoRedirect
-        try:
-            with urllib.request.build_opener(_NoRedirect).open(request, timeout=10) as response:
-                body = response.read(65_537)
-                if len(body) > 65_536:
-                    raise ValueError()
-                value = json.loads(body)
-                url = value.get("url", "")
-                parsed = urlsplit(url)
-                if value.get("customer") != self.bindings[organization][0] or parsed.scheme != "https" or parsed.netloc != "billing.stripe.com" or not parsed.path.startswith("/p/") or any(character in url for character in "\r\n\x00"):
-                    raise ValueError()
-                return url
-        except (ValueError, TypeError, OSError, urllib.error.URLError):
-            raise WorkRuntimeError("billing_portal_unavailable", 503) from None
+        value = self._stripe("/v1/billing_portal/sessions", {"customer": binding[0], "return_url": return_url})
+        url = value.get("url", "")
+        self._validate_stripe_url(url, "billing.stripe.com", "/p/")
+        if value.get("customer") != binding[0]:
+            raise WorkRuntimeError("billing_portal_unavailable", 503)
+        return url
 
 
 def handle_webhook(handler):

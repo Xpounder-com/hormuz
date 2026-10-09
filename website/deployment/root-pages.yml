@@ -91,6 +91,8 @@ jobs:
     name: Verify live website
     if: github.repository == 'usehormuz/usehormuz.github.io' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: deploy
+    env:
+      HORMUZ_DASHBOARD_ORIGIN: ${{ vars.HORMUZ_DASHBOARD_ORIGIN }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

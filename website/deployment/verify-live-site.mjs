@@ -8,8 +8,14 @@ export const LIVE_ORIGIN = 'https://usehormuz.github.io';
 export const LIVE_ROUTES = Object.freeze(['/', '/plans/', '/docs/', '/demo/', '/integrations/', '/enterprise/', '/security/', '/resources/', '/contact/', '/privacy/', '/brand/', '/workspace/', '/work/', '/evidence/', '/guides/team-ai-budgets/', '/guides/codex-claude-code-gateway/']);
 export const LIVE_DOWNLOADS = Object.freeze(['hormuz-overview.pdf', 'hormuz-appliance-brief.pdf', 'hormuz-trust-brief.pdf', 'hormuz-buyer-briefing.pptx', 'ai-work-proof.json']);
 
-export async function verifyLiveSite(sourcePin, fetcher = fetch) {
+export async function verifyLiveSite(sourcePin, fetcher = fetch, { dashboardOrigin } = {}) {
   const revision = validateSourcePin(sourcePin);
+  let workDestination;
+  if (dashboardOrigin) {
+    const gateway = new URL(dashboardOrigin);
+    assert.ok(gateway.protocol === 'https:' && !gateway.username && !gateway.password && gateway.pathname === '/' && !gateway.search && !gateway.hash && !gateway.hostname.endsWith('.github.io'), 'Expected a credential-free qualified HTTPS gateway origin');
+    workDestination = `${gateway.origin}/work`;
+  }
   async function request(route) {
     let response;
     try {
@@ -33,6 +39,9 @@ export async function verifyLiveSite(sourcePin, fetcher = fetch) {
     const html = await (await request(route)).text();
     assert.ok(html.includes(`<link rel="canonical" href="${LIVE_ORIGIN}${route}"`), `Canonical mismatch: ${route}`);
     assert.equal((html.match(/<h1[ >]/g) || []).length, 1, `Expected one heading: ${route}`);
+    if (route === '/work/' && workDestination) assert.ok(html.includes(`href="${workDestination}"`), 'Published AI Work entry does not point to the configured gateway');
+    if (route === '/demo/') assert.ok(html.includes('id="work-demo"') && html.includes('/demo/ai-work-demo.webm'), 'Published demo is missing the actual work recording');
+    if (route === '/evidence/') assert.ok(html.includes('id="work-proof"') && html.includes('/downloads/ai-work-proof.json'), 'Published evidence is missing the executed work receipt');
   }
   for (const name of LIVE_DOWNLOADS) {
     const bytes = Buffer.from(await (await request(`/downloads/${name}`)).arrayBuffer());
@@ -62,7 +71,7 @@ export async function verifyLiveSite(sourcePin, fetcher = fetch) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
     const sourcePin = JSON.parse(await readFile('site-source.json', 'utf8'));
-    console.log(JSON.stringify(await verifyLiveSite(sourcePin), null, 2));
+    console.log(JSON.stringify(await verifyLiveSite(sourcePin, fetch, { dashboardOrigin: process.env.HORMUZ_DASHBOARD_ORIGIN }), null, 2));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

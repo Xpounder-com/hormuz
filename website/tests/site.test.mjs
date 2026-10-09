@@ -110,7 +110,7 @@ test('published AI Work proof matches the executed receipt and keeps its conditi
   assert.equal(proof.conditions.customer_savings_validated, false);
   assert.ok(proof.checks.length > 0 && proof.checks.every(check => check.passed === true));
   assert.match(proof.source_commit, /^[a-f0-9]{40}$/);
-  const sourceFiles = ['hormuz/work_runtime.py', 'hormuz/work_gateway.py', 'hormuz/server.py', 'hormuz/usage.py'];
+  const sourceFiles = ['hormuz/work_runtime.py', 'hormuz/work_learning.py', 'hormuz/work_accounting.py', 'hormuz/work_provider_costs.py', 'hormuz/work_gateway.py', 'hormuz/work_workflow.py', 'hormuz/work_workflow_http.py', 'hormuz/work_http.py', 'hormuz/work_billing.py', 'hormuz/work_activation.py', 'hormuz/work_recovery.py', 'hormuz/work_pages.py', 'hormuz/work.css', 'hormuz/work_client.py', 'hormuz/commands/work.py', 'hormuz/config.py', 'hormuz/_config_work.py', 'hormuz/server.py', 'hormuz/usage.py', 'hormuz/_hosted_server.py', 'hormuz/_hosted_state.py', 'hormuz/_hosted_config.py', 'hormuz/_hosted_backup.py', 'hormuz/hosted.py', 'tools/ai_work_proof.py', 'tools/ai_work_browser_fixture.py', 'website/scripts/ai-work-browser-qa.mjs'];
   assert.deepEqual(Object.keys(proof.source_files).sort(), [...sourceFiles].sort());
   for (const path of sourceFiles) {
     const digest = proof.source_files[path];
@@ -132,6 +132,17 @@ test('published AI Work proof matches the executed receipt and keeps its conditi
     const originalMedia = readFileSync(new URL(`../../docs/evidence/ai-work-functional/${originalName}`, import.meta.url));
     assert.ok(publishedMedia.equals(originalMedia), `${publishedName}: public media must match the actual validation artifact`);
   }
+  const browser = JSON.parse(readFileSync(new URL('../public/demo/ai-work-browser-qa.json', import.meta.url), 'utf8'));
+  assert.equal(browser.real_provider_calls, 0);
+  assert.equal(browser.real_payments, 0);
+  assert.equal(browser.external_network_calls, 0);
+  assert.deepEqual(browser.browser_errors, []);
+  assert.deepEqual(browser.failed_requests, []);
+  assert.equal(browser.horizontal_overflow, false);
+  const browserSources = sourceFiles;
+  assert.deepEqual(Object.keys(browser.source_files).sort(), [...browserSources].sort());
+  for (const path of browserSources) assert.equal(browser.source_files[path], createHash('sha256').update(readFileSync(new URL(`../../${path}`, import.meta.url))).digest('hex'), `${path}: rerun browser qualification after source changes`);
+
 });
 test('claim ledger sources exist and social/commercial boundaries remain explicit', () => {
   const ledger = JSON.parse(readFileSync(new URL('../../marketing/claims-v1.json', import.meta.url), 'utf8'));

@@ -202,6 +202,7 @@ def backend(config, *, provider: bool = False, environ=None) -> None:
 def main(argv=None) -> int:
     from .commands.onboarding import add_onboarding_commands, run as run_team
     from ._hosted_backup import export_backup, read_backup_key, restore_backup, verify_backup
+    from .work_recovery import load_profile as load_gateway_recovery_profile
 
     logging.disable(logging.CRITICAL)
     os.umask(0o077)
@@ -210,6 +211,8 @@ def main(argv=None) -> int:
     parser.add_argument("--config", type=Path, default=Path(settings["HORMUZ_CONFIG"]))
     parser.add_argument("--provider-config", type=Path, default=Path(settings[PROVIDER_CONFIG_ENV]))
     parser.add_argument("--workspace-profile", action="store_true", help="Use the workspace profile for offline operator commands")
+    parser.add_argument("--provider-profile", action="store_true", help="Include provider-profile usage, AI Work and billing stores in offline maintenance")
+    parser.add_argument("--gateway-profile", action="store_true", help="Use the full owner-controlled SQLite gateway profile for offline recovery")
     commands = parser.add_subparsers(dest="command")
     for name in (
         "serve", "backend", "workspace-backend", "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate",
@@ -230,6 +233,8 @@ def main(argv=None) -> int:
         )
     add_onboarding_commands(commands)
     args = parser.parse_args(argv)
+    if sum((args.provider_profile, args.gateway_profile, args.workspace_profile)) > 1 or (args.provider_profile or args.gateway_profile) and args.command not in {"initialize", "snapshot", "restore", "backup-export", "backup-restore", "backup-verify", "check", "recovery-check"}:
+        parser.error("Full gateway profile selectors are exclusive and available only for offline maintenance")
     if args.workspace_profile or args.command == "workspace-backend":
         settings["HORMUZ_DOMAIN_API_KEY"] = os.environ.get("HORMUZ_DOMAIN_API_KEY", "")
     try:
@@ -241,8 +246,9 @@ def main(argv=None) -> int:
                               "inference_enabled": False, **result}, sort_keys=True))
             return 0
         config = (
-            load_provider_profile(args.config, args.provider_config, settings)
-            if args.command in {
+            load_gateway_recovery_profile(args.config)
+            if args.gateway_profile else load_provider_profile(args.config, args.provider_config, settings)
+            if args.provider_profile or args.command in {
                 "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate"
             }
             else load_workspace_profile(args.config, settings) if args.workspace_profile or args.command == "workspace-backend" or settings["HORMUZ_HOSTED_MODE"] == "workspace" else load_profile(args.config, settings)

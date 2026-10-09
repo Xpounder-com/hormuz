@@ -57,4 +57,14 @@ def build_ai_work(raw, *, source_path):
         raise ConfigError("ai_work.tool_capable_aliases must reference unique configured models")
     if not enabled and (cache or paid):
         raise ConfigError("ai_work must be enabled for caching or paid entitlements")
-    return AIWorkConfig(enabled, path.resolve() if enabled or "database" in value else None, cache, samples, tuple(actors), paid, price, secret_env, api_env, tuple(approved), tuple(tool_aliases))
+    exploration = value.get("exploration_enabled", False)
+    aliases = value.get("exploration_aliases", [])
+    rate = value.get("exploration_rate_percent", 5)
+    ceiling = value.get("exploration_max_cost_microusd", 0)
+    if type(exploration) is not bool or type(aliases) is not list or len(aliases) > 100 or any(type(alias) is not str or alias not in raw.get("model_routes", {}) for alias in aliases) or len(set(aliases)) != len(aliases):
+        raise ConfigError("ai_work.exploration_aliases must reference unique approved models")
+    if type(rate) is not int or not 1 <= rate <= 20 or type(ceiling) is not int or not 0 <= ceiling <= 9_000_000_000_000_000:
+        raise ConfigError("ai_work exploration sampling or monthly allowance is invalid")
+    if exploration and (not enabled or not aliases or ceiling == 0):
+        raise ConfigError("ai_work exploration requires enabled work, approved models and a monthly allowance")
+    return AIWorkConfig(enabled, path.resolve() if enabled or "database" in value else None, cache, samples, tuple(actors), paid, price, secret_env, api_env, tuple(approved), tuple(tool_aliases), exploration, tuple(aliases), rate, ceiling)

@@ -554,11 +554,19 @@
       "content_boundary": "identity_and_policy_metadata",
       "contains_prompt_or_response_body": false,
       "sqlite_tables": [
+        "ai_work_acquisition",
         "ai_work_attempts",
+        "ai_work_bindings",
+        "ai_work_bridge_events",
+        "ai_work_deliveries",
+        "ai_work_exploration",
+        "ai_work_funnel",
         "ai_work_jobs",
         "ai_work_observations",
         "ai_work_plans",
-        "ai_work_schema"
+        "ai_work_repeat_guards",
+        "ai_work_schema",
+        "ai_work_workflow_keys"
       ],
       "postgresql_tables": []
     },
@@ -567,8 +575,11 @@
       "content_boundary": "identity_and_policy_metadata",
       "contains_prompt_or_response_body": false,
       "sqlite_tables": [
+        "work_activation",
         "work_billing_events",
-        "work_entitlements"
+        "work_checkouts",
+        "work_entitlements",
+        "work_payment_facts"
       ],
       "postgresql_tables": []
     }

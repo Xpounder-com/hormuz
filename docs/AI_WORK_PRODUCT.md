@@ -39,11 +39,14 @@ CLI and supported native configuration.
    organization and application identity through the existing workspace and
    native/OIDC enrollment flow. Explicitly authorize its native/API client and
    model policy. An email address or browser membership is not application access.
-3. For a hosted paid deployment set `ai_work.require_paid` and the approved
-   `billing_price_id`. After independently verifying the account/customer mapping,
-   configure exactly one reviewed organization/customer/subscription binding in
-   `billing_bindings`. Do not accept this binding from a public request or checkout
-   metadata. Provider fees remain separate from the Hormuz subscription.
+3. For a paid deployment set `ai_work.require_paid`, the approved
+   `billing_price_id` and explicit operator `administrator_actor_ids`. The customer
+   requests qualification through `/work`; an operator reviews the actual workflow
+   and current application policy. Checkout creates a durable server-owned session
+   reference. Its signed live completion binds the customer/subscription only to
+   that recorded reference. Existing subscriptions may use independently reviewed
+   `billing_bindings`; public identifiers and arbitrary checkout metadata cannot
+   establish ownership. Provider fees remain separate from Hormuz.
 4. Supply the billing API key and webhook signing secret through the configured
    server environment secret names. The defaults are
    `HORMUZ_WORK_BILLING_API_KEY` and `HORMUZ_WORK_BILLING_WEBHOOK_SECRET`.
@@ -61,7 +64,7 @@ CLI and supported native configuration.
    subscription, and signed state changes close subsequent admission correctly.
 
 The reviewed server configuration uses the following non-secret shape; replace
-all example identifiers with independently verified mappings. No key values
+all example identifiers with independently verified operator/price configuration. No key values
 belong in this file:
 
 ```json
@@ -73,11 +76,7 @@ belong in this file:
     "minimum_samples": 5,
     "require_paid": true,
     "billing_price_id": "price_VERIFIED",
-    "billing_bindings": [{
-      "organization_id": "verified-organization",
-      "customer_id": "cus_VERIFIED",
-      "subscription_id": "sub_VERIFIED"
-    }]
+    "administrator_actor_ids": ["reviewed-operator"]
   }
 }
 ```
@@ -106,6 +105,14 @@ it cannot serve the AI Work runtime or activate paid inference. A customer must 
 explicitly qualified and enrolled on the configured provider deployment before
 using that deployment's `/work` dashboard. A generated provisioning address does
 not establish provider access, paid entitlement or operational qualification.
+
+The fixed provider-pilot profile deliberately excludes portfolio connector
+configuration. Its workflow checks use explicit CLI/SDK observations. Automatic
+signed GitHub/Linear observations and integrated recovery are available in the
+full single-node SQLite gateway profile with enrolled portfolio sources. These
+deployment capabilities are distinct; the dashboard exposes only configured
+channels. See [operations](AI_WORK_OPERATIONS.md) for activation, cancellation,
+support, update and recovery commands.
 
 ## Recovery and support
 

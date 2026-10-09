@@ -10,6 +10,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .work_learning import REQUEST_KINDS
+
+_UNSET = object()
+
 
 class WorkClientError(ValueError):
     def __init__(self, reason, status=0):
@@ -81,8 +85,12 @@ class WorkClient:
     def connect(self):
         return self._request("GET", "/v1/work/connect")
 
-    def create_job(self, repository, *, title=None, task_type="general", context_revision=None):
-        values = {"repository": repository, "task_type": task_type}
+    def create_job(self, repository, *, title=None, task_type=None, context_revision=None, completion_condition="workflow.completed.v1"):
+        values = {"repository": repository}
+        if task_type is not None:
+            values["task_type"] = task_type
+        if completion_condition != "workflow.completed.v1":
+            values["completion_condition"] = completion_condition
         if title is not None:
             values["title"] = title
         if context_revision is not None:
@@ -92,11 +100,28 @@ class WorkClient:
     def job(self, work_id):
         return WorkJob(self, work_id)
 
-    def set_plan(self, scope_type, scope_id, *, budget_microusd, objective="cost", expected_version=None):
+    def set_plan(self, scope_type, scope_id, *, budget_microusd, objective="cost", expected_version=None, exploration_enabled=_UNSET):
         values = {"scope_type": scope_type, "scope_id": scope_id, "budget_microusd": budget_microusd, "objective": objective}
         if expected_version is not None:
             values["expected_version"] = expected_version
+        if exploration_enabled is not _UNSET:
+            if exploration_enabled is not None and type(exploration_enabled) is not bool:
+                raise WorkClientError("invalid_exploration_enabled")
+            values["exploration_enabled"] = exploration_enabled
         return self._request("POST", "/v1/work/policies", values)
+
+    def activation(self, operation=None, **values):
+        if operation is not None and (not isinstance(operation, str) or operation not in {"request", "review", "reset", "reverify"}):
+            raise WorkClientError("invalid_activation_action")
+        return self._request("POST", "/v1/work/activation/" + operation, values) if operation in {"request", "review", "reset", "reverify"} else self._request("GET", "/v1/work/activation")
+
+    def billing(self, action):
+        if action not in {"checkout", "portal"}:
+            raise WorkClientError("invalid_billing_action")
+        return self._request("POST", "/v1/work/billing/" + action, {})
+
+    def support_receipt(self):
+        return self._request("GET", "/v1/work/support/receipt")
 
 
 @dataclass(frozen=True)
@@ -120,13 +145,21 @@ class WorkJob:
     def state(self):
         return self.client._request("GET", self._path)
 
-    def request(self, path, payload):
+    def bindings(self, **values):
+        return self.client._request("POST" if values else "GET", self._path + "/bindings", values if values else None)
+
+    def request(self, path, payload, *, request_kind=None):
         """Attach every request/retry; a successful response never closes the job."""
         if path not in {"/v1/responses", "/v1/chat/completions", "/v1/messages"}:
             raise WorkClientError("unsupported_inference_path")
         if not isinstance(payload, dict) or payload.get("stream") is True:
             raise WorkClientError("use_agent_headers_for_streaming")
-        return self.client._request("POST", path, payload, headers=self.headers)
+        headers = self.headers
+        if request_kind is not None:
+            if not isinstance(request_kind, str) or request_kind not in REQUEST_KINDS:
+                raise WorkClientError("invalid_request_kind")
+            headers["X-Hormuz-Request-Kind"] = request_kind
+        return self.client._request("POST", path, payload, headers=headers)
 
     def act(self, action, *, budget_microusd=None, expected_version=None):
         values = {"action": action}

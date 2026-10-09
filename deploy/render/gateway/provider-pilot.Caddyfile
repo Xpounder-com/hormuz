@@ -29,7 +29,7 @@
 		X-Robots-Tag "noindex, nofollow, noarchive"
 	}
 	@pilot {
-		path /health /ready /console /console/* /v1/auth/* /v1/admin/* /v1/gateway/whoami /v1/gateway/reliability /v1/gateway/usage /v1/responses /v1/responses/compact /v1/messages /v1/messages/count_tokens /v1/models /v1/chat/completions /work /work/ /work.css /work/jobs/* /v1/work/state /v1/work/connect /v1/work/jobs /v1/work/jobs/* /v1/work/policies /v1/work/billing/portal /v1/work/billing/webhook
+		path /health /ready /console /console/* /v1/auth/* /v1/admin/* /v1/gateway/whoami /v1/gateway/reliability /v1/gateway/usage /v1/responses /v1/responses/compact /v1/messages /v1/messages/count_tokens /v1/models /v1/chat/completions /work /work/ /work.css /work/jobs/* /v1/work/state /v1/work/connect /v1/work/jobs /v1/work/jobs/* /v1/work/policies /v1/work/billing/portal /v1/work/billing/webhook /v1/work/billing/checkout /v1/work/activation /v1/work/activation/request /v1/work/activation/review /v1/work/activation/reset /v1/work/activation/reverify /v1/work/support/receipt /work/acquisition /v1/work/acquisition
 	}
 	handle @pilot {
 		request_body {

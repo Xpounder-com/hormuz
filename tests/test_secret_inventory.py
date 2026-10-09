@@ -168,6 +168,56 @@ class SecretInventoryTests(unittest.TestCase):
                 validate_secret_inventory(self.inventory, source_root=root)
         self.assertEqual(raised.exception.code, "secret_inventory_environment_read_mismatch")
 
+    def test_ai_work_managed_sources_are_required_with_exact_custody(self) -> None:
+        entries = [item for item in self.inventory["managed_materials"] if item["id"].startswith("ai-work-")]
+        self.assertEqual(len(entries), 8)
+        mutations = {
+            "id": "unreviewed-work-material",
+            "source_module": "hormuz/session_store.py",
+            "source_qualname": "WorkWorkflow.bind",
+            "material_class": "provider_credential",
+            "custody_mode": "hormuz_encrypted_envelope",
+            "storage_owner": "customer_secret_manager",
+            "runtime_consumer": "custody_runtime",
+            "rotation_authority": "custody_operator",
+            "key_purpose": "data_encryption",
+        }
+        for original in entries:
+            candidate = copy.deepcopy(self.inventory)
+            candidate["managed_materials"] = [item for item in candidate["managed_materials"] if item["id"] != original["id"]]
+            with self.subTest(entry=original["id"], missing=True), self.assertRaisesRegex(
+                SecretInventoryError, "secret_inventory_managed_source_unmapped"
+            ):
+                validate_secret_inventory(candidate, source_root=ROOT)
+            for field, value in mutations.items():
+                candidate = copy.deepcopy(self.inventory)
+                entry = next(item for item in candidate["managed_materials"] if item["id"] == original["id"])
+                entry[field] = value
+                with self.subTest(entry=original["id"], field=field), self.assertRaises(SecretInventoryError):
+                    validate_secret_inventory(candidate, source_root=ROOT)
+
+    def test_local_workflow_key_custody_cannot_replace_other_secret_custody(self) -> None:
+        for entry_id in ("provider-credential-envelope", "session-credential-hashes", "console-browser-cookies"):
+            candidate = copy.deepcopy(self.inventory)
+            entry = next(item for item in candidate["managed_materials"] if item["id"] == entry_id)
+            entry["custody_mode"] = "owner_only_local_key"
+            with self.subTest(entry=entry_id), self.assertRaisesRegex(
+                SecretInventoryError, "secret_inventory_managed_custody_invalid"
+            ):
+                validate_secret_inventory(candidate, source_root=ROOT)
+        candidate = copy.deepcopy(self.inventory)
+        candidate["environment_reads"][1]["custody_mode"] = "owner_only_local_key"
+        with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_secret_custody_invalid"):
+            validate_secret_inventory(candidate, source_root=ROOT)
+
+    def test_work_handoff_cookie_mode_cannot_be_reused_by_other_writer(self) -> None:
+        candidate = copy.deepcopy(self.inventory)
+        entry = next(item for item in candidate["managed_materials"] if item["id"] == "ai-work-campaign-handoff-cookie")
+        entry["id"] = "unreviewed-work-cookie"
+        entry["source_qualname"] = "clear_handoff"
+        with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_managed_custody_invalid"):
+            validate_secret_inventory(candidate, source_root=ROOT)
+
     def test_bulk_environment_access_requires_inventory_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

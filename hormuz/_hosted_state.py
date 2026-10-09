@@ -10,6 +10,7 @@ import secrets
 import shutil
 import sqlite3
 import stat
+import tempfile
 from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
@@ -265,15 +266,23 @@ def _snapshot_locked(
         require_current_session_schema=require_current_session_schema,
     )
     directory = config.database_path.parent
-    _destination(destination, directory, trusted_parent_path=config.session_broker.trusted_parent_path)
+    from .work_recovery import owned_databases, owner_lock, validate_store
+    extra = owned_databases(config)
+    databases = (*DATABASES, *extra)
     with ExitStack() as stack:
+        if extra:
+            stack.enter_context(owner_lock(config.ai_work.database_path))
+            for name in extra:
+                _private(directory / name)
+                validate_store(directory / name, billing=name.endswith(".billing.sqlite3"))
+        _destination(destination, directory, trusted_parent_path=config.session_broker.trusted_parent_path)
         # Hold write reservations on BOTH databases before taking either copy.
         # Backup uses separate readers to avoid backing up a write transaction.
-        for name in DATABASES:
+        for name in databases:
             writer = sqlite3.connect((directory / name).as_uri() + "?mode=rw", uri=True, timeout=5)
             stack.callback(writer.close)
             writer.execute("BEGIN IMMEDIATE")
-        for name in DATABASES:
+        for name in databases:
             path = destination / name
             descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             os.close(descriptor)
@@ -288,7 +297,7 @@ def _snapshot_locked(
             with path.open("rb") as completed:
                 os.fsync(completed.fileno())
         _write(destination / MARKER, _read(directory / MARKER))
-        document = {"version": 1, "files": {name: _sha256(destination / name) for name in (*DATABASES, MARKER)}}
+        document = {"version": 2 if extra else 1, "files": {name: _sha256(destination / name) for name in (*databases, MARKER)}}
         _write(destination / SNAPSHOT, {**document, "binding": _mac(config, "snapshot/v1", document)})
     return usage_schema_version
 
@@ -344,11 +353,14 @@ def migrate_sessions(config: GatewayConfig, snapshot_directory: Path) -> dict[st
 
 def restore(config: GatewayConfig, source: Path) -> dict[str, int | bool]:
     with state_lock(config):
+        from .work_recovery import owned_databases, close_restored
+        extra = owned_databases(config)
+        databases = (*DATABASES, *extra)
         _private(source, directory=True)
-        if {path.name for path in source.iterdir()} != {SNAPSHOT, MARKER, *DATABASES}:
+        if {path.name for path in source.iterdir()} != {SNAPSHOT, MARKER, *databases}:
             raise HostedError("hosted_snapshot_files_invalid")
         manifest = _read(source / SNAPSHOT)
-        if set(manifest) != {"version", "files", "binding"} or manifest["version"] != 1 or not isinstance(manifest["files"], dict) or set(manifest["files"]) != {*DATABASES, MARKER}:
+        if set(manifest) != {"version", "files", "binding"} or manifest["version"] != (2 if extra else 1) or not isinstance(manifest["files"], dict) or set(manifest["files"]) != {*databases, MARKER}:
             raise HostedError("hosted_snapshot_manifest_invalid")
         signature = manifest.pop("binding")
         if not isinstance(signature, str) or not hmac.compare_digest(signature, _mac(config, "snapshot/v1", manifest)):
@@ -359,36 +371,44 @@ def restore(config: GatewayConfig, source: Path) -> dict[str, int | bool]:
                 raise HostedError("hosted_snapshot_digest_mismatch")
         check_initialized(at_directory(config, source))
         destination = config.database_path.parent
-        _destination(destination, source, trusted_parent_path=config.session_broker.trusted_parent_path)
-        for name in DATABASES:
-            descriptor = os.open(destination / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "wb") as output, (source / name).open("rb") as input_file:
-                shutil.copyfileobj(input_file, output)
-                output.flush()
-                os.fsync(output.fileno())
-            if not hmac.compare_digest(manifest["files"][name], _sha256(destination / name)):
-                raise HostedError("hosted_snapshot_digest_mismatch")
-        store = sessions(config)
-        directory = TeamDirectory(config, store)
-        with store._connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            for member in connection.execute("SELECT * FROM onboarding_memberships WHERE status != 'disabled'").fetchall():
-                directory._disable(connection, member)
-            # Defense for unbound flows and sessions, including older snapshots.
-            now = _isoformat(store._now())
-            connection.execute("UPDATE human_sessions SET revoked_at = ? WHERE revoked_at IS NULL", (now,))
-            connection.execute("UPDATE onboarding_invitations SET status = 'revoked', secret_hash = NULL, completed_at = ? WHERE status = 'pending'", (now,))
-            connection.execute("UPDATE session_enrollments SET status = 'failed', secret_hash = NULL, encrypted_flow = NULL, state_hash = NULL, browser_cookie_hash = NULL WHERE status IN ('pending', 'authorizing', 'exchanging', 'authorized')")
-            connection.execute("UPDATE console_grants SET status = 'revoked', authorization_version = authorization_version + 1, updated_at = ? WHERE status = 'active'", (now,))
-            connection.execute("UPDATE console_sessions SET revoked_at = ? WHERE revoked_at IS NULL", (now,))
-            connection.execute("UPDATE console_login_flows SET status = 'failed', state_hash = NULL, browser_cookie_hash = NULL, encrypted_flow = NULL WHERE status IN ('pending', 'exchanging')")
-            connection.execute("UPDATE workspaces SET status = 'closed'")
-            connection.execute("UPDATE workspace_domains SET status = 'removed', version = version + 1, verified_until = NULL, check_started_at = NULL, updated_at = ?", (now,))
-            connection.execute("UPDATE workspace_sessions SET revoked_at = ? WHERE revoked_at IS NULL", (now,))
-            connection.execute("UPDATE workspace_login_flows SET status = 'failed', state_hash = NULL, browser_cookie_hash = NULL, encrypted_flow = NULL WHERE status IN ('pending', 'exchanging')")
-            connection.execute("UPDATE workspace_handoffs SET consumed_at = ?, secret_hash = NULL WHERE consumed_at IS NULL", (now,))
-        counts = _assert_recovery_closed(config)
-        # A crash before this last write leaves an unactivatable partial restore.
-        _write(destination / MARKER, _marker(config, recovered=True))
-        check_initialized(config)
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(destination)
+        _parent(destination, trusted_parent_path=config.session_broker.trusted_parent_path)
+        with tempfile.TemporaryDirectory(prefix=".hormuz-closed-restore-", dir=destination.parent) as temporary:
+            staged = Path(temporary) / "state"
+            staged.mkdir(mode=0o700)
+            target = at_directory(config, staged)
+            for name in databases:
+                descriptor = os.open(staged / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, "wb") as output, (source / name).open("rb") as input_file:
+                    shutil.copyfileobj(input_file, output)
+                    output.flush()
+                    os.fsync(output.fileno())
+                if not hmac.compare_digest(manifest["files"][name], _sha256(staged / name)):
+                    raise HostedError("hosted_snapshot_digest_mismatch")
+            store = sessions(target)
+            directory = TeamDirectory(target, store)
+            with store._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                for member in connection.execute("SELECT * FROM onboarding_memberships WHERE status != 'disabled'").fetchall():
+                    directory._disable(connection, member)
+                # Defense for unbound flows and sessions, including older snapshots.
+                now = _isoformat(store._now())
+                connection.execute("UPDATE human_sessions SET revoked_at = ? WHERE revoked_at IS NULL", (now,))
+                connection.execute("UPDATE onboarding_invitations SET status = 'revoked', secret_hash = NULL, completed_at = ? WHERE status = 'pending'", (now,))
+                connection.execute("UPDATE session_enrollments SET status = 'failed', secret_hash = NULL, encrypted_flow = NULL, state_hash = NULL, browser_cookie_hash = NULL WHERE status IN ('pending', 'authorizing', 'exchanging', 'authorized')")
+                connection.execute("UPDATE console_grants SET status = 'revoked', authorization_version = authorization_version + 1, updated_at = ? WHERE status = 'active'", (now,))
+                connection.execute("UPDATE console_sessions SET revoked_at = ? WHERE revoked_at IS NULL", (now,))
+                connection.execute("UPDATE console_login_flows SET status = 'failed', state_hash = NULL, browser_cookie_hash = NULL, encrypted_flow = NULL WHERE status IN ('pending', 'exchanging')")
+                connection.execute("UPDATE workspaces SET status = 'closed'")
+                connection.execute("UPDATE workspace_domains SET status = 'removed', version = version + 1, verified_until = NULL, check_started_at = NULL, updated_at = ?", (now,))
+                connection.execute("UPDATE workspace_sessions SET revoked_at = ? WHERE revoked_at IS NULL", (now,))
+                connection.execute("UPDATE workspace_login_flows SET status = 'failed', state_hash = NULL, browser_cookie_hash = NULL, encrypted_flow = NULL WHERE status IN ('pending', 'exchanging')")
+                connection.execute("UPDATE workspace_handoffs SET consumed_at = ?, secret_hash = NULL WHERE consumed_at IS NULL", (now,))
+            close_restored(staged, extra)
+            counts = _assert_recovery_closed(target)
+            # A crash before this last write leaves an unactivatable partial restore.
+            _write(staged / MARKER, _marker(target, recovered=True))
+            check_initialized(target)
+            os.rename(staged, destination)
         return {"recovered_closed": True, **counts}

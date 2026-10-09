@@ -328,23 +328,32 @@ customer operators and providers remain authoritative.
 
 ### AI work databases
 
-`ai_work_metadata` owns authenticated job, plan, attempt and observation
-metadata in `ai_work_database_file`. `ai_work_billing_metadata` owns approved
-subscription/customer bindings, entitlement state and signed event digests in
-`ai_work_billing_database_file`. Both are explicitly enabled, separate local
-SQLite stores with owner-only files. Neither persists prompts or model answers.
-Operators must consistently back up and restore these alongside the usage
-store with processes stopped. Existing hosted snapshot tooling does not include
-these stores automatically; paid operation requires that explicit recovery step.
-Deleting the work ledger removes budget history and must not be used to reset
-an active customer's allowance. Retention, exported metadata, backups and
-offline deletion remain operator responsibilities. Request/answer reuse is
-bounded process memory; stopping the runtime clears it.
+`ai_work_metadata` owns authenticated jobs, plans, attempts, timing, observations,
+explicit signed-source associations, a private connector replay journal and
+consented acquisition metadata in `ai_work_database_file`.
+`ai_work_billing_metadata` owns trusted subscription/customer bindings,
+qualification, checkout references, signed payment evidence and entitlement
+state in `ai_work_billing_database_file`. Both are explicitly enabled,
+owner-only SQLite stores. Neither persists prompts or model answers. Private
+workflow fingerprints use a nonexported owner key within the work store.
 
-Work tables are `ai_work_schema`, `ai_work_plans`, `ai_work_jobs`,
-`ai_work_attempts` and `ai_work_observations`. Payment metadata tables are
-`work_billing_events` and `work_entitlements`. These local stores have no
-PostgreSQL replicas and require one owning gateway process per database.
+The full-gateway SQLite profile snapshot and encrypted backup commands include
+these stores alongside session and usage state under exclusive stopped-owner
+locks. The fixed PostgreSQL provider-pilot profile does not qualify this archive
+as recovery for its live usage store. Restore validates all files before publishing a directory, pauses jobs,
+retains unknown spend holds, fences pending connector observations and closes
+payment authority until requalification and fresh Stripe verification.
+This integrated recovery profile requires SQLite; PostgreSQL deployment needs
+an independently qualified consistent recovery procedure. Deleting the ledger
+must not reset an active customer's allowance. Retention, private metadata
+exports, backups and offline deletion remain operator responsibilities.
+Answer bodies are bounded process memory; stopping the runtime clears them.
+
+Work tables are `ai_work_acquisition`, `ai_work_attempts`, `ai_work_bindings`, `ai_work_bridge_events`, `ai_work_deliveries`, `ai_work_exploration`, `ai_work_funnel`, `ai_work_jobs`, `ai_work_observations`, `ai_work_plans`, `ai_work_repeat_guards`, `ai_work_schema`, `ai_work_workflow_keys`.
+Payment metadata tables are `work_activation`, `work_billing_events`, `work_checkouts`, `work_entitlements`, `work_payment_facts`.
+These stores have no PostgreSQL replicas and require one owning gateway
+process per database. Backup archives contain private identity and policy
+metadata and must retain owner access controls.
 
 ```bash
 python tools/verify_durable_data_inventory.py

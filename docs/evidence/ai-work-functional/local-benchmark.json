@@ -1,7 +1,35 @@
 {
   "attempts": 99990,
-  "background_build_ms": 24.711583,
+  "background_build_ms": 34.164875,
   "benchmark_episodes": 1000,
+  "budget_aware_selection": {
+    "expected_selection_passed": true,
+    "job_cap_microusd": 100,
+    "max_costs_microusd": {
+      "cheap": 10,
+      "fast": 20
+    },
+    "monthly_scope_relationship": "one_repository_workspace_and_repository_spend_are_identical",
+    "repository_cap_microusd": 1000000,
+    "route_max_ms": 20.841375,
+    "route_p50_ms": 18.901333,
+    "route_p95_ms": 19.860083,
+    "routing_target_ms": 30,
+    "routing_target_passed": true,
+    "samples": 100,
+    "scope": "snapshot_selector_plus_finite_work_budget_eligibility_excludes_gateway_normalization_policy_egress_and_atomic_admission",
+    "selected_models": [
+      "cheap"
+    ],
+    "workspace_cap_microusd": 2000000
+  },
+  "cohort": {
+    "completion_condition": "synthetic.completed.v1",
+    "context_signature": "830047c6a91720a29bf6f274b50b057ef9aaddea5642dde84e2a8febc31827f0",
+    "request_shape": "plain.830047c6a91720a29bf6f274b50b057e",
+    "task_origin": "declared",
+    "task_type": "benchmark"
+  },
   "displayed_jobs": 100,
   "expected_selection_passed": true,
   "fixture": "synthetic_local_sqlite_metadata",
@@ -12,13 +40,13 @@
     "not_production_load_or_provider_latency",
     "not_customer_savings_or_quality_evidence"
   ],
-  "measured_at": "2026-10-08T19:43:10.569893+00:00",
+  "measured_at": "2026-10-09T00:31:58.533777+00:00",
   "provider_calls": 0,
-  "report_json_bytes": 530525,
-  "report_ms": 43.346834,
-  "route_max_ms": 0.488917,
-  "route_p50_ms": 0.303917,
-  "route_p95_ms": 0.392541,
+  "report_json_bytes": 1144308,
+  "report_ms": 1081.857541,
+  "route_max_ms": 0.714625,
+  "route_p50_ms": 0.376,
+  "route_p95_ms": 0.481542,
   "routing_samples": 500,
   "routing_target_ms": 30,
   "routing_target_passed": true,
@@ -27,10 +55,14 @@
   "selected_models": [
     "cheap"
   ],
+  "selector_scope": "snapshot_selector_excludes_gateway_normalization_policy_egress_and_atomic_admission",
   "source_boundary": "working_tree_files_identified_by_sha256",
   "source_files": {
-    "hormuz/work_runtime.py": "6fe979abc7f0a0ba93931b319565edd6287be84220251b964b43cdb80a98cecd",
-    "tools/ai_work_benchmark.py": "ce60dd0d59acb31e14142c954b8e646d76d797ef7fd7a72bbc46193135ead933"
+    "hormuz/work_accounting.py": "0d36b1312301da6aaeb41aafa5fd34a1b65bab9e0ea5ff066316ec2f25bd1379",
+    "hormuz/work_learning.py": "a054014cb5ee15285f6b077b3b55acd9098cc0d61f7fad49e9e521832268bd86",
+    "hormuz/work_provider_costs.py": "aa9b4594bbb72157ed98fd0beeb295548d9c2b804a1bc2966589b0870fbdede7",
+    "hormuz/work_runtime.py": "da1c901cba36663cc0f39928cd4f8d9fa14f797068288e3d80999e9a927708c1",
+    "tools/ai_work_benchmark.py": "8447da6589e164c29762f66dd8711608356cace3ba8befb08e2c3f0e1e7a0c08"
   },
   "total_jobs": 10000
 }

@@ -185,13 +185,16 @@ class _ProviderRehearsalResponse:
         return None
 
 
-def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) -> bool:
+def _provider_input_tokens_bounded(
+    protocol: str, request: Mapping[str, Any], *, text_only: bool = False
+) -> bool:
     """Recognize request inputs whose billed content is self-contained.
 
-    Serialized bytes conservatively bound inline text/data, but cannot bound
-    content a provider resolves from stored state, a URL, a file identifier,
-    or a server-side tool. Unknown reference forms fail closed when a work
-    budget is active; this classifier never fetches or inspects content.
+    Preserve the existing attribution contract for self-contained inline
+    data. AI Work additionally requires text-only reservations: serialized
+    bytes cannot bound modality-specific image/document processing. Provider
+    references fail closed in either mode; this classifier never fetches or
+    inspects content.
     """
 
     if protocol == "openai":
@@ -239,6 +242,10 @@ def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) ->
         if kind == "image_url":
             # Even inline images have modality-specific token pricing; a
             # serialized text-byte bound cannot authorize their work cost.
+            return False
+        if text_only and kind in {"input_image", "input_file", "image", "document"}:
+            # Inline data is still not a text-token bound: compressed images
+            # and documents may expand into independently billed content.
             return False
         if kind == "input_image":
             if value.get("file_id") is not None:
@@ -448,6 +455,7 @@ class GatewayServer(ThreadingHTTPServer):
         except Exception:
             if self.work_runtime is not None:
                 self.work_runtime.close()
+            work_gateway.close(self)
             if self.impact_recorder is not None:
                 self.impact_recorder.close()
             self._close_postgres_pool()
@@ -516,6 +524,7 @@ class GatewayServer(ThreadingHTTPServer):
         finally:
             if self.work_runtime is not None:
                 self.work_runtime.close()
+            work_gateway.close(self)
             if self.workspace is not None:
                 self.workspace.domains.close()
             if self.impact_recorder is not None:
@@ -785,6 +794,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._work_started_ns = time.monotonic_ns()
+        self._work_attempt_started_ns = self._work_started_ns
+        self._work_is_retry = False
         self._response_started = False
         self._attribution_result = None
         path = urlsplit(self.path).path
@@ -844,6 +856,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         except AdmissionError as error:
             self._reject_attribution(identity, default_client, protocol, error)
         except WorkRuntimeError as error:
+            self.close_connection = True
+            if getattr(self, "_response_started", False):
+                LOGGER.error("ai_work_post_relay_failure relay_started=true")
+                return
             self._send_protocol_error(protocol, "AI work request requires attention: " + error.reason,
                 error.status, code="hormuz_ai_work_" + error.reason)
         except _STORAGE_FAILURES as error:
@@ -923,8 +939,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_protocol_error(protocol, decision.reason, HTTPStatus.FORBIDDEN, code="hormuz_policy_denied")
             return
 
-        decision = work_gateway.prepare(self, identity, decision, request_body,
-            client=client, protocol=protocol, output=requested_output, account_usage=account_usage)
         is_responses_create = protocol == "openai" and urlsplit(self.path).path == "/v1/responses"
         if (
             is_responses_create
@@ -977,6 +991,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         declared_context = context_headers[0].strip() if context_headers else None
         try:
+            redaction_started_ns = time.monotonic_ns()
             inspection = inspect_compacted_request(
                 request_body,
                 protocol=protocol,
@@ -985,6 +1000,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 declared_version=declared_context,
             )
             redaction = inspection.redaction
+            self._work_redaction_ms = (time.monotonic_ns() - redaction_started_ns) / 1_000_000
         except CompactionEnforcementError:
             self._send_protocol_error(
                 protocol,
@@ -1042,6 +1058,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # Route only the sanitized request, after the same governance checks
+        # used by the configured baseline. Selection cannot widen its caps.
+        decision = work_gateway.prepare(self, identity, decision, redaction.value,
+            client=client, protocol=protocol, output=requested_output,
+            output_field=output_field, account_usage=account_usage)
+        sanitized = dict(redaction.value, model=decision.route.upstream_model)
+        if decision.max_output_tokens is not None:
+            previous = sanitized.get(output_field)
+            sanitized[output_field] = min(previous, decision.max_output_tokens) if type(previous) is int else decision.max_output_tokens
+        redaction = replace(redaction, value=sanitized)
         policy_action = decision.action
         if redaction.count:
             policy_action = f"{policy_action}+redacted"
@@ -1174,6 +1200,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
 
         started_ns = time.monotonic_ns()
+        self._work_provider_ms = None
         try:
             if (
                 getattr(self, "_failover_rehearsal_requested", False)
@@ -1186,7 +1213,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
-            work_gateway.settle(self, identity, attempt, started_ns=started_ns)
             if account_usage and attempt is not None:
                 self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
                     attempt=attempt,
@@ -1201,6 +1227,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         downstream_bytes_sent=0,
                     ),
                 )
+            work_gateway.settle(self, identity, attempt, started_ns=started_ns)
             self._send_protocol_error(
                 protocol,
                 f"Upstream provider is unavailable: {error}",
@@ -1210,10 +1237,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
 
         response_headers_us = self._elapsed_us(started_ns)
+        self._work_provider_ms = (time.monotonic_ns() - started_ns) / 1_000_000
         status = getattr(response, "status", response.getcode())
         if 300 <= status < 400:
             response.close()
-            work_gateway.settle(self, identity, attempt, started_ns=started_ns)
             if account_usage and attempt is not None:
                 # A redirect can follow an accepted POST. Its status alone
                 # cannot establish whether provider work was billable, so
@@ -1231,6 +1258,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         downstream_bytes_sent=0,
                     ),
                 )
+            work_gateway.settle(self, identity, attempt, started_ns=started_ns)
             self._send_protocol_error(
                 protocol,
                 "Upstream provider redirect refused.",
@@ -1249,7 +1277,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         ):
             response.close()
             request_status = "rate_limited" if status == HTTPStatus.TOO_MANY_REQUESTS else "failed"
-            work_gateway.settle(self, identity, attempt, cost=0, status="failed", started_ns=started_ns)
             self.server.provider_reliability_store.finalize_request_attempt(
                 attempt=attempt,
                 organization_id=identity.organization_id,
@@ -1265,6 +1292,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     downstream_bytes_sent=0,
                 ),
             )
+            work_gateway.settle(self, identity, attempt, cost=0, status="failed", started_ns=started_ns)
             observation = getattr(self, "_impact_observations", {}).get(attempt.attempt_id)
             if observation is not None and self.server.impact_recorder is not None:
                 self.server.impact_recorder.submit(replace(observation, status=request_status))
@@ -1402,7 +1430,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             read_chunk = response.read
         try:
             while True:
-                chunk = read_chunk(_RELAY_CHUNK_BYTES)
+                read_started_ns = time.monotonic_ns()
+                try:
+                    chunk = read_chunk(_RELAY_CHUNK_BYTES)
+                finally:
+                    # Provider transport blocking time excludes our parsing,
+                    # ledger operations and downstream writes. It is not the
+                    # provider's internal GPU execution time.
+                    self._work_provider_ms += (time.monotonic_ns() - read_started_ns) / 1_000_000
                 if not chunk:
                     break
                 if first_body_byte_us is None:
@@ -1486,7 +1521,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             elif status == HTTPStatus.TOO_MANY_REQUESTS:
                 request_status = "rate_limited"
             elif 200 <= status < 300:
-                work_gateway.settle(self, identity, attempt, started_ns=started_ns)
                 self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
                     attempt=attempt,
                     organization_id=identity.organization_id,
@@ -1494,6 +1528,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     provider_metrics=provider_metrics,
                     finance_observation=parsed_usage.finance,
                 )
+                work_gateway.settle(self, identity, attempt, started_ns=started_ns)
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s requested_model=%s reason=provider_stream_interrupted",
                     identity.actor_id,
@@ -1506,7 +1541,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             else:
                 request_status = "failed"
             if request_status == "succeeded" and not usage.evidence_complete:
-                work_gateway.settle(self, identity, attempt, started_ns=started_ns)
                 self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
                     attempt=attempt,
                     organization_id=identity.organization_id,
@@ -1514,6 +1548,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     provider_metrics=provider_metrics,
                     finance_observation=parsed_usage.finance,
                 )
+                work_gateway.settle(self, identity, attempt, started_ns=started_ns)
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s "
                     "requested_model=%s reason=provider_usage_unavailable",
@@ -1542,11 +1577,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if configured_estimate.availability == "available":
                 assert configured_estimate.amount_microusd is not None
                 cost = configured_estimate.amount_microusd
-            work_gateway.settle(self, identity, attempt,
-                cost=cost if usage.evidence_complete or status in {429, 529} else None,
-                status="succeeded" if request_status == "succeeded" else "failed", started_ns=started_ns)
-            if request_status == "succeeded" and cache_capture and downstream_ok:
-                work_gateway.cache_response(self, identity, decision, request_value, bytes(cache_body), status=status, content_type=content_type)
+            # Commit provider evidence independently before optional work
+            # receipts/timing/cache: a work-store failure cannot erase a known
+            # provider charge or release an ambiguous provider reservation.
             self.server.provider_reliability_store.finalize_request_attempt(
                 attempt=attempt,
                 organization_id=identity.organization_id,
@@ -1563,6 +1596,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 finance_observation=parsed_usage.finance,
                 configured_estimate=configured_estimate,
             )
+            work_gateway.settle(self, identity, attempt,
+                cost=cost if usage.evidence_complete or status in {429, 529} else None,
+                status="succeeded" if request_status == "succeeded" else "failed", started_ns=started_ns)
+            if request_status == "succeeded" and cache_capture and downstream_ok:
+                work_gateway.cache_response(self, identity, decision, request_value, bytes(cache_body), status=status, content_type=content_type)
             observation = getattr(self, "_impact_observations", {}).get(attempt.attempt_id)
             if observation is not None and self.server.impact_recorder is not None:
                 self.server.impact_recorder.submit(replace(
@@ -1617,7 +1655,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if not output_tokens_bounded:
             reserved_output_tokens = 0
         reserved_input_tokens = len(body)
-        input_tokens_bounded = _provider_input_tokens_bounded(protocol, request_value)
+        input_tokens_bounded = _provider_input_tokens_bounded(
+            protocol, request_value, text_only=self.server.work_runtime is not None
+        )
         reserved_cost_microusd = route.estimate_reservation_cost_microusd(
             input_tokens=reserved_input_tokens,
             output_tokens=max(0, reserved_output_tokens),

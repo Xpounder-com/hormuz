@@ -35,9 +35,12 @@ def _ai_work_route(path):
     return path in {
         "/work", "/work/", "/work.css", "/v1/work/state", "/v1/work/connect",
         "/v1/work/jobs", "/v1/work/policies", "/v1/work/billing/portal",
-        "/v1/work/billing/webhook",
+        "/v1/work/billing/webhook", "/v1/work/billing/checkout", "/work/acquisition",
+        "/v1/work/acquisition", "/v1/work/activation", "/v1/work/activation/request",
+        "/v1/work/activation/review", "/v1/work/activation/reset", "/v1/work/activation/reverify",
+        "/v1/work/support/receipt",
     } or re.fullmatch(r"/work/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}", path) is not None or re.fullmatch(
-        r"/v1/work/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?:/(?:actions|observations))?", path
+        r"/v1/work/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?:/(?:actions|observations|bindings))?", path
     ) is not None
 
 

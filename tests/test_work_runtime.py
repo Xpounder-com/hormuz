@@ -382,14 +382,14 @@ class WorkRuntimeTests(unittest.TestCase):
                 "VALUES(?,'company','alice','history/repository','history','completed',?,?,?)",
                 (("history-" + str(index), previous_month, previous_month, previous_month) for index in range(10_000)))
             connection.executemany(
-                "INSERT INTO ai_work_plans VALUES('company','job',?,1,100,'cost',?)",
+                "INSERT INTO ai_work_plans(organization_id,scope_type,scope_id,version,budget_microusd,objective,updated_at) VALUES('company','job',?,1,100,'cost',?)",
                 (("history-" + str(index), previous_month) for index in range(10_000)))
             connection.executemany(
                 "INSERT INTO ai_work_attempts(organization_id,actor_id,request_id,work_id,model,protocol,reason,state,reserved_microusd,cost_microusd,created_at,settled_at) "
                 "VALUES('company','alice',?,'history-0','fast','openai','history','succeeded',1,1,?,?)",
                 (("history-attempt-" + str(index), previous_month, previous_month) for index in range(100_000)))
             connection.executemany(
-                "INSERT INTO ai_work_observations VALUES(?,'company','alice','history-0','completed','history',NULL,?)",
+                "INSERT INTO ai_work_observations(observation_id,organization_id,actor_id,work_id,status,source,reference,observed_at) VALUES(?,'company','alice','history-0','completed','history',NULL,?)",
                 (("history-observation-" + str(index), previous_month) for index in range(100_000)))
         work = self.work()
         self.runtime.set_plan("company", "repository", "org/repo", 100, "speed")

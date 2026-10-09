@@ -50,6 +50,23 @@ class WorkClientTests(TestCase):
             job.observe_check(1, reference="ci/run-2")
             self.assertEqual(request.call_args.args[2]["status"], "corrected")
 
+    def test_plan_edits_preserve_or_explicitly_clear_exploration_and_repeat_kind(self):
+        client = self.client()
+        with mock.patch.object(client, "_request", return_value={}) as request:
+            client.set_plan("job", "work-123", budget_microusd=100)
+            self.assertNotIn("exploration_enabled", request.call_args.args[2])
+            client.set_plan("job", "work-123", budget_microusd=100, exploration_enabled=False)
+            self.assertIs(False, request.call_args.args[2]["exploration_enabled"])
+            client.set_plan("job", "work-123", budget_microusd=100, exploration_enabled=None)
+            self.assertIsNone(request.call_args.args[2]["exploration_enabled"])
+            client.job("work-123").request("/v1/responses", {}, request_kind="legitimate_iteration")
+            self.assertEqual("legitimate_iteration", request.call_args.kwargs["headers"]["X-Hormuz-Request-Kind"])
+            dispatched = request.call_count
+            for kind in ("invented", [], "retry\r\nAuthorization: attack"):
+                with self.assertRaises(WorkClientError):
+                    client.job("work-123").request("/v1/responses", {}, request_kind=kind)
+            self.assertEqual(dispatched, request.call_count)
+
     def test_cli_parses_budget_exactly_and_prints_safe_work_header(self):
         parser = argparse.ArgumentParser()
         work.add_work_commands(parser.add_subparsers(dest="command", required=True))

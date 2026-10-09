@@ -7,6 +7,17 @@ still govern every provider request. See [the product operating guide](docs/AI_W
 and [runtime configuration](docs/AI_WORK_RUNTIME.md) for implemented behavior,
 supported agent/API connections and the remaining production qualification gates.
 
+The [reproducible browser journey](docs/AI_WORK_BROWSER_VALIDATION.md) passes
+12 checks across qualification, synthetic payment-gated activation, budget and
+priority selection, ordinary Responses API work, cache reuse and corrective
+repeat, a budget stop and approved continuation, and a signed workflow result.
+Its [recording and conditions](docs/evidence/ai-work-functional/AI_WORK_BROWSER_QA.json)
+use three local simulated provider responses. The separate
+[mechanics receipt](docs/evidence/ai-work-functional/receipt.json) passes 35 checks
+across 13 local fixture calls. Both identify 27 executed source files by SHA-256;
+neither makes real-provider calls or payments, qualifies an installed native agent,
+or proves customer savings or production model quality.
+
 [![CI](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Xpounder-com/hormuz)](https://github.com/Xpounder-com/hormuz/releases)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](pyproject.toml)
