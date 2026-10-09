@@ -50,8 +50,8 @@ Installed versions identify the specific tested SDK combination.
 
 The [recorded local run](receipt.json) on 2026-10-09 passed all six cases using OpenAI 3.27.0,
 Anthropic 1.12.1 and HTTPX2 2.13.1 on Python 3.12.12. Its 33-file manifest matches
-the tested files, including the public configuration loader;
-`e662f9587195ffdc7cecbaf10cb2396757947a23` identifies the starting checkout
+the tested files, including the public configuration loader and reviewed billing path;
+`e87901e960bb7b3b7cf6e07f57d1e71445632595` identifies the starting checkout
 revision. Later evidence metadata does not change that execution boundary.
 SQLite retained six active jobs, six successful response attempts
 and zero outcome observations. Chat streaming required two confirmation reads;

@@ -7,10 +7,9 @@ savings, model quality, live payments, a signed distribution or production
 deployment readiness.
 
 The bounded gateway, provider tour, browser journey and installed SDK executions
-were regenerated after the terminal-order, closed-frame, concurrent SDK
-confirmation, storage-error guards, SQLite connection cleanup and public
-configuration-loader exploration fix. Their source hashes identify the tested
-candidate files.
+were regenerated after the reviewed billing portal and durable checkout fixes.
+Their source hashes identify the tested runtime, including its request, storage,
+configuration-loader and stream guards.
 
 | Artifact | What it establishes |
 | --- | --- |
