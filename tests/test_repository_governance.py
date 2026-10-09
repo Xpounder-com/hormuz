@@ -408,7 +408,10 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ("            clients/rust/target/release/windows-rebuild.json\n", ""),
             ("rebuild_sha256 = (Get-FileHash target/release/windows-rebuild.json -Algorithm SHA256).Hash.ToLowerInvariant()", 'rebuild_sha256 = "unverified"'),
             ("acceptance_sha256 = (Get-FileHash target/release/windows-acceptance.json -Algorithm SHA256).Hash.ToLowerInvariant()", 'acceptance_sha256 = "unverified"'),
-            ("          if-no-files-found: error", "          if-no-files-found: warn"),
+            (
+                "            clients/rust/target/release/windows-rebuild.json\n          if-no-files-found: error",
+                "            clients/rust/target/release/windows-rebuild.json\n          if-no-files-found: warn",
+            ),
         )
         for original, replacement in mutations:
             with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
