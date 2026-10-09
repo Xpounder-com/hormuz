@@ -50,14 +50,15 @@ Installed versions identify the specific tested SDK combination.
 
 The [recorded local run](receipt.json) on 2026-10-09 passed all six cases using OpenAI 3.27.0,
 Anthropic 1.12.1 and HTTPX2 2.13.1 on Python 3.12.12. Its 32-file manifest matches
-the tested working tree; `5a02b48e2e73a6ae935ece24078e579f6fcf4a72` identifies
+the tested working tree; `fded8a5737e72e8b4496121c8fa4eed0eb9c3c62` identifies
 the starting checkout commit rather than declaring the uncommitted files part of
 that commit. SQLite retained six active jobs, six successful response attempts
 and zero outcome observations. Chat streaming required two confirmation reads;
 the other cases required one each. All six cases made one inference call each,
 and both listeners, clients and streams closed before the receipt was written.
 The recorded source includes the logical-group confirmation guard and the
-gateway's terminal stream framing checks.
+gateway's terminal stream framing checks. The refresh wrapper also checked all
+32 source hashes before and after execution and matched the emitted manifest.
 
 This qualifies the local SDK attachment and protocol paths only. Synthetic
 responses and configured fixture costs establish no model correctness, savings,

@@ -63,7 +63,7 @@ EXAMPLES = (
 )
 
 
-def request_body(example, *, output_tokens=256):
+def request_body(example, *, output_tokens=256, anthropic_no_thinking=False):
     body = {"model": example.provider}
     if example.api == "/v1/responses":
         body.update(input=example.instruction, max_output_tokens=output_tokens, store=False)
@@ -72,6 +72,8 @@ def request_body(example, *, output_tokens=256):
         body["max_completion_tokens" if example.provider == "openai" else "max_tokens"] = output_tokens
         if example.provider == "openai":
             body["store"] = False
+        elif anthropic_no_thinking:
+            body.update(thinking={"type": "disabled"}, output_config={"effort": "low"})
     if example.behavior == "stream":
         body["stream"] = True
         if example.api == "/v1/chat/completions":
@@ -184,6 +186,10 @@ def serving(server):
 
 def gateway_profile(routes, upstreams, *, live):
     providers = sorted(routes)
+    if providers == ["anthropic"] and "openai" not in upstreams:
+        # The core config requires this slot; no route selects it and the
+        # bounded environment supplies no credential for its inert endpoint.
+        upstreams = {**upstreams, "openai": {"base_url": "http://127.0.0.1:1", "api_key_env": "HORMUZ_EXAMPLE_UNUSED_OPENAI_KEY"}}
     return {
         "listen": {"host": "127.0.0.1", "port": 8787},
         "database": "usage.sqlite3", "upstreams": upstreams,
@@ -195,7 +201,7 @@ def gateway_profile(routes, upstreams, *, live):
     }
 
 
-def run_gateway(examples, routes, upstreams, environment, *, live, budget_microusd, max_live_calls):
+def run_gateway(examples, routes, upstreams, environment, *, live, budget_microusd, max_live_calls, anthropic_no_thinking=False):
     from dataclasses import replace
     from hormuz.config import GatewayConfig
     from hormuz.server import GatewayServer
@@ -221,7 +227,8 @@ def run_gateway(examples, routes, upstreams, environment, *, live, budget_microu
                     raise ValueError("live_request_limit_reached")
                 before = {row["request_id"] for row in job.state().get("attempts", [])}
                 attempted += 1
-                status, headers, raw = transport.request("POST", example.api, json.dumps(request_body(example)), {"Authorization": "Bearer " + token, "Content-Type": "application/json", **job.headers})
+                body = request_body(example, anthropic_no_thinking=live and anthropic_no_thinking)
+                status, headers, raw = transport.request("POST", example.api, json.dumps(body), {"Authorization": "Bearer " + token, "Content-Type": "application/json", **job.headers})
                 if status == 200:
                     validate_response(example.api, example.behavior, status, headers, raw)
                     attempts = [row for row in job.state().get("attempts", []) if row["request_id"] not in before]
@@ -272,8 +279,11 @@ def execute(args, examples):
                 raise ValueError("live_provider_credential_not_loaded")
             environment[name] = os.environ[name]
             upstreams[provider] = {"base_url": "https://api.openai.com" if provider == "openai" else "https://api.anthropic.com", "api_key_env": name}
-        result = run_gateway(examples, routes, upstreams, environment, live=True, budget_microusd=args.budget_microusd, max_live_calls=args.max_live_calls)
+        no_thinking = getattr(args, "anthropic_no_thinking", False)
+        result = run_gateway(examples, routes, upstreams, environment, live=True, budget_microusd=args.budget_microusd, max_live_calls=args.max_live_calls, anthropic_no_thinking=no_thinking)
         conditions = {"provider_mode": "live_provider_accounts", "provider_fixture_calls": 0, "billing_basis": "operator_configured_rate_estimate"}
+        if no_thinking:
+            conditions["anthropic_thinking"] = "disabled_low_effort"
     else:
         ProviderFixture.calls = []
         with serving(BoundedFixtureServer(("127.0.0.1", 0), ProviderFixture)) as provider:
@@ -293,6 +303,7 @@ def main(argv=None):
     parser.add_argument("--example", action="append", help="Select a scenario by name; repeat for several.")
     parser.add_argument("--live", choices=("openai", "anthropic", "both"), help="Explicitly allow real, potentially billed provider requests.")
     parser.add_argument("--rate-card", help="Private JSON with your selected models and qualified account rates.")
+    parser.add_argument("--anthropic-no-thinking", action="store_true", help="Opt into disabled thinking and low effort for a compatible live Anthropic model.")
     parser.add_argument("--max-live-calls", type=int, choices=range(1, 101), default=3, metavar="1..100")
     parser.add_argument("--budget-microusd", type=int, default=100_000, help="Workspace estimate allowance; default 0.10 USD, not an invoice cap.")
     parser.add_argument("--receipt", help="Write a metadata receipt; inspect before sharing.")
@@ -305,6 +316,8 @@ def main(argv=None):
         if not 0 < args.budget_microusd <= 100_000_000:
             raise ValueError("invalid_example_budget")
         examples = selected_examples(args.example, args.live)
+        if args.anthropic_no_thinking and (not args.live or not any(example.provider == "anthropic" for example in examples)):
+            raise ValueError("anthropic_no_thinking_requires_live_anthropic")
         if args.live and len(examples) > args.max_live_calls:
             raise ValueError("selected_examples_exceed_live_request_limit")
         # Reserve the destination before any potentially billed request.

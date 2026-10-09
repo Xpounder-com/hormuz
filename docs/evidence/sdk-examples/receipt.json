@@ -1,8 +1,8 @@
 {
   "schema_id": "hormuz.ai-work-sdk-qualification",
   "schema_version": 1,
-  "generated_at": "2026-10-09T15:24:04.368828+00:00",
-  "source_commit": "5a02b48e2e73a6ae935ece24078e579f6fcf4a72",
+  "generated_at": "2026-10-09T17:52:28.234186+00:00",
+  "source_commit": "fded8a5737e72e8b4496121c8fa4eed0eb9c3c62",
   "source_boundary": "working_tree_files_identified_by_sha256",
   "source_files": {
     "hormuz/work_runtime.py": "f218895a6b5cf60da6fa498277c7f3fb7fbdc8fb23f622d0e5c297eaf8036fd5",
@@ -33,7 +33,7 @@
     "tools/ai_work_browser_fixture.py": "d559268a3524a68a5b6291f791026af5b7a3a80e5116c389a03af2137eeebfe5",
     "website/scripts/ai-work-browser-qa.mjs": "b5f8314ed6b919f2f0bf037cb16db91b824716a7906c882a18854e9ec449ba20",
     "examples/sdk/work_sdk.py": "30f48e47f7ec8cf41bae57877691fb59e72d819ca404ea75ee1ac2d65a15490d",
-    "tools/ai_work_provider_examples.py": "d5ef1c4009be92c766bc089878693c1f28aeb9ba2da3c9174b80c1e76a5fb7ab",
+    "tools/ai_work_provider_examples.py": "54ac67976d614ed7b3ddfe34ee26c5f3d2f8445cce38cf8e513a8e799a3a531c",
     "tools/provider_example_transport.py": "36f140bda4f1e86b66a324401d6182153570e0312535e2e183f88b65a3e6e098",
     "tools/provider_example_responses.py": "ed03ffcb9a0221c1ba6ea809de0e721b7fd29efd6bd294b843d937f23a1dc120",
     "tools/ai_work_sdk_qualification.py": "e174a55f093092820185a6a86a54382dd6a1258ddcef4e87cffc5a3c5df729a5"

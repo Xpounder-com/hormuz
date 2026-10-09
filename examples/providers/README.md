@@ -55,7 +55,26 @@ python tools/ai_work_provider_examples.py --live both \
 # Select one particular request, with the same explicit live gate.
 python tools/ai_work_provider_examples.py --live openai \
   --rate-card .hormuz-examples/rates.runtime.json --example openai-ci-diagnosis
+
+# Haiku 5.5: one arithmetic canary with explicitly disabled thinking.
+python tools/ai_work_provider_examples.py --live anthropic \
+  --rate-card .hormuz-examples/rates.runtime.json --example anthropic-smoke \
+  --anthropic-no-thinking --max-live-calls 1
 ```
+
+`--anthropic-no-thinking` sends `thinking: {"type": "disabled"}` and
+`output_config: {"effort": "low"}` only for selected live Anthropic requests.
+Qualify that combination for the chosen model; it is supported by
+[Haiku 5.5 at low effort](https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting).
+The option keeps the 256-token output limit and avoids spending it on default
+adaptive thinking. It adds no sampling parameters. For this small Haiku 5.5
+canary, qualify standard account rates for prompts up to 100,000 tokens and the
+account's default geography. The example enables no provider prompt caching;
+the rate card has one cache-write rate and does not distinguish five-minute and
+one-hour TTLs or longer-context pricing. Consult the
+[model pricing](https://platform.claude.com/docs/en/models/haiku-5-5/overview)
+before extending the workload. Existing defaults keep the provider's thinking
+behavior. OpenAI payloads and the offline tour are unchanged.
 
 Each live command can incur provider charges. Default maximum output is 256
 tokens per request, live request count is three, and the workspace estimate
