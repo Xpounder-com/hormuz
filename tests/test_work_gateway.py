@@ -243,6 +243,27 @@ class WorkGatewayTests(unittest.TestCase):
         self.assertEqual(1, len(linked))
         self.assertEqual("none", linked[0]["repeat_signal"])
         self.assertEqual("unknown", state["outcome_evidence"])
+        status, headers, body = self.post(work, messages=[{"role": "assistant", "content": "three"}, {"role": "user", "content": "Continue"}])
+        self.assertEqual(200, status, body)
+        self.assertEqual("gpt-test-deep", json.loads(body)["model"])
+        self.assertEqual("session_affinity", headers["x-hormuz-work-route"])
+        self.assertEqual(3, len(WorkProvider.requests))
+
+    def test_completed_failover_response_with_unknown_usage_retains_hold_and_response_affinity(self):
+        work = self.job()
+        status, _, body = self.post(work, endpoint="/v1/responses", simulate_failover=True, simulate_missing_usage=True)
+        self.assertEqual(200, status, body)
+        self.assertEqual("gpt-test-deep", json.loads(body)["model"])
+        view = self.gateway.work_runtime.get_work(self.identity, work)
+        fallback = next(row for row in view["attempts"] if row["retry_of"])
+        self.assertEqual("unknown", fallback["state"])
+        self.assertTrue(fallback["response_succeeded"])
+        self.assertGreater(view["costs"]["uncertain_microusd"], 0)
+        self.assertEqual("unknown", view["outcome_evidence"])
+        status, headers, body = self.post(work, messages=[{"role": "assistant", "content": "three"}, {"role": "user", "content": "Continue"}])
+        self.assertEqual(200, status, body)
+        self.assertEqual("gpt-test-deep", json.loads(body)["model"])
+        self.assertEqual("session_affinity", headers["x-hormuz-work-route"])
 
     def test_real_http_workflows_train_local_routing_and_correction_retires_choice(self):
         runtime = self.gateway.work_runtime

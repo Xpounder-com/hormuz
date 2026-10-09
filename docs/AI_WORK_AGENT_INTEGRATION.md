@@ -7,6 +7,28 @@ certify provider invoices, or declare a job complete because a model answered.
 
 ## Authentication and prerequisites
 
+The `hormuz work` commands and Python work client in this guide require this
+reviewed AI Work source candidate on the client and gateway. The published
+v1.8.0 source, signed Mac, and OCI artifacts do not include these new commands.
+An operator installs the reviewed source revision and qualifies the exact agent
+and provider before activation; a stable installer alone is insufficient.
+
+Install the candidate CLI in a separate environment with Python 3.11+ and Git.
+Replace `<REVIEWED_40_CHARACTER_COMMIT>` with the complete 40-character lowercase
+reviewed commit supplied by your administrator or the website source pin. Use
+that immutable revision, never a branch or release tag.
+
+```sh
+python3 -m venv .venv-hormuz-ai-work
+source .venv-hormuz-ai-work/bin/activate
+python -m pip install 'hormuz[client,context] @ git+https://github.com/Xpounder-com/hormuz.git@<REVIEWED_40_CHARACTER_COMMIT>'
+hormuz work --help
+```
+
+This installs the candidate client package. The administrator still configures
+and qualifies the gateway. It does not update the signed Mac app, provision a
+hosted service, or activate paid inference.
+
 The gateway administrator enables `ai_work`, configures supported model routes and
 provider credentials, and authorizes your identity through the existing static or
 OIDC/native enrollment flow. Provider keys stay on the gateway server.

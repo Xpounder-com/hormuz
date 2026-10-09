@@ -7,8 +7,8 @@ repository pins a reviewed source commit for publication.
 The primary journey serves engineering teams using existing agents: choose a
 budget and pace, connect qualified traffic, and inspect the work record. The home
 page leads to `/evidence/`, `/work/`, and an engineering workflow inquiry. The
-fictional company illustration and companion preview remain teaching surfaces
-on `/demo/`; they are not the primary acquisition story. Pricing, appliance
+primary `/demo/` shows the actual synthetic AI Work recording, with compaction
+and policy mechanics in technical disclosures. Pricing, appliance
 reservations, scoped onboarding, cancellation, and managed-site terms remain
 reachable without changing their approved prices.
 The single price catalog is `lib/pricing.json`: software $0, Cloud
@@ -89,7 +89,11 @@ The dedicated website repository checks out an exact 40-character source commit
 from this public repository, installs locked dependencies, and runs the website
 tests, build, type check, and export verifier before publishing the root export.
 It does **not** run `prepare:legacy`. No cross-repository write token is needed.
-The artifact contains the public `/site-source.json` pin. A separate read-only
+The artifact contains the public `/site-source.json` pin. The validated revision
+is passed as `NEXT_PUBLIC_HORMUZ_SOURCE_REVISION` to both build and export
+verification; source-document links use that same immutable commit. Local builds
+without this variable use main, while invalid or mutable values fail. Stable
+download version labels are independent of the website source pin. A separate read-only
 CI job verifies the live pin, the complete route inventory, metadata, and five downloads after
 deployment, without giving verification code Pages or OIDC write permissions.
 Update its source pin through a reviewed PR after the corresponding product

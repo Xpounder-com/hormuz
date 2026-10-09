@@ -35,7 +35,7 @@ export default function SecurityPage() {
           <p>Hormuz documents its published {SOURCE_VERSION} release and newer AI Work source path, what your deployment must own, and what still requires independent proof.</p>
           <div className="hero-actions">
             <a className="button button-primary" href="#data-handling">Review data handling <span aria-hidden="true">↓</span></a>
-            <a className="button button-ghost" href="https://github.com/Xpounder-com/hormuz/blob/main/SECURITY.md" target="_blank" rel="noreferrer">Read SECURITY.md <span aria-hidden="true">↗</span></a>
+            <a className="button button-ghost" href={sourcePath('SECURITY.md')} target="_blank" rel="noreferrer">Read SECURITY.md <span aria-hidden="true">↗</span></a>
           </div>
         </div>
       </section>
@@ -83,8 +83,8 @@ export default function SecurityPage() {
           <h2>No trust badge can close these.</h2>
           <p>They require real customer-environment work, operational proof, or an independent party—not another marketing claim.</p>
           <div className="security-links">
-            <a href="https://github.com/Xpounder-com/hormuz/blob/main/docs/ARCHITECTURE.md" target="_blank" rel="noreferrer">Architecture & boundaries ↗</a>
-            <a href="https://github.com/Xpounder-com/hormuz/blob/main/docs/OPERATIONS.md" target="_blank" rel="noreferrer">Operations contract ↗</a>
+            <a href={sourcePath('docs/ARCHITECTURE.md')} target="_blank" rel="noreferrer">Architecture & boundaries ↗</a>
+            <a href={sourcePath('docs/OPERATIONS.md')} target="_blank" rel="noreferrer">Operations contract ↗</a>
           </div>
         </div>
         <ol className="gate-list">

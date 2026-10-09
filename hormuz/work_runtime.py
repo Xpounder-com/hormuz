@@ -238,6 +238,8 @@ class WorkRuntime:
                     ("cost_confirmation_source", "TEXT"),
                     ("cost_confirmation_reference", "TEXT"),
                     ("cost_confirmed_at", "REAL"),
+                    ("response_succeeded", "INTEGER NOT NULL DEFAULT 0"),
+                    ("cache_generation", "INTEGER NOT NULL DEFAULT -1"),
                 ):
                     if name not in columns:
                         connection.execute("ALTER TABLE ai_work_attempts ADD COLUMN " + name + " " + declaration)
@@ -276,7 +278,7 @@ class WorkRuntime:
             "ai_work_schema": ("version",),
             "ai_work_plans": ("organization_id", "scope_type", "scope_id", "version", "budget_microusd", "objective", "exploration_enabled"),
             "ai_work_jobs": ("work_id", "organization_id", "actor_id", "repository", "task_type", "context_revision", "state", "cache_generation", "pinned_model", "context_signature", "completion_condition"),
-            "ai_work_attempts": ("organization_id", "actor_id", "request_id", "work_id", "model", "protocol", "route_fingerprint", "request_pattern", "request_shape", "state", "reserved_microusd", "cost_microusd", "gateway_wall_ms", "confirmed_cost_microusd"),
+            "ai_work_attempts": ("organization_id", "actor_id", "request_id", "work_id", "model", "protocol", "route_fingerprint", "request_pattern", "request_shape", "state", "reserved_microusd", "cost_microusd", "gateway_wall_ms", "confirmed_cost_microusd", "response_succeeded", "cache_generation"),
             "ai_work_observations": ("observation_id", "organization_id", "actor_id", "work_id", "status", "source", "completion_condition"),
             "ai_work_repeat_guards": ("organization_id", "actor_id", "work_id", "request_pattern", "context_signature", "observed_at", "last_attempt_rowid"),
             "ai_work_exploration": ("organization_id", "actor_id", "work_id", "observed_at", "model", "reserved_microusd", "context_signature"),
@@ -817,9 +819,9 @@ class WorkRuntime:
                 ).fetchone()[0]
             connection.execute(
                 "INSERT INTO ai_work_attempts(organization_id,actor_id,request_id,work_id,logical_request_id,retry_of,cache_source,"
-                "model,protocol,route_fingerprint,request_pattern,request_shape,repeat_count,pattern_excluded,reason,state,reserved_microusd,created_at,settled_at,context_signature,request_kind,cache_bypass_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "model,protocol,route_fingerprint,request_pattern,request_shape,repeat_count,pattern_excluded,reason,state,reserved_microusd,created_at,settled_at,context_signature,request_kind,cache_bypass_reason,cache_generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (*owner, request_id, work_id, logical_request_id, retry_of, cache_source, model, protocol,
-                 fingerprint, request_pattern, request_shape, repeats, int(pattern_excluded), reason, state, amount, now, now if denied else None, context, request_kind, cache_bypass_reason),
+                 fingerprint, request_pattern, request_shape, repeats, int(pattern_excluded), reason, state, amount, now, now if denied else None, context, request_kind, cache_bypass_reason, work["cache_generation"]),
             )
             if denied:
                 connection.execute("UPDATE ai_work_jobs SET state='paused',pause_reason='budget_exhausted',updated_at=?,version=version+1 WHERE work_id=?", (now, work_id))
@@ -839,16 +841,24 @@ class WorkRuntime:
         result["created_at"] = _timestamp(result["created_at"])
         result["settled_at"] = _timestamp(result["settled_at"])
         result["reservation_exceeded"] = bool(result["reservation_exceeded"])
+        result["response_succeeded"] = bool(result["response_succeeded"])
         result["timing_stages"] = json.loads(result.get("timing_stages") or "{}")
         result["cost_confirmed_at"] = _timestamp(result.get("cost_confirmed_at"))
         return result
 
     def settle(self, identity, request_id, cost_microusd=None, status="succeeded", latency_ms=None):
+        """Record charge evidence and completed-response affinity separately.
+
+        ``response_succeeded`` records completed-response transport evidence,
+        including a completed response with an unknown charge. It never marks
+        the work complete or establishes response quality/correctness.
+        """
         owner, now = _identity(identity), self._now()
         _identifier(request_id, "request")
         status = "unknown" if status == "outcome_unknown" else status
         if not isinstance(status, str) or status not in {"succeeded", "failed", "unknown", "cache_hit"}:
             raise WorkRuntimeError("invalid_attempt_status")
+        response_succeeded = status in {"succeeded", "cache_hit"}
         cost = _amount(cost_microusd, optional=True)
         if latency_ms is not None and (isinstance(latency_ms, bool) or not isinstance(latency_ms, (int, float))
                                        or not math.isfinite(latency_ms) or not 0 <= latency_ms <= 86_400_000):
@@ -870,10 +880,25 @@ class WorkRuntime:
                     raise WorkRuntimeError("settlement_conflict", 409)
                 return self._attempt_view(attempt)
             connection.execute(
-                "UPDATE ai_work_attempts SET state=?,cost_microusd=?,latency_ms=?,settled_at=?,reservation_exceeded=? "
+                "UPDATE ai_work_attempts SET state=?,cost_microusd=?,latency_ms=?,settled_at=?,reservation_exceeded=?,"
+                "response_succeeded=MAX(response_succeeded,?) "
                 "WHERE organization_id=? AND actor_id=? AND request_id=?",
-                (status, cost, latency_ms, now, int(cost is not None and cost > attempt["reserved_microusd"]), *owner, request_id),
+                (status, cost, latency_ms, now, int(cost is not None and cost > attempt["reserved_microusd"]), int(response_succeeded), *owner, request_id),
             )
+            if response_succeeded and (attempt["cache_generation"], attempt["context_signature"]) == (work["cache_generation"], work["context_signature"]):
+                # Response delivery and charge certainty are distinct. Keep an
+                # unknown cost held, while continuing on the model that actually
+                # answered. Admission order makes out-of-order completions stable;
+                # old context/generation responses cannot restore retired affinity.
+                # One work pin deliberately fails cross-protocol continuations
+                # closed instead of translating a different provider's state.
+                affinity = connection.execute(
+                    "SELECT model FROM ai_work_attempts WHERE work_id=? AND response_succeeded=1 "
+                    "AND cache_generation=? AND context_signature=? ORDER BY rowid DESC LIMIT 1",
+                    (work["work_id"], work["cache_generation"], work["context_signature"]),
+                ).fetchone()
+                if affinity is not None:
+                    connection.execute("UPDATE ai_work_jobs SET pinned_model=? WHERE work_id=?", (affinity[0], work["work_id"]))
             row = connection.execute("SELECT * FROM ai_work_attempts WHERE organization_id=? AND actor_id=? AND request_id=?", (*owner, request_id)).fetchone()
             result = self._attempt_view(dict(row))
         self._invalidate_profiles(work, [(attempt["protocol"], attempt["request_shape"])])

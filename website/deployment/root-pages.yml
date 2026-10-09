@@ -57,12 +57,16 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Build the canonical root export
         working-directory: product/website
+        env:
+          NEXT_PUBLIC_HORMUZ_SOURCE_REVISION: ${{ steps.source.outputs.revision }}
         run: npm run build
       - name: Type-check the website
         working-directory: product/website
         run: npm run typecheck
       - name: Verify links, assets, canonicals, and downloads
         working-directory: product/website
+        env:
+          NEXT_PUBLIC_HORMUZ_SOURCE_REVISION: ${{ steps.source.outputs.revision }}
         run: npm run verify
       - name: Include the validated public source pin in the artifact
         run: cp site-source.json product/website/out/site-source.json

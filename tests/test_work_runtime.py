@@ -203,6 +203,118 @@ class WorkRuntimeTests(unittest.TestCase):
         tools = self.runtime.choose_route(self.alice, work, [self.fast, self.cheap], self.fast, {"tools": [{"type": "function"}]})
         self.assertEqual("tool_compatibility_baseline", tools["reason"])
 
+    def test_successful_failover_promotes_continuation_without_failed_or_unknown_override(self):
+        work = self.work()
+        self.runtime.reserve(self.alice, work, "primary", self.fast, "openai", 20)
+        self.runtime.settle(self.alice, "primary", 0, status="failed")
+        self.runtime.reserve(self.alice, work, "fallback", self.cheap, "openai", 20, retry_of="primary")
+        self.runtime.settle(self.alice, "fallback", 10)
+        for request_id, status in (("failed-later", "failed"), ("unknown-later", "unknown")):
+            self.runtime.reserve(self.alice, work, request_id, self.fast, "openai", 20)
+            self.runtime.settle(self.alice, request_id, 0 if status == "failed" else None, status=status)
+        continuation = {"messages": [{"role": "assistant", "content": "Fallback result"}, {"role": "user", "content": "Continue"}]}
+        selected = self.runtime.choose_route(self.alice, work, [self.fast, self.cheap], self.fast, continuation)
+        self.assertEqual(("cheap", "session_affinity"), (selected["alias"], selected["reason"]))
+        self.error("session_route_not_eligible", lambda: self.runtime.choose_route(self.alice, work, [self.fast], self.fast, continuation))
+        view = self.runtime.get_work(self.alice, work)
+        self.assertEqual(20, view["costs"]["uncertain_microusd"])
+        self.assertEqual({"fallback"}, {row["request_id"] for row in view["attempts"] if row["response_succeeded"]})
+
+    def test_response_affinity_uses_admission_order_across_out_of_order_completions(self):
+        work = self.work()
+        self.runtime.reserve(self.alice, work, "older", self.fast, "openai", 20)
+        self.runtime.reserve(self.alice, work, "newer", self.cheap, "openai", 20)
+        self.runtime.settle(self.alice, "newer", 10)
+        self.runtime.settle(self.alice, "older", 10)
+        self.assertEqual("cheap", self.runtime.get_work(self.alice, work)["pinned_model"])
+
+    def test_concurrent_response_completions_keep_latest_admitted_affinity(self):
+        work = self.work()
+        self.runtime.reserve(self.alice, work, "older", self.fast, "openai", 20)
+        self.runtime.reserve(self.alice, work, "newer", self.cheap, "openai", 20)
+        barrier = threading.Barrier(2)
+        def complete(request_id):
+            barrier.wait(timeout=5)
+            return self.runtime.settle(self.alice, request_id, 10)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            list(executor.map(complete, ("older", "newer")))
+        self.assertEqual("cheap", self.runtime.get_work(self.alice, work)["pinned_model"])
+
+    def test_latest_response_protocol_cannot_be_translated_by_an_older_completion(self):
+        work = self.work()
+        messages = ModelRoute("messages", "anthropic", "messages-v1", input_cost_per_million=1)
+        self.runtime.reserve(self.alice, work, "older", self.fast, "openai", 20)
+        self.runtime.reserve(self.alice, work, "newer", messages, "anthropic", 20)
+        self.runtime.settle(self.alice, "newer", 10)
+        self.runtime.settle(self.alice, "older", 10)
+        history = {"messages": [{"role": "assistant", "content": "Previous response"}]}
+        self.error("session_route_not_eligible", lambda: self.runtime.choose_route(self.alice, work, [self.fast, messages], self.fast, history))
+        selection = self.runtime.choose_route(self.alice, work, [self.fast, messages], messages, history)
+        self.assertEqual(("messages", "session_affinity"), (selection["alias"], selection["reason"]))
+
+    def test_completed_unknown_cost_response_affinity_survives_restart_and_recomputation(self):
+        work = self.work()
+        self.runtime.reserve(self.alice, work, "older", self.fast, "openai", 20)
+        self.runtime.reserve(self.alice, work, "newer", self.cheap, "openai", 20)
+        completed = self.runtime.settle(self.alice, "newer", status="succeeded")
+        self.assertEqual("unknown", completed["state"])
+        self.assertTrue(completed["response_succeeded"])
+        self.runtime.close()
+        self.runtime = WorkRuntime(self.path, clock=lambda: self.now, minimum_samples=3)
+        self.runtime.settle(self.alice, "older", 10)
+        view = self.runtime.get_work(self.alice, work)
+        self.assertEqual("cheap", view["pinned_model"])
+        self.assertEqual(20, view["costs"]["uncertain_microusd"])
+        self.assertEqual("unknown", view["outcome_evidence"])
+
+    def test_late_retired_generation_response_cannot_restore_affinity(self):
+        work = self.work()
+        self.runtime.reserve(self.alice, work, "old-generation", self.fast, "openai", 20)
+        self.runtime.observe(self.alice, work, "corrected")
+        self.runtime.reserve(self.alice, work, "current-generation", self.cheap, "openai", 20)
+        self.runtime.settle(self.alice, "current-generation", 10)
+        self.runtime.settle(self.alice, "old-generation", 10)
+        self.assertEqual("cheap", self.runtime.get_work(self.alice, work)["pinned_model"])
+        self.runtime.observe(self.alice, work, "corrected", reference="another-correction")
+        self.runtime.settle(self.alice, "old-generation", 10)
+        self.assertIsNone(self.runtime.get_work(self.alice, work)["pinned_model"])
+
+    def test_late_other_context_response_cannot_replace_current_response_affinity(self):
+        work = self.work()
+        old = self.runtime.bind_request_context(self.alice, work, {"input": "Summarize a short note"})["context_signature"]
+        self.runtime.reserve(self.alice, work, "old-context", self.fast, "openai", 20, request_context=old)
+        current = self.runtime.bind_request_context(self.alice, work, {"input": "Summarize " + "x" * 9000})["context_signature"]
+        self.runtime.reserve(self.alice, work, "current-context", self.cheap, "openai", 20, request_context=current)
+        self.runtime.settle(self.alice, "current-context", 10)
+        self.runtime.settle(self.alice, "old-context", 10)
+        self.assertEqual("cheap", self.runtime.get_work(self.alice, work)["pinned_model"])
+
+    def test_cached_response_affinity_preserves_its_originating_model(self):
+        work = self.work()
+        self.runtime.reserve(self.alice, work, "older", self.fast, "openai", 20)
+        self.runtime.settle(self.alice, "older", 10)
+        self.runtime.reserve(self.alice, work, "cached", self.cheap, "openai", 0,
+                             cache_source="exact_answer_cache", expected_cache_generation=0)
+        self.runtime.settle(self.alice, "cached", status="cache_hit")
+        self.assertEqual("cheap", self.runtime.get_work(self.alice, work)["pinned_model"])
+
+    def test_affinity_marker_migration_preserves_legacy_state_without_invented_delivery(self):
+        work = self.work()
+        self.runtime.reserve(self.alice, work, "legacy", self.fast, "openai", 20)
+        self.runtime.settle(self.alice, "legacy", status="unknown")
+        self.runtime.close()
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            connection.execute("ALTER TABLE ai_work_attempts DROP COLUMN response_succeeded")
+            connection.execute("ALTER TABLE ai_work_attempts DROP COLUMN cache_generation")
+        self.runtime = WorkRuntime(self.path, clock=lambda: self.now, minimum_samples=3)
+        self.runtime.verify_ready()
+        view = self.runtime.get_work(self.alice, work)
+        self.assertEqual(("unknown", False, -1), tuple(view["attempts"][0][key] for key in ("state", "response_succeeded", "cache_generation")))
+        self.assertEqual(20, view["costs"]["uncertain_microusd"])
+        self.runtime.reserve(self.alice, work, "new", self.cheap, "openai", 20)
+        self.runtime.settle(self.alice, "new", 10)
+        self.assertEqual("cheap", self.runtime.get_work(self.alice, work)["pinned_model"])
+
     def test_initial_tool_routing_requires_declared_capabilities_and_matching_schema(self):
         tools = {"tools": [{"type": "function", "function": {"name": "read", "parameters": {"type": "object"}}}]}
         shape = self.runtime.shape_for_request(tools)

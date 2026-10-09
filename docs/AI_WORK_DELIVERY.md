@@ -33,14 +33,22 @@ real provider request or payment. Synthetic metadata tests exercise mechanisms;
 they are not the customer-local quality benchmark or measured customer value.
 
 Final local regression: `python -m unittest discover -s tests -t . -q` ran
-2,905 tests with zero failures and 401 environment-dependent skips. All 583
+2,915 tests with zero failures and 401 environment-dependent skips. All 583
 package, test and tool sources parse on Python 3.11; renderer tests also pass
 on the actual Python 3.11 runtime. Website
-verification passed 71 tests, TypeScript, the production build and exported-site
+verification passed 73 Node tests and 10 Python tests, TypeScript, the production build and exported-site
 checks (16 pages). A fresh wheel/source archive and installed gateway smoke
 passed outside the checkout. The browser journey passed 12 checks and the
 mechanics proof passed 35; both receipts match their 27 source fingerprints.
-Remote CI and publication must still be verified against the committed PR heads.
+Installed-package handoff, matching restore, and closed-authorization checks also
+passed locally on synthetic state. This does not qualify signed distributions
+or an interactive native update; those live release gates remain open.
+Remote product CI passed at source commit
+[`f7fc9fe942c97cfbd1a419e9a73cec7280cc7944`](https://github.com/Xpounder-com/hormuz/commit/f7fc9fe942c97cfbd1a419e9a73cec7280cc7944),
+and publication Website checks passed for PR #40's original pin to that source.
+The subsequent source-link and candidate-install documentation changes require
+successor exact-head CI and Pages verification. Publication configuration tests
+currently pass all 10 checks.
 
 ## Supported operation boundary
 
@@ -63,7 +71,9 @@ or browser-submitted amount is promoted to provider-confirmed evidence.
 
 ## Live gates
 
-Source and local evidence are an implementation candidate. Completing the paid
+Source and local evidence are an implementation candidate. Existing v1.8.0
+installers do not contain the new AI Work CLI; the source candidate requires a
+reviewed immutable install revision and qualified gateway configuration. Completing the paid
 launch requires a named authorized deployment, real provider/account access,
 approved Stripe price and current signed live events, production identity/TLS,
 inquiry inbox and booking verification, exact Pages publication, and the signed

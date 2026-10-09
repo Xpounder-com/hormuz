@@ -1548,7 +1548,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     provider_metrics=provider_metrics,
                     finance_observation=parsed_usage.finance,
                 )
-                work_gateway.settle(self, identity, attempt, started_ns=started_ns)
+                work_gateway.settle(self, identity, attempt, status="succeeded", started_ns=started_ns)
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s "
                     "requested_model=%s reason=provider_usage_unavailable",

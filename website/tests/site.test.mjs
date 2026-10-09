@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { sitePath, siteUrl, CONTACT_EMAIL, SOURCE_VERSION, OCI_VERSION, MACOS_VERSION } from '../lib/site.mjs';
+import { spawnSync } from 'node:child_process';
+import { sitePath, siteUrl, resolveSourceRevision, CONTACT_EMAIL, SOURCE_VERSION, OCI_VERSION, MACOS_VERSION } from '../lib/site.mjs';
 import { buildInquiry, campaignSource } from '../lib/contact.mjs';
 
 test('core and notarized Mac downloads agree with packaging while Windows stays preview', () => {
@@ -18,6 +19,12 @@ test('core and notarized Mac downloads agree with packaging while Windows stays 
   assert.ok(docs.includes('releases/download/${MACOS_VERSION}/SHA256SUMS.txt'));
   assert.doesNotMatch(docs, /77d463869f35c5bd|releases\/download\/v1\.3\.0/);
   assert.match(docs, /\/issues\/340/);
+  assert.match(docs, /reviewed source candidate on both the gateway and CLI client/);
+  assert.match(docs, /published v1\.8\.0 installers do not include these new AI Work commands/);
+  const workEntry = readFileSync(new URL('../app/work/page.tsx', import.meta.url), 'utf8');
+  assert.ok(workEntry.includes("href={sitePath('/docs/#ai-work')}>AI Work setup path"));
+  const workGuide = readFileSync(new URL('../../docs/AI_WORK_AGENT_INTEGRATION.md', import.meta.url), 'utf8');
+  assert.match(workGuide, /v1\.8\.0 source, signed Mac, and OCI artifacts do not include these new commands/);
   assert.match(docs, /comparison-table release-downloads/);
   const styles = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(styles, /\.release-downloads\s*\{\s*min-width:\s*720px;/);
@@ -37,6 +44,21 @@ test('native paths and metadata use the dedicated organization root', () => {
   assert.equal(siteUrl('/contact/'), 'https://usehormuz.github.io/contact/');
   assert.throws(() => sitePath('https://example.com'));
   assert.throws(() => sitePath('//example.com'));
+});
+test('source anchors use a validated immutable build revision and retain the local main fallback', () => {
+  const revision = '9af53c79d1671638a57dba9d758482c7d4f88ef8';
+  assert.equal(resolveSourceRevision(undefined), 'main');
+  assert.equal(resolveSourceRevision(''), 'main');
+  assert.equal(resolveSourceRevision(revision), revision);
+  for (const invalid of ['main', 'v1.8.0', revision.toUpperCase(), revision.slice(0, 7), `${revision}\n`, ' '.repeat(40), null, 123]) {
+    assert.throws(() => resolveSourceRevision(invalid));
+  }
+  const moduleUrl = new URL('../lib/site.mjs', import.meta.url).href;
+  for (const value of ['', revision]) {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `import { sourcePath } from ${JSON.stringify(moduleUrl)}; console.log(sourcePath('docs/AI_WORK_AGENT_INTEGRATION.md'));`], { env: { ...process.env, NEXT_PUBLIC_HORMUZ_SOURCE_REVISION: value }, encoding: 'utf8' });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout.trim(), `https://github.com/Xpounder-com/hormuz/blob/${value || 'main'}/docs/AI_WORK_AGENT_INTEGRATION.md`);
+  }
 });
 test('shared current-release labels derive from the source version', () => {
   for (const file of ['app/components/SiteFooter.tsx', 'app/components/SetupExample.tsx', 'app/enterprise/page.tsx', 'app/docs/page.tsx', 'app/integrations/page.tsx', 'app/security/page.tsx', 'app/resources/page.tsx', 'app/guides/codex-claude-code-gateway/page.tsx']) {
