@@ -13,7 +13,13 @@ from pathlib import Path
 import re
 
 CONTRACT_PATH = "docs/ai-work-source-successor-v1.json"
-CONTRACT_SHA256 = "87032d8306741beb7afa4178e8dd957d63b8495b7430d015f444d3046781ba55"
+CONTRACT_SHA256 = "2487ccb55dcf2248a570083a4890d143303537f30c62f820e94ce256d63ae50d"
+CI_SOURCE_PATH = ".github/workflows/ci.yml"
+APPROVED_CI_SOURCE_SUCCESSOR = {
+    "path": CI_SOURCE_PATH,
+    "predecessor_sha256": "cde0462d47a3dd03555872365ceddc5e062bbc3685df3432fd45d0d26b015459",
+    "successor_sha256": "d536386dd5a378fc4c8c2e2c23a02293cf39f5599eaf20ace3d39a863d6f74d2",
+}
 SOURCE_PATHS = frozenset({"MANIFEST.in", "docs/DURABLE_DATA.md", "docs/durable-data-v1.json",
                           "pyproject.toml", "tests/test_durable_data_inventory.py",
                           "tools/verify_durable_data_inventory.py"})
@@ -41,9 +47,10 @@ def contract(root: Path) -> dict:
         canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
         if hashlib.sha256(canonical).hexdigest() != CONTRACT_SHA256:
             raise ValueError()
-        if set(value) != {"schema_id", "schema_version", "predecessor", "source_edits", "addition_counts", "nonclaims"} \
+        if set(value) != {"schema_id", "schema_version", "predecessor", "ci_source_successor", "source_edits", "addition_counts", "nonclaims"} \
                 or value["schema_id"] != "hormuz.ai-work-source-successor" or value["schema_version"] != 1 \
                 or value["predecessor"] != "docs/recommendation-runtime-plan-v1.json" \
+                or value["ci_source_successor"] != APPROVED_CI_SOURCE_SUCCESSOR \
                 or not isinstance(value["source_edits"], dict) or not set(value["source_edits"]).issubset(SOURCE_PATHS) \
                 or value["addition_counts"] != {"database_classes": 2, "sqlite_tables": 18, "postgresql_tables": 0, "operator_artifacts": 2}:
             raise ValueError()
@@ -55,6 +62,13 @@ def contract(root: Path) -> dict:
 def projected_sha256(root: Path, relative: str, expected: str) -> str:
     """Return a parent-source digest only for the exact approved additive edits."""
     authorization = contract(root)
+    if relative == CI_SOURCE_PATH:
+        ci_successor = authorization["ci_source_successor"]
+        if expected != ci_successor["predecessor_sha256"]:
+            raise ValueError("ai_work_source_authorization_invalid")
+        if hashlib.sha256((root / relative).read_bytes()).hexdigest() != ci_successor["successor_sha256"]:
+            raise ValueError("ai_work_ci_source_changed")
+        return ci_successor["predecessor_sha256"]
     item = authorization["source_edits"].get(relative)
     if not isinstance(item, dict) or set(item) != {"predecessor_sha256", "edits"} \
             or item["predecessor_sha256"] != expected or not isinstance(item["edits"], list) \

@@ -2,6 +2,11 @@
   "schema_id": "hormuz.ai-work-source-successor",
   "schema_version": 1,
   "predecessor": "docs/recommendation-runtime-plan-v1.json",
+  "ci_source_successor": {
+    "path": ".github/workflows/ci.yml",
+    "predecessor_sha256": "cde0462d47a3dd03555872365ceddc5e062bbc3685df3432fd45d0d26b015459",
+    "successor_sha256": "d536386dd5a378fc4c8c2e2c23a02293cf39f5599eaf20ace3d39a863d6f74d2"
+  },
   "source_edits": {
     "MANIFEST.in": {
       "predecessor_sha256": "c7491a666807ae2670702bde04a9150ba7027e645ca3388776b909d32cd73d45",

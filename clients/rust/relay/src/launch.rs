@@ -458,7 +458,7 @@ pub fn run_client_with_work_id(
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn run_with_executable(
     profile: &ConnectionProfile,
     credentials: Arc<dyn CredentialSource>,
