@@ -17,6 +17,7 @@ from hormuz.config import (
     ConfigError,
     GatewayConfig,
 )
+from hormuz.work_runtime import WorkRuntime
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +53,145 @@ class ConfigurationInputTests(unittest.TestCase):
 
         self.assertEqual(config.listen.host, "127.0.0.1")
         self.assertIn("gpt-5.4-mini", config.model_routes)
+
+    def test_public_load_accepts_bounded_exploration_settings_and_defaults(self) -> None:
+        for enabled, rate, allowance in (
+            (False, 1, 0),
+            (True, 20, 9_000_000_000_000_000),
+        ):
+            with self.subTest(enabled=enabled, rate=rate, allowance=allowance):
+                value = self._valid_configuration()
+                value["ai_work"] = {
+                    "enabled": True,
+                    "exploration_enabled": enabled,
+                    "exploration_aliases": ["gpt-5.4-mini"],
+                    "exploration_rate_percent": rate,
+                    "exploration_max_cost_microusd": allowance,
+                }
+                with tempfile.TemporaryDirectory() as temporary:
+                    path = Path(temporary) / "hormuz.json"
+                    path.write_text(json.dumps(value), encoding="utf-8")
+                    config = GatewayConfig.load(path, environ=TEST_ENVIRONMENT)
+                self.assertEqual(config.ai_work.exploration_enabled, enabled)
+                self.assertEqual(config.ai_work.exploration_aliases, ("gpt-5.4-mini",))
+                self.assertEqual(config.ai_work.exploration_rate_percent, rate)
+                self.assertEqual(config.ai_work.exploration_max_cost_microusd, allowance)
+
+        defaults = GatewayConfig.load(ROOT / "config.example.json", environ=TEST_ENVIRONMENT).ai_work
+        self.assertEqual(
+            (False, (), 5, 0),
+            (defaults.exploration_enabled, defaults.exploration_aliases,
+             defaults.exploration_rate_percent, defaults.exploration_max_cost_microusd),
+        )
+
+    def test_invalid_exploration_settings_fail_before_credential_resolution(self) -> None:
+        alias_error = "ai_work.exploration_aliases must reference unique approved models"
+        allowance_error = "ai_work exploration sampling or monthly allowance is invalid"
+        approval_error = "ai_work exploration requires enabled work, approved models and a monthly allowance"
+        cases = (
+            ("exploration_enabled", "true", alias_error),
+            ("exploration_enabled", 1, alias_error),
+            ("exploration_enabled", None, alias_error),
+            ("exploration_aliases", "gpt-5.4-mini", alias_error),
+            ("exploration_aliases", ["not-approved"], alias_error),
+            ("exploration_aliases", ["gpt-5.4-mini", "gpt-5.4-mini"], alias_error),
+            ("exploration_aliases", [{}], alias_error),
+            ("exploration_aliases", ["gpt-5.4-mini"] * 101, alias_error),
+            ("exploration_rate_percent", True, allowance_error),
+            ("exploration_rate_percent", "5", allowance_error),
+            ("exploration_rate_percent", 5.0, allowance_error),
+            ("exploration_rate_percent", 0, allowance_error),
+            ("exploration_rate_percent", 21, allowance_error),
+            ("exploration_max_cost_microusd", True, allowance_error),
+            ("exploration_max_cost_microusd", "25", allowance_error),
+            ("exploration_max_cost_microusd", 25.0, allowance_error),
+            ("exploration_max_cost_microusd", -1, allowance_error),
+            ("exploration_max_cost_microusd", 9_000_000_000_000_001, allowance_error),
+            ("enabled", False, approval_error),
+            ("exploration_aliases", [], approval_error),
+            ("exploration_max_cost_microusd", 0, approval_error),
+            ("exploration_unapproved_field", True, "configuration_unsupported_fields"),
+        )
+        for field, invalid, expected in cases:
+            with self.subTest(field=field, invalid=invalid):
+                value = self._valid_configuration()
+                value["ai_work"] = {
+                    "enabled": True,
+                    "exploration_enabled": True,
+                    "exploration_aliases": ["gpt-5.4-mini"],
+                    "exploration_rate_percent": 20,
+                    "exploration_max_cost_microusd": 25,
+                    field: invalid,
+                }
+                self._assert_load_error(
+                    json.dumps(value).encode("utf-8"), expected,
+                    environ=_EnvironmentMustNotBeRead(),
+                )
+
+    def test_publicly_loaded_exploration_settings_control_runtime_admission(self) -> None:
+        value = self._valid_configuration()
+        value["ai_work"] = {
+            "enabled": True,
+            "database": "work.sqlite3",
+            "minimum_samples": 3,
+            "exploration_enabled": True,
+            "exploration_aliases": ["gpt-5.4-mini"],
+            "exploration_rate_percent": 20,
+            "exploration_max_cost_microusd": 25,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            config = GatewayConfig.load(path, environ=TEST_ENVIRONMENT)
+            runtime = WorkRuntime(
+                config.ai_work.database_path, config, clock=lambda: 1_791_465_600.0,
+                minimum_samples=config.ai_work.minimum_samples,
+            )
+            try:
+                owner = config.identities_by_actor["alice"]
+                baseline = config.model_routes["gpt-5.4"]
+                alternative = config.model_routes["gpt-5.4-mini"]
+
+                def work() -> str:
+                    return runtime.create_work(
+                        owner, "org/repo", task_type="diagnosis", context_revision="commit-1",
+                    )["work_id"]
+
+                for index in range(3):
+                    seeded = work()
+                    attempt = f"baseline-{index}"
+                    runtime.reserve(owner, seeded, attempt, baseline, "openai", 30)
+                    runtime.settle(owner, attempt, 20, latency_ms=30)
+                    runtime.observe(owner, seeded, "completed")
+                current = work()
+                runtime.refresh_benchmark(owner, current, "openai")
+                too_expensive = runtime.choose_route(
+                    owner, current, [baseline, alternative], baseline, {},
+                    max_costs={baseline.alias: 30, alternative.alias: 26},
+                )
+                self.assertEqual(baseline.alias, too_expensive["alias"])
+                selected = runtime.choose_route(
+                    owner, current, [baseline, alternative], baseline, {},
+                    max_costs={baseline.alias: 30, alternative.alias: 25},
+                )
+                self.assertEqual(
+                    (alternative.alias, "bounded_local_exploration"),
+                    (selected["alias"], selected["reason"]),
+                )
+                self.assertEqual([], runtime.get_work(owner, current)["attempts"])
+                runtime.reserve(owner, current, "actual-exploration", alternative, "openai", 25,
+                                reason=selected["reason"])
+                runtime.settle(owner, "actual-exploration", 20, latency_ms=5)
+                later = work()
+                runtime.refresh_benchmark(owner, later, "openai")
+                no_second_allocation = runtime.choose_route(
+                    owner, later, [baseline, alternative], baseline, {},
+                    max_costs={baseline.alias: 30, alternative.alias: 1},
+                )
+                self.assertEqual(baseline.alias, no_second_allocation["alias"])
+                self.assertNotEqual("bounded_local_exploration", no_second_allocation["reason"])
+            finally:
+                runtime.close()
 
     def test_github_outcome_runtime_resolves_only_versioned_secret_references(self) -> None:
         value = self._valid_configuration()

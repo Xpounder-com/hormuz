@@ -333,6 +333,8 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
         "enabled", "database", "cache_enabled", "minimum_samples",
         "administrator_actor_ids", "require_paid", "billing_price_id", "billing_webhook_secret_env",
         "billing_api_key_env", "billing_bindings", "tool_capable_aliases",
+        "exploration_enabled", "exploration_aliases", "exploration_rate_percent",
+        "exploration_max_cost_microusd",
     }))
 
     _schema_optional_object(raw, "listen", _LISTEN_FIELDS)

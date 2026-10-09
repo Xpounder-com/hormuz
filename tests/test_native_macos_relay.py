@@ -11,11 +11,32 @@ import threading
 import unittest
 from pathlib import Path
 
-from tests.test_client_relay import ACCESS_TOKEN, _CodexToolGateway, _Gateway, _GatewayHandler
+from tests.test_client_relay import (
+    ACCESS_TOKEN, _CodexToolGateway, _CodexToolGatewayHandler, _Gateway, _GatewayHandler,
+)
 from tests.test_gateway import FakeProviderHandler
 
 
-class _ClaudeGatewayHandler(FakeProviderHandler):
+class _WorkHeaderRecordingMixin:
+    def do_POST(self) -> None:  # noqa: N802
+        # Preserve duplicate header fields; the inherited fixture's dictionary
+        # capture alone would hide two identical job headers.
+        self.server.work_header_values.append(self.headers.get_all("X-Hormuz-Work-Id", []))
+        super().do_POST()
+
+
+class _NativeCodexGatewayHandler(_WorkHeaderRecordingMixin, _CodexToolGatewayHandler):
+    pass
+
+
+class _NativeCodexGateway(_CodexToolGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.RequestHandlerClass = _NativeCodexGatewayHandler
+        self.work_header_values = []
+
+
+class _ClaudeGatewayHandler(_WorkHeaderRecordingMixin, FakeProviderHandler):
     @property
     def requests(self):
         return self.server.requests
@@ -29,6 +50,7 @@ class _ClaudeGateway(_Gateway):
         from http.server import ThreadingHTTPServer
 
         self.requests = []
+        self.work_header_values = []
         ThreadingHTTPServer.__init__(self, ("127.0.0.1", 0), _ClaudeGatewayHandler)
 
 
@@ -41,7 +63,7 @@ class NativeMacRelayTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.key = "12345678-1234-1234-1234-123456789abc"
         if self._testMethodName == "test_official_codex_on_and_off":
-            self.gateway = _CodexToolGateway()
+            self.gateway = _NativeCodexGateway()
         elif self._testMethodName == "test_official_claude_streams_through_native_relay":
             self.gateway = _ClaudeGateway()
         else:
@@ -100,13 +122,13 @@ if {hold!r}:
     sys.stdin.buffer.read()
 """)
 
-    def _start(self) -> tuple[subprocess.Popen, socket.socket]:
-        process = self._launch()
+    def _start(self, *, work_id: str | None = None) -> tuple[subprocess.Popen, socket.socket]:
+        process = self._launch(work_id=work_id)
         lease, _ = self.owner.accept()
         self.addCleanup(lease.close)
         return process, lease
 
-    def _launch(self) -> subprocess.Popen:
+    def _launch(self, *, work_id: str | None = None) -> subprocess.Popen:
         environment = {name: value for name, value in os.environ.items() if name in {
             "PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR",
             "HORMUZ_CONTEXT_TOKENIZER_CACHE",
@@ -116,6 +138,8 @@ if {hold!r}:
         command = [os.environ["HORMUZ_NATIVE_RELAY_BINARY"], "--profile", self.key,
                    "--state-directory", str(self.root), "--credential-helper", str(self.broker),
                    "--optimizer-helper", str(self.optimizer), "--owner-socket", str(self.root / "lease")]
+        if work_id is not None:
+            command.extend(["--work-id", work_id])
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, env=environment, cwd=self.root)
         self.addCleanup(self._stop, process)
@@ -456,16 +480,22 @@ connection.getresponse().read()
         outputs = {}
         for enabled in (False, True):
             self.gateway.requests.clear()
+            self.gateway.work_header_values.clear()
             self._preference(enabled)
-            process, lease = self._start()
+            work_id = "work-native-codex-" + ("on" if enabled else "off")
+            process, lease = self._start(work_id=work_id)
             output, diagnostic = process.communicate(timeout=60)
             lease.close()
             self.assertEqual(process.returncode, 0, msg=diagnostic.decode(errors="replace"))
             self.assertIn(b"CONTEXT_OK", output + diagnostic)
             self.assertEqual(len(self.gateway.requests), 2)
+            self.assertEqual(self.gateway.work_header_values, [[work_id], [work_id]])
             requests = [(json.loads(body), {k.lower(): v for k, v in headers.items()})
                         for body, headers in self.gateway.requests]
             self.assertTrue(all(headers["authorization"] == "Bearer " + ACCESS_TOKEN
+                                for _, headers in requests))
+            self.assertTrue(all("x-hormuz-actor-id" not in headers
+                                and "x-hormuz-organization-id" not in headers
                                 for _, headers in requests))
             payload, headers = requests[-1]
             result = next(item["output"] for item in payload["input"]
@@ -495,7 +525,8 @@ connection.getresponse().read()
             "-p", "--bare", "--no-session-persistence", "--tools", "",
             "--setting-sources", "", "Reply with exactly ok and do not call tools.",
         ], bare_claude=True)
-        process, _ = self._start()
+        work_id = "work-native-claude-stream"
+        process, _ = self._start(work_id=work_id)
         output, diagnostic = process.communicate(timeout=60)
         self.assertEqual(process.returncode, 0, msg=diagnostic.decode(errors="replace"))
         self.assertIn(b"ok", output.lower())
@@ -503,8 +534,60 @@ connection.getresponse().read()
                     if request["path"].partition("?")[0] == "/v1/messages"]
         self.assertTrue(messages)
         self.assertTrue(any(message["body"].get("stream") for message in messages))
+        self.assertTrue(self.gateway.work_header_values)
+        self.assertTrue(all(values == [work_id] for values in self.gateway.work_header_values))
         self.assertTrue(all(message["headers"]["authorization"] == "Bearer " + ACCESS_TOKEN
                             for message in messages))
+        self.assertTrue(all("x-hormuz-actor-id" not in message["headers"]
+                            and "x-hormuz-organization-id" not in message["headers"]
+                            for message in messages))
+
+
+class NativeMacRelayFixtureTests(unittest.TestCase):
+    def test_work_header_capture_preserves_absence_and_duplicate_fields(self) -> None:
+        from http.client import HTTPMessage
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        for handler_type, inherited in (
+            (_NativeCodexGatewayHandler, _CodexToolGatewayHandler),
+            (_ClaudeGatewayHandler, FakeProviderHandler),
+        ):
+            for values in ([], ["work-one"], ["work-one", "work-one"], ["work-one", "work-two"]):
+                with self.subTest(handler=handler_type.__name__, values=values):
+                    handler = object.__new__(handler_type)
+                    handler.headers = HTTPMessage()
+                    for value in values:
+                        handler.headers["X-Hormuz-Work-Id"] = value
+                    handler.server = SimpleNamespace(work_header_values=[])
+                    with patch.object(inherited, "do_POST") as exchange:
+                        handler.do_POST()
+                    exchange.assert_called_once_with()
+                    self.assertEqual(handler.server.work_header_values, [values])
+
+    def test_optional_fixture_binding_retains_fixed_custody_and_owner_arguments(self) -> None:
+        from unittest.mock import patch
+
+        fixture = NativeMacRelayTests("test_off_is_exact_and_listener_ends_with_client")
+        fixture.root = Path("/private/tmp/synthetic-native-fixture")
+        fixture.key = "12345678-1234-1234-1234-123456789abc"
+        fixture.broker = fixture.root / "broker"
+        fixture.optimizer = fixture.root / "optimizer"
+        with patch.dict(os.environ, {"HORMUZ_NATIVE_RELAY_BINARY": "/synthetic/native-relay"}, clear=True), \
+                patch("tests.test_native_macos_relay.subprocess.Popen") as spawn:
+            spawn.return_value.poll.return_value = 0
+            try:
+                fixture._launch()
+                unbound = spawn.call_args.args[0]
+                fixture._launch(work_id="work-owned")
+                bound = spawn.call_args.args[0]
+            finally:
+                fixture.doCleanups()
+        self.assertNotIn("--work-id", unbound)
+        self.assertEqual(bound, [*unbound, "--work-id", "work-owned"])
+        self.assertEqual(unbound[-2:], ["--owner-socket", str(fixture.root / "lease")])
+        self.assertEqual(unbound[unbound.index("--credential-helper") + 1], str(fixture.broker))
+        self.assertEqual(unbound[unbound.index("--optimizer-helper") + 1], str(fixture.optimizer))
 
 
 if __name__ == "__main__":

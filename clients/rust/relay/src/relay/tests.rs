@@ -191,10 +191,12 @@ fn work_id_header_requires_one_bounded_ascii_job_id() {
     assert!(work_id_header(&headers).is_none());
 }
 
+type CapturedWorkRequests = Vec<(String, Vec<u8>)>;
+
 struct WorkHeaderGateway {
     address: SocketAddr,
     stop: Arc<AtomicBool>,
-    worker: Option<JoinHandle<Vec<(String, Vec<u8>)>>>,
+    worker: Option<JoinHandle<CapturedWorkRequests>>,
 }
 
 impl WorkHeaderGateway {
@@ -262,7 +264,7 @@ impl WorkHeaderGateway {
         }
     }
 
-    fn finish(&mut self) -> Vec<(String, Vec<u8>)> {
+    fn finish(&mut self) -> CapturedWorkRequests {
         self.worker.take().unwrap().join().unwrap()
     }
 }
