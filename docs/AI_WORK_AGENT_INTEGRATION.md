@@ -158,6 +158,11 @@ Responses images and Anthropic image/document blocks are also unbounded, even
 when supplied as inline base64. Compressed bytes cannot bound image tokens or
 document expansion. Budgeted AI Work accepts supported text requests; additional
 modalities require independently validated reservation rules before admission.
+Budgeted inference uses qualified standard processing tiers. Explicit premium,
+automatic tier selection, fast inference and unqualified geography overrides
+are refused before dispatch; a speed preference selects a qualified model route.
+The operator must qualify account defaults and all applicable rates. Unexpected
+provider pricing dimensions remain an unknown charge in the work receipt.
 
 ## Scoped plans and continuation
 

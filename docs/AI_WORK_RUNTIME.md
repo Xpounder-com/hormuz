@@ -91,6 +91,28 @@ remains visible to the next budget check.
 The caller must supply a defensible upper estimate, including model input,
 maximum output and potential cache write rates. Unsupported provider-resolved
 inputs and unbounded output must be rejected by the gateway before dispatch.
+AI Work's configured token rates cover qualified standard processing. Explicit
+unqualified processing tiers, fast inference and geography overrides are
+refused before routing, answer reuse or provider dispatch. Standard service
+tier selection is pinned using the provider's request enum. Unexpected pricing
+dimensions in a provider response retain the work reservation as unknown and
+prevent answer-cache insertion. A delivered response can still establish
+continuation affinity; delivery and charge certainty remain separate.
+
+Operators must qualify the configured rates against the actual account,
+endpoint, model/context size, geography defaults and cache-write duration.
+Hormuz does not change a customer's residency policy or discover contractual
+prices from request text. The default geography remains the approved account's
+setting; its price envelope is a live qualification requirement. Customer speed
+preferences choose among qualified model routes and do not authorize an
+unpriced processing tier.
+An observed alternate geography still leaves the work charge unknown: configured
+token rates alone do not certify a geography-specific pricing profile.
+Provider request and observed metadata follow the documented
+[OpenAI service tiers](https://developers.openai.com/api/docs/guides/fast-mode),
+[Anthropic service tiers](https://platform.claude.com/docs/en/api/service-tiers),
+[speed modes](https://platform.claude.com/docs/en/build-with-claude/fast-mode) and
+[geography controls](https://platform.claude.com/docs/en/manage-claude/data-residency).
 The existing provider attempt owner and this work ledger have separate stores;
 integration releases only known unstarted holds on a work-ledger refusal.
 Crash uncertainty leaves conservative holds and never automatically replays a

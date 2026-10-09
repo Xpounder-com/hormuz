@@ -33,22 +33,27 @@ real provider request or payment. Synthetic metadata tests exercise mechanisms;
 they are not the customer-local quality benchmark or measured customer value.
 
 Final local regression: `python -m unittest discover -s tests -t . -q` ran
-2,915 tests with zero failures and 401 environment-dependent skips. All 583
+2,924 tests with zero failures and 401 environment-dependent skips. All 584
 package, test and tool sources parse on Python 3.11; renderer tests also pass
 on the actual Python 3.11 runtime. Website
 verification passed 73 Node tests and 10 Python tests, TypeScript, the production build and exported-site
 checks (16 pages). A fresh wheel/source archive and installed gateway smoke
 passed outside the checkout. The browser journey passed 12 checks and the
 mechanics proof passed 35; both receipts match their 27 source fingerprints.
+Nine pricing-mode regressions exercise actual JSON and streaming gateway
+admission, complete uncertain holds, cache exclusion, continuation affinity and
+legacy compatibility. The finite workspace/repository/job budget selector's
+synthetic p95 is 19.28825ms; this excludes full gateway and provider latency.
 Installed-package handoff, matching restore, and closed-authorization checks also
 passed locally on synthetic state. This does not qualify signed distributions
 or an interactive native update; those live release gates remain open.
 Remote product CI passed at source commit
-[`f7fc9fe942c97cfbd1a419e9a73cec7280cc7944`](https://github.com/Xpounder-com/hormuz/commit/f7fc9fe942c97cfbd1a419e9a73cec7280cc7944),
-and publication Website checks passed for PR #40's original pin to that source.
-The subsequent source-link and candidate-install documentation changes require
-successor exact-head CI and Pages verification. Publication configuration tests
-currently pass all 10 checks.
+[`d4e818c0530a01d3840a380cab30e3dadd7d3c77`](https://github.com/Xpounder-com/hormuz/commit/d4e818c0530a01d3840a380cab30e3dadd7d3c77).
+Publication PR #40 merged and its deployment/live verification passed at that
+source pin. The subsequent pricing-mode guard requires its own exact-head CI
+and successor Pages verification. Publication configuration tests pass all
+10 checks. Current remote receipts remain separately recorded in the external
+qualification directory; a predecessor's green CI does not qualify a successor.
 
 ## Supported operation boundary
 

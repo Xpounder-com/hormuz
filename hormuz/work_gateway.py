@@ -12,8 +12,71 @@ from urllib.parse import urlsplit
 from .work_runtime import WorkRuntime, WorkRuntimeError
 from .work_learning import REQUEST_KINDS
 from .policy import PolicyEngine
+from .usage import ResponseUsageParser
 
 WORK_HEADER = "X-Hormuz-Work-ID"
+
+
+def pricing_request_bounded(protocol, request_value):
+    """The configured token envelope has no alternate pricing-mode profile.
+
+    Omitted geography remains the operator-qualified account/route envelope;
+    never override a workspace's residency or add parameters to older models.
+    """
+    tier = "default" if protocol == "openai" else "standard_only"
+    if protocol not in {"openai", "anthropic"}:
+        return False
+    if request_value.get("service_tier") not in (None, tier):
+        return False
+    if protocol == "openai":
+        return request_value.get("speed") is None and request_value.get("inference_geo") is None
+    return (request_value.get("speed") in (None, "standard")
+        and request_value.get("inference_geo") in (None, "global"))
+
+
+def _prepare_pricing(protocol, request_value):
+    if not pricing_request_bounded(protocol, request_value):
+        raise WorkRuntimeError("request_cost_unbounded", 422)
+    # Auto/omitted service tiers may select account-configured premium service.
+    # These are request enums; Anthropic's observed response enum is "standard".
+    if request_value.get("service_tier") is None:
+        request_value["service_tier"] = "default" if protocol == "openai" else "standard_only"
+    for name in ("speed", "inference_geo"):
+        if request_value.get(name) is None:
+            request_value.pop(name, None)
+
+
+class WorkUsageParser(ResponseUsageParser):
+    """Observe pricing metadata without changing frozen provider finance wire.
+
+    Reuse the existing JSON/SSE decoder and inspect bounded-depth metadata
+    containers, never answer/tool content. An unexpected observed mode cannot
+    certify a numeric standard-rate work charge or seed an answer cache.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.work_pricing_known = True
+
+    def finish_with_finance(self):
+        result = super().finish_with_finance()
+        if result.finance.reason_code == "provider_usage_invalid":
+            # A rejected earlier JSON/SSE object could contain a conflicting
+            # pricing mode. Later complete token counts cannot erase that gap.
+            self.work_pricing_known = False
+        return result
+
+    def _parse_object(self, value):
+        def observe(item, depth=0):
+            if not isinstance(item, dict) or depth > 3:
+                return
+            expected = {"service_tier": "default" if self.protocol == "openai" else "standard",
+                        "speed": "standard", "inference_geo": "global"}
+            if any(name in item and item[name] != mode for name, mode in expected.items()):
+                self.work_pricing_known = False
+            for name in ("response", "message", "usage"):
+                observe(item.get(name), depth + 1)
+        observe(value)
+        super()._parse_object(value)
 
 
 class _RequestTotals:
@@ -79,6 +142,7 @@ def prepare(handler, identity, decision, request_value, *, client, protocol, out
         return decision
     if not account_usage:
         return decision
+    _prepare_pricing(protocol, request_value)
     billing = getattr(handler.server, "work_billing", None)
     if handler.server.config.ai_work.require_paid:
         if billing is None or not billing.entitled(identity.organization_id):

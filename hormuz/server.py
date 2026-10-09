@@ -197,6 +197,8 @@ def _provider_input_tokens_bounded(
     inspects content.
     """
 
+    if text_only and not work_gateway.pricing_request_bounded(protocol, request):
+        return False
     if protocol == "openai":
         if any(request.get(field) is not None for field in _OPENAI_PROVIDER_STATE_FIELDS):
             return False
@@ -1379,7 +1381,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
 
         is_event_stream = "text/event-stream" in content_type.lower()
-        parser = ResponseUsageParser(protocol, is_event_stream=is_event_stream, chat_completions=urlsplit(self.path).path == "/v1/chat/completions")
+        parser_type = work_gateway.WorkUsageParser if getattr(self, "_work_id", None) else ResponseUsageParser
+        parser = parser_type(protocol, is_event_stream=is_event_stream, chat_completions=urlsplit(self.path).path == "/v1/chat/completions")
         cache_body = bytearray()
         cache_capture = not is_event_stream and bool(getattr(self, "_work_id", None)) and self.server.config.ai_work.cache_enabled
 
@@ -1597,16 +1600,19 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 configured_estimate=configured_estimate,
             )
             work_gateway.settle(self, identity, attempt,
-                cost=cost if usage.evidence_complete or status in {429, 529} else None,
+                cost=cost if getattr(parser, "work_pricing_known", True)
+                    and (usage.evidence_complete or status in {429, 529}) else None,
                 status="succeeded" if request_status == "succeeded" else "failed", started_ns=started_ns)
-            if request_status == "succeeded" and cache_capture and downstream_ok:
+            if (request_status == "succeeded" and cache_capture and downstream_ok
+                    and getattr(parser, "work_pricing_known", True)):
                 work_gateway.cache_response(self, identity, decision, request_value, bytes(cache_body), status=status, content_type=content_type)
             observation = getattr(self, "_impact_observations", {}).get(attempt.attempt_id)
             if observation is not None and self.server.impact_recorder is not None:
                 self.server.impact_recorder.submit(replace(
                     observation, status=request_status,
                     output_tokens=usage.output_tokens if usage.evidence_complete else None,
-                    cost_microusd=cost if usage.evidence_complete else None,
+                    cost_microusd=cost if usage.evidence_complete
+                        and getattr(parser, "work_pricing_known", True) else None,
                 ))
             LOGGER.info(
                 "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d redactions=%d",
