@@ -1,7 +1,7 @@
 {
   "artifacts": {
-    "hormuz-1.8.0-py3-none-any.whl": "301da68d37b3e84cafc8d4ef340de7942a299d610560c3a77a1ab165ae4117bf",
-    "hormuz-1.8.0.tar.gz": "5a482eab0502b290da9a9db2ee54d638cbcdfecb34462f451ec25485c78edc8c"
+    "hormuz-1.8.0-py3-none-any.whl": "47026f5baf3c76652590abf1296c0f0d8fc90506cfcfb4c718005c0dc57205b2",
+    "hormuz-1.8.0.tar.gz": "0980d60119b84245535a3ed90210e9a066d6bdfa584c417d8015713d29074ca7"
   },
   "authenticated_create_and_owned_read": true,
   "client_closed": true,
@@ -14,14 +14,14 @@
   "new_server_threads_remaining": 0,
   "packaging_source_files": {
     "MANIFEST.in": "eea6bd9330d83dfac61bbc3f74b1af9b032e1be3d7179461febfcecaba49f6f7",
-    "docs/ai-work-source-successor-v1.json": "eff3883e401b1b922d1e8d40023e832c8d3bd52fb7f3c83346275230055111fc",
+    "docs/ai-work-source-successor-v1.json": "3654751e57f9283a2c801baf5b5f5808b1a044fdb2dd2b4f8955dd0fa16fa0b1",
     "examples/delivery/github-actions.yml": "1e27f491f72fe13fb029cd34bac768365f02d8cd776bd224bdacd06d6b8d15f1",
     "examples/providers/README.md": "52f55dfe2bf02550112932af33f2d24cf72051acd47d6a0ad2eaad0d1201faa4",
     "examples/providers/rate-card.template.json": "7477d0702481c414cee9a4faaad2fa3e4a8111ac66dc4f3d4f090b6d98af6fc2",
     "examples/sdk/README.md": "3085211ab96b4a763a81813d6e325a3a81ccd14c3c0f7a5d624ee5895e1d8531",
     "pyproject.toml": "a491df23dc78b4373baec7f4ff3347059bd7038396f30d9c0889fbd6bc568848",
     "requirements/v1-source-build.lock": "c1a4fb0c427f26abf840a571a45e6c0a37d554c0ec0b35f57958a68d2eb08a7f",
-    "tools/_ai_work_source_successor.py": "da099fa14554661ff07ee53fbaf3a595a569e38a8cf9c336bcc248df388a9111",
+    "tools/_ai_work_source_successor.py": "5787f2d3b2a8a5676240848d052526deaebdc195794a6046b24b9619eb833e77",
     "tools/ai_work_delivery_examples.py": "83c21a2c84614eff7905633bbbb5d2dd791cca42fee0a9b11230d4c1296daf45"
   },
   "provider_calls": 0,
@@ -30,7 +30,7 @@
   "schema_version": 1,
   "socket_connects": 2,
   "source_boundary": "working_tree_files_identified_by_sha256",
-  "source_commit": "a9d59e523f71251475f0c55e766ca3b517cc4f01",
+  "source_commit": "51a0ac07241350029fd0d1c6a02a1cd84c00dba4",
   "source_files": {
     "examples/sdk/work_sdk.py": "30f48e47f7ec8cf41bae57877691fb59e72d819ca404ea75ee1ac2d65a15490d",
     "hormuz/_config_input.py": "1fc2009b0e74a28bc6090f06a58b8655d1a75c9c1edc802a183e97461255b2a8",
@@ -68,6 +68,6 @@
   },
   "source_manifest_checked_before_and_after": true,
   "temporary_state_removed": true,
-  "verified_at": "2026-10-09T21:55:39.414245+00:00",
+  "verified_at": "2026-10-09T22:17:25.572691+00:00",
   "working_tree_clean_at_qualification": true
 }

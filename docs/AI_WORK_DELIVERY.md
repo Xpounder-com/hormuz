@@ -82,9 +82,11 @@ totals and restart checks. Its offline stage starts no listener. A separate
 [installed HTTP smoke](evidence/ai-work-functional/INSTALLED_HTTP_SMOKE.json)
 creates and reads an owned job through the same installed wheel with exactly
 two authenticated local requests and no provider inference. Both stages identify
-clean build snapshot `a9d59e523f71251475f0c55e766ca3b517cc4f01`, with 33 source
+clean build snapshot `51a0ac07241350029fd0d1c6a02a1cd84c00dba4`, with 33 source
 and 10 packaging hashes matching this candidate. All 1,703 snapshot file modes
 and 247 wheel/installed core files were independently verified; owned state closed.
+The unpacked source archive also passed the frozen Linear transition and
+recommendation runtime verifiers with their original acceptance gates retained.
 Retained earlier installed-package handoff, matching restore, and
 closed-authorization checks passed locally on synthetic state; they are separate
 from the fresh two-request package smoke. This does not qualify signed distributions
