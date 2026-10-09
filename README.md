@@ -1,5 +1,30 @@
 # Hormuz
 
+**Keep your agents. Choose your budget and pace.**
+
+Your team already uses AI across repositories. Hormuz puts the spending boundary,
+model decision and work record in one gateway, while you keep your familiar tools.
+Choose cost, speed or outcome priorities; see the attempts and uncertainty behind
+the work; reuse eligible answers and bypass them when correction evidence arrives.
+
+**Try the current AI Work source:** [first-run walkthrough](docs/TRY_HORMUZ.md) ·
+[21 OpenAI and Anthropic scenarios](examples/providers/README.md) ·
+[vendor SDK recipes](examples/sdk/README.md) ·
+[actual GitHub / Linear delivery](docs/AI_WORK_DELIVERY_EXAMPLES.md).
+
+![AI Work dashboard with explicitly synthetic example work](docs/evidence/ai-work-functional/AI_WORK_DASHBOARD_FULL.png)
+
+*Recorded local gateway UI with synthetic provider data. These examples do not
+establish customer savings, model quality or faster completion.*
+
+OpenAI Responses, Chat Completions and Anthropic Messages are supported request
+paths. Applications need a configurable endpoint and work attachment. Closed
+applications and unrelated AI subscriptions are outside the gateway's controls.
+AI Work is a source candidate; the published v1.8.0 installers remain separate.
+
+<details>
+<summary>Current AI Work mechanics and recorded validation</summary>
+
 The AI work experience adds an opt-in customer-owned job ledger, workspace,
 repository and job budgets, fast local routing for cost/speed/outcome priorities,
 and correction-aware exact answer reuse. Existing compaction and secret controls
@@ -18,12 +43,12 @@ across 13 local fixture calls. Both identify 27 executed source files by SHA-256
 neither makes real-provider calls or payments, qualifies an installed native agent,
 or proves customer savings or production model quality.
 
+</details>
+
 [![CI](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Xpounder-com/hormuz)](https://github.com/Xpounder-com/hormuz/releases)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-
-**Keep your agents. Choose your budget and pace.**
 
 Keep the AI clients people already use. Put organization policy between those
 clients and model providers.
@@ -74,6 +99,29 @@ quality, or individual performance.
 <a id="try-the-real-gateway-without-a-provider-account"></a>
 
 ## Quickstart
+
+For the current AI Work examples, install the candidate in an isolated Python
+3.11+ environment:
+
+~~~bash
+git clone --branch mehrdad/ai-work-experience https://github.com/Xpounder-com/hormuz.git
+cd hormuz
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --editable .
+python tools/ai_work_provider_examples.py --list
+python tools/ai_work_provider_examples.py
+~~~
+
+The default tour makes no external provider calls. It runs the actual gateway
+with disposable local provider simulators and removes temporary state on exit.
+Allow local port binding. Use the branch for exploration; pin a complete reviewed
+commit when operating a gateway. [Live examples](examples/providers/README.md)
+use your own OpenAI/Anthropic accounts, explicit rates and a small request limit.
+Provider calls can be billed separately. [Connect real workflow results](docs/AI_WORK_DELIVERY_EXAMPLES.md)
+after choosing the job's completion criterion.
+
+### Stable gateway demo
 
 The provider-free demo exercises the real HTTP gateway, policy, redaction,
 request-attempt, and SQLite evidence paths with disposable loopback providers:

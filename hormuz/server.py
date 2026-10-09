@@ -2023,6 +2023,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         if contract_header_value is not None:
             self.send_header("X-Hormuz-Contract", contract_header_value)
         if error_code is not None:
