@@ -49,16 +49,17 @@ manifest identifies the actual working tree, including the SDK recipe and harnes
 Installed versions identify the specific tested SDK combination.
 
 The [recorded local run](receipt.json) on 2026-10-09 passed all six cases using OpenAI 3.27.0,
-Anthropic 1.12.1 and HTTPX2 2.13.1 on Python 3.12.12. Its 32-file manifest matches
-the tested working tree; `ea863c42eda462f2872719aa3e8a9a505649ae2e` identifies
-the starting checkout commit rather than declaring the uncommitted files part of
-that commit. SQLite retained six active jobs, six successful response attempts
+Anthropic 1.12.1 and HTTPX2 2.13.1 on Python 3.12.12. Its 33-file manifest matches
+the tested files, including the public configuration loader;
+`e662f9587195ffdc7cecbaf10cb2396757947a23` identifies the starting checkout
+revision. Later evidence metadata does not change that execution boundary.
+SQLite retained six active jobs, six successful response attempts
 and zero outcome observations. Chat streaming required two confirmation reads;
 the other cases required one each. All six cases made one inference call each,
 and both listeners, clients and streams closed before the receipt was written.
 The recorded source includes the logical-group confirmation guard and the
 gateway's terminal stream framing checks. The refresh wrapper also checked all
-32 source hashes before and after execution and matched the emitted manifest.
+33 source hashes before and after execution and matched the emitted manifest.
 
 This qualifies the local SDK attachment and protocol paths only. Synthetic
 responses and configured fixture costs establish no model correctness, savings,

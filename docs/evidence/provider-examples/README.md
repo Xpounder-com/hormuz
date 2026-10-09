@@ -11,9 +11,9 @@ executed no tool actions, and establishes no customer savings or model quality.
 Timing describes this small functional run, not a load or performance benchmark.
 
 `source_commit` is the starting checkout revision,
-`ea863c42eda462f2872719aa3e8a9a505649ae2e`. The refreshed run included
-uncommitted changes; its 30 `source_files` hashes identify the actual working
-tree tested. The execution wrapper checked the reviewed source manifest before
+`e662f9587195ffdc7cecbaf10cb2396757947a23`. Its 31 `source_files` hashes identify
+the tested files, including the public configuration loader. The execution
+wrapper checked the reviewed source manifest before
 and after the run. The receipt is retained as executed rather than relabeled
 with a later commit.
 
@@ -88,5 +88,5 @@ customer experience.
 
 This live run precedes the SQLite connection-cleanup fix. Its original receipts
 remain unchanged and do not qualify the later gateway source. The synthetic
-tour above was regenerated against that fix; no additional billed requests were
+tour above was regenerated against the configuration-loader successor; no additional billed requests were
 made to refresh these live receipts.

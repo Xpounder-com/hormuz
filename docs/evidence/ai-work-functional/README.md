@@ -8,14 +8,15 @@ deployment readiness.
 
 The bounded gateway, provider tour, browser journey and installed SDK executions
 were regenerated after the terminal-order, closed-frame, concurrent SDK
-confirmation, storage-error guards and SQLite connection cleanup. Their source hashes identify the tested
+confirmation, storage-error guards, SQLite connection cleanup and public
+configuration-loader exploration fix. Their source hashes identify the tested
 candidate files.
 
 | Artifact | What it establishes |
 | --- | --- |
 | [receipt.json](receipt.json) | 35 real gateway checks, 13 simulated provider calls and source-file hashes |
 | [local-benchmark.json](local-benchmark.json) | Historical predecessor measurement over 10,000 synthetic jobs and 99,990 attempts; does not qualify this candidate |
-| [AI_WORK_BROWSER_QA.json](AI_WORK_BROWSER_QA.json) | 12 actual authenticated journey checks, three simulated provider responses, desktop/mobile rendering and 27 source hashes |
+| [AI_WORK_BROWSER_QA.json](AI_WORK_BROWSER_QA.json) | 12 actual authenticated journey checks, three simulated provider responses, desktop/mobile rendering and 28 source hashes |
 | [AI_WORK_DEMO.webm](AI_WORK_DEMO.webm) | Recorded connection, synthetic billing activation, budgets, ordinary API work, route/cache evidence, a cap, continuation and a signed workflow result |
 | [PACKAGING_SMOKE.json](PACKAGING_SMOKE.json) | Offline wheel/source build, isolated installed imports/CLI/styles, owned SQLite history/totals/restart, and a source-matched installed HTTP smoke |
 | [INSTALLED_HTTP_SMOKE.json](INSTALLED_HTTP_SMOKE.json) | Exactly two authenticated local installed-gateway requests: create and read an owned job; zero provider inference or external calls |
@@ -27,11 +28,12 @@ This is not an invoice or a customer saving. A completed workflow condition
 establishes that declared condition; an HTTP success or cache hit never supplies
 task completion.
 
-The package receipts name the clean source snapshot used for the offline build.
+The retained predecessor package receipts name the clean source snapshot used for the offline build.
 Their 32 runtime/example and 10 packaging-source fingerprints identify the tested
 files; later commits that retain those fingerprints add evidence metadata. The installed
 HTTP smoke makes exactly two local create/read requests and performs no provider
-inference. These unsigned artifacts do not qualify a native release or updater.
+inference. Those predecessor receipts do not qualify the configuration-loader
+successor. These unsigned artifacts do not qualify a native release or updater.
 
 The retained metadata benchmark identifies older source fingerprints. Its
 latency numbers are historical and must not be used for this candidate or as

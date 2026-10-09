@@ -1,7 +1,7 @@
 {
   "schema_id": "hormuz.ai-work-browser-validation",
   "schema_version": 1,
-  "generated_at": "2026-10-09T18:52:12.011Z",
+  "generated_at": "2026-10-09T21:14:47.062Z",
   "fixture": "actual gateway with synthetic local identity, provider, Stripe transport and signed GitHub fixture",
   "provider_calls": "3 local simulated provider responses; zero real or paid provider calls",
   "viewports": [
@@ -47,6 +47,7 @@
     "hormuz/work_client.py": "bc7448150586c4089706876087c75cac289f64cc9d320a39a42286e8b6499eb6",
     "hormuz/commands/work.py": "2945e6d9951c4c68ec3b8360e58ca35e89c27a855b013c69c9869a5ade27cf75",
     "hormuz/config.py": "ef10658f245c288c6b028e9d361ff72f0c1ae4ad1f27f235c7eb4066cc093937",
+    "hormuz/_config_input.py": "663f9db053199b4a23aeb62ff499189161b425ee1a499f9093cbae86c7d5957c",
     "hormuz/_config_work.py": "0c3224b2ddf8196ca251842789287c841aaeb356029d937ec28a33399aecfad8",
     "hormuz/server.py": "a483bb925de6a51b3104b02675d2b7871a42710aaacdcafd6daa8c877c8e5aad",
     "hormuz/usage.py": "6e3afd38de63ff8aaa63d83d93f8864437a3a703f305b52b09886a9be236a437",
@@ -55,7 +56,7 @@
     "hormuz/_hosted_config.py": "760f79f5809b5a7e5461a6e53ad1a04eb6ae273ebcac4d4ce09095b2dc23f0ef",
     "hormuz/_hosted_backup.py": "59468f65b37e14dda0235929947a1c269f785081015168f8d22c17e6b44cc1bf",
     "hormuz/hosted.py": "09fc8614f5d5190f7ab3a10884f43c3a2fb33b8fcbaaa74843a720355fa34a3e",
-    "tools/ai_work_proof.py": "398f9367e579bd3dc1267a77a985f0c406f87490241131141d01e915613293e6",
+    "tools/ai_work_proof.py": "4ba8eefee4174f403b8cdf7cb83a1b611e481b15c1c1fc8fd8a38d829d2fdb62",
     "tools/ai_work_browser_fixture.py": "d559268a3524a68a5b6291f791026af5b7a3a80e5116c389a03af2137eeebfe5",
     "website/scripts/ai-work-browser-qa.mjs": "b5f8314ed6b919f2f0bf037cb16db91b824716a7906c882a18854e9ec449ba20"
   },

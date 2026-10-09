@@ -33,10 +33,10 @@ real provider request or payment. Synthetic metadata tests exercise mechanisms;
 they are not the customer-local quality benchmark or measured customer value.
 
 Current bounded executions passed 35 mechanics checks, the 21-scenario provider
-tour and 12 browser journey checks. Their 27/30/27 source fingerprints match
+tour and 12 browser journey checks. Their 28/31/28 source fingerprints match
 the tested candidate files. The [installed SDK qualification](evidence/sdk-examples/README.md)
 also passed six actual SDK JSON/streaming cases through the authenticated gateway
-and real SQLite ledger, with 32 source fingerprints. Each used one simulated
+and real SQLite ledger, with 33 source fingerprints. Each used one simulated
 provider response, left the job active and submitted no completion observation.
 All these runs closed their owned clients, streams and servers. None establishes
 live-provider behavior, payment, customer savings or model quality.
@@ -44,18 +44,26 @@ An additional [installed-agent offline summary](evidence/sdk-examples/installed-
 records eight passing checks with observed Codex 0.160.0 and Claude Code 2.1.126:
 actual generated-configuration requests joined their owned ledgers, actor access
 and parent/job caps held, and unknown attribution stayed separate. Its immutable
-gateway revision is `d08cdb9e165003ac27ff9fdbc72bfc5c863fe8cb`; all 32 runtime
-fingerprints still match this candidate. It made no real provider call or payment
-and does not qualify the different managed supported pins or native launcher.
+gateway revision is `d08cdb9e165003ac27ff9fdbc72bfc5c863fe8cb`, identified by its
+retained 32-file manifest. It made no real provider call or payment and does not
+qualify the later configuration-loader change, different managed supported pins
+or native launcher.
 These executions include the OpenAI terminal-order, closed SSE frame,
 concurrent SDK confirmation, storage-error and SQLite connection-cleanup guards. Legacy usage and finance parsing remain
 unchanged, with equality regressions for the added stream cases.
 
-The full local regression passed 3,046 tests with zero failures and 401
+The predecessor full local regression passed 3,046 tests with zero failures and 401
 environment-dependent skips in 350.588 seconds. It includes the corrected
 `work attempts` command inventory, terminal-order/framing, concurrent SDK
 confirmation, real SQLite connection-close regressions and mocked bounded
-admission-readiness checks. Exact successor remote CI remains a separate requirement.
+admission-readiness checks. The configuration-loader successor passed 51 focused
+configuration/ownership/learning checks: public file loading enables bounded
+exploration, invalid settings fail before credential lookup, and an approved
+allocation reaches real SQLite admission without exceeding its allowance.
+Native fixture and CLI checks passed 14 local tests; 16 environment-specific
+native tests skipped locally. The pinned-client CI now checks bound Codex On/Off
+and Claude streaming calls through the compiled relay. Exact successor remote
+CI remains a separate requirement.
 
 Nine pricing-mode regressions exercise actual JSON and streaming gateway
 admission, complete uncertain holds, cache exclusion, continuation affinity and
@@ -68,8 +76,9 @@ an offline source build, installed imports and CLI, and owned SQLite history,
 totals and restart checks. Its offline stage starts no listener. A separate
 [installed HTTP smoke](evidence/ai-work-functional/INSTALLED_HTTP_SMOKE.json)
 creates and reads an owned job through the same installed wheel with exactly
-two authenticated local requests and no provider inference. Both stages match
-the candidate's 32 source and 10 packaging hashes and close their owned state.
+two authenticated local requests and no provider inference. Both retained predecessor stages identify 32 source and 10 packaging hashes and
+close their owned state. They do not qualify the later configuration-loader and
+source-manifest changes; successor installed-package qualification is pending.
 Installed-package handoff, matching restore, and closed-authorization checks also
 passed locally on synthetic state. This does not qualify signed distributions
 or an interactive native update; those live release gates remain open.
