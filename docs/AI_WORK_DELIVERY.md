@@ -40,14 +40,15 @@ and real SQLite ledger, with 32 source fingerprints. Each used one simulated
 provider response, left the job active and submitted no completion observation.
 All these runs closed their owned clients, streams and servers. None establishes
 live-provider behavior, payment, customer savings or model quality.
-These executions include the OpenAI terminal-order, closed SSE frame and
-concurrent SDK confirmation guards. Legacy usage and finance parsing remain
+These executions include the OpenAI terminal-order, closed SSE frame,
+concurrent SDK confirmation, storage-error and SQLite connection-cleanup guards. Legacy usage and finance parsing remain
 unchanged, with equality regressions for the added stream cases.
 
-The final full local regression passed 3,024 tests with zero failures and 401
-environment-dependent skips in 328.486 seconds. It includes the corrected
-`work attempts` command inventory, terminal-order/framing and concurrent SDK
-confirmation checks. Exact successor remote CI remains a separate requirement.
+The full local regression passed 3,046 tests with zero failures and 401
+environment-dependent skips in 350.588 seconds. It includes the corrected
+`work attempts` command inventory, terminal-order/framing, concurrent SDK
+confirmation, real SQLite connection-close regressions and mocked bounded
+admission-readiness checks. Exact successor remote CI remains a separate requirement.
 
 Nine pricing-mode regressions exercise actual JSON and streaming gateway
 admission, complete uncertain holds, cache exclusion, continuation affinity and
@@ -65,11 +66,12 @@ the candidate's 32 source and 10 packaging hashes and close their owned state.
 Installed-package handoff, matching restore, and closed-authorization checks also
 passed locally on synthetic state. This does not qualify signed distributions
 or an interactive native update; those live release gates remain open.
-Remote product CI passed at source commit
-[`d4e818c0530a01d3840a380cab30e3dadd7d3c77`](https://github.com/Xpounder-com/hormuz/commit/d4e818c0530a01d3840a380cab30e3dadd7d3c77).
-The existing public site is pinned to predecessor
-`e04280cf195aa1ab906aec5681eb55e4044d3d7a` through publication PR #41.
-The new examples require successor exact-head checks and Pages verification.
+Remote product checks identify their exact source revision in
+[PR #456](https://github.com/Xpounder-com/hormuz/pull/456). Website publication
+uses a separate repository and immutable `site-source.json` pin;
+[publication PR #44](https://github.com/usehormuz/usehormuz.github.io/pull/44)
+records this source-pin refresh. Local results and predecessor green runs cannot
+substitute for successful successor CI, deployment and live-page verification.
 Current website verification passes 74 Node tests, 10 Python tests, TypeScript,
 and an offline production export with fallback fonts: 16 canonical pages, 974
 local link occurrences and 29 source targets. Production font downloads remain
@@ -99,11 +101,20 @@ or browser-submitted amount is promoted to provider-confirmed evidence.
 
 Source and local evidence are an implementation candidate. Existing v1.8.0
 installers do not contain the new AI Work CLI; the source candidate requires a
-reviewed immutable install revision and qualified gateway configuration. Completing the paid
+reviewed immutable install revision and qualified gateway configuration.
+[Retained live-provider receipts](evidence/provider-examples/README.md) record
+six Anthropic and eleven OpenAI examples against their stated predecessor source
+profiles. Those executions establish the tested transport and usage paths, with
+configured estimates; they are not invoices, customer outcomes or qualification
+of a later gateway revision. Provider credentials are saved privately and no
+additional billed request is made to relabel old evidence.
+
+Completing the paid
 launch requires a named authorized deployment, real provider/account access,
 approved Stripe price and current signed live events, production identity/TLS,
 inquiry inbox and booking verification, exact Pages publication, and the signed
-release/update path. No suitable live setup has been supplied in this goal turn.
+release/update path. The paid workspace, live payment and customer-native
+combination remain unqualified until those checks are actually performed.
 
 Do not resume paid infrastructure before verified customer payment. No real
 inquiry, booking, charge, ad or outreach is generated merely to close a test.

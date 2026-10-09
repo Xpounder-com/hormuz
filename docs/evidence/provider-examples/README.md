@@ -11,7 +11,7 @@ executed no tool actions, and establishes no customer savings or model quality.
 Timing describes this small functional run, not a load or performance benchmark.
 
 `source_commit` is the starting checkout revision,
-`92b34b43e4bf4d8489c042e0800d0354edc864fa`. The refreshed run included
+`ea863c42eda462f2872719aa3e8a9a505649ae2e`. The refreshed run included
 uncommitted changes; its 30 `source_files` hashes identify the actual working
 tree tested. The execution wrapper checked the reviewed source manifest before
 and after the run. The receipt is retained as executed rather than relabeled
@@ -73,7 +73,7 @@ temporary ledger; its attempt count and charges are unknown and are not included
 in the estimates above. The runner now saves a sanitized failed receipt after
 gateway execution starts.
 
-The current short explanation prompts passed the
+Short explanation prompts passed the
 [eleven-example live run](openai-live-examples.json): Responses arithmetic, code
 explanation, code review, CI diagnosis, Chat arithmetic, JSON extraction, release
 note, Responses and Chat streaming, function declaration and speed priority.
@@ -85,3 +85,8 @@ executed tools, payments or completed jobs. The gateway estimate is 118 micro-US
 identified by their hashes. This success does not erase earlier failures or
 establish model quality, customer savings, native-agent compatibility or a paid
 customer experience.
+
+This live run precedes the SQLite connection-cleanup fix. Its original receipts
+remain unchanged and do not qualify the later gateway source. The synthetic
+tour above was regenerated against that fix; no additional billed requests were
+made to refresh these live receipts.

@@ -8,7 +8,7 @@ deployment readiness.
 
 The bounded gateway, provider tour, browser journey and installed SDK executions
 were regenerated after the terminal-order, closed-frame, concurrent SDK
-confirmation and storage-error guards. Their source hashes identify the tested
+confirmation, storage-error guards and SQLite connection cleanup. Their source hashes identify the tested
 candidate files.
 
 | Artifact | What it establishes |
@@ -27,9 +27,9 @@ This is not an invoice or a customer saving. A completed workflow condition
 establishes that declared condition; an HTTP success or cache hit never supplies
 task completion.
 
-The package artifacts were built offline from the clean `7eb78c4` source snapshot.
-Their 32 runtime/example and 10 packaging-source fingerprints match the candidate;
-later commits that retain those fingerprints add evidence metadata. The installed
+The package receipts name the clean source snapshot used for the offline build.
+Their 32 runtime/example and 10 packaging-source fingerprints identify the tested
+files; later commits that retain those fingerprints add evidence metadata. The installed
 HTTP smoke makes exactly two local create/read requests and performs no provider
 inference. These unsigned artifacts do not qualify a native release or updater.
 

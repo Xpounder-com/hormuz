@@ -1,11 +1,11 @@
 {
   "schema_id": "hormuz.ai-work-sdk-qualification",
   "schema_version": 1,
-  "generated_at": "2026-10-09T18:25:36.789560+00:00",
-  "source_commit": "92b34b43e4bf4d8489c042e0800d0354edc864fa",
+  "generated_at": "2026-10-09T18:51:39.841912+00:00",
+  "source_commit": "ea863c42eda462f2872719aa3e8a9a505649ae2e",
   "source_boundary": "working_tree_files_identified_by_sha256",
   "source_files": {
-    "hormuz/work_runtime.py": "f218895a6b5cf60da6fa498277c7f3fb7fbdc8fb23f622d0e5c297eaf8036fd5",
+    "hormuz/work_runtime.py": "8b2fb5ab317b73c1d0c04e884c5793135ff0c1c915a1b66418396b5a8cd73711",
     "hormuz/work_learning.py": "a054014cb5ee15285f6b077b3b55acd9098cc0d61f7fad49e9e521832268bd86",
     "hormuz/work_accounting.py": "0d36b1312301da6aaeb41aafa5fd34a1b65bab9e0ea5ff066316ec2f25bd1379",
     "hormuz/work_provider_costs.py": "aa9b4594bbb72157ed98fd0beeb295548d9c2b804a1bc2966589b0870fbdede7",

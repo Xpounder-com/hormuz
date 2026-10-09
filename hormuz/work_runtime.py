@@ -217,7 +217,7 @@ class WorkRuntime:
                 os.fchmod(fd, 0o600)
             finally:
                 os.close(fd)
-            with self._connect() as connection:
+            with closing(self._connect()) as connection, connection:
                 connection.execute("PRAGMA journal_mode=WAL")
                 connection.executescript(_SCHEMA)
                 # Additive metadata fields also support a ledger initialized by
@@ -267,10 +267,14 @@ class WorkRuntime:
 
     def _connect(self):
         connection = sqlite3.connect(self.path.absolute().as_uri() + "?mode=rw", uri=True, timeout=5, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=5000")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=5000")
+            return connection
+        except BaseException:
+            connection.close()
+            raise
 
     def verify_ready(self):
         """Probe the existing ledger without creating or initializing a file."""

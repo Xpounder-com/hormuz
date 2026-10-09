@@ -8,9 +8,87 @@ import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from hormuz.config import Identity, ModelRoute
 from hormuz.work_runtime import WorkRuntime, WorkRuntimeError
+
+
+class WorkRuntimeConnectionLifecycleTests(unittest.TestCase):
+    def assert_closed(self, connections):
+        self.assertEqual(len(connections), 1)
+        with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+            connections[0].execute("SELECT 1")
+
+    def test_initialization_closes_connection_and_preserves_schema(self):
+        connections = []
+        connect = sqlite3.connect
+
+        def tracked_connect(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            connections.append(connection)
+            return connection
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "work.sqlite3"
+            runtime = None
+            try:
+                with patch("hormuz.work_runtime.sqlite3.connect", side_effect=tracked_connect):
+                    runtime = WorkRuntime(path)
+                self.assert_closed(connections)
+                self.assertEqual(runtime.verify_ready()["schema_version"], 1)
+                with closing(connect(path)) as persisted:
+                    self.assertEqual(persisted.execute("SELECT version FROM ai_work_schema").fetchall(), [(1,)])
+            finally:
+                if runtime is not None:
+                    runtime.close()
+                for connection in connections:
+                    connection.close()
+
+    def test_initialization_schema_failure_closes_connection(self):
+        connections = []
+        connect = sqlite3.connect
+
+        def tracked_connect(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            connections.append(connection)
+            return connection
+
+        with tempfile.TemporaryDirectory() as folder:
+            try:
+                with (
+                    patch("hormuz.work_runtime.sqlite3.connect", side_effect=tracked_connect),
+                    patch("hormuz.work_runtime._SCHEMA", "SELECT * FROM absent_lifecycle_table"),
+                    self.assertRaisesRegex(WorkRuntimeError, "storage_unavailable"),
+                ):
+                    WorkRuntime(Path(folder) / "work.sqlite3")
+                self.assert_closed(connections)
+            finally:
+                for connection in connections:
+                    connection.close()
+
+    def test_setup_failure_closes_connection_before_returning_to_owner(self):
+        connections = []
+        connect = sqlite3.connect
+
+        def denied_setup_connect(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            connections.append(connection)
+            connection.set_authorizer(lambda action, *_args:
+                sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_PRAGMA else sqlite3.SQLITE_OK)
+            return connection
+
+        with tempfile.TemporaryDirectory() as folder:
+            try:
+                with (
+                    patch("hormuz.work_runtime.sqlite3.connect", side_effect=denied_setup_connect),
+                    self.assertRaisesRegex(WorkRuntimeError, "storage_unavailable"),
+                ):
+                    WorkRuntime(Path(folder) / "work.sqlite3")
+                self.assert_closed(connections)
+            finally:
+                for connection in connections:
+                    connection.close()
 
 
 class WorkRuntimeTests(unittest.TestCase):

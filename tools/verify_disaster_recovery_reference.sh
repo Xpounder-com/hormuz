@@ -127,6 +127,24 @@ wait_for_deployment() {
     || fail "deployment did not become ready: $1/$2"
 }
 
+wait_for_cnpg_admission() {
+  local manifest=$1
+  local attempt delay
+  # A ready operator pod does not establish API-server webhook connectivity.
+  # Four bounded dry runs permit at most three retries; never bypass admission.
+  for attempt in 1 2 3 4; do
+    if kubectl apply --dry-run=server --request-timeout=15s \
+      --filename "${manifest}" >/dev/null; then
+      return
+    fi
+    if [[ "${attempt}" -lt 4 ]]; then
+      delay=$(( (5 << (attempt - 1)) + RANDOM % 3 ))
+      sleep "${delay}"
+    fi
+  done
+  fail "CloudNativePG admission webhook did not become ready"
+}
+
 wait_for_statefulset() {
   local namespace=$1
   local statefulset=$2
@@ -931,7 +949,8 @@ replacement = (
 )
 output_path.write_text(source.replace(needle, replacement), encoding="utf-8")
 PY
-kubectl apply --filename "${WORK_ROOT}/source-postgres.yaml" >/dev/null
+wait_for_cnpg_admission "${WORK_ROOT}/source-postgres.yaml"
+kubectl apply --request-timeout=30s --filename "${WORK_ROOT}/source-postgres.yaml" >/dev/null
 wait_for_cnpg_ready
 
 source_topology="$(kubectl --namespace hormuz-dependencies get pods \
