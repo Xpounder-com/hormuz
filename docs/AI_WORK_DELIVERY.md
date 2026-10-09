@@ -33,7 +33,9 @@ real provider request or payment. Synthetic metadata tests exercise mechanisms;
 they are not the customer-local quality benchmark or measured customer value.
 
 Final local regression: `python -m unittest discover -s tests -t . -q` ran
-2,902 tests with zero failures and 401 environment-dependent skips. Website
+2,905 tests with zero failures and 401 environment-dependent skips. All 583
+package, test and tool sources parse on Python 3.11; renderer tests also pass
+on the actual Python 3.11 runtime. Website
 verification passed 71 tests, TypeScript, the production build and exported-site
 checks (16 pages). A fresh wheel/source archive and installed gateway smoke
 passed outside the checkout. The browser journey passed 12 checks and the
