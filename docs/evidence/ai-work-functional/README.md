@@ -7,8 +7,9 @@ savings, model quality, live payments, a signed distribution or production
 deployment readiness.
 
 The bounded gateway, provider tour, browser journey and installed SDK executions
-were regenerated after the terminal-order, closed-frame and concurrent SDK
-confirmation guards. Their source hashes identify the tested candidate files.
+were regenerated after the terminal-order, closed-frame, concurrent SDK
+confirmation and storage-error guards. Their source hashes identify the tested
+candidate files.
 
 | Artifact | What it establishes |
 | --- | --- |
@@ -25,6 +26,12 @@ real-provider calls or payments; its signed Stripe and GitHub events are synthet
 This is not an invoice or a customer saving. A completed workflow condition
 establishes that declared condition; an HTTP success or cache hit never supplies
 task completion.
+
+The package artifacts were built offline from the clean `7eb78c4` source snapshot.
+Their 32 runtime/example and 10 packaging-source fingerprints match the candidate;
+later commits that retain those fingerprints add evidence metadata. The installed
+HTTP smoke makes exactly two local create/read requests and performs no provider
+inference. These unsigned artifacts do not qualify a native release or updater.
 
 The retained metadata benchmark identifies older source fingerprints. Its
 latency numbers are historical and must not be used for this candidate or as
