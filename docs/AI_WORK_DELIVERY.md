@@ -40,6 +40,13 @@ and real SQLite ledger, with 32 source fingerprints. Each used one simulated
 provider response, left the job active and submitted no completion observation.
 All these runs closed their owned clients, streams and servers. None establishes
 live-provider behavior, payment, customer savings or model quality.
+An additional [installed-agent offline summary](evidence/sdk-examples/installed-agent-offline-summary.json)
+records eight passing checks with observed Codex 0.160.0 and Claude Code 2.1.126:
+actual generated-configuration requests joined their owned ledgers, actor access
+and parent/job caps held, and unknown attribution stayed separate. Its immutable
+gateway revision is `d08cdb9e165003ac27ff9fdbc72bfc5c863fe8cb`; all 32 runtime
+fingerprints still match this candidate. It made no real provider call or payment
+and does not qualify the different managed supported pins or native launcher.
 These executions include the OpenAI terminal-order, closed SSE frame,
 concurrent SDK confirmation, storage-error and SQLite connection-cleanup guards. Legacy usage and finance parsing remain
 unchanged, with equality regressions for the added stream cases.
@@ -85,6 +92,15 @@ API inference. Provider-resolved inputs and unbounded modalities fail before
 dispatch. Native subscriptions and calls outside the gateway remain outside caps.
 Provider timing measures transport blocking time, not GPU compute. Workflow
 completion establishes its specified condition, not universal correctness.
+
+The native source launcher accepts an optional `--work-id <job-id>` for one
+invocation, passes only its correlation header through the authenticated relay,
+and retains existing custody, version and supervision checks. The gateway
+authorizes the owned job; the ID grants no actor or tenant authority and is never
+saved in a connection profile. The generated Mac `.command` accepts the same
+pair while its resident-app lease is live. The panel's existing Open action
+remains unbound. See the [governed relay contract](../clients/rust/relay/README.md);
+signed native distribution and actual managed-client qualification remain open.
 
 Automatic signed connectors and integrated full-state recovery are available in
 the full SQLite single-node gateway profile with enrolled sources. The fixed

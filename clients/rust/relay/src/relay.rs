@@ -612,6 +612,12 @@ async fn exchange(
             upstream = upstream.header(name, value.clone());
         }
     }
+    // A work ID is a job association, never an authority grant. Match the
+    // Python relay's single bounded header contract; the authenticated gateway
+    // still verifies job ownership and applies its work policy.
+    if let Some(value) = work_id_header(&original_headers) {
+        upstream = upstream.header("X-Hormuz-Work-Id", value.clone());
+    }
     if optimized {
         upstream = upstream.header("X-Hormuz-Context-Format", "structural-v1");
     }
@@ -640,6 +646,18 @@ async fn exchange(
         .header(header::CONNECTION, "close")
         .body(body)
         .unwrap_or_else(|_| error(StatusCode::BAD_GATEWAY, "gateway_unavailable"))
+}
+
+fn work_id_header(headers: &hyper::HeaderMap) -> Option<&header::HeaderValue> {
+    let mut values = headers.get_all("x-hormuz-work-id").iter();
+    let value = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    if !crate::valid_work_id(value.to_str().ok()?) {
+        return None;
+    }
+    Some(value)
 }
 
 fn authenticated(headers: &hyper::HeaderMap, expected: &str) -> bool {

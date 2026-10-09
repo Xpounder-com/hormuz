@@ -65,3 +65,27 @@ responses and configured fixture costs establish no model correctness, savings,
 customer speed, provider invoice, live payment, deployed customer gateway or
 installed native coding-agent compatibility. Live provider/account/model/rate
 qualification remains a separate requirement.
+
+## Observed installed coding agents
+
+The separate [sanitized installed-agent summary](installed-agent-offline-summary.json)
+records eight passing checks using installed Codex 0.160.0 and Claude Code
+2.1.126 against immutable gateway revision `d08cdb9e165003ac27ff9fdbc72bfc5c863fe8cb`.
+Each client used freshly generated job-bound configuration and made one actual
+inference HTTP request. The authenticated gateway settled it in the owned SQLite
+job ledger. Actor isolation, job and workspace caps before egress, unknown
+attribution and independent closed-database checks also passed. The 23 requests
+included three synthetic provider responses and no real provider calls or payments.
+Jobs remained active with zero completion observations; all owned resources closed.
+
+The first batch failed before Claude inference because the private fixture
+rejected routes. Its failed receipt remains unchanged. A separately approved
+batch used a corrected fixture and passed. This disclosure removes private
+executable paths, ephemeral work and process identifiers, and records both
+private receipt hashes. The execution harness was private operator tooling.
+
+These observed versions differ from managed supported pins 0.147.0 and 2.1.233.
+The clients used direct generated configuration; they did not execute the new
+Rust governed launcher or native companion. This result does not qualify those
+native changes, supported-version conformance, a signed release, live provider
+billing, customer outcomes or output quality.

@@ -1,0 +1,177 @@
+{
+  "schema_id": "hormuz.installed-agent-offline-public-summary",
+  "schema_version": 1,
+  "verdict": "passed",
+  "source_revision": "d08cdb9e165003ac27ff9fdbc72bfc5c863fe8cb",
+  "harness_sha256": "99636074613475df4e39d4f0ff00bdb666fe4ce5f140a8333daa0742ed6a9359",
+  "source_files": {
+    "hormuz/work_runtime.py": "8b2fb5ab317b73c1d0c04e884c5793135ff0c1c915a1b66418396b5a8cd73711",
+    "hormuz/work_learning.py": "a054014cb5ee15285f6b077b3b55acd9098cc0d61f7fad49e9e521832268bd86",
+    "hormuz/work_accounting.py": "0d36b1312301da6aaeb41aafa5fd34a1b65bab9e0ea5ff066316ec2f25bd1379",
+    "hormuz/work_provider_costs.py": "aa9b4594bbb72157ed98fd0beeb295548d9c2b804a1bc2966589b0870fbdede7",
+    "hormuz/work_gateway.py": "71dfc35a64382ac21c75b74bd36cff0883a696d6d03eadc20df8e17a9704f2f5",
+    "hormuz/work_workflow.py": "0cd9c0b9719f72b81badf9c098706cb0a3e45613f3eb05527fc380065181186d",
+    "hormuz/work_workflow_http.py": "f15906f2675b6635cf8115c475ea1043bf6aed0a0c22978aed31c3a1552282d5",
+    "hormuz/work_http.py": "515db882469550a2dccc29d33ccc686e459c4a299f0e82f072ac4886ff1a3aa0",
+    "hormuz/work_billing.py": "0b4eb3e66ed9c1ee18b9fee0e4e07f955eaf076e4e65f2a21107d115f6336522",
+    "hormuz/work_activation.py": "e051bcd3d2a019ec4d1428665944dfc9a23b4aa99c8b4193a1dad1fc4c3d7d37",
+    "hormuz/work_recovery.py": "7b1a9cbc6ebc2ddb9867bcb779b3285d44ba23ae6c8c2b479bc251ca68c02df1",
+    "hormuz/work_pages.py": "890890b82262f40eb2792b110aab71427a0fa09b101e9ca64b81740932cdcc51",
+    "hormuz/work.css": "20f7fb46ed83848a910800cd8a7b85cfc107a83ab3806f6bd4b7437da9f54072",
+    "hormuz/work_client.py": "bc7448150586c4089706876087c75cac289f64cc9d320a39a42286e8b6499eb6",
+    "hormuz/commands/work.py": "2945e6d9951c4c68ec3b8360e58ca35e89c27a855b013c69c9869a5ade27cf75",
+    "hormuz/config.py": "ef10658f245c288c6b028e9d361ff72f0c1ae4ad1f27f235c7eb4066cc093937",
+    "hormuz/_config_work.py": "0c3224b2ddf8196ca251842789287c841aaeb356029d937ec28a33399aecfad8",
+    "hormuz/server.py": "a483bb925de6a51b3104b02675d2b7871a42710aaacdcafd6daa8c877c8e5aad",
+    "hormuz/usage.py": "6e3afd38de63ff8aaa63d83d93f8864437a3a703f305b52b09886a9be236a437",
+    "hormuz/_hosted_server.py": "a1cabada88bd170d09b14de06814f3d59249733db154e566a43f2d9d396c7e34",
+    "hormuz/_hosted_state.py": "ecc74bd2f278219e75183b688391e58742d3b666013e590c3c9ec1857e561370",
+    "hormuz/_hosted_config.py": "760f79f5809b5a7e5461a6e53ad1a04eb6ae273ebcac4d4ce09095b2dc23f0ef",
+    "hormuz/_hosted_backup.py": "59468f65b37e14dda0235929947a1c269f785081015168f8d22c17e6b44cc1bf",
+    "hormuz/hosted.py": "09fc8614f5d5190f7ab3a10884f43c3a2fb33b8fcbaaa74843a720355fa34a3e",
+    "tools/ai_work_proof.py": "398f9367e579bd3dc1267a77a985f0c406f87490241131141d01e915613293e6",
+    "tools/ai_work_browser_fixture.py": "d559268a3524a68a5b6291f791026af5b7a3a80e5116c389a03af2137eeebfe5",
+    "website/scripts/ai-work-browser-qa.mjs": "b5f8314ed6b919f2f0bf037cb16db91b824716a7906c882a18854e9ec449ba20",
+    "examples/sdk/work_sdk.py": "30f48e47f7ec8cf41bae57877691fb59e72d819ca404ea75ee1ac2d65a15490d",
+    "tools/ai_work_provider_examples.py": "f099d284bb5584b6a493a0bcbbc5064fa6e4e18b42f4e64b76bd84c776488798",
+    "tools/provider_example_transport.py": "36f140bda4f1e86b66a324401d6182153570e0312535e2e183f88b65a3e6e098",
+    "tools/provider_example_responses.py": "ed03ffcb9a0221c1ba6ea809de0e721b7fd29efd6bd294b843d937f23a1dc120",
+    "tools/ai_work_sdk_qualification.py": "e174a55f093092820185a6a86a54382dd6a1258ddcef4e87cffc5a3c5df729a5"
+  },
+  "limits": {
+    "gateway_handlers": 4,
+    "http_requests": 40,
+    "provider_fixture_calls": 3,
+    "provider_token_count_calls": 2,
+    "agent_inference_requests_each": 1,
+    "client_deadline_seconds": 45,
+    "socket_deadline_seconds": 5,
+    "upstream_deadline_seconds": 2,
+    "control_deadline_seconds": 5,
+    "inference_retries": 0
+  },
+  "checks": [
+    {
+      "check": "immutable reviewed source snapshot",
+      "passed": true,
+      "source_files": 32
+    },
+    {
+      "check": "codex actual installed client generated binding joins owned settled ledger",
+      "passed": true
+    },
+    {
+      "check": "claude actual installed client generated binding joins owned settled ledger",
+      "passed": true
+    },
+    {
+      "check": "different actor cannot read bound work",
+      "passed": true
+    },
+    {
+      "check": "job cap stops before synthetic provider egress",
+      "passed": true,
+      "budget_microusd": 1
+    },
+    {
+      "check": "workspace cap stops before synthetic provider egress",
+      "passed": true,
+      "budget_microusd": 192
+    },
+    {
+      "check": "missing work binding stays separate and does not claim completed work",
+      "passed": true
+    },
+    {
+      "check": "closed gateway actual SQLite ledger independently confirms attempts",
+      "passed": true,
+      "attempts": 5,
+      "successful_attempts": 3,
+      "observations": 0
+    }
+  ],
+  "clients": [
+    {
+      "client": "codex",
+      "observed_version": "0.160.0",
+      "supported_pin": "0.147.0",
+      "entrypoint_sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+      "native_binary_sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b",
+      "exit_code": 0,
+      "stdout_bytes": 3,
+      "stderr_bytes": 876,
+      "sanitized_error_classes": [],
+      "generated_configuration_sha256": "11cdb88bcc0c985d855eab18612e829f79712ca3ce8f59099291f4b5fea40215",
+      "process_group_closed": true,
+      "live_provider_calls": 0,
+      "inference_http_requests": 1,
+      "provider_inference_calls": 1,
+      "auxiliary_token_count_calls": 0,
+      "owned_attempts": 1,
+      "configured_cost_microusd": 96,
+      "work_state": "active",
+      "observations": 0
+    },
+    {
+      "client": "claude",
+      "observed_version": "2.1.126",
+      "supported_pin": "2.1.233",
+      "entrypoint_sha256": "87a1d05018ceadfc1fe616bfc10262b0503f51986f4af2dc42d1ed856ed3f7bb",
+      "native_binary_sha256": "87a1d05018ceadfc1fe616bfc10262b0503f51986f4af2dc42d1ed856ed3f7bb",
+      "exit_code": 0,
+      "stdout_bytes": 3,
+      "stderr_bytes": 0,
+      "sanitized_error_classes": [],
+      "generated_configuration_sha256": "9e2ddd4a247b3ab3139e01cb94f443a6318a20eddd332b8a163210e283ffab00",
+      "process_group_closed": true,
+      "live_provider_calls": 0,
+      "inference_http_requests": 1,
+      "provider_inference_calls": 1,
+      "auxiliary_token_count_calls": 0,
+      "owned_attempts": 1,
+      "configured_cost_microusd": 96,
+      "work_state": "active",
+      "observations": 0
+    }
+  ],
+  "request_counts": {
+    "http_requests": 23,
+    "provider_fixture_calls": 3,
+    "provider_token_count_calls": 0,
+    "unexpected_paths": 0,
+    "rejected_requests": []
+  },
+  "cleanup": {
+    "listeners_started": 1,
+    "listener_closed": true,
+    "gateway_thread_closed": true,
+    "owned_client_process_groups_closed": true,
+    "temporary_roots_removed": true
+  },
+  "real_provider_calls": 0,
+  "payments": 0,
+  "network_policy": "macOS sandbox-exec denies all network except owned localhost port",
+  "retry_policy": "No harness inference retries; each client inference HTTP is observed and capped at one; supplied SDK retry controls are configuration intent, not independent proof of SDK application",
+  "sandbox_profile_sha256": "3b186aac5dbdf19bff9329c619a51239665915204e70cf0e31be47b3835469ba",
+  "filesystem_policy": "real user home denied read/write except exact installed Claude executable; agent/auth/keychain/server.env.local reads explicitly denied",
+  "source_snapshot": "immutable git archive, removed after execution",
+  "failure": null,
+  "limitations": [
+    "Observed installed versions differ from supported pins",
+    "Direct generated configuration; managed launch/native companion not qualified",
+    "Synthetic text/usage confirms transport/attribution, not provider bill or output quality",
+    "No signed release, installation, update, removal, live gateway, or customer workflow qualification"
+  ],
+  "disclosure": {
+    "kind": "sanitized metadata derived from private execution receipt",
+    "private_receipt_sha256": "884852e78dfb8d865fc8049f2109947f67d29e08037ccca048f2588a78a60509",
+    "removed_fields": [
+      "client executable paths",
+      "ephemeral work identifiers",
+      "per-work request map",
+      "process identifiers"
+    ],
+    "prior_failed_receipt_sha256": "242c19ce2ba89a1b000ab61e2b4dad4ecaca5e18e060f296f7fb48442a66bf7c",
+    "prior_failure": "Claude stopped before inference at rejected private fixture routes; exact rejected URLs were not retained. The original failed receipt remains unchanged. A separately approved corrected-fixture batch passed."
+  }
+}
