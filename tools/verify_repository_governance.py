@@ -117,7 +117,76 @@ CUSTODY_SECRET_NAMES = (
     "V1_RELEASE_PUBLISH_TOKEN",
 )
 CUSTODY_ENVIRONMENT_NAME = "v1-release-custody"
+CI_DOCKERHUB_JOB_IDS = (
+    "postgres-compatibility",
+    "postgres-backup-restore",
+    "oci-reference-runtime",
+    "render-https-preflight",
+    "render-authentication-staging",
+    "compose-reference",
+    "kubernetes-reference",
+    "postgres-ha-reference",
+    "disaster-recovery-reference",
+    "oci-supply-chain",
+    "oci-reproducibility",
+)
+CI_DOCKERHUB_SERVICE_JOB_IDS = ("postgres-compatibility", "kubernetes-reference")
+CI_DOCKERHUB_GUARD = (
+    "github.repository == 'Xpounder-com/hormuz' && "
+    "(github.event_name != 'pull_request' || "
+    "github.event.pull_request.head.repo.full_name == github.repository)"
+)
+CI_DOCKERHUB_USERNAME_EXPRESSION = (
+    "${{ " + CI_DOCKERHUB_GUARD + " && secrets.DOCKERHUB_USERNAME || '' }}"
+)
+CI_DOCKERHUB_TOKEN_EXPRESSION = (
+    "${{ " + CI_DOCKERHUB_GUARD + " && secrets.DOCKERHUB_READ_TOKEN || '' }}"
+)
+CI_DOCKERHUB_PAIR_GUARD = (
+    CI_DOCKERHUB_GUARD
+    + " && secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_READ_TOKEN != ''"
+)
+CI_DOCKERHUB_SERVICE_USERNAME_EXPRESSION = (
+    "${{ " + CI_DOCKERHUB_PAIR_GUARD + " && secrets.DOCKERHUB_USERNAME || '' }}"
+)
+CI_DOCKERHUB_SERVICE_TOKEN_EXPRESSION = (
+    "${{ " + CI_DOCKERHUB_PAIR_GUARD + " && secrets.DOCKERHUB_READ_TOKEN || '' }}"
+)
+CI_DOCKERHUB_LOGIN_STEP = "Configure optional Docker Hub read authentication"
+CI_DOCKERHUB_CLEANUP_STEP = "Remove isolated Docker Hub read credentials"
+CI_DOCKERHUB_LOGIN_RUN_LINES = tuple(
+    line.strip()
+    for line in r'''set +x
+set -euo pipefail
+if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+  echo "Docker Hub read credentials absent; using anonymous pulls."
+  exit 0
+fi
+if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+  echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+  exit 1
+fi
+umask 077
+mkdir -p "$DOCKER_CONFIG"
+if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+  timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+  echo "::error::Docker Hub read authentication failed or timed out."
+  exit 1
+fi
+echo "Docker Hub read authentication configured."'''.splitlines()
+)
 EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
+    # A narrowly placed registry credential is the sole CI/PR
+    # exception. The job validator also checks fork guards, stdin and cleanup.
+    "ci.yml": (
+        (CI_DOCKERHUB_USERNAME_EXPRESSION, CI_DOCKERHUB_TOKEN_EXPRESSION)
+        * len(CI_DOCKERHUB_JOB_IDS)
+        + (
+            CI_DOCKERHUB_SERVICE_USERNAME_EXPRESSION,
+            CI_DOCKERHUB_SERVICE_TOKEN_EXPRESSION,
+        )
+        * len(CI_DOCKERHUB_SERVICE_JOB_IDS)
+    ),
     "freeze-v1-candidate.yml": (
         "${{ secrets.V1_RELEASE_ADMIN_TOKEN }}",
         "${{ secrets.V1_RELEASE_PUBLISH_TOKEN != '' }}",
@@ -1359,6 +1428,72 @@ def _validate_macos_pilot_operations_workflow(
         )
 
 
+def _validate_ci_dockerhub_auth(job_blocks: dict[str, str]) -> None:
+    """Allow only guarded registry reads; custody/provider rules stay intact."""
+
+    for job_id, job in job_blocks.items():
+        if job_id not in CI_DOCKERHUB_JOB_IDS:
+            if "DOCKERHUB_" in job:
+                raise RepositoryGovernanceError("CI Docker Hub credential placement changed")
+            continue
+        try:
+            login = _workflow_named_step(job, name=CI_DOCKERHUB_LOGIN_STEP)
+            cleanup = _workflow_named_step(job, name=CI_DOCKERHUB_CLEANUP_STEP)
+            names = re.findall(r"^      - name: (.+)$", job, flags=re.MULTILINE)
+            expected_secrets = [
+                CI_DOCKERHUB_USERNAME_EXPRESSION,
+                CI_DOCKERHUB_TOKEN_EXPRESSION,
+            ]
+            if job_id in CI_DOCKERHUB_SERVICE_JOB_IDS:
+                expected_secrets.extend([
+                    CI_DOCKERHUB_SERVICE_USERNAME_EXPRESSION,
+                    CI_DOCKERHUB_SERVICE_TOKEN_EXPRESSION,
+                ])
+                service = (
+                    "    services:\n      postgres:\n"
+                    "        image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777\n"
+                    "        credentials:\n"
+                    "          username: " + CI_DOCKERHUB_SERVICE_USERNAME_EXPRESSION + "\n"
+                    "          password: " + CI_DOCKERHUB_SERVICE_TOKEN_EXPRESSION + "\n"
+                )
+                if service not in job:
+                    raise RepositoryGovernanceError("CI Docker Hub service credential boundary changed")
+            if (
+                sorted(_workflow_secret_expressions(job, workflow_name="ci.yml"))
+                != sorted(expected_secrets)
+                or job.count("DOCKER_CONFIG:") != 1
+                or "    env:\n      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth\n" not in job
+                or names[:2] != ["Check out source", CI_DOCKERHUB_LOGIN_STEP]
+                or names[-1:] != [CI_DOCKERHUB_CLEANUP_STEP]
+                or _workflow_step_fields(login, name=CI_DOCKERHUB_LOGIN_STEP)
+                != ("timeout-minutes", "shell", "env", "run")
+                or not _has_exact_line(login, "timeout-minutes: 1")
+                or not _has_exact_line(login, "shell: bash")
+                or _workflow_step_environment(login, name=CI_DOCKERHUB_LOGIN_STEP)
+                != {
+                    "PATH": "/usr/bin:/bin",
+                    "DOCKERHUB_USERNAME": CI_DOCKERHUB_USERNAME_EXPRESSION,
+                    "DOCKERHUB_READ_TOKEN": CI_DOCKERHUB_TOKEN_EXPRESSION,
+                }
+                or _workflow_step_run_lines(login, name=CI_DOCKERHUB_LOGIN_STEP)
+                != CI_DOCKERHUB_LOGIN_RUN_LINES
+                or _workflow_step_fields(cleanup, name=CI_DOCKERHUB_CLEANUP_STEP)
+                != ("if", "shell", "run")
+                or not _has_exact_line(cleanup, "if: ${{ always() }}")
+                or not _has_exact_line(cleanup, "shell: bash")
+                or _workflow_step_run_lines(cleanup, name=CI_DOCKERHUB_CLEANUP_STEP)
+                != (
+                    "set -euo pipefail",
+                    'rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"',
+                )
+            ):
+                raise RepositoryGovernanceError("CI Docker Hub credential boundary changed")
+        except RepositoryGovernanceError as exc:
+            raise RepositoryGovernanceError(
+                f"CI Docker Hub credential boundary changed: {job_id}"
+            ) from exc
+
+
 def _validate_ci_workflow(
     text: str,
     job_blocks: dict[str, str],
@@ -1369,6 +1504,7 @@ def _validate_ci_workflow(
         raise RepositoryGovernanceError("CI job set changed")
     if "continue-on-error:" in text:
         raise RepositoryGovernanceError("CI job failure semantics changed")
+    _validate_ci_dockerhub_auth(job_blocks)
 
     for job_id, job_name in CI_JOB_NAMES.items():
         if job_fields[job_id].get("name") != job_name:
@@ -1969,7 +2105,7 @@ def _validate_workflows(
                     f"workflow uses an unapproved Action owner: {owner}"
                 )
         if "pull_request:" in text:
-            if "${{ secrets." in text:
+            if "${{ secrets." in text and path.name != "ci.yml":
                 raise RepositoryGovernanceError(
                     f"pull-request workflow consumes repository secrets: {path.name}"
                 )
