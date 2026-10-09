@@ -41,9 +41,12 @@ def _object(value):
 
 
 class WorkBilling:
-    def __init__(self, path, price_id, bindings, webhook_secret, *, api_key="", clock=time.time):
+    def __init__(self, path, price_id, bindings, webhook_secret, *, api_key="", portal_configuration_id=None, clock=time.time):
+        if portal_configuration_id is not None and (not isinstance(portal_configuration_id, str) or re.fullmatch(r"bpc_[A-Za-z0-9]{1,128}", portal_configuration_id) is None):
+            raise WorkRuntimeError("billing_portal_configuration_invalid", 503)
         self.path, self.price_id, self.clock = Path(path), price_id, clock
         self._secret, self._api_key = webhook_secret, api_key
+        self._portal_configuration_id = portal_configuration_id
         self.bindings = {row[0]: (row[1], row[2]) for row in bindings}
         if self.path.is_symlink():
             raise WorkRuntimeError("billing_storage_unsafe", 503)
@@ -349,10 +352,13 @@ class WorkBilling:
         origin = urlsplit(return_url)
         if origin.scheme != "https" or not origin.hostname or origin.username or origin.password or origin.query or origin.fragment or origin.path != "/work":
             raise WorkRuntimeError("billing_return_url_invalid", 400)
-        value = self._stripe("/v1/billing_portal/sessions", {"customer": binding[0], "return_url": return_url})
+        values = {"customer": binding[0], "return_url": return_url}
+        if self._portal_configuration_id is not None:
+            values["configuration"] = self._portal_configuration_id
+        value = self._stripe("/v1/billing_portal/sessions", values)
         url = value.get("url", "")
         self._validate_stripe_url(url, "billing.stripe.com", "/p/")
-        if value.get("customer") != binding[0]:
+        if value.get("customer") != binding[0] or self._portal_configuration_id is not None and value.get("configuration") != self._portal_configuration_id:
             raise WorkRuntimeError("billing_portal_unavailable", 503)
         return url
 

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from hormuz.work_billing import STRIPE_VERSION, WorkBilling
 from hormuz.work_runtime import WorkRuntimeError
@@ -98,6 +99,57 @@ class WorkBillingTests(unittest.TestCase):
         for url in ("http://gateway.example/work", "https://attacker@gateway.example/work", "https://gateway.example/work?token=secret"):
             with self.assertRaises(WorkRuntimeError):
                 self.billing.portal("company", url)
+
+    def test_portal_default_preserves_existing_session_request(self):
+        self.billing._api_key = "synthetic-api-fixture"
+        with patch.object(self.billing, "_stripe", return_value={
+            "customer": "cus_Approved", "configuration": "bpc_AccountDefault", "url": "https://billing.stripe.com/p/session/Synthetic",
+        }) as stripe:
+            self.assertEqual("https://billing.stripe.com/p/session/Synthetic", self.billing.portal("company", "https://gateway.example/work"))
+        stripe.assert_called_once_with("/v1/billing_portal/sessions", {"customer": "cus_Approved", "return_url": "https://gateway.example/work"})
+
+    def test_reviewed_portal_configuration_preserves_paid_and_cancellation_access(self):
+        self.send("customer.subscription.updated", self.subscription(), identifier="evt_subscription")
+        self.send("invoice.paid", self.invoice(), identifier="evt_invoice")
+        billing = WorkBilling(self.billing.path, "price_Approved", [("company", "cus_Approved", "sub_Approved")], self.secret,
+            api_key="synthetic-api-fixture", portal_configuration_id="bpc_Reviewed", clock=lambda: self.now)
+        self.assertTrue(billing.entitled("company"))
+        expected = {"customer": "cus_Approved", "return_url": "https://gateway.example/work", "configuration": "bpc_Reviewed"}
+        response = {"customer": "cus_Approved", "configuration": "bpc_Reviewed", "url": "https://billing.stripe.com/p/session/Synthetic"}
+        with patch.object(billing, "_stripe", return_value=response) as stripe:
+            self.assertEqual(response["url"], billing.portal("company", expected["return_url"]))
+        stripe.assert_called_once_with("/v1/billing_portal/sessions", expected)
+        self.assertTrue(billing.entitled("company"))
+
+        self.now += 1
+        self.send("customer.subscription.deleted", self.subscription(), identifier="evt_cancel")
+        self.assertFalse(billing.entitled("company"))
+        with patch.object(billing, "_stripe", return_value=response) as stripe:
+            self.assertEqual(response["url"], billing.portal("company", expected["return_url"]))
+        stripe.assert_called_once_with("/v1/billing_portal/sessions", expected)
+        changed = WorkBilling(billing.path, "price_Changed", [("company", "cus_Approved", "sub_Approved")], self.secret,
+            api_key="synthetic-api-fixture", portal_configuration_id="bpc_Reviewed", clock=lambda: self.now)
+        self.assertFalse(changed.entitled("company"))
+        self.assertTrue(changed.status("company")["portal_available"])
+        with patch.object(changed, "_stripe", return_value=response) as stripe:
+            self.assertEqual(response["url"], changed.portal("company", expected["return_url"]))
+        stripe.assert_called_once_with("/v1/billing_portal/sessions", expected)
+        self.assertFalse(changed.entitled("company"))
+
+    def test_configured_portal_rejects_wrong_or_missing_returned_configuration(self):
+        billing = WorkBilling(self.billing.path, "price_Approved", [("company", "cus_Approved", "sub_Approved")], self.secret,
+            api_key="synthetic-api-fixture", portal_configuration_id="bpc_Reviewed", clock=lambda: self.now)
+        for configuration in (None, "bpc_Other", {"id": "bpc_Reviewed"}):
+            with self.subTest(configuration=configuration), patch.object(billing, "_stripe", return_value={
+                "customer": "cus_Approved", "configuration": configuration, "url": "https://billing.stripe.com/p/session/Synthetic",
+            }), self.assertRaisesRegex(WorkRuntimeError, "billing_portal_unavailable"):
+                billing.portal("company", "https://gateway.example/work")
+
+    def test_invalid_direct_portal_configuration_creates_no_store(self):
+        path = Path(self.directory.name) / "invalid.sqlite3"
+        with self.assertRaisesRegex(WorkRuntimeError, "billing_portal_configuration_invalid"):
+            WorkBilling(path, "price_Approved", [], self.secret, portal_configuration_id="bpc_Bad-Id")
+        self.assertFalse(path.exists())
 
     def test_non_subscription_paid_invoice_is_ignored(self):
         self.assertEqual(self.send("invoice.paid", self.invoice(parent=None))["status"], "ignored")

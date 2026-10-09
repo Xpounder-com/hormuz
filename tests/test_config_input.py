@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from hormuz.cli import main
@@ -53,6 +54,55 @@ class ConfigurationInputTests(unittest.TestCase):
 
         self.assertEqual(config.listen.host, "127.0.0.1")
         self.assertIn("gpt-5.4-mini", config.model_routes)
+
+    def test_public_load_accepts_reviewed_portal_configuration_and_default(self) -> None:
+        for identifier in (None, "bpc_Reviewed123", "bpc_" + "A" * 128):
+            with self.subTest(identifier=identifier), tempfile.TemporaryDirectory() as temporary:
+                value = self._valid_configuration()
+                value["ai_work"] = {"enabled": True, "billing_portal_configuration_id": identifier}
+                path = Path(temporary) / "hormuz.json"
+                path.write_text(json.dumps(value), encoding="utf-8")
+                config = GatewayConfig.load(path, environ=TEST_ENVIRONMENT)
+                self.assertEqual(identifier, config.ai_work.billing_portal_configuration_id)
+        self.assertIsNone(GatewayConfig.load(ROOT / "config.example.json", environ=TEST_ENVIRONMENT).ai_work.billing_portal_configuration_id)
+
+    def test_invalid_portal_configuration_fails_before_credential_resolution(self) -> None:
+        for invalid in (False, 1, 1.0, {}, [], "", "bpc_", "price_Reviewed", "bpc_a-b", "bpc_a_b", "bpc_A\n", " bpc_A", "bpc_" + "A" * 129):
+            with self.subTest(invalid=invalid):
+                value = self._valid_configuration()
+                value["ai_work"] = {"enabled": True, "billing_portal_configuration_id": invalid}
+                self._assert_load_error(json.dumps(value).encode("utf-8"),
+                    "ai_work.billing_portal_configuration_id is invalid", environ=_EnvironmentMustNotBeRead())
+
+    def test_publicly_loaded_portal_configuration_reaches_billing_request(self) -> None:
+        from hormuz import work_gateway
+
+        with tempfile.TemporaryDirectory() as temporary:
+            value = self._valid_configuration()
+            value["ai_work"] = {"enabled": True, "database": "work.sqlite3", "require_paid": True,
+                "billing_price_id": "price_Reviewed", "billing_portal_configuration_id": "bpc_Reviewed",
+                "billing_bindings": [{"organization_id": "xpounder", "customer_id": "cus_Reviewed", "subscription_id": "sub_Reviewed"}]}
+            path = Path(temporary) / "hormuz.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            config = GatewayConfig.load(path, environ=TEST_ENVIRONMENT)
+            server = SimpleNamespace(config=config)
+            try:
+                work_gateway.initialize(server, environ={
+                    "HORMUZ_WORK_BILLING_WEBHOOK_SECRET": "whsec_synthetic_fixture_not_real",
+                    "HORMUZ_WORK_BILLING_API_KEY": "synthetic-api-fixture",
+                })
+                with mock.patch.object(server.work_billing, "_stripe", return_value={
+                    "url": "https://billing.stripe.com/p/session/Synthetic", "customer": "cus_Reviewed", "configuration": "bpc_Reviewed",
+                }) as stripe:
+                    self.assertEqual("https://billing.stripe.com/p/session/Synthetic", server.work_billing.portal("xpounder", "https://gateway.example/work"))
+                stripe.assert_called_once_with("/v1/billing_portal/sessions", {
+                    "customer": "cus_Reviewed", "return_url": "https://gateway.example/work", "configuration": "bpc_Reviewed",
+                })
+                self.assertFalse(server.work_billing.entitled("xpounder"))
+            finally:
+                if getattr(server, "work_runtime", None) is not None:
+                    server.work_runtime.close()
+                work_gateway.close(server)
 
     def test_public_load_accepts_bounded_exploration_settings_and_defaults(self) -> None:
         for enabled, rate, allowance in (

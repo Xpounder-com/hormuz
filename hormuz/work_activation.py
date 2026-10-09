@@ -8,6 +8,9 @@ import sqlite3
 
 from .work_runtime import WorkRuntimeError
 
+CHECKOUT_LIFETIME_SECONDS = 3600
+CHECKOUT_MINIMUM_CREATE_REMAINING_SECONDS = 1830
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS work_activation(
  organization_id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, model TEXT NOT NULL, client TEXT NOT NULL,
@@ -16,7 +19,7 @@ CREATE TABLE IF NOT EXISTS work_activation(
 CREATE TABLE IF NOT EXISTS work_checkouts(
  reference TEXT PRIMARY KEY, organization_id TEXT NOT NULL, generation TEXT NOT NULL,
  price_id TEXT NOT NULL, session_id TEXT UNIQUE, url TEXT, state TEXT NOT NULL,
- expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
+ expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, return_url TEXT);
 CREATE TABLE IF NOT EXISTS work_payment_facts(
  customer TEXT NOT NULL, subscription TEXT NOT NULL, kind TEXT NOT NULL,
  created_at INTEGER NOT NULL, event_id TEXT NOT NULL, value TEXT NOT NULL,
@@ -35,6 +38,10 @@ class WorkActivation:
         self.billing = billing
         with billing._connect() as connection:
             connection.executescript(SCHEMA)
+            connection.execute("BEGIN IMMEDIATE")
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(work_checkouts)")}
+            if "return_url" not in columns:
+                connection.execute("ALTER TABLE work_checkouts ADD COLUMN return_url TEXT")
 
     def status(self, organization):
         with self.billing._connect() as connection:
@@ -51,6 +58,10 @@ class WorkActivation:
             previous = connection.execute("SELECT state,model,client FROM work_activation WHERE organization_id=?", (organization,)).fetchone()
             if previous and previous[1:] == (model, client) and previous[0] in {"requested", "qualified", "checkout_pending", "payment_unverified"}:
                 return self.status(organization)
+            outstanding = connection.execute("SELECT 1 FROM work_checkouts WHERE organization_id=? AND (state='creating' OR (state='open' AND expires_at>?)) LIMIT 1",
+                (organization, int(self.billing.clock()))).fetchone()
+            if outstanding:
+                raise WorkRuntimeError("billing_checkout_retry_pending", 409)
             bound = connection.execute("SELECT subscription_state,price_id FROM work_entitlements WHERE organization_id=?", (organization,)).fetchone()
             if bound and (bound[0] != "recovery_required" or bound[1] != self.billing.price_id):
                 raise WorkRuntimeError("activation_existing_subscription", 409)
@@ -89,24 +100,38 @@ class WorkActivation:
             row = connection.execute("SELECT state,generation FROM work_activation WHERE organization_id=?", (organization,)).fetchone()
             if row is None or row[0] not in {"qualified", "checkout_pending"}:
                 raise WorkRuntimeError("activation_qualification_required", 409)
-            pending = connection.execute("SELECT reference,session_id,url,state,expires_at FROM work_checkouts WHERE organization_id=? AND generation=? AND price_id=? AND state IN ('creating','open') ORDER BY created_at DESC LIMIT 1", (organization, row[1], self.billing.price_id)).fetchone()
-            if pending and pending[4] > now:
+            outstanding = connection.execute("SELECT reference,session_id,url,state,expires_at,generation,price_id,return_url FROM work_checkouts WHERE organization_id=? AND (state='creating' OR (state='open' AND expires_at>?)) ORDER BY created_at DESC LIMIT 2",
+                (organization, now)).fetchall()
+            if len(outstanding) > 1 or outstanding and outstanding[0][5:7] != (row[1], self.billing.price_id):
+                raise WorkRuntimeError("billing_checkout_retry_pending", 409)
+            pending = outstanding[0] if outstanding else None
+            if pending:
                 reference = pending[0]
                 expires_at = pending[4]
                 if pending[3] == "open":
                     return {"url": pending[2], "status": "checkout_pending"}
+                if pending[7] != return_url:
+                    raise WorkRuntimeError("billing_checkout_retry_pending", 409)
+                recorded_return_url = pending[7]
             else:
-                expires_at = now + 1800
+                expires_at = now + CHECKOUT_LIFETIME_SECONDS
                 reference = "hormuz_checkout_" + secrets.token_urlsafe(24)
-                connection.execute("INSERT INTO work_checkouts(reference,organization_id,generation,price_id,state,expires_at,created_at) VALUES(?,?,?,?,'creating',?,?)",
-                    (reference, organization, row[1], self.billing.price_id, now + 1800, now))
+                recorded_return_url = return_url
+                connection.execute("INSERT INTO work_checkouts(reference,organization_id,generation,price_id,state,expires_at,created_at,return_url) VALUES(?,?,?,?,'creating',?,?,?)",
+                    (reference, organization, row[1], self.billing.price_id, expires_at, now, recorded_return_url))
+        # Stripe requires at least 30 minutes after its creation time. Keep the
+        # recorded parameters immutable for idempotent retries, with headroom
+        # for the bounded HTTP call. An unresolved creation cannot silently get
+        # a new reference when its remaining window becomes too short or ends.
+        if expires_at - int(self.billing.clock()) < CHECKOUT_MINIMUM_CREATE_REMAINING_SECONDS:
+            raise WorkRuntimeError("billing_checkout_retry_pending", 409)
         values = {"mode": "subscription", "line_items[0][price]": self.billing.price_id,
-            "line_items[0][quantity]": "1", "success_url": return_url, "cancel_url": return_url,
+            "line_items[0][quantity]": "1", "success_url": recorded_return_url, "cancel_url": recorded_return_url,
             "client_reference_id": reference, "expires_at": str(expires_at)}
         value = self.billing._stripe("/v1/checkout/sessions", values, idempotency=reference)
         session, url = value.get("id"), value.get("url")
         self.billing._validate_stripe_url(url, "checkout.stripe.com", "/c/")
-        if not isinstance(session, str) or re.fullmatch(r"cs_[A-Za-z0-9_]{1,180}", session) is None or value.get("livemode") is not True or value.get("mode") != "subscription" or value.get("client_reference_id") != reference:
+        if not isinstance(session, str) or re.fullmatch(r"cs_[A-Za-z0-9_]{1,180}", session) is None or value.get("livemode") is not True or value.get("mode") != "subscription" or value.get("client_reference_id") != reference or type(value.get("expires_at")) is not int or value["expires_at"] != expires_at or expires_at <= int(self.billing.clock()):
             raise WorkRuntimeError("billing_checkout_invalid_response", 503)
         with self.billing._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")

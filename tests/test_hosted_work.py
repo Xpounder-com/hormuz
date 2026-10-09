@@ -41,6 +41,7 @@ class HostedWorkConfigTests(unittest.TestCase):
         self.document["ai_work"] = {
             "enabled": True, "database": str(self.config.database_path.parent / "hormuz-work.sqlite3"),
             "require_paid": True, "billing_price_id": "price_Reviewed",
+            "billing_portal_configuration_id": "bpc_Reviewed",
             "billing_bindings": [{"organization_id": "customer-a", "customer_id": "cus_Reviewed", "subscription_id": "sub_Reviewed"}],
         }
         self.settings.update({
@@ -55,6 +56,7 @@ class HostedWorkConfigTests(unittest.TestCase):
     def test_reviewed_paid_config_and_child_secret_boundary(self):
         loaded = self.load()
         self.assertTrue(loaded.ai_work.require_paid)
+        self.assertEqual("bpc_Reviewed", loaded.ai_work.billing_portal_configuration_id)
         with patch.dict(os.environ, {**self.settings, "UNRELATED_SECRET": "never-inherit"}, clear=True):
             settings = runtime_settings()
         child = {name: settings[name] for name in PROVIDER_CHILD_ENV_NAMES}

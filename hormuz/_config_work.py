@@ -31,6 +31,9 @@ def build_ai_work(raw, *, source_path):
     price = value.get("billing_price_id")
     if price is not None and (type(price) is not str or not re.fullmatch(r"price_[A-Za-z0-9]{1,128}", price)):
         raise ConfigError("ai_work.billing_price_id is invalid")
+    portal_configuration = value.get("billing_portal_configuration_id")
+    if portal_configuration is not None and (type(portal_configuration) is not str or not re.fullmatch(r"bpc_[A-Za-z0-9]{1,128}", portal_configuration)):
+        raise ConfigError("ai_work.billing_portal_configuration_id is invalid")
     secret_env = value.get("billing_webhook_secret_env", "HORMUZ_WORK_BILLING_WEBHOOK_SECRET")
     if type(secret_env) is not str or not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", secret_env):
         raise ConfigError("ai_work.billing_webhook_secret_env is invalid")
@@ -67,4 +70,5 @@ def build_ai_work(raw, *, source_path):
         raise ConfigError("ai_work exploration sampling or monthly allowance is invalid")
     if exploration and (not enabled or not aliases or ceiling == 0):
         raise ConfigError("ai_work exploration requires enabled work, approved models and a monthly allowance")
-    return AIWorkConfig(enabled, path.resolve() if enabled or "database" in value else None, cache, samples, tuple(actors), paid, price, secret_env, api_env, tuple(approved), tuple(tool_aliases), exploration, tuple(aliases), rate, ceiling)
+    return AIWorkConfig(enabled, path.resolve() if enabled or "database" in value else None, cache, samples, tuple(actors), paid, price, secret_env, api_env, tuple(approved), tuple(tool_aliases), exploration, tuple(aliases), rate, ceiling,
+        billing_portal_configuration_id=portal_configuration)

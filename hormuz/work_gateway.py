@@ -305,7 +305,8 @@ def initialize(server, environ=None):
             server.work_billing = WorkBilling(
                 server.work_runtime.path.with_suffix(".billing.sqlite3"), settings.billing_price_id,
                 settings.billing_bindings, environment.get(settings.billing_webhook_secret_env, ""),
-                api_key=environment.get(settings.billing_api_key_env, ""))
+                api_key=environment.get(settings.billing_api_key_env, ""),
+                portal_configuration_id=settings.billing_portal_configuration_id)
             if settings.require_paid and not server.work_billing.webhook_configured:
                 raise WorkRuntimeError("billing_webhook_not_configured", 503)
         from .work_workflow import attach

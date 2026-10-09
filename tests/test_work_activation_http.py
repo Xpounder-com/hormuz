@@ -42,7 +42,7 @@ class WorkActivationHTTPTests(unittest.TestCase):
             self.reference = values["client_reference_id"]
             self.assertEqual(kwargs["idempotency"], self.reference)
             return {"id": "cs_live_Fixture", "url": "https://checkout.stripe.com/c/pay/Fixture", "livemode": True,
-                "mode": "subscription", "client_reference_id": self.reference}
+                "mode": "subscription", "client_reference_id": self.reference, "expires_at": int(values["expires_at"])}
         with patch.object(self.gateway.work_billing, "_stripe", side_effect=response):
             status, _, raw = self.request("POST", "/v1/work/billing/checkout", body={"csrf_token": self.csrf}, headers=self.browser)
         self.assertEqual(status, 200, raw)

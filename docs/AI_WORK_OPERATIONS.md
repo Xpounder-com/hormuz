@@ -27,6 +27,22 @@ that the authenticated account can perform. The steps are durable:
    server records that reference before creating a Stripe Checkout Session with
    the same idempotency key. Retries reuse the recorded open session. Checkout
    redirects grant no authority.
+   A new session has one immutable one-hour expiry. Creation retries use the
+   same reference and parameters only while at least 30 minutes plus transport
+   headroom remain. An unresolved creation with a shorter or expired window
+   stays recorded and requires operator review/reset before another checkout;
+   a timeout never renews its parameters or silently starts a second session.
+   A successful response must confirm the recorded expiry.
+   Outstanding creation or an unexpired open session also prevents a new
+   qualification generation or price from starting another checkout for the
+   organization. Changing a model, client or approved price cannot clear that
+   barrier. Operator reset explicitly closes the old references before renewed
+   qualification; other organizations retain their own independent checkout.
+   The validated original return URL is stored with the session parameters.
+   Creating retries from a different gateway origin, or legacy uncertain records
+   without that URL, require the same operator review/reset instead of changing
+   Stripe's parameters under an existing idempotency key. Known legacy open
+   sessions remain reusable until their recorded expiry.
 4. A signed live `checkout.session.completed` event binds the recorded session
    to its customer/subscription. Activation still requires an active subscription
    at the approved price and a paid invoice covering the current instant.
@@ -35,6 +51,14 @@ that the authenticated account can perform. The steps are durable:
 5. The signed payment gate opens covered inference. Signed cancellation or
    payment failure closes it. Customer administrators open the Stripe billing
    portal through `/work` to manage the bound subscription.
+
+Set `ai_work.billing_portal_configuration_id` to the reviewed Stripe `bpc_…`
+configuration for this offer. The gateway sends that exact non-secret ID when
+creating the portal session and requires Stripe's response to confirm it. Review
+payment updates, cancellation mode and any permitted product/price changes in
+the same Stripe account. Omitting the setting keeps Stripe's account default;
+qualify that default before using it for Hormuz. Portal configuration never grants
+paid entitlement or changes the trusted customer/subscription binding.
 
 Changing an approved price closes inference and refuses a second checkout for
 an existing trusted subscription. The same organization's portal management

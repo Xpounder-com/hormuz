@@ -451,6 +451,7 @@ class AIWorkConfig:
     exploration_aliases: tuple[str, ...] = ()
     exploration_rate_percent: int = 5
     exploration_max_cost_microusd: int = 0
+    billing_portal_configuration_id: str | None = None
 
 
 @dataclass(frozen=True)

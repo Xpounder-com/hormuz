@@ -105,7 +105,7 @@ def main():
             if path != '/v1/checkout/sessions':
                 raise AssertionError('Unexpected synthetic billing call')
             checkout['reference'] = values['client_reference_id']
-            return {'id': 'cs_local_BrowserFixture', 'url': 'https://checkout.stripe.com/c/pay/LocalBrowserFixture', 'livemode': True, 'mode': 'subscription', 'client_reference_id': checkout['reference']}
+            return {'id': 'cs_local_BrowserFixture', 'url': 'https://checkout.stripe.com/c/pay/LocalBrowserFixture', 'livemode': True, 'mode': 'subscription', 'client_reference_id': checkout['reference'], 'expires_at': int(values['expires_at'])}
         billing._stripe = stripe
         _, cookie = case.cookie.split('=', 1)
         name = '__Host-hormuz_console'

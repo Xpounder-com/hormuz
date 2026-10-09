@@ -62,6 +62,9 @@ CLI and supported native configuration.
 6. Qualify cancellation, nonpayment, expired periods and tenant isolation. Verify
    the administrator-only portal can update payment/cancel the reviewed customer
    subscription, and signed state changes close subsequent admission correctly.
+   Set `billing_portal_configuration_id` to the independently reviewed portal
+   configuration in the same Stripe account, or qualify the account default when
+   the optional setting is omitted.
 
 The reviewed server configuration uses the following non-secret shape; replace
 all example identifiers with independently verified operator/price configuration. No key values
@@ -76,6 +79,7 @@ belong in this file:
     "minimum_samples": 5,
     "require_paid": true,
     "billing_price_id": "price_VERIFIED",
+    "billing_portal_configuration_id": "bpc_VERIFIED",
     "administrator_actor_ids": ["reviewed-operator"]
   }
 }
