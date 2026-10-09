@@ -428,7 +428,8 @@ fn bound_relay_keeps_exactly_one_work_id_through_optimization() {
             .lines()
             .filter_map(|line| {
                 let (name, value) = line.split_once(": ")?;
-                name.eq_ignore_ascii_case("x-hormuz-work-id").then_some(value)
+                name.eq_ignore_ascii_case("x-hormuz-work-id")
+                    .then_some(value)
             })
             .collect();
         assert_eq!(ids, ["work-selected"]);
@@ -500,8 +501,7 @@ fn bound_optimizer_passthrough_keeps_original_bytes_and_selected_job_once() {
             Some("work-selected"),
         )
         .unwrap();
-        assert!(call(&relay, path, body, "", relay.local_credential())
-            .starts_with("HTTP/1.1 200"));
+        assert!(call(&relay, path, body, "", relay.local_credential()).starts_with("HTTP/1.1 200"));
         drop(relay);
     }
     let captured = gateway.finish();
