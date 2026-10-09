@@ -158,6 +158,7 @@ CI_DOCKERHUB_LOGIN_RUN_LINES = tuple(
     line.strip()
     for line in r'''set +x
 set -euo pipefail
+printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
 if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
   echo "Docker Hub read credentials absent; using anonymous pulls."
   exit 0
@@ -1462,7 +1463,8 @@ def _validate_ci_dockerhub_auth(job_blocks: dict[str, str]) -> None:
                 sorted(_workflow_secret_expressions(job, workflow_name="ci.yml"))
                 != sorted(expected_secrets)
                 or job.count("DOCKER_CONFIG:") != 1
-                or "    env:\n      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth\n" not in job
+                or "          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth\n" not in login
+                or "    env:\n      DOCKER_CONFIG:" in job
                 or names[:2] != ["Check out source", CI_DOCKERHUB_LOGIN_STEP]
                 or names[-1:] != [CI_DOCKERHUB_CLEANUP_STEP]
                 or _workflow_step_fields(login, name=CI_DOCKERHUB_LOGIN_STEP)
@@ -1472,6 +1474,7 @@ def _validate_ci_dockerhub_auth(job_blocks: dict[str, str]) -> None:
                 or _workflow_step_environment(login, name=CI_DOCKERHUB_LOGIN_STEP)
                 != {
                     "PATH": "/usr/bin:/bin",
+                    "DOCKER_CONFIG": "${{ runner.temp }}/hormuz-dockerhub-read-auth",
                     "DOCKERHUB_USERNAME": CI_DOCKERHUB_USERNAME_EXPRESSION,
                     "DOCKERHUB_READ_TOKEN": CI_DOCKERHUB_TOKEN_EXPRESSION,
                 }

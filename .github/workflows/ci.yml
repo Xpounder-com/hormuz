@@ -271,8 +271,6 @@ jobs:
     # The installed-wheel migration matrix normally completes in roughly
     # 21-25 minutes; keep bounded headroom for hosted-runner variance.
     timeout-minutes: 35
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     services:
       postgres:
         image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
@@ -299,11 +297,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -730,8 +730,6 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -742,11 +740,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -818,8 +818,6 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -830,11 +828,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -864,8 +864,6 @@ jobs:
     name: Closed Render HTTPS preflight
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -876,11 +874,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -973,8 +973,6 @@ jobs:
     name: Render authentication staging container
     runs-on: ubuntu-24.04
     timeout-minutes: 12
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -985,11 +983,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -1036,8 +1036,6 @@ jobs:
     name: Single-VM Compose pilot reference
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1048,11 +1046,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -1096,8 +1096,6 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     services:
       postgres:
         image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
@@ -1124,11 +1122,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -1188,8 +1188,6 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 50
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1200,11 +1198,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -1250,8 +1250,6 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 80
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1262,11 +1260,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -1313,8 +1313,6 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1325,11 +1323,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0
@@ -1371,8 +1371,6 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.run_full != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1384,11 +1382,13 @@ jobs:
         shell: bash
         env:
           PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
           DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
           DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
         run: |
           set +x
           set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
           if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
             echo "Docker Hub read credentials absent; using anonymous pulls."
             exit 0

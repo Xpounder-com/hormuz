@@ -57,6 +57,7 @@ class DockerHubAuthBehaviorTests(unittest.TestCase):
         self.config = self.runner / "hormuz-dockerhub-read-auth"
         self.capture = self.root / "docker-call.json"
         self.timeout_capture = self.root / "timeout-call.json"
+        self.github_env = self.root / "github-env"
         job = jobs(WORKFLOW.read_text())["oci-reference-runtime"]
         self.login = script(step(job, LOGIN))
         self.cleanup = script(step(job, CLEANUP))
@@ -96,6 +97,7 @@ sys.exit(subprocess.run(sys.argv[3:], timeout=3).returncode)
         environment = {
             "PATH": f"{self.root}:/usr/bin:/bin",
             "RUNNER_TEMP": str(self.runner), "DOCKER_CONFIG": str(self.config),
+            "GITHUB_ENV": str(self.github_env),
             "DOCKERHUB_USERNAME": username, "DOCKERHUB_READ_TOKEN": token,
             "MOCK_DOCKER_CAPTURE": str(self.capture),
             "MOCK_TIMEOUT_CAPTURE": str(self.timeout_capture),
@@ -127,6 +129,7 @@ sys.exit(subprocess.run(sys.argv[3:], timeout=3).returncode)
         token = "synthetic-public-read-token"
         result = self._run("synthetic-user", token)
         self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.github_env.read_text(), f"DOCKER_CONFIG={self.config}\n")
         calls = json.loads(self.capture.read_text())
         self.assertEqual(len(calls), 1)
         call = calls[0]
@@ -147,6 +150,7 @@ sys.exit(subprocess.run(sys.argv[3:], timeout=3).returncode)
         result = self._run()
         self.assertEqual(result.returncode, 0)
         self.assertIn("using anonymous pulls", result.stdout)
+        self.assertEqual(self.github_env.read_text(), f"DOCKER_CONFIG={self.config}\n")
         self.assertFalse(self.capture.exists())
         self.assertFalse(self.timeout_capture.exists())
         self._cleanup()
@@ -157,6 +161,7 @@ sys.exit(subprocess.run(sys.argv[3:], timeout=3).returncode)
                 result = self._run(username, token)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("Configure both", result.stdout)
+                self.assertEqual(self.github_env.read_text().splitlines()[-1], f"DOCKER_CONFIG={self.config}")
                 self.assertFalse(self.capture.exists())
                 self.assertFalse(self.timeout_capture.exists())
                 if token:
@@ -182,6 +187,16 @@ sys.exit(subprocess.run(sys.argv[3:], timeout=3).returncode)
 
 
 class DockerHubAuthGovernanceTests(unittest.TestCase):
+    def test_runner_context_is_step_scoped_and_job_level_regression_is_rejected(self) -> None:
+        text = WORKFLOW.read_text()
+        for identifier in DOCKER_JOBS:
+            job = jobs(text)[identifier]
+            self.assertNotIn("    env:\n      DOCKER_CONFIG:", job)
+            self.assertIn("          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth\n", step(job, LOGIN))
+        self._mutate(lambda value: value.replace(
+            "  oci-reference-runtime:\n",
+            "  oci-reference-runtime:\n    env:\n      DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth\n", 1))
+
     def _mutate(self, change) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
