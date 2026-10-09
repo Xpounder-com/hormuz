@@ -27,7 +27,7 @@ This is not an invoice or a customer saving. A completed workflow condition
 establishes that declared condition; an HTTP success or cache hit never supplies
 task completion.
 
-The package receipts name clean source snapshot `d78f416c3d118dd9481286c96f4ca74657c94776`
+The package receipts name clean source snapshot `a9d59e523f71251475f0c55e766ca3b517cc4f01`
 used for the offline build. Their 33 runtime/example and 10 packaging-source fingerprints identify the tested
 files; later commits that retain those fingerprints add evidence metadata. The installed
 HTTP smoke makes exactly two local create/read requests and performs no provider
