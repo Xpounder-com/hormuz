@@ -60,6 +60,11 @@ admission-readiness checks. The configuration-loader successor passed 51 focused
 configuration/ownership/learning checks: public file loading enables bounded
 exploration, invalid settings fail before credential lookup, and an approved
 allocation reaches real SQLite admission without exceeding its allowance.
+The reviewed billing/configuration/recovery checks passed 94 focused tests.
+Independent verification passed 78 pure checks and five local HTTP checks.
+Portal configuration, immutable checkout parameters, organization-wide pending
+creation guards and additive migration are covered with mocked Stripe transports.
+These checks establish no live subscription or payment.
 Native fixture and CLI checks passed 14 local tests; 16 environment-specific
 native tests skipped locally. The pinned-client CI now checks bound Codex On/Off
 and Claude streaming calls through the compiled relay. Exact successor remote
@@ -77,23 +82,29 @@ totals and restart checks. Its offline stage starts no listener. A separate
 [installed HTTP smoke](evidence/ai-work-functional/INSTALLED_HTTP_SMOKE.json)
 creates and reads an owned job through the same installed wheel with exactly
 two authenticated local requests and no provider inference. Both stages identify
-clean build snapshot `d78f416c3d118dd9481286c96f4ca74657c94776`, with 33 source
-and 10 packaging hashes matching this candidate. All 1,702 snapshot file modes
+clean build snapshot `a9d59e523f71251475f0c55e766ca3b517cc4f01`, with 33 source
+and 10 packaging hashes matching this candidate. All 1,703 snapshot file modes
 and 247 wheel/installed core files were independently verified; owned state closed.
-Installed-package handoff, matching restore, and closed-authorization checks also
-passed locally on synthetic state. This does not qualify signed distributions
+Retained earlier installed-package handoff, matching restore, and
+closed-authorization checks passed locally on synthetic state; they are separate
+from the fresh two-request package smoke. This does not qualify signed distributions
 or an interactive native update; those live release gates remain open.
 Remote product checks identify their exact source revision in
 [PR #456](https://github.com/Xpounder-com/hormuz/pull/456). Website publication
 uses a separate repository and immutable `site-source.json` pin;
 [publication PR #44](https://github.com/usehormuz/usehormuz.github.io/pull/44)
-records this source-pin refresh. Local results and predecessor green runs cannot
+records the retained publication at `a31f778ce1909fb0fb738ed8e5cac73de23727e9`,
+pinned to product source `d08cdb9e165003ac27ff9fdbc72bfc5c863fe8cb`. The successor
+publication waits for exact source CI. Local results and predecessor green runs cannot
 substitute for successful successor CI, deployment and live-page verification.
-Current website verification passes 74 Node tests, 10 Python tests, TypeScript,
-and an offline production export with fallback fonts: 16 canonical pages, 974
-local link occurrences and 29 source targets. Production font downloads remain
-for remote CI. Publication configuration tests pass all 11 checks. A
-predecessor's green CI does not qualify a successor.
+Fresh website verification passes 74 Node tests. TypeScript and the offline
+export passed against clean snapshot `a9d59e523f71251475f0c55e766ca3b517cc4f01`
+using disclosed private fallback fonts and webpack: 16 canonical pages, 974
+local link occurrences, 29 source targets and 76 byte-identical public assets.
+Production fonts and CI's default compiler are qualified separately. The earlier
+10 Python delivery checks and 11 publication configuration checks remain
+retained predecessor results; they do not qualify the final source or a new
+publication pin. A predecessor's green CI does not qualify a successor.
 
 ## Supported operation boundary
 
