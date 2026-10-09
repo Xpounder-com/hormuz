@@ -540,6 +540,23 @@ os.execv(real, command)
             selector.close()
 
     @staticmethod
+    def _owned_launcher_exited_unreaped(process) -> bool:
+        # Darwin excludes zombies from getpgid/group signalling, while a
+        # positive-PID signal-zero probe still finds an unreaped child. These
+        # observations are safe only while this Popen leader stays unreaped.
+        try:
+            os.getpgid(process.pid)
+        except ProcessLookupError:
+            try:
+                os.kill(process.pid, 0)
+            except OSError:
+                return False
+            return True
+        except OSError:
+            pass
+        return False
+
+    @staticmethod
     def _terminal_stop(process: subprocess.Popen, root) -> None:
         if getattr(process, "_hormuz_terminal_wait_called", False):
             return
@@ -552,15 +569,35 @@ os.execv(real, command)
             finally:
                 # A read/selector failure must still close this owned process
                 # group while the unreaped launcher identity remains pinned.
-                for signum in (signal.SIGTERM, signal.SIGKILL):
+                signal_error = None
+                try:
+                    for signum in (signal.SIGTERM, signal.SIGKILL):
+                        try:
+                            os.killpg(process.pid, signum)
+                        except ProcessLookupError:
+                            pass
+                        except PermissionError as error:
+                            # A zombie-only Darwin group can report EPERM. A
+                            # live leader or unavailable probes remain failures;
+                            # EPERM alone never establishes group closure.
+                            if not NativeMacRelayTests._owned_launcher_exited_unreaped(process):
+                                signal_error = signal_error or error
+                        except OSError as error:
+                            signal_error = signal_error or error
+                        if signum == signal.SIGTERM:
+                            time.sleep(0.1)
+                finally:
+                    # Never signal a numeric group after attempting to reap its
+                    # owned leader, including a registered cleanup invocation.
+                    process._hormuz_terminal_wait_called = True
                     try:
-                        os.killpg(process.pid, signum)
-                    except ProcessLookupError:
-                        pass
-                    if signum == signal.SIGTERM:
-                        time.sleep(0.1)
-                process._hormuz_terminal_wait_called = True
-                process.wait(timeout=3)
+                        process.wait(timeout=3)
+                    except BaseException as error:
+                        if signal_error is not None:
+                            raise signal_error from error
+                        raise
+                if signal_error is not None:
+                    raise signal_error
             if not _group_absent(process.pid):
                 raise AssertionError("owned native group closure unavailable")
             records = list(root.glob("native-helper-*.json"))
@@ -1053,6 +1090,114 @@ class NativeMacRelayFixtureTests(unittest.TestCase):
             failed_drain.communicate.assert_not_called()
             failed_drain.stdout.close.assert_called_once()
 
+    def test_terminal_cleanup_accepts_only_observed_unreaped_zombie(self) -> None:
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-zombie-fixture-") as folder:
+            process = Mock(pid=424245, _hormuz_terminal_wait_called=False)
+            order = []
+
+            def denied(group, signum):
+                order.append((group, signum))
+                raise PermissionError("fixed zombie group fixture")
+
+            process.wait.side_effect = lambda **_: order.append("reap")
+            with patch.object(NativeMacRelayTests, "_drain_terminal"), \
+                    patch("tests.test_native_macos_relay.os.killpg", side_effect=denied), \
+                    patch("tests.test_native_macos_relay.os.getpgid", side_effect=ProcessLookupError) as group, \
+                    patch("tests.test_native_macos_relay.os.kill") as leader, \
+                    patch("tests.test_native_macos_relay._group_absent", return_value=True) as observe:
+                NativeMacRelayTests._terminal_stop(process, Path(folder))
+                NativeMacRelayTests._terminal_stop(process, Path(folder))
+            self.assertEqual(order, [(424245, signal.SIGTERM), (424245, signal.SIGKILL), "reap"])
+            self.assertEqual([call.args for call in group.call_args_list], [(424245,), (424245,)])
+            self.assertEqual([call.args for call in leader.call_args_list], [(424245, 0), (424245, 0)])
+            observe.assert_called_once_with(424245)
+            process.wait.assert_called_once_with(timeout=3)
+            process.poll.assert_not_called()
+            process.communicate.assert_not_called()
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close.assert_called_once()
+
+    def test_terminal_cleanup_permission_denial_still_attempts_both_signals_and_reap(self) -> None:
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-denial-fixture-") as folder:
+            for wait_timeout in (False, True):
+                with self.subTest(wait_timeout=wait_timeout):
+                    process = Mock(pid=424246, _hormuz_terminal_wait_called=False)
+                    failure = PermissionError("fixed live leader fixture")
+                    timeout = subprocess.TimeoutExpired("owned fixture", 3)
+                    order = []
+
+                    def denied(group, signum):
+                        order.append((group, signum))
+                        raise failure
+
+                    def wait(**_):
+                        order.append("reap-attempt")
+                        if wait_timeout:
+                            raise timeout
+
+                    process.wait.side_effect = wait
+                    with patch.object(NativeMacRelayTests, "_drain_terminal"), \
+                            patch("tests.test_native_macos_relay.os.killpg", side_effect=denied), \
+                            patch("tests.test_native_macos_relay.os.getpgid", return_value=424246), \
+                            patch("tests.test_native_macos_relay.os.kill") as probe, \
+                            patch("tests.test_native_macos_relay._group_absent") as observe:
+                        with self.assertRaises(PermissionError) as raised:
+                            NativeMacRelayTests._terminal_stop(process, Path(folder))
+                        NativeMacRelayTests._terminal_stop(process, Path(folder))
+                    self.assertIs(raised.exception, failure)
+                    if wait_timeout:
+                        self.assertIs(raised.exception.__cause__, timeout)
+                    self.assertEqual(order, [(424246, signal.SIGTERM), (424246, signal.SIGKILL), "reap-attempt"])
+                    probe.assert_not_called()
+                    observe.assert_not_called()
+                    process.wait.assert_called_once_with(timeout=3)
+                    process.poll.assert_not_called()
+                    process.communicate.assert_not_called()
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        stream.close.assert_called_once()
+
+    def test_terminal_cleanup_requires_successful_retained_leader_probe(self) -> None:
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-probe-fixture-") as folder:
+            process = Mock(pid=424247, _hormuz_terminal_wait_called=False)
+            with patch.object(NativeMacRelayTests, "_drain_terminal"), \
+                    patch("tests.test_native_macos_relay.os.killpg", side_effect=PermissionError("fixed denied fixture")) as terminate, \
+                    patch("tests.test_native_macos_relay.os.getpgid", side_effect=ProcessLookupError), \
+                    patch("tests.test_native_macos_relay.os.kill", side_effect=ProcessLookupError) as probe, \
+                    patch("tests.test_native_macos_relay._group_absent") as observe:
+                with self.assertRaises(PermissionError):
+                    NativeMacRelayTests._terminal_stop(process, Path(folder))
+            self.assertEqual([call.args for call in terminate.call_args_list],
+                             [(424247, signal.SIGTERM), (424247, signal.SIGKILL)])
+            self.assertEqual([call.args for call in probe.call_args_list], [(424247, 0), (424247, 0)])
+            observe.assert_not_called()
+            process.wait.assert_called_once_with(timeout=3)
+            process.stdout.close.assert_called_once()
+
+    def test_terminal_cleanup_rejects_surviving_group_after_zombie_gate(self) -> None:
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-survivor-fixture-") as folder:
+            process = Mock(pid=424248, _hormuz_terminal_wait_called=False)
+            with patch.object(NativeMacRelayTests, "_drain_terminal"), \
+                    patch("tests.test_native_macos_relay.os.killpg", side_effect=PermissionError("fixed zombie fixture")) as terminate, \
+                    patch("tests.test_native_macos_relay.os.getpgid", side_effect=ProcessLookupError), \
+                    patch("tests.test_native_macos_relay.os.kill"), \
+                    patch("tests.test_native_macos_relay._group_absent", return_value=False) as observe:
+                with self.assertRaisesRegex(AssertionError, "owned native group closure"):
+                    NativeMacRelayTests._terminal_stop(process, Path(folder))
+                NativeMacRelayTests._terminal_stop(process, Path(folder))
+            self.assertEqual([call.args for call in terminate.call_args_list],
+                             [(424248, signal.SIGTERM), (424248, signal.SIGKILL)])
+            observe.assert_called_once_with(424248)
+            process.wait.assert_called_once_with(timeout=3)
+            process.stdout.close.assert_called_once()
+
     def test_terminal_wrapper_and_helper_scripts_compile_without_launch(self) -> None:
         from unittest.mock import patch
 
@@ -1069,23 +1214,28 @@ class NativeMacRelayFixtureTests(unittest.TestCase):
     def test_native_batch_stops_after_first_failed_case(self) -> None:
         from unittest.mock import Mock
 
-        with tempfile.TemporaryDirectory(prefix="hormuz-native-stop-fixture-") as folder:
-            fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
-            fixture.root = Path(folder)
-            (fixture.root / "profile.json").write_text('{}')
-            fixture.work_fixture = Mock(spec=_NativeWorkFixture, provider_calls=[], gateway_calls=[])
-            fixture.work_fixture.job.return_value = "work-owned"
-            fixture._preference = Mock()
-            fixture._official_client = Mock()
-            fixture._run_terminal = Mock(side_effect=AssertionError("fixed fixture failure"))
-            # Exercise control flow only; no native environment, process or
-            # socket. The skip wrapper's genuine native invocation stays gated.
-            with self.assertRaisesRegex(AssertionError, "fixed fixture failure"):
-                NativeMacRelayTests.test_official_clients_settle_real_work_ledger.__wrapped__(fixture)
-            fixture._run_terminal.assert_called_once()
-            fixture._official_client.assert_called_once()
-            fixture.work_fixture.job.assert_called_once()
-            fixture.work_fixture.assert_job.assert_not_called()
+        native = NativeMacRelayTests.test_official_clients_settle_real_work_ledger
+        native = getattr(native, "__wrapped__", native)
+        for configured in (False, True):
+            with self.subTest(official_client_configured=configured), \
+                    tempfile.TemporaryDirectory(prefix="hormuz-native-stop-fixture-") as folder:
+                fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+                fixture.root = Path(folder)
+                (fixture.root / "profile.json").write_text('{}')
+                fixture.work_fixture = Mock(spec=_NativeWorkFixture, provider_calls=[], gateway_calls=[])
+                fixture.work_fixture.job.return_value = "work-owned"
+                fixture._preference = Mock()
+                fixture._official_client = Mock()
+                fixture._run_terminal = Mock(side_effect=AssertionError("fixed fixture failure"))
+                # skipUnless returns the original method when enabled and a
+                # wrapped method otherwise. Exercise both without launching.
+                method = unittest.skipUnless(configured, "fixed fixture condition")(native)
+                with self.assertRaisesRegex(AssertionError, "fixed fixture failure"):
+                    getattr(method, "__wrapped__", method)(fixture)
+                fixture._run_terminal.assert_called_once()
+                fixture._official_client.assert_called_once()
+                fixture.work_fixture.job.assert_called_once()
+                fixture.work_fixture.assert_job.assert_not_called()
 
     def test_real_work_fixture_settles_streams_and_refuses_unowned_jobs(self) -> None:
         # Qualifies this real runtime/provider fixture locally; it does not
