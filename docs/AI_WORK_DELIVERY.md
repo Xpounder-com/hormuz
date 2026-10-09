@@ -23,7 +23,7 @@ is [AI_WORK_COMPLETION_GOAL.md](AI_WORK_COMPLETION_GOAL.md).
 | Website 4: demonstration | Actual authenticated gateway browser journey and recording; route, cap, continuation and signed completion | Fixture conditions remain clearly labeled |
 | Website 5: evidence | Public source-matched execution receipt, synthetic mechanics benchmark and visible uncertainty | Actual customer savings/speed/quality evidence |
 | Website 6: commercial flow | Compatibility → subscription → activation; existing prices, separate provider fees and cancellation | Qualified live price/payment/portal |
-| Website 7: distribution | Form acknowledgement handling, booking link, mobile QA, optional signed campaign handoff and consented private funnel; publication workflow and exact pin PR | Owner inbox delivery, booking confirmation and published new pin |
+| Website 7: distribution | Form acknowledgement handling, booking link, mobile QA, optional signed campaign handoff and consented private funnel; publication workflow and exact deployed source pin | Owner inbox delivery and booking confirmation |
 
 Executable witnesses are the `test_work_*` suites, durable/secret inventories,
 source successor guards and [functional evidence](evidence/ai-work-functional/README.md).
@@ -65,10 +65,18 @@ Independent verification passed 78 pure checks and five local HTTP checks.
 Portal configuration, immutable checkout parameters, organization-wide pending
 creation guards and additive migration are covered with mocked Stripe transports.
 These checks establish no live subscription or payment.
-Native fixture and CLI checks passed 14 local tests; 16 environment-specific
-native tests skipped locally. The pinned-client CI now checks bound Codex On/Off
-and Claude streaming calls through the compiled relay. Exact successor remote
-CI remains a separate requirement.
+The retained native fixture and CLI checks passed 14 local tests; 16
+environment-specific native tests skipped locally. Completed CI for source
+`e4ef0ddae5c867479f73707a63c9e62c90de8c45` passed 22 main jobs and four Mac jobs.
+Its PR merge checkout had the same Git tree as that source. The Mac run passed
+18 relay tests, including the actual pinned Codex On/Off and Claude streaming
+clients through an extracted compiled relay. Those gateway simulators establish
+transport and correlation behavior; they do not exercise the real work ledger.
+The new composition case joins those clients to actual `GatewayServer`,
+`WorkRuntime` and SQLite using three bounded synthetic terminal replies. Its
+local fixture qualification is distinct from execution of the conditional
+native case, which requires a new completed CI run. No reply declares a job
+complete, and no test calls a live provider.
 
 Nine pricing-mode regressions exercise actual JSON and streaming gateway
 admission, complete uncertain holds, cache exclusion, continuation affinity and
@@ -94,11 +102,14 @@ or an interactive native update; those live release gates remain open.
 Remote product checks identify their exact source revision in
 [PR #456](https://github.com/Xpounder-com/hormuz/pull/456). Website publication
 uses a separate repository and immutable `site-source.json` pin;
-[publication PR #44](https://github.com/usehormuz/usehormuz.github.io/pull/44)
-records the retained publication at `a31f778ce1909fb0fb738ed8e5cac73de23727e9`,
-pinned to product source `d08cdb9e165003ac27ff9fdbc72bfc5c863fe8cb`. The successor
-publication waits for exact source CI. Local results and predecessor green runs cannot
-substitute for successful successor CI, deployment and live-page verification.
+[publication PR #45](https://github.com/usehormuz/usehormuz.github.io/pull/45)
+records the completed publication at `39a81dd45a4bb82eda1c45aba11a151724c3144f`,
+pinned to product source `e4ef0ddae5c867479f73707a63c9e62c90de8c45`. Its exact
+main deployment passed all three jobs, verified 16 pages and five downloads,
+and passed 21 desktop/mobile rendered checks. No inquiry, booking, payment or
+authenticated hosted workspace was created by that qualification. Subsequent
+source changes need their own matching CI and publication; a predecessor's
+green run does not qualify them.
 Fresh website verification passes 74 Node tests. TypeScript and the offline
 export passed against clean snapshot `a9d59e523f71251475f0c55e766ca3b517cc4f01`
 using disclosed private fallback fonts and webpack: 16 canonical pages, 974
@@ -116,9 +127,12 @@ dispatch. Native subscriptions and calls outside the gateway remain outside caps
 Provider timing measures transport blocking time, not GPU compute. Workflow
 completion establishes its specified condition, not universal correctness.
 
-The native source launcher accepts an optional `--work-id <job-id>` for one
-invocation, passes only its correlation header through the authenticated relay,
-and retains existing custody, version and supervision checks. The gateway
+The source launchers accept an optional `--work-id <job-id>` for one invocation
+and retain that binding in relay state. A bound relay supplies a missing header,
+accepts exactly one matching header, and rejects malformed, duplicate or
+different IDs before credential lookup, optimization or upstream dispatch.
+Unbound launches allow an absent header, while malformed or duplicate supplied
+IDs are refused. Existing custody, version and supervision checks remain. The gateway
 authorizes the owned job; the ID grants no actor or tenant authority and is never
 saved in a connection profile. The generated Mac `.command` accepts the same
 pair while its resident-app lease is live. The panel's existing Open action

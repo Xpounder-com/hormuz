@@ -524,7 +524,7 @@ fn run_with_executable_until(
     if _stopped() {
         return Ok(130);
     }
-    let relay = LocalRelay::start(profile, credentials, optimization)?;
+    let relay = LocalRelay::start_with_work_id(profile, credentials, optimization, work_id)?;
     let plan = LaunchPlan::new(
         profile,
         executable,

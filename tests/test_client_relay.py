@@ -493,6 +493,240 @@ class RelayTests(unittest.TestCase):
             gateway_thread.join(timeout=2)
             gateway.server_close()
 
+    def _work_request(
+        self,
+        relay: LocalRelayServer,
+        *,
+        client: str,
+        work_headers: list[tuple[str, str]],
+        body: bytes = b"{}",
+    ) -> tuple[int, bytes]:
+        path = "/v1/responses" if client == "codex" else "/v1/messages"
+        connection = http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        try:
+            connection.putrequest("POST", path)
+            if client == "codex":
+                connection.putheader("Authorization", "Bearer " + LOCAL_TOKEN)
+            else:
+                connection.putheader("X-Api-Key", LOCAL_TOKEN)
+            connection.putheader("Content-Type", "application/json")
+            connection.putheader("Content-Length", str(len(body)))
+            for name, value in work_headers:
+                connection.putheader(name, value)
+            connection.endheaders(body)
+            response = connection.getresponse()
+            try:
+                return response.status, response.read()
+            finally:
+                response.close()
+        finally:
+            connection.close()
+
+    def test_selected_work_binding_validated_before_listener_or_custody(self) -> None:
+        credential = mock.Mock(return_value=ACCESS_TOKEN)
+        optimizer = mock.create_autospec(RelayOptimizer, instance=True)
+        with mock.patch.object(ThreadingHTTPServer, "__init__") as listen:
+            for work_id in ("", ".job", "bad/id", "work ", "é", "a" * 129, 1, True):
+                with self.subTest(work_id=work_id):
+                    with self.assertRaisesRegex(ClientRelayError, "^invalid_work_binding$"):
+                        LocalRelayServer(
+                            gateway="http://127.0.0.1:9", client="codex",
+                            local_credential=LOCAL_TOKEN, gateway_credential=credential,
+                            optimizer=optimizer, work_id=work_id,
+                        )
+            for upstream_auth in ("openai", "anthropic"):
+                with self.subTest(upstream_auth=upstream_auth):
+                    with self.assertRaisesRegex(ClientRelayError, "^unsupported_work_binding$"):
+                        LocalRelayServer(
+                            gateway="http://127.0.0.1:9", client="codex",
+                            local_credential=LOCAL_TOKEN, gateway_credential=credential,
+                            optimizer=optimizer, work_id="work-selected",
+                            upstream_auth=upstream_auth,
+                        )
+            listen.assert_not_called()
+        credential.assert_not_called()
+        optimizer.prepare.assert_not_called()
+
+    def test_work_headers_rejected_before_custody_optimizer_or_egress(self) -> None:
+        invalid_headers = [
+            [("X-Hormuz-Work-Id", value)]
+            for value in ("", ".job", "bad/id", "work ", "é", "a" * 129, "work,other")
+        ] + [
+            [("X-Hormuz-Work-Id", "work-selected"),
+             ("x-hormuz-work-id", "work-selected")],
+            [("X-Hormuz-Work-Id", "work-selected"),
+             ("x-hormuz-work-id", "work-other")],
+        ]
+        for client in ("codex", "claude-code"):
+            for selected in (None, "work-selected"):
+                credential = mock.Mock(return_value=ACCESS_TOKEN)
+                optimizer = mock.create_autospec(RelayOptimizer, instance=True)
+                relay = LocalRelayServer(
+                    gateway="http://127.0.0.1:9", client=client,
+                    local_credential=LOCAL_TOKEN, gateway_credential=credential,
+                    optimizer=optimizer, work_id=selected,
+                )
+                thread = threading.Thread(
+                    target=lambda: relay.serve_forever(poll_interval=0.01), daemon=True
+                )
+                thread.start()
+                try:
+                    candidates = invalid_headers + (
+                        [[("X-Hormuz-Work-Id", "WORK-selected")]] if selected else []
+                    )
+                    with mock.patch.object(relay_module, "_gateway_connection") as egress:
+                        for headers in candidates:
+                            with self.subTest(client=client, selected=selected, headers=headers):
+                                status, body = self._work_request(
+                                    relay, client=client, work_headers=headers
+                                )
+                                self.assertEqual(status, 400)
+                                self.assertEqual(json.loads(body), {"error": {"code": "local_work_id_invalid"}})
+                        credential.assert_not_called()
+                        optimizer.prepare.assert_not_called()
+                        optimizer.note_oversized_passthrough.assert_not_called()
+                        egress.assert_not_called()
+                finally:
+                    relay.shutdown()
+                    thread.join(timeout=2)
+                    relay.server_close()
+                    self.assertFalse(thread.is_alive())
+
+    def test_bound_and_unbound_work_headers_reach_only_governed_gateway(self) -> None:
+        gateway = _Gateway()
+        received_ids: list[list[str]] = []
+        original_post = _GatewayHandler.do_POST
+
+        def capture_work_ids(handler: _GatewayHandler) -> None:
+            received_ids.append(handler.headers.get_all("X-Hormuz-Work-Id", []))
+            original_post(handler)
+
+        gateway_thread = threading.Thread(
+            target=lambda: gateway.serve_forever(poll_interval=0.01), daemon=True
+        )
+        gateway_thread.start()
+        try:
+            with mock.patch.object(_GatewayHandler, "do_POST", capture_work_ids):
+                for client in ("codex", "claude-code"):
+                    for selected in (None, "work-selected"):
+                        relay = LocalRelayServer(
+                            gateway=f"http://127.0.0.1:{gateway.server_port}", client=client,
+                            local_credential=LOCAL_TOKEN, gateway_credential=lambda: ACCESS_TOKEN,
+                            optimizer=RelayOptimizer(
+                                preference_store=self.store, client=client,
+                                gateway_compatible=False,
+                            ),
+                            work_id=selected,
+                        )
+                        thread = threading.Thread(
+                            target=lambda: relay.serve_forever(poll_interval=0.01), daemon=True
+                        )
+                        thread.start()
+                        try:
+                            for incoming in (None, selected or "work-unbound"):
+                                headers = [("X-Hormuz-Actor-Id", "attacker"),
+                                           ("X-Hormuz-Organization-Id", "attacker")]
+                                if incoming is not None:
+                                    headers.append(("x-hormuz-work-id", incoming))
+                                for maximum in (MAX_REQUEST_BYTES, 1):
+                                    with self.subTest(client=client, selected=selected, incoming=incoming, maximum=maximum):
+                                        with mock.patch.object(relay_module, "MAX_REQUEST_BYTES", maximum):
+                                            self.assertEqual(
+                                                self._work_request(relay, client=client, work_headers=headers),
+                                                (200, b'{"ok":true}'),
+                                            )
+                                        expected = selected or incoming
+                                        self.assertEqual(received_ids[-1], [] if expected is None else [expected])
+                                        forwarded = {name.lower(): value for name, value in gateway.requests[-1][1].items()}
+                                        self.assertEqual(forwarded["authorization"], "Bearer " + ACCESS_TOKEN)
+                                        self.assertNotIn("x-hormuz-actor-id", forwarded)
+                                        self.assertNotIn("x-hormuz-organization-id", forwarded)
+                                        self.assertEqual(gateway.requests[-1][0], b"{}")
+                        finally:
+                            relay.shutdown()
+                            thread.join(timeout=2)
+                            relay.server_close()
+                            self.assertFalse(thread.is_alive())
+        finally:
+            gateway.shutdown()
+            gateway_thread.join(timeout=2)
+            gateway.server_close()
+            self.assertFalse(gateway_thread.is_alive())
+
+    def test_direct_provider_work_metadata_stays_private_and_invalid_headers_reject(self) -> None:
+        gateway = _Gateway()
+        gateway_thread = threading.Thread(
+            target=lambda: gateway.serve_forever(poll_interval=0.01), daemon=True
+        )
+        gateway_thread.start()
+        try:
+            for upstream_auth in ("openai", "anthropic"):
+                credential = mock.Mock(return_value="provider-secret-fixture")
+                optimizer = RelayOptimizer(
+                    preference_store=self.store, client="codex", gateway_compatible=False,
+                )
+                relay = LocalRelayServer(
+                    gateway=f"http://127.0.0.1:{gateway.server_port}", client="codex",
+                    local_credential=LOCAL_TOKEN, gateway_credential=credential,
+                    optimizer=optimizer, upstream_auth=upstream_auth,
+                )
+                thread = threading.Thread(
+                    target=lambda: relay.serve_forever(poll_interval=0.01), daemon=True
+                )
+                thread.start()
+                try:
+                    self.assertEqual(self._work_request(
+                        relay, client="codex", work_headers=[("X-Hormuz-Work-Id", "work-valid")]
+                    ), (200, b'{"ok":true}'))
+                    self.assertNotIn("x-hormuz-work-id", {name.lower() for name in gateway.requests[-1][1]})
+                    request_count = len(gateway.requests)
+                    credential.reset_mock()
+                    with mock.patch.object(optimizer, "prepare") as prepare, mock.patch.object(relay_module, "_gateway_connection") as egress:
+                        for headers in (
+                            [("X-Hormuz-Work-Id", "bad/id")],
+                            [("X-Hormuz-Work-Id", "work-valid"), ("X-Hormuz-Work-Id", "work-valid")],
+                        ):
+                            with self.subTest(upstream_auth=upstream_auth, headers=headers):
+                                status, body = self._work_request(relay, client="codex", work_headers=headers)
+                                self.assertEqual(status, 400)
+                                self.assertEqual(json.loads(body)["error"]["code"], "local_work_id_invalid")
+                        credential.assert_not_called()
+                        prepare.assert_not_called()
+                        egress.assert_not_called()
+                    self.assertEqual(len(gateway.requests), request_count)
+                finally:
+                    relay.shutdown()
+                    thread.join(timeout=2)
+                    relay.server_close()
+                    self.assertFalse(thread.is_alive())
+        finally:
+            gateway.shutdown()
+            gateway_thread.join(timeout=2)
+            gateway.server_close()
+            self.assertFalse(gateway_thread.is_alive())
+
+    def test_run_client_supplies_the_selected_job_to_the_relay(self) -> None:
+        credential = Path(self.temporary.name) / "credential-helper"
+        credential.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        credential.chmod(0o700)
+        for client in ("codex", "claude-code"):
+            server = mock.Mock(origin="http://127.0.0.1:9876")
+            profile = SavedClientProfile("profile-a", "https://gateway.example", client, "approved", False)
+            with self.subTest(client=client), mock.patch.object(relay_module, "LocalRelayServer", return_value=server) as relay, mock.patch.object(relay_module, "probe_gateway_capability", return_value=False), mock.patch.object(relay_module, "supported_client_executable", return_value="/synthetic/client"), mock.patch.object(relay_module.subprocess, "run", return_value=mock.Mock(returncode=0)) as launched:
+                self.assertEqual(run_client(
+                    profile=profile, state_directory=self.state,
+                    credential_helper=credential, work_id="work-selected",
+                ), 0)
+                self.assertEqual(relay.call_args.kwargs["work_id"], "work-selected")
+                command = launched.call_args.args[0]
+                environment = launched.call_args.kwargs["env"]
+                if client == "codex":
+                    self.assertIn('model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-selected"}', command)
+                else:
+                    self.assertEqual(environment["ANTHROPIC_CUSTOM_HEADERS"], "X-Hormuz-Work-Id: work-selected")
+                server.shutdown.assert_called_once_with()
+                server.server_close.assert_called_once_with()
+
     def test_non_latin_1_provider_credentials_fail_before_connect(self) -> None:
         for upstream_auth in ("openai", "anthropic"):
             with self.subTest(upstream_auth=upstream_auth):
@@ -1291,6 +1525,7 @@ raise SystemExit(0 if response.status == 200 else 1)
                     state_directory=self.state,
                     credential_helper=credential,
                     counters=COUNTERS,
+                    work_id="work-selected",
                 ),
                 0,
             )
@@ -1298,6 +1533,7 @@ raise SystemExit(0 if response.status == 200 else 1)
             body, request_headers = gateway.requests[0]
             headers = {key.lower(): value for key, value in request_headers.items()}
             self.assertEqual(headers[CONTEXT_FORMAT_HEADER.lower()], CONTEXT_FORMAT_VERSION)
+            self.assertEqual(headers["x-hormuz-work-id"], "work-selected")
             payload = json.loads(body)
             compact = payload["input"][1]["output"]
             self.assertIn("hormuz-path-list-v1", compact)
