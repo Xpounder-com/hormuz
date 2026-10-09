@@ -98,13 +98,25 @@ persistent, qualified gateway for real work.
 an existing file. It contains scenario names, status, route metadata, attempt
 counts, gateway totals and source file hashes. It omits keys, prompts and answers.
 Inspect it before sharing; your model and configured spending are still metadata.
+Source hashes and the starting revision are captured before execution and checked
+again afterward. A changed or unavailable source boundary makes the run fail.
+
+If an executed scenario fails, the batch stops and exits with a nonzero status.
+Its failed receipt preserves the scenario, API, fixed failure reason, earlier
+completed checks and attempted gateway request count. After the gateway drains,
+it also captures owned ledger totals before removing temporary state, including
+failed estimates and pending or unknown-charge holds. An unavailable ledger
+snapshot is explicitly null. Setup failures before gateway creation keep the
+generic error output. No failed request is replayed; the receipt cannot establish
+every possible provider charge or invoice amount.
 
 Synthetic receipts state zero real calls. Live receipts count successful uncached
 provider responses observed by the gateway, not invoices or every possible charge.
 Neither claims savings, faster task completion, model correctness or paid delivery.
 Passing requires a complete endpoint response, including its stream terminal
 markers when applicable, and a successful response observation in the gateway
-ledger. A failed or truncated HTTP 200 stream receives no passing receipt.
+ledger. A failed or truncated HTTP 200 stream receives a failed receipt with the
+partial run metadata when gateway execution started.
 
 The four cache/budget/context controls are local-only to avoid injecting tutorial
 correction observations into a live workload. A passing HTTP request does not

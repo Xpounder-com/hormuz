@@ -5,15 +5,269 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 from tools import ai_work_provider_examples as examples
 
 
+@contextlib.contextmanager
+def without_provider_credentials():
+    # Keep TMPDIR/TEMP/TMP: the first tempfile lookup caches its choice globally.
+    with mock.patch.dict(os.environ):
+        for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HORMUZ_EXAMPLE_TOKEN",
+                     "HORMUZ_EXAMPLE_UNUSED_OPENAI_KEY", "HORMUZ_SYNTHETIC_PROVIDER_KEY"):
+            os.environ.pop(name, None)
+        yield
+
+
 class ProviderExamplesTests(unittest.TestCase):
+    def test_credential_isolation_preserves_first_tempfile_choice_in_fresh_process(self):
+        with tempfile.TemporaryDirectory(prefix="hormuz-temp-isolation-", dir=Path.cwd()) as folder:
+            code = """import json, os, tempfile
+from pathlib import Path
+from tests.test_ai_work_provider_examples import without_provider_credentials
+expected = Path(os.environ['TMPDIR'])
+assert tempfile.tempdir is None
+with without_provider_credentials():
+    assert all(name not in os.environ for name in ('OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'HORMUZ_EXAMPLE_TOKEN'))
+    assert all(Path(os.environ[name]) == expected for name in ('TMPDIR', 'TEMP', 'TMP'))
+    assert os.environ['HORMUZ_TEMP_ISOLATION_SENTINEL'] == 'preserved'
+    with tempfile.TemporaryDirectory() as child:
+        assert Path(child).parent == expected
+assert Path(tempfile.gettempdir()) == expected
+assert os.environ['OPENAI_API_KEY'] == 'synthetic-isolation-test-key'
+print(json.dumps({'first_tempfile_choice_preserved': True, 'credentials_restored': True}))
+"""
+            environment = {**os.environ, "TMPDIR": folder, "TEMP": folder, "TMP": folder,
+                           "OPENAI_API_KEY": "synthetic-isolation-test-key",
+                           "ANTHROPIC_API_KEY": "synthetic-isolation-test-key",
+                           "HORMUZ_EXAMPLE_TOKEN": "synthetic-isolation-test-token",
+                           "HORMUZ_TEMP_ISOLATION_SENTINEL": "preserved"}
+            result = subprocess.run([sys.executable, "-c", code], cwd=examples.ROOT,
+                                    env=environment, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), {"first_tempfile_choice_preserved": True, "credentials_restored": True})
+
+    def run_in_memory_batch(self, names, *, failure_kind="incomplete", snapshot_error=False):
+        """Real SQLite costs, mocked transport/lifecycle, and zero listeners."""
+        from hormuz.work_runtime import WorkRuntime
+        from hormuz.work_client import WorkClientError
+        gateways, requests, cleanup, creations = [], [], [], []
+
+        class Gateway:
+            def __init__(self, config, *, environ):
+                self.server_port, self.config = 12345, config
+                self.owner = next(iter(config.identities_by_token.values()))
+                self.work_runtime = WorkRuntime(config.ai_work.database_path, config)
+                self.path = self.work_runtime.path
+                self.closed = False
+                self.pending = None
+                report = self.work_runtime.report
+
+                def after_drain(identity, *, administrator):
+                    self_test.assertTrue(self.closed)
+                    self_test.assertTrue(self.path.exists())
+                    self_test.assertFalse(administrator)
+                    if snapshot_error:
+                        raise OSError("private_snapshot_error_body")
+                    return report(identity, administrator=administrator)
+                self.work_runtime.report = after_drain
+                gateways.append(self)
+
+        @contextlib.contextmanager
+        def serving(gateway):
+            try:
+                yield gateway
+            finally:
+                if gateway.pending:
+                    gateway.work_runtime.settle(gateway.owner, gateway.pending, 7, "failed")
+                gateway.work_runtime.close()
+                gateway.closed = True
+                cleanup.append("gateway")
+                if failure_kind == "cleanup":
+                    raise OSError("private_cleanup_body")
+
+        class Client:
+            def __init__(self, *_args, **_kwargs):
+                self.gateway = gateways[-1]
+
+            def set_plan(self, scope, identifier, **values):
+                return self.gateway.work_runtime.set_plan(self.gateway.owner.organization_id, scope, identifier, **values)
+
+            def create_job(self, repository, **values):
+                creations.append(values)
+                if failure_kind == "job_creation" and len(creations) == 2:
+                    raise ValueError("private_secret_identifier")
+                return self.gateway.work_runtime.create_work(self.gateway.owner, repository, **values)
+
+            def job(self, work_id):
+                return SimpleNamespace(work_id=work_id, headers={"synthetic-work-id": work_id},
+                                       state=lambda: self.gateway.work_runtime.get_work(self.gateway.owner, work_id))
+
+        class Transport:
+            def __init__(self, _port):
+                pass
+
+            def __enter__(self):
+                if failure_kind == "transport_enter":
+                    raise ValueError("private_secret_identifier")
+                return self
+
+            def __exit__(self, *_args):
+                cleanup.append("transport")
+
+            def request(self, _method, api, _body, headers):
+                gateway = gateways[-1]
+                identifier = "synthetic-request-" + str(len(requests) + 1)
+                requests.append(api)
+                gateway.work_runtime.reserve(gateway.owner, headers["synthetic-work-id"], identifier, "openai", "openai", 19)
+                if len(requests) == 1:
+                    gateway.work_runtime.settle(gateway.owner, identifier, 11, "succeeded")
+                    return 200, {"content-type": "application/json"}, json.dumps({"object": "response", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "private_response_body"}]}]}).encode()
+                if failure_kind == "timeout":
+                    gateway.work_runtime.settle(gateway.owner, identifier, status="unknown")
+                    raise WorkClientError("example_transport_timeout")
+                gateway.pending = identifier
+                if failure_kind == "unsafe_exception":
+                    raise ValueError("private_secret_identifier")
+                if failure_kind == "stream":
+                    return 200, {"content-type": "text/event-stream"}, b'data: {"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"private_response_body"},"finish_reason":"stop"}]}\n\n'
+                return 200, {"content-type": "application/json"}, b'{"object":"response","status":"incomplete","output":[],"private":"private_response_body"}'
+
+        self_test = self
+        routes = {"openai": {"protocol": "openai", "upstream_model": "synthetic-openai", **{key: 3 for key in examples.RATES}}}
+        upstreams = {"openai": {"base_url": "http://127.0.0.1:1", "api_key_env": "FIXTURE_KEY"}}
+        selected = examples.selected_examples(names, None)
+        with mock.patch("hormuz.server.GatewayServer", Gateway), mock.patch("hormuz.work_client.WorkClient", Client), mock.patch.object(examples, "serving", serving), mock.patch.object(examples, "LoopbackTransport", Transport):
+            result = examples.run_gateway(selected, routes, upstreams, {"FIXTURE_KEY": "synthetic-unit-test-key"}, live=all(item.live for item in selected), budget_microusd=100_000, max_live_calls=len(names))
+        self.assertEqual(cleanup, ["gateway"] if failure_kind == "transport_enter" else ["transport", "gateway"])
+        self.assertFalse(gateways[0].path.exists())
+        self.assertNotIn("private_", json.dumps(result))
+        return result, requests
+
+    def test_failed_batch_keeps_prior_checks_and_final_failed_cost_without_replay(self):
+        for kind, second in (("incomplete", "openai-explain-code"), ("stream", "chat-stream")):
+            with self.subTest(kind=kind):
+                result, requests = self.run_in_memory_batch(["openai-smoke", second, "openai-review-change"], failure_kind=kind)
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual([row["example"] for row in result["checks"]], ["openai-smoke"])
+                self.assertEqual(result["examples_completed"], 1)
+                self.assertEqual(result["gateway_requests_attempted"], 2)
+                self.assertEqual(len(requests), 2)
+                self.assertEqual(result["successful_uncached_provider_responses_observed"], 1)
+                self.assertEqual(result["failure"], {"example": second, "api": "/v1/chat/completions" if kind == "stream" else "/v1/responses", "behavior": "stream" if kind == "stream" else "request", "scenario_index": 2, "phase": "endpoint_validation", "observed_status": 200, "passed": False, "reason": "incomplete_provider_response"})
+                self.assertEqual(result["gateway_totals"]["committed_microusd"], 18)
+                self.assertEqual(result["gateway_totals"]["failed_attempts"], 1)
+                self.assertEqual(result["gateway_totals"]["pending_microusd"], 0)
+                self.assertFalse(result["gateway_totals"]["invoice_finality"])
+                self.assertTrue(result["outcome_observations"].startswith("none"))
+
+    def test_timeout_receipt_retains_unknown_charge_hold_and_no_status_guess(self):
+        result, requests = self.run_in_memory_batch(["openai-smoke", "openai-explain-code", "openai-review-change"], failure_kind="timeout")
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(result["failure"]["reason"], "example_transport_timeout")
+        self.assertIsNone(result["failure"]["observed_status"])
+        self.assertEqual(result["gateway_totals"]["committed_microusd"], 11)
+        self.assertEqual(result["gateway_totals"]["uncertain_microusd"], 19)
+        self.assertEqual(result["gateway_totals"]["unknown_attempts"], 1)
+        self.assertEqual(result["gateway_totals"]["consumed_microusd"], 30)
+
+    def test_failed_snapshot_is_null_and_does_not_replace_original_failure(self):
+        result, _ = self.run_in_memory_batch(["openai-smoke", "openai-explain-code"], snapshot_error=True)
+        self.assertEqual(result["failure"]["reason"], "incomplete_provider_response")
+        self.assertIsNone(result["gateway_totals"])
+        self.assertEqual(result["gateway_totals_error"], "example_ledger_snapshot_unavailable")
+
+    def test_arbitrary_identifier_exception_is_not_receipt_metadata(self):
+        result, _ = self.run_in_memory_batch(["openai-smoke", "openai-explain-code"], failure_kind="unsafe_exception")
+        self.assertEqual(result["failure"]["reason"], "example_execution_unavailable")
+
+    def test_new_scenario_setup_failure_cannot_inherit_prior_http_status(self):
+        result, requests = self.run_in_memory_batch(["openai-smoke", "openai-explain-code", "openai-review-change"], failure_kind="job_creation")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(result["gateway_requests_attempted"], 1)
+        self.assertEqual(result["failure"]["example"], "openai-explain-code")
+        self.assertEqual(result["failure"]["phase"], "job_creation")
+        self.assertIsNone(result["failure"]["observed_status"])
+        self.assertEqual(result["gateway_totals"]["attempts"], 1)
+        self.assertEqual(result["gateway_totals"]["committed_microusd"], 11)
+
+    def test_context_job_creation_failure_cannot_inherit_first_response_status(self):
+        result, requests = self.run_in_memory_batch(["context-change"], failure_kind="job_creation")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(result["failure"]["phase"], "job_creation")
+        self.assertIsNone(result["failure"]["observed_status"])
+        self.assertEqual(result["gateway_totals"]["committed_microusd"], 11)
+
+    def test_lifecycle_errors_preserve_original_failure_and_conservative_snapshot(self):
+        result, requests = self.run_in_memory_batch(["openai-smoke", "openai-explain-code"], failure_kind="cleanup")
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(result["failure"]["reason"], "incomplete_provider_response")
+        self.assertEqual(result["cleanup_error"], "example_gateway_cleanup_unavailable")
+        self.assertEqual(result["gateway_totals_snapshot"], "after_lifecycle_error")
+        result, requests = self.run_in_memory_batch(["openai-smoke"], failure_kind="transport_enter")
+        self.assertEqual(requests, [])
+        self.assertEqual(result["failure"]["phase"], "gateway_startup")
+        self.assertEqual(result["gateway_requests_attempted"], 0)
+        self.assertEqual(result["gateway_totals"]["attempts"], 0)
+
+    def test_internal_source_fence_retains_run_metadata_and_rejects_changed_or_missing_source(self):
+        for mutation in (None, "change", "remove"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                names = ["tools/ai_work_provider_examples.py", "tools/provider_example_transport.py", "tools/provider_example_responses.py", "core.py"]
+                for name in names:
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("original source")
+                manifest = root / "docs/evidence/ai-work-functional/receipt.json"
+                manifest.parent.mkdir(parents=True)
+                manifest.write_text(json.dumps({"source_files": {"core.py": "predecessor-digest"}}))
+                rates = root / "private-rates.json"
+                rates.write_text(json.dumps({"openai": {"model": "synthetic-qualified", **{key: 1 for key in examples.RATES}}}))
+                arguments = argparse.Namespace(live="openai", rate_card=str(rates), budget_microusd=100_000, max_live_calls=1)
+
+                def run(*_args, **_kwargs):
+                    if mutation == "change":
+                        (root / "core.py").write_text("modified during dispatch")
+                    elif mutation == "remove":
+                        (root / "core.py").unlink()
+                    result = {"status": "passed", "gateway_requests_attempted": 1, "gateway_totals": {"uncertain_microusd": 19}}
+                    if mutation == "remove":
+                        result.update(status="failed", failure={"reason": "incomplete_provider_response"})
+                    return result
+
+                with mock.patch.object(examples, "ROOT", root), mock.patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic-unit-test-key"}, clear=True), mock.patch.object(examples, "run_gateway", side_effect=run) as dispatch, mock.patch.object(examples.subprocess, "run", return_value=mock.Mock(stdout="starting-commit")):
+                    receipt = examples.execute(arguments, examples.selected_examples(["openai-smoke"], "openai"))
+                self.assertEqual(dispatch.call_count, 1)
+                self.assertEqual(receipt["status"], "failed" if mutation else "passed")
+                self.assertEqual(receipt["gateway_totals"]["uncertain_microusd"], 19)
+                self.assertEqual(receipt["source_verified_before_and_after"], mutation is None)
+                if mutation == "change":
+                    self.assertNotEqual(receipt["source_files_after"]["core.py"], receipt["source_files"]["core.py"])
+                    self.assertEqual(receipt["source_verification_error"], "example_source_changed")
+                elif mutation == "remove":
+                    self.assertEqual(receipt["source_verification_error"], "example_source_manifest_unavailable")
+                    self.assertEqual(receipt["failure"]["reason"], "incomplete_provider_response")
+                self.assertNotIn("synthetic-unit-test-key", json.dumps(receipt))
+
+    def test_failed_run_saves_partial_receipt_and_returns_nonzero_without_reexecution(self):
+        result, requests = self.run_in_memory_batch(["openai-smoke", "openai-explain-code"])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "failed-receipt.json"
+            with mock.patch.object(examples, "execute", return_value=result) as execute, contextlib.redirect_stderr(io.StringIO()) as captured:
+                self.assertEqual(examples.main(["--receipt", str(path)]), 1)
+            execute.assert_called_once()
+            self.assertEqual(json.loads(path.read_text()), result)
+            self.assertEqual(json.loads(captured.getvalue()), result)
+        self.assertEqual(len(requests), 2)
+
     def test_catalog_is_unique_and_default_live_calls_are_small(self):
         self.assertEqual(len(examples.EXAMPLES), 21)
         self.assertEqual(len({e.name for e in examples.EXAMPLES}), 21)
@@ -178,7 +432,7 @@ class ProviderExampleIntegrationTests(unittest.TestCase):
         examples.ProviderFixture.calls = []
         gateways, boundaries = [], []
         try:
-            with mock.patch.dict(os.environ, {}, clear=True), contextlib.ExitStack() as resources:
+            with without_provider_credentials(), contextlib.ExitStack() as resources:
                 provider = BoundedFixtureServer(("127.0.0.1", 0), examples.ProviderFixture)
                 resources.enter_context(examples.serving(provider))
 

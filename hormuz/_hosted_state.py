@@ -18,7 +18,7 @@ from ._hosted_config import HostedError, at_directory
 from ._sqlite_schema import SQLITE_SCHEMA_VERSION, verify_sqlite_schema_ready
 from .config import GatewayConfig
 from .onboarding import TeamDirectory
-from .session_store import SQLiteSessionStore, SESSION_STORE_SCHEMA_VERSION, _isoformat
+from .session_store import SQLiteSessionStore, SESSION_STORE_SCHEMA_VERSION, SessionStoreError, _isoformat
 from .store import StorageSchemaError, UsageStore
 
 

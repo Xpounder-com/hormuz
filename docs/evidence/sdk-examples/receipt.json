@@ -1,8 +1,8 @@
 {
   "schema_id": "hormuz.ai-work-sdk-qualification",
   "schema_version": 1,
-  "generated_at": "2026-10-09T17:52:28.234186+00:00",
-  "source_commit": "fded8a5737e72e8b4496121c8fa4eed0eb9c3c62",
+  "generated_at": "2026-10-09T18:25:36.789560+00:00",
+  "source_commit": "92b34b43e4bf4d8489c042e0800d0354edc864fa",
   "source_boundary": "working_tree_files_identified_by_sha256",
   "source_files": {
     "hormuz/work_runtime.py": "f218895a6b5cf60da6fa498277c7f3fb7fbdc8fb23f622d0e5c297eaf8036fd5",
@@ -25,7 +25,7 @@
     "hormuz/server.py": "a483bb925de6a51b3104b02675d2b7871a42710aaacdcafd6daa8c877c8e5aad",
     "hormuz/usage.py": "6e3afd38de63ff8aaa63d83d93f8864437a3a703f305b52b09886a9be236a437",
     "hormuz/_hosted_server.py": "a1cabada88bd170d09b14de06814f3d59249733db154e566a43f2d9d396c7e34",
-    "hormuz/_hosted_state.py": "785d40fb4510e27c7aac27c0e90226fd4e5a2ea737531f7a456d717058ce944b",
+    "hormuz/_hosted_state.py": "ecc74bd2f278219e75183b688391e58742d3b666013e590c3c9ec1857e561370",
     "hormuz/_hosted_config.py": "760f79f5809b5a7e5461a6e53ad1a04eb6ae273ebcac4d4ce09095b2dc23f0ef",
     "hormuz/_hosted_backup.py": "59468f65b37e14dda0235929947a1c269f785081015168f8d22c17e6b44cc1bf",
     "hormuz/hosted.py": "09fc8614f5d5190f7ab3a10884f43c3a2fb33b8fcbaaa74843a720355fa34a3e",
@@ -33,7 +33,7 @@
     "tools/ai_work_browser_fixture.py": "d559268a3524a68a5b6291f791026af5b7a3a80e5116c389a03af2137eeebfe5",
     "website/scripts/ai-work-browser-qa.mjs": "b5f8314ed6b919f2f0bf037cb16db91b824716a7906c882a18854e9ec449ba20",
     "examples/sdk/work_sdk.py": "30f48e47f7ec8cf41bae57877691fb59e72d819ca404ea75ee1ac2d65a15490d",
-    "tools/ai_work_provider_examples.py": "54ac67976d614ed7b3ddfe34ee26c5f3d2f8445cce38cf8e513a8e799a3a531c",
+    "tools/ai_work_provider_examples.py": "f099d284bb5584b6a493a0bcbbc5064fa6e4e18b42f4e64b76bd84c776488798",
     "tools/provider_example_transport.py": "36f140bda4f1e86b66a324401d6182153570e0312535e2e183f88b65a3e6e098",
     "tools/provider_example_responses.py": "ed03ffcb9a0221c1ba6ea809de0e721b7fd29efd6bd294b843d937f23a1dc120",
     "tools/ai_work_sdk_qualification.py": "e174a55f093092820185a6a86a54382dd6a1258ddcef4e87cffc5a3c5df729a5"
