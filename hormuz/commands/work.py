@@ -53,6 +53,9 @@ def add_work_commands(subparsers):
     exploration.add_argument("--inherit-exploration", action="store_true", help="Clear this plan's override and inherit its parent")
     bindings = commands.add_parser("bindings", help="List an owned job's signed-source associations")
     bindings.add_argument("--work-id", required=True)
+    attempts = commands.add_parser("attempts", help="Read one bounded page of an owned job's full attempt history")
+    attempts.add_argument("--work-id", required=True)
+    attempts.add_argument("--before", help="The next_before request ID from the previous page")
     bind = commands.add_parser("bind", help="Associate one owned job with an enrolled signed source object")
     bind.add_argument("--work-id", required=True)
     bind.add_argument("--provider", choices=("github", "linear"), required=True)
@@ -120,6 +123,8 @@ def run(args):
                 result = job.bindings(provider=args.provider, connector_id=args.connector_id, container_id=args.container_id, object_id=args.object_id, completion_condition=args.completion_condition)
             elif command == "bindings":
                 result = job.bindings()
+            elif command == "attempts":
+                result = job.attempts(before=args.before)
             elif command == "headers":
                 result = job.headers
             elif command == "observe":

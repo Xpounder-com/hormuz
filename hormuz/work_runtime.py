@@ -491,6 +491,39 @@ class WorkRuntime:
             ).fetchall()
             return [self._work_view(connection, dict(row), now) for row in rows]
 
+    def attempt_history(self, identity, work_id, *, before=None, limit=50):
+        """Read a bounded owned-job page in stable reverse admission order.
+
+        The cursor is an existing request ID in this exact job. Concurrent new
+        admissions do not move older pages; no database row ID is exported.
+        """
+        owner = _identity(identity)
+        before = _identifier(before, "before_request", optional=True)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise WorkRuntimeError("work_invalid_attempt_limit")
+        with self._transaction() as connection:
+            self._work(connection, owner, work_id)
+            where = "organization_id=? AND actor_id=? AND work_id=?"
+            parameters = (*owner, work_id)
+            if before is not None:
+                cursor = connection.execute(
+                    "SELECT rowid FROM ai_work_attempts WHERE " + where + " AND request_id=?",
+                    (*parameters, before),
+                ).fetchone()
+                if cursor is None:
+                    raise WorkRuntimeError("attempt_not_found", 404)
+                where += " AND rowid<?"
+                parameters += (cursor[0],)
+            rows = connection.execute(
+                "SELECT * FROM ai_work_attempts WHERE " + where + " ORDER BY rowid DESC LIMIT ?",
+                (*parameters, limit + 1),
+            ).fetchall()
+            attempts = [self._attempt_view(dict(row)) for row in rows[:limit]]
+        return {"schema_id": "hormuz.ai-work-attempt-history", "schema_version": 1,
+                "scope": "owned_job", "work_id": work_id, "attempts": attempts,
+                "page_limit": limit, "order": "reverse_admission",
+                "next_before": attempts[-1]["request_id"] if len(rows) > limit else None}
+
     @staticmethod
     def _costs(connection, where, parameters):
         row = connection.execute(
@@ -505,6 +538,10 @@ class WorkRuntime:
             "COALESCE(SUM(CASE WHEN state='unknown' AND confirmed_cost_microusd IS NULL THEN reserved_microusd ELSE 0 END),0) AS uncertain_microusd,"
             "COALESCE(SUM(CASE WHEN state='cache_hit' THEN 1 ELSE 0 END),0) AS cache_hits,"
             "COALESCE(SUM(CASE WHEN state='denied' THEN 1 ELSE 0 END),0) AS denied,"
+            "COALESCE(SUM(state='failed'),0) AS failed_attempts,"
+            "COALESCE(SUM(state='unknown'),0) AS unknown_attempts,"
+            "COALESCE(SUM(retry_of IS NOT NULL),0) AS retry_attempts,"
+            "COALESCE(SUM(retry_of IS NOT NULL AND reason='provider_failover'),0) AS failover_attempts,"
             "COALESCE(SUM(reservation_exceeded),0) AS reservation_exceeded,"
             "COALESCE(SUM(CASE WHEN repeat_count>0 AND pattern_excluded=0 THEN 1 ELSE 0 END),0) AS repeated_requests,"
             "SUM(latency_ms) AS provider_latency_ms,COUNT(latency_ms) AS timed_attempts,"

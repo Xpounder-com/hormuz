@@ -145,3 +145,46 @@ class WorkPagesTests(unittest.TestCase):
         self.assertIn('Start another job', rendered)
         self.assertIn('id="your-jobs"', rendered)
         self.assertNotIn('Create your first job', rendered)
+
+    def test_agent_guidance_uses_authorized_protocol_models_and_escapes_shell_arguments(self):
+        state = self.state(); job = self.job(); state['works'] = [job]
+        job['agent_choices'] = [{'client': 'claude-code', 'protocol': 'anthropic', 'model': 'approved-claude'}]
+        rendered = work_pages.dashboard(state)
+        self.assertIn('hormuz client config claude --auth-mode session', rendered)
+        self.assertIn('claude --model approved-claude', rendered)
+        self.assertNotIn('hormuz client config codex', rendered)
+        self.assertIn('already enrolled native session', rendered)
+        job['agent_choices'] = [{'client': 'codex', 'protocol': 'openai', 'model': 'approved;echo <script>'}]
+        rendered = work_pages.dashboard(state)
+        self.assertIn('hormuz client config codex', rendered)
+        self.assertNotIn('hormuz client config claude', rendered)
+        self.assertIn('--model &#x27;approved;echo &lt;script&gt;&#x27;', rendered)
+        self.assertNotIn('<script>', rendered)
+        job['agent_choices'] = []
+        rendered = work_pages.dashboard(state)
+        self.assertIn('No configured provider route and application grant', rendered)
+        self.assertNotIn('hormuz client config', rendered)
+
+    def test_whole_history_counts_and_retry_lineage_remain_distinct_from_bounded_rows(self):
+        state = self.state(); job = self.job(); state['works'] = [job]
+        job['costs'].update(failed_attempts=17, unknown_attempts=3, retry_attempts=8, failover_attempts=4)
+        job.update(attempts_limit=5, attempts_truncated=True)
+        job['attempts'] = [{'model': 'approved', 'logical_request_id': '<logical>', 'retry_of': '<prior>', 'state': 'failed'}]
+        rendered = work_pages.dashboard(state)
+        for expected in ('Failed attempts</dt><dd>17', 'Unknown attempts</dt><dd>3', 'Linked retries</dt><dd>8', 'Provider failovers</dt><dd>4', 'Counts overlap:', 'full captured history', 'Logical request: &lt;logical&gt;', 'Retry of: &lt;prior&gt;'):
+            self.assertIn(expected, rendered)
+        self.assertNotIn('<logical>', rendered)
+        self.assertNotIn('<prior>', rendered)
+        self.assertIn('href="/work/jobs/work-1/attempts"', rendered)
+
+    def test_history_page_escapes_lineage_and_cursor_and_has_no_automatic_fetch(self):
+        history = {'work_id': 'work-1', 'page_limit': 50, 'attempts': [{'model': '<model>', 'logical_request_id': '<logical>', 'retry_of': '<prior>'}], 'next_before': 'request-1'}
+        rendered = work_pages.attempt_history(history)
+        self.assertIn('href="/work/jobs/work-1/attempts/before/request-1"', rendered)
+        self.assertIn('up to 50 owned attempts', rendered)
+        self.assertNotIn('<model>', rendered)
+        self.assertNotIn('<script', rendered)
+        history['next_before'] = 'prefix/path:@id'
+        self.assertIn('/attempts/before/prefix%2Fpath%3A%40id', work_pages.attempt_history(history))
+        history['next_before'] = None
+        self.assertNotIn('Older attempts', work_pages.attempt_history(history))

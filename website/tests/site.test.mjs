@@ -66,6 +66,17 @@ test('shared current-release labels derive from the source version', () => {
     assert.match(source, /\{SOURCE_VERSION(?:\.slice\(1\))?\}/, file);
   }
 });
+test('compatibility guidance matches the Chat route while preserving native qualification limits', () => {
+  const gateway = readFileSync(new URL('../../hormuz/server.py', import.meta.url), 'utf8');
+  assert.match(gateway, /"\/v1\/chat\/completions": \("openai", "codex", True\)/);
+  for (const file of ['app/components/SetupExample.tsx', 'lib/customer-questions.mjs']) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert.match(source, /AI Work supports OpenAI Responses, OpenAI-compatible Chat Completions at \/v1\/chat\/completions, and Anthropic Messages/, file);
+    assert.match(source, /does not expose Ollama’s native \/api\/chat and \/api\/generate routes/, file);
+    assert.match(source, /Exact native-client versions, models, streaming, and tool behavior still require qualification/, file);
+    assert.doesNotMatch(source, /does not expose (?:\/v1\/chat\/completions|Chat Completions)/, file);
+  }
+});
 test('inquiries encode user text as body, never additional recipients or headers', () => {
   const value = buildInquiry({ name: 'A & B', workflow: 'Budget? &bcc=someone@example.com\n#test', interest: 'pilot' });
   const url = new URL(value.mailto);

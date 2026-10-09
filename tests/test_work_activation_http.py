@@ -112,7 +112,8 @@ class WorkActivationHTTPTests(unittest.TestCase):
         _, _, raw = self.request("GET", "/v1/work/state", headers=self.token_headers)
         state = json.loads(raw)
         self.assertTrue(state["funnel"]["consent"])
-        self.assertGreater(state["funnel"]["events"]["qualified_connection"], 0)
+        # Reading setup records no actual API-response or native qualification.
+        self.assertEqual(state["funnel"]["events"]["qualified_connection"], 0)
         self.assertEqual(state["funnel"]["events"]["receipt_opened"], 1)
         self.assertEqual(state["funnel"]["events"]["payment_verified"], 0)
         # Re-opening the same receipt is not another conversion.

@@ -99,5 +99,5 @@ exercises alternate-route selection. Use actual customer-local episodes for lear
 Official references: [Responses](https://developers.openai.com/api/reference/resources/responses/methods/create),
 [Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
 [Anthropic Messages](https://platform.claude.com/docs/en/api/messages).
-Online documentation refresh and live provider calls were unavailable in this
-development session; qualify the chosen models and installed source on your account.
+Live provider qualification remains pending. Qualify the chosen models, prices
+and installed source on your account before treating these examples as live evidence.

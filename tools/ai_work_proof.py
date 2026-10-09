@@ -7,6 +7,7 @@ call a paid model, report measured customer savings or establish task quality.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing, contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
@@ -24,7 +25,79 @@ ROOT = Path(__file__).resolve().parents[1]
 PROOF_SOURCE_FILES = ('hormuz/work_runtime.py', 'hormuz/work_learning.py', 'hormuz/work_accounting.py', 'hormuz/work_provider_costs.py', 'hormuz/work_gateway.py', 'hormuz/work_workflow.py', 'hormuz/work_workflow_http.py', 'hormuz/work_http.py', 'hormuz/work_billing.py', 'hormuz/work_activation.py', 'hormuz/work_recovery.py', 'hormuz/work_pages.py', 'hormuz/work.css', 'hormuz/work_client.py', 'hormuz/commands/work.py', 'hormuz/config.py', 'hormuz/_config_work.py', 'hormuz/server.py', 'hormuz/usage.py', 'hormuz/_hosted_server.py', 'hormuz/_hosted_state.py', 'hormuz/_hosted_config.py', 'hormuz/_hosted_backup.py', 'hormuz/hosted.py', 'tools/ai_work_proof.py', 'tools/ai_work_browser_fixture.py', 'website/scripts/ai-work-browser-qa.mjs')
 sys.path.insert(0, str(ROOT))
 from hormuz.config import GatewayConfig
-from hormuz.server import GatewayServer, serve_in_thread
+from hormuz.server import GatewayServer
+
+CLIENT_TIMEOUT = 5
+UPSTREAM_TIMEOUT = 2
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
+class BoundedProofServer:
+    """Limit accepted loopback handlers and bound idle socket reads."""
+
+    daemon_threads = False
+    block_on_close = True
+    request_queue_size = 4
+
+    def __init__(self, *args, **kwargs):
+        self._proof_slots = threading.BoundedSemaphore(4)
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        request, address = super().get_request()
+        request.settimeout(CLIENT_TIMEOUT)
+        return request, address
+
+    def process_request(self, request, address):
+        if not self._proof_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, address)
+        except BaseException:
+            self._proof_slots.release()
+            self.shutdown_request(request)
+            raise
+
+    def process_request_thread(self, request, address):
+        try:
+            super().process_request_thread(request, address)
+        finally:
+            self._proof_slots.release()
+
+
+class ProofProviderServer(BoundedProofServer, ThreadingHTTPServer):
+    pass
+
+
+class ProofGatewayServer(BoundedProofServer, GatewayServer):
+    pass
+
+
+@contextmanager
+def serving(server):
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    started = False
+    try:
+        thread.start()
+        started = True
+        yield server
+    finally:
+        try:
+            if started:
+                server.shutdown()
+        finally:
+            try:
+                server.server_close()
+            finally:
+                if started:
+                    thread.join(timeout=CLIENT_TIMEOUT)
+                    if thread.is_alive():
+                        raise RuntimeError("proof_server_thread_not_closed")
+
+
+def source_manifest():
+    return {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in PROOF_SOURCE_FILES}
 
 
 class FixtureProvider(BaseHTTPRequestHandler):
@@ -63,16 +136,15 @@ class FixtureProvider(BaseHTTPRequestHandler):
 
 
 def execute():
+    source_files = source_manifest()
     FixtureProvider.calls = []
-    provider = ThreadingHTTPServer(("127.0.0.1", 0), FixtureProvider)
-    provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
-    provider_thread.start()
     assertions, trace = [], []
-    try:
+    with serving(ProofProviderServer(("127.0.0.1", 0), FixtureProvider)) as provider:
         with tempfile.TemporaryDirectory(prefix="hormuz-work-proof-") as folder:
             config_path = Path(folder) / "gateway.json"
             config_path.write_text(json.dumps({
                 "listen": {"host": "127.0.0.1", "port": 8088}, "database": "usage.sqlite3",
+                "upstream_timeout_seconds": UPSTREAM_TIMEOUT,
                 "upstreams": {"openai": {"base_url": f"http://127.0.0.1:{provider.server_port}", "api_key_env": "PROOF_PROVIDER"}},
                 "identities": [{"token_env": "PROOF_TOKEN", "actor_id": "proof-actor", "actor_name": "Fixture operator", "team_id": "engineering", "team_name": "Engineering", "organization_id": "proof-company", "allowed_clients": ["codex"]}],
                 "model_routes": {"baseline": {"protocol": "openai", "upstream_model": "fixture-baseline", "input_cost_per_million": 3, "output_cost_per_million": 3, "failover_alias": "economy"},
@@ -83,22 +155,26 @@ def execute():
             environment = {"PROOF_TOKEN": "synthetic-proof-token", "PROOF_PROVIDER": "synthetic-proof-provider-key"}
             config = GatewayConfig.load(config_path, environ=environment)
             config = replace(config, listen=replace(config.listen, port=0))
-            gateway = GatewayServer(config, environ=environment)
-            thread = serve_in_thread(gateway)
-            try:
+            with serving(ProofGatewayServer(config, environ=environment)) as gateway, closing(
+                http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=CLIENT_TIMEOUT)
+            ) as connection:
                 def request(path, body=None, *, work_id=None, token="synthetic-proof-token"):
-                    connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
                     headers = {"Authorization": "Bearer " + token}
                     if body is not None:
                         headers["Content-Type"] = "application/json"
                     if work_id:
                         headers["X-Hormuz-Work-ID"] = work_id
                     started = time.monotonic_ns()
-                    connection.request("POST" if body is not None else "GET", path, json.dumps(body).encode() if body is not None else None, headers)
-                    response = connection.getresponse()
-                    payload = response.read()
-                    result = (response.status, {key.lower(): value for key, value in response.getheaders()}, json.loads(payload))
-                    connection.close()
+                    try:
+                        connection.request("POST" if body is not None else "GET", path, json.dumps(body).encode() if body is not None else None, headers)
+                        with connection.getresponse() as response:
+                            payload = response.read(MAX_RESPONSE_BYTES + 1)
+                            if len(payload) > MAX_RESPONSE_BYTES:
+                                raise RuntimeError("proof_response_too_large")
+                            result = (response.status, {key.lower(): value for key, value in response.getheaders()}, json.loads(payload))
+                    except BaseException:
+                        connection.close()
+                        raise
                     trace.append({"path": path, "status": result[0], "wall_ms": round((time.monotonic_ns() - started) / 1e6, 3),
                         "cache": result[1].get("x-hormuz-cache"), "route": result[1].get("x-hormuz-work-route")})
                     return result
@@ -166,21 +242,15 @@ def execute():
                 check("openai_compatible_chat_is_accounted", code == 200 and request(f"/v1/work/jobs/{chat}")[2]["attempts"][0]["cost_microusd"] == 48)
                 check("missing_authentication_cannot_read_work", request("/v1/work/state", token="incorrect-fixture")[0] == 401)
                 state = request("/v1/work/state")[2]
+                if source_manifest() != source_files:
+                    raise RuntimeError("proof_source_changed_during_execution")
                 return {"schema_id": "hormuz.ai-work-proof", "schema_version": 1, "generated_at": datetime.now(timezone.utc).isoformat(),
-                    "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+                    "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, timeout=CLIENT_TIMEOUT).strip(),
                     "source_boundary": "working_tree_files_identified_by_sha256",
-                    "source_files": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (ROOT / name for name in PROOF_SOURCE_FILES)},
+                    "source_files": source_files,
                     "conditions": {"provider": "loopback_synthetic_fixture", "real_provider_calls": 0, "real_payments": 0, "billing_basis": "synthetic_configured_rate_estimate", "observations": "declared_executed_fixture_check_and_correction", "minimum_samples": 3, "production_quality_validated": False, "customer_savings_validated": False},
                     "checks": assertions, "provider_fixture_calls": len(FixtureProvider.calls), "trace": trace,
                     "covered_work": state}
-            finally:
-                gateway.shutdown()
-                gateway.server_close()
-                thread.join(timeout=5)
-    finally:
-        provider.shutdown()
-        provider.server_close()
-        provider_thread.join(timeout=5)
 
 
 def main():

@@ -50,6 +50,23 @@ a global model leaderboard, grade provider quality or establish customer savings
 The script consumes the answer without printing its body and returns a small
 metadata receipt. Read the actual job in your private gateway for route decisions,
 captured estimates, attempts and uncertainty.
+The receipt preserves the gateway's observed cost basis and the job's pending
+and uncertain charge totals. A successful response can still leave its charge
+unknown; response confirmation does not release that hold or reconcile an invoice.
+Success requires a complete endpoint response and a new successful ledger attempt.
+If terminal stream delivery arrives before the gateway finishes settlement, the
+recipe makes at most three additional metadata reads with bounded backoff and
+jitter. It never resends inference. Terminal failure or uncertainty stops that
+wait, and the receipt records the number of gateway confirmation reads.
+New attempts must belong to one logical request group. Linked failovers share
+that group; concurrent independent requests make confirmation ambiguous and
+preserve the work ID for inspection without replaying inference.
+For streams, the recipe checks Responses' completed event, every Chat choice's
+finish reason plus its `[DONE]` frame, or Anthropic's final stop reason and
+`message_stop`. It rejects provider errors, missing terminals and output cutoffs
+such as `length`, `max_tokens` or `pause_turn`. Stream consumption is capped at
+4 MiB and 8,192 SDK events; only completion metadata is retained. These checks
+do not grade the answer or declare the job completed.
 
 If anything fails after job creation, the failure receipt includes `work_id`
 without the SDK error body. Inspect that job before retrying: an uncertain

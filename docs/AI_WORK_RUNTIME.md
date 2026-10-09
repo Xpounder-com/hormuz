@@ -288,6 +288,20 @@ amount. A verified receipt does not establish invoice finality. Financial
 reconciliation of an unknown attempt releases its cost hold without inventing a
 successful outcome or supplying a model-success sample.
 
+Job, actor and workspace reports retain full-history `failed_attempts`,
+`unknown_attempts`, `retry_attempts` and `failover_attempts` counts even when the
+attempt-detail list is truncated. Failed and unknown refer to recorded settlement
+states; an unknown charge does not establish that a response failed. Retry counts
+cover recorded `retry_of` links, including blocked attempts; failovers are the
+subset explicitly marked `provider_failover`. These counts overlap and must not
+be added together. Request and retry lineage is also available through bounded
+history pages. Use `hormuz work attempts --work-id WORK_ID`, then pass its
+`next_before` value with `--before REQUEST_ID` for the next older page. The client
+reads only the requested page and never starts an automatic history crawl.
+`job.attempts(before=...)` supplies the same operation to Python integrations.
+Pages use reverse admission order, so concurrent new requests do not shift older
+pages; cursors must belong to the same owned job.
+
 Organization reports can also display existing account-bound provider aggregate
 cost evidence through `work_provider_costs`. Both the work administrator boundary
 and an exact configured `portfolio_admin` principal are required. The existing

@@ -4,7 +4,7 @@ from dataclasses import replace
 from unittest import mock
 import re
 from urllib.parse import urlencode
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from hormuz.config import AIWorkConfig
 from hormuz.work_runtime import WorkRuntime
@@ -47,6 +47,53 @@ class WorkHTTPTests(ConsoleHTTPTestCase):
         self.assertEqual(status, 200)
         self.assertIn("Job details", detail)
         self.assertEqual(self.request("GET", detail_path, headers=self.bearer(token=outsider.access_token))[0], 404)
+
+    def test_owned_attempt_history_is_bounded_and_paged_in_html_and_api(self):
+        job = self.create()
+        identity = self.gateway.session_broker.authenticate(self.native.access_token)
+        for index in range(52):
+            request_id = "x" * 129 if index == 2 else "prefix/path:@id" if index == 1 else "admit-" + str(index)
+            self.gateway.work_runtime.reserve(identity, job["work_id"], request_id, "safe-openai", "openai", 1,
+                logical_request_id="logical-1", retry_of="admit-0" if index else None)
+            self.gateway.work_runtime.settle(identity, request_id, 1, status="failed" if index == 0 else "succeeded")
+        path = "/v1/work/jobs/" + job["work_id"] + "/attempts"
+        status, _, history = self.request("GET", path, headers=self.bearer())
+        self.assertEqual(200, status, history)
+        self.assertEqual("owned_job", history["scope"])
+        self.assertEqual(50, len(history["attempts"]))
+        self.assertEqual("x" * 129, history["next_before"])
+        self.assertNotIn("rowid", history)
+        status, _, older = self.request("GET", path + "/before/" + history["next_before"], headers=self.bearer())
+        self.assertEqual(200, status, older)
+        self.assertEqual(["prefix/path:@id", "admit-0"], [row["request_id"] for row in older["attempts"]])
+        self.assertIsNone(older["next_before"])
+        status, _, after_encoded = self.request("GET", path + "/before/" + quote("prefix/path:@id", safe=""), headers=self.bearer())
+        self.assertEqual(200, status)
+        self.assertEqual(["admit-0"], [row["request_id"] for row in after_encoded["attempts"]])
+        html_path = "/work/jobs/" + job["work_id"] + "/attempts"
+        status, _, rendered = self.request("GET", html_path, headers=self.bearer())
+        self.assertEqual(200, status)
+        self.assertIn(html_path + "/before/" + "x" * 129, rendered)
+        self.assertIn("Logical request: logical-1", rendered)
+        self.assertIn("Retry of: admit-0", rendered)
+        status, _, rendered = self.request("GET", html_path + "/before/" + "x" * 129, headers=self.bearer())
+        self.assertEqual(200, status)
+        self.assertNotIn("Older attempts", rendered)
+
+    def test_attempt_history_uses_owned_authority_exact_cursor_and_get_only(self):
+        job, other = self.create(), self.create()
+        identity = self.gateway.session_broker.authenticate(self.native.access_token)
+        self.gateway.work_runtime.reserve(identity, other["work_id"], "other-job-request", "safe-openai", "openai", 1)
+        path = "/v1/work/jobs/" + job["work_id"] + "/attempts"
+        self.assertEqual(404, self.request("GET", path, headers=self.bearer(token=self.member_native.access_token))[0])
+        self.assertEqual(404, self.request("GET", path + "/before/other-job-request", headers=self.bearer())[0])
+        self.assertEqual(404, self.request("GET", path + "/before/missing", headers=self.bearer())[0])
+        self.assertEqual(400, self.request("GET", path + "?limit=1000", headers=self.bearer())[0])
+        for invalid in ("x" * 257, "%FF", "prefix%253Fquery", "prefix%3Fquery", "%ZZ"):
+            self.assertEqual(400, self.request("GET", path + "/before/" + invalid, headers=self.bearer())[0], invalid)
+        self.assertEqual(404, self.request("GET", path + "/before/" + "x" * 769, headers=self.bearer())[0])
+        self.assertEqual(404, self.request("POST", path, {}, self.bearer())[0])
+        self.assertEqual(404, self.request("GET", path.replace("/v1/work/", "/work/"), headers=self.bearer(token=self.member_native.access_token))[0])
 
     def test_managed_relay_keeps_job_identity_across_requests(self):
         import http.client

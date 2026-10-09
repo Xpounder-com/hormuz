@@ -144,6 +144,14 @@ windows and report responses remain bounded independently of durable history.
 
 ## Release evidence
 
+After optional acquisition consent, a connection event requires a delivered,
+uncached response with complete usage and successful terminal metadata from a
+supported API. Reading setup instructions or finding configured credentials
+does not supply this event. Historical setup-read events remain stored but are
+excluded from the response count. This records API activity, not native-client
+qualification or job completion. First and repeat work count distinct attributed
+jobs with admitted activity; a denied-only job does not contribute.
+
 Local HTTP fixtures exercise real sessions, CSRF, tenant/actor isolation, work
 admission and settlement, passive observations and billing lifecycle boundaries.
 The functional browser demo uses the actual gateway with a local identity/provider

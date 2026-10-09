@@ -43,6 +43,13 @@ across 13 local fixture calls. Both identify 27 executed source files by SHA-256
 neither makes real-provider calls or payments, qualifies an installed native agent,
 or proves customer savings or production model quality.
 
+The [installed SDK qualification](docs/evidence/sdk-examples/README.md) passes
+six real SDK calls through an authenticated disposable gateway: JSON and streaming
+for Responses, Chat Completions and Messages. It records one synthetic provider
+call per case, complete response metadata and the actual SQLite ledger, with
+32 source fingerprints. SDK versions and cleanup checks are in its receipt;
+live provider and native-agent qualification remain separate.
+
 </details>
 
 [![CI](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml)

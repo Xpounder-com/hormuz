@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import re
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
@@ -144,6 +145,15 @@ class WorkJob:
 
     def state(self):
         return self.client._request("GET", self._path)
+
+    def attempts(self, *, before=None):
+        """Read one bounded history page; follow next_before explicitly."""
+        path = self._path + "/attempts"
+        if before is not None:
+            if not isinstance(before, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}", before):
+                raise WorkClientError("invalid_attempt_cursor")
+            path += "/before/" + quote(before, safe="")
+        return self.client._request("GET", path)
 
     def bindings(self, **values):
         return self.client._request("POST" if values else "GET", self._path + "/bindings", values if values else None)

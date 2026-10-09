@@ -68,6 +68,74 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertEqual(70, plan["pending_microusd"])
         self.assertEqual(30, plan["remaining_microusd"])
 
+    def test_full_history_failure_and_retry_counts_survive_bounded_details_and_restart(self):
+        work = self.work()
+        self.runtime.reserve(self.alice, work, "original", self.fast, "openai", 10, logical_request_id="request-one")
+        self.runtime.settle(self.alice, "original", 2, status="failed")
+        self.runtime.reserve(self.alice, work, "fallback", self.cheap, "openai", 10,
+                             reason="provider_failover", logical_request_id="request-one", retry_of="original")
+        self.runtime.settle(self.alice, "fallback", 3)
+        self.runtime.reserve(self.alice, work, "intentional-retry", self.fast, "openai", 10,
+                             logical_request_id="request-two", retry_of="original")
+        self.runtime.settle(self.alice, "intentional-retry", status="unknown")
+        # A complete response with an unknown charge is not a failed response.
+        self.runtime.reserve(self.alice, work, "unknown-charge", self.fast, "openai", 10)
+        self.runtime.settle(self.alice, "unknown-charge", status="succeeded")
+        self.now += 1
+        for index in range(101):
+            identifier = "later-" + str(index)
+            self.runtime.reserve(self.alice, work, identifier, self.fast, "openai", 10)
+            self.runtime.settle(self.alice, identifier, 1)
+        other_work = self.work(self.other)
+        self.runtime.reserve(self.other, other_work, "other-failure", self.fast, "openai", 10)
+        self.runtime.settle(self.other, "other-failure", 1, status="failed")
+        expected = {"failed_attempts": 1, "unknown_attempts": 2, "retry_attempts": 2, "failover_attempts": 1}
+        view = self.runtime.get_work(self.alice, work)
+        self.assertTrue(view["attempts_truncated"])
+        self.assertEqual(100, len(view["attempts"]))
+        self.assertFalse(any(attempt["request_id"] == "original" for attempt in view["attempts"]))
+        self.assertEqual(expected, {key: view["costs"][key] for key in expected})
+        self.assertEqual(105, view["costs"]["attempts"])
+        self.assertEqual(expected, {key: self.runtime.report(self.alice)["totals"][key] for key in expected})
+        self.runtime.close()
+        self.runtime = WorkRuntime(self.path, clock=lambda: self.now)
+        self.assertEqual(expected, {key: self.runtime.get_work(self.alice, work)["costs"][key] for key in expected})
+        history, cursor = [], None
+        for page in range(3):
+            result = self.runtime.attempt_history(self.alice, work, before=cursor)
+            self.assertEqual(("owned_job", "reverse_admission", 50),
+                             (result["scope"], result["order"], result["page_limit"]))
+            history.extend(result["attempts"])
+            cursor = result["next_before"]
+            self.assertEqual(page < 2, cursor is not None)
+        self.assertEqual(105, len(history))
+        self.assertEqual(105, len({row["request_id"] for row in history}))
+        fallback = next(row for row in history if row["request_id"] == "fallback")
+        self.assertEqual(("original", "request-one", "provider_failover"),
+                         (fallback["retry_of"], fallback["logical_request_id"], fallback["reason"]))
+        self.assertNotIn("rowid", fallback)
+        self.assertNotIn("request_pattern", fallback)
+
+    def test_history_cursor_is_owned_job_bound_and_stable_during_new_admission(self):
+        work = self.work()
+        for index in range(4):
+            self.runtime.reserve(self.alice, work, "history-" + str(index), self.fast, "openai", 10)
+            self.runtime.settle(self.alice, "history-" + str(index), 1)
+        first = self.runtime.attempt_history(self.alice, work, limit=2)
+        self.assertEqual(["history-3", "history-2"], [row["request_id"] for row in first["attempts"]])
+        self.runtime.reserve(self.alice, work, "new-admission", self.fast, "openai", 10)
+        older = self.runtime.attempt_history(self.alice, work, before=first["next_before"], limit=2)
+        self.assertEqual(["history-1", "history-0"], [row["request_id"] for row in older["attempts"]])
+        self.assertIsNone(older["next_before"])
+        self.assertEqual([], self.runtime.attempt_history(self.alice, work, before="history-0")["attempts"])
+        unrelated = self.work()
+        self.error("attempt_not_found", lambda: self.runtime.attempt_history(self.alice, unrelated, before="history-2"))
+        self.error("attempt_not_found", lambda: self.runtime.attempt_history(self.alice, work, before="nonexistent"))
+        for owner in (self.bob, self.other):
+            self.error("work_not_found", lambda: self.runtime.attempt_history(owner, work, before="history-2"))
+        for limit in (0, 101, True, 1.5):
+            self.error("work_invalid_attempt_limit", lambda: self.runtime.attempt_history(self.alice, work, limit=limit))
+
     def test_unknown_hold_survives_restart_and_no_zero_cost_is_invented(self):
         self.runtime.set_plan("company", "repository", "org/repo", 100, "speed")
         work = self.work()

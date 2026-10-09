@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 
 CONTRACT_PATH = "docs/ai-work-source-successor-v1.json"
-CONTRACT_SHA256 = "059cff2e0a18aa99cf0463c182221051dc89795c7f4a3092ce1669e762dfff2a"
+CONTRACT_SHA256 = "87032d8306741beb7afa4178e8dd957d63b8495b7430d015f444d3046781ba55"
 SOURCE_PATHS = frozenset({"MANIFEST.in", "docs/DURABLE_DATA.md", "docs/durable-data-v1.json",
                           "pyproject.toml", "tests/test_durable_data_inventory.py",
                           "tools/verify_durable_data_inventory.py"})

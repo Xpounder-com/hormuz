@@ -1603,6 +1603,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cost=cost if getattr(parser, "work_pricing_known", True)
                     and (usage.evidence_complete or status in {429, 529}) else None,
                 status="succeeded" if request_status == "succeeded" else "failed", started_ns=started_ns)
+            if request_status == "succeeded":
+                work_gateway.connection_observed(self, identity, attempt, parser, downstream_ok=downstream_ok)
             if (request_status == "succeeded" and cache_capture and downstream_ok
                     and getattr(parser, "work_pricing_known", True)):
                 work_gateway.cache_response(self, identity, decision, request_value, bytes(cache_body), status=status, content_type=content_type)

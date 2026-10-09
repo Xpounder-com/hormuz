@@ -4,7 +4,6 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -19,18 +18,26 @@ const { chromium } = await import(pathToFileURL(modulePath).href);
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'hormuz-browser-qa-'));
 const fixturePath = path.join(temporary, 'fixture.json');
 const processFixture = spawn(python, ['tools/ai_work_browser_fixture.py', fixturePath], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
-let stderr = ''; processFixture.stderr.on('data', value => { stderr += value.toString(); });
+const backendAgent = new http.Agent({ keepAlive: true, maxSockets: 4, maxTotalSockets: 4, maxFreeSockets: 4, timeout: 10000 });
+let stderr = ''; processFixture.stderr.on('data', value => { stderr = (stderr + value.toString()).slice(-65536); });
 let pending = ''; const events = []; const waiters = [];
 processFixture.stdout.on('data', value => {
   pending += value.toString();
   while (pending.includes('\n')) {
     const end = pending.indexOf('\n'); const line = pending.slice(0, end); pending = pending.slice(end + 1);
-    const event = JSON.parse(line); const waiter = waiters.shift(); waiter ? waiter(event) : events.push(event);
+    const event = JSON.parse(line); const waiter = waiters.shift(); waiter ? waiter.resolve(event) : events.push(event);
   }
 });
 async function nextEvent() {
   if (events.length) return events.shift();
-  return Promise.race([new Promise(resolve => waiters.push(resolve)), new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Fixture timeout: ' + stderr.slice(-1000))), 20000); timer.unref(); })]);
+  return new Promise((resolve, reject) => {
+    const waiter = { resolve: value => { clearTimeout(timer); resolve(value); } };
+    const timer = setTimeout(() => {
+      const index = waiters.indexOf(waiter); if (index >= 0) waiters.splice(index, 1);
+      reject(new Error('Fixture timeout: ' + stderr.slice(-1000)));
+    }, 20000);
+    timer.unref(); waiters.push(waiter);
+  });
 }
 async function control(operation, values = {}) {
   processFixture.stdin.write(JSON.stringify({ operation, ...values }) + '\n'); const event = await nextEvent();
@@ -41,18 +48,31 @@ function backend(fixture, requestPath, method, headers, body) {
     const target = new URL(fixture.url); const clean = { ...headers, host: new URL(fixture.public_origin).host };
     delete clean['content-length']; delete clean['connection']; delete clean['accept-encoding'];
     if (body) clean['content-length'] = Buffer.byteLength(body);
-    const request = http.request({ hostname: target.hostname, port: target.port, method, path: requestPath, headers: clean, agent: false }, response => {
-      const chunks = []; response.on('data', chunk => chunks.push(chunk)); response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }));
+    const deadline = setTimeout(() => request.destroy(new Error('Local fixture deadline exceeded')), 15000);
+    const request = http.request({ hostname: target.hostname, port: target.port, method, path: requestPath, headers: clean, agent: backendAgent }, response => {
+      let bytes = 0; const chunks = [];
+      response.on('data', chunk => { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) response.destroy(new Error('Local fixture response too large')); else chunks.push(chunk); });
+      response.on('error', error => { clearTimeout(deadline); reject(error); });
+      response.on('end', () => { clearTimeout(deadline); resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }); });
     });
-    request.on('error', error => reject(new Error('Local fixture transport failed at ' + requestPath + ': ' + error.code))); if (body) request.write(body); request.end();
+    request.setTimeout(10000, () => request.destroy(new Error('Local fixture socket timeout')));
+    request.on('error', error => { clearTimeout(deadline); reject(new Error('Local fixture transport failed at ' + requestPath + ': ' + (error.code || error.message))); }); if (body) request.write(body); request.end();
+  });
+}
+async function waitForFixtureExit(timeoutMs) {
+  if (processFixture.exitCode !== null || processFixture.signalCode !== null) return;
+  await new Promise(resolve => {
+    const finish = () => { clearTimeout(timer); processFixture.off('exit', finish); resolve(); };
+    const timer = setTimeout(finish, timeoutMs); processFixture.once('exit', finish);
   });
 }
 let browser;
 try {
   assert.equal((await nextEvent()).event, 'ready');
   const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
-  browser = await chromium.launch({ headless: true, channel: 'chrome' });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, recordVideo: { dir: temporary, size: { width: 1440, height: 1000 } } });
+  browser = await chromium.launch({ headless: true, channel: 'chrome', timeout: 20000 });
+  const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1440, height: 1000 }, recordVideo: { dir: temporary, size: { width: 1440, height: 1000 } } });
+  context.setDefaultTimeout(15000); context.setDefaultNavigationTimeout(20000);
   await context.addCookies([{ ...fixture.cookie, domain: new URL(fixture.public_origin).hostname, path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
   const failed = [], errors = [], external = []; let checkoutIntercepts = 0; const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
@@ -165,7 +185,16 @@ try {
   const video = page.video(); await context.close(); fs.copyFileSync(await video.path(), path.join(artifactRoot, 'AI_WORK_DEMO.webm'));
   console.log(JSON.stringify({ checks: checks.length, provider_fixture_calls: merged.provider_fixture_calls, real_provider_calls: 0, real_payments: 0, screenshots: validation.artifacts, errors, failures: failed }));
 } finally {
-  if (browser) await browser.close();
-  if (processFixture.exitCode === null) { processFixture.stdin.write('{"operation":"stop"}\n'); processFixture.stdin.end(); await Promise.race([once(processFixture, 'exit'), new Promise(resolve => setTimeout(resolve, 3000))]); if (processFixture.exitCode === null) processFixture.kill(); }
-  fs.rmSync(temporary, { recursive: true, force: true });
+  try { if (browser) await browser.close(); }
+  finally {
+    backendAgent.destroy();
+    try {
+      if (processFixture.exitCode === null && processFixture.signalCode === null) {
+        if (!processFixture.stdin.destroyed) processFixture.stdin.end('{"operation":"stop"}\n');
+        await waitForFixtureExit(5000);
+        if (processFixture.exitCode === null && processFixture.signalCode === null) { processFixture.kill('SIGTERM'); await waitForFixtureExit(3000); }
+        if (processFixture.exitCode === null && processFixture.signalCode === null) { processFixture.kill('SIGKILL'); await waitForFixtureExit(3000); }
+      }
+    } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+  }
 }

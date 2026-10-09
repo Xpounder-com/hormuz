@@ -9,6 +9,10 @@
         {
           "predecessor": "",
           "addition": "include tools/ai_work_proof.py\ninclude tools/ai_work_benchmark.py\ninclude tools/ai_work_browser_fixture.py\ninclude docs/ai-work-source-successor-v1.json\ninclude tools/_ai_work_source_successor.py\ninclude hormuz/work.css\n"
+        },
+        {
+          "predecessor": "",
+          "addition": "include tools/ai_work_provider_examples.py\ninclude tools/provider_example_transport.py\ninclude tools/provider_example_responses.py\ninclude tools/ai_work_delivery_examples.py\ninclude tools/ai_work_sdk_qualification.py\ninclude website/scripts/ai-work-browser-qa.mjs\ninclude examples/providers/README.md\ninclude examples/providers/rate-card.template.json\ninclude examples/sdk/README.md\ninclude examples/sdk/work_sdk.py\ninclude examples/delivery/github-actions.yml\n"
         }
       ]
     },

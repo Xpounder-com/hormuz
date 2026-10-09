@@ -159,6 +159,17 @@ include tools/ai_work_browser_fixture.py
 include docs/ai-work-source-successor-v1.json
 include tools/_ai_work_source_successor.py
 include hormuz/work.css
+include tools/ai_work_provider_examples.py
+include tools/provider_example_transport.py
+include tools/provider_example_responses.py
+include tools/ai_work_delivery_examples.py
+include tools/ai_work_sdk_qualification.py
+include website/scripts/ai-work-browser-qa.mjs
+include examples/providers/README.md
+include examples/providers/rate-card.template.json
+include examples/sdk/README.md
+include examples/sdk/work_sdk.py
+include examples/delivery/github-actions.yml
 include docs/evidence/reconciliation_scope_probe.py
 recursive-include tests *.py *.json
 recursive-include hormuz/migrations/postgresql *.sql

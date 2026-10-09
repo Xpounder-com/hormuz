@@ -1,0 +1,14 @@
+{
+  "authenticated_create_and_owned_read": true,
+  "http_requests": 2,
+  "listener_count": 1,
+  "maximum_gateway_handlers": 2,
+  "socket_connects": 2,
+  "refused_network_attempts": 0,
+  "provider_calls": 0,
+  "external_network_calls": 0,
+  "client_closed": true,
+  "listener_closed": true,
+  "new_server_threads_remaining": 0,
+  "temporary_state_removed": true
+}

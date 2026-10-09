@@ -150,6 +150,30 @@ class WorkWorkflowTests(unittest.TestCase):
         self.assertEqual(1, funnel["events"]["receipt_opened"])
         self.assertEqual({"consent": False, "events": {}}, self.workflow.funnel(other))
 
+    def test_api_connection_evidence_rechecks_owned_settlement_and_ignores_old_setup_claims(self):
+        work_id, _ = self.bind()
+        self.runtime.reserve(self.identity, work_id, "api-success", "approved", "openai", 10)
+        self.runtime.settle(self.identity, "api-success", 1)
+        self.workflow.observed_connection(self.identity, "api-success")
+        self.assertEqual({"consent": False, "events": {}}, self.workflow.funnel(self.identity))
+        self.workflow.acquire(self.identity, {"utm_source": "fixture"}, consent=True)
+        with self.runtime._transaction(write=True) as connection:
+            connection.execute("INSERT INTO ai_work_funnel VALUES(?,?,?,?,?)", ("acme", "alice", "qualified_connection", "historical-setup-only", self.now))
+        self.assertEqual(0, self.workflow.funnel(self.identity)["events"]["qualified_connection"])
+        with self.assertRaisesRegex(WorkRuntimeError, "invalid_funnel_event"):
+            self.workflow.event(self.identity, "qualified_connection", "caller-claim")
+        other = replace(self.identity, actor_id="other")
+        self.workflow.acquire(other, {"utm_source": "fixture"}, consent=True)
+        self.workflow.observed_connection(other, "api-success")
+        self.assertEqual(0, self.workflow.funnel(other)["events"]["qualified_connection"])
+        self.workflow.observed_connection(self.identity, "api-success")
+        self.workflow.observed_connection(self.identity, "api-success")
+        self.assertEqual(1, self.workflow.funnel(self.identity)["events"]["qualified_connection"])
+        with self.runtime._transaction() as connection:
+            row = connection.execute("SELECT reference FROM ai_work_funnel WHERE event='api_response_observed'").fetchone()
+        self.assertNotIn("api-success", row[0])
+        self.assertNotIn("approved", row[0])
+
     def test_linear_verified_issue_completion_updates_explicit_work(self):
         config = linear.runtime_config(self.root)
         repository = create_portfolio_repository(config)

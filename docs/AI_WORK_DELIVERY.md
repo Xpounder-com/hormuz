@@ -32,28 +32,49 @@ connector code against local synthetic provider/payment transports. It makes no
 real provider request or payment. Synthetic metadata tests exercise mechanisms;
 they are not the customer-local quality benchmark or measured customer value.
 
-Final local regression: `python -m unittest discover -s tests -t . -q` ran
-2,924 tests with zero failures and 401 environment-dependent skips. All 584
-package, test and tool sources parse on Python 3.11; renderer tests also pass
-on the actual Python 3.11 runtime. Website
-verification passed 73 Node tests and 10 Python tests, TypeScript, the production build and exported-site
-checks (16 pages). A fresh wheel/source archive and installed gateway smoke
-passed outside the checkout. The browser journey passed 12 checks and the
-mechanics proof passed 35; both receipts match their 27 source fingerprints.
+Current bounded executions passed 35 mechanics checks, the 21-scenario provider
+tour and 12 browser journey checks. Their 27/30/27 source fingerprints match
+the tested candidate files. The [installed SDK qualification](evidence/sdk-examples/README.md)
+also passed six actual SDK JSON/streaming cases through the authenticated gateway
+and real SQLite ledger, with 32 source fingerprints. Each used one simulated
+provider response, left the job active and submitted no completion observation.
+All these runs closed their owned clients, streams and servers. None establishes
+live-provider behavior, payment, customer savings or model quality.
+These executions include the OpenAI terminal-order, closed SSE frame and
+concurrent SDK confirmation guards. Legacy usage and finance parsing remain
+unchanged, with equality regressions for the added stream cases.
+
+The final full local regression passed 3,024 tests with zero failures and 401
+environment-dependent skips in 328.486 seconds. It includes the corrected
+`work attempts` command inventory, terminal-order/framing and concurrent SDK
+confirmation checks. Exact successor remote CI remains a separate requirement.
+
 Nine pricing-mode regressions exercise actual JSON and streaming gateway
 admission, complete uncertain holds, cache exclusion, continuation affinity and
-legacy compatibility. The finite workspace/repository/job budget selector's
-synthetic p95 is 19.28825ms; this excludes full gateway and provider latency.
+legacy compatibility. The retained large synthetic metadata benchmark measures
+predecessor source; its selector latency does not qualify the current candidate.
+The bounded gateway proof records provider wait and gateway overhead under its
+stated fixture conditions.
+The [packaging receipt](evidence/ai-work-functional/PACKAGING_SMOKE.json) covers
+an offline source build, installed imports and CLI, and owned SQLite history,
+totals and restart checks. Its offline stage starts no listener. A separate
+[installed HTTP smoke](evidence/ai-work-functional/INSTALLED_HTTP_SMOKE.json)
+creates and reads an owned job through the same installed wheel with exactly
+two authenticated local requests and no provider inference. Both stages match
+the candidate's 32 source and 10 packaging hashes and close their owned state.
 Installed-package handoff, matching restore, and closed-authorization checks also
 passed locally on synthetic state. This does not qualify signed distributions
 or an interactive native update; those live release gates remain open.
 Remote product CI passed at source commit
 [`d4e818c0530a01d3840a380cab30e3dadd7d3c77`](https://github.com/Xpounder-com/hormuz/commit/d4e818c0530a01d3840a380cab30e3dadd7d3c77).
-Publication PR #40 merged and its deployment/live verification passed at that
-source pin. The subsequent pricing-mode guard requires its own exact-head CI
-and successor Pages verification. Publication configuration tests pass all
-10 checks. Current remote receipts remain separately recorded in the external
-qualification directory; a predecessor's green CI does not qualify a successor.
+The existing public site is pinned to predecessor
+`e04280cf195aa1ab906aec5681eb55e4044d3d7a` through publication PR #41.
+The new examples require successor exact-head checks and Pages verification.
+Current website verification passes 74 Node tests, 10 Python tests, TypeScript,
+and an offline production export with fallback fonts: 16 canonical pages, 974
+local link occurrences and 29 source targets. Production font downloads remain
+for remote CI. Publication configuration tests pass all 11 checks. A
+predecessor's green CI does not qualify a successor.
 
 ## Supported operation boundary
 

@@ -27,22 +27,60 @@ from tests import test_github_connector_runtime as github
 from tools.ai_work_proof import FixtureProvider, PROOF_SOURCE_FILES
 
 
+class BoundedProviderServer(ThreadingHTTPServer):
+    """Fixture listener with at most four handlers and bounded socket reads."""
+
+    def __init__(self, *args, **kwargs):
+        self._slots = threading.BoundedSemaphore(4)
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        connection, address = super().get_request()
+        connection.settimeout(10)
+        return connection, address
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 class BrowserFixture(WorkHTTPTests):
     def configure_gateway(self, config):
         config = super().configure_gateway(config)
         FixtureProvider.calls = []
-        provider = ThreadingHTTPServer(('127.0.0.1', 0), FixtureProvider)
-        provider_thread = threading.Thread(target=provider.serve_forever, daemon=True); provider_thread.start()
+        provider = BoundedProviderServer(('127.0.0.1', 0), FixtureProvider)
+        provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
         self.addCleanup(self._close, provider, provider_thread)
+        provider_thread.start()
         upstreams = {**config.upstreams, 'openai': replace(config.upstreams['openai'], base_url=f'http://127.0.0.1:{provider.server_port}')}
         return replace(config, upstreams=upstreams, ai_work=replace(config.ai_work, cache_enabled=True, minimum_samples=3),
                        model_routes={alias: replace(route, input_cost_per_million=1, output_cost_per_million=1) for alias, route in config.model_routes.items()})
 
+    @staticmethod
+    def _close(server, thread):
+        if thread.is_alive():
+            server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
 
 def main():
     fixture_path = Path(sys.argv[1])
-    case = BrowserFixture(); case.setUp()
+    case = BrowserFixture()
     try:
+        case.setUp()
         case.login_console()
         admin = case.admin.membership_id
         external = github.runtime_config(case.root)

@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import codecs
 import os
 import hashlib
+import logging
+import sqlite3
 import time
 from dataclasses import replace
 from uuid import uuid4
@@ -15,6 +18,7 @@ from .policy import PolicyEngine
 from .usage import ResponseUsageParser
 
 WORK_HEADER = "X-Hormuz-Work-ID"
+LOGGER = logging.getLogger(__name__)
 
 
 def pricing_request_bounded(protocol, request_value):
@@ -56,8 +60,196 @@ class WorkUsageParser(ResponseUsageParser):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.work_pricing_known = True
+        self._work_terminal_observed = False
+        self._work_terminal_invalid = False
+        self._work_anthropic_phase = "awaiting_start"
+        self._work_chat_done = False
+        self._work_chat_usage_suffix = False
+        self._work_sse_frame_open = False
+        self._work_utf8 = codecs.getincrementaldecoder("utf-8")(errors="strict")
+
+    def feed(self, data):
+        if self._work_utf8 is not None:
+            try:
+                self._work_utf8.decode(data)
+            except UnicodeDecodeError:
+                self._work_terminal_invalid = True
+                self._work_utf8 = None
+        super().feed(data)
+
+    def _parse_sse_line(self, line):
+        # Observe stream ordering independently of the frozen finance decoder.
+        # Event headers cannot resume a finished response; a Chat [DONE] must
+        # follow its choice's finish, never replace it or precede later data.
+        if not line:
+            self._work_sse_frame_open = False
+        elif not line.startswith(":"):
+            self._work_sse_frame_open = True
+        if line.startswith("event:"):
+            event = line[6:].strip()
+            if (event in {"error", "response.error", "response.failed", "response.incomplete"}
+                    or self.protocol == "openai" and not self.chat_completions and self._work_terminal_observed
+                    or self.protocol == "anthropic" and self._work_anthropic_phase == "stopped"
+                    or self.protocol == "anthropic" and self._work_anthropic_phase == "terminal" and event not in {"ping", "message_stop"}
+                    or self.chat_completions and (self._work_terminal_observed or self._work_chat_done)):
+                self._work_terminal_invalid = True
+        elif line.startswith("data:") and line[5:].strip() == "[DONE]":
+            if (self.protocol != "openai" or not self.chat_completions
+                    or not self._work_terminal_observed or self._work_chat_done):
+                self._work_terminal_invalid = True
+            self._work_chat_done = True
+        super()._parse_sse_line(line)
+
+    def _observe_provider_terminal_state(self, value):
+        if value is not None and not isinstance(value, str):
+            self._work_terminal_invalid = True
+            self._native.note_parse_failure()
+            return
+        super()._observe_provider_terminal_state(value)
+
+    @property
+    def work_connection_complete(self):
+        """A complete supported API response, never job or native completion."""
+        return (self._work_terminal_observed and not self._work_terminal_invalid
+            and self.work_pricing_known and self.usage.evidence_complete
+            and (not self.is_event_stream or self.provider_completed)
+            and (not self.is_event_stream or not self._work_sse_frame_open)
+            and (not (self.chat_completions and self.is_event_stream)
+                or self._work_chat_done)
+            and (not (self.protocol == "anthropic" and self.is_event_stream)
+                or self._work_anthropic_phase == "stopped"))
+
+    def _observe_anthropic_stream(self, value):
+        """Bounded message phases; repeated ordinary deltas/pings remain valid.
+
+        Streaming permits multiple top-level nonterminal deltas. Once a final
+        stop reason arrives, only pings and one message_stop may follow. This
+        validates optional activity evidence without rewriting usage or content.
+        """
+        event_type = value.get("type")
+        if (not isinstance(event_type, str) or event_type not in {"message_start", "message_delta", "message_stop", "content_block_start", "content_block_delta", "content_block_stop", "ping", "error"}
+                or self._work_anthropic_phase == "stopped"):
+            self._work_terminal_invalid = True
+            return
+        if event_type == "ping":
+            return
+        if event_type == "message_start":
+            message = value.get("message")
+            if (self._work_anthropic_phase != "awaiting_start"
+                    or not isinstance(message, dict) or message.get("type") != "message"
+                    or message.get("role") != "assistant" or message.get("error") is not None
+                    or message.get("stop_reason") is not None):
+                self._work_terminal_invalid = True
+                return
+            self._work_anthropic_phase = "active"
+            return
+        if self._work_anthropic_phase == "awaiting_start":
+            self._work_terminal_invalid = True
+            return
+        if self._work_anthropic_phase == "terminal":
+            if event_type == "message_stop":
+                self._work_anthropic_phase = "stopped"
+            else:
+                self._work_terminal_invalid = True
+            return
+        if event_type in {"message_stop", "error"}:
+            self._work_terminal_invalid = True
+        elif event_type.startswith("content_block_") and self._work_anthropic_phase == "metadata":
+            self._work_terminal_invalid = True
+        elif event_type == "message_delta":
+            delta = value.get("delta")
+            if not isinstance(delta, dict):
+                self._work_terminal_invalid = True
+                return
+            terminal = delta.get("stop_reason")
+            self._work_anthropic_phase = "metadata"
+            if terminal is not None:
+                self._work_terminal_observed = True
+                self._work_terminal_invalid |= not isinstance(terminal, str) or terminal not in {"end_turn", "tool_use", "stop_sequence"}
+                self._work_anthropic_phase = "terminal"
+
+    def _observe_work_terminal(self, value):
+        if not isinstance(value, dict):
+            self._work_terminal_invalid = True
+            return
+        if value.get("error") is not None or value.get("type") in ("error", "response.error", "response.failed", "response.incomplete"):
+            self._work_terminal_invalid = True
+        terminal = None
+        if self.protocol == "openai" and self.chat_completions:
+            if self.is_event_stream and self._work_chat_done:
+                self._work_terminal_invalid = True
+                return
+            if value.get("object") != ("chat.completion.chunk" if self.is_event_stream else "chat.completion"):
+                self._work_terminal_invalid = True
+                return
+            choices = value.get("choices")
+            if not isinstance(choices, list) or not choices and not self.is_event_stream:
+                self._work_terminal_invalid = True
+                return
+            if self.is_event_stream and not choices:
+                # include_usage adds one empty-choice usage chunk between the
+                # successful finish and [DONE]. Other empty or repeated chunks
+                # cannot certify a complete supported response.
+                if (not self._work_terminal_observed or self._work_chat_usage_suffix
+                        or not isinstance(value.get("usage"), dict)):
+                    self._work_terminal_invalid = True
+                self._work_chat_usage_suffix = True
+                return
+            if self.is_event_stream and self._work_terminal_observed:
+                self._work_terminal_invalid = True
+                return
+            if isinstance(choices, list) and choices:
+                if len(choices) != 1 or not isinstance(choices[0], dict) or type(choices[0].get("index")) is not int or choices[0]["index"] != 0:
+                    self._work_terminal_invalid = True
+                    return
+                choice = choices[0]
+                if (self.is_event_stream and not isinstance(choice.get("delta"), dict)
+                        or not self.is_event_stream and (not isinstance(choice.get("message"), dict) or choice["message"].get("role") != "assistant")):
+                    self._work_terminal_invalid = True
+                    return
+                terminal = choices[0].get("finish_reason")
+                if terminal is not None:
+                    self._work_terminal_observed = True
+                    self._work_terminal_invalid |= not isinstance(terminal, str) or terminal not in {"stop", "tool_calls", "function_call"}
+        elif self.protocol == "openai":
+            if self.is_event_stream:
+                if self._work_terminal_observed:
+                    self._work_terminal_invalid = True
+                    return
+                if not isinstance(value.get("type"), str) or not value["type"].startswith("response."):
+                    self._work_terminal_invalid = True
+                    return
+                if value.get("type") not in {"response.completed", "response.failed", "response.incomplete"}:
+                    return
+                response = value.get("response")
+            else:
+                response = value
+            if isinstance(response, dict) and response.get("object") == "response":
+                self._work_terminal_invalid |= response.get("error") is not None
+                terminal = response.get("status")
+                self._work_terminal_observed = True
+                self._work_terminal_invalid |= terminal != "completed"
+            else:
+                self._work_terminal_invalid = True
+        elif self.protocol == "anthropic":
+            if self.is_event_stream:
+                self._observe_anthropic_stream(value)
+                return
+            if value.get("type") != "message" or value.get("role") != "assistant":
+                self._work_terminal_invalid = True
+                return
+            terminal = value.get("stop_reason")
+            if terminal is not None:
+                self._work_terminal_observed = True
+                self._work_terminal_invalid |= not isinstance(terminal, str) or terminal not in {"end_turn", "tool_use", "stop_sequence"}
 
     def finish_with_finance(self):
+        if self._work_utf8 is not None:
+            try:
+                self._work_utf8.decode(b"", final=True)
+            except UnicodeDecodeError:
+                self._work_terminal_invalid = True
+            self._work_utf8 = None
         result = super().finish_with_finance()
         if result.finance.reason_code == "provider_usage_invalid":
             # A rejected earlier JSON/SSE object could contain a conflicting
@@ -76,6 +268,7 @@ class WorkUsageParser(ResponseUsageParser):
             for name in ("response", "message", "usage"):
                 observe(item.get(name), depth + 1)
         observe(value)
+        self._observe_work_terminal(value)
         super()._parse_object(value)
 
 
@@ -238,6 +431,18 @@ def settle(handler, identity, attempt, *, cost=None, status="unknown", started_n
         cost_microusd=cost, status=status, latency_ms=latency)
     if latency is not None:
         _record_timing(handler, identity, attempt.attempt_id, latency)
+
+
+def connection_observed(handler, identity, attempt, parser, *, downstream_ok):
+    workflow = getattr(handler.server, "work_workflow", None)
+    if (workflow is not None and attempt is not None and downstream_ok
+            and isinstance(parser, WorkUsageParser) and parser.work_connection_complete):
+        try:
+            workflow.observed_connection(identity, attempt.attempt_id)
+        except (sqlite3.Error, OSError, WorkRuntimeError):
+            # Optional conversion evidence cannot undo delivered provider work,
+            # its settled charge, or subsequent ordinary cache/impact cleanup.
+            LOGGER.warning("work_connection_recording_unavailable")
 
 
 def _record_timing(handler, identity, request_id, provider_ms):

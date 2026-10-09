@@ -2,6 +2,8 @@
 
 from html import escape
 from decimal import Decimal
+from shlex import quote
+from urllib.parse import quote as urlquote
 
 
 def page(title, body, *, workspace_enabled=True, console_enabled=True):
@@ -203,7 +205,7 @@ def _funnel(state):
     funnel = state.get('funnel', {})
     if not funnel.get('consent'):
         return ''
-    labels = {'qualified_connection': 'Qualified connection recorded', 'operator_qualified': 'Operator qualification recorded', 'first_attributed_work': 'First attributed work captured', 'receipt_opened': 'Job receipt opened', 'checkout_payment_received': 'Checkout payment event received', 'payment_verified': 'Current payment verified', 'paid_activation': 'Paid work currently active', 'repeat_work': 'Another attributed job captured'}
+    labels = {'qualified_connection': 'Supported API response observed', 'operator_qualified': 'Operator qualification recorded', 'first_attributed_work': 'First attributed work captured', 'receipt_opened': 'Job receipt opened', 'checkout_payment_received': 'Checkout payment event received', 'payment_verified': 'Current payment verified', 'paid_activation': 'Paid work currently active', 'repeat_work': 'Another attributed job captured'}
     rows = ''.join(f'<div><dt>{label}</dt><dd>{int(funnel.get("events", {}).get(key, 0))}</dd></div>' for key, label in labels.items() if key in funnel.get('events', {}))
     return f'''<details class="panel private-progress"><summary>Your consented source and private progress</summary><p class="muted">Recorded from authenticated work and durable qualification or payment evidence. Opening a public page does not claim a paid conversion.</p><dl class="detail-list">{rows or '<div><dt>Progress</dt><dd>No qualifying event recorded yet</dd></div>'}</dl><p class="muted">These records stay private to this verified account. Task content and private job identifiers are excluded from public website analytics.</p></details>'''
 
@@ -280,7 +282,8 @@ def _attempts(attempts):
         confirmation = "Unknown" if confirmed is None else _money(confirmed)
         source = _explanation(attempt.get("cost_confirmation_source", "No confirmation"))
         reuse = "Exact cache hit" if attempt.get("state") == "cache_hit" else _explanation(attempt.get("cache_bypass_reason", "No bypass recorded"))
-        rows.append(f'''<tr><th scope="row">{escape(str(attempt.get('model', 'unknown')))}<code>{escape(str(attempt.get('request_id', '')))}</code></th><td>{_explanation(attempt.get('state'))}</td><td>{charge}<small>Provider-confirmed: {confirmation}</small><small>{source}</small></td><td>{_duration(attempt.get('latency_ms'))}<small>Gateway wall: {_duration(attempt.get('gateway_wall_ms'))}</small><small>Overhead: {_duration(attempt.get('gateway_overhead_ms'))}</small></td><td>{_explanation(attempt.get('reason'))}<small>Recurrence: {_explanation(attempt.get('repeat_signal', 'none'))}</small><small>Cache: {reuse}</small></td></tr>''')
+        lineage = '<small>Logical request: ' + escape(str(attempt.get('logical_request_id') or 'Not recorded')) + '</small><small>Retry of: ' + escape(str(attempt.get('retry_of') or 'None')) + '</small>'
+        rows.append(f'''<tr><th scope="row">{escape(str(attempt.get('model', 'unknown')))}<code>{escape(str(attempt.get('request_id', '')))}</code>{lineage}</th><td>{_explanation(attempt.get('state'))}</td><td>{charge}<small>Provider-confirmed: {confirmation}</small><small>{source}</small></td><td>{_duration(attempt.get('latency_ms'))}<small>Gateway wall: {_duration(attempt.get('gateway_wall_ms'))}</small><small>Overhead: {_duration(attempt.get('gateway_overhead_ms'))}</small></td><td>{_explanation(attempt.get('reason'))}<small>Recurrence: {_explanation(attempt.get('repeat_signal', 'none'))}</small><small>Cache: {reuse}</small></td></tr>''')
     return '<div class="table-scroll"><table><thead><tr><th scope="col">Model / request</th><th scope="col">State</th><th scope="col">Cost evidence</th><th scope="col">Observed provider time</th><th scope="col">Decision and reuse reason</th></tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>' if rows else '<p class="muted">No provider attempts captured.</p>'
 
 
@@ -312,7 +315,7 @@ def _job(work, plans, csrf, *, can_manage=True, routing=None):
     attempt_table = _attempts(attempts)
     truncation = f'<p class="muted">Showing the most recent {int(work.get("attempts_limit", len(attempts)))} attempts; totals include all captured attempts.</p>' if work.get("attempts_truncated") else ''
     if can_manage:
-        truncation += f'<p><a href="/work/jobs/{escape(work_id)}">Open job details →</a></p>'
+        truncation += f'<p><a href="/work/jobs/{escape(work_id)}">Open job details →</a> · <a href="/work/jobs/{escape(work_id)}/attempts">Browse full attempt history →</a></p>'
     if work.get("observations_truncated"):
         events += '<li class="muted">Additional observations exist outside this summary.</li>'
     controls = ''
@@ -346,22 +349,49 @@ def _job(work, plans, csrf, *, can_manage=True, routing=None):
     timing = _explanation(costs.get('timing_coverage', 'Provider attempt timing only'))
     receipt = f'<a class="text-link" href="/v1/work/jobs/{escape(work_id)}">Open job receipt (JSON) →</a>' if can_manage else ''
     agent = _agent_integration(work) if can_manage else ''
+    attempt_counts = '<dl class="job-facts">' + ''.join('<div><dt>' + label + '</dt><dd>' + ('Unknown' if costs.get(key) is None else str(int(costs[key]))) + '</dd></div>' for key, label in (("failed_attempts", "Failed attempts"), ("unknown_attempts", "Unknown attempts"), ("retry_attempts", "Linked retries"), ("failover_attempts", "Provider failovers"))) + '</dl><p class="muted">Attempt counts cover this job’s full captured history, including attempts outside the displayed list. Counts overlap: a failed retry or a failover can appear in more than one count.</p>'
 
-    return f'''<article class="panel job-card"><div class="section-heading"><div><p class="eyebrow">{escape(str(work['repository']))}</p><h3>{escape(str(work.get('title') or work_id))}</h3></div><span class="status">{escape(str(work.get('state', 'unknown')).replace('_', ' '))}</span></div>{pause}<p class="work-id"><span>Work ID</span><code>{escape(work_id)}</code></p><p class="completion-condition"><strong>Completion condition</strong>{condition}</p><dl class="job-facts"><div><dt>Settled estimate</dt><dd>{_money(settled)}</dd></div><div><dt>Provider-confirmed cost</dt><dd>{confirmation}</dd></div><div><dt>Reserved / unsettled</dt><dd>{_money(pending)}</dd></div><div><dt>Sum of observed attempt time</dt><dd>{elapsed_text}</dd></div><div><dt>Gateway wall time</dt><dd>{gateway_wall}</dd></div><div><dt>Gateway overhead</dt><dd>{overhead}</dd></div><div><dt>Observed completion elapsed</dt><dd>{completion_text}</dd></div><div><dt>Priority</dt><dd>{escape(priority)}</dd></div><div><dt>Cache hits / recurrences</dt><dd>{int(costs.get('cache_hits', 0))} / {int(costs.get('repeated_requests', 0))}</dd></div></dl><p class="muted">Cost basis: {_explanation(costs.get('cost_basis'))}. Unconfirmed attempts: {escape(str(costs.get('unconfirmed_attempts', 'Unknown')))}. Confirmed amounts cover only their imported attempt subset; invoice finality: {'Recorded by source' if costs.get('invoice_finality') else 'Not established'}.</p><p class="muted">Timing coverage: {timing}. Provider, gateway, and whole-job completion time are different measurements.</p>{receipt}{agent}<details><summary>Attempts and route decisions ({int(costs.get('attempts', 0))})</summary>{attempt_table}{truncation}<p class="muted">Recurrence is a possible repeat signal, not a quality judgment. Cache hits never establish completion. Repeated corrective work can bypass an earlier answer.</p></details>{_local_evidence(work)}<details><summary>Outcome evidence</summary><ul class="observations">{events}</ul></details>{controls}</article>'''
+    return f'''<article class="panel job-card"><div class="section-heading"><div><p class="eyebrow">{escape(str(work['repository']))}</p><h3>{escape(str(work.get('title') or work_id))}</h3></div><span class="status">{escape(str(work.get('state', 'unknown')).replace('_', ' '))}</span></div>{pause}<p class="work-id"><span>Work ID</span><code>{escape(work_id)}</code></p><p class="completion-condition"><strong>Completion condition</strong>{condition}</p><dl class="job-facts"><div><dt>Settled estimate</dt><dd>{_money(settled)}</dd></div><div><dt>Provider-confirmed cost</dt><dd>{confirmation}</dd></div><div><dt>Reserved / unsettled</dt><dd>{_money(pending)}</dd></div><div><dt>Sum of observed attempt time</dt><dd>{elapsed_text}</dd></div><div><dt>Gateway wall time</dt><dd>{gateway_wall}</dd></div><div><dt>Gateway overhead</dt><dd>{overhead}</dd></div><div><dt>Observed completion elapsed</dt><dd>{completion_text}</dd></div><div><dt>Priority</dt><dd>{escape(priority)}</dd></div><div><dt>Cache hits / recurrences</dt><dd>{int(costs.get('cache_hits', 0))} / {int(costs.get('repeated_requests', 0))}</dd></div></dl>{attempt_counts}<p class="muted">Cost basis: {_explanation(costs.get('cost_basis'))}. Unconfirmed attempts: {escape(str(costs.get('unconfirmed_attempts', 'Unknown')))}. Confirmed amounts cover only their imported attempt subset; invoice finality: {'Recorded by source' if costs.get('invoice_finality') else 'Not established'}.</p><p class="muted">Timing coverage: {timing}. Provider, gateway, and whole-job completion time are different measurements.</p>{receipt}{agent}<details><summary>Attempts and route decisions ({int(costs.get('attempts', 0))})</summary>{attempt_table}{truncation}<p class="muted">Recurrence is a possible repeat signal, not a quality judgment. Cache hits never establish completion. Repeated corrective work can bypass an earlier answer.</p></details>{_local_evidence(work)}<details><summary>Outcome evidence</summary><ul class="observations">{events}</ul></details>{controls}</article>'''
 
 
 def _agent_integration(work):
     work_id = str(work["work_id"])
-    configuration = 'hormuz client config codex --auth-mode session --url "$HORMUZ_GATEWAY_URL" --model YOUR_APPROVED_ALIAS --work-id ' + work_id
+    choices = work.get("agent_choices", [])
+    configurations = []
+    for route in choices:
+        client, protocol = route.get("client"), route.get("protocol")
+        if (client, protocol) not in {("codex", "openai"), ("claude-code", "anthropic")}:
+            continue
+        model = str(route["model"])
+        command = 'hormuz client config ' + ('codex' if client == 'codex' else 'claude') + ' --auth-mode session --url "$HORMUZ_GATEWAY_URL"'
+        if client == 'codex':
+            command += ' --model ' + quote(model)
+        command += ' --work-id ' + quote(work_id)
+        label = 'Codex · OpenAI Responses' if client == 'codex' else 'Claude Code · Anthropic Messages'
+        instructions = '<p class="muted">Merge the printed settings into this agent’s existing user configuration, preserving its permitted headers.</p>'
+        if client == 'claude-code':
+            instructions += '<p class="muted">Then select the approved model when launching Claude Code:</p><pre><code>' + escape('claude --model ' + quote(model)) + '</code></pre>'
+        configurations.append('<p><strong>' + label + '</strong> · <code>' + escape(model) + '</code></p><pre><code>' + escape(command) + '</code></pre>' + instructions)
+    if not configurations:
+        return '<details><summary>Connect an ordinary agent to this job</summary><p class="muted">No configured provider route and application grant are available together for this identity. Ask your operator to confirm application access and an approved model before connecting this job.</p></details>'
     launch = 'hormuz context run --profile YOUR_MANAGED_PROFILE --work-id ' + work_id
     if work.get('completion_condition') == 'workflow.completed.v1':
         check = 'hormuz work check --work-id ' + work_id + ' --reference ci/run-42 --completes-work -- python -m unittest YOUR_CHECK'
         outcome = '<p class="muted">Run the ordinary task in that agent. The declared workflow runner can record its actual check result:</p><pre><code>' + escape(check) + '</code></pre>'
     else:
         outcome = '<p class="muted">Run the ordinary task in that agent. Completion requires the declared signed workflow condition. Bind its configured connector below; a local check or model response does not establish that condition.</p>'
-    return '<details><summary>Connect an ordinary agent to this job</summary><p class="muted">Use your enrolled session and an approved model alias. This binds requests and retries to the work ID; it does not run a task by itself.</p><pre><code>' + escape(configuration) + '</code></pre><p class="muted">For an existing managed profile, launch its agent with the same job identity:</p><pre><code>' + escape(launch) + '</code></pre>' + outcome + '</details>'
+    return '<details><summary>Connect an ordinary agent to this job</summary><p class="muted">These routes match your application grant and model policy; configured credentials do not prove live compatibility. The commands below require an already enrolled native session in your operating system secure store. API integrations can instead attach X-Hormuz-Work-Id with their existing authorized gateway credential. This binds requests and retries to the work ID; it does not run a task by itself.</p>' + ''.join(configurations) + '<p class="muted">For an existing managed profile, launch its agent with the same job identity:</p><pre><code>' + escape(launch) + '</code></pre>' + outcome + '</details>'
 
 
 def job_detail(work, *, csrf, can_manage, **navigation):
     heading = '<div class="section-heading"><h1>Job details</h1><a class="button secondary" href="/work">All captured work →</a></div>'
     return page("Job details", heading + _job(work, work.get("plans", []), csrf, can_manage=can_manage), **navigation)
+
+
+def attempt_history(history, **navigation):
+    work_id = escape(str(history["work_id"]))
+    heading = '<div class="section-heading"><h1>Attempt history</h1><a class="button secondary" href="/work/jobs/' + work_id + '">Back to job →</a></div>'
+    body = '<p class="work-id"><span>Work ID</span><code>' + work_id + '</code></p><p class="muted">Showing one page of up to ' + str(int(history['page_limit'])) + ' owned attempts in reverse admission order. Each page is stable while newer requests arrive. Retry lineage is activity evidence, separate from job completion.</p>' + _attempts(history['attempts'])
+    if history.get('next_before'):
+        body += '<p><a class="button secondary" href="/work/jobs/' + work_id + '/attempts/before/' + urlquote(str(history['next_before']), safe='') + '">Older attempts →</a></p>'
+    return page("Attempt history", heading + body, **navigation)

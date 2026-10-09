@@ -210,12 +210,27 @@ class WorkWorkflow:
         return {"acquisition_reference": reference, "scope": "private_authenticated_actor", "consent": True}
 
     def event(self, identity, event, reference):
-        if event not in {"qualified_connection", "receipt_opened"}:
+        if event != "receipt_opened":
             raise WorkRuntimeError("invalid_funnel_event")
         with self.runtime._transaction(write=True) as connection:
             # No acquisition tracking is enabled merely by opening /work.
             if connection.execute("SELECT 1 FROM ai_work_acquisition WHERE organization_id=? AND actor_id=?", (identity.organization_id, identity.actor_id)).fetchone():
                 connection.execute("INSERT OR IGNORE INTO ai_work_funnel VALUES(?,?,?,?,?)", (identity.organization_id, identity.actor_id, event, self._digest("funnel", reference), self.runtime._now()))
+
+    def observed_connection(self, identity, request_id):
+        """Record a delivered, protocol-validated API response after settlement.
+
+        The gateway supplies terminal validation. Recheck its owned, uncached
+        settled attempt here; neither a browser nor a configured credential can
+        submit a connection claim. This establishes no native-client grade.
+        """
+        with self.runtime._transaction(write=True) as connection:
+            if not connection.execute("SELECT 1 FROM ai_work_acquisition WHERE organization_id=? AND actor_id=?", (identity.organization_id, identity.actor_id)).fetchone():
+                return
+            attempt = connection.execute("SELECT model,protocol,route_fingerprint FROM ai_work_attempts WHERE organization_id=? AND actor_id=? AND request_id=? AND state='succeeded' AND response_succeeded=1 AND cache_source IS NULL", (identity.organization_id, identity.actor_id, request_id)).fetchone()
+            if attempt is None:
+                return
+            connection.execute("INSERT OR IGNORE INTO ai_work_funnel VALUES(?,?,?,?,?)", (identity.organization_id, identity.actor_id, "api_response_observed", self._digest("api-response", *attempt), self.runtime._now()))
 
     def funnel(self, identity):
         with self.runtime._transaction() as connection:
@@ -223,8 +238,11 @@ class WorkWorkflow:
             if not acquisition:
                 return {"consent": False, "events": {}}
             since = acquisition["consent_at"]
-            attempts = connection.execute("SELECT COUNT(DISTINCT work_id) FROM ai_work_attempts WHERE organization_id=? AND actor_id=? AND created_at>=? AND work_id IN (SELECT work_id FROM ai_work_jobs WHERE repository!='unattributed')", (identity.organization_id, identity.actor_id, since)).fetchone()[0]
-            events = {row[0]: row[1] for row in connection.execute("SELECT event,COUNT(*) FROM ai_work_funnel WHERE organization_id=? AND actor_id=? AND occurred_at>=? GROUP BY event", (identity.organization_id, identity.actor_id, since))}
+            attempts = connection.execute("SELECT COUNT(DISTINCT work_id) FROM ai_work_attempts WHERE organization_id=? AND actor_id=? AND created_at>=? AND state<>'denied' AND work_id IN (SELECT work_id FROM ai_work_jobs WHERE repository!='unattributed')", (identity.organization_id, identity.actor_id, since)).fetchone()[0]
+            events = {row[0]: row[1] for row in connection.execute("SELECT event,COUNT(*) FROM ai_work_funnel WHERE organization_id=? AND actor_id=? AND occurred_at>=? AND event IN ('api_response_observed','receipt_opened') GROUP BY event", (identity.organization_id, identity.actor_id, since))}
+        # Predecessor 'qualified_connection' rows meant a setup read. Preserve
+        # their history, but never promote those rows to actual response proof.
+        events["qualified_connection"] = events.pop("api_response_observed", 0)
         events.update(first_attributed_work=int(attempts > 0), repeat_work=int(attempts > 1))
         return {"consent": True, "acquisition_reference": acquisition[0], "labels": json.loads(acquisition[1]), "events": events, "scope": "private_actor"}
 

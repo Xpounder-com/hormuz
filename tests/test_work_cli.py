@@ -50,6 +50,31 @@ class WorkClientTests(TestCase):
             job.observe_check(1, reference="ci/run-2")
             self.assertEqual(request.call_args.args[2]["status"], "corrected")
 
+    def test_history_pages_are_explicit_and_cursors_cannot_change_the_request(self):
+        client = self.client()
+        with mock.patch.object(client, "_request", return_value={"next_before": "request-50"}) as request:
+            self.assertEqual("request-50", client.job("work-123").attempts()["next_before"])
+            request.assert_called_once_with("GET", "/v1/work/jobs/work-123/attempts")
+            client.job("work-123").attempts(before="request-50")
+            self.assertEqual(("GET", "/v1/work/jobs/work-123/attempts/before/request-50"), request.call_args.args)
+            for value in ("", ".", "..", "../other", "id?token=private", "id\r\nAuthorization: private", "x" * 257, 5):
+                with self.assertRaises(WorkClientError):
+                    client.job("work-123").attempts(before=value)
+            self.assertEqual(2, request.call_count)
+            for cursor in ("x" * 129, "x" * 256, "prefix/path:@id"):
+                client.job("work-123").attempts(before=cursor)
+            self.assertEqual("/v1/work/jobs/work-123/attempts/before/prefix%2Fpath%3A%40id", request.call_args.args[1])
+
+    def test_cli_reads_only_one_requested_attempt_history_page(self):
+        parser = argparse.ArgumentParser()
+        work.add_work_commands(parser.add_subparsers(dest="command", required=True))
+        args = parser.parse_args(["work", "--gateway", "https://gateway.example", "attempts", "--work-id", "work-123", "--before", "request-50"])
+        output = io.StringIO()
+        with mock.patch.dict("os.environ", {"HORMUZ_TOKEN": "secret-fixture-token"}), mock.patch.object(WorkClient, "_request", return_value={"attempts": [], "next_before": None}) as request, redirect_stdout(output):
+            self.assertEqual(work.run(args), 0)
+        request.assert_called_once_with("GET", "/v1/work/jobs/work-123/attempts/before/request-50")
+        self.assertNotIn("secret-fixture-token", output.getvalue())
+
     def test_plan_edits_preserve_or_explicitly_clear_exploration_and_repeat_kind(self):
         client = self.client()
         with mock.patch.object(client, "_request", return_value={}) as request:

@@ -8,7 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from . import console_http, work_pages, workspace_http
 from .config import Identity
@@ -93,11 +93,19 @@ def _dispatch(handler):
         if dispatch(handler, principal, request):
             return
     if handler.command == "GET":
+        history = re.fullmatch(r"/(v1/work|work)/jobs/([A-Za-z0-9][A-Za-z0-9._-]{0,127})/attempts(?:/before/([^/]{1,768}))?", path)
         if path in {"/work", "/work/"}:
             from .work_workflow_http import consume_handoff
             if consume_handoff(handler, principal):
                 return
             _dashboard(handler, principal)
+        elif history:
+            before = unquote(history[3], errors="strict") if history[3] is not None else None
+            page = runtime.attempt_history(principal.identity, history[2], before=before)
+            if history[1] == "v1/work":
+                _json(handler, 200, page)
+            else:
+                _send(handler, 200, work_pages.attempt_history(page, **_navigation(handler)))
         elif re.fullmatch(r"/work/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}", path):
             work = runtime.get_work(principal.identity, path.rsplit("/", 1)[1])
             _work_capabilities(handler, principal, work)
@@ -106,12 +114,6 @@ def _dispatch(handler):
         elif path in {"/v1/work/state", "/v1/work/connect", "/v1/work/jobs", "/v1/work/activation", "/v1/work/support/receipt"}:
             state = _state(handler, principal)
             if path.endswith("/connect"):
-                workflow = getattr(handler.server, "work_workflow", None)
-                if workflow is not None:
-                    for route in state["connection"]["routes"]:
-                        client = "codex" if route["protocol"] == "openai" else "claude-code"
-                        if route["eligible"] and client in principal.identity.allowed_clients:
-                            workflow.event(principal.identity, "qualified_connection", route["model"] + ":" + client)
                 state = {"schema_id": "hormuz.ai-work-connect", "schema_version": 1, "connection": state["connection"], "billing": state["billing"]}
             if path == "/v1/work/activation":
                 state = state["onboarding"]
@@ -403,8 +405,9 @@ def _state(handler, principal):
     activation["client_choices"] = sorted({row["client"] for row in choices})
     state["support"] = {"receipt_available": True, "recovery_state": activation["state"], "can_reset": activation["can_reset"]}
     state["capabilities"] = {"completion_condition": True, "workflow_bindings": bool(connectors)}
+    agent_choices = _agent_choices(handler, principal)
     for work in state.get("works", []):
-        _work_capabilities(handler, principal, work, connectors=connectors)
+        _work_capabilities(handler, principal, work, connectors=connectors, agent_choices=agent_choices)
     state["onboarding"] = activation
     return state
 
@@ -431,7 +434,24 @@ def _connector_choices(handler, principal):
     return result[:100]
 
 
-def _work_capabilities(handler, principal, work, *, connectors=None):
+def _agent_choices(handler, principal):
+    policy = handler.server.config.resolved_policy(principal.identity)
+    result = []
+    for alias, route in handler.server.config.model_routes.items():
+        client = {"openai": "codex", "anthropic": "claude-code"}.get(route.protocol)
+        if (principal.identity.allowed_clients and client not in principal.identity.allowed_clients
+                or principal.identity.authentication_source == "browser_session" and not principal.identity.allowed_clients
+                or policy.allowed_clients is not None and client not in policy.allowed_clients
+                or policy.allowed_models is not None and alias not in policy.allowed_models
+                or not handler.server.upstream_credentials.get(route.protocol)):
+            continue
+        result.append({"client": client, "protocol": route.protocol, "model": alias})
+        if len(result) == 100:
+            break
+    return result
+
+
+def _work_capabilities(handler, principal, work, *, connectors=None, agent_choices=None):
     from .work_workflow import CONDITIONS
     owned = work.get("actor_id") == principal.identity.actor_id
     choices = _connector_choices(handler, principal) if connectors is None else connectors
@@ -439,6 +459,7 @@ def _work_capabilities(handler, principal, work, *, connectors=None):
     work["receipt_available"] = owned
     work["binding_available"] = bool(owned and choices)
     work["connector_choices"] = choices if owned else []
+    work["agent_choices"] = (agent_choices if agent_choices is not None else _agent_choices(handler, principal)) if owned else []
     workflow = getattr(handler.server, "work_workflow", None)
     work["bindings"] = workflow.bindings(principal.identity, work["work_id"])["bindings"] if owned and workflow is not None else []
 
