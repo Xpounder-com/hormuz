@@ -180,6 +180,8 @@ cold-start guard, not a statistical proof or universal quality threshold.
 Alternative cold starts can collect evidence from actual incoming work when
 `ai_work.exploration_aliases`, `exploration_rate_percent` (1–20), and a positive
 `exploration_max_cost_microusd` monthly workspace allowance are configured.
+The public JSON loader accepts all four controls, including the boolean
+`ai_work.exploration_enabled`; invalid settings fail before credential lookup.
 Exploration is off by default and can be enabled by configuration or an explicit
 plan override. An explicit parent-plan opt-out cannot be overridden by a child
 plan. A plan override cannot grant unapproved aliases or a larger

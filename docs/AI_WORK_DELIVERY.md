@@ -76,9 +76,10 @@ an offline source build, installed imports and CLI, and owned SQLite history,
 totals and restart checks. Its offline stage starts no listener. A separate
 [installed HTTP smoke](evidence/ai-work-functional/INSTALLED_HTTP_SMOKE.json)
 creates and reads an owned job through the same installed wheel with exactly
-two authenticated local requests and no provider inference. Both retained predecessor stages identify 32 source and 10 packaging hashes and
-close their owned state. They do not qualify the later configuration-loader and
-source-manifest changes; successor installed-package qualification is pending.
+two authenticated local requests and no provider inference. Both stages identify
+clean build snapshot `d78f416c3d118dd9481286c96f4ca74657c94776`, with 33 source
+and 10 packaging hashes matching this candidate. All 1,702 snapshot file modes
+and 247 wheel/installed core files were independently verified; owned state closed.
 Installed-package handoff, matching restore, and closed-authorization checks also
 passed locally on synthetic state. This does not qualify signed distributions
 or an interactive native update; those live release gates remain open.

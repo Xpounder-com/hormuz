@@ -28,12 +28,11 @@ This is not an invoice or a customer saving. A completed workflow condition
 establishes that declared condition; an HTTP success or cache hit never supplies
 task completion.
 
-The retained predecessor package receipts name the clean source snapshot used for the offline build.
-Their 32 runtime/example and 10 packaging-source fingerprints identify the tested
+The package receipts name clean source snapshot `d78f416c3d118dd9481286c96f4ca74657c94776`
+used for the offline build. Their 33 runtime/example and 10 packaging-source fingerprints identify the tested
 files; later commits that retain those fingerprints add evidence metadata. The installed
 HTTP smoke makes exactly two local create/read requests and performs no provider
-inference. Those predecessor receipts do not qualify the configuration-loader
-successor. These unsigned artifacts do not qualify a native release or updater.
+inference. These unsigned artifacts do not qualify a native release or updater.
 
 The retained metadata benchmark identifies older source fingerprints. Its
 latency numbers are historical and must not be used for this candidate or as

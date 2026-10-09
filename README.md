@@ -39,7 +39,7 @@ repeat, a budget stop and approved continuation, and a signed workflow result.
 Its [recording and conditions](docs/evidence/ai-work-functional/AI_WORK_BROWSER_QA.json)
 use three local simulated provider responses. The separate
 [mechanics receipt](docs/evidence/ai-work-functional/receipt.json) passes 35 checks
-across 13 local fixture calls. Both identify 27 executed source files by SHA-256;
+across 13 local fixture calls. Both identify 28 executed source files by SHA-256;
 neither makes real-provider calls or payments, qualifies an installed native agent,
 or proves customer savings or production model quality.
 
@@ -47,7 +47,7 @@ The [installed SDK qualification](docs/evidence/sdk-examples/README.md) passes
 six real SDK calls through an authenticated disposable gateway: JSON and streaming
 for Responses, Chat Completions and Messages. It records one synthetic provider
 call per case, complete response metadata and the actual SQLite ledger, with
-32 source fingerprints. SDK versions and cleanup checks are in its receipt;
+33 source fingerprints. SDK versions and cleanup checks are in its receipt;
 live provider and native-agent qualification remain separate.
 
 </details>
