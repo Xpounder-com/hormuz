@@ -106,6 +106,10 @@ affected gate on a new build when artifact bytes change.
    both distribution run URLs, source commits, and archive digests, plus the
    exact hosted-gateway source commit and deployment run URL, then reproduces
    the clean-machine, lifecycle, and official-client recovery records.
+   Current native removal is a separate artifact named
+   `hormuz-macos-native-removal-<run number>-<attempt>`, containing only
+   `removal.json`. Historical v1/v2 lifecycle fields keep their original meaning;
+   sign-out alone does not qualify removal.
    The clean-machine group may retain up to eight Apple Silicon attempts so every
    failed attempt can remain disclosed before a qualifying retry; every record
    must still report `architecture: arm64`.
@@ -265,7 +269,7 @@ Silicon desktop in the runner log: sign
 in through the Hormuz app with a Codex profile, then lock and unlock the Mac
 once. A full-scope run next asks for a Claude Code profile after the first
 session is revoked and removed. A Codex/OpenAI run ends after the common
-lifecycle, Codex recovery, revocation, sign-out, and empty-session checks; it
+lifecycle, Codex recovery, revocation, sign-out, empty-session and local removal checks; it
 cannot enter the Claude path or retain a stale Claude record. The collector
 never prints a session credential or client output. It rejects any session
 profile whose HTTPS gateway differs from the
@@ -276,11 +280,36 @@ Render instance fingerprint. The lock probe accepts the dictionary and legacy
 array encodings produced by supported `ioreg` versions, but only a literal
 Boolean lock state.
 
-The workflow is successful only when the final artifact contains exactly
-`macos-pilot-operations-evidence.json`. Use that workflow run URL as
+The workflow retains `macos-pilot-operations-evidence.json` and `removal.json`
+in separate exact-member artifacts. Use that workflow run URL as
 `macos_operational_evidence_url` in the final aggregate. A queued run, a run on
 the wrong source, missing hardware, skipped interaction, or any failed collector
 remains incomplete evidence.
+
+The removal collector stops only the verified installed app process, pinned by
+its owner, start time and executable identity. It compares the installed bundle
+with the authenticated candidate before moving it into its private same-device
+cleanup directory; it refuses an unrelated app or changed bundle. Native apply
+and verify must observe absent Keychain session custody and no remaining
+unchanged, selected generated setup. Edited, shared, backup or unknown files are
+retained and counted; coordination locks remain. Settings are retained unless
+the user explicitly chooses the separate appearance reset option. The collector
+uses the default retained-settings path. Removal does not revoke provider API
+keys, delete repository content, or prove the absence of undetectable legacy
+process copies. The earlier actual server-revocation denial and sign-out are
+recorded independently: a read-only verification or already-empty Keychain
+cannot assert server revocation.
+
+The transferred, source-reviewed system-Perl adapter caps client/cleanup command
+output and time without installing Python, Node or CPAN on the clean machine.
+It uses a readiness handshake and parent acknowledgement before the client can
+execute or create workers, establishes a new owned session, and retains the
+unreaped process leader through graceful termination and the final group
+signal, then reaps and observes closure. It never kills processes by name or
+sweeps parent PIDs. A changed bundle in the private quarantine is retained for
+recovery, including changes detected immediately before cleanup; its location
+does not enter public JSON or console output. These are implementation
+requirements until the actual current-candidate pilot run observes them.
 
 ## Content-free evidence boundary
 
@@ -369,6 +398,18 @@ aggregate, use the same exact artifacts and add:
 The selector must agree with the aggregate, operations proof, authenticated
 gateway profile/protocol list, selected client records, and both public review
 attestations. It is not inferred from the absence of Claude evidence.
+
+To additionally qualify the current candidate's observed native removal, supply:
+
+```bash
+--removal-evidence /private/path/removal.json
+```
+
+This explicit companion is bounded, owned and regular, rejects symlinks and
+extra fields, and authenticates its separate exact-member artifact to the same
+successful candidate-bound operations run. A synthetic companion can validate
+shape but cannot set `native_removal_qualified` true. Omitting the argument leaves
+legacy aggregate behavior unchanged and makes no native removal claim.
 
 Exit status `0` means the real aggregate is ready for a controlled external
 pilot. Status `1` means the evidence is structurally valid but one or more

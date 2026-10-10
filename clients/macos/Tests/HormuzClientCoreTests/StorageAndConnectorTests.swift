@@ -355,6 +355,7 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
 
     func testContextOptimizationDefaultsOffAndSharesClosedPrivateSetting() async throws {
         let profile = try profile()
+        try directory.saveProfile(profile)
         XCTAssertFalse(try ContextOptimizationSettings.load(profile: profile, directory: directory).enabled)
         let enabled = try await ContextOptimizationSettings.save(
             enabled: true, profile: profile, directory: directory

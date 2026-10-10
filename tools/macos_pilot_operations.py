@@ -646,6 +646,8 @@ def _parser() -> argparse.ArgumentParser:
     assemble_command.add_argument("--source-commit", required=True)
     assemble_command.add_argument("--workflow-run-url", required=True)
     assemble_command.add_argument("--output", type=Path, required=True)
+    assemble_command.add_argument("--removal", type=Path)
+    assemble_command.add_argument("--removal-output", type=Path)
     return parser
 
 
@@ -661,6 +663,10 @@ def main(argv: list[str] | None = None) -> int:
                 qualification_scope=arguments.qualification_scope,
             )
         else:
+            if (arguments.removal is None) != (arguments.removal_output is None):
+                raise MacPilotOperationsError("removal_output_required")
+            if arguments.output.exists() or arguments.output.is_symlink():
+                raise MacPilotOperationsError("output_path_unsafe")
             selected = _scope_contract(arguments.qualification_scope)
             if (
                 selected.name == scope.FULL_DUAL_PROVIDER
@@ -677,8 +683,9 @@ def main(argv: list[str] | None = None) -> int:
                 if arguments.claude_record is None
                 else _load_json(arguments.claude_record, "claude_record")
             )
+            raw_inputs = _load_json(arguments.inputs, "operations_inputs")
             value = assemble(
-                inputs=_load_json(arguments.inputs, "operations_inputs"),
+                inputs=raw_inputs,
                 arm64_record=_load_json(arguments.arm64_record, "arm64_record"),
                 lifecycle=_load_json(arguments.lifecycle, "lifecycle"),
                 codex_record=_load_json(arguments.codex_record, "codex_record"),
@@ -687,6 +694,33 @@ def main(argv: list[str] | None = None) -> int:
                 workflow_run_url=arguments.workflow_run_url,
                 qualification_scope=selected.name,
             )
+            if arguments.removal is not None:
+                if (arguments.removal_output.name != "removal.json"
+                        or arguments.removal_output.parent != arguments.output.parent
+                        or arguments.removal_output == arguments.output
+                        or arguments.removal_output.exists()
+                        or arguments.removal_output.is_symlink()):
+                    raise MacPilotOperationsError("removal_output_path_invalid")
+                inputs = _validate_inputs(
+                    raw_inputs,
+                    arguments.source_commit, selected.name,
+                )
+                candidate = inputs["candidate"]
+                try:
+                    removal = pilot.validate_native_removal(
+                        pilot._parse_json(
+                            pilot._read_bounded_regular(
+                                arguments.removal, 32768, "native_removal", require_owner=True,
+                            ), "native_removal",
+                        ),
+                        source_commit=arguments.source_commit,
+                        artifact_sha256=candidate["archive_sha256"],
+                        version=candidate["version"], build=candidate["build"],
+                        workflow_run_url=arguments.workflow_run_url,
+                    )
+                except pilot.MacPilotEvidenceError as error:
+                    raise MacPilotOperationsError(str(error)) from None
+                _write_exclusive(arguments.removal_output, removal)
         _write_exclusive(arguments.output, value)
     except (MacPilotOperationsError, OSError, UnicodeError) as error:
         print(str(error), file=sys.stderr)

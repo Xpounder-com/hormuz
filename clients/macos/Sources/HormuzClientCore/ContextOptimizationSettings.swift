@@ -72,8 +72,12 @@ public enum ContextOptimizationSettings {
         profile: ConnectionProfile,
         directory: PrivateDirectory
     ) async throws -> ContextOptimizationPreference {
+        let connection = try await directory.lock()
+        defer { connection.unlock() }
         let lock = try await directory.lock(name: "context-optimization.lock")
         defer { lock.unlock() }
+        try directory.requireSetupWritable()
+        guard try directory.loadProfile() == profile else { throw ClientError.configurationChanged }
         let name = fileName(profile: profile)
         let previous = try directory.read(name)
         if previous != nil { _ = try load(profile: profile, directory: directory) }
@@ -82,6 +86,8 @@ public enum ContextOptimizationSettings {
             options: [.sortedKeys]
         )
         try directory.write(body, to: name, expected: previous)
+        try NativeOwnership.record([NativeOwnedFile(name: name, digest: NativeOwnership.digest(body),
+                                                    profileID: profile.id, kind: "preference")], directory: directory)
         let saved = try load(profile: profile, directory: directory)
         guard saved.enabled == enabled else { throw ClientError.storageUnavailable }
         return saved

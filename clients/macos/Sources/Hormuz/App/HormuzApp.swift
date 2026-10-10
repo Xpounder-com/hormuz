@@ -53,6 +53,7 @@ private struct HormuzMenu: View {
         Divider()
 
         Button("Open Hormuz", action: openControlCenter)
+        Button("Remove local setup…", action: connection.previewRemoval).disabled(connection.isBusy)
 
         if presentation.widgetVisible {
             Button("Hide Widget", action: hideWidget)

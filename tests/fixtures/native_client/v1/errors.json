@@ -1,7 +1,7 @@
 {
   "schema_id": "hormuz.native-client-fixtures",
   "schema_version": 1,
-  "source_revision": "f4a4de0dd1a1432f47b0f488a01e5b30b226f31c",
+  "source_revision": "1b3afa7237c9fafd980537ef1dd178a564c641ad",
   "cases": [
     {
       "code": "invalidProfile",
@@ -146,6 +146,18 @@
       "swift_message": "Hormuz sign-in is not configured for this app. Use Advanced to connect to a self-hosted gateway.",
       "native_message": "Hormuz sign-in is not configured for this app. Use Advanced to connect to a self-hosted gateway.",
       "note": ""
+    },
+    {
+      "code": "removalPending",
+      "swift_message": "Local setup removal is pending. Retry removal before starting a new connection.",
+      "native_message": "Local setup removal is pending. Retry removal before starting a new connection.",
+      "note": "Mac removal uses this code. Shared fixed-diagnostic parity does not imply a Rust removal workflow."
+    },
+    {
+      "code": "removalRecoveryRequired",
+      "swift_message": "An edited local file could not be restored safely. Its bytes were retained; review local removal recovery.",
+      "native_message": "An edited local file could not be restored safely. Its bytes were retained; review local removal recovery.",
+      "note": "Mac removal uses this code. Shared fixed-diagnostic parity does not imply a Rust removal workflow."
     }
   ]
 }

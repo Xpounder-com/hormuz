@@ -492,12 +492,15 @@ def _file_identity(value: os.stat_result) -> tuple[int, int, int, int, int, int]
     )
 
 
-def _read_bounded_regular(path: Path, maximum: int, label: str) -> bytes:
+def _read_bounded_regular(
+    path: Path, maximum: int, label: str, *, require_owner: bool = False,
+) -> bytes:
     try:
         before = path.lstat()
     except OSError as error:
         raise MacPilotEvidenceError(f"{label}_unavailable") from error
-    if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
+    if (not stat.S_ISREG(before.st_mode) or before.st_size > maximum
+            or (require_owner and (before.st_uid != os.getuid() or before.st_nlink != 1))):
         raise MacPilotEvidenceError(f"{label}_not_bounded_regular_file")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     descriptor = -1
@@ -507,6 +510,7 @@ def _read_bounded_regular(path: Path, maximum: int, label: str) -> bytes:
         if (
             not stat.S_ISREG(opened.st_mode)
             or _file_identity(before) != _file_identity(opened)
+            or (require_owner and (opened.st_uid != os.getuid() or opened.st_nlink != 1))
         ):
             raise MacPilotEvidenceError(f"{label}_changed_during_open")
         with os.fdopen(descriptor, "rb") as source:
@@ -1707,6 +1711,102 @@ def _validate_macos_operations_evidence_payload(
         raise MacPilotEvidenceError("macos_operations_evidence_binding_invalid")
 
 
+NATIVE_REMOVAL_SCHEMA_ID = "hormuz.macos-native-removal-evidence"
+_NATIVE_REMOVAL_FIELDS = {
+    "schema_id", "schema_version", "source_commit", "workflow_run_url",
+    "artifact_sha256", "version", "build", "started_at", "completed_at",
+    "native_apply", "native_verify", "prior_server_revocation_denied",
+    "prior_sign_out_verified", "owned_app_process_stopped", "installed_bundle_removed",
+}
+_NATIVE_REMOVAL_RESULT_FIELDS = {
+    "schema_id", "schema_version", "status", "session_was_present", "pending",
+    "server_revocation_confirmed", "keychain_session_absent", "generated_setup_absent",
+    "removed_files", "retained_files", "coordination_locks_retained", "appearance_reset",
+}
+
+
+def validate_native_removal(
+    value: object, *, source_commit: str, artifact_sha256: str,
+    version: str, build: str, workflow_run_url: str,
+) -> dict[str, Any]:
+    """Check observed removal records; shape validation grants no live authority."""
+    record = _require_fields(value, _NATIVE_REMOVAL_FIELDS, "native_removal")
+    _require_pattern(source_commit, _REVISION_RE, "native_removal_source_commit")
+    _require_pattern(artifact_sha256, _SHA256_RE, "native_removal_artifact_sha256")
+    _require_pattern(workflow_run_url, _ACTIONS_RUN_RE, "native_removal_workflow_run_url")
+    if (record["schema_id"] != NATIVE_REMOVAL_SCHEMA_ID
+            or type(record["schema_version"]) is not int or record["schema_version"] != 1
+            or record["source_commit"] != source_commit
+            or record["artifact_sha256"] != artifact_sha256
+            or record["version"] != version or record["build"] != build
+            or record["workflow_run_url"] != workflow_run_url):
+        raise MacPilotEvidenceError("native_removal_identity_invalid")
+    _require_pattern(version, _VERSION_RE, "native_removal_version")
+    _require_pattern(build, _BUILD_RE, "native_removal_build")
+    started = _require_timestamp(record["started_at"], "native_removal_started_at")
+    completed = _require_timestamp(record["completed_at"], "native_removal_completed_at")
+    if not timedelta(0) <= completed - started <= timedelta(minutes=90):
+        raise MacPilotEvidenceError("native_removal_timeline_invalid")
+    for field in ("prior_server_revocation_denied", "prior_sign_out_verified",
+                  "owned_app_process_stopped", "installed_bundle_removed"):
+        if _require_bool(record[field], f"native_removal_{field}") is not True:
+            raise MacPilotEvidenceError("native_removal_incomplete")
+    for name in ("native_apply", "native_verify"):
+        native = _require_fields(record[name], _NATIVE_REMOVAL_RESULT_FIELDS, name)
+        if (native["schema_id"] != "hormuz.native-removal-result"
+                or type(native["schema_version"]) is not int or native["schema_version"] != 1):
+            raise MacPilotEvidenceError("native_removal_result_schema_invalid")
+        removed = _require_int(native["removed_files"], 0, 4096, f"{name}_removed_files")
+        retained = _require_int(native["retained_files"], 0, 4096, f"{name}_retained_files")
+        if native["status"] != ("complete_with_retained_files" if retained else "complete"):
+            raise MacPilotEvidenceError("native_removal_result_status_invalid")
+        for field in ("session_was_present", "pending", "server_revocation_confirmed",
+                      "keychain_session_absent", "generated_setup_absent",
+                      "coordination_locks_retained", "appearance_reset"):
+            _require_bool(native[field], f"{name}_{field}")
+        if (native["pending"] or not native["keychain_session_absent"]
+                or not native["generated_setup_absent"] or not native["coordination_locks_retained"]
+                or native["appearance_reset"]):
+            raise MacPilotEvidenceError("native_removal_incomplete")
+        if name == "native_apply":
+            if native["session_was_present"] != native["server_revocation_confirmed"]:
+                raise MacPilotEvidenceError("native_removal_revocation_invalid")
+        elif (removed or native["session_was_present"] or native["server_revocation_confirmed"]):
+            raise MacPilotEvidenceError("native_removal_verification_invalid")
+    if record["native_apply"]["retained_files"] != record["native_verify"]["retained_files"]:
+        raise MacPilotEvidenceError("native_removal_retention_changed")
+    return record
+
+
+def _authenticate_native_removal(
+    value: object, artifact: dict[str, Any], operations_url: str,
+    generated_at: datetime, artifact_created_at: datetime | None,
+) -> None:
+    record = validate_native_removal(
+        value, source_commit=artifact["source_commit"],
+        artifact_sha256=artifact["archive_sha256"], version=artifact["version"],
+        build=artifact["build"], workflow_run_url=operations_url,
+    )
+    run = _authenticate_github_run(
+        operations_url, artifact["source_commit"], MACOS_PILOT_OPERATIONS_WORKFLOW,
+        "native_removal",
+    )
+    run_started, _ = _validate_github_run_timeline(run, generated_at, "native_removal")
+    if artifact_created_at is None or run_started < artifact_created_at:
+        raise MacPilotEvidenceError("native_removal_predates_artifact")
+    _, number, attempt = _require_github_run_identity(run, "native_removal")
+    observed, created = _authenticate_run_json_artifact(
+        run, artifact["source_commit"], f"hormuz-macos-native-removal-{number}-{attempt}",
+        "removal.json", "native_removal",
+    )
+    if not _json_values_equal(observed, record):
+        raise MacPilotEvidenceError("native_removal_artifact_mismatch")
+    started = _require_timestamp(record["started_at"], "native_removal_started_at")
+    completed = _require_timestamp(record["completed_at"], "native_removal_completed_at")
+    if not run_started <= started <= completed <= created <= generated_at:
+        raise MacPilotEvidenceError("native_removal_timeline_invalid")
+
+
 def _authenticate_macos_operational_evidence(
     operations_url: str,
     artifact: dict[str, Any],
@@ -2122,6 +2222,7 @@ def validate_evidence(
     previous_archive_sha256: str,
     now: datetime | None = None,
     expected_qualification_scope: object = DEFAULT_QUALIFICATION_SCOPE,
+    removal_evidence: object | None = None,
 ) -> dict[str, object]:
     requested_scope = _requested_scope(expected_qualification_scope)
     scope_contract = _document_scope(value, requested_scope)
@@ -2311,6 +2412,23 @@ def validate_evidence(
                 scope_contract=scope_contract,
             )
 
+    removal_qualified = False
+    if removal_evidence is not None:
+        validate_native_removal(
+            removal_evidence, source_commit=artifact["source_commit"],
+            artifact_sha256=artifact["archive_sha256"], version=artifact["version"],
+            build=artifact["build"], workflow_run_url=operations_url,
+        )
+        if evidence_kind == "pilot_qualification":
+            if not macos_records_complete or gateway_deployment_completed_at is None:
+                reasons.append("native_removal_operations_incomplete")
+            else:
+                _authenticate_native_removal(
+                    removal_evidence, artifact, operations_url, generated_at,
+                    artifact_created_at,
+                )
+                removal_qualified = True
+
     reviews = _require_fields(root["reviews"], _REVIEWS_FIELDS, "reviews")
     validated_reviews = {
         "security": _validate_review(
@@ -2406,6 +2524,8 @@ def validate_evidence(
     }
     if scope_contract.schema_version == 2:
         result["qualification_scope"] = scope_contract.name
+    if removal_evidence is not None:
+        result["native_removal_qualified"] = removal_qualified
     return result
 
 
@@ -2424,6 +2544,7 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_QUALIFICATION_SCOPE,
     )
     parser.add_argument("--allow-synthetic-fixture", action="store_true")
+    parser.add_argument("--removal-evidence", type=Path)
     return parser
 
 
@@ -2496,6 +2617,12 @@ def main(argv: list[str] | None = None) -> int:
                 previous_archive_size=previous_archive_size,
                 previous_archive_sha256=previous_archive_sha256,
                 expected_qualification_scope=args.qualification_scope,
+                removal_evidence=(
+                    None if args.removal_evidence is None else _parse_json(
+                        _read_bounded_regular(args.removal_evidence, 32768,
+                                              "native_removal", require_owner=True), "native_removal"
+                    )
+                ),
             )
     except MacPilotEvidenceError as error:
         print(f"macos_pilot_evidence=invalid code={error}", file=sys.stderr)

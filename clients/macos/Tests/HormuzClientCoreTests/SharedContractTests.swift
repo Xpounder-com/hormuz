@@ -237,7 +237,7 @@ final class SharedContractTests: PrivateStorageTestCase {
 
     func testSharedFixedErrorCatalog() throws {
         let cases = try XCTUnwrap(fixture("errors")["cases"] as? [[String: Any]])
-        XCTAssertEqual(cases.count, 24)
+        XCTAssertEqual(cases.count, 26)
         for item in cases {
             let code = try XCTUnwrap(item["code"] as? String)
             let error = try XCTUnwrap(ClientError(rawValue: code))

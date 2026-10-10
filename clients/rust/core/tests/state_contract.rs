@@ -160,7 +160,7 @@ fn safe_error_catalog_has_fixed_messages_and_rejects_arbitrary_input() {
     let fixture = fixture(include_str!(
         "../../../../tests/fixtures/native_client/v1/errors.json"
     ));
-    assert_eq!(fixture["cases"].as_array().unwrap().len(), 24);
+    assert_eq!(fixture["cases"].as_array().unwrap().len(), 26);
     for case in fixture["cases"].as_array().unwrap() {
         let error: ClientError = serde_json::from_value(case["code"].clone()).unwrap();
         assert_eq!(error.to_string(), case["native_message"].as_str().unwrap());
