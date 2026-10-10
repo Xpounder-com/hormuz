@@ -28,7 +28,7 @@ for (const name of targets) {
           await page.waitForFunction(() => document.activeElement === document.querySelector('.companion-card'));
         };
         const close = async () => { await card.press('Escape'); await card.waitFor({ state: 'detached' }); };
-        const consent = () => page.evaluate(() => ['hormuz.x-ads-consent.v1', 'hormuz.analytics-consent.v1'].map(key => localStorage.getItem(key)));
+        const consent = () => page.evaluate(() => ['hormuz.x-ads-consent.v1', 'hormuz.analytics-consent.v2'].map(key => localStorage.getItem(key)));
 
         await page.goto(`${base}/demo/?qa=1#companion`, { waitUntil: 'networkidle' });
         assert.match(await page.title(), /Try Hormuz/);

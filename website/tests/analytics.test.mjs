@@ -45,6 +45,23 @@ test('expired, malformed and excessive-duration saved preferences cannot enable 
   }
 });
 
+test('an earlier Analytics opt-in cannot authorize pricing and service-interest events', () => {
+  const win = browser();
+  win.storage.set('hormuz.analytics-consent.v1', JSON.stringify({ choice: 'allowed', expires: Date.now() + CONSENT_DURATION }));
+  assert.equal(readAnalyticsConsent(win), 'unset');
+  assert.equal(trackAnalyticsEvent('pricing_open', 'comparison', win, id), false);
+  assert.equal(trackAnalyticsEvent('inquiry_open', 'managed', win, id), false);
+  assert.deepEqual(win.scripts, []);
+  assert.equal(win.dataLayer, undefined);
+
+  saveAnalyticsConsent('allowed', win);
+  const returning = browser();
+  for (const [key, value] of win.storage) returning.storage.set(key, value);
+  assert.equal(readAnalyticsConsent(returning), 'allowed');
+  assert.equal(trackAnalyticsEvent('pricing_open', 'comparison', returning, id), true);
+  assert.equal(returning.scripts.length, 1);
+});
+
 test('page context keeps bounded campaign labels while excluding form data, fragments, and referrer paths', () => {
   const win = browser({ url: 'https://usehormuz.github.io/contact/?utm_source=x&utm_medium=paid_social&utm_campaign=hormuz_2026&utm_content=ad_42&email=private%40example.com&twclid=private&workflow=secret#private' });
   assert.deepEqual(analyticsContext(win), { page_location: 'https://usehormuz.github.io/contact/', page_title: 'Hormuz /contact/', page_referrer: 'https://t.co/', campaign_source: 'x', campaign_medium: 'paid_social', campaign_name: 'hormuz_2026', campaign_content: 'ad_42' });

@@ -3,7 +3,8 @@ import { SITE_ORIGIN, SITE_ROUTES, REPOSITORY } from './site.mjs';
 import { isSalesInquiry } from './contact.mjs';
 import { privacySignal, CONSENT_DURATION } from './x-ads.mjs';
 
-export const ANALYTICS_CONSENT_KEY = 'hormuz.analytics-consent.v1';
+// Pricing and service-interest clicks require a new choice under the updated notice.
+export const ANALYTICS_CONSENT_KEY = 'hormuz.analytics-consent.v2';
 const sessions = new WeakMap();
 const session = win => {
   if (!sessions.has(win)) sessions.set(win, { consent: 'unset', started: false, id: '', lead: false });

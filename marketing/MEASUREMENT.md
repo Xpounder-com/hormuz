@@ -19,6 +19,9 @@ definitions and does not collect automatic form entries, searches, or arbitrary
 outbound URLs. Keep Google signals and ad personalization off.
 
 Analytics requires a new, separate visitor choice; old X consent is never reused.
+The added pricing and Cloud/managed-site interest events use renewed Analytics
+consent under the updated notice. Earlier website-analytics preferences do not
+start the SDK or authorize these events.
 No Google script, queue, request or Analytics cookie is created before opt-in.
 Decline, Global Privacy Control and Do Not Track keep collection off. The consent
 choice lasts up to 180 days. With blocked storage it lasts only for the page.

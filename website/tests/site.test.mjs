@@ -219,6 +219,10 @@ test('privacy notices distinguish host URL processing from application analytics
   }
   assert.match(page, /Optional Google Analytics and X Ads measurement each stay off until you allow that service/);
   assert.match(page, /An earlier choice to allow X does not allow Google Analytics/);
+  assert.match(page, /pricing and inquiry-link clicks including fixed Cloud or managed-site interest labels/);
+  assert.match(page, /you must make a new choice under this notice before Analytics starts/);
+  const choices = readFileSync(new URL('../app/components/AdConsent.tsx', import.meta.url), 'utf8');
+  assert.match(choices, /install and pricing links, Cloud or managed-site inquiry links/);
   assert.match(page, /Safari and browsers on iPhone and iPad do not load X Ads code/);
   assert.match(page, /process or save it before you send/);
 });
