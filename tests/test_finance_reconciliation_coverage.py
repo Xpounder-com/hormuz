@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from decimal import Decimal
+from decimal import Decimal, Inexact, Rounded, localcontext
 import json
 import unittest
 
@@ -143,6 +143,41 @@ def preview(provider_view=None, events=None, **overrides):
 
 
 class FinanceReconciliationCoverageTests(unittest.TestCase):
+    def test_openai_provider_subtotal_preserves_extended_precision_and_signed_credit(self):
+        chosen = snapshot()
+        positive = "1." + "0" * 35 + "2"
+        negative = "-0." + "0" * 35 + "1"
+        selected = view(
+            buckets=(coverage(START, MIDDLE, chosen, 2),),
+            observations=(cost(positive, chosen, suffix="a"), cost(negative, chosen, suffix="b")),
+        )
+        with localcontext() as context:
+            context.prec = 2
+            context.traps[Inexact] = context.traps[Rounded] = True
+            original_flags = context.flags.copy()
+            report = preview(selected, (), end_at=MIDDLE)
+            self.assertEqual(context.flags, original_flags)
+        self.assertEqual(report.provider_cost.known_subtotal, "1." + "0" * 35 + "1")
+        self.assertEqual(report.provider_cost.negative_row_count, 1)
+        self.assertEqual((report.provider_cost.provider_final, report.provider_cost.invoice_final), (False, False))
+        self.assertIsNone(report.gateway_estimate.known_subtotal)
+        self.assertIsNone(report.signed_variance)
+
+    def test_provider_subtotal_keeps_profile_precision_and_aggregate_magnitude_bounds(self):
+        chosen = snapshot()
+        for profile, amounts in (
+            ("anthropic.organization-costs.v1", ("0.0000000000000000001",)),
+            (PROFILE, ("0." + "0" * 36 + "1",)),
+            (PROFILE, ("600000000000000000", "600000000000000000")),
+        ):
+            selected = replace(view(
+                buckets=(coverage(START, MIDDLE, chosen, len(amounts)),),
+                observations=tuple(cost(value, chosen, suffix=suffix)
+                                   for value, suffix in zip(amounts, ("a", "b"))),
+            ), collection_profile=profile)
+            with self.subTest(profile=profile, rows=len(amounts)), self.assertRaises(FinanceCoveragePreviewError):
+                preview(selected, (), end_at=MIDDLE)
+
     def test_distinct_aggregate_and_estimate_subtotals_never_become_variance_or_invoice(self):
         report = preview()
         self.assertEqual(report.provider_cost.known_subtotal, "1.25")

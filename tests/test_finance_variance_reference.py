@@ -71,6 +71,44 @@ def calculate(
 
 
 class FinanceVarianceReferenceTests(unittest.TestCase):
+    def test_openai_extended_precision_variance_and_ratio_remain_exact_under_hostile_context(self):
+        smallest = "0." + "0" * 35 + "1"
+        with localcontext() as context:
+            context.prec = 2
+            context.traps[Inexact] = context.traps[Rounded] = True
+            original_flags = context.flags.copy()
+            result = calculate(
+                provider_rows=(provider("1." + "0" * 35 + "2"), provider("-" + smallest, suffix="f")),
+            )
+            wide = calculate(
+                provider_rows=(provider("9" * 18 + "." + "9" * 36),),
+                gateway_rows=(estimate("9" * 18),),
+            )
+            self.assertEqual(context.flags, original_flags)
+        self.assertEqual(result.provider_total, "1." + "0" * 35 + "1")
+        self.assertEqual((result.signed_variance, result.absolute_variance), (smallest, smallest))
+        self.assertEqual((result.relative_variance.numerator, result.relative_variance.denominator), (smallest, "1"))
+        self.assertEqual(len(result.provider_observation_keys), 2)
+        self.assertEqual(result.review_status, "not_evaluated")
+        self.assertEqual(wide.signed_variance, "0." + "9" * 36)
+
+    def test_extended_provider_policy_never_widens_estimates_anthropic_or_aggregate_magnitude(self):
+        anthropic = replace(grain(), provider="anthropic", product="anthropic.costs",
+                            collection_profile="anthropic.organization-costs.v1")
+        cases = (
+            {"provider_rows": (provider("0." + "0" * 36 + "1"),)},
+            {"gateway_rows": (estimate("0.0000000000000000001"),)},
+            {"provider_grain": anthropic, "gateway_grain": anthropic,
+             "provider_rows": (provider("0.0000000000000000001"),)},
+            {"provider_rows": (provider("600000000000000000"), provider("600000000000000000", suffix="f"))},
+            {"provider_rows": (provider("-600000000000000000"),),
+             "gateway_rows": (estimate("600000000000000000"),)},
+        )
+        for index, arguments in enumerate(cases):
+            with self.subTest(case=index), self.assertRaises(FinanceVarianceReferenceError) as caught:
+                calculate(**arguments)
+            self.assertEqual(caught.exception.code, "finance_reference_invalid")
+
     def test_positive_negative_and_zero_variance_are_exact_and_unreviewed(self):
         positive = calculate()
         self.assertEqual((positive.provider_total, positive.configured_estimate_known_subtotal), ("1.25", "1"))

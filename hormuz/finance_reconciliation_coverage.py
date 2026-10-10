@@ -19,7 +19,7 @@ from .finance_collection import (
     MAX_WINDOW_DAYS, PROFILE_SPECS, FinanceCollectionError, _parse_time, _time_text,
 )
 from .finance_collection_repository import AsOfCollectionView, SelectedCollectionSnapshot
-from .finance_values import FinanceValueError, currency_code, decimal_text, exact_context
+from .finance_values import FinanceValueError, currency_code, decimal_text, exact_context, openai_provider_decimal_text
 
 
 MAX_PREVIEW_ROWS = 10_000
@@ -251,6 +251,11 @@ def _provider_coverage(
     digests: set[str] = set()
     negative = 0
     negative_unknown = 0
+    provider_decimal = (
+        openai_provider_decimal_text
+        if PROFILE_SPECS[view.collection_profile].provider == "openai"
+        else decimal_text
+    )
     try:
         with exact_context():
             total = Decimal(0)
@@ -286,7 +291,7 @@ def _provider_coverage(
                     _invalid()
                 keys.add(observation_key)
                 digests.add(row["observation_digest"])
-                amount = decimal_text(row["canonical_amount"])
+                amount = provider_decimal(row["canonical_amount"])
                 if amount != row["canonical_amount"]:
                     _invalid()
                 parsed = Decimal(amount)
@@ -298,7 +303,7 @@ def _provider_coverage(
                 counts[bucket] += 1
             if any(counts[bucket] != row["observation_count"] for bucket, row in coverage.items()):
                 _invalid()
-            known_subtotal = decimal_text(total) if view.observations else None
+            known_subtotal = provider_decimal(total) if view.observations else None
     except (FinanceValueError, DecimalException, TypeError, ValueError):
         _invalid()
     return ProviderCostCoverage(

@@ -7,7 +7,7 @@ digests suitable for the append-only finance collection repository.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, localcontext
 import hashlib
@@ -23,6 +23,8 @@ from typing import Any, Callable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from .finance_values import FinanceValueError, decimal_text, exact_context, openai_provider_decimal_text
 
 
 MAX_PAGE_BYTES = 1_048_576
@@ -51,7 +53,6 @@ FINANCE_COLLECTION_SOURCE_SCHEMA_IDS = frozenset(
 )
 
 _MAX_INT64 = 9_223_372_036_854_775_807
-_MONEY_BOUND = Decimal("1000000000000000000")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _DIMENSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+ -]{0,127}\Z")
 _JSON_NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\Z")
@@ -59,6 +60,9 @@ _COUNT_NUMBER = re.compile(r"(?:0|[1-9][0-9]*)\Z")
 _CURRENCY = re.compile(r"[A-Za-z]{3}\Z")
 _QUANTITY_UNITS = frozenset(
     {"tokens", "requests", "images", "seconds", "minutes", "hours", "bytes", "characters"}
+)
+_OPENAI_QUANTITY_UNITS = _QUANTITY_UNITS | frozenset(
+    {"1000_tokens", "duration_seconds", "duration_minutes", "duration_hours", "gibibyte_hours"}
 )
 
 
@@ -312,6 +316,8 @@ class NormalizedCollection:
     cost_observations: tuple[CostObservation, ...]
     fingerprint_key_version: int
     parser_version: int = PARSER_VERSION
+    # Ephemeral validation context, excluded from accounting identity/storage.
+    verified_provider_account_fingerprint: str | None = field(default=None, compare=False, repr=False)
 
 
 def tenant_fingerprint(
@@ -563,6 +569,10 @@ def validate_normalized_collection(value: NormalizedCollection) -> None:
         or value.parser_version != PARSER_VERSION
         or not _sha(value.page_chain_digest)
         or not _sha(value.content_digest)
+        or (value.verified_provider_account_fingerprint is not None and (
+            not _sha(value.verified_provider_account_fingerprint)
+            or value.query.collection_profile != "openai.organization-costs.v1"
+        ))
     ):
         raise FinanceCollectionError("snapshot_conflict")
     expected_grid = _expected_grid(value.query)
@@ -716,7 +726,8 @@ def _validate_normalized_cost(
                 raise FinanceCollectionError("snapshot_conflict")
         unit = _quantity_unit(
             value.quantity_unit,
-            required=value.native_quantity is not None,
+            required=value.native_quantity is not None and query.profile.provider != "openai",
+            allowed=_OPENAI_QUANTITY_UNITS if query.profile.provider == "openai" else _QUANTITY_UNITS,
         )
     except FinanceCollectionError:
         raise FinanceCollectionError("snapshot_conflict") from None
@@ -790,6 +801,7 @@ def normalize_collection_pages(
     *,
     fingerprint_key: bytes,
     fingerprint_key_version: int,
+    expected_provider_account_fingerprint: str | None = None,
 ) -> NormalizedCollection:
     """Validate a complete provider page chain and discard all raw bytes."""
 
@@ -810,6 +822,7 @@ def normalize_collection_pages(
         decoded,
         fingerprint_key=fingerprint_key,
         fingerprint_key_version=fingerprint_key_version,
+        expected_provider_account_fingerprint=expected_provider_account_fingerprint,
     )
 
 
@@ -819,6 +832,7 @@ def normalize_collection_file(
     *,
     fingerprint_key: bytes,
     fingerprint_key_version: int,
+    expected_provider_account_fingerprint: str | None = None,
 ) -> NormalizedCollection:
     """Normalize one customer-supplied bundle under the already prepared query."""
 
@@ -861,6 +875,7 @@ def normalize_collection_file(
         pages,
         fingerprint_key=fingerprint_key,
         fingerprint_key_version=fingerprint_key_version,
+        expected_provider_account_fingerprint=expected_provider_account_fingerprint,
     )
 
 
@@ -870,11 +885,14 @@ def _normalize_decoded_pages(
     *,
     fingerprint_key: bytes,
     fingerprint_key_version: int,
+    expected_provider_account_fingerprint: str | None = None,
 ) -> NormalizedCollection:
     if (
         not 32 <= len(fingerprint_key) <= 4096
         or type(fingerprint_key_version) is not int
         or not 1 <= fingerprint_key_version <= 2_147_483_647
+        or (expected_provider_account_fingerprint is not None
+            and not _sha(expected_provider_account_fingerprint))
     ):
         raise FinanceCollectionError("invalid_request")
     expected_grid = _expected_grid(query)
@@ -921,6 +939,7 @@ def _normalize_decoded_pages(
     costs: list[CostObservation] = []
     coverage: list[BucketCoverage] = []
     semantic_keys: set[tuple[object, ...]] = set()
+    verified_provider_account_fingerprint = None
     for start, end in expected_grid:
         records = observed_buckets[(start, end)]
         for record in records:
@@ -940,8 +959,11 @@ def _normalize_decoded_pages(
                     end,
                     record,
                     fingerprint_key,
+                    expected_provider_account_fingerprint=expected_provider_account_fingerprint,
                 )
                 costs.append(normalized)
+                if query.profile.provider == "openai" and record.get("organization_id") is not None:
+                    verified_provider_account_fingerprint = expected_provider_account_fingerprint
             if semantic in semantic_keys:
                 raise FinanceCollectionError("provider_response_invalid")
             semantic_keys.add(semantic)
@@ -984,6 +1006,7 @@ def _normalize_decoded_pages(
         usage_observations=tuple(usage),
         cost_observations=tuple(costs),
         fingerprint_key_version=fingerprint_key_version,
+        verified_provider_account_fingerprint=verified_provider_account_fingerprint,
     )
 
 
@@ -1112,6 +1135,8 @@ def _cost_observation(
     end: str,
     value: Mapping[str, Any],
     key: bytes,
+    *,
+    expected_provider_account_fingerprint: str | None = None,
 ) -> tuple[CostObservation, tuple[object, ...]]:
     if query.profile.provider == "openai":
         _allowed_keys(
@@ -1126,13 +1151,36 @@ def _cost_observation(
                 "api_source",
                 "quantity",
                 "quantity_unit",
+                "organization_id",
+                "organization_name",
+                "project_name",
+                "user_email",
             },
         )
         if value.get("object") != "organization.costs.result":
             raise FinanceCollectionError("provider_response_invalid")
         # This fixed profile does not group by either optional dimension.
-        if value.get("user_id") is not None or value.get("api_source") is not None:
+        if (value.get("user_id") is not None or value.get("api_source") is not None
+                or value.get("user_email") is not None):
             raise FinanceCollectionError("provider_response_invalid")
+        for field in ("organization_name", "project_name"):
+            label = value.get(field)
+            if label is not None and (type(label) is not str or not _unicode_safe(label)
+                                      or len(label.encode("utf-8")) > 2048):
+                raise FinanceCollectionError("provider_response_invalid")
+        account = value.get("organization_id")
+        if account is not None:
+            if type(account) is not str or expected_provider_account_fingerprint is None:
+                raise FinanceCollectionError("provider_response_invalid")
+            try:
+                observed_account = tenant_fingerprint(
+                    key, organization_id=query.organization_id,
+                    kind="provider-account", value=account,
+                )
+            except FinanceCollectionError:
+                raise FinanceCollectionError("provider_response_invalid") from None
+            if not hmac.compare_digest(observed_account, expected_provider_account_fingerprint):
+                raise FinanceCollectionError("provider_response_invalid")
         amount = _mapping(value.get("amount"))
         _exact_keys(amount, {"value", "currency"})
         native_amount, _, canonical_amount = _decimal_value(amount.get("value"), require_number=True)
@@ -1153,7 +1201,9 @@ def _cost_observation(
         native_quantity = None
         if quantity_value is not None:
             native_quantity, _, _ = _decimal_value(quantity_value, require_number=True)
-        quantity_unit = _quantity_unit(value.get("quantity_unit"), required=native_quantity is not None)
+        quantity_unit = _quantity_unit(
+            value.get("quantity_unit"), required=False, allowed=_OPENAI_QUANTITY_UNITS,
+        )
     else:
         _allowed_keys(
             value,
@@ -1271,31 +1321,36 @@ def _decimal_value(value: object, *, require_number: bool) -> tuple[str, Decimal
     ):
         raise FinanceCollectionError("numeric_domain_invalid")
     try:
-        decimal_value = Decimal(source)
+        with exact_context():
+            decimal_value = Decimal(source)
     except InvalidOperation:
         raise FinanceCollectionError("numeric_domain_invalid") from None
-    _validate_decimal(decimal_value)
-    return source, decimal_value, _decimal_text(decimal_value)
+    try:
+        canonical = (
+            openai_provider_decimal_text(decimal_value)
+            if require_number else _anthropic_decimal_text(decimal_value)
+        )
+    except FinanceValueError:
+        raise FinanceCollectionError("numeric_domain_invalid") from None
+    return source, decimal_value, canonical
 
 
 def _validate_decimal(value: Decimal) -> None:
-    if not value.is_finite() or not -_MONEY_BOUND < value < _MONEY_BOUND:
+    # Anthropic native and converted money retain the existing 18-place value
+    # and raw-scale domain. Tuple bounds precede formatting so validation never
+    # rounds or expands a huge exponent; no OpenAI exception applies here.
+    parts = value.as_tuple()
+    if not value.is_finite() or parts.exponent < -18 or len(parts.digits) > 36:
         raise FinanceCollectionError("numeric_domain_invalid")
-    text = format(value, "f")
-    unsigned = text.lstrip("-")
-    integer, dot, fractional = unsigned.partition(".")
-    if len(integer.lstrip("0")) > 18 or (
-        bool(dot) and len(fractional) > 18
-    ):
-        raise FinanceCollectionError("numeric_domain_invalid")
-    digits = value.as_tuple().digits
-    first_nonzero = next((index for index, digit in enumerate(digits) if digit), len(digits))
-    if len(digits[first_nonzero:]) > 36:
-        raise FinanceCollectionError("numeric_domain_invalid")
-    if value:
-        exponent = value.normalize().as_tuple().exponent
-        if not -18 <= exponent <= 17:
-            raise FinanceCollectionError("numeric_domain_invalid")
+    try:
+        decimal_text(value)
+    except FinanceValueError:
+        raise FinanceCollectionError("numeric_domain_invalid") from None
+
+
+def _anthropic_decimal_text(value: Decimal) -> str:
+    _validate_decimal(value)
+    return decimal_text(value)
 
 
 def _decimal_text(value: Decimal) -> str:
@@ -1509,11 +1564,21 @@ def _bucket_parts(
     value: Mapping[str, Any],
 ) -> tuple[str, str, tuple[dict[str, Any], ...]]:
     if spec.provider == "openai":
-        _exact_keys(value, {"object", "start_time", "end_time", "results"})
+        required = {"object", "start_time", "end_time", "results"}
+        if spec.source_kind == "cost":
+            _allowed_keys(value, required | {"start_time_iso", "end_time_iso"})
+            if not required.issubset(value):
+                raise FinanceCollectionError("provider_response_invalid")
+        else:
+            _exact_keys(value, required)
         if value.get("object") != "bucket":
             raise FinanceCollectionError("provider_response_invalid")
         start = _unix_time(value.get("start_time"))
         end = _unix_time(value.get("end_time"))
+        if spec.source_kind == "cost":
+            for field, canonical in (("start_time_iso", start), ("end_time_iso", end)):
+                if value.get(field) is not None and _cost_iso_time(value[field]) != _parse_time(canonical):
+                    raise FinanceCollectionError("provider_response_invalid")
     else:
         _exact_keys(value, {"starting_at", "ending_at", "results"})
         start_value = value.get("starting_at")
@@ -1526,6 +1591,34 @@ def _bucket_parts(
     if not isinstance(results, list) or len(results) > MAX_RECORDS:
         raise FinanceCollectionError("provider_response_invalid")
     return start, end, tuple(dict(_mapping(record)) for record in results)
+
+
+def _cost_iso_time(value: object) -> datetime:
+    # Numeric bucket epochs are authoritative integer seconds. Aliases may
+    # vary in display format, but no nonzero fraction may be truncated into
+    # agreement. A missing timezone means UTC only for this redundant metadata.
+    if type(value) is not str or len(value) > 64:
+        raise FinanceCollectionError("provider_response_invalid")
+    match = re.fullmatch(
+        r"(?P<clock>[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2})"
+        r"(?:\.(?P<fraction>[0-9]{1,9}))?"
+        r"(?P<offset>Z|z|[+-][0-9]{2}(?::?[0-9]{2})?)?", value,
+    )
+    if match is None or any(digit != "0" for digit in match.group("fraction") or ""):
+        raise FinanceCollectionError("provider_response_invalid")
+    zone = timezone.utc
+    offset = match.group("offset")
+    if offset is not None and offset not in {"Z", "z"}:
+        digits = offset[1:].replace(":", "")
+        hours, minutes = int(digits[:2]), int(digits[2:] or "0")
+        if hours > 23 or minutes > 59 or (offset[0] == "-" and hours == minutes == 0):
+            raise FinanceCollectionError("provider_response_invalid")
+        zone = timezone(timedelta(minutes=(hours * 60 + minutes) * (-1 if offset[0] == "-" else 1)))
+    try:
+        clock = _parse_time(match.group("clock").replace(" ", "T") + "Z", response=True)
+        return clock.replace(tzinfo=zone).astimezone(timezone.utc)
+    except (OverflowError, ValueError):
+        raise FinanceCollectionError("provider_response_invalid") from None
 
 
 def _decode_json_page(payload: bytes) -> Mapping[str, Any]:
@@ -1725,12 +1818,14 @@ def _currency(value: object) -> str:
     return value.upper()
 
 
-def _quantity_unit(value: object, *, required: bool) -> str | None:
+def _quantity_unit(
+    value: object, *, required: bool, allowed: frozenset[str] = _QUANTITY_UNITS,
+) -> str | None:
     if value is None:
         if required:
             raise FinanceCollectionError("provider_response_invalid")
         return None
-    if not isinstance(value, str) or value not in _QUANTITY_UNITS:
+    if not isinstance(value, str) or value not in allowed:
         raise FinanceCollectionError("provider_response_invalid")
     return value
 
