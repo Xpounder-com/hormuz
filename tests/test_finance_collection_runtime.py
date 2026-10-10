@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime, timezone
+import io
 import json
 from pathlib import Path
 import sqlite3
@@ -406,6 +408,102 @@ class _Opener:
 
 
 class FinanceCollectionTransportTests(unittest.TestCase):
+    def test_nonretryable_http_error_closes_response_before_failure(self):
+        value = query("openai.organization-costs.v1")
+        for status, code in ((401, "provider_unauthorized"), (403, "provider_unauthorized"), (400, "provider_response_invalid")):
+            with self.subTest(status=status), io.BytesIO(b"synthetic error body") as body:
+                error = HTTPError("https://api.openai.com", status, "synthetic", {}, body)
+                opener = _Opener([error])
+                with self.assertRaisesRegex(FinanceCollectionError, code):
+                    fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                        opener=opener, clock=lambda: 0, sleep=lambda _delay: self.fail("nonretryable error slept"))
+                self.assertTrue(body.closed)
+                self.assertEqual(len(opener.requests), 1)
+
+    def test_retryable_http_error_closes_response_before_sleep_and_next_attempt(self):
+        value = query("openai.organization-costs.v1")
+        payload = openai_page([openai_bucket(START, MIDDLE, [openai_cost()])])
+        for status in (429, 503):
+            with self.subTest(status=status), io.BytesIO(b"synthetic error body") as body:
+                error = HTTPError("https://api.openai.com", status, "synthetic", {"Retry-After": "3"}, body)
+                sleeps = []
+
+                def next_response(request):
+                    self.assertTrue(body.closed)
+                    return _Response(payload, request.full_url)
+
+                opener = _Opener([error, next_response])
+
+                def sleep(delay):
+                    self.assertTrue(body.closed)
+                    self.assertEqual(len(opener.requests), 1)
+                    sleeps.append(delay)
+
+                self.assertEqual(fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                    opener=opener, clock=lambda: 0, sleep=sleep), (payload,))
+                self.assertEqual(sleeps, [3.0])
+                self.assertEqual(len(opener.requests), 2)
+
+    def test_exhausted_http_errors_close_every_response_and_preserve_retry_bound(self):
+        value = query("openai.organization-costs.v1")
+        for status, code in ((429, "provider_rate_limited"), (503, "provider_unavailable")):
+            with self.subTest(status=status), ExitStack() as cleanup:
+                bodies = [cleanup.enter_context(io.BytesIO(b"synthetic error body")) for _ in range(3)]
+                errors = [HTTPError("https://api.openai.com", status, "synthetic", {}, body) for body in bodies]
+                opener = _Opener(errors)
+                sleeps = []
+
+                def sleep(delay):
+                    self.assertTrue(all(body.closed for body in bodies[:len(opener.requests)]))
+                    self.assertLess(len(opener.requests), 3)
+                    sleeps.append(delay)
+
+                with self.assertRaisesRegex(FinanceCollectionError, code):
+                    fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                        opener=opener, clock=lambda: 0, sleep=sleep)
+                self.assertTrue(all(body.closed for body in bodies))
+                self.assertEqual(sleeps, [1.0, 2.0])
+                self.assertEqual(len(opener.requests), 3)
+
+    def test_http_error_close_failure_preserves_public_error(self):
+        value = query("openai.organization-costs.v1")
+        with io.BytesIO(b"synthetic error body") as body:
+            error = HTTPError("https://api.openai.com", 403, "synthetic", {}, body)
+
+            def close():
+                body.close()
+                raise OSError("synthetic close failure")
+
+            with mock.patch.object(error, "close", side_effect=close) as close_error:
+                with self.assertRaisesRegex(FinanceCollectionError, "provider_unauthorized"):
+                    fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                        opener=_Opener([error]), clock=lambda: 0, sleep=lambda _delay: self.fail("unauthorized error slept"))
+                close_error.assert_called_once_with()
+                self.assertTrue(body.closed)
+
+        payload = openai_page([openai_bucket(START, MIDDLE, [openai_cost()])])
+        with io.BytesIO(b"synthetic error body") as body:
+            headers = {"Retry-After": "3"}
+            error = HTTPError("https://api.openai.com", 429, "synthetic", headers, body)
+            sleeps = []
+
+            def close():
+                headers.clear()
+                body.close()
+                raise OSError("synthetic close failure")
+
+            def sleep(delay):
+                self.assertTrue(body.closed)
+                sleeps.append(delay)
+
+            opener = _Opener([error, lambda request: _Response(payload, request.full_url)])
+            with mock.patch.object(error, "close", side_effect=close) as close_error:
+                self.assertEqual(fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                    opener=opener, clock=lambda: 0, sleep=sleep), (payload,))
+                close_error.assert_called_once_with()
+                self.assertEqual(sleeps, [3.0])
+                self.assertEqual(len(opener.requests), 2)
+
     def test_query_rejects_page_chain_that_cannot_fit_deadline_bound(self):
         with self.assertRaisesRegex(FinanceCollectionError, "invalid_request"):
             CollectionQuery(
