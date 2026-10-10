@@ -5,16 +5,16 @@ import { SiteFooter } from './components/SiteFooter';
 import { SiteHeader } from './components/SiteHeader';
 import { WorkPriorities } from './components/WorkPriorities';
 
-export const metadata = pageMetadata('Hormuz — Keep your agents. Choose your budget and pace.', 'Control supported AI traffic, understand what work consumes, and choose cost or speed priorities. Connect your existing coding agents to Hormuz.', '/');
+export const metadata = pageMetadata('Hormuz — Keep your agents. Choose your budget and pace.', 'For engineering teams managing growing AI bills across repositories. Connect documented coding-client paths, choose budget and pace, and inspect whole-work spending.', '/');
 
 export default function Home() {
   return <div className="landing-home ai-work-home"><SiteHeader active="platform" /><main id="content" tabIndex={-1}>
     <section className="landing-hero work-hero" id="top">
       <div className="work-hero-grid"><div className="landing-hero-copy">
         <h1>Keep your agents.<br /><em>Choose your budget and pace.</em></h1>
-        <p className="landing-deck">Bring your existing coding tools through Hormuz. Set the spending boundary, see what your work consumes, and keep control as AI usage grows.</p>
+        <p className="landing-deck">Engineering teams: keep control of growing AI bills across your repositories. Bring supported coding tools through Hormuz, set a spending boundary, and see what the whole job consumes.</p>
         <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/#examples')}>Try the examples <span aria-hidden="true">→</span></CampaignLink><CampaignLink className="button landing-secondary" href={sitePath('/evidence/')}>Inspect the evidence <span aria-hidden="true">→</span></CampaignLink></div>
-        <p className="landing-reassurance">Free software · Your provider accounts · Provider charges separate<br />AI Work requires qualification on your exact workflow.</p>
+        <p className="landing-reassurance">Free software · Your provider accounts · Provider charges separate<br />Documented protocol baselines: Codex 0.147.0 / OpenAI Responses; Claude Code 2.1.233 / Anthropic Messages.<br /><CampaignLink href={sitePath('/integrations/#clients')}>Check setup and coverage →</CampaignLink><br />AI Work requires qualification on your exact workflow.</p>
       </div><div className="work-passage" aria-label="The governed request path">
         <div><span>01</span><h2>Your agents</h2><p>Use a qualified client connection.</p></div><div><span>02</span><h2>Hormuz</h2><p>Identity, spending limits, and request controls before dispatch.</p></div><div><span>03</span><h2>Your providers</h2><p>Eligible requests continue; usage returns to the work record.</p></div>
       </div></div>

@@ -20,7 +20,7 @@ establish customer savings, model quality or faster completion.*
 OpenAI Responses, Chat Completions and Anthropic Messages are supported request
 paths. Applications need a configurable endpoint and work attachment. Closed
 applications and unrelated AI subscriptions are outside the gateway's controls.
-AI Work is a source candidate; the published v1.8.0 installers remain separate.
+AI Work is a 1.9.0 source candidate; the published v1.8.0 installers remain separate.
 
 <details>
 <summary>Current AI Work mechanics and recorded validation</summary>
