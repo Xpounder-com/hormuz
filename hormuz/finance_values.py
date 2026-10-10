@@ -16,6 +16,7 @@ PAGE_BYTES = 1048576
 JSON_DEPTH = 16
 JSON_MEMBERS = 65536
 _DECIMAL = re.compile(r"-?(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,18})?\Z")
+_OPENAI_PROVIDER_DECIMAL = re.compile(r"-?(?:0|[1-9][0-9]{0,17})(?:\.[0-9]+)?\Z")
 _CURRENCY = re.compile(r"[A-Za-z]{3}\Z")
 _ERRORS = frozenset({
     "finance_invalid_amount", "finance_invalid_source", "finance_source_limit_exceeded",
@@ -67,6 +68,39 @@ def decimal_text(value: object) -> str:
         raise FinanceValueError("finance_invalid_amount")
     result = format(Decimal((parts.sign, tuple(digits), exponent)), "f")
     return result.rstrip("0").rstrip(".") if "." in result else result
+
+
+def openai_provider_decimal_text(value: object) -> str:
+    """Exact OpenAI report value: 18 integer and 36 fractional places.
+
+    This policy is separate from configured rates/estimates and Anthropic.
+    Native source lexemes are retained by the collection caller; this returns
+    canonical text without rounding or ambient-context arithmetic.
+    """
+    if isinstance(value, str):
+        if len(value) > 128 or not _OPENAI_PROVIDER_DECIMAL.fullmatch(value):
+            raise FinanceValueError("finance_invalid_amount")
+        number = Decimal(value)
+    elif type(value) is Decimal:
+        number = value
+    else:
+        raise FinanceValueError("finance_invalid_amount")
+    if not number.is_finite():
+        raise FinanceValueError("finance_invalid_amount")
+    parts = number.as_tuple()
+    if len(parts.digits) > 128:
+        raise FinanceValueError("finance_invalid_amount")
+    if number.is_zero():
+        return "0"
+    digits, exponent = list(parts.digits), parts.exponent
+    while digits[-1] == 0:
+        digits.pop()
+        exponent += 1
+    # Validate before format(): a bounded lexeme can encode a huge exponent.
+    # 18 integer + 36 fractional places permit at most 54 coefficient digits.
+    if exponent < -36 or len(digits) + exponent > 18 or len(digits) > 54:
+        raise FinanceValueError("finance_invalid_amount")
+    return format(Decimal((parts.sign, tuple(digits), exponent)), "f")
 
 
 def currency_code(value: object) -> str:

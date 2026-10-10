@@ -370,6 +370,7 @@ def _collect_or_import(
                 pages,
                 fingerprint_key=key,
                 fingerprint_key_version=args.fingerprint_key_version,
+                expected_provider_account_fingerprint=prepared.provider_account_fingerprint,
             )
         else:
             payload = _read_bounded(Path(args.file), 16_777_216)
@@ -378,6 +379,7 @@ def _collect_or_import(
                 payload,
                 fingerprint_key=key,
                 fingerprint_key_version=args.fingerprint_key_version,
+                expected_provider_account_fingerprint=prepared.provider_account_fingerprint,
             )
         return repository.publish_collection(principal, prepared, collection)
     except _TerminalFailure as failure:

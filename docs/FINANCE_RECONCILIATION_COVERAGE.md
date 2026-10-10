@@ -108,6 +108,14 @@ The builder accepts at most 31 canonical daily buckets and 10,000 observations
 or attempts. It checks that coverage and rows belong to the selected snapshot,
 that counts match, and that duplicate observations or attempts cannot be summed.
 It uses exact decimal arithmetic with canonical bounded amounts. An explicit
+OpenAI Costs amount follows the versioned
+[provider decimal policy extension v1](finance-openai-provider-decimal-policy-v1.json)
+through provider subtotals and account-comparable variance: 36 fractional
+places, while configured estimates and Anthropic remain at 18. The owned
+96-digit trapped context preserves exact sums/differences; a subtotal or
+variance with absolute magnitude at least `10^18` remains unavailable even if
+every input row is valid. No rounding, clipping or invoice-finality change
+occurs. An explicit
 `no_observation` bucket and a missing bucket are counted separately; neither
 becomes numeric zero. A selected row in another currency fails closed. Gateway
 attempts in another currency remain in the denominator but are excluded from
