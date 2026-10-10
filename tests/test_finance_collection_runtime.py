@@ -280,6 +280,48 @@ class FinanceCollectionNormalizationTests(unittest.TestCase):
         self.assertNotEqual(paged.page_chain_digest, combined.page_chain_digest)
         self.assertNotIn("opaque-secret-cursor", repr(paged))
 
+    def test_openai_cost_ungrouped_nullable_metadata_preserves_identity(self):
+        value = query("openai.organization-costs.v1")
+        baseline = normalize_collection_pages(
+            value,
+            (openai_page([openai_bucket(START, MIDDLE, [openai_cost()])]),),
+            fingerprint_key=KEY,
+            fingerprint_key_version=1,
+        )
+        self.assertEqual(value.profile.group_by, ("project_id", "line_item", "api_key_id"))
+        for metadata in ({"user_id": None}, {"api_source": None}, {"user_id": None, "api_source": None}):
+            with self.subTest(metadata=metadata):
+                result = normalize_collection_pages(
+                    value,
+                    (openai_page([openai_bucket(START, MIDDLE, [openai_cost(**metadata)])]),),
+                    fingerprint_key=KEY,
+                    fingerprint_key_version=1,
+                )
+                validate_normalized_collection(result)
+                self.assertEqual(result.cost_observations, baseline.cost_observations)
+                self.assertEqual(result.coverage, baseline.coverage)
+                self.assertEqual(result.content_digest, baseline.content_digest)
+                self.assertEqual(result.page_chain_digest, baseline.page_chain_digest)
+                self.assertEqual(result.record_count, 1)
+                self.assertFalse(result.cost_observations[0].provider_final)
+                self.assertFalse(result.cost_observations[0].invoice_final)
+
+    def test_openai_cost_ungrouped_metadata_and_unknown_fields_fail_closed(self):
+        value = query("openai.organization-costs.v1")
+        for field in ("user_id", "api_source", "unknown_metadata"):
+            for item in (None, "private-metadata-sentinel", "api", True, 0, [], {}):
+                if field != "unknown_metadata" and item is None:
+                    continue
+                with self.subTest(field=field, item=item):
+                    with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$") as caught:
+                        normalize_collection_pages(
+                            value,
+                            (openai_page([openai_bucket(START, MIDDLE, [openai_cost(**{field: item})])]),),
+                            fingerprint_key=KEY,
+                            fingerprint_key_version=1,
+                        )
+                    self.assertNotIn("private-metadata-sentinel", str(caught.exception))
+
     def test_empty_bucket_is_coverage_not_numeric_zero(self):
         value = query("openai.organization-usage-completions.v1")
         result = normalize_collection_pages(

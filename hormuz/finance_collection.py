@@ -1122,11 +1122,16 @@ def _cost_observation(
                 "line_item",
                 "project_id",
                 "api_key_id",
+                "user_id",
+                "api_source",
                 "quantity",
                 "quantity_unit",
             },
         )
         if value.get("object") != "organization.costs.result":
+            raise FinanceCollectionError("provider_response_invalid")
+        # This fixed profile does not group by either optional dimension.
+        if value.get("user_id") is not None or value.get("api_source") is not None:
             raise FinanceCollectionError("provider_response_invalid")
         amount = _mapping(value.get("amount"))
         _exact_keys(amount, {"value", "currency"})
