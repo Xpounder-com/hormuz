@@ -98,8 +98,8 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
         <label>Your name<input name="name" autoComplete="name" required maxLength={100} /></label>
         <label>Work email<input name="email" type="email" autoComplete="email" required maxLength={254} /></label>
         <label>Organization<input name="organization" autoComplete="organization" required maxLength={150} /></label>
-        <label>Your agents, spending concern, and priority<textarea name="workflow" required maxLength={1200} rows={4} aria-describedby="lead-safety" placeholder="For example: Codex across several repositories, API-billed usage, and a monthly spending limit; speed matters within that limit." /></label>
-        <p className="field-hint" id="lead-safety">Do not include credentials, prompts, customer data, or other secrets.</p>
+        <label>Your team’s workflow and operating needs<textarea name="workflow" required maxLength={1200} rows={4} aria-describedby="lead-safety" placeholder="For example: five developers using Codex with our OpenAI API account; around 2,000 requests/month. We want hosting and have a named team administrator." /></label>
+        <p className="field-hint" id="lead-safety">Include team size, agents and providers, expected traffic, and who operates the setup. For a managed site, include the site and device count. Do not include credentials, prompts, customer data, or other secrets.</p>
         <label>Timing <span>(optional)</span><input name="timeframe" maxLength={100} placeholder="For example: this quarter" /></label>
         <div className="lead-trap" aria-hidden="true"><label>Leave this empty<input name="_gotcha" tabIndex={-1} autoComplete="off" /></label></div>
         {campaignSource(search) && <label className="checkbox-label"><input type="checkbox" checked={includeSource} onChange={e => setIncludeSource(e.target.checked)} />Include campaign source with my application: {campaignSource(search)}</label>}

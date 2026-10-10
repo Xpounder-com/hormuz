@@ -45,6 +45,23 @@ test('expired, malformed and excessive-duration saved preferences cannot enable 
   }
 });
 
+test('an earlier Analytics opt-in cannot authorize pricing and service-interest events', () => {
+  const win = browser();
+  win.storage.set('hormuz.analytics-consent.v1', JSON.stringify({ choice: 'allowed', expires: Date.now() + CONSENT_DURATION }));
+  assert.equal(readAnalyticsConsent(win), 'unset');
+  assert.equal(trackAnalyticsEvent('pricing_open', 'comparison', win, id), false);
+  assert.equal(trackAnalyticsEvent('inquiry_open', 'managed', win, id), false);
+  assert.deepEqual(win.scripts, []);
+  assert.equal(win.dataLayer, undefined);
+
+  saveAnalyticsConsent('allowed', win);
+  const returning = browser();
+  for (const [key, value] of win.storage) returning.storage.set(key, value);
+  assert.equal(readAnalyticsConsent(returning), 'allowed');
+  assert.equal(trackAnalyticsEvent('pricing_open', 'comparison', returning, id), true);
+  assert.equal(returning.scripts.length, 1);
+});
+
 test('page context keeps bounded campaign labels while excluding form data, fragments, and referrer paths', () => {
   const win = browser({ url: 'https://usehormuz.github.io/contact/?utm_source=x&utm_medium=paid_social&utm_campaign=hormuz_2026&utm_content=ad_42&email=private%40example.com&twclid=private&workflow=secret#private' });
   assert.deepEqual(analyticsContext(win), { page_location: 'https://usehormuz.github.io/contact/', page_title: 'Hormuz /contact/', page_referrer: 'https://t.co/', campaign_source: 'x', campaign_medium: 'paid_social', campaign_name: 'hormuz_2026', campaign_content: 'ad_42' });
@@ -107,4 +124,30 @@ test('link measurement identifies allowed destinations without passing URLs or a
   assert.deepEqual(trackedDestination('/docs/#mac'), ['install_click', 'setup_guide']);
   assert.deepEqual(trackedDestination('https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip'), ['install_click', 'mac_download']);
   for (const href of ['mailto:someone@example.com', 'https://other.example/docs/', '/privacy/', 'javascript:alert(1)']) assert.equal(trackedDestination(href), null);
+});
+
+test('the free-to-paid funnel requires consent and excludes private data', () => {
+  const paths = [
+    ['/plans/#offers', ['pricing_open', 'comparison']],
+    ['/plans/#cloud', ['pricing_open', 'cloud']],
+    ['/plans/#managed', ['pricing_open', 'managed']],
+    ['/plans/?email=private@example.com#private-value', ['pricing_open', 'comparison']],
+    ['/contact/?interest=cloud&workflow=private', ['inquiry_open', 'cloud']],
+    ['/contact/?interest=managed', ['inquiry_open', 'managed']],
+    ['/contact/?interest=private-value', ['inquiry_open', 'contact']],
+  ];
+  const win = browser();
+  for (const [href, expected] of paths) {
+    assert.deepEqual(trackedDestination(href), expected);
+    assert.equal(trackAnalyticsEvent(...expected, win, id), false);
+  }
+  assert.equal(win.dataLayer, undefined);
+  saveAnalyticsConsent('allowed', win);
+  assert.equal(trackAnalyticsEvent('pricing_open', 'comparison', win, id), true);
+  assert.equal(trackAnalyticsEvent('inquiry_open', 'cloud', win, id), true);
+  assert.equal(trackAnalyticsEvent('inquiry_open', 'managed', win, id), true);
+  assert.equal(trackAnalyticsEvent('inquiry_open', 'private-value', win, id), false);
+  assert.deepEqual(commands(win).filter(args => args[0] === 'event').map(args => [args[1], args[2].action]), [
+    ['page_view', undefined], ['pricing_open', 'comparison'], ['inquiry_open', 'cloud'], ['inquiry_open', 'managed'],
+  ]);
 });
