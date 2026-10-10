@@ -52,16 +52,16 @@ export function SiteHeader({
               </CampaignLink>
             ))}
             <CampaignLink href={sitePath('/integrations/')} aria-current={active === 'integrations' ? 'page' : undefined}>Integrations</CampaignLink>
-            <CampaignLink className="mobile-pilot-cta" href={sitePath('/contact/?interest=work')}>Discuss your workflow ↗</CampaignLink>
+            <CampaignLink className="mobile-pilot-cta" href={sitePath('/docs/')}>Start free →</CampaignLink>
           </div>
         </details>
 
         <CampaignLink
           className="nav-cta"
-          href={sitePath('/contact/?interest=work')}
+          href={sitePath('/docs/')}
         >
-          Discuss workflow
-          <span aria-hidden="true">↗</span>
+          Start free
+          <span aria-hidden="true">→</span>
         </CampaignLink>
       </nav>
     </header>

@@ -13,6 +13,10 @@
 .work-passage .work-passage-note { font-size:12px; margin-left:18px; }
 .ai-work-home .hero-owner { position: relative; width: min(100% - 64px,1200px); margin:45px auto 0; }
 .work-journey { padding-top:80px; }
+.sme-growth { padding-top:60px; }
+.sme-growth .work-steps { margin-bottom:28px; }
+.sme-growth .sme-path-price { color:var(--lp-ink); }
+.sme-path-price strong { font-size:30px; letter-spacing:-.04em; }
 .work-steps { list-style:none; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:36px; padding:0; margin:44px 0 60px; }
 .work-steps li { border-top:1px solid var(--lp-line); padding-top:22px; }
 .work-steps h3 { font-size:25px; letter-spacing:-.04em; margin:15px 0; }
