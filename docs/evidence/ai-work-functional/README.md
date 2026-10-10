@@ -7,7 +7,8 @@ savings, model quality, live payments, a signed distribution or production
 deployment readiness.
 
 The bounded gateway proof and browser journey were regenerated from source
-`bd0adf0562cea6eb2a6f412537ebb9b269b0ce50` after the HTTP-error response cleanup.
+`e9e551bec46bb1e5049ba318761696dcd0048097` after the HTTP-error response cleanup
+and correction of the mixed estimated/provider-confirmed cost labels.
 Their 28 source hashes identify the executed runtime. The package and installed
 SDK receipts retain their earlier recorded source and do not qualify this cleanup.
 
