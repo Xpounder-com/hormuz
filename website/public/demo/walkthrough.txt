@@ -12,13 +12,17 @@ Compare Standard (16,000 output tokens, redact configured secrets), Strict (4,00
 The actual setting is On/Off per device and connection, default Off. A complete 127-path synthetic tool block becomes 1,679 bytes from 3,108 and restores every line, duplicate, and order. It is structural encoding, not a prose summary. Small, unknown, or ineligible results pass through. See compaction-example.json for both full forms.
 
 4. MY SETUP
-The Mac app connects to an existing gateway. Gateway operators configure provider accounts, unique identities, and policies. Codex/OpenAI is live-qualified for 1.2; the Claude Code/Anthropic protocol exists but same-candidate live qualification is open. Ollama Responses/Messages are candidate integrations, not verified support.
+The Mac app connects to your team’s configured gateway. Your administrator sets up provider accounts, individual identities, and policies. Live-provider tests for the 1.2 release cover OpenAI only; live Claude Code and Anthropic use has not been verified on the newer source version. An end-to-end Ollama integration has not been verified. Check your client version, provider, streaming, and tool behavior before connecting your team.
 
 INSTALL FREE: https://usehormuz.github.io/docs/
-PAID ENGAGEMENTS: https://usehormuz.github.io/enterprise/
+COMPARE FREE SOFTWARE, CLOUD, AND MANAGED SITES: https://usehormuz.github.io/plans/#offers
 EXAMPLE DATA: https://usehormuz.github.io/demo/customer-example.json
 
 PRACTICAL QUESTIONS
+
+Setup: Can I use Hormuz on my own Mac without a team gateway?
+Yes. The free Personal Optimizer runs locally on a supported Apple Silicon Mac with pinned Codex CLI and your own provider API credential. It needs no organization or Hormuz account. Its initial automatic optimization is narrow.
+https://usehormuz.github.io/docs/#personal
 
 Setup: Does the Mac app include a hosted gateway?
 The Mac app connects your coding client to a configured Hormuz gateway. Ask your administrator for its URL and your identity or invitation. Running your own gateway requires provider accounts, credentials, model rates, and identity/policy configuration.
@@ -33,7 +37,7 @@ Configure a unique member identity, generate the supported client settings, sele
 https://usehormuz.github.io/docs/#first-request
 
 Setup: Which computers and client versions can I use?
-The 1.2.0 Mac archive supports Apple Silicon on macOS 14+ and includes its helper and tokenizer resources. Source installation requires Python 3.11+. Codex 0.147.0 and Claude Code 2.1.233 are documented protocol baselines, not a promise about every newer client.
+The 1.8.0 Mac archive supports Apple Silicon on macOS 14+ and includes its helper and tokenizer resources. Source installation requires Python 3.11+. Codex 0.147.0 and Claude Code 2.1.233 are documented protocol baselines, not a promise about every newer client.
 https://usehormuz.github.io/integrations/#clients
 
 Setup: Where do company provider credentials live?
@@ -57,7 +61,7 @@ Lower scopes only tighten ancestor controls. An Engineering team policy cannot g
 https://usehormuz.github.io/demo/#policy
 
 Policy: How do I check a policy before applying it?
-Create and validate a candidate locally, then compare and preview using the documented administrative commands. Validation makes no network or policy mutations. A preview depends on its supplied policy, usage, and reservation evidence; incomplete inputs are not proof of production admission.
+Create and validate a policy file locally, then compare and preview using the administrative commands. Validation changes no active policy. Preview uses current monthly usage without reserving budget. Concurrent requests and reservations can still change whether a later live request is allowed.
 https://usehormuz.github.io/demo/#policy
 
 Policy: Can I undo a change? What about requests already running?
@@ -85,11 +89,11 @@ No. It is a configured-rate-card estimate for captured requests. Provider discou
 https://usehormuz.github.io/demo/#spend
 
 Analytics: What are committed, pending, uncertain, and available amounts?
-Committed is the terminal configured-rate estimate. Pending reserves for requests without a terminal outcome. Uncertain holds room for ambiguous outcomes. Available subtracts all three from the active plan. The internal work-budget report is a preview; it has no public CLI or HTTP route yet.
+Committed is the terminal configured-rate estimate. Pending reserves for requests without a terminal outcome. Uncertain holds room for ambiguous outcomes. Available subtracts all three from the active plan. The work-budget report shown here is a preview and is not yet available through a public CLI or HTTP route.
 https://usehormuz.github.io/demo/#spend
 
 Analytics: Can managers see work scopes and plan changes?
-The internal work-budget implementation tracks work-scope attribution, active plan and window, amount changes, and request-to-plan bindings. Its report distinguishes comparable changes from changes in currency, scope, or period. Delivery through a public manager interface is still open.
+The work-budget preview shows work scope, the active plan and period, and plan changes. This report is not yet available in a public manager interface. For current team, person, model, and provider usage, use the administrator CLI.
 https://usehormuz.github.io/demo/#spend
 
 Analytics: Will I see all company AI use and employee productivity?
@@ -101,7 +105,7 @@ Eligible structure can store repeated prefixes or keys once while preserving exa
 https://usehormuz.github.io/demo/#compaction
 
 Context: What can I configure for compaction?
-The actual control is On/Off for one saved connection on one device, default Off. There is no aggressiveness slider. Internal size, reconstruction, byte-growth, and dual-tokenizer checks select eligible transformations. On means it may try; some results stay unchanged.
+The actual control is On/Off for one saved connection on one device, default Off. There is no aggressiveness slider. Hormuz checks size, exact reconstruction, byte growth, and token counts before selecting a transformation. On means it may try; some results stay unchanged.
 https://usehormuz.github.io/demo/#compaction
 
 Context: Which tool results are eligible?
@@ -121,11 +125,11 @@ It applies to the next request; in-flight work retains its starting setting. Rev
 https://usehormuz.github.io/demo/#compaction
 
 Compatibility: Does it work with Ollama?
-Ollama documents non-stateful OpenAI Responses and Anthropic Messages. Hormuz has configurable upstreams for those protocols, making these candidate integrations. End-to-end streaming, tool use, history, token accounting, and policy behavior still need qualification before claiming support.
+Ollama documents non-stateful OpenAI Responses and Anthropic Messages. Hormuz can configure upstreams for those protocols, but an end-to-end Ollama integration has not been verified. Check streaming, tools, history, token accounting, and policy behavior with your setup before using it.
 https://usehormuz.github.io/demo/#setup
 
 Compatibility: Does “OpenAI-compatible” mean every endpoint works?
-No. Hormuz routes Responses, its compaction relay, Anthropic Messages, and token counting. It does not expose Chat Completions or native Ollama /api/chat and /api/generate. Other clients, servers, and adapters require an exact protocol check.
+No. AI Work supports OpenAI Responses, OpenAI-compatible Chat Completions at /v1/chat/completions, and Anthropic Messages; Hormuz also provides its compaction relay and token counting. It does not expose Ollama’s native /api/chat and /api/generate routes. Test your exact client version, model, streaming, and tool behavior before connecting your team.
 https://usehormuz.github.io/integrations/#protocols
 
 Compatibility: Can a remote gateway use the Ollama on my laptop?
@@ -145,7 +149,7 @@ The $999 appliance includes enclosure, cooling, power supply, installed gateway 
 https://usehormuz.github.io/enterprise/#onboarding
 
 Billing: When will appliances be available?
-Appliances are coming soon, with rollout planned for early 2027. The date is a target, not a guaranteed shipping date. Hardware and workload qualification must pass before delivery. Cloud is accepting inquiries; compatibility, capacity, and activation are confirmed before service payment. An inquiry creates no gateway, subscription, or paid reservation.
+Appliances are coming soon, with rollout planned for early 2027. The date is a target, not a guaranteed shipping date. We verify the hardware and support for your workflow before delivery. Cloud is accepting inquiries; compatibility, capacity, and activation are confirmed before service payment. An inquiry creates no gateway, subscription, or paid reservation.
 https://usehormuz.github.io/enterprise/#reserve
 
 Billing: How do I reserve an appliance?
@@ -157,7 +161,7 @@ Yes. Cancel anytime before fulfillment for a full refund. Email mehrdadz@neurali
 https://usehormuz.github.io/enterprise/#reserve
 
 Billing: Does a managed site pay for Cloud separately?
-No. The $499 monthly site fee includes one associated Cloud workspace. There is no additional Cloud subscription for that workspace. Standalone Cloud is $49.99 per workspace per month. Model-provider usage remains the customer’s bill.
+No. The $499 monthly site fee includes one associated Cloud workspace. There is no additional Cloud subscription for that workspace. Standalone Cloud is $49.99 per workspace per month. You pay your model providers separately.
 https://usehormuz.github.io/plans/#details
 
 Billing: What is the managed-site support allowance?
@@ -165,5 +169,5 @@ A managed site includes up to 1 hour of remote assistance per billing month for 
 https://usehormuz.github.io/enterprise/#support
 
 Billing: How do sites, renewal, and cancellation work?
-A site is one agreed physical location or isolated customer deployment. Additional appliances in that site do not create another site subscription; capacity must still be confirmed. Cloud and managed sites renew monthly until canceled. Email the owner before the next renewal with your subscription reference. The current paid period, appliance ownership, and free software access remain available.
+A site is one agreed physical location or isolated customer deployment. Additional appliances in that site do not create another site subscription; capacity must still be confirmed. Cloud and managed sites renew monthly until canceled. Contact Hormuz before the next renewal with your subscription reference. The current paid period, appliance ownership, and free software access remain available.
 https://usehormuz.github.io/enterprise/#cancel

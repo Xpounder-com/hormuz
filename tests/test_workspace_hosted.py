@@ -89,6 +89,15 @@ class WorkspaceHostedHTTPTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/workspace", headers={"Host": "unknown.customer.com"})[0], 400)
         self.assertEqual(self.request("POST", "/v1/responses", body={})[0], 503)
 
+    def test_work_entry_uses_provider_free_provisioning_without_bypassing_ingress(self):
+        status, headers, body = self.request("GET", "/work")
+        self.assertEqual((status, headers["Location"], body), (303, "/workspace", b""))
+        self.assertEqual(self.request("GET", "/work", headers={"X-Hormuz-Ingress-Credential": "forged"})[0], 401)
+        self.assertEqual(self.request("GET", "/work", headers={"Host": "unknown.customer.com"})[0], 400)
+        self.assertEqual(self.request("GET", "/work?return=https://foreign.example.test")[0], 400)
+        self.assertEqual(self.request("GET", "/v1/work/state")[0], 503)
+        self.assertIsNone(self.gateway.work_runtime)
+
     def test_private_hop_host_and_provider_boundaries(self):
         status, _, body = self.request("GET", "/health")
         self.assertEqual(status, 200)

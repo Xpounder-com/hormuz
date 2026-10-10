@@ -198,6 +198,7 @@ jobs:
           codesign --verify --strict clients/macos/dist/Hormuz.app
           plutil -lint clients/macos/dist/Hormuz.app/Contents/Info.plist
       - name: Prove the Apple Silicon distribution-shaped package
+        id: package
         run: >-
           ./script/package_macos_release.sh
           --ad-hoc
@@ -211,6 +212,7 @@ jobs:
         with:
           node-version: "24"
       - name: Verify packaged Rust relay with pinned official clients
+        id: official_clients
         run: |
           set -euo pipefail
           npm install --prefix "$RUNNER_TEMP/hormuz-native-clients" \
@@ -234,8 +236,10 @@ jobs:
             HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY="$RUNNER_TEMP/hormuz-native-clients/node_modules/.bin" \
             python -m unittest -v tests.test_native_macos_relay
       - name: Test distribution archive contracts
+        id: archive_contracts
         run: python -m unittest tests.test_macos_distribution_verifier tests.test_macos_pilot_evidence
       - name: Test local optimizer and relay contracts
+        id: local_contracts
         run: >-
           python -m unittest
           tests.test_compaction
@@ -245,10 +249,84 @@ jobs:
           tests.test_client_relay
           tests.test_context_relay_bridge
       - name: Verify native client against the local gateway
+        id: local_gateway
         run: >-
           python tools/verify_macos_client.py
           --probe clients/macos/.build/debug/HormuzFixtureProbe
           --output "$RUNNER_TEMP/hormuz-macos-local-proof.json"
+      - name: Bind the ad-hoc candidate to source and observed test outcomes
+        id: candidate
+        if: always() && steps.package.outcome == 'success'
+        env:
+          HORMUZ_PACKAGE_DIRECTORY: ${{ runner.temp }}/hormuz-macos-package
+          HORMUZ_CHECKOUT_COMMIT: ${{ github.sha }}
+          HORMUZ_CANDIDATE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          HORMUZ_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HORMUZ_JOB_STATUS: ${{ job.status }}
+          HORMUZ_OFFICIAL_CLIENT_OUTCOME: ${{ steps.official_clients.outcome }}
+          HORMUZ_ARCHIVE_CONTRACT_OUTCOME: ${{ steps.archive_contracts.outcome }}
+          HORMUZ_LOCAL_CONTRACT_OUTCOME: ${{ steps.local_contracts.outcome }}
+          HORMUZ_LOCAL_GATEWAY_OUTCOME: ${{ steps.local_gateway.outcome }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          package = Path(os.environ["HORMUZ_PACKAGE_DIRECTORY"])
+          archives = list(package.glob("Hormuz-*-local-validation.zip"))
+          if len(archives) != 1 or not archives[0].is_file() or archives[0].is_symlink():
+              raise SystemExit("candidate_archive_unavailable")
+          archive = archives[0]
+          metadata = json.loads((package / "package-metadata.json").read_text())
+          with archive.open("rb") as stream:
+              archive_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+          if metadata.get("mode") != "ad-hoc" or metadata.get("distribution_ready") is not False:
+              raise SystemExit("candidate_mode_invalid")
+          if metadata.get("archive_sha256") != archive_digest:
+              raise SystemExit("candidate_archive_digest_mismatch")
+          def revision(ref):
+              result = subprocess.run(["git", "rev-parse", "--verify", ref],
+                  capture_output=True, text=True, timeout=5)
+              return result.stdout.strip() if result.returncode == 0 else None
+          checkout = revision("HEAD")
+          if checkout != os.environ["HORMUZ_CHECKOUT_COMMIT"]:
+              raise SystemExit("candidate_checkout_mismatch")
+          for field, expected in (("source_commit", checkout),
+                  ("workflow_run_url", os.environ["HORMUZ_RUN_URL"])):
+              if field in metadata and metadata[field] != expected:
+                  raise SystemExit("candidate_metadata_provenance_mismatch")
+          head = os.environ["HORMUZ_CANDIDATE_HEAD"]
+          proof = {
+              "schema_id": "hormuz.macos-ad-hoc-candidate", "schema_version": 1,
+              "checkout_commit": checkout, "checkout_tree": revision("HEAD^{tree}"),
+              "candidate_head": head, "candidate_tree_if_available": revision(head + "^{tree}"),
+              "workflow_run_url": os.environ["HORMUZ_RUN_URL"],
+              "package_metadata_has_source_provenance": "source_commit" in metadata,
+              "archive": archive.name, "archive_sha256": archive_digest,
+              "executable_sha256": metadata["executable_sha256"],
+              "native_relay_sha256": metadata["native_relay_sha256"],
+              "context_helper_backend_sha256": metadata["context_helper_backend_sha256"],
+              "job_status_at_capture": os.environ["HORMUZ_JOB_STATUS"],
+              "step_outcomes": {name: os.environ[variable] for name, variable in (
+                  ("official_clients", "HORMUZ_OFFICIAL_CLIENT_OUTCOME"),
+                  ("archive_contracts", "HORMUZ_ARCHIVE_CONTRACT_OUTCOME"),
+                  ("local_contracts", "HORMUZ_LOCAL_CONTRACT_OUTCOME"),
+                  ("local_gateway", "HORMUZ_LOCAL_GATEWAY_OUTCOME"))},
+              "distribution_ready": False, "customer_release_qualified": False,
+              "scope": "Ad-hoc candidate bytes only; native outcomes and final job result require separate review."
+          }
+          (package / "candidate-provenance.json").write_text(json.dumps(proof, indent=2) + "\n")
+          PY
+      - name: Retain the ad-hoc candidate for inspection
+        if: always() && steps.candidate.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-macos-ad-hoc-candidate-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/hormuz-macos-package/Hormuz-*-local-validation.zip
+            ${{ runner.temp }}/hormuz-macos-package/package-metadata.json
+            ${{ runner.temp }}/hormuz-macos-package/candidate-provenance.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain metadata-only verification evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

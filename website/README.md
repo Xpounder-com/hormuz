@@ -4,8 +4,17 @@ Static Next.js export for **https://usehormuz.github.io/**. This repository
 remains the authoritative website source; the dedicated
 [`usehormuz/usehormuz.github.io`](https://github.com/usehormuz/usehormuz.github.io)
 repository pins a reviewed source commit for publication.
-The site presents free software, planned Cloud, appliances,
-scoped onboarding, and managed sites alongside documentation, demos, and community.
+The primary journey serves small and medium engineering, agency, and IT teams
+using existing supported agents: start with free software, choose Cloud when
+hosting is needed, or discuss a managed site for defined operating help. The
+home page and `/plans/` make the three paths explicit; managed sites include
+their associated Cloud workspace. Application, traffic, retention, capacity,
+monitoring coverage, and activation are confirmed before paid checkout. The
+budget and pace controls, `/evidence/`, and `/work/` remain part of the journey. The
+primary `/demo/` shows the actual synthetic AI Work recording, with compaction
+and policy mechanics in technical disclosures. Pricing, appliance
+reservations, scoped onboarding, cancellation, and managed-site terms remain
+reachable without changing their approved prices.
 The single price catalog is `lib/pricing.json`: software $0, Cloud
 $49.99/workspace/month, appliance $999, appliance with scoped onboarding $1,499,
 and managed site $499/site/month.
@@ -84,8 +93,12 @@ The dedicated website repository checks out an exact 40-character source commit
 from this public repository, installs locked dependencies, and runs the website
 tests, build, type check, and export verifier before publishing the root export.
 It does **not** run `prepare:legacy`. No cross-repository write token is needed.
-The artifact contains the public `/site-source.json` pin. A separate read-only
-CI job verifies the live pin, nine routes, metadata, and four downloads after
+The artifact contains the public `/site-source.json` pin. The validated revision
+is passed as `NEXT_PUBLIC_HORMUZ_SOURCE_REVISION` to both build and export
+verification; source-document links use that same immutable commit. Local builds
+without this variable use main, while invalid or mutable values fail. Stable
+download version labels are independent of the website source pin. A separate read-only
+CI job verifies the live pin, the complete route inventory, metadata, and five downloads after
 deployment, without giving verification code Pages or OIDC write permissions.
 Update its source pin through a reviewed PR after the corresponding product
 source change passes review and CI; source changes do not silently republish the
@@ -93,7 +106,7 @@ canonical website.
 
 For the initial migration, publish and verify the new root site from the reviewed
 migration commit **before** merging the product change that enables old-address
-redirects. Check all nine routes, recordings, contact draft behavior, PDFs, PPTX,
+redirects. Check all known routes, recordings, contact draft behavior, PDFs, PPTX,
 mobile navigation, and metadata. Then merge through the protected workflow,
 verify the old route redirects and downloads, and update inbound repository links.
 An unavailable organization or unverified target is a cutover blocker, not a
@@ -187,3 +200,50 @@ event definitions and account-side activation checks.
 
 Figma handoff: https://www.figma.com/design/Ax2HWqdWzVnMANEOmB5Z4z
 Public author: Mehrdad Zaker · mehrdadz@neuralint.io.
+
+## AI Work entry and evidence
+
+`/work/` is a static entry page, not a cross-origin bearer-token application.
+Set `HORMUZ_DASHBOARD_ORIGIN` at build time to the verified HTTPS gateway origin;
+the entry opens its authenticated `/work` route. The legacy
+`NEXT_PUBLIC_HORMUZ_DASHBOARD_ORIGIN` is still accepted. Unsafe paths, credentials,
+query strings, static Pages origins, and conflicting settings fail the build.
+When no destination is configured, the page explains how to use an existing
+organization gateway and offers a workflow discussion. Never put tokens or
+private paths or workspace credentials in these public settings.
+
+`/evidence/` presents real provider-free executions with synthetic inputs,
+original transcripts, source provenance, and qualification boundaries. It also
+plays the actual authenticated journey against local synthetic identity, provider,
+Stripe and signed GitHub fixtures. The current recording passed 12 checks with
+three simulated provider responses and zero external network calls or real
+payments. Its estimate is calculated from captured fixture usage and configured
+synthetic rates; no amount is seeded. These
+are functional control demonstrations, not customer savings or completion-time
+results. New AI Work proof must come from actual recorded runtime execution;
+never populate this page with invented output. The public AI Work receipt at
+`public/downloads/ai-work-proof.json` must be byte-for-byte identical to the
+executed `docs/evidence/ai-work-functional/receipt.json`; recopy it after any
+regenerated execution before building. It records synthetic configured estimates
+and local timings, not customer savings or production model quality.
+
+Both execution receipts identify the same 27 gateway, billing, identity, CLI,
+UI and runner files by SHA-256. Website tests enforce exact current source hashes
+and byte-identical public recording, poster and browser-check copies. Reproduce
+the browser journey from the source root with installed test dependencies,
+Playwright and Chrome:
+
+```sh
+HORMUZ_QA_PYTHON=/path/to/project-venv/bin/python \
+HORMUZ_QA_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs \
+node website/scripts/ai-work-browser-qa.mjs
+```
+
+See [the browser validation guide](../docs/AI_WORK_BROWSER_VALIDATION.md) for
+interception and qualification boundaries. Regenerate the browser run and gateway
+receipt after source changes, then copy their public artifacts before building.
+
+The cost/speed/outcome chooser on the public home page only explains the policy. Live
+work creation and preference changes happen on the authenticated gateway.
+Website analytics measure public evidence/entry clicks with bounded labels;
+they do not report private work identities, descriptions, keys, or repositories.

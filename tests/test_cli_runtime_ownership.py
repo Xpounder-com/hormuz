@@ -256,6 +256,10 @@ if loaded:
             "members": {"list": None, "disable": None, "reinvite": None},
             "invitations": {"list": None, "revoke": None}, "events": None,
         })
+        # Preserve every legacy command; the opt-in work surface is additive.
+        self.assertEqual(tree.pop("work"), {
+            name: None for name in ("connect", "state", "create", "plan", "headers", "pause", "resume", "stop", "approve", "observe", "check", "request", "activation", "support", "qualify", "review", "reset", "reverify", "checkout", "portal", "bind", "bindings", "attempts")
+        })
         self.assertEqual(tree, EXPECTED_COMMAND_TREE)
 
 

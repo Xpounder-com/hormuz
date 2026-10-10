@@ -1,0 +1,16 @@
+{
+  "openai": {
+    "model": "YOUR_APPROVED_OPENAI_MODEL",
+    "input_cost_per_million": null,
+    "output_cost_per_million": null,
+    "cache_read_cost_per_million": null,
+    "cache_write_cost_per_million": null
+  },
+  "anthropic": {
+    "model": "YOUR_APPROVED_ANTHROPIC_MODEL",
+    "input_cost_per_million": null,
+    "output_cost_per_million": null,
+    "cache_read_cost_per_million": null,
+    "cache_write_cost_per_million": null
+  }
+}

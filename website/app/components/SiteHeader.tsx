@@ -4,12 +4,11 @@ import { sitePath } from '../../lib/site.mjs';
 
 const navigation = [
   { key: 'platform', label: 'Product', href: '/' },
-  { key: 'demo', label: 'Try Hormuz', href: '/demo/' },
+  { key: 'evidence', label: 'Evidence', href: '/evidence/' },
   { key: 'docs', label: 'Install & docs', href: '/docs/' },
   { key: 'plans', label: 'Pricing & pay', href: '/plans/' },
   { key: 'security', label: 'Security', href: '/security/' },
-  { key: 'resources', label: 'Resources', href: '/resources/' },
-  { key: 'workspace', label: 'Workspace', href: '/workspace/' },
+  { key: 'work', label: 'AI Work', href: '/work/' },
 ];
 
 export function SiteHeader({
@@ -53,7 +52,7 @@ export function SiteHeader({
               </CampaignLink>
             ))}
             <CampaignLink href={sitePath('/integrations/')} aria-current={active === 'integrations' ? 'page' : undefined}>Integrations</CampaignLink>
-            <CampaignLink className="mobile-pilot-cta" href={sitePath('/docs/')}>Install free ↗</CampaignLink>
+            <CampaignLink className="mobile-pilot-cta" href={sitePath('/docs/')}>Start free →</CampaignLink>
           </div>
         </details>
 
@@ -61,8 +60,8 @@ export function SiteHeader({
           className="nav-cta"
           href={sitePath('/docs/')}
         >
-          Install free
-          <span aria-hidden="true">↗</span>
+          Start free
+          <span aria-hidden="true">→</span>
         </CampaignLink>
       </nav>
     </header>

@@ -32,6 +32,7 @@ final class HormuzApplicationDelegate: NSObject, NSApplicationDelegate {
             displayOptions: edge.displayOptions,
             showWidget: { [weak self] in self?.showWidget() }
         )
+        connection.openRemovalControls = { [weak self] in self?.showExpandedControlCenter() }
         edge.start()
         // Public console/login fields identify session switching. The optional
         // screen-lock field and distributed notifications are advisory macOS

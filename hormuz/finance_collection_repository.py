@@ -148,6 +148,7 @@ class PreparedCollectionAttempt:
     state: str = "pending"
     receipt_id: str | None = None
     snapshot_id: str | None = None
+    provider_account_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -549,8 +550,14 @@ class FinanceCollectionRepository:
                 != prepared.credential_reference_version
                 or binding.fingerprint_key_version
                 != prepared.fingerprint_key_version
+                or binding.provider_account_fingerprint
+                != prepared.provider_account_fingerprint
             ):
                 raise FinanceCollectionError("binding_inactive")
+            if (collection.verified_provider_account_fingerprint is not None
+                    and not hmac.compare_digest(collection.verified_provider_account_fingerprint,
+                                                binding.provider_account_fingerprint)):
+                raise FinanceCollectionError("snapshot_conflict")
             _validate_binding_scope(binding, collection)
 
             predecessor = sql.one(
@@ -2364,6 +2371,21 @@ def _prepared_from_row(sql: Any, row: Mapping[str, object]) -> PreparedCollectio
             str(row["bucket_width"]),
             int(row["requested_page_size"]),
         )
+        # Verification context comes from the immutable selected binding, never
+        # from provider response metadata or a raw account identifier.
+        source_row = sql.one(
+            f"SELECT * FROM {SOURCE_BINDING_TABLE} "
+            "WHERE organization_id=? AND binding_id=? AND version=?",
+            (row["organization_id"], row["binding_id"], row["binding_version"]),
+        )
+        if source_row is None:
+            raise FinanceCollectionError("unavailable")
+        source = _binding_from_row(source_row)
+        if (source.provider != row["provider"]
+                or source.credential_reference_id != row["credential_reference_id"]
+                or source.credential_reference_version != row["credential_reference_version"]
+                or source.fingerprint_key_version != row["fingerprint_key_version"]):
+            raise FinanceCollectionError("unavailable")
         terminal = sql.one(
             f"SELECT state,receipt_id,snapshot_id FROM {COLLECTION_EVENT_TABLE} "
             "WHERE organization_id=? AND attempt_id=?",
@@ -2387,6 +2409,7 @@ def _prepared_from_row(sql: Any, row: Mapping[str, object]) -> PreparedCollectio
             state,
             None if terminal is None else terminal["receipt_id"],
             None if terminal is None else terminal["snapshot_id"],
+            source.provider_account_fingerprint,
         )
     except (FinanceCollectionError, KeyError, TypeError, ValueError):
         raise FinanceCollectionError("unavailable") from None
@@ -2410,6 +2433,7 @@ def _same_prepared_root(
         first.fingerprint_key_version,
         first.prepared_by,
         first.prepared_at,
+        first.provider_account_fingerprint,
     ) == (
         second.organization_id,
         second.attempt_id,
@@ -2424,6 +2448,7 @@ def _same_prepared_root(
         second.fingerprint_key_version,
         second.prepared_by,
         second.prepared_at,
+        second.provider_account_fingerprint,
     )
 
 

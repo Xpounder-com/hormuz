@@ -38,7 +38,20 @@ notarized Mac archive. Ordinary Mac CI still uses ad hoc local validation;
 only the explicitly authorized protected distribution workflow signs and
 submits an app to Apple. See the [release boundaries](releases/v1.8.0-notarized-mac.md).
 
+Ordinary Mac CI retains the already-built archive for seven days as
+`hormuz-macos-ad-hoc-candidate-<checkout-commit>`, including when later native
+tests fail. Its provenance records the actual checkout, candidate head, archive
+and executable hashes, and observed test-step outcomes. A missing local candidate
+tree remains explicit; compare the actual checkout tree with the proposed source
+before reusing the binaries. Failed or skipped checks remain unqualified, and
+retaining the archive does not make it a customer download or notarized release.
+
 ## Local packaging and notarization
+
+The commands below reproduce the v1.8.0 release from its source and matching
+helper artifacts. Current source prepares a 1.9.0 candidate; the protected
+workflow's version input must equal the source package version. No 1.9.0
+download is qualified here.
 
 Confirm that exactly one intended identity is available:
 

@@ -6,8 +6,8 @@ use hormuz_client_core::ConnectionProfile;
 use hormuz_client_platform::{CredentialStore, RefreshCoordinator};
 use hormuz_client_platform::{NativeCredentialStore, PrivateDirectory};
 #[cfg(any(target_os = "macos", windows))]
-use hormuz_client_relay::run_client;
-use hormuz_client_relay::{CredentialSource, Optimization, RelayError};
+use hormuz_client_relay::run_client_with_work_id;
+use hormuz_client_relay::{valid_work_id, CredentialSource, Optimization, RelayError};
 #[cfg(any(target_os = "macos", target_os = "linux", windows))]
 use hormuz_client_relay::{OptimizerCancellation, RequestOptimizer};
 #[cfg(target_os = "linux")]
@@ -53,9 +53,18 @@ fn execute() -> Result<i32, RelayError> {
         &arguments.optimizer_helper,
         &arguments.owner_socket,
     ) {
-        return execute_mac_broker(&arguments.key, &arguments.root, broker, optimizer, owner);
+        return execute_mac_broker(
+            &arguments.key,
+            &arguments.root,
+            broker,
+            optimizer,
+            owner,
+            arguments.work_id.as_deref(),
+        );
     }
-    let LaunchArguments { key, root, .. } = arguments;
+    let key = arguments.key;
+    let root = arguments.root;
+    let work_id = arguments.work_id;
     let directory = PrivateDirectory::open(&root).map_err(|_| RelayError::InvalidConfiguration)?;
     let controller = Arc::new(SessionController::new(
         directory.clone(),
@@ -105,10 +114,11 @@ fn execute() -> Result<i32, RelayError> {
         state_root: root,
     });
     let status_profile = status.profile().ok_or(RelayError::InvalidConfiguration)?;
-    run_client(
+    run_client_with_work_id(
         status_profile,
         token_source,
         Optimization::OnDemand(optimizer),
+        work_id.as_deref(),
     )
 }
 
@@ -122,6 +132,7 @@ fn execute_mac_broker(
     broker: &Path,
     optimizer: &Path,
     owner: &Path,
+    work_id: Option<&str>,
 ) -> Result<i32, RelayError> {
     for executable in [broker, optimizer] {
         validate_optimizer_python_executable(executable)?;
@@ -162,7 +173,13 @@ fn execute_mac_broker(
         helper: Some(optimizer.to_owned()),
         state_root: root.to_owned(),
     }));
-    hormuz_client_relay::run_client_until(&profile, source, optimization, &mut stopped)
+    hormuz_client_relay::run_client_until_with_work_id(
+        &profile,
+        source,
+        optimization,
+        work_id,
+        &mut stopped,
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -236,6 +253,7 @@ fn execute() -> Result<i32, RelayError> {
         root,
         optimizer_python,
         owner_socket,
+        work_id,
     } = arguments()?;
     let optimizer_root = root.clone();
     let lifetime = std::cell::RefCell::new(None::<crate::owner_lease::OwnerLease>);
@@ -270,9 +288,13 @@ fn execute() -> Result<i32, RelayError> {
         |profile| linux_optimization(profile, &optimizer_root, optimizer_python.as_deref()),
         stopped,
         |profile, credentials, optimization| {
-            hormuz_client_relay::run_client_until(profile, credentials, optimization, &mut || {
-                stopped()
-            })
+            hormuz_client_relay::run_client_until_with_work_id(
+                profile,
+                credentials,
+                optimization,
+                work_id.as_deref(),
+                &mut || stopped(),
+            )
         },
     );
     match result {
@@ -398,6 +420,7 @@ where
 struct LaunchArguments {
     key: String,
     root: PathBuf,
+    work_id: Option<String>,
     #[cfg(target_os = "linux")]
     optimizer_python: Option<PathBuf>,
     #[cfg(target_os = "macos")]
@@ -419,6 +442,7 @@ where
     let mut args = arguments.into_iter();
     let mut profile = None;
     let mut directory = None;
+    let mut work_id = None;
     #[cfg(target_os = "linux")]
     let mut optimizer_python = None;
     #[cfg(target_os = "macos")]
@@ -443,6 +467,14 @@ where
                 return Err(RelayError::InvalidConfiguration);
             }
             profile = Some(value.to_ascii_lowercase());
+        } else if flag == "--work-id" && work_id.is_none() {
+            let value = value
+                .into_string()
+                .map_err(|_| RelayError::InvalidConfiguration)?;
+            if !valid_work_id(&value) {
+                return Err(RelayError::InvalidConfiguration);
+            }
+            work_id = Some(value);
         } else if flag == "--state-directory" && directory.is_none() {
             let value = PathBuf::from(value);
             if !value.is_absolute() || value.as_os_str().as_encoded_bytes().len() > 4096 {
@@ -508,6 +540,7 @@ where
     Ok(LaunchArguments {
         key: profile.ok_or(RelayError::InvalidConfiguration)?,
         root: directory.ok_or(RelayError::InvalidConfiguration)?,
+        work_id,
         #[cfg(target_os = "linux")]
         optimizer_python,
         #[cfg(target_os = "macos")]
@@ -517,6 +550,50 @@ where
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         owner_socket,
     })
+}
+
+#[cfg(test)]
+mod work_binding_tests {
+    use super::*;
+
+    #[test]
+    fn optional_work_id_arguments_are_closed_and_validated_before_custody() {
+        let root = std::env::temp_dir();
+        let base = vec![
+            "--profile".into(),
+            "12345678-1234-1234-1234-123456789abc".into(),
+            "--state-directory".into(),
+            root.into_os_string(),
+        ];
+        let parse = |extra: &[&str]| {
+            let mut args = base.clone();
+            args.extend(extra.iter().map(std::ffi::OsString::from));
+            parse_arguments(args)
+        };
+        assert!(parse(&[]).unwrap().work_id.is_none());
+        let bound = parse(&["--work-id", "job-1._-"]).unwrap();
+        assert_eq!(bound.work_id.as_deref(), Some("job-1._-"));
+        assert!(parse(&["--work-id", &"a".repeat(128)]).is_ok());
+        for value in [
+            "",
+            ".job",
+            "-job",
+            "job space",
+            "job\nX-Actor: spoof",
+            "é",
+            &"a".repeat(129),
+        ] {
+            assert!(parse(&["--work-id", value]).is_err());
+        }
+        for args in [
+            vec!["--work-id"],
+            vec!["--work-id", "job-1", "--work-id", "job-2"],
+            vec!["--work-id", "job-1", "--model", "spoof"],
+            vec!["--work-id", "job-1", "--gateway", "https://spoof.test"],
+        ] {
+            assert!(parse(&args).is_err());
+        }
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]

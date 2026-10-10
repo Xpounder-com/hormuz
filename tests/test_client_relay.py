@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from time import perf_counter_ns
 from unittest import mock
 
 from cryptography import x509
@@ -44,12 +45,72 @@ from hormuz.compaction_enforcement import (
 from hormuz.compaction_formats import restore_text
 from hormuz.compaction_protocols import derive_selections
 from hormuz.compaction_runtime import ContextPreferenceStore
-from hormuz.personal_metrics import PersonalMetricsStore
+from hormuz.personal_metrics import OptimizationMeasurement, PersonalMetricsStore
 
 
 COUNTERS = {"cl100k_base": len, "o200k_base": len}
 ACCESS_TOKEN = "hox_a_" + "A" * 43
 LOCAL_TOKEN = "hox_l_" + "B" * 43
+
+
+def _codex_compaction_diagnostic(body: bytes, *, packaged_helper: bool) -> dict[str, object]:
+    """Content-free replay evidence; context run exposes no actual fallback reason."""
+    started = perf_counter_ns()
+    measurements: list[OptimizationMeasurement] = []
+
+    class EnabledPreference:
+        enabled = True
+
+        def load(self):
+            return self
+
+    class DiagnosticOptimizer(RelayOptimizer):
+        def _queue_observation(self, measurement: OptimizationMeasurement) -> None:
+            measurements.append(measurement)
+
+    diagnostic: dict[str, object] = {
+        "diagnostic_basis": "real_tokenizer_replay" if packaged_helper else "fixture_character_replay",
+        "actual_helper_reason": "not_exposed_by_context_run",
+    }
+    try:
+        optimizer = DiagnosticOptimizer(
+            preference_store=EnabledPreference(),
+            client="codex",
+            gateway_compatible=True,
+            # Preserve the packaged path's cold load inside its existing guard.
+            counters=None if packaged_helper else COUNTERS,
+        )
+        optimizer.prepare(body, "/v1/responses")
+        measurement = measurements[-1]
+        diagnostic.update(
+            guarded_replay_reason=measurement.reason,
+            guarded_replay_applied=measurement.applied,
+            guarded_replay_overhead_us=measurement.overhead_us,
+        )
+        counters = optimizer._token_counters()
+        if counters is None:
+            diagnostic["candidate_reason"] = "resources_unavailable"
+        else:
+            payload = json.loads(body)
+            selections = derive_selections(payload, "responses", client="codex")
+            candidate_started = perf_counter_ns()
+            candidate = optimize_request(payload, "responses", selections, counters, enabled=True)
+            diagnostic.update(
+                candidate_reason=candidate.reason,
+                candidate_changed=candidate.changed,
+                candidate_before_tokens=candidate.before_tokens,
+                candidate_after_tokens=candidate.after_tokens,
+                candidate_saved_tokens={
+                    name: count - candidate.after_tokens[name]
+                    for name, count in candidate.before_tokens.items()
+                },
+                candidate_replay_overhead_us=max(0, (perf_counter_ns() - candidate_started) // 1_000),
+            )
+    except Exception:
+        # A diagnostic must not replace the mandatory actual header assertion.
+        diagnostic["diagnostic_error"] = "replay_unavailable"
+    diagnostic["diagnostic_overhead_us"] = max(0, (perf_counter_ns() - started) // 1_000)
+    return diagnostic
 
 
 class _Gateway(ThreadingHTTPServer):
@@ -283,6 +344,48 @@ class RelayTests(unittest.TestCase):
             {"type": "function_call_output", "call_id": "records", "output": paths},
         ]}
 
+    def test_packaged_compaction_diagnostic_uses_real_counter_loader_without_content(self) -> None:
+        payload = self._payload()
+        payload["instructions"] = "PRIVATE_DIAGNOSTIC_SENTINEL"
+        body = json.dumps(payload).encode()
+        counters = {"cl100k_base": lambda _value: 100, "o200k_base": lambda _value: 200}
+        with mock.patch.object(relay_module, "load_token_counters", return_value=counters) as load:
+            result = _codex_compaction_diagnostic(body, packaged_helper=True)
+        load.assert_called_once_with()
+        self.assertEqual(result["diagnostic_basis"], "real_tokenizer_replay")
+        self.assertEqual(result["guarded_replay_reason"], "no_savings")
+        self.assertEqual(result["candidate_reason"], "no_savings")
+        self.assertEqual(result["candidate_before_tokens"], {"cl100k_base": 100, "o200k_base": 200})
+        self.assertEqual(result["candidate_saved_tokens"], {"cl100k_base": 0, "o200k_base": 0})
+        self.assertNotIn("PRIVATE_DIAGNOSTIC_SENTINEL", json.dumps(result))
+        self.assertNotIn("src/generated", json.dumps(result))
+        self.assertEqual(result["actual_helper_reason"], "not_exposed_by_context_run")
+
+    def test_compaction_diagnostic_preserves_guard_and_separates_candidate_savings(self) -> None:
+        body = json.dumps(self._payload()).encode()
+        with mock.patch.object(relay_module, "load_token_counters", return_value=COUNTERS), \
+                mock.patch.object(relay_module.time, "perf_counter_ns", side_effect=[0, 100_001_000, 100_002_000]):
+            result = _codex_compaction_diagnostic(body, packaged_helper=True)
+        self.assertEqual(result["guarded_replay_reason"], "net_regression")
+        self.assertFalse(result["guarded_replay_applied"])
+        self.assertEqual(result["guarded_replay_overhead_us"], 100_002)
+        self.assertEqual(result["candidate_reason"], "compacted")
+        self.assertTrue(result["candidate_changed"])
+        self.assertTrue(all(value > 0 for value in result["candidate_saved_tokens"].values()))
+
+    def test_compaction_diagnostic_resource_failure_is_fixed_and_source_fixture_stays_local(self) -> None:
+        body = json.dumps(self._payload()).encode()
+        with mock.patch.object(relay_module, "load_token_counters", side_effect=relay_module.ContextRuntimeError("resources_unavailable")) as load:
+            result = _codex_compaction_diagnostic(body, packaged_helper=True)
+        load.assert_called_once_with()
+        self.assertEqual(result["guarded_replay_reason"], "resources_unavailable")
+        self.assertEqual(result["candidate_reason"], "resources_unavailable")
+        with mock.patch.object(relay_module, "load_token_counters") as load:
+            source = _codex_compaction_diagnostic(body, packaged_helper=False)
+        load.assert_not_called()
+        self.assertEqual(source["diagnostic_basis"], "fixture_character_replay")
+        self.assertEqual(source["candidate_reason"], "compacted")
+
     def test_loader_accepts_native_setup_and_rejects_invalid_setup_metadata(self) -> None:
         profile_key = str(uuid.uuid4())
         path = self.state / "profile.json"
@@ -492,6 +595,242 @@ class RelayTests(unittest.TestCase):
             gateway.shutdown()
             gateway_thread.join(timeout=2)
             gateway.server_close()
+
+    def _work_request(
+        self,
+        relay: LocalRelayServer,
+        *,
+        client: str,
+        work_headers: list[tuple[str, str]],
+        body: bytes = b"{}",
+    ) -> tuple[int, bytes]:
+        path = "/v1/responses" if client == "codex" else "/v1/messages"
+        connection = http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        try:
+            connection.putrequest("POST", path)
+            if client == "codex":
+                connection.putheader("Authorization", "Bearer " + LOCAL_TOKEN)
+            else:
+                connection.putheader("X-Api-Key", LOCAL_TOKEN)
+            connection.putheader("Content-Type", "application/json")
+            connection.putheader("Content-Length", str(len(body)))
+            for name, value in work_headers:
+                connection.putheader(name, value)
+            connection.endheaders(body)
+            response = connection.getresponse()
+            try:
+                return response.status, response.read()
+            finally:
+                response.close()
+        finally:
+            connection.close()
+
+    def test_selected_work_binding_validated_before_listener_or_custody(self) -> None:
+        credential = mock.Mock(return_value=ACCESS_TOKEN)
+        optimizer = mock.create_autospec(RelayOptimizer, instance=True)
+        with mock.patch.object(ThreadingHTTPServer, "__init__") as listen:
+            for work_id in ("", ".job", "bad/id", "work ", "é", "a" * 129, 1, True):
+                with self.subTest(work_id=work_id):
+                    with self.assertRaisesRegex(ClientRelayError, "^invalid_work_binding$"):
+                        LocalRelayServer(
+                            gateway="http://127.0.0.1:9", client="codex",
+                            local_credential=LOCAL_TOKEN, gateway_credential=credential,
+                            optimizer=optimizer, work_id=work_id,
+                        )
+            for upstream_auth in ("openai", "anthropic"):
+                with self.subTest(upstream_auth=upstream_auth):
+                    with self.assertRaisesRegex(ClientRelayError, "^unsupported_work_binding$"):
+                        LocalRelayServer(
+                            gateway="http://127.0.0.1:9", client="codex",
+                            local_credential=LOCAL_TOKEN, gateway_credential=credential,
+                            optimizer=optimizer, work_id="work-selected",
+                            upstream_auth=upstream_auth,
+                        )
+            listen.assert_not_called()
+        credential.assert_not_called()
+        optimizer.prepare.assert_not_called()
+
+    def test_work_headers_rejected_before_custody_optimizer_or_egress(self) -> None:
+        invalid_headers = [
+            [("X-Hormuz-Work-Id", value)]
+            for value in ("", ".job", "bad/id", "work ", "é", "a" * 129, "work,other")
+        ] + [
+            [("X-Hormuz-Work-Id", "work-selected"),
+             ("x-hormuz-work-id", "work-selected")],
+            [("X-Hormuz-Work-Id", "work-selected"),
+             ("x-hormuz-work-id", "work-other")],
+        ]
+        for client in ("codex", "claude-code"):
+            for selected in (None, "work-selected"):
+                credential = mock.Mock(return_value=ACCESS_TOKEN)
+                optimizer = mock.create_autospec(RelayOptimizer, instance=True)
+                relay = LocalRelayServer(
+                    gateway="http://127.0.0.1:9", client=client,
+                    local_credential=LOCAL_TOKEN, gateway_credential=credential,
+                    optimizer=optimizer, work_id=selected,
+                )
+                thread = threading.Thread(
+                    target=lambda: relay.serve_forever(poll_interval=0.01), daemon=True
+                )
+                thread.start()
+                try:
+                    candidates = invalid_headers + (
+                        [[("X-Hormuz-Work-Id", "WORK-selected")]] if selected else []
+                    )
+                    with mock.patch.object(relay_module, "_gateway_connection") as egress:
+                        for headers in candidates:
+                            with self.subTest(client=client, selected=selected, headers=headers):
+                                status, body = self._work_request(
+                                    relay, client=client, work_headers=headers
+                                )
+                                self.assertEqual(status, 400)
+                                self.assertEqual(json.loads(body), {"error": {"code": "local_work_id_invalid"}})
+                        credential.assert_not_called()
+                        optimizer.prepare.assert_not_called()
+                        optimizer.note_oversized_passthrough.assert_not_called()
+                        egress.assert_not_called()
+                finally:
+                    relay.shutdown()
+                    thread.join(timeout=2)
+                    relay.server_close()
+                    self.assertFalse(thread.is_alive())
+
+    def test_bound_and_unbound_work_headers_reach_only_governed_gateway(self) -> None:
+        gateway = _Gateway()
+        received_ids: list[list[str]] = []
+        original_post = _GatewayHandler.do_POST
+
+        def capture_work_ids(handler: _GatewayHandler) -> None:
+            received_ids.append(handler.headers.get_all("X-Hormuz-Work-Id", []))
+            original_post(handler)
+
+        gateway_thread = threading.Thread(
+            target=lambda: gateway.serve_forever(poll_interval=0.01), daemon=True
+        )
+        gateway_thread.start()
+        try:
+            with mock.patch.object(_GatewayHandler, "do_POST", capture_work_ids):
+                for client in ("codex", "claude-code"):
+                    for selected in (None, "work-selected"):
+                        relay = LocalRelayServer(
+                            gateway=f"http://127.0.0.1:{gateway.server_port}", client=client,
+                            local_credential=LOCAL_TOKEN, gateway_credential=lambda: ACCESS_TOKEN,
+                            optimizer=RelayOptimizer(
+                                preference_store=self.store, client=client,
+                                gateway_compatible=False,
+                            ),
+                            work_id=selected,
+                        )
+                        thread = threading.Thread(
+                            target=lambda: relay.serve_forever(poll_interval=0.01), daemon=True
+                        )
+                        thread.start()
+                        try:
+                            for incoming in (None, selected or "work-unbound"):
+                                headers = [("X-Hormuz-Actor-Id", "attacker"),
+                                           ("X-Hormuz-Organization-Id", "attacker")]
+                                if incoming is not None:
+                                    headers.append(("x-hormuz-work-id", incoming))
+                                for maximum in (MAX_REQUEST_BYTES, 1):
+                                    with self.subTest(client=client, selected=selected, incoming=incoming, maximum=maximum):
+                                        with mock.patch.object(relay_module, "MAX_REQUEST_BYTES", maximum):
+                                            self.assertEqual(
+                                                self._work_request(relay, client=client, work_headers=headers),
+                                                (200, b'{"ok":true}'),
+                                            )
+                                        expected = selected or incoming
+                                        self.assertEqual(received_ids[-1], [] if expected is None else [expected])
+                                        forwarded = {name.lower(): value for name, value in gateway.requests[-1][1].items()}
+                                        self.assertEqual(forwarded["authorization"], "Bearer " + ACCESS_TOKEN)
+                                        self.assertNotIn("x-hormuz-actor-id", forwarded)
+                                        self.assertNotIn("x-hormuz-organization-id", forwarded)
+                                        self.assertEqual(gateway.requests[-1][0], b"{}")
+                        finally:
+                            relay.shutdown()
+                            thread.join(timeout=2)
+                            relay.server_close()
+                            self.assertFalse(thread.is_alive())
+        finally:
+            gateway.shutdown()
+            gateway_thread.join(timeout=2)
+            gateway.server_close()
+            self.assertFalse(gateway_thread.is_alive())
+
+    def test_direct_provider_work_metadata_stays_private_and_invalid_headers_reject(self) -> None:
+        gateway = _Gateway()
+        gateway_thread = threading.Thread(
+            target=lambda: gateway.serve_forever(poll_interval=0.01), daemon=True
+        )
+        gateway_thread.start()
+        try:
+            for upstream_auth in ("openai", "anthropic"):
+                credential = mock.Mock(return_value="provider-secret-fixture")
+                optimizer = RelayOptimizer(
+                    preference_store=self.store, client="codex", gateway_compatible=False,
+                )
+                relay = LocalRelayServer(
+                    gateway=f"http://127.0.0.1:{gateway.server_port}", client="codex",
+                    local_credential=LOCAL_TOKEN, gateway_credential=credential,
+                    optimizer=optimizer, upstream_auth=upstream_auth,
+                )
+                thread = threading.Thread(
+                    target=lambda: relay.serve_forever(poll_interval=0.01), daemon=True
+                )
+                thread.start()
+                try:
+                    self.assertEqual(self._work_request(
+                        relay, client="codex", work_headers=[("X-Hormuz-Work-Id", "work-valid")]
+                    ), (200, b'{"ok":true}'))
+                    self.assertNotIn("x-hormuz-work-id", {name.lower() for name in gateway.requests[-1][1]})
+                    request_count = len(gateway.requests)
+                    credential.reset_mock()
+                    with mock.patch.object(optimizer, "prepare") as prepare, mock.patch.object(relay_module, "_gateway_connection") as egress:
+                        for headers in (
+                            [("X-Hormuz-Work-Id", "bad/id")],
+                            [("X-Hormuz-Work-Id", "work-valid"), ("X-Hormuz-Work-Id", "work-valid")],
+                        ):
+                            with self.subTest(upstream_auth=upstream_auth, headers=headers):
+                                status, body = self._work_request(relay, client="codex", work_headers=headers)
+                                self.assertEqual(status, 400)
+                                self.assertEqual(json.loads(body)["error"]["code"], "local_work_id_invalid")
+                        credential.assert_not_called()
+                        prepare.assert_not_called()
+                        egress.assert_not_called()
+                    self.assertEqual(len(gateway.requests), request_count)
+                finally:
+                    relay.shutdown()
+                    thread.join(timeout=2)
+                    relay.server_close()
+                    self.assertFalse(thread.is_alive())
+        finally:
+            gateway.shutdown()
+            gateway_thread.join(timeout=2)
+            gateway.server_close()
+            self.assertFalse(gateway_thread.is_alive())
+
+    def test_run_client_supplies_the_selected_job_to_the_relay(self) -> None:
+        credential = Path(self.temporary.name) / "credential-helper"
+        credential.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        credential.chmod(0o700)
+        for client in ("codex", "claude-code"):
+            server = mock.Mock(origin="http://127.0.0.1:9876")
+            profile = SavedClientProfile("profile-a", "https://gateway.example", client, "approved", False)
+            with self.subTest(client=client), mock.patch.object(relay_module, "LocalRelayServer", return_value=server) as relay, mock.patch.object(relay_module, "probe_gateway_capability", return_value=False), mock.patch.object(relay_module, "supported_client_executable", return_value="/synthetic/client"), mock.patch.object(relay_module.subprocess, "run", return_value=mock.Mock(returncode=0)) as launched:
+                self.assertEqual(run_client(
+                    profile=profile, state_directory=self.state,
+                    credential_helper=credential, work_id="work-selected",
+                ), 0)
+                self.assertEqual(relay.call_args.kwargs["work_id"], "work-selected")
+                command = launched.call_args.args[0]
+                environment = launched.call_args.kwargs["env"]
+                if client == "codex":
+                    self.assertIn(("-c", 'web_search="disabled"'), list(zip(command, command[1:])))
+                    self.assertIn('model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-selected"}', command)
+                else:
+                    self.assertNotIn('web_search="disabled"', command)
+                    self.assertEqual(environment["ANTHROPIC_CUSTOM_HEADERS"], "X-Hormuz-Work-Id: work-selected")
+                server.shutdown.assert_called_once_with()
+                server.server_close.assert_called_once_with()
 
     def test_non_latin_1_provider_credentials_fail_before_connect(self) -> None:
         for upstream_auth in ("openai", "anthropic"):
@@ -1291,6 +1630,7 @@ raise SystemExit(0 if response.status == 200 else 1)
                     state_directory=self.state,
                     credential_helper=credential,
                     counters=COUNTERS,
+                    work_id="work-selected",
                 ),
                 0,
             )
@@ -1298,6 +1638,7 @@ raise SystemExit(0 if response.status == 200 else 1)
             body, request_headers = gateway.requests[0]
             headers = {key.lower(): value for key, value in request_headers.items()}
             self.assertEqual(headers[CONTEXT_FORMAT_HEADER.lower()], CONTEXT_FORMAT_VERSION)
+            self.assertEqual(headers["x-hormuz-work-id"], "work-selected")
             payload = json.loads(body)
             compact = payload["input"][1]["output"]
             self.assertIn("hormuz-path-list-v1", compact)
@@ -1421,24 +1762,16 @@ raise SystemExit(0 if response.status == 200 else 1)
             self.assertEqual(result, 0, msg=failure_detail)
             decoded_requests = [json.loads(body) for body, _headers in gateway.requests]
             output_requests = [
-                (payload, headers)
-                for payload, (_body, headers) in zip(decoded_requests, gateway.requests, strict=True)
+                (payload, body, headers)
+                for payload, (body, headers) in zip(decoded_requests, gateway.requests, strict=True)
                 if any(
                     isinstance(item, dict) and item.get("type") == "function_call_output"
                     for item in payload.get("input", [])
                 )
             ]
             self.assertEqual(len(output_requests), 1)
-            payload, request_headers = output_requests[0]
+            payload, request_body, request_headers = output_requests[0]
             headers = {key.lower(): value for key, value in request_headers.items()}
-            diagnostic_selections = derive_selections(payload, "responses", client="codex")
-            diagnostic_result = optimize_request(
-                payload,
-                "responses",
-                diagnostic_selections,
-                COUNTERS,
-                enabled=True,
-            )
             diagnostic_outputs = [
                 item.get("output")
                 for item in payload.get("input", [])
@@ -1446,19 +1779,13 @@ raise SystemExit(0 if response.status == 200 else 1)
             ]
             diagnostic_output = diagnostic_outputs[0] if len(diagnostic_outputs) == 1 else None
             shape = {
-                "payload_keys": sorted(payload),
-                "input_types": [
-                    item.get("type") if isinstance(item, dict) else type(item).__name__
+                **_codex_compaction_diagnostic(request_body, packaged_helper=bool(packaged_helper)),
+                "input_count": len(payload.get("input", [])),
+                "exec_command_call_count": sum(
+                    isinstance(item, dict) and item.get("type") == "function_call" and item.get("name") == "exec_command"
                     for item in payload.get("input", [])
-                ],
-                "call_names": [
-                    item.get("name")
-                    for item in payload.get("input", [])
-                    if isinstance(item, dict) and item.get("type") == "function_call"
-                ],
+                ),
                 "has_previous_response_id": "previous_response_id" in payload,
-                "selection_formats": [selection.format for selection in diagnostic_selections],
-                "optimizer_reason": diagnostic_result.reason,
                 "output_bytes": (
                     len(diagnostic_output.encode("utf-8"))
                     if isinstance(diagnostic_output, str)

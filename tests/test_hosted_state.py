@@ -105,6 +105,17 @@ class HostedStateTests(unittest.TestCase):
                 load_profile(self.config.source_path, {**self.settings, **change})
         self.assertFalse(self.config.database_path.parent.exists())
 
+    def test_session_store_parent_failure_is_hosted_error_without_creating_state(self):
+        previous_mode = self.root.stat().st_mode & 0o777
+        self.root.chmod(0o750)
+        try:
+            with self.assertRaisesRegex(HostedError, "hosted_state_parent_unsafe"):
+                initialize(self.config)
+            self.assertFalse(self.config.database_path.parent.exists())
+            self.assertFalse((self.root / ".state.hosted.lock").exists())
+        finally:
+            self.root.chmod(previous_mode)
+
     def test_explicit_initialization_is_empty_private_and_never_repeated(self):
         with self.assertRaises(FileNotFoundError):
             check_initialized(self.config)
@@ -315,12 +326,13 @@ class HostedStateTests(unittest.TestCase):
         with patch("hormuz._hosted_state._write", side_effect=OSError("synthetic interrupted final write")):
             with self.assertRaises(OSError):
                 restore(destination, source)
-        self.assertTrue(destination.database_path.exists())
+        self.assertFalse(destination.database_path.parent.exists())
         self.assertFalse((destination.database_path.parent / MARKER).exists())
         with self.assertRaises(FileNotFoundError):
             check_initialized(destination)
-        with self.assertRaises(FileExistsError):
-            initialize(destination)
+        # Failed restore is rolled back completely, so a fresh explicit
+        # initialization remains possible.
+        initialize(destination)
 
     def test_snapshot_requires_the_original_identity_key_binding(self):
         initialize(self.config)

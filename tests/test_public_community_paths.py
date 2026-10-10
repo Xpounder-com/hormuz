@@ -28,6 +28,7 @@ class PublicCommunityPathTests(unittest.TestCase):
             shutil.copy2(REPOSITORY_ROOT / name, target / name)
         shutil.copytree(REPOSITORY_ROOT / ".github", target / ".github")
         shutil.copytree(REPOSITORY_ROOT / "docs", target / "docs")
+        shutil.copytree(REPOSITORY_ROOT / "examples", target / "examples")
         shutil.copytree(
             REPOSITORY_ROOT / "marketing",
             target / "marketing",

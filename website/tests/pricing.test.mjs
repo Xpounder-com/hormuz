@@ -3,9 +3,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { commercial, PAYMENT_KEYS, pricing } from '../lib/commercial.mjs';
 import { customerQuestions } from '../lib/customer-questions.mjs';
+import { siteUrl } from '../lib/site.mjs';
 
 const allowedPrices = new Set(['$0', '$49.99', '$999', '$1,499', '$499', '$49']);
 const pricePattern = /\$(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
+
+test('the no-JavaScript walkthrough contains every current FAQ answer and destination', () => {
+  const walkthrough = readFileSync(new URL('../public/demo/walkthrough.txt', import.meta.url), 'utf8');
+  for (const [category, question, answer, href] of customerQuestions) {
+    assert.ok(walkthrough.includes(`${category}: ${question}\n${answer}\n${siteUrl(href)}`), `Stale or missing answer: ${question}. Run npm run prepare:walkthrough.`);
+  }
+});
 
 test('the catalog contains the approved offers and bounded support', () => {
   assert.equal(pricing.currency, 'USD');

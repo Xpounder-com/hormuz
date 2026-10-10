@@ -19,6 +19,9 @@ definitions and does not collect automatic form entries, searches, or arbitrary
 outbound URLs. Keep Google signals and ad personalization off.
 
 Analytics requires a new, separate visitor choice; old X consent is never reused.
+The added pricing and Cloud/managed-site interest events use renewed Analytics
+consent under the updated notice. Earlier website-analytics preferences do not
+start the SDK or authorize these events.
 No Google script, queue, request or Analytics cookie is created before opt-in.
 Decline, Global Privacy Control and Do Not Track keep collection off. The consent
 choice lasts up to 180 days. With blocked storage it lasts only for the page.
@@ -38,7 +41,8 @@ passed to Analytics. Explicit events are:
 | `demo_open` | A link to the website demo is clicked | Demo interest, not completion |
 | `demo_interaction` | A user selects a spend, policy, compaction, or setup section | Use of the illustration, not a product evaluation |
 | `install_click` | A setup-guide or official Mac download link is clicked | Install interest, not a completed installation |
-| `inquiry_open` | A contact-page link is clicked | Inquiry intent, not a submitted lead |
+| `pricing_open` | A pricing-page link is clicked | Comparison, Cloud, or managed-site interest; not a buying decision |
+| `inquiry_open` | A contact-page link is clicked | Contact, Cloud, or managed-site intent; not a submitted lead |
 | `generate_lead` | A sales inquiry receives a positive Formspree acknowledgement | Consented receipt, not qualification or payment |
 
 Mark only `generate_lead` as the primary GA4 key event for the inquiry funnel.
@@ -101,8 +105,10 @@ Suggested weekly review: source of each actual conversation, one named problem,
 next step and owner, blockers, and evaluator friction. Do not infer individual
 productivity from usage data. Keep study evidence separate from sales notes.
 Use Stripe's dated records for payment, subscription, cancellation, and refund
-totals. The inquiry ledger does not support the current catalog's paid stages;
-keep activation and delivery evidence in private operating notes. Do not count
+totals. The inquiry ledger does not establish paid stages. AI Work's separate private
+activation and billing stores record configured qualification, server-created
+checkout references, and verified signed payment evidence; deployment and service
+delivery still require their own qualification records. Do not count
 applying a reservation deposit as another payment.
 
 ## Consent-aware source handling
@@ -176,3 +182,36 @@ classified `qa` in the private ledger. Unflagged service-accepted spam can still
 trigger an event; exclude it from the sales ledger after review.
 Inspect Events Manager activity after publication; a browser request alone does
 not prove ad attribution. No purchase, booking, or subscription pixel is installed.
+
+
+## Consented AI Work progress
+
+The public `/work/` entry has a separate unchecked campaign-handoff choice. It
+passes only the four bounded labels to the configured trusted HTTPS gateway.
+The gateway preserves them briefly through its normal sign-in boundary and then
+asks for explicit authenticated confirmation. It records no private attribution
+or funnel merely because a visitor opens a page or signs in. Declining source
+attribution leaves work available. Website analytics consent remains separate.
+
+Confirmed consent creates a random opaque acquisition reference scoped to the
+private account. Counts come from captured work and actual durable qualification
+or signed billing state. Private actor, organization, repository, work, customer,
+subscription, and workflow object identifiers are never public analytics fields.
+A receipt opened is receipt access; a request completed is activity; another
+attributed job is repeat work. None independently establishes quality, retention,
+a qualified buyer, or paid-provider savings. Current payment and activation
+flags follow current evidence rather than a forever-positive browser conversion.
+
+## Inquiry and booking qualification
+
+The reviewed source configures Formspree and a Google Calendar appointment
+schedule. The form shows an acknowledgment only after a nonredirected HTTP
+success with `ok: true`; a service acknowledgment does not prove delivery to the
+owner inbox. Ambiguous responses preserve a request reference without automatic
+retry. The acknowledged state offers the configured booking handoff and asks the
+visitor to retain the reference. A calendar link click does not prove a booking.
+
+The local qualification checks exercise accepted, rejected, and ambiguous
+transports with interception. They do not send an inquiry, email, calendar
+invitation, ad, or payment. Owner receipt, an actual accepted booking, and a live
+qualified paid workspace remain external operating evidence until verified.

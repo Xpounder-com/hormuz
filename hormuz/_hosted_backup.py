@@ -31,11 +31,24 @@ from ._hosted_state import (
     snapshot,
 )
 from .config import GatewayConfig
+from .work_recovery import WORK_DATABASE, BILLING_DATABASE
 
 
 BACKUP_SCHEMA = "hormuz.hosted-offsite-backup"
 BACKUP_MAGIC = b"HORMUZ-HOSTED-BACKUP\x00\x01"
 BACKUP_FILES = (SNAPSHOT, MARKER, *DATABASES)
+
+def _backup_names(version, names):
+    if type(version) is not int:
+        raise HostedError("hosted_backup_manifest_invalid")
+    allowed = (BACKUP_FILES,) if version == 1 else (
+        (*BACKUP_FILES, WORK_DATABASE), (*BACKUP_FILES, WORK_DATABASE, BILLING_DATABASE)
+    ) if version == 2 else ()
+    result = tuple(names)
+    if result not in allowed:
+        raise HostedError("hosted_backup_manifest_invalid")
+    return result
+
 NONCE_BYTES = 12
 TAG_BYTES = 16
 CHUNK_BYTES = 1024 * 1024
@@ -120,13 +133,15 @@ def _archive_manifest(directory: Path) -> tuple[bytes, tuple[dict[str, object], 
     if (
         set(snapshot_manifest) != {"version", "files", "binding"}
         or type(snapshot_manifest["version"]) is not int
-        or snapshot_manifest["version"] != 1
+        or snapshot_manifest["version"] not in {1, 2}
         or not isinstance(snapshot_manifest["files"], dict)
-        or set(snapshot_manifest["files"]) != {*DATABASES, MARKER}
+        or set(snapshot_manifest["files"]) not in ({*DATABASES, MARKER}, {*DATABASES, MARKER, WORK_DATABASE}, {*DATABASES, MARKER, WORK_DATABASE, BILLING_DATABASE})
     ):
         raise HostedError("hosted_backup_snapshot_invalid")
     entries: list[dict[str, object]] = []
-    for name in BACKUP_FILES:
+    extra = tuple(name for name in (WORK_DATABASE, BILLING_DATABASE) if name in snapshot_manifest["files"])
+    names = _backup_names(snapshot_manifest["version"], (*BACKUP_FILES, *extra))
+    for name in names:
         path = directory / name
         info = _private(path)
         digest = _sha256(path) if name == SNAPSHOT else snapshot_manifest["files"][name]
@@ -137,7 +152,7 @@ def _archive_manifest(directory: Path) -> tuple[bytes, tuple[dict[str, object], 
         ):
             raise HostedError("hosted_backup_snapshot_invalid")
         entries.append({"name": name, "size": info.st_size, "sha256": digest})
-    document = {"schema": BACKUP_SCHEMA, "version": 1, "files": entries}
+    document = {"schema": BACKUP_SCHEMA, "version": snapshot_manifest["version"], "files": entries}
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
     if len(encoded) > MAX_MANIFEST_BYTES:
         raise HostedError("hosted_backup_manifest_invalid")
@@ -251,13 +266,14 @@ class _ArchiveConsumer:
             or set(document) != {"schema", "version", "files"}
             or document["schema"] != BACKUP_SCHEMA
             or type(document["version"]) is not int
-            or document["version"] != 1
+            or document["version"] not in {1, 2}
             or not isinstance(document["files"], list)
-            or len(document["files"]) != len(BACKUP_FILES)
         ):
             raise HostedError("hosted_backup_manifest_invalid")
+        names = _backup_names(document["version"], [entry.get("name") if isinstance(entry, dict) else None for entry in document["files"]])
+        self.version = document["version"]
         entries: list[dict[str, object]] = []
-        for expected_name, entry in zip(BACKUP_FILES, document["files"], strict=True):
+        for expected_name, entry in zip(names, document["files"], strict=True):
             if (
                 not isinstance(entry, dict)
                 or set(entry) != {"name", "size", "sha256"}
@@ -282,7 +298,7 @@ class _ArchiveConsumer:
             self.capture = bytearray()
             if entry["name"] in {SNAPSHOT, MARKER} and not 1 <= self.remaining <= 4096:
                 raise HostedError("hosted_backup_payload_invalid")
-            if entry["name"] in DATABASES and self.remaining < 16:
+            if entry["name"] in (*DATABASES, WORK_DATABASE, BILLING_DATABASE) and self.remaining < 16:
                 raise HostedError("hosted_backup_payload_invalid")
             if self.destination is not None:
                 descriptor = os.open(
@@ -355,9 +371,9 @@ class _ArchiveConsumer:
             not isinstance(snapshot_document, dict)
             or set(snapshot_document) != {"version", "files", "binding"}
             or type(snapshot_document["version"]) is not int
-            or snapshot_document["version"] != 1
+            or snapshot_document["version"] != self.version
             or not isinstance(snapshot_document["files"], dict)
-            or set(snapshot_document["files"]) != {*DATABASES, MARKER}
+            or set(snapshot_document["files"]) != {str(entry["name"]) for entry in self.entries if entry["name"] != SNAPSHOT}
             or not isinstance(snapshot_document["binding"], str)
             or len(snapshot_document["binding"]) != 64
             or not isinstance(marker_document, dict)
@@ -382,7 +398,7 @@ class _ArchiveConsumer:
         ):
             if any(character not in "0123456789abcdef" for character in value):
                 raise HostedError("hosted_backup_payload_invalid")
-        if any(self.captured[name] != b"SQLite format 3\x00" for name in DATABASES):
+        if any(self.captured[name] != b"SQLite format 3\x00" for name in snapshot_document["files"] if name != MARKER):
             raise HostedError("hosted_backup_payload_invalid")
         if self.destination is not None:
             _fsync_directory(self.destination)

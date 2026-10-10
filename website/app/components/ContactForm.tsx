@@ -5,7 +5,7 @@ import { buildInquiry, campaignSource, INTERESTS, normalizeInterest } from '../.
 import { CONTACT_EMAIL } from '../../lib/site.mjs';
 
 export function ContactForm() {
-  const [interest, setInterest] = useState('onboarding');
+  const [interest, setInterest] = useState('work');
   const [source, setSource] = useState('');
   const [includeSource, setIncludeSource] = useState(false);
   const [draft, setDraft] = useState<{ subject: string; body: string; mailto: string } | null>(null);
@@ -35,7 +35,7 @@ export function ContactForm() {
     <form className="contact-form" onSubmit={prepare} onChange={() => { setDraft(null); setStatus(''); }}>
       <label>What would you like to discuss?<select name="interest" value={interest} onChange={e => setInterest(e.target.value)}>{Object.entries(INTERESTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <div className="form-row"><label>Your name <span>(required)</span><input name="name" autoComplete="name" required maxLength={100} /></label><label>Organization <span>(optional)</span><input name="organization" autoComplete="organization" maxLength={150} /></label></div>
-      <label>Workflow or question <span>(required)</span><textarea name="workflow" required maxLength={1200} rows={5} aria-describedby="inquiry-safety" placeholder="For example: a production API workflow, expected monthly requests, concurrent streams, and the controls you need." /></label>
+      <label>Workflow or question <span>(required)</span><textarea name="workflow" required maxLength={1200} rows={5} aria-describedby="inquiry-safety" placeholder="Include team size, agents and providers, expected traffic, and who operates the setup. For a managed site, include the site and device count." /></label>
       <p id="inquiry-safety" className="field-hint">Do not include tokens, prompts, customer data, configurations, or other secrets.</p>
       <label>Timing <span>(optional)</span><input name="timeframe" maxLength={100} placeholder="For example: exploring this quarter" /></label>
       {source && <label className="checkbox-label"><input type="checkbox" checked={includeSource} onChange={e => setIncludeSource(e.target.checked)} />Include campaign source in my email draft: {source}</label>}

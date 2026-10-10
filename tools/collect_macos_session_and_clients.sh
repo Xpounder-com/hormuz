@@ -52,7 +52,7 @@ case "$SCHEMA_VERSION" in
     ;;
 esac
 
-for output_name in lifecycle.json codex-recovery.json; do
+for output_name in lifecycle.json codex-recovery.json removal.json; do
   [[ ! -e "$OUTPUT_DIRECTORY/$output_name" && ! -L "$OUTPUT_DIRECTORY/$output_name" ]] \
     || fail output_path_unsafe
 done
@@ -120,9 +120,33 @@ WORK_ROOT="$RUNNER_TEMP/hormuz-macos-session-clients-$GITHUB_RUN_ID-$GITHUB_RUN_
 [[ "$WORK_ROOT" == /* && ! -e "$WORK_ROOT" && ! -L "$WORK_ROOT" ]] \
   || fail work_root_unsafe
 /bin/mkdir -m 700 "$WORK_ROOT"
+BOUNDED_ADAPTER="$(/usr/bin/dirname "$0")/macos_pilot_bounded_process.pl"
+[[ -f "$BOUNDED_ADAPTER" && ! -L "$BOUNDED_ADAPTER" ]] || fail bounded_adapter_unsafe
+QUARANTINE_RECOVERY_REQUIRED=false
+QUARANTINE_PATHS=("" "" "" "" "" "" "" "")
+QUARANTINE_REFERENCES=("" "" "" "" "" "" "" "")
+QUARANTINE_IDENTITIES=("" "" "" "" "" "" "" "")
+quarantines_safe_to_remove() {
+  local index path
+  for index in "${!QUARANTINE_PATHS[@]}"; do
+    path="${QUARANTINE_PATHS[$index]}"
+    [[ -n "$path" ]] || continue
+    [[ -d "$path" && ! -L "$path" \
+          && "$(/usr/bin/stat -f '%d:%i' "$path")" == "${QUARANTINE_IDENTITIES[$index]}" ]] \
+      || return 1
+    /usr/bin/diff -qr "$path" "${QUARANTINE_REFERENCES[$index]}" >/dev/null 2>&1 \
+      || return 1
+  done
+}
 cleanup() {
-  /usr/bin/pkill -P "$$" >/dev/null 2>&1 || true
-  /bin/rm -rf "$WORK_ROOT"
+  if [[ "$QUARANTINE_RECOVERY_REQUIRED" != true ]] && quarantines_safe_to_remove; then
+    /bin/rm -rf "$WORK_ROOT"
+  else
+    # This recovery location stays in owned private state, never public JSON.
+    printf '%s\n' "$WORK_ROOT" > "$WORK_ROOT/RECOVERY_REQUIRED_PRIVATE.txt"
+    printf 'macos_session_client_error=quarantined_bundle_requires_recovery\n' >&2
+    exit 1
+  fi
 }
 trap cleanup EXIT
 
@@ -264,33 +288,124 @@ running_app_matches() {
 verify_bundle "$CANDIDATE_APP" "$CANDIDATE_VERSION" "$CANDIDATE_BUILD"
 verify_bundle "$PREVIOUS_APP" "$PREVIOUS_VERSION" "$PREVIOUS_BUILD"
 
-restart_app() {
-  local candidate_pid
-  /usr/bin/pkill -x Hormuz >/dev/null 2>&1 || true
-  local stopped=false
-  for _attempt in {1..10}; do
-    if ! /usr/bin/pgrep -x Hormuz >/dev/null 2>&1; then
-      stopped=true
-      break
+INSTALLED_REFERENCE=""
+BUNDLE_SEQUENCE=0
+verify_installed_bundle() {
+  local installed=/Applications/Hormuz.app
+  [[ -d /Applications && ! -L /Applications && -d "$installed" && ! -L "$installed" ]] \
+    || fail applications_destination_unsafe
+  local owner
+  owner="$(/usr/bin/stat -f '%u' "$installed")"
+  [[ "$owner" == "$(/usr/bin/id -u)" || "$owner" == "0" ]] \
+    || fail applications_owner_invalid
+  local version build
+  version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$installed/Contents/Info.plist")"
+  build="$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$installed/Contents/Info.plist")"
+  if [[ "$version" == "$CANDIDATE_VERSION" && "$build" == "$CANDIDATE_BUILD" ]]; then
+    INSTALLED_REFERENCE="$CANDIDATE_APP"
+  elif [[ "$version" == "$PREVIOUS_VERSION" && "$build" == "$PREVIOUS_BUILD" ]]; then
+    INSTALLED_REFERENCE="$PREVIOUS_APP"
+  else
+    fail applications_unowned_build
+  fi
+  verify_bundle "$installed" "$version" "$build"
+  /usr/bin/diff -qr "$installed" "$INSTALLED_REFERENCE" >/dev/null 2>&1 \
+    || fail applications_contents_mismatch
+}
+
+OWNED_APP_PID=""
+OWNED_APP_START=""
+OWNED_APP_COMMAND=""
+capture_owned_app() {
+  OWNED_APP_PID=""
+  local pid uid start command pids rc
+  if pids="$(/usr/bin/pgrep -x Hormuz 2>/dev/null)"; then
+    rc=0
+  else
+    rc=$?
+    [[ "$rc" == "1" ]] || fail app_process_observation_failed
+  fi
+  for pid in $pids; do
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail app_pid_invalid
+    [[ -z "$OWNED_APP_PID" ]] || fail app_process_ambiguous
+    uid="$(/bin/ps -p "$pid" -o uid= | /usr/bin/tr -d ' ')"
+    start="$(/bin/ps -p "$pid" -o lstart=)"
+    command="$(/bin/ps -ww -p "$pid" -o command=)"
+    [[ "$uid" == "$(/usr/bin/id -u)" && -n "$start" && -n "$command" ]] \
+      || fail app_process_identity_invalid
+    running_app_matches "$pid" /Applications/Hormuz.app/Contents/MacOS/Hormuz /Applications/Hormuz.app \
+      || fail app_process_unowned
+    OWNED_APP_PID="$pid"
+    OWNED_APP_START="$start"
+    OWNED_APP_COMMAND="$command"
+  done
+}
+
+owned_app_matches_snapshot() {
+  [[ "$(/bin/ps -p "$OWNED_APP_PID" -o uid= 2>/dev/null | /usr/bin/tr -d ' ')" == "$(/usr/bin/id -u)" \
+        && "$(/bin/ps -p "$OWNED_APP_PID" -o lstart= 2>/dev/null)" == "$OWNED_APP_START" \
+        && "$(/bin/ps -ww -p "$OWNED_APP_PID" -o command= 2>/dev/null)" == "$OWNED_APP_COMMAND" ]] \
+    || return 1
+  running_app_matches "$OWNED_APP_PID" /Applications/Hormuz.app/Contents/MacOS/Hormuz /Applications/Hormuz.app
+}
+
+stop_owned_app() {
+  verify_installed_bundle
+  capture_owned_app
+  [[ -n "$OWNED_APP_PID" ]] || return 0
+  owned_app_matches_snapshot || fail app_process_identity_changed
+  /bin/kill -TERM "$OWNED_APP_PID" || fail app_process_stop_failed
+  for _attempt in {1..15}; do
+    if ! /bin/kill -0 "$OWNED_APP_PID" 2>/dev/null; then
+      capture_owned_app
+      [[ -z "$OWNED_APP_PID" ]] || fail app_process_reappeared
+      return 0
     fi
+    owned_app_matches_snapshot || fail app_process_identity_changed
     /bin/sleep 1
   done
-  [[ "$stopped" == true ]] || fail app_process_not_stopped
-  local app_binary=/Applications/Hormuz.app/Contents/MacOS/Hormuz
+  fail app_process_not_stopped
+}
+
+quarantine_installed_bundle() {
+  verify_installed_bundle
+  local reference="$INSTALLED_REFERENCE" identity moved index="$BUNDLE_SEQUENCE"
+  [[ "$index" -lt 8 ]] || fail quarantine_limit_exceeded
+  identity="$(/usr/bin/stat -f '%d:%i' /Applications/Hormuz.app)"
+  [[ "${identity%%:*}" == "$(/usr/bin/stat -f '%d' "$WORK_ROOT")" ]] \
+    || fail applications_cross_device_move_refused
+  BUNDLE_SEQUENCE=$((BUNDLE_SEQUENCE + 1))
+  moved="$WORK_ROOT/replaced-$BUNDLE_SEQUENCE.app"
+  [[ ! -e "$moved" && ! -L "$moved" ]] || fail quarantine_destination_unsafe
+  [[ "$(/usr/bin/stat -f '%d:%i' /Applications/Hormuz.app)" == "$identity" ]] \
+    || fail applications_identity_changed
+  # Any uncertain post-move state is recovery-only. EXIT cannot purge it.
+  QUARANTINE_RECOVERY_REQUIRED=true
+  /bin/mv /Applications/Hormuz.app "$moved" || fail app_quarantine_failed
+  [[ ! -L "$moved" && "$(/usr/bin/stat -f '%d:%i' "$moved")" == "$identity" ]] \
+    || fail applications_identity_changed
+  /usr/bin/diff -qr "$moved" "$reference" >/dev/null 2>&1 \
+    || fail applications_contents_mismatch
+  [[ ! -e /Applications/Hormuz.app && ! -L /Applications/Hormuz.app ]] \
+    || fail applications_destination_unsafe
+  QUARANTINE_PATHS[$index]="$moved"
+  QUARANTINE_REFERENCES[$index]="$reference"
+  QUARANTINE_IDENTITIES[$index]="$identity"
+  QUARANTINE_RECOVERY_REQUIRED=false
+}
+
+restart_app() {
+  stop_owned_app
   /usr/bin/open -n /Applications/Hormuz.app || fail app_launch_failed
   local running=false
   for _attempt in {1..30}; do
-    for candidate_pid in $(/usr/bin/pgrep -x Hormuz 2>/dev/null || true); do
-      [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] || continue
-      if running_app_matches "$candidate_pid" "$app_binary" /Applications/Hormuz.app; then
-        /bin/sleep 2
-        if /bin/kill -0 "$candidate_pid" 2>/dev/null \
-            && running_app_matches "$candidate_pid" "$app_binary" /Applications/Hormuz.app; then
-          running=true
-          break 2
-        fi
-      fi
-    done
+    capture_owned_app
+    if [[ -n "$OWNED_APP_PID" ]]; then
+      /bin/sleep 2
+      owned_app_matches_snapshot || fail app_process_identity_changed
+      running=true
+      break
+    fi
     /bin/sleep 1
   done
   [[ "$running" == true ]] || fail app_launch_failed
@@ -301,11 +416,8 @@ install_bundle() {
   local version="$2"
   local build="$3"
   if [[ -e /Applications/Hormuz.app || -L /Applications/Hormuz.app ]]; then
-    [[ -d /Applications/Hormuz.app && ! -L /Applications/Hormuz.app ]] \
-      || fail applications_destination_unsafe
-    [[ "$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - /Applications/Hormuz.app/Contents/Info.plist 2>/dev/null)" == "com.xpounder.hormuz" ]] \
-      || fail applications_destination_unsafe
-    /bin/rm -rf /Applications/Hormuz.app
+    stop_owned_app
+    quarantine_installed_bundle
   fi
   /usr/bin/ditto "$source" /Applications/Hormuz.app || fail app_install_failed
   verify_bundle /Applications/Hormuz.app "$version" "$build"
@@ -475,22 +587,9 @@ SH
 }
 
 run_bounded() {
-  local stdout="$1"
-  local stderr="$2"
+  local stdout="$1" stderr="$2"
   shift 2
-  "$@" >"$stdout" 2>"$stderr" &
-  local pid=$!
-  for _attempt in {1..120}; do
-    if ! /bin/kill -0 "$pid" 2>/dev/null; then
-      wait "$pid"
-      return $?
-    fi
-    /bin/sleep 1
-  done
-  /usr/bin/pkill -TERM -P "$pid" >/dev/null 2>&1 || true
-  /bin/kill -TERM "$pid" >/dev/null 2>&1 || true
-  wait "$pid" >/dev/null 2>&1 || true
-  return 124
+  /usr/bin/perl "$BOUNDED_ADAPTER" 120 65536 "$stdout" "$stderr" -- "$@"
 }
 
 write_client_record() {
@@ -677,6 +776,8 @@ verify_session
 install_bundle "$CANDIDATE_APP" "$CANDIDATE_VERSION" "$CANDIDATE_BUILD"
 verify_session
 
+PRIOR_SERVER_REVOCATION_DENIED=false
+PRIOR_SIGN_OUT_VERIFIED=false
 run_codex_recovery
 /Applications/Hormuz.app/Contents/MacOS/Hormuz \
   pilot-evidence server-revoke --profile "$ACTIVE_PROFILE_ID" \
@@ -686,6 +787,7 @@ run_codex_recovery
   pilot-evidence verify-denied --profile "$ACTIVE_PROFILE_ID" \
   --state-directory "$STATE_DIRECTORY" >/dev/null \
   || fail server_revocation_denial_failed
+PRIOR_SERVER_REVOCATION_DENIED=true
 /Applications/Hormuz.app/Contents/MacOS/Hormuz \
   pilot-evidence sign-out --profile "$ACTIVE_PROFILE_ID" \
   --state-directory "$STATE_DIRECTORY" >/dev/null \
@@ -694,6 +796,7 @@ run_codex_recovery
   pilot-evidence session-absent --profile "$ACTIVE_PROFILE_ID" \
   --state-directory "$STATE_DIRECTORY" >/dev/null \
   || fail session_removal_failed
+PRIOR_SIGN_OUT_VERIFIED=true
 credential_files_absent
 
 if [[ "$QUALIFICATION_SCOPE" == "full_dual_provider" ]]; then
@@ -729,4 +832,61 @@ done
 /usr/bin/plutil -convert json "$LIFECYCLE_TMP" || fail output_conversion_failed
 /bin/chmod 600 "$LIFECYCLE_TMP"
 /bin/mv "$LIFECYCLE_TMP" "$OUTPUT_DIRECTORY/lifecycle.json"
+
+# The native result observes custody and generated-file absence. It must never
+# infer server revocation from an empty store; retain the earlier real denial.
+REMOVAL_STARTED="$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
+stop_owned_app
+[[ -z "$OWNED_APP_PID" ]] || fail removal_app_process_present
+run_removal_json() {
+  local output="$1"
+  shift
+  /usr/bin/perl "$BOUNDED_ADAPTER" 30 32768 "$output" "$output.stderr" -- \
+    /Applications/Hormuz.app/Contents/MacOS/Hormuz "$@" \
+    || fail native_removal_failed
+  /usr/bin/plutil -lint "$output" >/dev/null || fail native_removal_output_invalid
+}
+
+PREVIEW="$WORK_ROOT/removal-preview.json"
+APPLY="$WORK_ROOT/removal-apply.json"
+VERIFY="$WORK_ROOT/removal-verify.json"
+run_removal_json "$PREVIEW" local-setup removal preview --state-directory "$STATE_DIRECTORY"
+PREVIEW_TOKEN="$(/usr/bin/plutil -extract preview_token raw -o - "$PREVIEW")"
+[[ "$PREVIEW_TOKEN" =~ ^[0-9a-f]{64}$ ]] || fail removal_preview_invalid
+run_removal_json "$APPLY" local-setup removal apply --state-directory "$STATE_DIRECTORY" \
+  --preview-token "$PREVIEW_TOKEN" --confirm
+run_removal_json "$VERIFY" local-setup removal verify --state-directory "$STATE_DIRECTORY"
+for native in "$APPLY" "$VERIFY"; do
+  for field in keychain_session_absent generated_setup_absent coordination_locks_retained; do
+    [[ "$(/usr/bin/plutil -type "$field" "$native")" == "boolean" \
+          && "$(/usr/bin/plutil -extract "$field" raw -o - "$native")" == "true" ]] \
+      || fail native_removal_incomplete
+  done
+done
+capture_owned_app
+[[ -z "$OWNED_APP_PID" ]] || fail removal_app_process_present
+quarantine_installed_bundle
+[[ ! -e /Applications/Hormuz.app && ! -L /Applications/Hormuz.app ]] \
+  || fail removal_bundle_present
+REMOVAL_TMP="$OUTPUT_DIRECTORY/removal.json.tmp.plist"
+[[ ! -e "$REMOVAL_TMP" && ! -L "$REMOVAL_TMP" ]] || fail output_path_unsafe
+/usr/bin/plutil -create xml1 "$REMOVAL_TMP"
+/usr/bin/plutil -insert schema_id -string hormuz.macos-native-removal-evidence "$REMOVAL_TMP"
+/usr/bin/plutil -insert schema_version -integer 1 "$REMOVAL_TMP"
+/usr/bin/plutil -insert source_commit -string "$SOURCE_COMMIT" "$REMOVAL_TMP"
+/usr/bin/plutil -insert artifact_sha256 -string "$CANDIDATE_SHA256" "$REMOVAL_TMP"
+/usr/bin/plutil -insert version -string "$CANDIDATE_VERSION" "$REMOVAL_TMP"
+/usr/bin/plutil -insert build -string "$CANDIDATE_BUILD" "$REMOVAL_TMP"
+/usr/bin/plutil -insert workflow_run_url -string "https://github.com/Xpounder-com/hormuz/actions/runs/$GITHUB_RUN_ID" "$REMOVAL_TMP"
+/usr/bin/plutil -insert started_at -string "$REMOVAL_STARTED" "$REMOVAL_TMP"
+/usr/bin/plutil -insert completed_at -string "$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')" "$REMOVAL_TMP"
+/usr/bin/plutil -insert native_apply -json "$(/bin/cat "$APPLY")" "$REMOVAL_TMP"
+/usr/bin/plutil -insert native_verify -json "$(/bin/cat "$VERIFY")" "$REMOVAL_TMP"
+/usr/bin/plutil -insert prior_server_revocation_denied -bool "$PRIOR_SERVER_REVOCATION_DENIED" "$REMOVAL_TMP"
+/usr/bin/plutil -insert prior_sign_out_verified -bool "$PRIOR_SIGN_OUT_VERIFIED" "$REMOVAL_TMP"
+/usr/bin/plutil -insert owned_app_process_stopped -bool true "$REMOVAL_TMP"
+/usr/bin/plutil -insert installed_bundle_removed -bool true "$REMOVAL_TMP"
+/usr/bin/plutil -convert json "$REMOVAL_TMP"
+/bin/chmod 600 "$REMOVAL_TMP"
+/bin/mv "$REMOVAL_TMP" "$OUTPUT_DIRECTORY/removal.json"
 printf 'macos_session_client_status=passed\n'

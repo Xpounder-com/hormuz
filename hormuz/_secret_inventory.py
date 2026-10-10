@@ -47,6 +47,7 @@ _CUSTODY_MODES = frozenset(
         "private_invitation_handoff",
         "browser_http_only_cookie",
         "hosted_backup_aead",
+        "owner_only_local_key",
     }
 )
 _STORAGE_OWNERS = frozenset(
@@ -180,6 +181,28 @@ _IDENTITY_CONNECTOR_HASH_MATERIALS = {
         "OutcomeKeys._digest",
     ): "tenant_fingerprint_key",
 }
+
+# These additions have a distinct local custody boundary. In particular, the
+# durable workflow key is protected by its owner-only database, not an envelope.
+_AI_WORK_MANAGED_CUSTODY = {
+    ("hormuz/work_workflow.py", "WorkWorkflow.__init__"):
+        ("ai-work-workflow-fingerprint-key", "tenant_fingerprint_key", "owner_only_local_key", "customer_filesystem", "gateway_runtime", "identity_operator", "identity_connector_secret"),
+    ("hormuz/work_workflow.py", "WorkWorkflow._digest"):
+        ("ai-work-workflow-fingerprints", "tenant_fingerprint_key", "keyed_hash", "customer_filesystem", "gateway_runtime", "identity_operator", "identity_connector_secret"),
+    ("hormuz/work_workflow.py", "WorkWorkflow._delivery_digest"):
+        ("ai-work-verified-delivery-fingerprints", "tenant_fingerprint_key", "keyed_hash", "customer_filesystem", "gateway_runtime", "identity_operator", "identity_connector_secret"),
+    ("hormuz/work_runtime.py", "WorkRuntime.pattern_for_request"):
+        ("ai-work-request-fingerprints", "tenant_fingerprint_key", "keyed_hash", "operator_process", "gateway_runtime", "deployment_operator", "identity_connector_secret"),
+    ("hormuz/work_runtime.py", "WorkRuntime._cache_identity"):
+        ("ai-work-answer-cache-fingerprints", "tenant_fingerprint_key", "keyed_hash", "operator_process", "gateway_runtime", "deployment_operator", "identity_connector_secret"),
+    ("hormuz/work_workflow_http.py", "_encode_handoff"):
+        ("ai-work-campaign-handoff-signature", "session_material", "keyed_hash", "operator_process", "admin_console", "identity_operator", "session_material"),
+    ("hormuz/work_workflow_http.py", "_decode_handoff"):
+        ("ai-work-campaign-handoff-verification", "session_material", "keyed_hash", "operator_process", "admin_console", "identity_operator", "session_material"),
+    ("hormuz/work_workflow_http.py", "_cookie"):
+        ("ai-work-campaign-handoff-cookie", "session_material", "browser_http_only_cookie", "client_browser", "admin_console", "session_owner", "session_material"),
+}
+_AI_WORK_CUSTODY_FIELDS = ("id", "material_class", "custody_mode", "storage_owner", "runtime_consumer", "rotation_authority", "key_purpose")
 
 
 class SecretInventoryError(RuntimeError):
@@ -502,7 +525,7 @@ def _validate_sources(
             "secret_inventory_material_class_invalid",
         )
         custody_mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
-        if custody_mode in {"private_invitation_handoff", "browser_http_only_cookie"}:
+        if custody_mode in {"private_invitation_handoff", "browser_http_only_cookie", "owner_only_local_key"}:
             raise SecretInventoryError("secret_inventory_secret_custody_invalid")
         _enum(entry, "storage_owner", _STORAGE_OWNERS, "secret_inventory_storage_owner_invalid")
         _enum(entry, "runtime_consumer", _RUNTIME_CONSUMERS, "secret_inventory_consumer_invalid")
@@ -526,6 +549,8 @@ def _validate_managed_materials(
     purpose_statuses: Mapping[str, str],
     source_root: Path,
 ) -> None:
+    work_ids = {item[0] for item in _AI_WORK_MANAGED_CUSTODY.values()}
+    work_seen: set[str] = set()
     for entry in entries:
         _exact_keys(entry, _MANAGED_MATERIAL_FIELDS, "secret_inventory_entry_shape_invalid")
         _validate_id(entry, seen_ids)
@@ -534,6 +559,13 @@ def _validate_managed_materials(
             raise SecretInventoryError("secret_inventory_managed_source_missing")
         _enum(entry, "material_class", _MATERIAL_CLASSES, "secret_inventory_material_class_invalid")
         mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
+        work_custody = _AI_WORK_MANAGED_CUSTODY.get((coordinate.source_module, coordinate.source_qualname))
+        if work_custody is not None or entry.get("id") in work_ids:
+            if work_custody is None or tuple(entry.get(field) for field in _AI_WORK_CUSTODY_FIELDS) != work_custody:
+                raise SecretInventoryError("secret_inventory_managed_custody_invalid")
+            work_seen.add(entry["id"])
+        if mode == "owner_only_local_key" and work_custody is None:
+            raise SecretInventoryError("secret_inventory_managed_custody_invalid")
         identity_connector_hash = (
             mode == "keyed_hash"
             and entry.get("key_purpose") == "identity_connector_secret"
@@ -562,8 +594,9 @@ def _validate_managed_materials(
             }
             and not identity_connector_hash
             and not personal_provider_mode
+            and work_custody is None
         )
-        if mode == "browser_http_only_cookie" and (
+        if mode == "browser_http_only_cookie" and work_custody is None and (
             coordinate.source_module not in {"hormuz/console_http.py", "hormuz/workspace_http.py"}
             or coordinate.source_qualname != "_cookie_header"
             or entry.get("storage_owner") != "client_browser"
@@ -603,7 +636,7 @@ def _validate_managed_materials(
             entry.get("key_purpose") != "session_material" or entry.get("material_class") != "session_material"
         ):
             raise SecretInventoryError("secret_inventory_managed_custody_invalid")
-        if not local_session_mode and not identity_connector_hash and not personal_provider_mode and mode not in {
+        if not local_session_mode and not identity_connector_hash and not personal_provider_mode and work_custody is None and mode not in {
             "hormuz_encrypted_envelope", "external_service_encryption",
             "transient_import", "hosted_backup_aead",
         }:
@@ -614,6 +647,8 @@ def _validate_managed_materials(
         purpose = _optional_purpose(entry.get("key_purpose"))
         if purpose is None or purpose_statuses.get(purpose) != "active":
             raise SecretInventoryError("secret_inventory_managed_purpose_invalid")
+    if work_seen != work_ids:
+        raise SecretInventoryError("secret_inventory_managed_source_unmapped")
 
 
 def _coordinate(entry: Mapping[str, Any], *, require_selector: bool) -> SourceCoordinate:

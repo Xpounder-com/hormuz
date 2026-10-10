@@ -4,6 +4,7 @@ import HormuzClientCore
 
 enum CredentialCommand {
     static func run(arguments: [String]) -> Never {
+        if arguments.first == "local-setup" { runRemoval(arguments: arguments) }
         if arguments == ["--version"] {
             let packagedVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             print("Hormuz Mac " + (packagedVersion ?? "0.1.0-local"))
@@ -96,6 +97,46 @@ enum CredentialCommand {
                 default:
                     fail(ClientError.invalidArguments)
                 }
+                exit(0)
+            } catch { fail(error) }
+        }
+        dispatchMain()
+    }
+
+    private static func runRemoval(arguments: [String]) -> Never {
+        guard arguments.count >= 5, arguments[0] == "local-setup", arguments[1] == "removal",
+              ["preview", "apply", "verify"].contains(arguments[2]), arguments[3] == "--state-directory",
+              arguments[4].hasPrefix("/"),
+              !arguments[4].unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        else { fail(ClientError.invalidArguments) }
+        let operation = arguments[2]
+        let tail = Array(arguments.dropFirst(5))
+        let reset = tail.last == "--reset-appearance"
+        var token: String?
+        if operation == "apply" {
+            guard (tail.count == 3 || (tail.count == 4 && reset)), tail[0] == "--preview-token", tail[2] == "--confirm",
+                  tail[1].count == 64, tail[1].allSatisfy({ $0.isASCII && ($0.isNumber || "abcdef".contains($0)) })
+            else { fail(ClientError.invalidArguments) }
+            token = tail[1]
+        } else if !tail.isEmpty { fail(ClientError.invalidArguments) }
+        Task {
+            do {
+                let directory = try PrivateDirectory(root: URL(fileURLWithPath: arguments[4]), create: false)
+                let controller = SessionController(directory: directory)
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                let data: Data
+                switch operation {
+                case "preview": data = try encoder.encode(await controller.previewLocalSetupRemoval())
+                case "verify": data = try encoder.encode(await controller.verifyLocalSetupRemoval())
+                case "apply":
+                    guard let token else { fail(ClientError.invalidArguments) }
+                    let result = try await controller.applyLocalSetupRemoval(previewToken: token)
+                    if reset { NativeAppearanceSettings.reset(UserDefaults.standard) }
+                    data = try encoder.encode(result.withAppearanceReset(reset))
+                default: fail(ClientError.invalidArguments)
+                }
+                FileHandle.standardOutput.write(data)
+                FileHandle.standardOutput.write(Data("\n".utf8))
                 exit(0)
             } catch { fail(error) }
         }

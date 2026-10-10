@@ -24,20 +24,35 @@ private struct DesktopRedemption: Decodable {
 
 public actor SessionController {
     public let directory: PrivateDirectory
-    private let store: any SessionStore
-    private let transport: any GatewayTransport
+    let store: any SessionStore
+    let transport: any GatewayTransport
+    private var coordination: NativeSessionCoordination?
+    let removalSafety: @Sendable () throws -> Void
+    let removalJournalSync: @Sendable () throws -> Void
     private let now: @Sendable () -> Date
 
     public init(directory: PrivateDirectory, store: any SessionStore = KeychainSessionStore(),
-                transport: any GatewayTransport = HTTPGatewayTransport(), now: @escaping @Sendable () -> Date = { Date() }) {
+                transport: any GatewayTransport = HTTPGatewayTransport(), now: @escaping @Sendable () -> Date = { Date() },
+                coordination: NativeSessionCoordination? = nil,
+                removalSafety: (@Sendable () throws -> Void)? = nil,
+                removalJournalSync: (@Sendable () throws -> Void)? = nil) {
         self.directory = directory
         self.store = store
         self.transport = transport
         self.now = now
+        self.coordination = coordination
+        self.removalSafety = removalSafety ?? (store.coordinationNamespace == nil ? {} : NativeRemovalProcessSafety.check)
+        self.removalJournalSync = removalJournalSync ?? { try directory.syncMetadata() }
+    }
+
+    func lockConnection(allowAbsent: Bool = false) async throws -> NativeSessionLock {
+        if coordination == nil { coordination = try NativeSessionCoordination.forStore(store, directory: directory) }
+        guard let coordination else { throw ClientError.storageUnavailable }
+        return try await coordination.lock(connection: directory, allowAbsent: allowAbsent)
     }
 
     public func status() async throws -> ConnectionStatus {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
         if let record = try store.load() {
             let checked = try record.validated(for: record.profile)
@@ -51,8 +66,9 @@ public actor SessionController {
     public func signIn(profile: ConnectionProfile, joinTeam: Bool = false,
                        openBrowser: @Sendable (URL) async throws -> Void) async throws {
         let profile = try profile.validated()
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
+        try directory.requireSetupWritable()
         guard try store.load() == nil else { throw ClientError.alreadySignedIn }
         try directory.saveProfile(profile)
         let secret = try Self.enrollmentSecret()
@@ -112,8 +128,9 @@ public actor SessionController {
     public func signInDesktop(origin: String, client: AIClient, allowLoopbackHTTP: Bool = false, joinTeam: Bool = false,
                               openBrowser: @Sendable (URL) async throws -> Void) async throws {
         let origin = try ConnectionProfile.normalizeGateway(origin, allowLoopbackHTTP: allowLoopbackHTTP)
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
+        try directory.requireSetupWritable()
         guard try store.load() == nil else { throw ClientError.alreadySignedIn }
         let secret = try Self.enrollmentSecret()
         var enrollmentFields = [
@@ -195,7 +212,7 @@ public actor SessionController {
     /// Calls are serialized across the app and all helper processes.
     public func accessCredential(profileID: UUID, forceRefresh: Bool = false,
                                  expectedProfile: ConnectionProfile? = nil) async throws -> String {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
         let record = try await credentialWhileLocked(profileID: profileID, forceRefresh: forceRefresh,
                                                      expectedProfile: expectedProfile)
@@ -204,7 +221,7 @@ public actor SessionController {
     }
 
     public func dashboard(profileID: UUID) async throws -> Dashboard {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
         let record = try await credentialWhileLocked(profileID: profileID)
         try await validateDesktopProfile(record)
@@ -226,14 +243,14 @@ public actor SessionController {
     /// Content-free operational checks used by the signed pilot workflow. They
     /// deliberately return no credential or server body to their caller.
     public func verifySession(profileID: UUID) async throws {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
         let record = try await credentialWhileLocked(profileID: profileID)
         _ = try await identity(record.profile, token: record.accessToken)
     }
 
     public func reliability(profileID: UUID) async throws -> ProviderReliabilitySnapshot {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
         let record = try await credentialWhileLocked(profileID: profileID)
         let reply = try await transport.request(
@@ -250,7 +267,7 @@ public actor SessionController {
     }
 
     public func refreshSession(profileID: UUID) async throws {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
         _ = try await credentialWhileLocked(profileID: profileID, forceRefresh: true)
     }
@@ -258,7 +275,7 @@ public actor SessionController {
     /// Revoke the current server session while retaining the Keychain record so
     /// a subsequent check can prove that the gateway rejects that exact session.
     public func revokeServerSession(profileID: UUID) async throws {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
         guard let profile = try directory.loadProfile(), profile.id == profileID,
               let saved = try store.load() else { throw ClientError.loginRequired }
@@ -272,7 +289,7 @@ public actor SessionController {
     }
 
     public func verifyServerRevocation(profileID: UUID) async throws {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
         guard let profile = try directory.loadProfile(), profile.id == profileID,
               let saved = try store.load() else { throw ClientError.loginRequired }
@@ -288,11 +305,12 @@ public actor SessionController {
     }
 
     public func verifySessionAbsent(profileID: UUID) async throws {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
         guard let profile = try directory.loadProfile(), profile.id == profileID else {
             throw ClientError.loginRequired
         }
+        try directory.requireSetupWritable()
         guard try store.load() == nil else { throw ClientError.alreadySignedIn }
     }
 
@@ -300,14 +318,16 @@ public actor SessionController {
     /// login. This deliberately does not trust a profile file: a stale or
     /// removed profile must not hide a retained session record.
     public func verifySessionStoreEmpty() async throws {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
+        try directory.requireSetupWritable()
         guard try store.load() == nil else { throw ClientError.alreadySignedIn }
     }
 
     public func signOut() async throws {
-        let lock = try await directory.lock()
+        let lock = try await lockConnection()
         defer { lock.unlock() }
+        try directory.requireSetupWritable()
         guard let saved = try store.load() else { return }
         var record = try saved.validated(for: saved.profile)
         // Suspend local use BEFORE contacting the gateway. Preserve this token
@@ -324,6 +344,7 @@ public actor SessionController {
 
     private func credentialWhileLocked(profileID: UUID, forceRefresh: Bool = false,
                                        expectedProfile: ConnectionProfile? = nil) async throws -> SessionRecord {
+        try directory.requireSetupWritable()
         guard let profile = try directory.loadProfile(), profile.id == profileID else { throw ClientError.loginRequired }
         if let expectedProfile, profile != expectedProfile { throw ClientError.configurationChanged }
         guard let saved = try store.load() else { throw ClientError.loginRequired }

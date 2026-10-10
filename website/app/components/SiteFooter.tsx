@@ -11,14 +11,15 @@ export function SiteFooter() {
           <BrandLockup />
         </CampaignLink>
         <p className="footer-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a></p>
-        <p>Understand AI usage. Set the policy for what happens next.</p>
-        <span>Apache-2.0 · Core {SOURCE_VERSION.slice(1)} · Mac {MACOS_VERSION.slice(1)}<br />Production qualification remains deployment-specific.</span>
+        <p>Keep your agents. Choose your budget and pace.</p>
+        <span>Apache-2.0 · Core {SOURCE_VERSION.slice(1)} · Mac {MACOS_VERSION.slice(1)}<br />Check compatibility and security for your deployment.</span>
       </div>
 
       <div className="footer-column">
         <strong>Build with Hormuz</strong>
         <CampaignLink href={sitePath('/docs/')}>Install free</CampaignLink>
-        <CampaignLink href={sitePath('/demo/')}>Explore the $1M example</CampaignLink>
+        <CampaignLink href={sitePath('/work/')}>Open AI Work</CampaignLink>
+        <CampaignLink href={sitePath('/evidence/')}>Inspect the evidence</CampaignLink>
         <CampaignLink href={sitePath('/demo/#policy')}>Try a policy</CampaignLink>
         <CampaignLink href={sitePath('/demo/#compaction')}>See context compaction</CampaignLink>
         <CampaignLink href={sitePath('/integrations/')}>Check my stack</CampaignLink>
@@ -29,7 +30,7 @@ export function SiteFooter() {
       <div className="footer-column">
         <strong>Evaluate</strong>
         <CampaignLink href={sitePath('/plans/')}>Pricing & pay</CampaignLink>
-        <CampaignLink href={sitePath('/enterprise/')}>Enterprise & services</CampaignLink>
+        <CampaignLink href={sitePath('/enterprise/')}>Onboarding & managed sites</CampaignLink>
         <CampaignLink href={sitePath('/security/')}>Security & boundaries</CampaignLink>
         <CampaignLink href={sitePath('/resources/')}>Buyer & project resources</CampaignLink>
         <CampaignLink href={sitePath('/brand/')}>Brand & assets</CampaignLink>
@@ -41,7 +42,7 @@ export function SiteFooter() {
       <div className="footer-column">
         <strong>{AUTHOR}</strong>
         <span>Hormuz founder · Director, Neuralint</span>
-        <CampaignLink href={sitePath('/contact/?interest=review')}>Get a free AI review</CampaignLink>
+        <CampaignLink href={sitePath('/contact/?interest=work')}>Discuss your workflow</CampaignLink>
         <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
         <a href={sourcePath('SECURITY.md')}>Report a vulnerability ↗</a>
       </div>

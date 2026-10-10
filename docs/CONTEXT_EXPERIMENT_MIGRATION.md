@@ -1,6 +1,6 @@
 # Migrating the deprecated context experiment
 
-Hormuz 0.2 removes the experimental context-pack kernel from the core gateway distribution and runtime. The core `hormuz` wheel has no context retrieval, lifecycle, cache, provenance, memory, or content-storage implementation. Normal gateway startup does not import experimental modules or create context storage.
+Hormuz 0.2 removes the experimental context-pack kernel from the core gateway distribution and runtime. Normal gateway startup does not import experimental modules or create context storage. The separately authorized 2026-10-08 `ai_work` runtime adds opt-in exact answer reuse in bounded process memory under [ADR 0014](decisions/0014-customer-local-ai-work-and-exact-reuse.md); it does not restore the archived experimental context-pack kernel.
 
 The experiment remains in this repository as the separately buildable `hormuz-context-experiment` package. It is outside the core release, security, and operational claims.
 

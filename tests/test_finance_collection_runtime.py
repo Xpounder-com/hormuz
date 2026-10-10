@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime, timezone
+from decimal import Inexact, InvalidOperation, Rounded, localcontext
+import io
 import json
 from pathlib import Path
 import sqlite3
@@ -127,6 +130,20 @@ def openai_cost(**changes) -> dict[str, object]:
     }
 
 
+def openai_cost_metadata_bucket(**changes) -> dict[str, object]:
+    bucket = openai_bucket(START, MIDDLE, [openai_cost(
+        organization_id="raw-provider-account",
+        organization_name="private-organization-label",
+        project_name="private-project-label",
+        user_email=None,
+        user_id=None,
+        api_source=None,
+        **changes,
+    )])
+    bucket.update(start_time_iso=START, end_time_iso=MIDDLE)
+    return bucket
+
+
 def anthropic_usage(**changes) -> dict[str, object]:
     return {
         "account_id": "person-account-sensitive",
@@ -188,6 +205,322 @@ def normalized_usage(
 
 
 class FinanceCollectionNormalizationTests(unittest.TestCase):
+    def test_openai_cost_amount_and_quantity_preserve_exact_extended_decimal_lexemes(self):
+        cases = (("0." + "0" * 35 + "1", "0." + "0" * 35 + "1"),
+                 ("9" * 18 + "." + "9" * 36, "9" * 18 + "." + "9" * 36),
+                 ("-1.000000000000000000000000000000000001", "-1.000000000000000000000000000000000001"),
+                 ("1e-36", "0." + "0" * 35 + "1"),
+                 ("1." + "0" * 100, "1"), ("-0e-1000000", "0"))
+        with localcontext() as context:
+            context.prec = 2
+            context.traps[Inexact] = context.traps[Rounded] = True
+            original_flags = context.flags.copy()
+            for native, canonical in cases:
+                with self.subTest(native=native):
+                    record = openai_cost(amount={"value": "exact-amount", "currency": "usd"},
+                                         quantity="exact-quantity", quantity_unit=None)
+                    page = openai_page([openai_bucket(START, MIDDLE, [record])])
+                    page = page.replace(b'"exact-amount"', native.encode()).replace(b'"exact-quantity"', native.encode())
+                    collection = normalize_collection_pages(query("openai.organization-costs.v1"),
+                        (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+                    item = collection.cost_observations[0]
+                    self.assertEqual((item.native_amount, item.canonical_amount, item.native_quantity),
+                                     (native, canonical, native))
+                    self.assertEqual((item.provider_final, item.invoice_final), (False, False))
+                    validate_normalized_collection(collection)
+            self.assertEqual(context.flags, original_flags)
+
+    def test_collection_extreme_numeric_exponents_cannot_mutate_caller_flags(self):
+        for trapped in (False, True):
+            for field in ("amount", "quantity"):
+                for exponent in ("9" * 40, "-" + "9" * 40):
+                    record = openai_cost(amount={"value": "exact-amount", "currency": "USD"},
+                                         quantity="exact-quantity", quantity_unit=None)
+                    page = openai_page([openai_bucket(START, MIDDLE, [record])])
+                    for name in ("amount", "quantity"):
+                        raw = "1e" + exponent if name == field else "1"
+                        page = page.replace(('"exact-' + name + '"').encode(), raw.encode())
+                    with self.subTest(trapped=trapped, field=field, negative=exponent.startswith("-")), localcontext() as context:
+                        context.traps[InvalidOperation] = trapped
+                        context.clear_flags()
+                        original_flags = context.flags.copy()
+                        with self.assertRaisesRegex(FinanceCollectionError, "numeric_domain_invalid"):
+                            normalize_collection_pages(query("openai.organization-costs.v1"),
+                                (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+                        self.assertEqual(context.flags, original_flags)
+
+    def test_legacy_openai_canonical_values_and_snapshot_identities_are_unchanged(self):
+        from hormuz.finance_values import decimal_text
+
+        for native in ("1.25", "-0.000000000000000001", "999999999999999999.999999999999999999", "1e-18", "-0.00"):
+            record = openai_cost(amount={"value": "exact-amount", "currency": "USD"},
+                                 quantity="exact-quantity", quantity_unit="tokens")
+            page = openai_page([openai_bucket(START, MIDDLE, [record])])
+            page = page.replace(b'"exact-amount"', native.encode()).replace(b'"exact-quantity"', native.encode())
+            value = query("openai.organization-costs.v1")
+            actual = normalize_collection_pages(value, (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+            with mock.patch("hormuz.finance_collection.openai_provider_decimal_text", side_effect=decimal_text):
+                legacy = normalize_collection_pages(value, (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+            with self.subTest(native=native):
+                self.assertEqual(actual, legacy)
+                self.assertEqual(actual.content_digest, legacy.content_digest)
+                self.assertEqual(actual.cost_observations[0].observation_digest,
+                                 legacy.cost_observations[0].observation_digest)
+
+    def test_openai_cost_decimal_rejects_precision_range_and_lexeme_overruns_for_both_fields(self):
+        for field in ("amount", "quantity"):
+            for native in ("1e-37", "1e18", "-1e18", "1e-1000000", "1e1000000",
+                           "0." + "0" * 36 + "1", "1." + "0" * 127):
+                with self.subTest(field=field, native=native):
+                    record = openai_cost(amount={"value": "exact-amount", "currency": "USD"},
+                                         quantity="exact-quantity", quantity_unit=None)
+                    page = openai_page([openai_bucket(START, MIDDLE, [record])])
+                    page = page.replace(b'"exact-amount"', (native if field == "amount" else "1").encode())
+                    page = page.replace(b'"exact-quantity"', (native if field == "quantity" else "1").encode())
+                    with self.assertRaisesRegex(FinanceCollectionError, "numeric_domain_invalid"):
+                        normalize_collection_pages(query("openai.organization-costs.v1"),
+                            (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+
+    def test_openai_stored_decimal_validation_rejects_forged_extended_values_and_anthropic_stays_18_places(self):
+        page = openai_page([openai_bucket(START, MIDDLE, [openai_cost()])])
+        original = normalize_collection_pages(query("openai.organization-costs.v1"),
+            (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+        for field in ("native_amount", "native_quantity"):
+            item = replace(original.cost_observations[0], **{field: "1e-37"})
+            with self.subTest(field=field), self.assertRaisesRegex(FinanceCollectionError, "snapshot_conflict"):
+                validate_normalized_collection(replace(original, cost_observations=(item,)))
+        for native in ("0." + "0" * 18 + "1", "0." + "0" * 16 + "1", "1." + "0" * 19):
+            with self.subTest(native=native), self.assertRaisesRegex(FinanceCollectionError, "numeric_domain_invalid"):
+                normalize_collection_pages(query("anthropic.organization-costs.v1"),
+                    (anthropic_page([anthropic_bucket(START, MIDDLE, [anthropic_cost(amount=native)])]),),
+                    fingerprint_key=KEY, fingerprint_key_version=1)
+
+    def test_openai_cost_quantity_nullability_and_identity_preserve_native_values(self):
+        value = query("openai.organization-costs.v1")
+
+        def normalize(records):
+            result = normalize_collection_pages(
+                value, (openai_page([openai_bucket(START, MIDDLE, records)]),),
+                fingerprint_key=KEY, fingerprint_key_version=1,
+            )
+            validate_normalized_collection(result)
+            return result
+
+        explicit_null = normalize([openai_cost(quantity=1, quantity_unit=None)])
+        omitted = openai_cost(quantity=1)
+        del omitted["quantity_unit"]
+        self.assertEqual(normalize([omitted]).content_digest, explicit_null.content_digest)
+        self.assertEqual(explicit_null.cost_observations[0].native_quantity, "1")
+        self.assertIsNone(explicit_null.cost_observations[0].quantity_unit)
+        changed_quantity = normalize([openai_cost(quantity=2, quantity_unit=None)])
+        changed_unit = normalize([openai_cost(quantity=1, quantity_unit="1000_tokens")])
+        self.assertEqual(len({item.content_digest for item in (explicit_null, changed_quantity, changed_unit)}), 3)
+        self.assertEqual(len({item.cost_observations[0].observation_digest for item in
+                              (explicit_null, changed_quantity, changed_unit)}), 3)
+        # Quantity is a measured value; it must not create an implicit new
+        # grouping dimension that permits two rows for the same semantic key.
+        with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+            normalize([openai_cost(quantity=1, quantity_unit=None), openai_cost(quantity=2, quantity_unit=None)])
+        for result in (explicit_null, changed_quantity, changed_unit):
+            self.assertFalse(result.cost_observations[0].provider_final)
+            self.assertFalse(result.cost_observations[0].invoice_final)
+
+    def test_anthropic_cost_quantity_fields_remain_unsupported(self):
+        value = query("anthropic.organization-costs.v1")
+        baseline = normalize_collection_pages(
+            value, (anthropic_page([anthropic_bucket(START, MIDDLE, [anthropic_cost()])]),),
+            fingerprint_key=KEY, fingerprint_key_version=1,
+        )
+        validate_normalized_collection(baseline)
+        self.assertIsNone(baseline.cost_observations[0].native_quantity)
+        self.assertIsNone(baseline.cost_observations[0].quantity_unit)
+        for fields in ({"quantity": 1, "quantity_unit": None}, {"quantity_unit": "duration_seconds"}):
+            with self.subTest(fields=fields):
+                with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+                    normalize_collection_pages(
+                        value, (anthropic_page([anthropic_bucket(START, MIDDLE, [anthropic_cost(**fields)])]),),
+                        fingerprint_key=KEY, fingerprint_key_version=1,
+                    )
+
+    def normalize_cost_metadata(self, bucket, *, account="raw-provider-account"):
+        expected = None if account is None else tenant_fingerprint(
+            KEY, organization_id="acme", kind="provider-account", value=account,
+        )
+        return normalize_collection_pages(
+            query("openai.organization-costs.v1"), (openai_page([bucket]),),
+            fingerprint_key=KEY, fingerprint_key_version=1,
+            expected_provider_account_fingerprint=expected,
+        )
+
+    def test_cost_verified_metadata_preserves_exact_amount_and_content_identity(self):
+        baseline = normalize_collection_pages(
+            query("openai.organization-costs.v1"),
+            (openai_page([openai_bucket(START, MIDDLE, [openai_cost()])]),),
+            fingerprint_key=KEY, fingerprint_key_version=1,
+        )
+        for suffix in ("Z", "+00:00"):
+            with self.subTest(suffix=suffix):
+                bucket = openai_cost_metadata_bucket()
+                bucket.update(start_time_iso=START[:-1] + suffix, end_time_iso=MIDDLE[:-1] + suffix)
+                observed = self.normalize_cost_metadata(bucket)
+                validate_normalized_collection(observed)
+                self.assertEqual(observed, baseline)
+                for private in ("raw-provider-account", "private-organization-label", "private-project-label"):
+                    self.assertNotIn(private, repr(observed))
+                self.assertFalse(observed.cost_observations[0].provider_final)
+                self.assertFalse(observed.cost_observations[0].invoice_final)
+
+    def test_cost_iso_alias_spellings_and_null_metadata_preserve_exact_identity(self):
+        baseline_bucket = openai_cost_metadata_bucket()
+        del baseline_bucket["start_time_iso"], baseline_bucket["end_time_iso"]
+        baseline = self.normalize_cost_metadata(baseline_bucket)
+        for separator in ("T", " "):
+            for fraction in ("", ".0", ".000000000"):
+                for suffix in ("", "Z", "z", "+00", "+0000", "+00:00"):
+                    with self.subTest(separator=separator, fraction=fraction, suffix=suffix):
+                        bucket = openai_cost_metadata_bucket()
+                        bucket.update(
+                            start_time_iso=START[:-1].replace("T", separator) + fraction + suffix,
+                            end_time_iso=MIDDLE[:-1].replace("T", separator) + fraction + suffix,
+                        )
+                        observed = self.normalize_cost_metadata(bucket)
+                        validate_normalized_collection(observed)
+                        self.assertEqual(observed, baseline)
+        for start, end in ((None, None), (None, MIDDLE), (START, None),
+                           ("2026-01-01T01:00:00+01:00", "2026-01-01T19:00:00-05:00"),
+                           ("2026-01-01 01:00:00+0100", "2026-01-01 19:00:00-0500"),
+                           ("2026-01-01T01:00:00+01", "2026-01-01T19:00:00-05")):
+            with self.subTest(start=start, end=end):
+                bucket = openai_cost_metadata_bucket()
+                bucket.update(start_time_iso=start, end_time_iso=end)
+                observed = self.normalize_cost_metadata(bucket)
+                validate_normalized_collection(observed)
+                self.assertEqual(observed, baseline)
+                self.assertEqual(observed.coverage[0].bucket_start_at, START)
+                self.assertEqual(observed.coverage[0].bucket_end_at, MIDDLE)
+
+    def test_cost_iso_aliases_cannot_replace_required_numeric_bounds(self):
+        for field in ("start_time", "end_time"):
+            for value in ("missing", None, True, "1767225600", 1767225600.5):
+                with self.subTest(field=field, value=value):
+                    bucket = openai_cost_metadata_bucket()
+                    if value == "missing":
+                        del bucket[field]
+                    else:
+                        bucket[field] = value
+                    with self.assertRaises(FinanceCollectionError):
+                        self.normalize_cost_metadata(bucket)
+
+    def test_cost_alias_compatibility_does_not_relax_query_or_usage_parsers(self):
+        for start in (START[:-1], START[:-1] + "z", START[:-1] + "+00:00"):
+            with self.subTest(start=start):
+                with self.assertRaisesRegex(FinanceCollectionError, "^invalid_request$"):
+                    query("openai.organization-costs.v1", start=start)
+        for value in (None, START, START[:-1]):
+            with self.subTest(value=value):
+                bucket = openai_bucket(START, MIDDLE, [openai_usage()])
+                bucket["start_time_iso"] = value
+                with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+                    normalize_collection_pages(
+                        query("openai.organization-usage-completions.v1"), (openai_page([bucket]),),
+                        fingerprint_key=KEY, fingerprint_key_version=1,
+                    )
+
+    def test_cost_iso_aliases_reject_mismatch_and_malformed_types(self):
+        for name, value in (("start_time_iso", MIDDLE), ("end_time_iso", START),
+                            ("start_time_iso", "2026-01-01T00:00:00+01:00"),
+                            ("start_time_iso", 1767225600), ("start_time_iso", True),
+                            ("start_time_iso", []), ("start_time_iso", {}),
+                            ("start_time_iso", "2026-01-01T00:00:00.000001Z"),
+                            ("start_time_iso", "2026-01-01T00:00:00.0000001Z"),
+                            ("start_time_iso", "2026-01-01T00:00:00.000000001Z"),
+                            ("start_time_iso", "2026-01-01T00:00:00.0000000000Z"),
+                            ("start_time_iso", "2026-01-01T00:00:00-00:00"),
+                            ("start_time_iso", "2026-01-01T00:00:00-0000"),
+                            ("start_time_iso", "2026-01-01T00:00:00-00"),
+                            ("start_time_iso", "2026-01-01T00:00:00+24:00"),
+                            ("start_time_iso", "2026-01-01T00:00:00+01:60"),
+                            ("start_time_iso", "2026-01-01T00:00:00+0:00"),
+                            ("start_time_iso", "2026-02-30T00:00:00Z"),
+                            ("start_time_iso", "2026-01-01T24:00:00Z"),
+                            ("start_time_iso", "2026-01-01T00:00:60Z"),
+                            ("start_time_iso", "2026-W01-4T00:00:00Z"),
+                            ("start_time_iso", "2026-01-01"),
+                            ("start_time_iso", "2026-01-01\u00a000:00:00Z"),
+                            ("start_time_iso", "2026-01-01T00:00:00Z "),
+                            ("start_time_iso", "Z" * 65)):
+            with self.subTest(name=name, value=value):
+                bucket = openai_cost_metadata_bucket()
+                bucket[name] = value
+                with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+                    self.normalize_cost_metadata(bucket)
+
+    def test_cost_account_context_cannot_cross_tenants_or_fingerprint_keys(self):
+        for key, tenant in ((KEY, "other-tenant"), (b"another-private-fingerprint-key-value", "acme")):
+            with self.subTest(tenant=tenant):
+                expected = tenant_fingerprint(key, organization_id=tenant, kind="provider-account",
+                                              value="raw-provider-account")
+                with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+                    normalize_collection_pages(
+                        query("openai.organization-costs.v1"), (openai_page([openai_cost_metadata_bucket()]),),
+                        fingerprint_key=KEY, fingerprint_key_version=1,
+                        expected_provider_account_fingerprint=expected,
+                    )
+
+    def test_cost_null_account_metadata_preserves_legacy_context_optional_behavior(self):
+        bucket = openai_cost_metadata_bucket()
+        bucket["results"][0]["organization_id"] = None
+        self.normalize_cost_metadata(bucket, account=None)
+
+    def test_cost_account_metadata_requires_matching_context_and_string(self):
+        for account in (None, "another-provider-account", "acme"):
+            with self.subTest(account=account):
+                with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+                    self.normalize_cost_metadata(openai_cost_metadata_bucket(), account=account)
+        for value in (True, 17, [], {}, "bad\x00account", "a" * 2049):
+            with self.subTest(type=type(value).__name__):
+                bucket = openai_cost_metadata_bucket()
+                bucket["results"][0]["organization_id"] = value
+                with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+                    self.normalize_cost_metadata(bucket)
+
+    def test_cost_optional_labels_validate_types_bounds_and_discard_values(self):
+        for field in ("organization_name", "project_name"):
+            for value in (None, "", "a" * 2048):
+                with self.subTest(field=field, accepted=value is None):
+                    bucket = openai_cost_metadata_bucket()
+                    bucket["results"][0][field] = value
+                    self.normalize_cost_metadata(bucket)
+            for value in (True, 3, [], {}, "private\x00label", "a" * 2049, "é" * 1025):
+                with self.subTest(field=field, type=type(value).__name__):
+                    bucket = openai_cost_metadata_bucket()
+                    bucket["results"][0][field] = value
+                    with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+                        self.normalize_cost_metadata(bucket)
+
+    def test_cost_nonnull_user_email_and_unknown_metadata_fail_closed(self):
+        for field, value in (("user_email", "private-person@example.invalid"),
+                             ("user_email", True), ("unknown_metadata", None)):
+            with self.subTest(field=field):
+                bucket = openai_cost_metadata_bucket()
+                bucket["results"][0][field] = value
+                with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$") as caught:
+                    self.normalize_cost_metadata(bucket)
+                self.assertNotIn("private-person", str(caught.exception))
+        bucket = openai_cost_metadata_bucket()
+        bucket["unexpected_bucket_metadata"] = None
+        with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+            self.normalize_cost_metadata(bucket)
+
+    def test_cost_alias_compatibility_does_not_relax_usage_bucket_schema(self):
+        bucket = openai_bucket(START, MIDDLE, [openai_usage()])
+        bucket.update(start_time_iso=START, end_time_iso=MIDDLE)
+        with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+            normalize_collection_pages(
+                query("openai.organization-usage-completions.v1"), (openai_page([bucket]),),
+                fingerprint_key=KEY, fingerprint_key_version=1,
+            )
+
     def test_content_free_fingerprints_reject_invalid_unicode(self):
         with self.assertRaisesRegex(FinanceCollectionError, "invalid_request"):
             tenant_fingerprint(
@@ -278,6 +611,48 @@ class FinanceCollectionNormalizationTests(unittest.TestCase):
         self.assertNotEqual(paged.page_chain_digest, combined.page_chain_digest)
         self.assertNotIn("opaque-secret-cursor", repr(paged))
 
+    def test_openai_cost_ungrouped_nullable_metadata_preserves_identity(self):
+        value = query("openai.organization-costs.v1")
+        baseline = normalize_collection_pages(
+            value,
+            (openai_page([openai_bucket(START, MIDDLE, [openai_cost()])]),),
+            fingerprint_key=KEY,
+            fingerprint_key_version=1,
+        )
+        self.assertEqual(value.profile.group_by, ("project_id", "line_item", "api_key_id"))
+        for metadata in ({"user_id": None}, {"api_source": None}, {"user_id": None, "api_source": None}):
+            with self.subTest(metadata=metadata):
+                result = normalize_collection_pages(
+                    value,
+                    (openai_page([openai_bucket(START, MIDDLE, [openai_cost(**metadata)])]),),
+                    fingerprint_key=KEY,
+                    fingerprint_key_version=1,
+                )
+                validate_normalized_collection(result)
+                self.assertEqual(result.cost_observations, baseline.cost_observations)
+                self.assertEqual(result.coverage, baseline.coverage)
+                self.assertEqual(result.content_digest, baseline.content_digest)
+                self.assertEqual(result.page_chain_digest, baseline.page_chain_digest)
+                self.assertEqual(result.record_count, 1)
+                self.assertFalse(result.cost_observations[0].provider_final)
+                self.assertFalse(result.cost_observations[0].invoice_final)
+
+    def test_openai_cost_ungrouped_metadata_and_unknown_fields_fail_closed(self):
+        value = query("openai.organization-costs.v1")
+        for field in ("user_id", "api_source", "unknown_metadata"):
+            for item in (None, "private-metadata-sentinel", "api", True, 0, [], {}):
+                if field != "unknown_metadata" and item is None:
+                    continue
+                with self.subTest(field=field, item=item):
+                    with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$") as caught:
+                        normalize_collection_pages(
+                            value,
+                            (openai_page([openai_bucket(START, MIDDLE, [openai_cost(**{field: item})])]),),
+                            fingerprint_key=KEY,
+                            fingerprint_key_version=1,
+                        )
+                    self.assertNotIn("private-metadata-sentinel", str(caught.exception))
+
     def test_empty_bucket_is_coverage_not_numeric_zero(self):
         value = query("openai.organization-usage-completions.v1")
         result = normalize_collection_pages(
@@ -320,7 +695,7 @@ class FinanceCollectionNormalizationTests(unittest.TestCase):
                 fingerprint_key_version=1,
             )
         cost_query = query("openai.organization-costs.v1")
-        for amount in (True, 1e18, 0.0000000000000000001):
+        for amount in (True, 1e18, 1e-37):
             with self.subTest(amount=amount):
                 record = openai_cost(amount={"value": amount, "currency": "USD"})
                 with self.assertRaises(FinanceCollectionError):
@@ -406,6 +781,102 @@ class _Opener:
 
 
 class FinanceCollectionTransportTests(unittest.TestCase):
+    def test_nonretryable_http_error_closes_response_before_failure(self):
+        value = query("openai.organization-costs.v1")
+        for status, code in ((401, "provider_unauthorized"), (403, "provider_unauthorized"), (400, "provider_response_invalid")):
+            with self.subTest(status=status), io.BytesIO(b"synthetic error body") as body:
+                error = HTTPError("https://api.openai.com", status, "synthetic", {}, body)
+                opener = _Opener([error])
+                with self.assertRaisesRegex(FinanceCollectionError, code):
+                    fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                        opener=opener, clock=lambda: 0, sleep=lambda _delay: self.fail("nonretryable error slept"))
+                self.assertTrue(body.closed)
+                self.assertEqual(len(opener.requests), 1)
+
+    def test_retryable_http_error_closes_response_before_sleep_and_next_attempt(self):
+        value = query("openai.organization-costs.v1")
+        payload = openai_page([openai_bucket(START, MIDDLE, [openai_cost()])])
+        for status in (429, 503):
+            with self.subTest(status=status), io.BytesIO(b"synthetic error body") as body:
+                error = HTTPError("https://api.openai.com", status, "synthetic", {"Retry-After": "3"}, body)
+                sleeps = []
+
+                def next_response(request):
+                    self.assertTrue(body.closed)
+                    return _Response(payload, request.full_url)
+
+                opener = _Opener([error, next_response])
+
+                def sleep(delay):
+                    self.assertTrue(body.closed)
+                    self.assertEqual(len(opener.requests), 1)
+                    sleeps.append(delay)
+
+                self.assertEqual(fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                    opener=opener, clock=lambda: 0, sleep=sleep), (payload,))
+                self.assertEqual(sleeps, [3.0])
+                self.assertEqual(len(opener.requests), 2)
+
+    def test_exhausted_http_errors_close_every_response_and_preserve_retry_bound(self):
+        value = query("openai.organization-costs.v1")
+        for status, code in ((429, "provider_rate_limited"), (503, "provider_unavailable")):
+            with self.subTest(status=status), ExitStack() as cleanup:
+                bodies = [cleanup.enter_context(io.BytesIO(b"synthetic error body")) for _ in range(3)]
+                errors = [HTTPError("https://api.openai.com", status, "synthetic", {}, body) for body in bodies]
+                opener = _Opener(errors)
+                sleeps = []
+
+                def sleep(delay):
+                    self.assertTrue(all(body.closed for body in bodies[:len(opener.requests)]))
+                    self.assertLess(len(opener.requests), 3)
+                    sleeps.append(delay)
+
+                with self.assertRaisesRegex(FinanceCollectionError, code):
+                    fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                        opener=opener, clock=lambda: 0, sleep=sleep)
+                self.assertTrue(all(body.closed for body in bodies))
+                self.assertEqual(sleeps, [1.0, 2.0])
+                self.assertEqual(len(opener.requests), 3)
+
+    def test_http_error_close_failure_preserves_public_error(self):
+        value = query("openai.organization-costs.v1")
+        with io.BytesIO(b"synthetic error body") as body:
+            error = HTTPError("https://api.openai.com", 403, "synthetic", {}, body)
+
+            def close():
+                body.close()
+                raise OSError("synthetic close failure")
+
+            with mock.patch.object(error, "close", side_effect=close) as close_error:
+                with self.assertRaisesRegex(FinanceCollectionError, "provider_unauthorized"):
+                    fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                        opener=_Opener([error]), clock=lambda: 0, sleep=lambda _delay: self.fail("unauthorized error slept"))
+                close_error.assert_called_once_with()
+                self.assertTrue(body.closed)
+
+        payload = openai_page([openai_bucket(START, MIDDLE, [openai_cost()])])
+        with io.BytesIO(b"synthetic error body") as body:
+            headers = {"Retry-After": "3"}
+            error = HTTPError("https://api.openai.com", 429, "synthetic", headers, body)
+            sleeps = []
+
+            def close():
+                headers.clear()
+                body.close()
+                raise OSError("synthetic close failure")
+
+            def sleep(delay):
+                self.assertTrue(body.closed)
+                sleeps.append(delay)
+
+            opener = _Opener([error, lambda request: _Response(payload, request.full_url)])
+            with mock.patch.object(error, "close", side_effect=close) as close_error:
+                self.assertEqual(fetch_collection_pages(value, credential="synthetic", base_url="https://api.openai.com",
+                    opener=opener, clock=lambda: 0, sleep=sleep), (payload,))
+                close_error.assert_called_once_with()
+                self.assertEqual(sleeps, [3.0])
+                self.assertEqual(len(opener.requests), 2)
+
     def test_query_rejects_page_chain_that_cannot_fit_deadline_bound(self):
         with self.assertRaisesRegex(FinanceCollectionError, "invalid_request"):
             CollectionQuery(
@@ -583,6 +1054,40 @@ class FinanceCollectionSQLiteRepositoryTests(unittest.TestCase):
             self.binding_request(**changes),
             fingerprint_key=KEY,
         )
+
+    def test_prepared_account_context_is_reloaded_and_spoofing_blocks_publication(self):
+        binding = self.bind()
+        value = query("openai.organization-costs.v1")
+        prepared = self.repository.prepare_collection(
+            ADMIN, value, idempotency_key="bound-cost-account", evidence_origin="authenticated_api",
+        )
+        self.assertEqual(prepared.provider_account_fingerprint, binding.provider_account_fingerprint)
+        restarted = create_finance_collection_repository(self.config)
+        collection = normalize_collection_pages(
+            value, (openai_page([openai_cost_metadata_bucket()]),),
+            fingerprint_key=KEY, fingerprint_key_version=1,
+            expected_provider_account_fingerprint=prepared.provider_account_fingerprint,
+        )
+        forged = replace(prepared, provider_account_fingerprint="0" * 64)
+        with self.assertRaisesRegex(FinanceCollectionError, "^attempt_conflict$"):
+            restarted.publish_collection(ADMIN, forged, collection)
+        wrong_fingerprint = tenant_fingerprint(
+            KEY, organization_id="acme", kind="provider-account", value="wrong-provider-account",
+        )
+        wrong_bucket = openai_cost_metadata_bucket()
+        wrong_bucket["results"][0]["organization_id"] = "wrong-provider-account"
+        wrong_collection = normalize_collection_pages(
+            value, (openai_page([wrong_bucket]),), fingerprint_key=KEY, fingerprint_key_version=1,
+            expected_provider_account_fingerprint=wrong_fingerprint,
+        )
+        with self.assertRaisesRegex(FinanceCollectionError, "^snapshot_conflict$"):
+            restarted.publish_collection(ADMIN, prepared, wrong_collection)
+        self.assertIsNotNone(restarted.publish_collection(ADMIN, prepared, collection).snapshot_id)
+        replay = restarted.prepare_collection(
+            ADMIN, value, idempotency_key="bound-cost-account", evidence_origin="authenticated_api",
+        )
+        self.assertEqual(replay.state, "succeeded")
+        self.assertEqual(replay.provider_account_fingerprint, binding.provider_account_fingerprint)
 
     def test_fixed_precision_whole_second_storage_time_is_valid(self):
         with unittest.mock.patch(

@@ -427,6 +427,8 @@ class HostedProviderConfigTests(unittest.TestCase):
             "RENDER_SERVICE_TYPE": "",
             "RENDER_WEB_CONCURRENCY": "",
             "HORMUZ_POSTGRES_MIGRATION_DSN": "",
+            "HORMUZ_WORK_BILLING_WEBHOOK_SECRET": "",
+            "HORMUZ_WORK_BILLING_API_KEY": "",
         }
         create_pool.assert_called_once_with(self.config, environ=runtime_settings)
         create_store.assert_called_once_with(

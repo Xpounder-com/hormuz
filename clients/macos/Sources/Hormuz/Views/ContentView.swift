@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var connection: ConnectionModel
+    var resetAppearance: () -> Void = {}
 
     var body: some View {
         ScrollView {
@@ -34,11 +35,16 @@ struct ContentView: View {
                     SignInView(connection: connection)
                 }
                 Divider()
+                Button("Remove local setup…", action: connection.previewRemoval)
+                    .disabled(connection.isBusy)
                 Text("Hormuz governs requests sent through its gateway. It is not a device VPN. Provider credentials stay with your team; this app stores only your revocable Hormuz session in Keychain.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .padding(28)
         }
         .sheet(isPresented: $connection.showingPreview) { ConnectorPreviewView(connection: connection) }
+        .sheet(isPresented: $connection.showingRemoval) {
+            RemovalConfirmationView(connection: connection, resetAppearance: resetAppearance)
+        }
     }
 }

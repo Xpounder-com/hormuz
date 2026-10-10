@@ -26,7 +26,8 @@ The helpers do not set a live-verification flag or create provider-final cost.
 
 ## Exact values and provider conventions
 
-Money is a finite decimal string with at most 18 integer and 18 significant
+The legacy foundation's money type is a finite decimal string with at most
+18 integer and 18 significant
 fractional places. Wire strings reject floats, exponent notation, leading
 zeros, surrounding whitespace and non-finite numbers. Calculations use their
 own exact decimal context, independent of caller precision/traps. Insignificant
@@ -41,6 +42,16 @@ authorize a credit/discount classification, invoice-final label or allocation.
 Currency case normalization is not a claim about settlement or minor units.
 Missing values must be represented by the future observation envelope as
 unknown, not supplied to this known-amount helper as zero.
+
+Production OpenAI Costs collection uses the separate
+`openai_provider_decimal_text` helper and the versioned
+[OpenAI provider decimal policy extension](finance-openai-provider-decimal-policy-v1.json).
+That profile permits exact 36-place amount/quantity values and applies the same
+policy to stored observations, provider subtotals and variance. It does not
+widen `decimal_text`, `provider_amount` / `ProviderAmount`, configured rates or
+estimates, or Anthropic conversion. Source text is retained, only trailing
+coefficient zeroes are removed for canonical amounts, and exponent bounds are
+checked before formatting. Out-of-domain results remain unavailable.
 
 `decode_provider_json` bounds a page to 1 MiB, 16 nested containers and 65,536
 members, with numeric lexemes bounded to 128 characters. It rejects duplicate

@@ -27,6 +27,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0010](0010-v1.1-portfolio-intelligence-contract.md) | Accepted | Original v1.1 additive portfolio contract; remaining delivery now targets v1.3.0 | [#212](https://github.com/Xpounder-com/hormuz/issues/212) |
 | [0011](0011-additive-budget-reports-and-linear-context.md) | Accepted; budget runtime complete, Linear gated | Separate versioned budget preview/report and metadata-only Linear parent/context records; frozen v1 preserved | [#217](https://github.com/Xpounder-com/hormuz/issues/217), [#220](https://github.com/Xpounder-com/hormuz/issues/220) |
 | [0012](0012-analytics-first-budget-management-output.md) | Accepted; budget runtime complete | First budget runtime uses an analytics-first version-2 current report and compact activation change fact | [#214](https://github.com/Xpounder-com/hormuz/issues/214), [#217](https://github.com/Xpounder-com/hormuz/issues/217) |
+| [0014](0014-customer-local-ai-work-and-exact-reuse.md) | Implementation authorized in product-owner conversation; production qualification separate | Customer-local routing, scoped work budgets, passive observations and opt-in exact answer reuse | Approval origin recorded in ADR; GitHub release approval remains separate |
 
 ## Acceptance record
 

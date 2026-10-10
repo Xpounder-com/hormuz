@@ -274,6 +274,9 @@ jobs:
     services:
       postgres:
         image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        credentials:
+          username: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_READ_TOKEN != '' && secrets.DOCKERHUB_USERNAME || '' }}
+          password: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_READ_TOKEN != '' && secrets.DOCKERHUB_READ_TOKEN || '' }}
         env:
           POSTGRES_DB: hormuz_test
           POSTGRES_PASSWORD: hormuz-test-password
@@ -289,6 +292,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -686,6 +717,12 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" \
             -p test_postgres_pooling.py \
             -v
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   postgres-backup-restore:
     name: PostgreSQL recovery drills
@@ -698,6 +735,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -740,6 +805,12 @@ jobs:
             ${{ runner.temp }}/hormuz-postgres-pitr-evidence/summary.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   oci-reference-runtime:
     name: OCI reference runtime
@@ -752,8 +823,42 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Build and smoke-test the non-root OCI reference runtime
         run: ./tools/verify_oci_reference.sh
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   render-https-preflight:
     name: Closed Render HTTPS preflight
@@ -764,6 +869,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -829,6 +962,12 @@ jobs:
           path: ${{ runner.temp }}/hormuz-render-preflight/http.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   render-authentication-staging:
     name: Render authentication staging container
@@ -839,6 +978,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -858,6 +1025,12 @@ jobs:
           path: ${{ runner.temp }}/hormuz-render-gateway.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   compose-reference:
     name: Single-VM Compose pilot reference
@@ -868,6 +1041,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Prove the disposable signed-image Compose profile
         env:
           HORMUZ_COMPOSE_PROOF_ACK: I_UNDERSTAND_THIS_IS_A_DISPOSABLE_SINGLE_VM_PILOT_PROOF
@@ -882,6 +1083,12 @@ jobs:
           path: ${{ runner.temp }}/hormuz-compose-reference/summary.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   kubernetes-reference:
     name: Kubernetes + Helm multi-replica reference
@@ -892,6 +1099,9 @@ jobs:
     services:
       postgres:
         image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        credentials:
+          username: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_READ_TOKEN != '' && secrets.DOCKERHUB_USERNAME || '' }}
+          password: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_READ_TOKEN != '' && secrets.DOCKERHUB_READ_TOKEN || '' }}
         env:
           POSTGRES_DB: hormuz_multi_replica_test
           POSTGRES_PASSWORD: hormuz-multi-replica-test-password
@@ -907,6 +1117,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -937,6 +1175,12 @@ jobs:
           path: ${{ runner.temp }}/hormuz-kubernetes-reference/*.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   postgres-ha-reference:
     name: PostgreSQL HA failover reference
@@ -949,6 +1193,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Prove safe promotion and quorum-loss refusal
         env:
           GH_TOKEN: ${{ github.token }}
@@ -965,6 +1237,12 @@ jobs:
           path: ${{ runner.temp }}/hormuz-postgres-ha-reference/summary.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   disaster-recovery-reference:
     name: Disaster recovery reference
@@ -977,6 +1255,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Prove the Kubernetes enterprise-reference recovery contract
         env:
           GH_TOKEN: ${{ github.token }}
@@ -994,6 +1300,12 @@ jobs:
           path: ${{ runner.temp }}/hormuz-disaster-recovery/summary.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   oci-supply-chain:
     name: OCI supply-chain evidence
@@ -1006,6 +1318,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Build candidate and enforce the fix-aware vulnerability policy
         env:
           HORMUZ_OCI_SUPPLY_CHAIN_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-oci-supply-chain
@@ -1018,6 +1358,12 @@ jobs:
           path: ${{ runner.temp }}/hormuz-oci-supply-chain/*
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   oci-reproducibility:
     name: OCI reproducibility
@@ -1031,6 +1377,34 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Configure optional Docker Hub read authentication
+        timeout-minutes: 1
+        shell: bash
+        env:
+          PATH: /usr/bin:/bin
+          DOCKER_CONFIG: ${{ runner.temp }}/hormuz-dockerhub-read-auth
+          DOCKERHUB_USERNAME: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_READ_TOKEN: ${{ github.repository == 'Xpounder-com/hormuz' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.DOCKERHUB_READ_TOKEN || '' }}
+        run: |
+          set +x
+          set -euo pipefail
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "${GITHUB_ENV:?}"
+          if [[ -z "$DOCKERHUB_USERNAME" && -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "Docker Hub read credentials absent; using anonymous pulls."
+            exit 0
+          fi
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_READ_TOKEN" ]]; then
+            echo "::error::Configure both DOCKERHUB_USERNAME and DOCKERHUB_READ_TOKEN."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          if ! printf '%s' "$DOCKERHUB_READ_TOKEN" | env -u DOCKERHUB_READ_TOKEN -u DOCKERHUB_USERNAME \
+            timeout --kill-after=5s 30s docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io >/dev/null 2>&1; then
+            echo "::error::Docker Hub read authentication failed or timed out."
+            exit 1
+          fi
+          echo "Docker Hub read authentication configured."
       - name: Set up pinned Buildx and BuildKit
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
@@ -1049,6 +1423,12 @@ jobs:
           path: ${{ runner.temp }}/hormuz-oci-reproducibility/summary.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove isolated Docker Hub read credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "${RUNNER_TEMP:?}/hormuz-dockerhub-read-auth/config.json"
 
   client-compatibility:
     name: Codex and Claude Code compatibility

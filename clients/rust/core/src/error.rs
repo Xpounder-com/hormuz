@@ -29,6 +29,8 @@ pub enum ClientError {
     ContextHelperUnavailable,
     DesktopProfileChanged,
     DesktopUnavailable,
+    RemovalPending,
+    RemovalRecoveryRequired,
 }
 
 impl fmt::Display for ClientError {
@@ -58,6 +60,8 @@ impl fmt::Display for ClientError {
             Self::ContextHelperUnavailable => "The local context optimization helper is unavailable. Save a new connector after reinstalling Hormuz.",
             Self::DesktopProfileChanged => "Your team's Hormuz settings changed. Sign out and connect again to update this client.",
             Self::DesktopUnavailable => "Hormuz sign-in is not configured for this app. Use Advanced to connect to a self-hosted gateway.",
+            Self::RemovalPending => "Local setup removal is pending. Retry removal before starting a new connection.",
+            Self::RemovalRecoveryRequired => "An edited local file could not be restored safely. Its bytes were retained; review local removal recovery.",
         })
     }
 }

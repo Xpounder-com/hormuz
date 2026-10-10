@@ -9,7 +9,7 @@ test('publication pins a fixed public repository and an exact source commit', ()
   for (const value of [null, [], 'main', {}, { repository: 'other/project', revision }, { repository: 'Xpounder-com/hormuz', revision, script: 'extra' }]) {
     assert.throws(() => validateSourcePin(value));
   }
-  for (const invalid of ['main', 'v1.0.0', revision.slice(0, 7), revision.toUpperCase(), `${revision}\nextra=bad`, 123]) {
+  for (const invalid of ['main', 'v1.0.0', revision.slice(0, 7), revision.toUpperCase(), `${revision}\n`, `${revision}\nextra=bad`, 123]) {
     assert.throws(() => validateSourcePin({ repository: 'Xpounder-com/hormuz', revision: invalid }));
   }
 });
@@ -25,6 +25,7 @@ test('dedicated publication uses read-only source builds and a main-only Pages b
   assert.match(workflow, /repository: Xpounder-com\/hormuz/);
   assert.equal((workflow.match(/persist-credentials: false/g) || []).length, 3);
   assert.match(workflow, /cp site-source\.json product\/website\/out\/site-source\.json/);
+  for (const command of ['build', 'verify']) assert.match(workflow, new RegExp(`NEXT_PUBLIC_HORMUZ_SOURCE_REVISION: \\$\\{\\{ steps\\.source\\.outputs\\.revision \\}\\}\\n        run: npm run ${command}`));
   assert.match(workflow, /needs: deploy/);
   assert.match(workflow, /run: node scripts\/verify-live-site\.mjs/);
   const deploy = workflow.split('\n  deploy:\n')[1].split('\n  verify:\n')[0];

@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { BASE_PATH, SITE_ORIGIN, SITE_ROUTES, siteUrl } from '../lib/site.mjs';
+import { BASE_PATH, SITE_ORIGIN, SITE_ROUTES, SOURCE_REVISION, siteUrl } from '../lib/site.mjs';
 import { GA_MEASUREMENT_ID, GOOGLE_SITE_VERIFICATION } from '../lib/measurement-config.mjs';
 
 import { commercial, PAYMENT_KEYS, CLOUD_PRICE, APPLIANCE_PRICE, ONBOARDING_PRICE, MANAGED_SITE_PRICE, RESERVATION_PRICE } from '../lib/commercial.mjs';
@@ -19,6 +19,11 @@ const decode = text => text.replaceAll('&amp;', '&').replaceAll('&#x27;', "'").r
 for (const route of routes) {
   const html = await readFile(path.join(out, route, 'index.html'), 'utf8');
   pages.set(route, html);
+  if (route === '/docs/') {
+    const candidateRef = SOURCE_REVISION === 'main' ? '&lt;REVIEWED_40_CHARACTER_COMMIT&gt;' : SOURCE_REVISION;
+    const installUrl = `git+https://github.com/Xpounder-com/hormuz.git@${candidateRef}`;
+    if (![...html.matchAll(/<pre\b[^>]*>[\s\S]*?<\/pre>/g)].some(([block]) => block.includes(installUrl))) failures.push('/docs/: candidate installation does not match the build revision');
+  }
   if (!html.includes(`href="${siteUrl(route)}"`)) failures.push(`${route}: missing correct canonical`);
   if (!html.includes('property="og:image"') || !html.includes(siteUrl('/og.png'))) failures.push(`${route}: missing canonical social image`);
   if ((html.match(/<h1[ >]/g) || []).length !== 1) failures.push(`${route}: expected one h1`);
@@ -33,7 +38,11 @@ for (const [route, html] of pages) {
     if (/^(mailto:|data:)/.test(href)) continue;
     const url = new URL(href, siteUrl(route));
     if (url.origin !== SITE_ORIGIN) {
-      if (url.hostname === 'github.com' && url.pathname.startsWith('/Xpounder-com/hormuz/blob/main/')) sourceLinks.add(decodeURIComponent(url.pathname.slice('/Xpounder-com/hormuz/blob/main/'.length)));
+      const source = url.hostname === 'github.com' && url.pathname.match(/^\/Xpounder-com\/hormuz\/blob\/([^/]+)\/(.+)$/);
+      if (source) {
+        if (source[1] !== SOURCE_REVISION) failures.push(`${route}: source link does not match the build revision: ${href}`);
+        sourceLinks.add(decodeURIComponent(source[2]));
+      }
       continue;
     }
     if (!url.pathname.startsWith(`${BASE_PATH}/`)) { failures.push(`${route}: escaped site basePath: ${href}`); continue; }
@@ -82,4 +91,4 @@ for (const [offer, key, amount, monthly] of checkoutOffers) {
   }
 }
 if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }
-else console.log(JSON.stringify({ verdict: 'passed', pages: pages.size, local_link_occurrences: localLinks, source_targets: sourceLinks.size, tracking: GA_MEASUREMENT_ID ? 'ga4_and_x_independent_opt_in' : 'x_ads_opt_in_non_webkit', search_console_tag: Boolean(GOOGLE_SITE_VERIFICATION), contact: commercial.formEndpoint ? 'formspree_submission' : 'local_email_draft_only', booking: Boolean(commercial.bookingUrl), payments: PAYMENT_KEYS.every(key => Boolean(commercial[key])), payable_offers: checkoutOffers.length }, null, 2));
+else console.log(JSON.stringify({ verdict: 'passed', pages: pages.size, local_link_occurrences: localLinks, source_revision: SOURCE_REVISION, source_targets: sourceLinks.size, tracking: GA_MEASUREMENT_ID ? 'ga4_and_x_independent_opt_in' : 'x_ads_opt_in_non_webkit', search_console_tag: Boolean(GOOGLE_SITE_VERIFICATION), contact: commercial.formEndpoint ? 'formspree_submission' : 'local_email_draft_only', booking: Boolean(commercial.bookingUrl), payments: PAYMENT_KEYS.every(key => Boolean(commercial[key])), payable_offers: checkoutOffers.length }, null, 2));

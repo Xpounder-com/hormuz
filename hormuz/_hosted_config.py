@@ -138,5 +138,6 @@ def _load_profile(path: Path, credentials: dict[str, str], *, workspace: bool) -
 
 def at_directory(config: GatewayConfig, directory: Path) -> GatewayConfig:
     """Move a private snapshot without changing origin, issuer or key binding."""
-    return replace(config, database_path=directory / "usage.sqlite3",
+    work = replace(config.ai_work, database_path=directory / "hormuz-work.sqlite3") if config.ai_work.enabled else config.ai_work
+    return replace(config, database_path=directory / "usage.sqlite3", ai_work=work,
                    session_broker=replace(config.session_broker, database_path=directory / "sessions.sqlite3"))

@@ -217,11 +217,13 @@ impl LaunchPlan {
         executable: PathBuf,
         relay_address: SocketAddr,
         local_credential: &str,
+        work_id: Option<&str>,
     ) -> Result<Self, RelayError> {
         if !executable.is_absolute()
             || !executable.is_file()
             || !relay_address.ip().is_loopback()
             || !valid_local_credential(local_credential)
+            || work_id.is_some_and(|value| !valid_work_id(value))
         {
             return Err(RelayError::InvalidConfiguration);
         }
@@ -250,7 +252,7 @@ impl LaunchPlan {
             });
             environment.push((name.into(), value));
         }
-        let args = match profile.client() {
+        let mut args = match profile.client() {
             AIClient::Codex => {
                 environment.push(("HORMUZ_LOCAL_RELAY_TOKEN".into(), local_credential.into()));
                 let provider = format!(
@@ -286,6 +288,27 @@ impl LaunchPlan {
                 vec!["--model".into(), profile.model().into()]
             }
         };
+        if let Some(work_id) = work_id {
+            match profile.client() {
+                AIClient::Codex => {
+                    args.extend([
+                        "-c".into(),
+                        "web_search=\"disabled\"".into(),
+                        "-c".into(),
+                        format!(
+                            "model_providers.hormuz_context_relay.http_headers={{\"X-Hormuz-Work-Id\"={}}}",
+                            serde_json::to_string(work_id)
+                                .map_err(|_| RelayError::InvalidConfiguration)?
+                        )
+                        .into(),
+                    ]);
+                }
+                AIClient::ClaudeCode => environment.push((
+                    "ANTHROPIC_CUSTOM_HEADERS".into(),
+                    format!("X-Hormuz-Work-Id: {work_id}").into(),
+                )),
+            }
+        }
         Ok(Self {
             executable,
             args,
@@ -342,6 +365,17 @@ pub(crate) fn valid_local_credential(value: &str) -> bool {
         && value[6..]
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+}
+
+/// A job identifier is correlation only; the authenticated gateway still
+/// verifies job ownership. This value never changes profile or custody state.
+pub fn valid_work_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=128).contains(&bytes.len())
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(byte))
 }
 
 /// Owns and reaps the direct client on Unix. The dedicated launcher holds
@@ -401,19 +435,46 @@ pub fn run_client(
     credentials: Arc<dyn CredentialSource>,
     optimization: Optimization,
 ) -> Result<i32, RelayError> {
-    let executable = discover_supported_client(profile.client())?;
-    run_with_executable(profile, credentials, optimization, executable)
+    run_client_with_work_id(profile, credentials, optimization, None)
 }
 
+/// Bind only this invocation to a job. Invalid IDs fail before discovery,
+/// credential access or listener creation; ordinary launches remain unbound.
+pub fn run_client_with_work_id(
+    profile: &ConnectionProfile,
+    credentials: Arc<dyn CredentialSource>,
+    optimization: Optimization,
+    work_id: Option<&str>,
+) -> Result<i32, RelayError> {
+    if work_id.is_some_and(|value| !valid_work_id(value)) {
+        return Err(RelayError::InvalidConfiguration);
+    }
+    let executable = discover_supported_client(profile.client())?;
+    run_with_executable_until(
+        profile,
+        credentials,
+        optimization,
+        executable,
+        work_id,
+        &mut || false,
+    )
+}
+
+#[cfg(all(test, unix))]
 fn run_with_executable(
     profile: &ConnectionProfile,
     credentials: Arc<dyn CredentialSource>,
     optimization: Optimization,
     executable: PathBuf,
 ) -> Result<i32, RelayError> {
-    run_with_executable_until(profile, credentials, optimization, executable, &mut || {
-        false
-    })
+    run_with_executable_until(
+        profile,
+        credentials,
+        optimization,
+        executable,
+        None,
+        &mut || false,
+    )
 }
 
 /// A native shell owns this lease independently of its panels. Owner exit or
@@ -425,12 +486,33 @@ pub fn run_client_until(
     optimization: Optimization,
     stopped: &mut dyn FnMut() -> bool,
 ) -> Result<i32, RelayError> {
+    run_client_until_with_work_id(profile, credentials, optimization, None, stopped)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub fn run_client_until_with_work_id(
+    profile: &ConnectionProfile,
+    credentials: Arc<dyn CredentialSource>,
+    optimization: Optimization,
+    work_id: Option<&str>,
+    stopped: &mut dyn FnMut() -> bool,
+) -> Result<i32, RelayError> {
+    if work_id.is_some_and(|value| !valid_work_id(value)) {
+        return Err(RelayError::InvalidConfiguration);
+    }
     let executable = match discover_supported_client_until(profile.client(), stopped) {
         Ok(executable) => executable,
         Err(RelayError::ClientLaunchCancelled) => return Ok(130),
         Err(error) => return Err(error),
     };
-    run_with_executable_until(profile, credentials, optimization, executable, stopped)
+    run_with_executable_until(
+        profile,
+        credentials,
+        optimization,
+        executable,
+        work_id,
+        stopped,
+    )
 }
 
 fn run_with_executable_until(
@@ -438,17 +520,19 @@ fn run_with_executable_until(
     credentials: Arc<dyn CredentialSource>,
     optimization: Optimization,
     executable: PathBuf,
+    work_id: Option<&str>,
     _stopped: &mut dyn FnMut() -> bool,
 ) -> Result<i32, RelayError> {
     if _stopped() {
         return Ok(130);
     }
-    let relay = LocalRelay::start(profile, credentials, optimization)?;
+    let relay = LocalRelay::start_with_work_id(profile, credentials, optimization, work_id)?;
     let plan = LaunchPlan::new(
         profile,
         executable,
         relay.address(),
         relay.local_credential(),
+        work_id,
     )?;
     let mut client = plan.spawn()?;
     #[cfg(windows)]
@@ -467,6 +551,110 @@ fn run_with_executable_until(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn work_id_grammar_matches_bounded_gateway_correlation() {
+        for value in ["job-1", "A", "1._-", &"a".repeat(128)] {
+            assert!(valid_work_id(value));
+        }
+        for value in [
+            "",
+            ".job",
+            "-job",
+            "_job",
+            "a b",
+            "a/b",
+            "a:b",
+            "a\nX-Actor: spoof",
+            "é",
+            "aé",
+            &"a".repeat(129),
+        ] {
+            assert!(!valid_work_id(value));
+        }
+    }
+
+    #[test]
+    fn work_binding_is_optional_and_contains_only_one_correlation_header() {
+        let executable = tempfile::NamedTempFile::new().unwrap();
+        let token = format!("hox_l_{}", "A".repeat(43));
+        for client in ["codex", "claude-code"] {
+            let profile = ConnectionProfile::from_json(
+                format!(
+                    "{{\"id\":\"12345678-1234-1234-1234-123456789abc\",\"gateway\":\"https://gateway.example.test\",\"organization\":\"org-a\",\"client\":\"{client}\",\"model\":\"approved\",\"allowLoopbackHTTP\":false,\"setup\":\"custom\"}}"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            for work_id in [None, Some("job-123._-")] {
+                let plan = LaunchPlan::new(
+                    &profile,
+                    executable.path().to_owned(),
+                    "127.0.0.1:1234".parse().unwrap(),
+                    &token,
+                    work_id,
+                )
+                .unwrap();
+                let args: Vec<_> = plan.args.iter().map(|arg| arg.to_str().unwrap()).collect();
+                assert_eq!(
+                    args.windows(2)
+                        .any(|pair| pair == ["-c", "web_search=\"disabled\""]),
+                    client == "codex" && work_id.is_some()
+                );
+                let headers: Vec<_> = plan
+                    .environment
+                    .iter()
+                    .filter(|(name, _)| name == OsStr::new("ANTHROPIC_CUSTOM_HEADERS"))
+                    .map(|(_, value)| value.to_str().unwrap())
+                    .collect();
+                match (client, work_id) {
+                    ("codex", Some(_)) => {
+                        let expected = concat!(
+                            "model_providers.hormuz_context_relay.http_headers=",
+                            "{\"X-Hormuz-Work-Id\"=\"job-123._-\"}"
+                        );
+                        assert_eq!(args.last().copied(), Some(expected));
+                        assert!(headers.is_empty());
+                    }
+                    ("claude-code", Some(_)) => {
+                        assert_eq!(headers, ["X-Hormuz-Work-Id: job-123._-"])
+                    }
+                    (_, None) => {
+                        assert!(headers.is_empty());
+                        assert!(args.iter().all(|arg| !arg.contains("X-Hormuz-Work-Id")));
+                    }
+                    _ => unreachable!(),
+                }
+                assert_eq!(format!("{plan:?}"), "LaunchPlan(<redacted>)");
+                assert!(!args.iter().any(|arg| {
+                    arg.contains("X-Hormuz-Actor") || arg.contains("X-Hormuz-Tenant")
+                }));
+            }
+            let credentials: Arc<dyn CredentialSource> =
+                Arc::new(|| panic!("invalid binding must not access credentials"));
+            for invalid in ["", "-invalid", "job\r\nX-Hormuz-Actor: spoof"] {
+                assert!(matches!(
+                    LaunchPlan::new(
+                        &profile,
+                        executable.path().to_owned(),
+                        "127.0.0.1:1234".parse().unwrap(),
+                        &token,
+                        Some(invalid),
+                    ),
+                    Err(RelayError::InvalidConfiguration)
+                ));
+                assert_eq!(
+                    run_client_with_work_id(
+                        &profile,
+                        credentials.clone(),
+                        Optimization::Off,
+                        Some(invalid),
+                    ),
+                    Err(RelayError::InvalidConfiguration)
+                );
+            }
+        }
+    }
     #[test]
     fn pins_match_the_reference_client_versions() {
         let reference = include_str!("../../../../hormuz/client_versions.py");

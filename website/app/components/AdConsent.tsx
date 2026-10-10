@@ -74,7 +74,7 @@ export function AdConsent() {
     <div><span className="section-label">Your privacy choices</span><h2 id="ad-consent-title" ref={heading} tabIndex={-1}>Help us understand what works.</h2>
       <p>Choose optional measurement. You can use the site and submit an inquiry either way. <CampaignLink href={sitePath('/privacy/#analytics')}>Details & choices</CampaignLink>.</p>
       <div className="measurement-options">
-        {hasAnalytics && <label><input type="checkbox" checked={allowAnalytics} disabled={signal} onChange={event => setAllowAnalytics(event.target.checked)} /><span><strong>Website analytics</strong><small>Allow Google Analytics cookies to measure campaign visits, demo use, install links, and submitted inquiries. Form entries are never included.</small></span></label>}
+        {hasAnalytics && <label><input type="checkbox" checked={allowAnalytics} disabled={signal} onChange={event => setAllowAnalytics(event.target.checked)} /><span><strong>Website analytics</strong><small>Allow Google Analytics cookies to measure page and campaign visits, demo use, install and pricing links, Cloud or managed-site inquiry links, and acknowledged sales inquiries. Form entries are never included.</small></span></label>}
         {supported && <label><input type="checkbox" checked={allowX} disabled={signal} onChange={event => setAllowX(event.target.checked)} /><span><strong>X ad measurement</strong><small>Allow X cookies and visit signals to measure ads and acknowledged sales inquiries.</small></span></label>}
       </div>
       {!supported && <p>X Ads measurement stays off in Safari and on iPhone and iPad browsers for site reliability.</p>}

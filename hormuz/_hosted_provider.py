@@ -64,10 +64,15 @@ PROVIDER_OPERATOR_SECRET_NAMES = (
     *PROVIDER_SECRET_NAMES,
     PROVIDER_MIGRATION_DSN_ENV,
 )
+PROVIDER_WORK_BILLING_ENV_NAMES = (
+    "HORMUZ_WORK_BILLING_WEBHOOK_SECRET",
+    "HORMUZ_WORK_BILLING_API_KEY",
+)
 PROVIDER_CHILD_ENV_NAMES = (
     PROVIDER_PROFILE_ENV,
     *PROVIDER_SECRET_NAMES,
     *PROVIDER_DEPLOYMENT_METADATA_NAMES,
+    *PROVIDER_WORK_BILLING_ENV_NAMES,
 )
 PROVIDER_BASE_URLS = {
     "openai": "https://api.openai.com",
@@ -373,6 +378,32 @@ def _validate_provider_runtime(config: GatewayConfig, protocols: tuple[str, ...]
         raise HostedError("hosted_provider_optional_control_unsupported")
 
 
+def _validate_ai_work(config: GatewayConfig, credentials: dict[str, str]) -> None:
+    """Bind optional work state and payment custody to this private process."""
+    work = config.ai_work
+    supplied = [credentials.get(name, "") for name in PROVIDER_WORK_BILLING_ENV_NAMES]
+    if not work.enabled:
+        if any(supplied):
+            raise HostedError("hosted_work_inactive_credential_forbidden")
+        return
+    state = config.database_path.parent
+    if work.database_path != state / "hormuz-work.sqlite3":
+        raise HostedError("hosted_work_state_binding_mismatch")
+    if (work.billing_webhook_secret_env, work.billing_api_key_env) != PROVIDER_WORK_BILLING_ENV_NAMES:
+        raise HostedError("hosted_work_credential_environment_unsupported")
+    if not work.billing_price_id:
+        if any(supplied):
+            raise HostedError("hosted_work_inactive_credential_forbidden")
+        return
+    webhook, api_key = supplied
+    if (not isinstance(webhook, str) or re.fullmatch(r"whsec_[A-Za-z0-9_]{16,512}", webhook) is None
+            or not isinstance(api_key, str) or re.fullmatch(r"(?:sk|rk)_live_[A-Za-z0-9]{16,512}", api_key) is None):
+        raise HostedError("hosted_work_billing_credential_invalid")
+    existing = [value for name, value in credentials.items() if name in PROVIDER_SECRET_NAMES and value]
+    if len(set([*existing, webhook, api_key])) != len(existing) + 2:
+        raise HostedError("hosted_provider_credentials_must_be_distinct")
+
+
 def load_provider_profile(
     hosted_path: Path,
     provider_path: Path,
@@ -390,6 +421,7 @@ def load_provider_profile(
         raise HostedError("hosted_provider_configuration_invalid") from None
     _validate_state_binding(config, staging)
     _validate_provider_runtime(config, protocols)
+    _validate_ai_work(config, credentials)
     metadata = deployment_metadata(credentials)
     _validate_render_runtime(config, metadata)
     return config

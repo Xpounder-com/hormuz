@@ -433,6 +433,28 @@ class Policy:
 
 
 @dataclass(frozen=True)
+class AIWorkConfig:
+    """Explicitly enabled, single-node work management and optional answer reuse."""
+
+    enabled: bool = False
+    database_path: Path | None = None
+    cache_enabled: bool = False
+    minimum_samples: int = 5
+    administrator_actor_ids: tuple[str, ...] = ()
+    require_paid: bool = False
+    billing_price_id: str | None = None
+    billing_webhook_secret_env: str = "HORMUZ_WORK_BILLING_WEBHOOK_SECRET"
+    billing_api_key_env: str = "HORMUZ_WORK_BILLING_API_KEY"
+    billing_bindings: tuple[tuple[str, str, str], ...] = ()
+    tool_capable_aliases: tuple[str, ...] = ()
+    exploration_enabled: bool = False
+    exploration_aliases: tuple[str, ...] = ()
+    exploration_rate_percent: int = 5
+    exploration_max_cost_microusd: int = 0
+    billing_portal_configuration_id: str | None = None
+
+
+@dataclass(frozen=True)
 class GatewayConfig:
     source_path: Path
     listen: ListenConfig
@@ -463,6 +485,7 @@ class GatewayConfig:
     outcome_connectors: OutcomeConnectorConfig | None = None
     attribution_control: AttributionConfig | None = None
     finance_account_bindings: FinanceAccountBindings | None = None
+    ai_work: AIWorkConfig = field(default_factory=AIWorkConfig)
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":

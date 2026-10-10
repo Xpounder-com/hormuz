@@ -1,0 +1,88 @@
+{
+  "schema_id": "hormuz.ai-work-source-successor",
+  "schema_version": 1,
+  "predecessor": "docs/recommendation-runtime-plan-v1.json",
+  "ci_source_successor": {
+    "path": ".github/workflows/ci.yml",
+    "predecessor_sha256": "cde0462d47a3dd03555872365ceddc5e062bbc3685df3432fd45d0d26b015459",
+    "successor_sha256": "d536386dd5a378fc4c8c2e2c23a02293cf39f5599eaf20ace3d39a863d6f74d2"
+  },
+  "source_edits": {
+    "MANIFEST.in": {
+      "predecessor_sha256": "c7491a666807ae2670702bde04a9150ba7027e645ca3388776b909d32cd73d45",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "include tools/ai_work_proof.py\ninclude tools/ai_work_benchmark.py\ninclude tools/ai_work_browser_fixture.py\ninclude docs/ai-work-source-successor-v1.json\ninclude tools/_ai_work_source_successor.py\ninclude hormuz/work.css\n"
+        },
+        {
+          "predecessor": "",
+          "addition": "include tools/ai_work_provider_examples.py\ninclude tools/provider_example_transport.py\ninclude tools/provider_example_responses.py\ninclude tools/ai_work_delivery_examples.py\ninclude tools/ai_work_sdk_qualification.py\ninclude website/scripts/ai-work-browser-qa.mjs\ninclude examples/providers/README.md\ninclude examples/providers/rate-card.template.json\ninclude examples/sdk/README.md\ninclude examples/sdk/work_sdk.py\ninclude examples/delivery/github-actions.yml\n"
+        }
+      ]
+    },
+    "docs/DURABLE_DATA.md": {
+      "predecessor_sha256": "bbeea3aabaacf19c126d8ece53763cb529f7b0e5478b97754f9f393ae6cfa4a1",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "### AI work databases\n\n`ai_work_metadata` owns authenticated jobs, plans, attempts, timing, observations,\nexplicit signed-source associations, a private connector replay journal and\nconsented acquisition metadata in `ai_work_database_file`.\n`ai_work_billing_metadata` owns trusted subscription/customer bindings,\nqualification, checkout references, signed payment evidence and entitlement\nstate in `ai_work_billing_database_file`. Both are explicitly enabled,\nowner-only SQLite stores. Neither persists prompts or model answers. Private\nworkflow fingerprints use a nonexported owner key within the work store.\n\nThe full-gateway SQLite profile snapshot and encrypted backup commands include\nthese stores alongside session and usage state under exclusive stopped-owner\nlocks. The fixed PostgreSQL provider-pilot profile does not qualify this archive\nas recovery for its live usage store. Restore validates all files before publishing a directory, pauses jobs,\nretains unknown spend holds, fences pending connector observations and closes\npayment authority until requalification and fresh Stripe verification.\nThis integrated recovery profile requires SQLite; PostgreSQL deployment needs\nan independently qualified consistent recovery procedure. Deleting the ledger\nmust not reset an active customer's allowance. Retention, private metadata\nexports, backups and offline deletion remain operator responsibilities.\nAnswer bodies are bounded process memory; stopping the runtime clears them.\n\nWork tables are `ai_work_acquisition`, `ai_work_attempts`, `ai_work_bindings`, `ai_work_bridge_events`, `ai_work_deliveries`, `ai_work_exploration`, `ai_work_funnel`, `ai_work_jobs`, `ai_work_observations`, `ai_work_plans`, `ai_work_repeat_guards`, `ai_work_schema`, `ai_work_workflow_keys`.\nPayment metadata tables are `work_activation`, `work_billing_events`, `work_checkouts`, `work_entitlements`, `work_payment_facts`.\nThese stores have no PostgreSQL replicas and require one owning gateway\nprocess per database. Backup archives contain private identity and policy\nmetadata and must retain owner access controls.\n\n"
+        }
+      ]
+    },
+    "docs/durable-data-v1.json": {
+      "predecessor_sha256": "a3ba153c06507f949ef4f1b65e6152e65b39f4dc2c382e8bd114ee3ec0159df5",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "    },\n    {\n      \"id\": \"ai_work_metadata\",\n      \"content_boundary\": \"identity_and_policy_metadata\",\n      \"contains_prompt_or_response_body\": false,\n      \"sqlite_tables\": [\n        \"ai_work_acquisition\",\n        \"ai_work_attempts\",\n        \"ai_work_bindings\",\n        \"ai_work_bridge_events\",\n        \"ai_work_deliveries\",\n        \"ai_work_exploration\",\n        \"ai_work_funnel\",\n        \"ai_work_jobs\",\n        \"ai_work_observations\",\n        \"ai_work_plans\",\n        \"ai_work_repeat_guards\",\n        \"ai_work_schema\",\n        \"ai_work_workflow_keys\"\n      ],\n      \"postgresql_tables\": []\n    },\n    {\n      \"id\": \"ai_work_billing_metadata\",\n      \"content_boundary\": \"identity_and_policy_metadata\",\n      \"contains_prompt_or_response_body\": false,\n      \"sqlite_tables\": [\n        \"work_activation\",\n        \"work_billing_events\",\n        \"work_checkouts\",\n        \"work_entitlements\",\n        \"work_payment_facts\"\n      ],\n      \"postgresql_tables\": []\n"
+        },
+        {
+          "predecessor": "",
+          "addition": "    },\n    {\n      \"id\": \"ai_work_database_file\",\n      \"created_when\": \"explicit_ai_work_enablement\",\n      \"storage_location\": \"separate_owner_only_sqlite_file_in_configured_ai_work_directory\",\n      \"content_boundary\": \"owned_jobs_scoped_plans_attempts_observations_and_nonexported_request_fingerprints\",\n      \"prompt_or_response_body_boundary\": \"excluded_by_hormuz_contract\",\n      \"customer_operator_authority\": \"stopped_process_consistent_backup_restore_export_retention_and_deletion\"\n    },\n    {\n      \"id\": \"ai_work_billing_database_file\",\n      \"created_when\": \"explicit_ai_work_billing_configuration\",\n      \"storage_location\": \"separate_owner_only_sqlite_file_in_configured_ai_work_directory\",\n      \"content_boundary\": \"approved_customer_subscription_binding_entitlement_state_and_signed_event_digests\",\n      \"prompt_or_response_body_boundary\": \"excluded_by_hormuz_contract\",\n      \"customer_operator_authority\": \"stopped_process_consistent_backup_restore_export_retention_and_deletion\"\n"
+        }
+      ]
+    },
+    "tests/test_durable_data_inventory.py": {
+      "predecessor_sha256": "6542791b7c1294f1a9f100b725e62c9bf3fb4a6a0ccdbf3d716d8b8aaeeac1f0",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "            \"hormuz/work_runtime.py\",\n            \"hormuz/work_billing.py\",\n            \"hormuz/work_workflow.py\",\n            \"hormuz/work_activation.py\",\n"
+        },
+        {
+          "predecessor": "        self.assertEqual(result[\"database_class_count\"], 42)\n        self.assertEqual(result[\"sqlite_table_count\"], 90)\n",
+          "addition": "        self.assertEqual(result[\"database_class_count\"], 44)\n        self.assertEqual(result[\"sqlite_table_count\"], 108)\n"
+        },
+        {
+          "predecessor": "        self.assertEqual(result[\"operator_artifact_count\"], 18)\n",
+          "addition": "        self.assertEqual(result[\"operator_artifact_count\"], 20)\n"
+        }
+      ]
+    },
+    "tools/verify_durable_data_inventory.py": {
+      "predecessor_sha256": "85b642700e60ce93441e755f53cf8af7a718d24aeeaf0b8f2e7ed5dae6a05456",
+      "edits": [
+        {
+          "predecessor": "",
+          "addition": "    \"ai_work_database_file\",\n    \"ai_work_billing_database_file\",\n"
+        },
+        {
+          "predecessor": "    for path in (\"hormuz/_onboarding_schema.py\", \"hormuz/_console_schema.py\", \"hormuz/_workspace_schema.py\", \"hormuz/policy_impact.py\"):\n",
+          "addition": "    for path in (\"hormuz/_onboarding_schema.py\", \"hormuz/_console_schema.py\", \"hormuz/_workspace_schema.py\", \"hormuz/policy_impact.py\", \"hormuz/work_runtime.py\", \"hormuz/work_billing.py\", \"hormuz/work_workflow.py\", \"hormuz/work_activation.py\"):\n"
+        }
+      ]
+    }
+  },
+  "addition_counts": {
+    "database_classes": 2,
+    "sqlite_tables": 18,
+    "postgresql_tables": 0,
+    "operator_artifacts": 2
+  },
+  "nonclaims": [
+    "historic_plans_wires_fixtures_schemas_and_source_guards_remain_frozen",
+    "new_ai_work_state_is_separate_from_existing_usage_schema",
+    "no_release_activation_customer_savings_or_live_model_quality_claim"
+  ]
+}

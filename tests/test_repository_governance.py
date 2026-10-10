@@ -295,7 +295,22 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ("      fail-fast: false", "      fail-fast: true"),
             ("    timeout-minutes: 15\n", "    timeout-minutes: 15\n    if: false\n"),
             ("      - name: Verify shared native Rust libraries\n", "      - name: Verify shared native Rust libraries\n        if: false\n"),
-            ("        run: cargo test --workspace --locked", "        run: cargo test --workspace --locked || true"),
+            (
+                "        run: cargo test --workspace --locked -- --test-threads=1\n",
+                "        run: cargo test --workspace --locked\n",
+            ),
+            (
+                "        run: cargo test --workspace --locked -- --test-threads=1\n",
+                "        run: cargo test --workspace --locked -- --test-threads=2\n",
+            ),
+            (
+                "        run: cargo test --workspace --locked -- --test-threads=1\n",
+                "        run: cargo test --workspace --locked -- --test-threads=1 || true\n",
+            ),
+            (
+                "        run: cargo test --workspace --locked -- --test-threads=1\n",
+                "        run: cargo test --workspace --locked -- --test-threads=1 --skip shutdown_cancels\n",
+            ),
             ("      - name: Verify existing Swift expectations\n", "      - name: Verify existing Swift expectations\n        continue-on-error: true\n"),
             ("native-client-contracts-${{ github.workflow }}-${{ github.ref }}", "ci-${{ github.workflow }}-${{ github.ref }}"),
         )
@@ -365,7 +380,10 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ("cargo build -p hormuz-linux -p hormuz-client-relay --features hormuz-linux/gtk-ui --release --locked", "cargo check -p hormuz-linux --locked"),
             ("cargo build -p hormuz-linux -p hormuz-client-relay --features hormuz-linux/gtk-ui --release --locked", "cargo build -p hormuz-linux --release --locked"),
             ("cargo clippy -p hormuz-linux --features gtk-ui --all-targets --locked -- -D warnings", "cargo clippy -p hormuz-linux --locked || true"),
-            ("        shell: bash\n", "        shell: bash {0}\n"),
+            (
+                "      - name: Exercise actual GTK controls with an isolated session\n        working-directory: clients/rust\n        shell: bash\n",
+                "      - name: Exercise actual GTK controls with an isolated session\n        working-directory: clients/rust\n        shell: bash {0}\n",
+            ),
             ("          GDK_BACKEND: x11\n", "          GDK_BACKEND: broadway\n"),
             ("          HORMUZ_GTK_PROOF_DIRECTORY: ${{ github.workspace }}/clients/rust/target/linux-gtk-proof\n", ""),
             ("xvfb-run -a dbus-run-session -- cargo test -p hormuz-linux --features gtk-ui --locked -- --test-threads=1", "cargo test -p hormuz-linux --locked"),
@@ -958,9 +976,24 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 "workflow environment contract changed",
             ),
             (
-                "          path: ${{ runner.temp }}/hormuz-macos-pilot-operations\n",
+                "          path: ${{ runner.temp }}/hormuz-macos-pilot-operations/macos-pilot-operations-evidence.json\n",
                 "          path: ${{ runner.temp }}\n",
                 "macOS pilot operations artifact boundary changed",
+            ),
+            (
+                "          path: ${{ runner.temp }}/hormuz-macos-pilot-operations/removal.json\n",
+                "          path: ${{ runner.temp }}/hormuz-macos-pilot-operations\n",
+                "macOS pilot operations artifact boundary changed",
+            ),
+            (
+                '            --removal "$RUNNER_TEMP/hormuz-macos-arm64-records/removal.json"\n',
+                "",
+                "macOS pilot operations artifact boundary changed",
+            ),
+            (
+                "          install -m 0600 tools/macos_pilot_bounded_process.pl \\\n",
+                "",
+                "macOS pilot operations provenance boundary changed",
             ),
         )
         for original, replacement, expected in mutations:
@@ -1040,16 +1073,16 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ),
             (
                 "extra retained output",
-                '          test "$(find "$HORMUZ_OUTPUT" -type f | wc -l | tr -d \' \')" = 1\n',
                 '          test "$(find "$HORMUZ_OUTPUT" -type f | wc -l | tr -d \' \')" = 2\n',
+                '          test "$(find "$HORMUZ_OUTPUT" -type f | wc -l | tr -d \' \')" = 3\n',
             ),
             ("relaxed overwrite", "          overwrite: false\n", "          overwrite: true\n"),
             ("relaxed retention", "          retention-days: 30\n", "          retention-days: 31\n"),
             (
                 "continue on error",
-                "      - name: Validate and assemble the sole retained proof\n",
+                "      - name: Validate historical operations and observed native removal separately\n",
                 (
-                    "      - name: Validate and assemble the sole retained proof\n"
+                    "      - name: Validate historical operations and observed native removal separately\n"
                     "        continue-on-error: true\n"
                 ),
             ),

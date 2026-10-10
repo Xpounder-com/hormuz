@@ -22,6 +22,7 @@ from .commands import personal as personal_commands
 from .commands import runtime as runtime_commands
 from .commands import session as session_commands
 from .commands import onboarding as onboarding_commands
+from .commands import work as work_commands
 from .session_store import SessionStoreError
 from .config import ConfigError, GatewayConfig
 from .custody import CustodyError
@@ -81,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     personal_commands.add_personal_commands(subparsers)
     session_commands.add_session_commands(subparsers)
     onboarding_commands.add_onboarding_commands(subparsers)
+    work_commands.add_work_commands(subparsers)
 
     audit_commands.add_audit_commands(subparsers)
 
@@ -118,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
         return session_commands.client_config(args)
     if args.command == "context":
         return context_commands.run(args)
+    if args.command == "work":
+        return work_commands.run(args)
     if args.command == "personal":
         return personal_commands.run(args)
     if args.command == "contract" and args.contract_command == "manifest":

@@ -1,5 +1,6 @@
 import { CampaignLink } from '../../components/CampaignLink';
 import { CodeBlock } from '../../components/CodeBlock';
+import { TeamServiceNextStep } from '../../components/TeamServiceNextStep';
 import { PageFrame, PageHero } from '../../components/PageFrame';
 import { pageMetadata } from '../../../lib/metadata';
 import { sitePath, sourcePath } from '../../../lib/site.mjs';
@@ -47,7 +48,7 @@ export default function TeamBudgetsGuide() {
   return <PageFrame active="guides">
     <PageHero eyebrow="Practical guide / AI cost management" title={<>Understand AI costs.<br /><span>Set team budgets.</span></>}>
       <p>AI cost management starts with knowing which requests drive the bill. Use Hormuz to measure captured Codex and Claude Code usage, compare token costs, and put organization, team, and person limits around requests routed through your gateway.</p>
-      <p><CampaignLink href={sitePath('/resources/#tutorials')}>All practical guides →</CampaignLink></p>
+      <p><CampaignLink href={sitePath('/resources/#tutorials')}>All practical guides →</CampaignLink> · <CampaignLink href={sitePath('/guides/software-agency-ai-budgets/')}>Software-agency walkthrough →</CampaignLink></p>
     </PageHero>
     <div className="docs-shell">
       <aside className="docs-sidebar" aria-label="Guide navigation"><div><strong>In this guide</strong><a href="#measure">Measure AI spend</a><a href="#scopes">Choose the limits</a><a href="#create">Create a baseline</a><a href="#team">Add a team budget</a><a href="#compare">Inspect the change</a><a href="#activate">Activate and measure</a></div></aside>
@@ -63,7 +64,7 @@ export default function TeamBudgetsGuide() {
           <p>For your own data, run these reports in a configured gateway environment with an existing usage store and captured requests. Replace the configuration path and team ID with your deployment’s values:</p>
           <CodeBlock label="Inspect captured AI costs by team, model, and provider" code={'hormuz --config /etc/hormuz/hormuz.json status --group-by team\nhormuz --config /etc/hormuz/hormuz.json status --group-by model --team engineering\nhormuz --config /etc/hormuz/hormuz.json status --group-by provider --team engineering --json'} />
           <p>The report covers the current UTC calendar month. Cache-read and reasoning tokens can be subcategories of reported input or output; do not add them to total tokens a second time. Cost estimates use configured rates and need reconciliation with provider invoices, including discounts, credits, and other charges. Requests that bypass Hormuz are outside its coverage. <a href={sourcePath('docs/USAGE.md')}>Read the usage and cost definitions ↗</a></p>
-          <p>New to the gateway? <CampaignLink href={sitePath('/demo/#spend')}>Explore the cost example</CampaignLink>, then follow the local budget walkthrough below. It creates a policy candidate you can inspect before activation.</p>
+          <p>New to the gateway? <CampaignLink href={sitePath('/demo/#policy')}>Explore the policy controls</CampaignLink>, then follow the local budget walkthrough below. It creates a policy candidate you can inspect before activation.</p>
         </section>
         <section id="scopes" className="docs-section">
           <p className="section-label">02 / Choose the limits</p><h2>Three scopes. One governed request.</h2>
@@ -75,7 +76,7 @@ export default function TeamBudgetsGuide() {
             <tr><th scope="row">Engineering response</th><td>2,000 output tokens</td><td>The response cap for each governed request.</td></tr>
           </tbody></table></div>
           <p>For example, suppose Engineering has used $140 with no outstanding reservations. A request requiring a $12 reservation exceeds the team’s remaining $10, even if that person and the organization have room. These are invented values to explain the check, not customer spending or measured savings.</p>
-          <p>Budget accounting uses configured model rates and captured usage in the current UTC month. Provider invoices can differ, and traffic that bypasses Hormuz is outside this budget. <CampaignLink href={sitePath('/demo/#spend')}>Explore the interactive spend example →</CampaignLink></p>
+          <p>Budget accounting uses configured model rates and captured usage in the current UTC month. Provider invoices can differ, and traffic that bypasses Hormuz is outside this budget. <CampaignLink href={sitePath('/evidence/#work-proof')}>Inspect the executed work receipt →</CampaignLink></p>
         </section>
         <section id="create" className="docs-section">
           <p className="section-label">03 / Create a baseline</p><h2>Start with a policy you can inspect.</h2>
@@ -103,6 +104,7 @@ export default function TeamBudgetsGuide() {
           <CodeBlock label="Report captured usage on your configured gateway" code={'hormuz --config /etc/hormuz/hormuz.json status --group-by team\nhormuz --config /etc/hormuz/hormuz.json status --group-by model --team engineering'} />
           <p>Use your actual configuration path and team ID. Compare estimated cost, input/output/cache tokens, and policy outcomes. A lower output cap does not guarantee a fixed saving: accepted requests, model rates, and workload quality still matter. The <a href={sourcePath('docs/USAGE.md')}>usage reporting reference ↗</a> explains report coverage and cost estimates.</p>
         </section>
+        <TeamServiceNextStep />
         <section className="docs-next"><div><span>Next guide</span><h2>Route your coding clients through Hormuz.</h2></div><CampaignLink className="button button-primary" href={sitePath('/guides/codex-claude-code-gateway/')}>Connect Codex & Claude Code →</CampaignLink></section>
       </article>
     </div>

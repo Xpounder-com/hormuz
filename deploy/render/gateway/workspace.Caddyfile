@@ -29,7 +29,7 @@
 		X-Robots-Tag "noindex, nofollow, noarchive"
 	}
 	@login {
-		path /health /ready /workspace /workspace/* /w/* /v1/workspaces/* /.well-known/hormuz-domain/*
+		path /health /ready /work /work/ /workspace /workspace/* /w/* /v1/workspaces/* /.well-known/hormuz-domain/*
 	}
 	handle @login {
 		request_body {

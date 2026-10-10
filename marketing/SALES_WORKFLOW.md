@@ -1,11 +1,11 @@
-# Hormuz inquiry to appliance or Cloud delivery
+# Hormuz engineering workflow inquiry to delivery
 
 Owner: Mehrdad Zaker. Operating response target: one business day. This is a founder-operated workflow, not an automated CRM or a promise that a lead has been qualified.
 
 ## Incoming inquiries and notifications
 
 1. Formspree stores applications and emails **mehrdadz@neuralint.io** (recipient observed in the live form settings on September 6, 2026). Email Notifications and Submission Archive are enabled. Review the inbox and Formspree submissions each business day; include the spam folder when checking a missing inquiry.
-2. A successful website submission shows a receipt and random `HZ-…` reference. It offers Google Calendar booking for workflow review, Cloud, appliance, onboarding, and managed-site interests. It explicitly does not promise an automatic applicant email. Formspree's paid autoresponder has not been purchased.
+2. A successful website submission shows a receipt and random `HZ-…` reference. It offers Google Calendar booking for engineering AI work, workflow review, Cloud, appliance, onboarding, and managed-site interests. It explicitly does not promise an automatic applicant email. Formspree's paid autoresponder has not been purchased.
 3. Reply personally within the operating target, acknowledge the reference, and confirm the next step. Draft below; do not send without reviewing the person's actual request.
 4. A completed Google Calendar booking sends both parties an invitation with Google Meet details. The attendee receives a one-day reminder. Booking availability: Wednesday and Thursday, 10:00–15:00 **America/Chicago**, 30-minute appointments, 60-day horizon, four-hour minimum notice. The organizer calendar is checked for busy events; email verification is required for unsigned visitors.
 5. Save the reference in the private ledger. A direct booking without a website inquiry gets a local `CAL-…` reference linked to the actual calendar event. Do not count a booking-link click as a booking.
@@ -47,7 +47,7 @@ ledger does not estimate close probability or recognize revenue from an inquiry.
 
 ## Review agenda and value case
 
-Use the 30-minute discussion to decide which catalog offer fits:
+Use the 30-minute discussion to confirm one engineering workflow and its coverage before choosing an existing catalog offer:
 
 - 0–5 minutes: team, AI clients/providers, current route, and the concrete trigger for this inquiry.
 - 5–15: one material control problem; current baseline and cost of the problem. Ask who operates the system and who decides on a purchase.

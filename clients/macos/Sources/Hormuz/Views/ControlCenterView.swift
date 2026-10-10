@@ -9,7 +9,7 @@ struct ControlCenterView: View {
 
     var body: some View {
         TabView {
-            ContentView(connection: connection)
+            ContentView(connection: connection, resetAppearance: presentation.resetAppearanceForRemoval)
                 .tabItem { Label("Connection", systemImage: "link") }
 
             CompanionPreferencesView(

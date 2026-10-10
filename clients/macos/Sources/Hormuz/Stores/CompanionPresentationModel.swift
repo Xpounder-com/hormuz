@@ -78,6 +78,13 @@ final class CompanionPresentationModel: ObservableObject {
         defaults.set(value, forKey: Keys.display)
     }
 
+    func resetAppearanceForRemoval() {
+        NativeAppearanceSettings.reset(defaults)
+        visibilityMode = .always
+        uiScale = 1
+        selectedDisplayID = "primary"
+    }
+
     func ensureWidgetVisible() {
         keepsWidgetOpenAfterDismissal = false
         widgetVisible = true

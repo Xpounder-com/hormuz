@@ -29,7 +29,7 @@ const paymentLabels: Record<PaidOffer, string> = {
 };
 
 export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUrl: string }) {
-  const [interest, setInterest] = useState('review');
+  const [interest, setInterest] = useState('work');
   const [search, setSearch] = useState('');
   const [includeSource, setIncludeSource] = useState(false);
   const [state, setState] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
@@ -79,7 +79,7 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
     <h2 ref={confirmation} tabIndex={-1}>{testSubmission ? 'Test inquiry received.' : 'Your inquiry is received.'}</h2>
     <p>Request reference: <strong>{reference}</strong>. Save this reference to help us find your inquiry.</p>
     <p>Mehrdad will review your workflow and reply personally. Response target: one business day. This page is your receipt; an automatic application email is not sent.</p>
-    {bookingUrl && isSalesInquiry(interest) && <><p>Choose a 30-minute Google Meet review on Wednesday or Thursday, 10 am–3 pm Central. Include your request reference when booking.</p><a className="button button-primary" href={bookingUrl} rel="noreferrer">Choose my review time ↗</a><p>Google Calendar emails both of us an invitation after you complete the booking.</p></>}
+    {bookingUrl && isSalesInquiry(interest) && <><p>Choose a 30-minute Google Meet review on Wednesday or Thursday, 10 am–3 pm Central. Include your request reference when booking.</p><a className="button button-primary" href={bookingUrl} rel="noreferrer">Choose my discussion time ↗</a><p>Google Calendar emails both of us an invitation after you complete the booking.</p></>}
     <p>No payment has been taken. A meeting is confirmed only after booking; any paid scope is agreed separately. Questions? <a href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(`Hormuz inquiry ${reference}`)}`}>Email Mehrdad</a>.</p>
     {interest === 'reservation' && <p>This is a received inquiry. A paid appliance reservation is confirmed separately through Stripe after successful deposit payment. <CampaignLink href={sitePath('/enterprise/#reserve')}>Reservation details →</CampaignLink>.</p>}
   </section>;
@@ -98,13 +98,13 @@ export function LeadForm({ endpoint, bookingUrl }: { endpoint: string; bookingUr
         <label>Your name<input name="name" autoComplete="name" required maxLength={100} /></label>
         <label>Work email<input name="email" type="email" autoComplete="email" required maxLength={254} /></label>
         <label>Organization<input name="organization" autoComplete="organization" required maxLength={150} /></label>
-        <label>Your API workflow or team requirements<textarea name="workflow" required maxLength={1200} rows={4} aria-describedby="lead-safety" placeholder="For example: an application using OpenAI Responses, expected monthly requests, concurrent streams, and the controls you need." /></label>
-        <p className="field-hint" id="lead-safety">Do not include credentials, prompts, customer data, or other secrets.</p>
+        <label>Your team’s workflow and operating needs<textarea name="workflow" required maxLength={1200} rows={4} aria-describedby="lead-safety" placeholder="For example: five developers using Codex with our OpenAI API account; around 2,000 requests/month. We want hosting and have a named team administrator." /></label>
+        <p className="field-hint" id="lead-safety">Include team size, agents and providers, expected traffic, and who operates the setup. For a managed site, include the site and device count. Do not include credentials, prompts, customer data, or other secrets.</p>
         <label>Timing <span>(optional)</span><input name="timeframe" maxLength={100} placeholder="For example: this quarter" /></label>
         <div className="lead-trap" aria-hidden="true"><label>Leave this empty<input name="_gotcha" tabIndex={-1} autoComplete="off" /></label></div>
         {campaignSource(search) && <label className="checkbox-label"><input type="checkbox" checked={includeSource} onChange={e => setIncludeSource(e.target.checked)} />Include campaign source with my application: {campaignSource(search)}</label>}
         <p className="field-hint">Submitting sends these details to Hormuz through Formspree so we can respond to this inquiry. It does not subscribe you to marketing emails. <CampaignLink href={sitePath('/privacy/')}>Privacy details</CampaignLink>.</p>
-        <p className="field-hint">Personal reply from Mehrdad. Response target: one business day. {bookingUrl && isSalesInquiry(interest) ? 'After submitting, choose a free 30-minute review time.' : ''}</p>
+        <p className="field-hint">Personal reply from Mehrdad. Response target: one business day. {bookingUrl && isSalesInquiry(interest) ? 'After submitting, choose a 30-minute workflow discussion.' : ''}</p>
         <button className="button button-primary" type="submit">{state === 'sending' ? 'Sending…' : selectedOffer?.action || 'Send my inquiry →'}</button>
       </fieldset>
     </form>
