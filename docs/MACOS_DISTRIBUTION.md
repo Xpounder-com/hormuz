@@ -48,6 +48,11 @@ retaining the archive does not make it a customer download or notarized release.
 
 ## Local packaging and notarization
 
+The commands below reproduce the v1.8.0 release from its source and matching
+helper artifacts. Current source prepares a 1.9.0 candidate; the protected
+workflow's version input must equal the source package version. No 1.9.0
+download is qualified here.
+
 Confirm that exactly one intended identity is available:
 
 ```sh

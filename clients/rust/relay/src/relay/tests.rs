@@ -43,6 +43,48 @@ fn call(relay: &LocalRelay, path: &str, body: &[u8], extra: &str, token: &str) -
     read_response(&mut stream).unwrap()
 }
 
+fn accepted_idle_connection(relay: &LocalRelay) -> TcpStream {
+    let connection = TcpStream::connect_timeout(&relay.address(), Duration::from_secs(5)).unwrap();
+    connection
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let state = relay.state_probe.upgrade().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut wait = Duration::from_millis(1);
+    // Call this before request traffic: the worker and this probe own two
+    // references, so the third must belong to the accepted idle connection.
+    while Arc::strong_count(&state) < 3 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "relay did not accept the idle connection"
+        );
+        thread::sleep(wait.min(remaining));
+        wait = wait.saturating_mul(2).min(Duration::from_millis(50));
+    }
+    connection
+}
+
+fn assert_owned_relay_shutdown(relay: LocalRelay, mut connection: TcpStream) {
+    let state = relay.state_probe.clone();
+    let local_token = Arc::downgrade(&relay.token);
+    drop(relay);
+    // This socket identifies the original relay even if another test has
+    // already reused its ephemeral port. Do not reconnect to the old address.
+    let mut byte = [0_u8; 1];
+    match connection.read(&mut byte) {
+        Ok(0) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+            ) => {}
+        result => panic!("relay connection remained open after shutdown: {result:?}"),
+    }
+    assert!(state.upgrade().is_none(), "relay state survived shutdown");
+    assert!(local_token.upgrade().is_none());
+}
+
 fn read_response(mut input: impl Read) -> std::io::Result<String> {
     // Rejected requests deliberately leave the body unread. macOS may reset
     // that socket after sending a complete response, so fixed-length replies
@@ -242,13 +284,15 @@ struct WorkHeaderGateway {
     address: SocketAddr,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<CapturedWorkRequests>>,
+    listener_probe: std::sync::Weak<TcpListener>,
 }
 
 impl WorkHeaderGateway {
     fn start(expected_requests: usize) -> Self {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let listener = Arc::new(TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap());
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
+        let listener_probe = Arc::downgrade(&listener);
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
         let worker = thread::spawn(move || {
@@ -309,11 +353,19 @@ impl WorkHeaderGateway {
             address,
             stop,
             worker: Some(worker),
+            listener_probe,
         }
     }
 
     fn finish(&mut self) -> CapturedWorkRequests {
-        self.worker.take().unwrap().join().unwrap()
+        let captured = self.worker.take().unwrap().join().unwrap();
+        // The worker is the sole owner of this exact listener. Its release
+        // must be checked by identity rather than a potentially recycled port.
+        assert!(
+            self.listener_probe.upgrade().is_none(),
+            "owned gateway listener survived worker completion"
+        );
+        captured
     }
 }
 
@@ -342,6 +394,7 @@ fn relay_preserves_only_one_valid_work_id_without_forwarding_client_authority() 
             Optimization::Off,
         )
         .unwrap();
+        let connection = accepted_idle_connection(&relay);
         for extra in ["X-Hormuz-Work-Id: Work-123._\r\n", ""] {
             let headers = [
                 extra,
@@ -357,9 +410,7 @@ fn relay_preserves_only_one_valid_work_id_without_forwarding_client_authority() 
             let response = call(&relay, path, body, &headers, relay.local_credential());
             assert!(response.starts_with("HTTP/1.1 200"));
         }
-        let address = relay.address();
-        drop(relay);
-        assert!(TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_err());
+        assert_owned_relay_shutdown(relay, connection);
     }
     let captured = gateway.finish();
     assert_eq!(captured.len(), 4);
@@ -391,7 +442,6 @@ fn relay_preserves_only_one_valid_work_id_without_forwarding_client_authority() 
         assert!(!headers.contains("x-hormuz-actor-id:"));
         assert!(!headers.contains("x-hormuz-organization-id:"));
     }
-    assert!(TcpStream::connect_timeout(&gateway.address, Duration::from_millis(100)).is_err());
 }
 
 #[test]
@@ -407,6 +457,7 @@ fn bound_relay_keeps_exactly_one_work_id_through_optimization() {
             Some("work-selected"),
         )
         .unwrap();
+        let connection = accepted_idle_connection(&relay);
         for extra in ["", "X-Hormuz-Work-Id: work-selected\r\n"] {
             assert!(call(
                 &relay,
@@ -417,9 +468,7 @@ fn bound_relay_keeps_exactly_one_work_id_through_optimization() {
             )
             .starts_with("HTTP/1.1 200"));
         }
-        let address = relay.address();
-        drop(relay);
-        assert!(TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_err());
+        assert_owned_relay_shutdown(relay, connection);
     }
     let captured = gateway.finish();
     assert_eq!(captured.len(), 4);
@@ -440,7 +489,6 @@ fn bound_relay_keeps_exactly_one_work_id_through_optimization() {
             .to_ascii_lowercase()
             .contains("x-hormuz-context-format: structural-v1"));
     }
-    assert!(TcpStream::connect_timeout(&gateway.address, Duration::from_millis(100)).is_err());
 }
 
 #[test]
@@ -459,6 +507,7 @@ fn invalid_or_conflicting_work_ids_fail_before_optimizer_custody_or_egress() {
                 expected,
             )
             .unwrap();
+            let connection = accepted_idle_connection(&relay);
             for extra in [
                 "X-Hormuz-Work-Id: \r\n",
                 "X-Hormuz-Work-Id: work/invalid\r\n",
@@ -478,16 +527,13 @@ fn invalid_or_conflicting_work_ids_fail_before_optimizer_custody_or_egress() {
                 )
                 .starts_with("HTTP/1.1 400"));
             }
-            let address = relay.address();
-            drop(relay);
-            assert!(TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_err());
+            assert_owned_relay_shutdown(relay, connection);
         }
     }
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(optimizations.load(Ordering::SeqCst), 0);
     gateway.stop.store(true, Ordering::SeqCst);
     assert!(gateway.finish().is_empty());
-    assert!(TcpStream::connect_timeout(&gateway.address, Duration::from_millis(100)).is_err());
 }
 
 #[test]
@@ -504,8 +550,9 @@ fn bound_optimizer_passthrough_keeps_original_bytes_and_selected_job_once() {
             Some("work-selected"),
         )
         .unwrap();
+        let connection = accepted_idle_connection(&relay);
         assert!(call(&relay, path, body, "", relay.local_credential()).starts_with("HTTP/1.1 200"));
-        drop(relay);
+        assert_owned_relay_shutdown(relay, connection);
     }
     let captured = gateway.finish();
     assert_eq!(captured.len(), 2);
@@ -518,7 +565,6 @@ fn bound_optimizer_passthrough_keeps_original_bytes_and_selected_job_once() {
         assert!(headers.contains("x-hormuz-work-id: work-selected\r\n"));
         assert!(!headers.contains("x-hormuz-context-format:"));
     }
-    assert!(TcpStream::connect_timeout(&gateway.address, Duration::from_millis(100)).is_err());
 }
 
 #[test]
@@ -877,34 +923,8 @@ fn stopping_closes_the_connection_and_releases_relay_state() {
         Optimization::Off,
     )
     .unwrap();
-    let mut connection = TcpStream::connect(relay.address()).unwrap();
-    let state = relay.state_probe.upgrade().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Arc::strong_count(&state) < 3 {
-        assert!(
-            Instant::now() < deadline,
-            "relay did not accept the connection"
-        );
-        thread::sleep(Duration::from_millis(1));
-    }
-    drop(state);
-    let local_token = Arc::downgrade(&relay.token);
-    drop(relay);
-    // This connection belongs to the original listener even if its port is reused.
-    connection
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .unwrap();
-    let mut byte = [0_u8; 1];
-    match connection.read(&mut byte) {
-        Ok(0) => {}
-        Err(error)
-            if matches!(
-                error.kind(),
-                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
-            ) => {}
-        result => panic!("relay connection remained open after shutdown: {result:?}"),
-    }
-    assert!(local_token.upgrade().is_none());
+    let connection = accepted_idle_connection(&relay);
+    assert_owned_relay_shutdown(relay, connection);
 }
 
 #[test]
