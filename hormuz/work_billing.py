@@ -135,6 +135,12 @@ class WorkBilling:
                 if not isinstance(result, dict):
                     raise ValueError()
                 return result
+        except urllib.error.HTTPError as error:
+            try:
+                error.close()
+            except OSError:
+                pass
+            raise WorkRuntimeError("billing_api_unavailable", 503) from None
         except (ValueError, TypeError, OSError, urllib.error.URLError):
             raise WorkRuntimeError("billing_api_unavailable", 503) from None
 

@@ -1,11 +1,13 @@
 """Payment proof, ownership, ordering and replay; no real Stripe calls."""
 import hashlib
 import hmac
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from hormuz.work_billing import STRIPE_VERSION, WorkBilling
 from hormuz.work_runtime import WorkRuntimeError
@@ -21,6 +23,39 @@ class WorkBillingTests(unittest.TestCase):
 
     def tearDown(self):
         self.directory.cleanup()
+
+    def test_stripe_http_errors_close_response_without_retry_or_public_error_change(self):
+        self.billing._api_key = "synthetic-api-fixture"
+        for status in (401, 429, 503):
+            with self.subTest(status=status), io.BytesIO(b"synthetic private error body") as body:
+                error = HTTPError("https://api.stripe.com/v1/subscriptions/sub_Synthetic", status, "synthetic", {}, body)
+                with patch("hormuz.work_billing.urllib.request.build_opener") as build_opener:
+                    build_opener.return_value.open.side_effect = error
+                    with self.assertRaisesRegex(WorkRuntimeError, "billing_api_unavailable") as raised:
+                        self.billing._stripe("/v1/subscriptions/sub_Synthetic", {}, method="GET")
+                    self.assertEqual(raised.exception.status, 503)
+                    self.assertTrue(body.closed)
+                    build_opener.return_value.open.assert_called_once()
+                    self.assertEqual(build_opener.return_value.open.call_args.kwargs, {"timeout": 10})
+
+    def test_stripe_http_error_close_failure_preserves_public_error(self):
+        self.billing._api_key = "synthetic-api-fixture"
+        with io.BytesIO(b"synthetic private error body") as body:
+            error = HTTPError("https://api.stripe.com/v1/subscriptions/sub_Synthetic", 403, "synthetic", {}, body)
+
+            def close():
+                body.close()
+                raise OSError("synthetic close failure")
+
+            with patch.object(error, "close", side_effect=close) as close_error, \
+                    patch("hormuz.work_billing.urllib.request.build_opener") as build_opener:
+                build_opener.return_value.open.side_effect = error
+                with self.assertRaisesRegex(WorkRuntimeError, "billing_api_unavailable") as raised:
+                    self.billing._stripe("/v1/subscriptions/sub_Synthetic", {}, method="GET")
+                self.assertEqual(raised.exception.status, 503)
+                self.assertTrue(body.closed)
+                close_error.assert_called_once_with()
+                build_opener.return_value.open.assert_called_once()
 
     def send(self, kind, item, *, identifier="evt_one", created=None, live=True):
         event = {"id": identifier, "type": kind, "created": self.now if created is None else created,

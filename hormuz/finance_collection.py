@@ -1406,20 +1406,26 @@ def _request_page(
                 raise FinanceCollectionError("provider_response_invalid")
             return payload
         except HTTPError as error:
-            status = error.code
-            if status in {401, 403}:
-                raise FinanceCollectionError("provider_unauthorized") from None
-            retryable = status == 429 or 500 <= status <= 599
-            if not retryable or attempt >= MAX_RETRIES_PER_PAGE:
-                code = (
-                    "provider_rate_limited"
-                    if status == 429
-                    else "provider_unavailable"
-                    if 500 <= status <= 599
-                    else "provider_response_invalid"
-                )
-                raise FinanceCollectionError(code) from None
-            delay = _retry_delay(error.headers, attempt)
+            try:
+                status = error.code
+                if status in {401, 403}:
+                    raise FinanceCollectionError("provider_unauthorized") from None
+                retryable = status == 429 or 500 <= status <= 599
+                if not retryable or attempt >= MAX_RETRIES_PER_PAGE:
+                    code = (
+                        "provider_rate_limited"
+                        if status == 429
+                        else "provider_unavailable"
+                        if 500 <= status <= 599
+                        else "provider_response_invalid"
+                    )
+                    raise FinanceCollectionError(code) from None
+                delay = _retry_delay(error.headers, attempt)
+            finally:
+                try:
+                    error.close()
+                except OSError:
+                    pass
         except (URLError, TimeoutError, socket.timeout, OSError):
             if attempt >= MAX_RETRIES_PER_PAGE:
                 raise FinanceCollectionError("provider_unavailable") from None

@@ -129,6 +129,29 @@ class WorkPagesTests(unittest.TestCase):
         rendered = work_pages.dashboard(state)
         self.assertIn('Provider-confirmed attempt subset</h2><p class="metric-value">$0.00', rendered)
 
+    def test_mixed_committed_cost_is_not_labeled_as_an_estimate(self):
+        state = self.state()
+        state['totals'].update(committed_microusd=3_750_000, estimated_cost_microusd=1_250_000,
+            provider_confirmed_cost_microusd=2_500_000, provider_confirmed_attempts=1,
+            unconfirmed_attempts=1, invoice_finality=False)
+        job = self.job()
+        job['costs'].update(committed_microusd=5_750_000, estimated_cost_microusd=1_250_000,
+            provider_confirmed_cost_microusd=4_500_000, provider_confirmed_attempts=1,
+            unconfirmed_attempts=1, invoice_finality=False,
+            cost_basis='mixed_provider_confirmed_and_estimated')
+        state['works'] = [job]
+        rendered = work_pages.dashboard(state)
+        self.assertIn('Committed cost</h2><p class="metric-value">$3.75', rendered)
+        self.assertIn('Provider-confirmed attempt subset</h2><p class="metric-value">$2.50', rendered)
+        self.assertIn('Configured estimates, replaced by provider-confirmed amounts where available.', rendered)
+        for page in (rendered, work_pages.job_detail(job, csrf='synthetic-csrf', can_manage=True)):
+            self.assertIn('Committed cost</dt><dd>$5.75', page)
+            self.assertIn('Provider-confirmed cost</dt><dd>$4.50', page)
+            self.assertIn('Committed cost uses configured estimates, replaced by provider-confirmed amounts where available.', page)
+            self.assertIn('invoice finality: Not established', page)
+            self.assertNotIn('Settled estimate', page)
+            self.assertNotIn('Configured provider rates · captured attempts', page)
+
     def test_login_explains_pending_campaign_confirmation_without_recording_claim(self):
         rendered = work_pages.login(message='Sign in, then confirm source. <script>')
         self.assertIn('Sign in, then confirm source.', rendered)
