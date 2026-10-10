@@ -12,7 +12,7 @@ export function SiteFooter() {
         </CampaignLink>
         <p className="footer-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a></p>
         <p>Keep your agents. Choose your budget and pace.</p>
-        <span>Apache-2.0 · Core {SOURCE_VERSION.slice(1)} · Mac {MACOS_VERSION.slice(1)}<br />Production qualification remains deployment-specific.</span>
+        <span>Apache-2.0 · Core {SOURCE_VERSION.slice(1)} · Mac {MACOS_VERSION.slice(1)}<br />Check compatibility and security for your deployment.</span>
       </div>
 
       <div className="footer-column">

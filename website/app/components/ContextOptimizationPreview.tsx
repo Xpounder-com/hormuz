@@ -14,7 +14,7 @@ export function ContextOptimizationPreview() {
         <div><dt>Still governed</dt><dd>Identity, policy, budget, accounting, and secret controls still apply.</dd></div>
       </dl>
       <CampaignLink className="button context-optimization-cta" href={sitePath('/demo/#compaction')}>Try the before & after <span aria-hidden="true">↗</span></CampaignLink>
-      <p className="context-optimization-status">Available in 1.2.0. Automatic selection is narrow; unsupported or non-beneficial results pass through unchanged. Savings depend on the workload. Release live-provider qualification is OpenAI-only.</p>
+      <p className="context-optimization-status">Available in 1.2.0. Automatic selection is narrow; unsupported or non-beneficial results pass through unchanged. Savings depend on the workload. Live-provider tests for this release cover OpenAI only.</p>
     </div>
 
     <ContextFold />

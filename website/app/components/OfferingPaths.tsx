@@ -16,7 +16,7 @@ export function OfferingPaths() {
         <p className="section-label">FOR TEAMS THAT OPERATE IT THEMSELVES</p><h3>Free software</h3>
         <PriceAmount amount={SOFTWARE_PRICE} period="Software license · Apache-2.0" />
         <p>Use the Personal Optimizer locally or operate your own gateway. Existing software capabilities remain open source.</p>
-        <ul><li>Qualified local context optimization on supported clients</li><li>Gateway policy, secret controls, and usage reporting</li><li>Your provider accounts and infrastructure</li><li>Documentation and community support</li></ul>
+        <ul><li>Local context optimization on supported clients</li><li>Gateway policy, secret controls, and usage reporting</li><li>Your provider accounts and infrastructure</li><li>Documentation and community support</li></ul>
         <CampaignLink className="button button-primary" href={sitePath('/docs/')}>Start with free software <span aria-hidden="true">↗</span></CampaignLink>
         <p className="field-hint">No card or Hormuz subscription required. Supported platforms and workflow boundaries are listed in the setup guide.</p>
       </article>
@@ -26,7 +26,7 @@ export function OfferingPaths() {
         <p>A planned Hormuz-hosted gateway and dashboard for your supported application traffic. Your team operates its applications and provider accounts.</p>
         <ul><li>One hosted workspace</li><li>Team controls and usage reporting</li><li>Administrative users included</li><li>Provider accounts remain yours</li></ul>
         <CampaignLink className="button button-primary" href={sitePath('/contact/?interest=cloud')}>Confirm Cloud fit <span aria-hidden="true">→</span></CampaignLink>
-        <p className="field-hint">Accepting inquiries. Confirm your application, provider, expected traffic, retention needs, service coverage, and activation before subscribing. Cloud qualification must pass before activation.</p>
+        <p className="field-hint">Accepting inquiries for the planned service. Tell us about your application, provider, traffic, and retention needs. We confirm compatibility, service coverage, and activation before you subscribe.</p>
         <StripeCheckoutLink offer="cloud" className="button button-outline">Subscribe to Cloud — {CLOUD_PRICE}/month</StripeCheckoutLink>
         <p className="field-hint">Monthly billing starts at checkout and renews until canceled. <CampaignLink href={sitePath('/plans/#cloud')}>Cloud and cancellation details →</CampaignLink></p>
       </article>

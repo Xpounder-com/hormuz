@@ -8,13 +8,13 @@ export function EnterprisePlans({ includeManagedSite = true }: { includeManagedS
   return <><section className="section offer-section" id="plans" aria-labelledby="plans-title">
     <div className="section-heading"><p className="section-label">{includeManagedSite ? 'APPLIANCE AND SITE MANAGEMENT' : 'OPTIONAL APPLIANCE PACKAGES'}</p>
       <h2 id="plans-title">{includeManagedSite ? <>Local processing.<br />Choose the setup and support you need.</> : <>Need a local appliance?<br />Choose the installation help you need.</>}</h2>
-      <p className="offer-intro">Coming soon: a preconfigured gateway appliance for supported requests inside your network. Rollout is planned for {pricing.reservation.plannedRollout}. Local compaction and secret redaction are part of the planned appliance. Hardware and workflow qualification must pass before delivery.</p>
+      <p className="offer-intro">Coming soon: a preconfigured gateway appliance for supported requests inside your network. Rollout is planned for {pricing.reservation.plannedRollout}. Local compaction and secret redaction are part of the planned appliance. We verify the hardware and support for your workflow before delivery.</p>
     </div>
     <div className={`offer-grid conversion-offers${includeManagedSite ? '' : ' offer-grid-two'}`}>
       <article className="offer-card"><p className="section-label">COMING SOON · CUSTOMER IT INSTALLS</p><h3>Appliance</h3>
         <PriceAmount amount={APPLIANCE_PRICE} period="USD / appliance · one-time" />
         <p>An assembled appliance including enclosure, cooling, power supply, and a tested Hormuz installation.</p>
-        <ul><li>Setup guide and supported configuration</li><li>Local processing for qualified workflows</li><li>Your IT team handles deployment</li></ul>
+        <ul><li>Setup guide and supported configuration</li><li>Local processing for supported workflows</li><li>Your IT team handles deployment</li></ul>
         <a className="button button-primary" href="#reserve">Reserve yours <span aria-hidden="true">↓</span></a>
         <div className="confirmed-order"><StripeCheckoutLink offer="appliance" className="button button-outline">Pay for appliance — {APPLIANCE_PRICE}</StripeCheckoutLink>
           <p className="field-hint">For a confirmed delivery without a reservation deposit. Coming soon; full-price checkout does not establish a shipping date. Reserved buyers pay their balance through the Stripe invoice Hormuz provides.</p></div>
