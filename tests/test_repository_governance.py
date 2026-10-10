@@ -295,7 +295,22 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ("      fail-fast: false", "      fail-fast: true"),
             ("    timeout-minutes: 15\n", "    timeout-minutes: 15\n    if: false\n"),
             ("      - name: Verify shared native Rust libraries\n", "      - name: Verify shared native Rust libraries\n        if: false\n"),
-            ("        run: cargo test --workspace --locked", "        run: cargo test --workspace --locked || true"),
+            (
+                "        run: cargo test --workspace --locked -- --test-threads=1\n",
+                "        run: cargo test --workspace --locked\n",
+            ),
+            (
+                "        run: cargo test --workspace --locked -- --test-threads=1\n",
+                "        run: cargo test --workspace --locked -- --test-threads=2\n",
+            ),
+            (
+                "        run: cargo test --workspace --locked -- --test-threads=1\n",
+                "        run: cargo test --workspace --locked -- --test-threads=1 || true\n",
+            ),
+            (
+                "        run: cargo test --workspace --locked -- --test-threads=1\n",
+                "        run: cargo test --workspace --locked -- --test-threads=1 --skip shutdown_cancels\n",
+            ),
             ("      - name: Verify existing Swift expectations\n", "      - name: Verify existing Swift expectations\n        continue-on-error: true\n"),
             ("native-client-contracts-${{ github.workflow }}-${{ github.ref }}", "ci-${{ github.workflow }}-${{ github.ref }}"),
         )
