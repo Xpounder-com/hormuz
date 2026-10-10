@@ -1470,6 +1470,10 @@ class WorkRuntime:
         if isinstance(value, dict):
             if any(value.get(key) for key in ("previous_response_id", "conversation", "session_id")):
                 return True
+            if any(key in value and type(value[key]) is not str for key in ("role", "type")):
+                # Schemas can contain mapping/array tags. Keep continuation
+                # inference conservative without throwing on unhashable data.
+                return True
             if value.get("role") in {"assistant", "tool"} or value.get("type") in {
                 "function_call", "function_call_output", "tool_use", "tool_result", "computer_call", "computer_call_output"
             }:
@@ -1488,6 +1492,8 @@ class WorkRuntime:
                 return False
             if isinstance(value, dict):
                 if any(key in forbidden and item not in (None, False, [], {}) for key, item in value.items()):
+                    return False
+                if any(key in value and type(value[key]) is not str for key in ("role", "type")):
                     return False
                 if value.get("role") in {"assistant", "tool"} or value.get("type") in {
                     "function_call", "function_call_output", "tool_use", "tool_result", "image", "input_image", "input_file", "document", "audio", "file"

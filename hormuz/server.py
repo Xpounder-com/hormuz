@@ -185,6 +185,37 @@ class _ProviderRehearsalResponse:
         return None
 
 
+def _openai_namespace_tools_bounded(tool: Mapping[str, Any]) -> bool:
+    """Qualify the pinned namespace shape containing only inline definitions."""
+
+    if (set(tool) != {"type", "name", "description", "tools"}
+            or type(tool.get("name")) is not str or not tool["name"]
+            or type(tool.get("description")) is not str
+            or type(tool.get("tools")) is not list or not tool["tools"]):
+        return False
+    for child in tool["tools"]:
+        if (type(child) is not dict or type(child.get("type")) is not str
+                or child["type"] not in _OPENAI_INLINE_TOOL_TYPES
+                or type(child.get("name")) is not str or not child["name"]
+                or type(child.get("description")) is not str
+                or ("defer_loading" in child and type(child["defer_loading"]) is not bool)):
+            return False
+        common = {"type", "name", "description", "defer_loading"}
+        if child["type"] == "function":
+            if (set(child) - (common | {"strict", "parameters"})
+                    or type(child.get("strict")) is not bool
+                    or type(child.get("parameters")) is not dict):
+                return False
+        else:
+            format_value = child.get("format")
+            if (set(child) - (common | {"format"})
+                    or type(format_value) is not dict
+                    or set(format_value) != {"type", "syntax", "definition"}
+                    or any(type(value) is not str for value in format_value.values())):
+                return False
+    return True
+
+
 def _provider_input_tokens_bounded(
     protocol: str, request: Mapping[str, Any], *, text_only: bool = False
 ) -> bool:
@@ -192,7 +223,7 @@ def _provider_input_tokens_bounded(
 
     Preserve the existing attribution contract for self-contained inline
     data. AI Work additionally requires text-only reservations: serialized
-    bytes cannot bound modality-specific image/document processing. Provider
+    bytes cannot bound modality-specific image/audio/document processing. Provider
     references fail closed in either mode; this classifier never fetches or
     inspects content.
     """
@@ -209,6 +240,13 @@ def _provider_input_tokens_bounded(
         if ("web_search_options" in request or "audio" in request
                 or request.get("modalities", ["text"]) != ["text"]):
             return False
+        if text_only:
+            messages = request.get("messages")
+            if type(messages) is list and any(
+                type(message) is dict and message.get("audio") is not None
+                for message in messages
+            ):
+                return False
         inline_tool_types = _OPENAI_INLINE_TOOL_TYPES
     elif protocol == "anthropic":
         if any(request.get(field) is not None for field in _ANTHROPIC_PROVIDER_STATE_FIELDS):
@@ -227,10 +265,37 @@ def _provider_input_tokens_bounded(
             tool_type = tool.get("type")
             if protocol == "anthropic" and tool_type is None:
                 continue
+            if text_only and protocol == "openai" and tool_type == "namespace":
+                if not _openai_namespace_tools_bounded(tool):
+                    return False
+                continue
             if type(tool_type) is not str or tool_type not in inline_tool_types:
                 return False
 
-    pending: list[object] = [request]
+    # Qualified tool definitions, including JSON Schema defaults and properties,
+    # are serialized text, not provider-resolved content. This local walk view
+    # does not change the request or the complete body used for reservations.
+    # Keep the legacy non-text attribution classifier's traversal unchanged.
+    content_request = dict(request) if text_only else request
+    if text_only:
+        if tools is not None:
+            content_request.pop("tools", None)
+        if protocol == "openai":
+            text = request.get("text")
+            text_format = text.get("format") if type(text) is dict else None
+            if type(text_format) is dict and text_format.get("type") == "json_schema":
+                if type(text_format.get("schema")) is not dict:
+                    return False
+                content_request["text"] = {**text, "format": {
+                    key: value for key, value in text_format.items() if key != "schema"}}
+            response_format = request.get("response_format")
+            if type(response_format) is dict and response_format.get("type") == "json_schema":
+                json_schema = response_format.get("json_schema")
+                if type(json_schema) is not dict or type(json_schema.get("schema")) is not dict:
+                    return False
+                content_request["response_format"] = {**response_format, "json_schema": {
+                    key: value for key, value in json_schema.items() if key != "schema"}}
+    pending: list[object] = [content_request]
     while pending:
         value = pending.pop()
         if type(value) is list:
@@ -239,15 +304,17 @@ def _provider_input_tokens_bounded(
         if type(value) is not dict:
             continue
         kind = value.get("type")
+        if "type" in value and type(kind) is not str:
+            return False
         if kind == "item_reference":
             return False
         if kind == "image_url":
             # Even inline images have modality-specific token pricing; a
             # serialized text-byte bound cannot authorize their work cost.
             return False
-        if text_only and kind in {"input_image", "input_file", "image", "document"}:
+        if text_only and kind in {"input_image", "input_file", "image", "document", "input_audio", "audio"}:
             # Inline data is still not a text-token bound: compressed images
-            # and documents may expand into independently billed content.
+            # and audio/documents have independently billed content.
             return False
         if kind == "input_image":
             if value.get("file_id") is not None:
@@ -262,7 +329,8 @@ def _provider_input_tokens_bounded(
             return False
         if kind in {"image", "document"}:
             source = value.get("source")
-            if type(source) is not dict or source.get("type") not in _INLINE_ANTHROPIC_SOURCE_TYPES:
+            if (type(source) is not dict or type(source.get("type")) is not str
+                    or source["type"] not in _INLINE_ANTHROPIC_SOURCE_TYPES):
                 return False
         pending.extend(value.values())
     return True

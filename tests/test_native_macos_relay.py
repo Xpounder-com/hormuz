@@ -1156,8 +1156,7 @@ connection.getresponse().read()
             arguments = (["exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
                 "--ephemeral", "--sandbox", "read-only", "-C", str(self.root),
                 "-c", "analytics.enabled=false", "-c", "feedback.enabled=false",
-                "-c", "features.plugins=false", "-c", 'web_search="disabled"',
-                "Reply with exactly CONTEXT_OK. Do not call tools."]
+                "-c", "features.plugins=false", "Reply with exactly CONTEXT_OK. Do not call tools."]
                 if name == "codex" else ["-p", "--bare", "--no-session-persistence", "--tools", "",
                 "--setting-sources", "", "--max-turns", "1", "Reply with exactly 42. Do not call tools."])
             self._official_client(name, arguments, bare_claude=name == "claude", terminal_only=True,
@@ -1191,7 +1190,7 @@ class NativeMacRelayFixtureTests(unittest.TestCase):
             self.assertIs(handler._read_json_body(), body)
         read.assert_called_once_with()
         self.assertEqual(json.dumps(body, sort_keys=True), before)
-        self.assertIsNone(handler._native_work_record["request_diagnostics"]["text_input_bounded"])
+        self.assertIs(handler._native_work_record["request_diagnostics"]["text_input_bounded"], False)
         payload = {"error": {"code": "invalid_request", "message": "Request field model must be a non-empty string"}}
         with patch.object(GatewayRequestHandler, "_send_json") as send:
             handler._send_json(400, payload, error_code="invalid_request")
@@ -1638,9 +1637,6 @@ class NativeMacRelayFixtureTests(unittest.TestCase):
                     getattr(method, "__wrapped__", method)(fixture)
                 fixture._run_terminal.assert_called_once()
                 fixture._official_client.assert_called_once()
-                name, arguments = fixture._official_client.call_args.args
-                self.assertEqual(name, "codex")
-                self.assertIn(("-c", 'web_search="disabled"'), list(zip(arguments, arguments[1:])))
                 fixture.work_fixture.job.assert_called_once()
                 fixture.work_fixture.assert_job.assert_not_called()
 

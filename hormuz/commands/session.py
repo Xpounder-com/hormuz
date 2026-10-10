@@ -81,6 +81,7 @@ def client_config(args: argparse.Namespace) -> int:
             print("\n".join([
                 "# Merge into ~/.codex/config.toml; no credential values belong here.",
                 "model = " + json.dumps(args.model), 'model_provider = "hormuz"',
+                *(['web_search = "disabled"'] if work_headers else []),
                 "", "[model_providers.hormuz]", 'name = "Hormuz"',
                 "base_url = " + json.dumps(gateway + "/v1"), 'wire_api = "responses"',
                 *(['http_headers = { "X-Hormuz-Work-Id" = ' + json.dumps(work_id) + ' }'] if work_headers else []),

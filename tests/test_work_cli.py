@@ -109,35 +109,56 @@ class WorkClientTests(TestCase):
     def test_native_session_config_attaches_work_without_opening_server_secrets(self):
         from hormuz.cli import main
         for name in ("codex", "claude"):
-            output = io.StringIO()
-            argv = ["client", "config", name, "--auth-mode", "session", "--url", "https://gateway.example", "--model", "safe-openai", "--work-id", "work-123"]
-            with mock.patch("hormuz.cli.GatewayConfig.load", side_effect=AssertionError("server configuration read")), redirect_stdout(output):
-                self.assertEqual(main(argv), 0)
-            if name == "codex":
-                provider = tomllib.loads(output.getvalue())["model_providers"]["hormuz"]
-                self.assertEqual(provider["http_headers"], {"X-Hormuz-Work-Id": "work-123"})
-                self.assertEqual(provider["auth"]["command"], "hormuz")
-            else:
-                settings = json.loads(output.getvalue())
-                self.assertEqual(settings["env"]["ANTHROPIC_CUSTOM_HEADERS"], "X-Hormuz-Work-Id: work-123")
-                self.assertIn("auth session", settings["apiKeyHelper"])
-            self.assertNotIn("Authorization", output.getvalue())
-        output = io.StringIO()
-        with redirect_stderr(output):
-            self.assertEqual(main([*argv[:-1], 'work-123\r\nAuthorization: secret-fixture-token']), 1)
-        self.assertNotIn("secret-fixture-token", output.getvalue())
+            for work_id in (None, "work-123"):
+                output = io.StringIO()
+                argv = ["client", "config", name, "--auth-mode", "session", "--url", "https://gateway.example", "--model", "safe-openai"]
+                if work_id is not None:
+                    argv.extend(["--work-id", work_id])
+                with self.subTest(client=name, work_id=work_id), mock.patch("hormuz.cli.GatewayConfig.load", side_effect=AssertionError("server configuration read")), redirect_stdout(output):
+                    self.assertEqual(main(argv), 0)
+                if name == "codex":
+                    settings = tomllib.loads(output.getvalue())
+                    provider = settings["model_providers"]["hormuz"]
+                    self.assertEqual(settings.get("web_search"), "disabled" if work_id else None)
+                    self.assertNotIn("web_search", provider)
+                    self.assertEqual(provider.get("http_headers"), {"X-Hormuz-Work-Id": work_id} if work_id else None)
+                    self.assertEqual(provider["auth"]["command"], "hormuz")
+                else:
+                    settings = json.loads(output.getvalue())
+                    self.assertEqual(settings["env"].get("ANTHROPIC_CUSTOM_HEADERS"), "X-Hormuz-Work-Id: " + work_id if work_id else None)
+                    self.assertNotIn("web_search", output.getvalue())
+                    self.assertIn("auth session", settings["apiKeyHelper"])
+                self.assertNotIn("Authorization", output.getvalue())
+            for invalid in ("", 'work-123\r\nAuthorization: secret-fixture-token'):
+                output, diagnostic = io.StringIO(), io.StringIO()
+                with self.subTest(client=name, invalid=invalid), redirect_stdout(output), redirect_stderr(diagnostic):
+                    self.assertEqual(main([*argv[:-1], invalid]), 1)
+                self.assertEqual(output.getvalue(), "")
+                self.assertNotIn("secret-fixture-token", diagnostic.getvalue())
 
     def test_native_static_config_preserves_private_credential_reference(self):
         from hormuz.commands.client import _client_config
-        from hormuz.config import GatewayConfig
+        from hormuz.config import ConfigError, GatewayConfig
         config = GatewayConfig.load(Path(__file__).parents[1] / "config.example.json", environ={"HORMUZ_TOKEN": "secret-fixture-token"})
         for name in ("codex", "claude"):
-            output = io.StringIO()
-            with redirect_stdout(output):
-                self.assertEqual(_client_config(config, name, "https://gateway.example", work_id="work-123"), 0)
-            self.assertIn("X-Hormuz-Work-Id", output.getvalue())
-            self.assertIn("HORMUZ_TOKEN", output.getvalue())
-            self.assertNotIn("secret-fixture-token", output.getvalue())
+            for work_id in (None, "work-123"):
+                output = io.StringIO()
+                with self.subTest(client=name, work_id=work_id), redirect_stdout(output):
+                    self.assertEqual(_client_config(config, name, "https://gateway.example", work_id=work_id), 0)
+                self.assertEqual("X-Hormuz-Work-Id" in output.getvalue(), work_id is not None)
+                if name == "codex":
+                    settings = tomllib.loads(output.getvalue())
+                    self.assertEqual(settings.get("web_search"), "disabled" if work_id else None)
+                    self.assertNotIn("web_search", settings["model_providers"]["hormuz"])
+                else:
+                    self.assertNotIn("web_search", output.getvalue())
+                self.assertIn("HORMUZ_TOKEN", output.getvalue())
+                self.assertNotIn("secret-fixture-token", output.getvalue())
+            for invalid in ("", "work-123\r\nAuthorization: secret-fixture-token"):
+                output = io.StringIO()
+                with self.subTest(client=name, invalid=invalid), redirect_stdout(output), self.assertRaises(ConfigError):
+                    _client_config(config, name, "https://gateway.example", work_id=invalid)
+                self.assertEqual(output.getvalue(), "")
 
     def test_managed_native_launch_and_relay_preserve_work_and_context_only(self):
         from hormuz.client_relay import _client_command, _forward_headers, SavedClientProfile, ClientRelayError
@@ -145,17 +166,22 @@ class WorkClientTests(TestCase):
         upstream_token = "hox_a_" + "A" * 43
         for name in ("codex", "claude-code"):
             profile = SavedClientProfile("fixture", "https://gateway.example", name, "approved", False)
-            with mock.patch.dict("os.environ", {"ANTHROPIC_CUSTOM_HEADERS": "Authorization: attacker", "OPENAI_API_KEY": "direct-provider-secret"}, clear=True):
-                argv, environment = _client_command(profile, "http://127.0.0.1:8787", local_token, executable="/usr/bin/" + name, work_id="work-123")
-            if name == "codex":
-                self.assertIn('model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-123"}', argv)
-                self.assertEqual(environment["HORMUZ_LOCAL_RELAY_TOKEN"], local_token)
-            else:
-                self.assertEqual(environment["ANTHROPIC_CUSTOM_HEADERS"], "X-Hormuz-Work-Id: work-123")
-                self.assertEqual(environment["ANTHROPIC_AUTH_TOKEN"], local_token)
-            self.assertNotIn("direct-provider-secret", argv)
-            with self.assertRaises(ClientRelayError):
-                _client_command(profile, "http://127.0.0.1:8787", local_token, executable="fixture", work_id="bad\nAuthorization: attacker")
+            for work_id in (None, "work-123"):
+                with self.subTest(client=name, work_id=work_id), mock.patch.dict("os.environ", {"ANTHROPIC_CUSTOM_HEADERS": "Authorization: attacker", "OPENAI_API_KEY": "direct-provider-secret"}, clear=True):
+                    argv, environment = _client_command(profile, "http://127.0.0.1:8787", local_token, executable="/usr/bin/" + name, work_id=work_id)
+                self.assertEqual(("-c", 'web_search="disabled"') in list(zip(argv, argv[1:])), name == "codex" and work_id is not None)
+                if name == "codex":
+                    self.assertEqual(any("X-Hormuz-Work-Id" in arg for arg in argv), work_id is not None)
+                    if work_id is not None:
+                        self.assertIn('model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-123"}', argv)
+                    self.assertEqual(environment["HORMUZ_LOCAL_RELAY_TOKEN"], local_token)
+                else:
+                    self.assertEqual(environment.get("ANTHROPIC_CUSTOM_HEADERS"), "X-Hormuz-Work-Id: " + work_id if work_id else None)
+                    self.assertEqual(environment["ANTHROPIC_AUTH_TOKEN"], local_token)
+                self.assertNotIn("direct-provider-secret", argv)
+            for invalid in ("", "bad\nAuthorization: attacker"):
+                with self.assertRaises(ClientRelayError):
+                    _client_command(profile, "http://127.0.0.1:8787", local_token, executable="fixture", work_id=invalid)
         headers = http.client.HTTPMessage()
         for name, value in (("X-Hormuz-Work-Id", "work-123"), ("Authorization", "Bearer client-secret"), ("X-Api-Key", "client-key")):
             headers[name] = value

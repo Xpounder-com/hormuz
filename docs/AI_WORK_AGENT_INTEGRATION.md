@@ -86,6 +86,23 @@ request/retry using that configuration: use a distinct ID for a different job an
 remove/change the header when switching jobs. Successful responses never mark
 the job complete.
 
+Generated Codex configuration for a bound work ID includes the top-level setting
+`web_search = "disabled"`. Bound managed Codex launches apply the same setting to
+that invocation. This removes provider-hosted search from the bounded text-only
+request; a prompt saying “do not use tools” does not remove a declared provider tool.
+When merging printed configuration, keep the setting before any `[table]` heading.
+Review the work header and search setting when switching jobs or leaving a bound
+session, because printed configuration remains in the file where you put it.
+
+For older generated configuration, apply the setting explicitly:
+
+```sh
+codex -c 'web_search="disabled"'
+```
+
+This command uses the work header and credential helper from the generated
+configuration above. Hosted search remains outside the bounded workflow.
+
 For an existing managed Hormuz desktop/context profile, the launcher can bind one
 agent session without editing agent credential configuration:
 
@@ -158,6 +175,25 @@ Responses images and Anthropic image/document blocks are also unbounded, even
 when supplied as inline base64. Compressed bytes cannot bound image tokens or
 document expansion. Budgeted AI Work accepts supported text requests; additional
 modalities require independently validated reservation rules before admission.
+Responses work accepts inline function/custom declarations and the supported
+Codex namespace wrapper containing direct function/custom children. Their full
+definitions and JSON Schema remain in the request and its text-cost reservation;
+they are not image, file or provider-state inputs. Nested namespaces, malformed
+namespace declarations, provider-hosted search, `tool_search`, image generation
+and unknown tool types are refused before dispatch. Disabling web search removes
+that capability only; it does not qualify other unsupported tools. Normal local
+function/custom tools are preserved. Actual image/audio/file inputs and provider
+references remain unbounded even when they accompany an accepted namespace.
+OpenAI structured-output definitions are also reserved as serialized text at the
+recognized Responses `text.format` (`type: json_schema`) and Chat Completions
+`response_format.json_schema` locations, with a dictionary-valued `schema`.
+This does not qualify arbitrary schema locations, Anthropic output formats or
+new tool formats. Actual input content is checked independently of these
+definitions; a schema field named `type` or a media-shaped schema default never
+authorizes an image, audio, file or stored-response input.
+Requests whose schemas contain non-string `type` or `role` values conservatively
+retain the baseline context inference and bypass exact-answer reuse. Accepted
+schemas still reach the provider and consume their full serialized reservation.
 Budgeted inference uses qualified standard processing tiers. Explicit premium,
 automatic tier selection, fast inference and unqualified geography overrides
 are refused before dispatch; a speed preference selects a qualified model route.

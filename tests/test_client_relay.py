@@ -721,8 +721,10 @@ class RelayTests(unittest.TestCase):
                 command = launched.call_args.args[0]
                 environment = launched.call_args.kwargs["env"]
                 if client == "codex":
+                    self.assertIn(("-c", 'web_search="disabled"'), list(zip(command, command[1:])))
                     self.assertIn('model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-selected"}', command)
                 else:
+                    self.assertNotIn('web_search="disabled"', command)
                     self.assertEqual(environment["ANTHROPIC_CUSTOM_HEADERS"], "X-Hormuz-Work-Id: work-selected")
                 server.shutdown.assert_called_once_with()
                 server.server_close.assert_called_once_with()

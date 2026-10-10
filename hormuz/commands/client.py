@@ -131,6 +131,7 @@ def _client_config(
             "# Put this in the user-level ~/.codex/config.toml",
             f"model = {json.dumps(default_model)}",
             'model_provider = "hormuz"',
+            *(['web_search = "disabled"'] if work_headers else []),
             "",
             "[model_providers.hormuz]",
             'name = "Hormuz"',

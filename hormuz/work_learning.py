@@ -27,7 +27,8 @@ def request_characteristics(value):
             for child in item[-32:]:
                 collect(child, depth + 1)
         elif isinstance(item, dict):
-            if item.get("type") in {"text", "input_text"}:
+            kind = item.get("type")
+            if type(kind) is str and kind in {"text", "input_text"}:
                 collect(item.get("text"), depth + 1)
             elif item.get("role") == "user":
                 collect(item.get("content"), depth + 1)
@@ -64,7 +65,8 @@ def request_characteristics(value):
             "input_size": "small" if total <= 1024 else "medium" if total <= 8192 else "large",
             "tools": bool(value.get("tools")),
             "structured_output": bool(value.get("response_format") or (formatting.get("format") if isinstance(formatting, dict) else None)),
-            "history": any(isinstance(item, dict) and item.get("role") in {"assistant", "tool"}
+            "history": any(isinstance(item, dict) and type(item.get("role")) is str
+                           and item["role"] in {"assistant", "tool"}
                            for item in messages)}
 
 

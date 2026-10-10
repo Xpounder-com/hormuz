@@ -293,6 +293,8 @@ impl LaunchPlan {
                 AIClient::Codex => {
                     args.extend([
                         "-c".into(),
+                        "web_search=\"disabled\"".into(),
+                        "-c".into(),
                         format!(
                             "model_providers.hormuz_context_relay.http_headers={{\"X-Hormuz-Work-Id\"={}}}",
                             serde_json::to_string(work_id)
@@ -594,6 +596,11 @@ mod tests {
                 )
                 .unwrap();
                 let args: Vec<_> = plan.args.iter().map(|arg| arg.to_str().unwrap()).collect();
+                assert_eq!(
+                    args.windows(2)
+                        .any(|pair| pair == ["-c", "web_search=\"disabled\""]),
+                    client == "codex" && work_id.is_some()
+                );
                 let headers: Vec<_> = plan
                     .environment
                     .iter()
@@ -623,22 +630,29 @@ mod tests {
                     arg.contains("X-Hormuz-Actor") || arg.contains("X-Hormuz-Tenant")
                 }));
             }
-            assert!(matches!(
-                LaunchPlan::new(
-                    &profile,
-                    executable.path().to_owned(),
-                    "127.0.0.1:1234".parse().unwrap(),
-                    &token,
-                    Some("job\r\nX-Hormuz-Actor: spoof"),
-                ),
-                Err(RelayError::InvalidConfiguration)
-            ));
             let credentials: Arc<dyn CredentialSource> =
                 Arc::new(|| panic!("invalid binding must not access credentials"));
-            assert_eq!(
-                run_client_with_work_id(&profile, credentials, Optimization::Off, Some("-invalid")),
-                Err(RelayError::InvalidConfiguration)
-            );
+            for invalid in ["", "-invalid", "job\r\nX-Hormuz-Actor: spoof"] {
+                assert!(matches!(
+                    LaunchPlan::new(
+                        &profile,
+                        executable.path().to_owned(),
+                        "127.0.0.1:1234".parse().unwrap(),
+                        &token,
+                        Some(invalid),
+                    ),
+                    Err(RelayError::InvalidConfiguration)
+                ));
+                assert_eq!(
+                    run_client_with_work_id(
+                        &profile,
+                        credentials.clone(),
+                        Optimization::Off,
+                        Some(invalid),
+                    ),
+                    Err(RelayError::InvalidConfiguration)
+                );
+            }
         }
     }
     #[test]

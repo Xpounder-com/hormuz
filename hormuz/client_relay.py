@@ -1189,7 +1189,7 @@ def _client_command(
         if not isinstance(work_id, str) or _WORK_ID.fullmatch(work_id) is None:
             raise ClientRelayError("invalid_work_binding")
         if profile.client == "codex":
-            command.extend(["-c", 'model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"=' + json.dumps(work_id) + '}'])
+            command.extend(["-c", 'web_search="disabled"', "-c", 'model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"=' + json.dumps(work_id) + '}'])
         elif profile.client == "claude-code":
             environment["ANTHROPIC_CUSTOM_HEADERS"] = "X-Hormuz-Work-Id: " + work_id
         else:
