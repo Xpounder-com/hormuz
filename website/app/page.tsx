@@ -14,7 +14,7 @@ export default function Home() {
       <div className="work-hero-grid"><div className="landing-hero-copy">
         <p className="section-label">AI CONTROL FOR SMALL AND GROWING TEAMS</p>
         <h1>Keep your agents.<br /><em>Choose your budget and pace.</em></h1>
-        <p className="landing-deck">For software agencies, engineering teams, and IT teams using supported AI tools. Connect your existing agents through Hormuz, set spending boundaries, and see what each piece of work consumes. Start free and choose hosting or operating help as your needs grow.</p>
+        <p className="landing-deck">For software agencies, engineering teams, and IT teams facing growing AI bills across repositories. Connect your existing agents through Hormuz, set spending boundaries, and see what each piece of work consumes. Start free and choose hosting or operating help as your needs grow.</p>
         <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/#examples')}>Start free <span aria-hidden="true">→</span></CampaignLink><CampaignLink className="button landing-secondary" href={sitePath('/plans/#offers')}>Compare plans <span aria-hidden="true">→</span></CampaignLink></div>
         <p className="landing-reassurance">Free software · Your provider accounts · Provider charges separate<br />Documented client versions: Codex 0.147.0 / OpenAI Responses; Claude Code 2.1.233 / Anthropic Messages.<br /><CampaignLink href={sitePath('/integrations/#clients')}>Check setup and coverage →</CampaignLink><br />Check compatibility with your tools and provider before connecting.</p>
       </div><div className="work-passage" aria-label="The governed request path">
