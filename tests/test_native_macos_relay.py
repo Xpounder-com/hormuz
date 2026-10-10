@@ -26,7 +26,7 @@ from tests.test_client_relay import (
 )
 from tests.test_gateway import FakeProviderHandler
 from hormuz.config import GatewayConfig
-from hormuz.server import GatewayRequestHandler
+from hormuz.server import GatewayRequestHandler, _provider_input_tokens_bounded
 from hormuz.work_client import WorkClient, WorkClientError
 from tools.ai_work_proof import ProofGatewayServer, ProofProviderServer, serving
 from tools.ai_work_provider_examples import gateway_profile
@@ -98,6 +98,44 @@ def _terminal_output_diagnostics(stdout_size, stderr_size, stderr_prefix):
         "stderr_prefix_bytes": len(prefix), "stderr_prefix_truncated": stderr_size > len(prefix),
         "stderr_markers": [code for pattern, code in markers if pattern in prefix] or ["unclassified"]},
         sort_keys=True, separators=(",", ":"))
+
+
+_NATIVE_WORK_ERROR_CODES = frozenset({
+    "invalid_request", "invalid_json", "length_required", "invalid_content_length",
+    "request_too_large", "unauthorized", "hormuz_policy_denied", "hormuz_provider_policy_denied",
+    "hormuz_secret_detected", "hormuz_budget_denied", "hormuz_storage_unavailable",
+    "gateway_upstream_not_configured", "gateway_upstream_error", "gateway_upstream_redirect",
+    "hormuz_ai_work_request_cost_unbounded", "hormuz_ai_work_work_not_found",
+    "hormuz_ai_work_invalid_work_header", "hormuz_ai_work_invalid_request_kind",
+    "hormuz_ai_work_paid_workspace_required", "hormuz_ai_work_request_already_dispatched",
+})
+
+
+def _native_work_request_diagnostics(protocol, body):
+    """Classify admission shape only; never retain arbitrary request values."""
+    tier = body.get("service_tier")
+    tier = ("absent" if tier is None else tier
+            if type(tier) is str and tier in {"default", "auto", "priority", "flex", "standard_only"}
+            else "other")
+    output = "max_output_tokens" if protocol == "openai" else "max_tokens"
+    references = ("conversation", "previous_response_id", "prompt") if protocol == "openai" else ("container", "mcp_servers")
+    try:
+        bounded = _provider_input_tokens_bounded(protocol, body, text_only=True)
+    except TypeError:
+        # A malformed JSON kind may be unhashable. Observational diagnostics
+        # must not replace the gateway's own model/schema rejection.
+        bounded = None
+    return {"protocol": protocol if protocol in {"openai", "anthropic"} else "unclassified",
+        "service_tier": tier, "speed_present": body.get("speed") is not None,
+        "inference_geo_present": body.get("inference_geo") is not None,
+        "provider_state_present": any(body.get(field) is not None for field in references),
+        "output_limit_present": output in body,
+        "output_limit_positive": type(body.get(output)) is int and body[output] > 0,
+        "text_input_bounded": bounded}
+
+
+def _native_work_response_code(code):
+    return code if type(code) is str and code in _NATIVE_WORK_ERROR_CODES else "unclassified"
 
 
 class _WorkTerminalProvider(BaseHTTPRequestHandler):
@@ -172,14 +210,38 @@ class _WorkRecordingHandler(GatewayRequestHandler):
     def _record(self):
         fixture = self.server.fixture
         fixture.count_http()
+        self._native_work_record = None
         path = urlsplit(self.path).path
         if path in {"/v1/responses", "/v1/messages", "/v1/messages/count_tokens"}:
-            fixture.gateway_calls.append({"path": path,
+            self._native_work_record = {"path": path,
                 "work_headers": self.headers.get_all("X-Hormuz-Work-Id", []),
                 "owner_auth": self.headers.get("Authorization") == "Bearer " + ACCESS_TOKEN,
                 "authority_header": any(name.lower().startswith(("x-hormuz-actor", "x-hormuz-organization",
                                                                  "x-hormuz-team", "x-hormuz-role"))
-                                        for name in self.headers)})
+                                        for name in self.headers)}
+            fixture.gateway_calls.append(self._native_work_record)
+
+    def _read_json_body(self):
+        body = super()._read_json_body()
+        record = getattr(self, "_native_work_record", None)
+        if record is not None and body is not None:
+            protocol = "openai" if record["path"] == "/v1/responses" else "anthropic"
+            record["request_diagnostics"] = _native_work_request_diagnostics(protocol, body)
+        return body
+
+    def send_response(self, code, message=None):
+        record = getattr(self, "_native_work_record", None)
+        if record is not None:
+            record["status"] = int(code) if isinstance(code, int) and not isinstance(code, bool) and 100 <= code <= 599 else None
+        return super().send_response(code, message)
+
+    def _send_json(self, status, value, **kwargs):
+        record = getattr(self, "_native_work_record", None)
+        if record is not None:
+            error = value.get("error") if isinstance(value, dict) else None
+            code = kwargs.get("error_code") or (error.get("code") if isinstance(error, dict) else None)
+            record["error_code"] = _native_work_response_code(code)
+        return super()._send_json(status, value, **kwargs)
 
     def do_GET(self) -> None:  # noqa: N802
         self._record()
@@ -702,8 +764,11 @@ os.execv(real, command)
                 lease.close()
             selector.close()
             self._terminal_stop(process, self.root)
+        diagnostic = json.loads(_terminal_output_diagnostics(stdout_size, stderr_size, stderr_prefix))
+        diagnostic["gateway"] = [{"status": row.get("status"), "error_code": row.get("error_code", "unobserved"),
+            "request": row.get("request_diagnostics")} for row in self.work_fixture.gateway_calls[-4:]]
         self.assertEqual(process.returncode, 0, "native terminal invocation failed; "
-            + _terminal_output_diagnostics(stdout_size, stderr_size, stderr_prefix))
+            + json.dumps(diagnostic, sort_keys=True, separators=(",", ":")))
         host, port = json.loads((self.root / "terminal-relay-address.json").read_text())
         # This one bounded closure probe is to this invocation's actual endpoint.
         with self.assertRaises(OSError):
@@ -1114,6 +1179,75 @@ connection.getresponse().read()
 
 
 class NativeMacRelayFixtureTests(unittest.TestCase):
+    def test_malformed_work_request_diagnostics_preserve_super_body_and_rejection(self) -> None:
+        from unittest.mock import patch
+
+        body = {"input": [{"type": []}], "private": "synthetic-private-input"}
+        before = json.dumps(body, sort_keys=True)
+        handler = _WorkRecordingHandler.__new__(_WorkRecordingHandler)
+        handler._native_work_record = {"path": "/v1/responses"}
+        with patch.object(GatewayRequestHandler, "_read_json_body", return_value=body) as read:
+            self.assertIs(handler._read_json_body(), body)
+        read.assert_called_once_with()
+        self.assertEqual(json.dumps(body, sort_keys=True), before)
+        self.assertIsNone(handler._native_work_record["request_diagnostics"]["text_input_bounded"])
+        payload = {"error": {"code": "invalid_request", "message": "Request field model must be a non-empty string"}}
+        with patch.object(GatewayRequestHandler, "_send_json") as send:
+            handler._send_json(400, payload, error_code="invalid_request")
+        send.assert_called_once_with(400, payload, error_code="invalid_request")
+        with patch.object(GatewayRequestHandler, "send_response") as response:
+            handler.send_response(400)
+        response.assert_called_once_with(400, None)
+        self.assertEqual(handler._native_work_record["status"], 400)
+        self.assertEqual(handler._native_work_record["error_code"], "invalid_request")
+        self.assertNotIn("synthetic-private-input", json.dumps(handler._native_work_record))
+
+    def test_work_request_diagnostics_classify_pricing_without_request_content(self) -> None:
+        private = "synthetic-private-prompt-credential-reference"
+        for tier, expected, bounded in ((None, "absent", True), ("default", "default", True),
+                ("auto", "auto", False), ("priority", "priority", False),
+                ("flex", "flex", False), (private, "other", False), ([private], "other", False)):
+            body = {"model": "approved", "input": private, "service_tier": tier,
+                    "max_output_tokens": 32, "tools": [{"type": "function", "name": private}]}
+            before = json.dumps(body, sort_keys=True)
+            diagnostic = _native_work_request_diagnostics("openai", body)
+            self.assertEqual((diagnostic["service_tier"], diagnostic["text_input_bounded"]), (expected, bounded))
+            self.assertNotIn(private, json.dumps(diagnostic))
+            self.assertTrue(diagnostic["output_limit_positive"])
+            self.assertEqual(json.dumps(body, sort_keys=True), before)
+        diagnostic = _native_work_request_diagnostics("openai", {"previous_response_id": private,
+            "speed": private, "inference_geo": private, "max_output_tokens": private})
+        self.assertTrue(diagnostic["provider_state_present"])
+        self.assertTrue(diagnostic["speed_present"])
+        self.assertTrue(diagnostic["inference_geo_present"])
+        self.assertFalse(diagnostic["output_limit_positive"])
+        self.assertFalse(diagnostic["text_input_bounded"])
+        self.assertNotIn(private, json.dumps(diagnostic))
+        self.assertEqual(_native_work_request_diagnostics("anthropic", {"max_tokens": 32})["protocol"], "anthropic")
+
+    def test_work_handler_diagnostics_preserve_wire_and_redact_unknown_error_codes(self) -> None:
+        from unittest.mock import patch
+
+        private = "synthetic-private-message-header-identity"
+        handler = _WorkRecordingHandler.__new__(_WorkRecordingHandler)
+        handler._native_work_record = {"path": "/v1/responses"}
+        body = {"service_tier": "auto", "input": private}
+        with patch.object(GatewayRequestHandler, "_read_json_body", return_value=body) as read:
+            self.assertIs(handler._read_json_body(), body)
+        read.assert_called_once_with()
+        for code, expected in (("hormuz_ai_work_request_cost_unbounded", "hormuz_ai_work_request_cost_unbounded"),
+                               (private, "unclassified"), ([private], "unclassified")):
+            payload = {"error": {"code": code, "message": private}}
+            with patch.object(GatewayRequestHandler, "_send_json", return_value="wire-preserved") as send:
+                self.assertEqual(handler._send_json(422, payload, error_code=code), "wire-preserved")
+            send.assert_called_once_with(422, payload, error_code=code)
+            self.assertEqual(handler._native_work_record["error_code"], expected)
+            with patch.object(GatewayRequestHandler, "send_response") as response:
+                handler.send_response(422, private)
+            response.assert_called_once_with(422, private)
+            self.assertEqual(handler._native_work_record["status"], 422)
+            self.assertNotIn(private, json.dumps(handler._native_work_record))
+
     def test_terminal_codex_preserves_independent_overrides_and_arguments(self) -> None:
         from unittest.mock import patch
 
@@ -1292,7 +1426,10 @@ class NativeMacRelayFixtureTests(unittest.TestCase):
 
         fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
         fixture.root = Path("/private/tmp/synthetic-native-fixture")
-        fixture.work_fixture = SimpleNamespace(failed=False)
+        fixture.work_fixture = SimpleNamespace(failed=False, gateway_calls=[{
+            "status": 422, "error_code": "hormuz_ai_work_request_cost_unbounded",
+            "request_diagnostics": _native_work_request_diagnostics("openai", {"service_tier": "auto"}),
+            "work_headers": ["private-work-identity"], "owner_auth": True}])
         lease = Mock()
         fixture.owner = Mock()
         fixture.owner.accept.return_value = (lease, None)
@@ -1315,6 +1452,10 @@ class NativeMacRelayFixtureTests(unittest.TestCase):
         diagnostic = json.loads(str(raised.exception).split("native terminal invocation failed; ", 1)[1])
         self.assertEqual(diagnostic["stderr_markers"], ["provider_url_invalid", "python_value_error"])
         self.assertEqual((diagnostic["stdout_bytes"], diagnostic["stderr_bytes"]), (len(stdout), len(stderr)))
+        self.assertEqual(diagnostic["gateway"][0]["status"], 422)
+        self.assertEqual(diagnostic["gateway"][0]["error_code"], "hormuz_ai_work_request_cost_unbounded")
+        self.assertEqual(diagnostic["gateway"][0]["request"]["service_tier"], "auto")
+        self.assertFalse(diagnostic["gateway"][0]["request"]["text_input_bounded"])
         self.assertNotIn("private", str(raised.exception))
 
     def test_terminal_cleanup_retains_leader_and_observes_helpers_only(self) -> None:
