@@ -22,7 +22,8 @@ case "$HORMUZ_RELAY_TARGET" in
   *) HORMUZ_RELAY_TARGET="$PWD/$HORMUZ_RELAY_TARGET" ;;
 esac
 (cd "$HORMUZ_REPO_ROOT/clients/rust"; "$HORMUZ_CARGO" build \
-  --target-dir "$HORMUZ_RELAY_TARGET" --locked --package hormuz-client-relay)
+  --target-dir "$HORMUZ_RELAY_TARGET" --locked --package hormuz-client-relay --package hormuz-client-ui)
+export HORMUZ_RUST_UI_LIBRARY_DIR="$HORMUZ_RELAY_TARGET/debug"
 
 # Stop only the GUI from this build directory, never a helper or another copy.
 if [ "$HORMUZ_MODE" != "--build-only" ]; then
@@ -34,6 +35,10 @@ if [ "$HORMUZ_MODE" != "--build-only" ]; then
 fi
 swift build --package-path "$HORMUZ_MAC_ROOT" --product Hormuz
 HORMUZ_BUILD_DIR="$(swift build --package-path "$HORMUZ_MAC_ROOT" --show-bin-path)"
+if ! nm -gU "$HORMUZ_BUILD_DIR/Hormuz" | grep ' _hormuz_ui_abi_version$' > /dev/null; then
+  echo "The source-matched Rust UI ABI must be embedded in the Mac executable." >&2
+  exit 1
+fi
 mkdir -p "$HORMUZ_BUNDLE/Contents/MacOS"
 mkdir -p "$HORMUZ_BUNDLE/Contents/Resources/ContextHelper"
 mkdir -p "$HORMUZ_BUNDLE/Contents/Helpers"

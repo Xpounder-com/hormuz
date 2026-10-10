@@ -31,7 +31,7 @@ pub fn stop_linux_user_service(token: &str) -> Result<(), RelayError> {
     })
 }
 pub use launch::{discover_supported_client, run_client, run_client_with_work_id, valid_work_id};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use launch::{run_client_until, run_client_until_with_work_id};
 pub use relay::{
     CredentialSource, LocalRelay, Optimization, OptimizerCancellation, RelayCancellation,

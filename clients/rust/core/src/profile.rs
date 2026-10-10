@@ -26,6 +26,10 @@ pub struct ConnectionProfile {
     #[serde(rename = "allowLoopbackHTTP")]
     allow_loopback_http: bool,
     setup: GatewaySetup,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    desktop_managed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    desktop_profile_version: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -42,6 +46,9 @@ struct ProfileWire {
     // Only a missing setup is legacy custom. Null/unknown values are invalid.
     #[serde(default)]
     setup: GatewaySetup,
+    #[serde(default)]
+    desktop_managed: bool,
+    desktop_profile_version: Option<i64>,
 }
 
 impl ConnectionProfile {
@@ -71,6 +78,9 @@ impl ConnectionProfile {
             || !safe_text(&wire.organization, 200)
             || !model_valid
             || wire.issuer.as_ref().is_some_and(|s| !safe_text(s, 2048))
+            || wire
+                .desktop_profile_version
+                .is_some_and(|version| !wire.desktop_managed || version <= 0)
             || (wire.setup == GatewaySetup::OpenAIPilot
                 && (wire.client != AIClient::Codex
                     || !matches!(wire.model.as_str(), "openai-primary" | "openai-secondary")
@@ -88,6 +98,8 @@ impl ConnectionProfile {
             model: wire.model,
             allow_loopback_http: wire.allow_loopback_http,
             setup: wire.setup,
+            desktop_managed: wire.desktop_managed,
+            desktop_profile_version: wire.desktop_profile_version,
         })
     }
 
@@ -114,6 +126,12 @@ impl ConnectionProfile {
     }
     pub fn setup(&self) -> GatewaySetup {
         self.setup
+    }
+    pub fn desktop_managed(&self) -> bool {
+        self.desktop_managed
+    }
+    pub fn desktop_profile_version(&self) -> Option<i64> {
+        self.desktop_profile_version
     }
 }
 

@@ -45,9 +45,20 @@ final class HormuzWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func show() {
+        connection.dashboardVisibility(surface: "controlCenter", detail: true, visible: true)
         rebuildContent()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        connection.dashboardVisibility(surface: "controlCenter", detail: false, visible: false)
+    }
+    func windowDidMiniaturize(_ notification: Notification) {
+        connection.dashboardVisibility(surface: "controlCenter", detail: false, visible: false)
+    }
+    func windowDidDeminiaturize(_ notification: Notification) {
+        connection.dashboardVisibility(surface: "controlCenter", detail: true, visible: true)
     }
 
     private func rebuildContent() {

@@ -5,9 +5,9 @@ use hormuz_client_core::ConnectionProfile;
 #[cfg(target_os = "linux")]
 use hormuz_client_platform::{CredentialStore, RefreshCoordinator};
 use hormuz_client_platform::{NativeCredentialStore, PrivateDirectory};
-use hormuz_client_relay::{
-    run_client_with_work_id, valid_work_id, CredentialSource, Optimization, RelayError,
-};
+#[cfg(any(target_os = "macos", windows))]
+use hormuz_client_relay::run_client_with_work_id;
+use hormuz_client_relay::{valid_work_id, CredentialSource, Optimization, RelayError};
 #[cfg(any(target_os = "macos", target_os = "linux", windows))]
 use hormuz_client_relay::{OptimizerCancellation, RequestOptimizer};
 #[cfg(target_os = "linux")]
@@ -134,25 +134,10 @@ fn execute_mac_broker(
     owner: &Path,
     work_id: Option<&str>,
 ) -> Result<i32, RelayError> {
-    use std::io::Read;
-    use std::os::unix::{fs::MetadataExt, net::UnixStream};
     for executable in [broker, optimizer] {
         validate_optimizer_python_executable(executable)?;
     }
-    let parent = owner.parent().ok_or(RelayError::InvalidConfiguration)?;
-    let metadata = parent
-        .symlink_metadata()
-        .map_err(|_| RelayError::InvalidConfiguration)?;
-    if !metadata.is_dir()
-        || metadata.mode() & 0o777 != 0o700
-        || metadata.uid() != rustix::process::geteuid().as_raw()
-    {
-        return Err(RelayError::InvalidConfiguration);
-    }
-    let lifetime = UnixStream::connect(owner).map_err(|_| RelayError::InvalidConfiguration)?;
-    lifetime
-        .set_nonblocking(true)
-        .map_err(|_| RelayError::InvalidConfiguration)?;
+    let lifetime = crate::owner_lease::OwnerLease::open(owner)?;
     let directory = PrivateDirectory::open(root).map_err(|_| RelayError::InvalidConfiguration)?;
     let profile_bytes = {
         let guard = directory
@@ -168,12 +153,7 @@ fn execute_mac_broker(
     if profile.key() != key {
         return Err(RelayError::InvalidConfiguration);
     }
-    let mut stopped = || match (&lifetime).read(&mut [0]) {
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
-        // Only EOF is expected. A broken or unexpected control channel is
-        // fail-closed; a panel close does not close this app-owned lease.
-        _ => true,
-    };
+    let mut stopped = || lifetime.stopped();
     let source = Arc::new(MacCredentialBroker {
         executable: broker.to_owned(),
         root: root.to_owned(),
@@ -272,13 +252,29 @@ fn execute() -> Result<i32, RelayError> {
         key,
         root,
         optimizer_python,
+        owner_socket,
         work_id,
     } = arguments()?;
     let optimizer_root = root.clone();
-    execute_linux_with(
+    let lifetime = std::cell::RefCell::new(None::<crate::owner_lease::OwnerLease>);
+    let stopped = || {
+        lifetime
+            .borrow()
+            .as_ref()
+            .is_some_and(|owner| owner.stopped())
+    };
+    let result = execute_linux_with(
         &key,
         &root,
-        hormuz_client_relay::require_linux_user_service,
+        || {
+            // Verified process-tree containment precedes private socket/state
+            // inspection, credential access and supported-client discovery.
+            hormuz_client_relay::require_linux_user_service()?;
+            if let Some(path) = owner_socket {
+                *lifetime.borrow_mut() = Some(crate::owner_lease::OwnerLease::open(&path)?);
+            }
+            Ok(())
+        },
         |root| {
             let directory =
                 PrivateDirectory::open(root).map_err(|_| RelayError::InvalidConfiguration)?;
@@ -290,10 +286,21 @@ fn execute() -> Result<i32, RelayError> {
             ))
         },
         |profile| linux_optimization(profile, &optimizer_root, optimizer_python.as_deref()),
+        stopped,
         |profile, credentials, optimization| {
-            run_client_with_work_id(profile, credentials, optimization, work_id.as_deref())
+            hormuz_client_relay::run_client_until_with_work_id(
+                profile,
+                credentials,
+                optimization,
+                work_id.as_deref(),
+                &mut || stopped(),
+            )
         },
-    )
+    );
+    match result {
+        Err(RelayError::ClientLaunchCancelled) => Ok(130),
+        result => result,
+    }
 }
 
 /// The optimizer is constructed only after the supervised-launch preflight and
@@ -356,6 +363,7 @@ fn execute_linux_with<C, S, T, K, Preflight, Open, Launch>(
     preflight: Preflight,
     open: Open,
     configure_optimization: impl FnOnce(&ConnectionProfile) -> Result<Optimization, RelayError>,
+    stopped: impl Fn() -> bool,
     launch: Launch,
 ) -> Result<i32, RelayError>
 where
@@ -372,6 +380,9 @@ where
     ) -> Result<i32, RelayError>,
 {
     preflight()?;
+    if stopped() {
+        return Err(RelayError::ClientLaunchCancelled);
+    }
     let controller = Arc::new(open(root)?);
     let status = controller
         .status(&Operation::default())
@@ -383,6 +394,9 @@ where
         .ok_or(RelayError::InvalidConfiguration)?;
     if !status.has_session() {
         return Err(RelayError::CredentialUnavailable);
+    }
+    if stopped() {
+        return Err(RelayError::ClientLaunchCancelled);
     }
     // Reject a missing, locked, pending, expired or mismatched session before
     // the first listener or supported-client version probe can start.
@@ -397,6 +411,9 @@ where
         Ok(Zeroizing::new(credential.expose().to_owned()))
     }) as Arc<dyn CredentialSource>;
     let optimization = configure_optimization(&profile)?;
+    if stopped() {
+        return Err(RelayError::ClientLaunchCancelled);
+    }
     launch(&profile, token_source, optimization)
 }
 
@@ -410,7 +427,7 @@ struct LaunchArguments {
     credential_helper: Option<PathBuf>,
     #[cfg(target_os = "macos")]
     optimizer_helper: Option<PathBuf>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     owner_socket: Option<PathBuf>,
 }
 
@@ -429,7 +446,9 @@ where
     #[cfg(target_os = "linux")]
     let mut optimizer_python = None;
     #[cfg(target_os = "macos")]
-    let (mut credential_helper, mut optimizer_helper, mut owner_socket) = (None, None, None);
+    let (mut credential_helper, mut optimizer_helper) = (None, None);
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let mut owner_socket = None;
     while let Some(flag) = args.next() {
         let value = args.next().ok_or(RelayError::InvalidConfiguration)?;
         if flag == "--profile" && profile.is_none() {
@@ -462,10 +481,22 @@ where
                 return Err(RelayError::InvalidConfiguration);
             }
             directory = Some(value);
+        } else if cfg!(any(target_os = "macos", target_os = "linux")) && flag == "--owner-socket" {
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            {
+                if owner_socket.is_some() {
+                    return Err(RelayError::InvalidConfiguration);
+                }
+                let path = PathBuf::from(value);
+                validate_optimizer_python_path(&path)?;
+                owner_socket = Some(path);
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            return Err(RelayError::InvalidConfiguration);
         } else if cfg!(target_os = "macos")
             && matches!(
                 flag.to_str(),
-                Some("--credential-helper" | "--optimizer-helper" | "--owner-socket")
+                Some("--credential-helper" | "--optimizer-helper")
             )
         {
             #[cfg(target_os = "macos")]
@@ -473,7 +504,7 @@ where
                 let target = match flag.to_str() {
                     Some("--credential-helper") => &mut credential_helper,
                     Some("--optimizer-helper") => &mut optimizer_helper,
-                    _ => &mut owner_socket,
+                    _ => &mut optimizer_helper,
                 };
                 if target.is_some() {
                     return Err(RelayError::InvalidConfiguration);
@@ -516,7 +547,7 @@ where
         credential_helper,
         #[cfg(target_os = "macos")]
         optimizer_helper,
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         owner_socket,
     })
 }
@@ -831,6 +862,70 @@ mod linux_tests {
     const NOW: f64 = 1_780_000_000.0;
     const FOUNDATION_EPOCH: f64 = 978_307_200.0;
 
+    #[test]
+    fn linux_owner_socket_is_optional_absolute_and_not_duplicated() {
+        let base = ["--profile", KEY, "--state-directory", "/synthetic/private"];
+        let parse = |extra: &[&str]| parse_arguments(base.iter().chain(extra).map(OsString::from));
+        assert!(parse(&[]).unwrap().owner_socket.is_none());
+        assert_eq!(
+            parse(&["--owner-socket", "/synthetic/lease"])
+                .unwrap()
+                .owner_socket,
+            Some(PathBuf::from("/synthetic/lease"))
+        );
+        assert!(parse(&["--owner-socket", "relative"]).is_err());
+        assert!(parse(&[
+            "--owner-socket",
+            "/synthetic/lease",
+            "--owner-socket",
+            "/other"
+        ])
+        .is_err());
+        assert!(parse(&[
+            "--owner-socket",
+            "/synthetic/lease",
+            "--credential-helper",
+            "/other"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn owner_exit_before_custody_or_launch_never_starts_a_client_or_gateway() {
+        let requested = profile("http://127.0.0.1:9", "approved");
+        for cancel_at in 0..3 {
+            let opened = AtomicUsize::new(0);
+            let checks = AtomicUsize::new(0);
+            let loads = Arc::new(AtomicUsize::new(0));
+            let transport_calls = Arc::new(AtomicUsize::new(0));
+            let result = execute_linux_with(
+                KEY,
+                Path::new("/synthetic/private"),
+                || Ok(()),
+                |_| {
+                    opened.fetch_add(1, Ordering::SeqCst);
+                    Ok(controller(
+                        Some(&requested),
+                        Some(record(&requested)),
+                        false,
+                        Arc::new(AtomicUsize::new(0)),
+                        loads.clone(),
+                        transport_calls.clone(),
+                    ))
+                },
+                |_| Ok(Optimization::Off),
+                || checks.fetch_add(1, Ordering::SeqCst) >= cancel_at,
+                |_, _, _| panic!("closed owner must not start a relay or client"),
+            );
+            assert_eq!(result, Err(RelayError::ClientLaunchCancelled));
+            assert_eq!(transport_calls.load(Ordering::SeqCst), 0);
+            if cancel_at == 0 {
+                assert_eq!(opened.load(Ordering::SeqCst), 0);
+                assert_eq!(loads.load(Ordering::SeqCst), 0);
+            }
+        }
+    }
+
     fn fake_interpreter(path: &Path, body: &str) {
         std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
         let mut permissions = std::fs::metadata(path).unwrap().permissions();
@@ -1135,6 +1230,7 @@ mod linux_tests {
             |_| {
                 panic!("preflight failure must precede optimizer selection");
             },
+            || false,
             |_, _, _| {
                 launched.fetch_add(1, Ordering::SeqCst);
                 Ok(0)
@@ -1192,6 +1288,7 @@ mod linux_tests {
                 |_| {
                     panic!("unavailable session must precede optimizer selection");
                 },
+                || false,
                 |_, _, _| {
                     launched.fetch_add(1, Ordering::SeqCst);
                     Ok(0)
@@ -1258,6 +1355,7 @@ mod linux_tests {
                 ))
             },
             |_| Ok(Optimization::Off),
+            || false,
             |profile, credentials, optimization| {
                 assert!(matches!(optimization, Optimization::Off));
                 let relay =
@@ -1412,6 +1510,7 @@ mod linux_tests {
                         interpreter_selected.then_some(helper.as_path()),
                     )
                 },
+                || false,
                 |profile, credentials, optimization| {
                     assert_eq!(
                         matches!(&optimization, Optimization::OnDemand(_)),

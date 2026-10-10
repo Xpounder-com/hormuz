@@ -116,6 +116,7 @@ final class EdgePanelController {
     }
 
     func stop() {
+        connection.dashboardVisibility(surface: "edge", detail: false, visible: false)
         settledUpdate.cancel()
         cancellables.removeAll()
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
@@ -290,6 +291,8 @@ final class EdgePanelController {
     }
 
     private func updatePanels(animated: Bool) {
+        connection.dashboardVisibility(surface: "edge", detail: hover.selectedMetric != nil || presentation.hub.isOpen,
+            visible: presentation.widgetVisible)
         guard presentation.widgetVisible else {
             bodyTransition.hide()
             tooltipTransition.setVisible(false)

@@ -84,6 +84,29 @@ fn gateway_parser_cannot_expand_the_literal_loopback_exception() {
 }
 
 #[test]
+fn hosted_profile_metadata_round_trips_and_invalid_policy_never_downgrades() {
+    let mut value = serde_json::to_value(profile()).unwrap();
+    value["desktopManaged"] = Value::Bool(true);
+    value["desktopProfileVersion"] = Value::from(7);
+    let hosted = ConnectionProfile::from_json(&serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(hosted.desktop_managed());
+    assert_eq!(hosted.desktop_profile_version(), Some(7));
+    assert_eq!(serde_json::to_value(&hosted).unwrap(), value);
+    for invalid in [
+        Value::from(0),
+        Value::from(-1),
+        Value::from("future"),
+        Value::Bool(true),
+    ] {
+        value["desktopProfileVersion"] = invalid;
+        assert!(ConnectionProfile::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
+    }
+    value["desktopProfileVersion"] = Value::from(7);
+    value["desktopManaged"] = Value::Bool(false);
+    assert!(ConnectionProfile::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
+}
+
+#[test]
 fn shared_context_settings_are_canonical_bounded_and_default_off() {
     let fixture = fixture(include_str!(
         "../../../../tests/fixtures/native_client/v1/context-settings.json"
