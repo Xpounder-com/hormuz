@@ -18,6 +18,30 @@ The candidate is deliberately not an acceptance claim. `finance collect` and
 validation gates, and reconciliation, allocation, role-scoped reporting, live
 customer evidence, and final release remain separate decisions.
 
+## OpenAI Costs response metadata
+
+The fixed `openai.organization-costs.v1` parser accepts optional
+`start_time_iso` / `end_time_iso` aliases only when they explicitly denote UTC
+(`Z` or `+00:00`) and equal the required numeric bucket boundaries. Other
+offsets, naive dates and precision beyond six fractional digits are rejected.
+The query and Usage-profile parsers retain their existing contracts.
+
+Optional `organization_name` and `project_name` labels must be null or valid
+Unicode strings of at most 2048 UTF-8 bytes; validated labels are discarded.
+`user_email` must remain null or absent, as this profile does not group by
+user. A non-null `organization_id` must match the immutable selected source
+binding through the same tenant-scoped `provider-account` HMAC and key version;
+it cannot be matched against the Hormuz tenant ID. Both collection and file
+import receive this binding-derived verification context. Missing context or
+a different provider account is rejected. Only the fingerprint travels in
+ephemeral prepared/normalized objects, and publication rechecks the binding
+and context. No raw account ID, new database column or label is stored.
+
+Omitted/null account metadata remains compatible. Unknown fields, amount and
+grouping validation, coverage, pagination and provider/invoice finality rules
+remain strict; accepting this metadata does not allocate account costs to jobs
+or establish live-provider acceptance.
+
 ## PostgreSQL security gate
 
 PostgreSQL schema 16 provisions the seven owner-controlled collection tables,

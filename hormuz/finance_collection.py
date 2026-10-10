@@ -7,7 +7,7 @@ digests suitable for the append-only finance collection repository.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, localcontext
 import hashlib
@@ -312,6 +312,8 @@ class NormalizedCollection:
     cost_observations: tuple[CostObservation, ...]
     fingerprint_key_version: int
     parser_version: int = PARSER_VERSION
+    # Ephemeral validation context, excluded from accounting identity/storage.
+    verified_provider_account_fingerprint: str | None = field(default=None, compare=False, repr=False)
 
 
 def tenant_fingerprint(
@@ -563,6 +565,10 @@ def validate_normalized_collection(value: NormalizedCollection) -> None:
         or value.parser_version != PARSER_VERSION
         or not _sha(value.page_chain_digest)
         or not _sha(value.content_digest)
+        or (value.verified_provider_account_fingerprint is not None and (
+            not _sha(value.verified_provider_account_fingerprint)
+            or value.query.collection_profile != "openai.organization-costs.v1"
+        ))
     ):
         raise FinanceCollectionError("snapshot_conflict")
     expected_grid = _expected_grid(value.query)
@@ -790,6 +796,7 @@ def normalize_collection_pages(
     *,
     fingerprint_key: bytes,
     fingerprint_key_version: int,
+    expected_provider_account_fingerprint: str | None = None,
 ) -> NormalizedCollection:
     """Validate a complete provider page chain and discard all raw bytes."""
 
@@ -810,6 +817,7 @@ def normalize_collection_pages(
         decoded,
         fingerprint_key=fingerprint_key,
         fingerprint_key_version=fingerprint_key_version,
+        expected_provider_account_fingerprint=expected_provider_account_fingerprint,
     )
 
 
@@ -819,6 +827,7 @@ def normalize_collection_file(
     *,
     fingerprint_key: bytes,
     fingerprint_key_version: int,
+    expected_provider_account_fingerprint: str | None = None,
 ) -> NormalizedCollection:
     """Normalize one customer-supplied bundle under the already prepared query."""
 
@@ -861,6 +870,7 @@ def normalize_collection_file(
         pages,
         fingerprint_key=fingerprint_key,
         fingerprint_key_version=fingerprint_key_version,
+        expected_provider_account_fingerprint=expected_provider_account_fingerprint,
     )
 
 
@@ -870,11 +880,14 @@ def _normalize_decoded_pages(
     *,
     fingerprint_key: bytes,
     fingerprint_key_version: int,
+    expected_provider_account_fingerprint: str | None = None,
 ) -> NormalizedCollection:
     if (
         not 32 <= len(fingerprint_key) <= 4096
         or type(fingerprint_key_version) is not int
         or not 1 <= fingerprint_key_version <= 2_147_483_647
+        or (expected_provider_account_fingerprint is not None
+            and not _sha(expected_provider_account_fingerprint))
     ):
         raise FinanceCollectionError("invalid_request")
     expected_grid = _expected_grid(query)
@@ -921,6 +934,7 @@ def _normalize_decoded_pages(
     costs: list[CostObservation] = []
     coverage: list[BucketCoverage] = []
     semantic_keys: set[tuple[object, ...]] = set()
+    verified_provider_account_fingerprint = None
     for start, end in expected_grid:
         records = observed_buckets[(start, end)]
         for record in records:
@@ -940,8 +954,11 @@ def _normalize_decoded_pages(
                     end,
                     record,
                     fingerprint_key,
+                    expected_provider_account_fingerprint=expected_provider_account_fingerprint,
                 )
                 costs.append(normalized)
+                if query.profile.provider == "openai" and record.get("organization_id") is not None:
+                    verified_provider_account_fingerprint = expected_provider_account_fingerprint
             if semantic in semantic_keys:
                 raise FinanceCollectionError("provider_response_invalid")
             semantic_keys.add(semantic)
@@ -984,6 +1001,7 @@ def _normalize_decoded_pages(
         usage_observations=tuple(usage),
         cost_observations=tuple(costs),
         fingerprint_key_version=fingerprint_key_version,
+        verified_provider_account_fingerprint=verified_provider_account_fingerprint,
     )
 
 
@@ -1112,6 +1130,8 @@ def _cost_observation(
     end: str,
     value: Mapping[str, Any],
     key: bytes,
+    *,
+    expected_provider_account_fingerprint: str | None = None,
 ) -> tuple[CostObservation, tuple[object, ...]]:
     if query.profile.provider == "openai":
         _allowed_keys(
@@ -1126,13 +1146,36 @@ def _cost_observation(
                 "api_source",
                 "quantity",
                 "quantity_unit",
+                "organization_id",
+                "organization_name",
+                "project_name",
+                "user_email",
             },
         )
         if value.get("object") != "organization.costs.result":
             raise FinanceCollectionError("provider_response_invalid")
         # This fixed profile does not group by either optional dimension.
-        if value.get("user_id") is not None or value.get("api_source") is not None:
+        if (value.get("user_id") is not None or value.get("api_source") is not None
+                or value.get("user_email") is not None):
             raise FinanceCollectionError("provider_response_invalid")
+        for field in ("organization_name", "project_name"):
+            label = value.get(field)
+            if label is not None and (type(label) is not str or not _unicode_safe(label)
+                                      or len(label.encode("utf-8")) > 2048):
+                raise FinanceCollectionError("provider_response_invalid")
+        account = value.get("organization_id")
+        if account is not None:
+            if type(account) is not str or expected_provider_account_fingerprint is None:
+                raise FinanceCollectionError("provider_response_invalid")
+            try:
+                observed_account = tenant_fingerprint(
+                    key, organization_id=query.organization_id,
+                    kind="provider-account", value=account,
+                )
+            except FinanceCollectionError:
+                raise FinanceCollectionError("provider_response_invalid") from None
+            if not hmac.compare_digest(observed_account, expected_provider_account_fingerprint):
+                raise FinanceCollectionError("provider_response_invalid")
         amount = _mapping(value.get("amount"))
         _exact_keys(amount, {"value", "currency"})
         native_amount, _, canonical_amount = _decimal_value(amount.get("value"), require_number=True)
@@ -1509,11 +1552,21 @@ def _bucket_parts(
     value: Mapping[str, Any],
 ) -> tuple[str, str, tuple[dict[str, Any], ...]]:
     if spec.provider == "openai":
-        _exact_keys(value, {"object", "start_time", "end_time", "results"})
+        required = {"object", "start_time", "end_time", "results"}
+        if spec.source_kind == "cost":
+            _allowed_keys(value, required | {"start_time_iso", "end_time_iso"})
+            if not required.issubset(value):
+                raise FinanceCollectionError("provider_response_invalid")
+        else:
+            _exact_keys(value, required)
         if value.get("object") != "bucket":
             raise FinanceCollectionError("provider_response_invalid")
         start = _unix_time(value.get("start_time"))
         end = _unix_time(value.get("end_time"))
+        if spec.source_kind == "cost":
+            for field, canonical in (("start_time_iso", start), ("end_time_iso", end)):
+                if field in value and _cost_iso_time(value[field]) != _parse_time(canonical):
+                    raise FinanceCollectionError("provider_response_invalid")
     else:
         _exact_keys(value, {"starting_at", "ending_at", "results"})
         start_value = value.get("starting_at")
@@ -1526,6 +1579,17 @@ def _bucket_parts(
     if not isinstance(results, list) or len(results) > MAX_RECORDS:
         raise FinanceCollectionError("provider_response_invalid")
     return start, end, tuple(dict(_mapping(record)) for record in results)
+
+
+def _cost_iso_time(value: object) -> datetime:
+    # Restrict aliases to explicit UTC and at most datetime's six fractional
+    # digits, so parsing can never silently truncate a conflicting instant.
+    if type(value) is not str or re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+        r"(?:\.[0-9]{1,6})?(?:Z|\+00:00)", value,
+    ) is None:
+        raise FinanceCollectionError("provider_response_invalid")
+    return _parse_time(value[:-6] + "Z" if value.endswith("+00:00") else value, response=True)
 
 
 def _decode_json_page(payload: bytes) -> Mapping[str, Any]:

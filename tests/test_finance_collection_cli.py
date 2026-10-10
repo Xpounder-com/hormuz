@@ -30,6 +30,7 @@ if __package__:
         MIDDLE,
         START,
         openai_bucket,
+        openai_cost_metadata_bucket,
         openai_page,
         openai_usage,
     )
@@ -42,6 +43,7 @@ else:
         MIDDLE,
         START,
         openai_bucket,
+        openai_cost_metadata_bucket,
         openai_page,
         openai_usage,
     )
@@ -94,6 +96,93 @@ class FinanceCollectionCLITests(unittest.TestCase):
             self.binding_request(),
             fingerprint_key=KEY,
         )
+
+    def cost_collect_args(self):
+        return ["finance", "collect", "provider-account", "1", "openai.organization-costs.v1",
+                START, MIDDLE, "--page-size", "1", "--idempotency-key", "cost-metadata",
+                "--fingerprint-key-version", "1"]
+
+    def test_cost_metadata_collect_verifies_bound_account_and_discards_labels(self):
+        binding = self.bind()
+        fetched = mock.Mock(return_value=(openai_page([openai_cost_metadata_bucket()]),))
+        normalized = mock.Mock(wraps=finance_commands.normalize_collection_pages)
+        dependencies = finance_commands.FinanceCommandDependencies(
+            resolve_credentials=lambda *_args, **_kwargs: {"openai": "synthetic-key"},
+            fetch_pages=fetched, normalize_pages=normalized,
+        )
+        status, stdout, stderr = self.invoke(self.cost_collect_args(), dependencies=dependencies)
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("snapshot_id", json.loads(stdout))
+        self.assertEqual(normalized.call_args.kwargs["expected_provider_account_fingerprint"],
+                         binding.provider_account_fingerprint)
+        self.assertEqual(fetched.call_count, 1)
+        self.assertEqual(fetched.call_args.args[0].profile.group_by, ("project_id", "line_item", "api_key_id"))
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            row = connection.execute("SELECT canonical_amount,cost_basis,provider_final,invoice_final "
+                                     "FROM portfolio_finance_cost_observations").fetchone()
+            self.assertEqual(row, ("1.25", "provider_reported_aggregate", 0, 0))
+        database_bytes = self.config.database_path.read_bytes()
+        for private in (b"raw-provider-account", b"private-organization-label", b"private-project-label"):
+            self.assertNotIn(private, database_bytes)
+        repeated = self.invoke(self.cost_collect_args(), dependencies=dependencies)
+        self.assertEqual(repeated, (status, stdout, stderr))
+        self.assertEqual(fetched.call_count, 1)
+
+    def test_cost_metadata_wrong_account_records_failure_without_snapshot(self):
+        self.bind()
+        bucket = openai_cost_metadata_bucket()
+        bucket["results"][0]["organization_id"] = "wrong-private-provider-account"
+        dependencies = finance_commands.FinanceCommandDependencies(
+            resolve_credentials=lambda *_args, **_kwargs: {"openai": "synthetic-key"},
+            fetch_pages=lambda *_args, **_kwargs: (openai_page([bucket]),),
+        )
+        status, stdout, stderr = self.invoke(self.cost_collect_args(), dependencies=dependencies)
+        self.assertEqual(status, 2)
+        self.assertEqual(stdout, "")
+        self.assertEqual(json.loads(stderr), {"error": {"code": "provider_response_invalid"}})
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            self.assertEqual(connection.execute("SELECT state,reason_code FROM portfolio_finance_collection_events").fetchone(),
+                             ("failed", "normalization_failed"))
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0], 0)
+
+    def test_cost_metadata_import_uses_the_same_selected_account_context(self):
+        binding = self.bind()
+        path = self.root / "cost-metadata-bundle.json"
+        path.write_text(json.dumps({
+            "schema_id": "hormuz.finance-collection-file-bundle", "schema_version": 1,
+            "collection_profile": "openai.organization-costs.v1", "query_start_at": START,
+            "query_end_at": MIDDLE, "bucket_width": "1d", "requested_page_size": 1,
+            "pages": [json.loads(openai_page([openai_cost_metadata_bucket()]))],
+        }))
+        normalized = mock.Mock(wraps=finance_commands.normalize_collection_file)
+        dependencies = finance_commands.FinanceCommandDependencies(normalize_file=normalized)
+        status, stdout, stderr = self.invoke(
+            ["finance", "import", str(path), "provider-account", "1", "openai.organization-costs.v1", START,
+             MIDDLE, "--page-size", "1", "--idempotency-key", "import-metadata",
+             "--fingerprint-key-version", "1"], dependencies=dependencies,
+        )
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("snapshot_id", json.loads(stdout))
+        self.assertEqual(normalized.call_args.kwargs["expected_provider_account_fingerprint"],
+                         binding.provider_account_fingerprint)
+
+    def test_cost_metadata_rebinding_during_fetch_prevents_publication(self):
+        self.bind()
+        def fetch(*_args, **_kwargs):
+            request = {**self.binding_request(), "expected_version": 1,
+                       "provider_account_reference_id": "new-private-provider-account"}
+            create_finance_collection_repository(self.config).bind_source(ADMIN, request, fingerprint_key=KEY)
+            return (openai_page([openai_cost_metadata_bucket()]),)
+        dependencies = finance_commands.FinanceCommandDependencies(
+            resolve_credentials=lambda *_args, **_kwargs: {"openai": "synthetic-key"}, fetch_pages=fetch,
+        )
+        status, stdout, stderr = self.invoke(self.cost_collect_args(), dependencies=dependencies)
+        self.assertEqual(status, 2)
+        self.assertEqual(stdout, "")
+        self.assertEqual(json.loads(stderr), {"error": {"code": "binding_inactive"}})
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0], 0)
+
 
     def test_unauthorized_source_bind_cannot_open_file_key_or_database(self):
         missing = self.root / "must-not-open.json"
