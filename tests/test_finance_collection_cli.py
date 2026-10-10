@@ -145,6 +145,91 @@ class FinanceCollectionCLITests(unittest.TestCase):
                              ("failed", "normalization_failed"))
             self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0], 0)
 
+    def test_cost_quantities_collect_exact_units_and_null_unit_to_storage_idempotently(self):
+        self.bind()
+        units = ("1000_tokens", "duration_seconds", "duration_minutes", "duration_hours", "gibibyte_hours", None)
+        quantity = "12345.000000000000123"
+        bucket = openai_cost_metadata_bucket(quantity="exact-quantity", quantity_unit=units[0])
+        bucket["results"] = [
+            {**bucket["results"][0], "quantity_unit": unit} for unit in units
+        ]
+        page = openai_page([bucket]).replace(b'"exact-quantity"', quantity.encode())
+        fetched = mock.Mock(return_value=(page,))
+        normalized = []
+
+        def normalize(*args, **kwargs):
+            result = finance_commands.normalize_collection_pages(*args, **kwargs)
+            normalized.append(result)
+            return result
+
+        dependencies = finance_commands.FinanceCommandDependencies(
+            resolve_credentials=lambda *_args, **_kwargs: {"openai": "synthetic-key"},
+            fetch_pages=fetched, normalize_pages=normalize,
+        )
+        outcome = self.invoke(self.cost_collect_args(), dependencies=dependencies)
+        self.assertEqual((outcome[0], outcome[2]), (0, ""))
+        receipt = json.loads(outcome[1])
+        self.assertEqual(len(normalized), 1)
+        collection = normalized[0]
+        expected_digests = {item.quantity_unit: item.observation_digest for item in collection.cost_observations}
+        self.assertEqual(len(set(expected_digests.values())), len(units))
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            rows = connection.execute(
+                "SELECT native_quantity,quantity_unit,observation_digest,native_amount,currency,"
+                "cost_basis,provider_final,invoice_final FROM portfolio_finance_cost_observations"
+            ).fetchall()
+            self.assertEqual(len(rows), len(units))
+            self.assertEqual({row[1] for row in rows}, set(units))
+            for row in rows:
+                self.assertEqual(row, (quantity, row[1], expected_digests[row[1]], "1.25", "USD",
+                                       "provider_reported_aggregate", 0, 0))
+            self.assertEqual(connection.execute(
+                "SELECT content_digest FROM portfolio_finance_snapshots WHERE snapshot_id=?",
+                (receipt["snapshot_id"],),
+            ).fetchone()[0], collection.content_digest)
+        # Reopen the repository and read its validated typed view, rather than
+        # relying only on the SQL insert accepting nullable text columns.
+        observed = create_finance_collection_repository(self.config).observations_as_of(
+            ADMIN, binding_id="provider-account", binding_version=1,
+            collection_profile="openai.organization-costs.v1", start_at=START, end_at=MIDDLE,
+        )
+        self.assertEqual(len(observed.observations), len(units))
+        self.assertEqual(self.invoke(self.cost_collect_args(), dependencies=dependencies), outcome)
+        fetched.assert_called_once()
+        self.assertEqual(len(normalized), 1)
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_cost_observations").fetchone()[0], len(units))
+
+    def test_cost_quantity_invalid_units_and_types_publish_no_snapshot(self):
+        self.bind()
+        cases = ((1, "unsupported_unit", "provider_response_invalid"),
+                 (1, "DURATION_SECONDS", "provider_response_invalid"),
+                 (1, True, "provider_response_invalid"),
+                 (1, 17, "provider_response_invalid"),
+                 (1, [], "provider_response_invalid"),
+                 (1, {}, "provider_response_invalid"),
+                 ("1", None, "numeric_domain_invalid"),
+                 (True, None, "numeric_domain_invalid"),
+                 ({}, "duration_seconds", "numeric_domain_invalid"))
+        for index, (quantity, unit, code) in enumerate(cases):
+            with self.subTest(index=index):
+                page = openai_page([openai_cost_metadata_bucket(quantity=quantity, quantity_unit=unit)])
+                fetched = mock.Mock(return_value=(page,))
+                dependencies = finance_commands.FinanceCommandDependencies(
+                    resolve_credentials=lambda *_args, **_kwargs: {"openai": "synthetic-key"},
+                    fetch_pages=fetched,
+                )
+                args = self.cost_collect_args()
+                args[args.index("--idempotency-key") + 1] = f"invalid-quantity-{index}"
+                status, stdout, stderr = self.invoke(args, dependencies=dependencies)
+                self.assertEqual((status, stdout), (2, ""))
+                self.assertEqual(json.loads(stderr), {"error": {"code": code}})
+                fetched.assert_called_once()
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_cost_observations").fetchone()[0], 0)
+
     def test_cost_metadata_import_uses_the_same_selected_account_context(self):
         binding = self.bind()
         path = self.root / "cost-metadata-bundle.json"

@@ -60,6 +60,9 @@ _CURRENCY = re.compile(r"[A-Za-z]{3}\Z")
 _QUANTITY_UNITS = frozenset(
     {"tokens", "requests", "images", "seconds", "minutes", "hours", "bytes", "characters"}
 )
+_OPENAI_QUANTITY_UNITS = _QUANTITY_UNITS | frozenset(
+    {"1000_tokens", "duration_seconds", "duration_minutes", "duration_hours", "gibibyte_hours"}
+)
 
 
 class FinanceCollectionError(RuntimeError):
@@ -722,7 +725,8 @@ def _validate_normalized_cost(
                 raise FinanceCollectionError("snapshot_conflict")
         unit = _quantity_unit(
             value.quantity_unit,
-            required=value.native_quantity is not None,
+            required=value.native_quantity is not None and query.profile.provider != "openai",
+            allowed=_OPENAI_QUANTITY_UNITS if query.profile.provider == "openai" else _QUANTITY_UNITS,
         )
     except FinanceCollectionError:
         raise FinanceCollectionError("snapshot_conflict") from None
@@ -1196,7 +1200,9 @@ def _cost_observation(
         native_quantity = None
         if quantity_value is not None:
             native_quantity, _, _ = _decimal_value(quantity_value, require_number=True)
-        quantity_unit = _quantity_unit(value.get("quantity_unit"), required=native_quantity is not None)
+        quantity_unit = _quantity_unit(
+            value.get("quantity_unit"), required=False, allowed=_OPENAI_QUANTITY_UNITS,
+        )
     else:
         _allowed_keys(
             value,
@@ -1789,12 +1795,14 @@ def _currency(value: object) -> str:
     return value.upper()
 
 
-def _quantity_unit(value: object, *, required: bool) -> str | None:
+def _quantity_unit(
+    value: object, *, required: bool, allowed: frozenset[str] = _QUANTITY_UNITS,
+) -> str | None:
     if value is None:
         if required:
             raise FinanceCollectionError("provider_response_invalid")
         return None
-    if not isinstance(value, str) or value not in _QUANTITY_UNITS:
+    if not isinstance(value, str) or value not in allowed:
         raise FinanceCollectionError("provider_response_invalid")
     return value
 

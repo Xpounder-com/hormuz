@@ -204,6 +204,53 @@ def normalized_usage(
 
 
 class FinanceCollectionNormalizationTests(unittest.TestCase):
+    def test_openai_cost_quantity_nullability_and_identity_preserve_native_values(self):
+        value = query("openai.organization-costs.v1")
+
+        def normalize(records):
+            result = normalize_collection_pages(
+                value, (openai_page([openai_bucket(START, MIDDLE, records)]),),
+                fingerprint_key=KEY, fingerprint_key_version=1,
+            )
+            validate_normalized_collection(result)
+            return result
+
+        explicit_null = normalize([openai_cost(quantity=1, quantity_unit=None)])
+        omitted = openai_cost(quantity=1)
+        del omitted["quantity_unit"]
+        self.assertEqual(normalize([omitted]).content_digest, explicit_null.content_digest)
+        self.assertEqual(explicit_null.cost_observations[0].native_quantity, "1")
+        self.assertIsNone(explicit_null.cost_observations[0].quantity_unit)
+        changed_quantity = normalize([openai_cost(quantity=2, quantity_unit=None)])
+        changed_unit = normalize([openai_cost(quantity=1, quantity_unit="1000_tokens")])
+        self.assertEqual(len({item.content_digest for item in (explicit_null, changed_quantity, changed_unit)}), 3)
+        self.assertEqual(len({item.cost_observations[0].observation_digest for item in
+                              (explicit_null, changed_quantity, changed_unit)}), 3)
+        # Quantity is a measured value; it must not create an implicit new
+        # grouping dimension that permits two rows for the same semantic key.
+        with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+            normalize([openai_cost(quantity=1, quantity_unit=None), openai_cost(quantity=2, quantity_unit=None)])
+        for result in (explicit_null, changed_quantity, changed_unit):
+            self.assertFalse(result.cost_observations[0].provider_final)
+            self.assertFalse(result.cost_observations[0].invoice_final)
+
+    def test_anthropic_cost_quantity_fields_remain_unsupported(self):
+        value = query("anthropic.organization-costs.v1")
+        baseline = normalize_collection_pages(
+            value, (anthropic_page([anthropic_bucket(START, MIDDLE, [anthropic_cost()])]),),
+            fingerprint_key=KEY, fingerprint_key_version=1,
+        )
+        validate_normalized_collection(baseline)
+        self.assertIsNone(baseline.cost_observations[0].native_quantity)
+        self.assertIsNone(baseline.cost_observations[0].quantity_unit)
+        for fields in ({"quantity": 1, "quantity_unit": None}, {"quantity_unit": "duration_seconds"}):
+            with self.subTest(fields=fields):
+                with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+                    normalize_collection_pages(
+                        value, (anthropic_page([anthropic_bucket(START, MIDDLE, [anthropic_cost(**fields)])]),),
+                        fingerprint_key=KEY, fingerprint_key_version=1,
+                    )
+
     def normalize_cost_metadata(self, bucket, *, account="raw-provider-account"):
         expected = None if account is None else tenant_fingerprint(
             KEY, organization_id="acme", kind="provider-account", value=account,

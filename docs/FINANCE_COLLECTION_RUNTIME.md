@@ -42,6 +42,16 @@ grouping validation, coverage, pagination and provider/invoice finality rules
 remain strict; accepting this metadata does not allocate account costs to jobs
 or establish live-provider acceptance.
 
+OpenAI Costs quantities retain their exact JSON numeric text. In addition to
+the previously accepted units, the parser and normalized validation accept
+`1000_tokens`, `duration_seconds`, `duration_minutes`, `duration_hours` and
+`gibibyte_hours`. A numeric quantity may have a null or omitted unit; no unit
+is inferred and no quantity conversion occurs. Quantity and unit remain in
+the observation digest, and unit remains in its semantic identity. The
+existing nullable text storage needs no migration. Anthropic quantity fields,
+unknown units and invalid numeric/unit types remain rejected; provider and
+invoice finality remain false.
+
 ## PostgreSQL security gate
 
 PostgreSQL schema 16 provisions the seven owner-controlled collection tables,
