@@ -53,17 +53,19 @@ class CorePackageBoundaryTests(unittest.TestCase):
         load_config.assert_not_called()
         self.assertIn("context_experiment_moved", stderr.getvalue())
 
-    def test_context_experiment_tracks_the_current_core_minor_line(self) -> None:
+    def test_context_experiment_preserves_the_floor_and_bounds_supported_core_lines(self) -> None:
         core = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         experiment = tomllib.loads(
             (ROOT / "experiments" / "context" / "pyproject.toml").read_text(
                 encoding="utf-8"
             )
         )
-        major, minor, _patch = core["project"]["version"].split(".")
-        expected = f"hormuz>={major}.{minor}.0,<{major}.{int(minor) + 1}.0"
-
-        self.assertEqual(experiment["project"]["dependencies"], [expected])
+        self.assertEqual(
+            experiment["project"]["dependencies"], ["hormuz>=1.8.0,<1.10.0"]
+        )
+        core_version = tuple(int(part) for part in core["project"]["version"].split("."))
+        self.assertGreaterEqual(core_version, (1, 8, 0))
+        self.assertLess(core_version, (1, 10, 0))
 
     def test_legacy_context_configuration_fails_closed(self) -> None:
         payload = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))

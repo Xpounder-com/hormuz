@@ -6,12 +6,16 @@ import { spawnSync } from 'node:child_process';
 import { sitePath, siteUrl, resolveSourceRevision, CONTACT_EMAIL, SOURCE_VERSION, OCI_VERSION, MACOS_VERSION } from '../lib/site.mjs';
 import { buildInquiry, campaignSource } from '../lib/contact.mjs';
 
-test('core and notarized Mac downloads agree with packaging while Windows stays preview', () => {
-  const core = readFileSync(new URL('../../pyproject.toml', import.meta.url), 'utf8');
-  const version = core.match(/^version = "([^"]+)"$/m)?.[1];
-  assert.equal(SOURCE_VERSION, `v${version}`);
+test('published core and notarized Mac downloads agree with the release record while Windows stays preview', () => {
+  // A reviewed source candidate can advance before its public artifacts ship.
+  const release = readFileSync(new URL(`../../docs/releases/${SOURCE_VERSION}-notarized-mac.md`, import.meta.url), 'utf8');
+  const publishedVersion = release.match(/^# Hormuz (v\d+\.\d+\.\d+):/m)?.[1];
+  assert.equal(SOURCE_VERSION, publishedVersion);
   assert.equal(OCI_VERSION, SOURCE_VERSION);
   assert.equal(MACOS_VERSION, SOURCE_VERSION);
+  assert.ok(release.includes(`releases/download/${SOURCE_VERSION}/hormuz-${SOURCE_VERSION.slice(1)}-py3-none-any.whl`));
+  assert.ok(release.includes(`releases/download/${MACOS_VERSION}/Hormuz-${MACOS_VERSION.slice(1)}-notarized.zip`));
+  assert.ok(release.includes(`releases/download/${MACOS_VERSION}/SHA256SUMS.txt`));
   const docs = readFileSync(new URL('../app/docs/page.tsx', import.meta.url), 'utf8');
   assert.match(docs, /Windows development preview/);
   assert.match(docs, /Unsigned, unsupported/);
