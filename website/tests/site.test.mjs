@@ -23,7 +23,7 @@ test('published core and notarized Mac downloads agree with the release record w
   assert.ok(docs.includes('releases/download/${MACOS_VERSION}/SHA256SUMS.txt'));
   assert.doesNotMatch(docs, /77d463869f35c5bd|releases\/download\/v1\.3\.0/);
   assert.match(docs, /\/issues\/340/);
-  assert.match(docs, /reviewed source candidate on both the gateway and CLI client/);
+  assert.match(docs, /source revision linked from this page on both the gateway and CLI client/);
   assert.match(docs, /published v1\.8\.0 installers do not include these new AI Work commands/);
   const workEntry = readFileSync(new URL('../app/work/page.tsx', import.meta.url), 'utf8');
   assert.ok(workEntry.includes("href={sitePath('/docs/#ai-work')}>AI Work setup path"));
@@ -77,7 +77,7 @@ test('compatibility guidance matches the Chat route while preserving native qual
     const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
     assert.match(source, /AI Work supports OpenAI Responses, OpenAI-compatible Chat Completions at \/v1\/chat\/completions, and Anthropic Messages/, file);
     assert.match(source, /does not expose Ollama’s native \/api\/chat and \/api\/generate routes/, file);
-    assert.match(source, /Exact native-client versions, models, streaming, and tool behavior still require qualification/, file);
+    assert.match(source, /Test your exact client version, model, streaming, and tool behavior before connecting your team/, file);
     assert.doesNotMatch(source, /does not expose (?:\/v1\/chat\/completions|Chat Completions)/, file);
   }
 });

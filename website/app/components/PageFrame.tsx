@@ -5,13 +5,13 @@ import { sitePath } from '../../lib/site.mjs';
 import { PassageLines } from './Brand';
 
 const sections: Record<string, [string, string][]> = {
-  evidence: [['AI Work in action', '#work-demo'], ['Work receipt', '#work-proof'], ['Recorded gateway', '#recording'], ['Qualification', '#qualification']],
+  evidence: [['AI Work in action', '#work-demo'], ['Work receipt', '#work-proof'], ['Recorded gateway', '#recording'], ['What the tests show', '#qualification']],
   plans: [['Compare plans', '#offers'], ['Cloud details', '#cloud'], ['Managed sites', '#managed'], ['Appliances', '#plans'], ['How payment works', '#details']],
   enterprise: [['Prices', '#plans'], ['Reserve yours', '#reserve'], ['Compare', '#comparison'], ['Onboarding', '#onboarding'], ['Support allowance', '#support'], ['Activation', '#activate']],
   demo: [['Actual AI Work', '#work-demo'], ['Compaction', '#compaction'], ['Policy', '#policy'], ['Recorded gateway', '#recording']],
-  security: [['At a glance', '#status'], ['Data handling', '#data-handling'], ['Controls', '#controls'], ['Open gates', '#gates']],
+  security: [['At a glance', '#status'], ['Data handling', '#data-handling'], ['Controls', '#controls'], ['Your security checks', '#gates']],
   integrations: [['My stack', '#my-stack'], ['Client setup', '#clients'], ['AI Work agents', '#ai-work'], ['Protocols', '#protocols'], ['Verify your route', '#verification']],
-  resources: [['Buyer materials', '#downloads'], ['Tutorials', '#tutorials'], ['Contribute', '#contribute']],
+  resources: [['Team resources', '#downloads'], ['Tutorials', '#tutorials'], ['Contribute', '#contribute']],
   brand: [['Concept', '#concept'], ['Identity', '#identity'], ['Color & type', '#system'], ['Downloads', '#assets']],
 };
 

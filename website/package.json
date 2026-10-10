@@ -9,6 +9,7 @@
     "test": "node --test tests/*.test.mjs",
     "verify": "node scripts/verify-export.mjs",
     "prepare:legacy": "node scripts/prepare-legacy-export.mjs",
+    "prepare:walkthrough": "node scripts/build-walkthrough.mjs",
     "campaign:url": "node scripts/campaign-url.mjs"
   },
   "engines": { "node": ">=22.14.0" },

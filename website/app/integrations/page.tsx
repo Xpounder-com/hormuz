@@ -5,7 +5,7 @@ import { PageFrame, PageHero } from '../components/PageFrame';
 import { CodeBlock } from '../components/CodeBlock';
 import { SetupExample } from '../components/SetupExample';
 
-export const metadata = pageMetadata('Coding-client and API integrations — Hormuz', 'Check supported coding-client paths and the AI Work API attachment contract, with server-side provider keys and explicit qualification boundaries.', '/integrations/');
+export const metadata = pageMetadata('Coding-client and API integrations — Hormuz', 'Check supported coding-client paths and the AI Work API attachment contract, with server-side provider keys and version-specific compatibility guidance.', '/integrations/');
 
 export default function IntegrationsPage() {
   return <PageFrame active="integrations">
@@ -30,13 +30,13 @@ export default function IntegrationsPage() {
           <p>Leave optional gateway model discovery disabled and select an explicit supported model. Hormuz does not implement that optional discovery endpoint.</p>
         </article>
       </div>
-      <p className="after-grid">These are documented protocol baselines, not a claim that every newer client is supported. Hormuz {SOURCE_VERSION} core passes provider-free release checks; the maintained live-provider evidence remains the v1.2.0 OpenAI-only qualification, and same-candidate Claude Code/Anthropic qualification remains open. See <a href={sourcePath('SUPPORT.md')}>Support</a> and <a href={sourcePath('docs/LIVE_CLIENT_CONFORMANCE.md')}>live-client conformance</a> for the evidence boundaries.</p>
+      <p className="after-grid">Use the documented client versions as your starting point; newer versions need testing. Hormuz {SOURCE_VERSION} passes local release checks without external provider calls. The available live-provider tests cover OpenAI on v1.2.0; live Claude Code and Anthropic use has not been verified on the newer source version. See <a href={sourcePath('SUPPORT.md')}>Support</a> and <a href={sourcePath('docs/LIVE_CLIENT_CONFORMANCE.md')}>live-client conformance</a> for tested versions and setup details.</p>
     </section>
     <section className="section prose-section" id="ai-work"><h2>Attach API agent requests to a piece of work.</h2><p>The AI Work source path adds a durable work ID and scoped budgets to supported gateway requests. The Python client attaches <code>X-Hormuz-Work-Id</code> for non-streaming OpenAI Responses, OpenAI-compatible Chat Completions, and Anthropic Messages. Streaming integrations supply that header through their existing SDK and keep the usual gateway authentication.</p><p>AI Work budgets currently cover text inputs with validated configured upper cost bounds. Image, audio, document, and provider-resolved inputs are rejected when that bound is unavailable.</p><p>The operator enables AI Work, authorizes the application, and qualifies the exact model, protocol, tool, and streaming behavior. New workspace sign-up does not enable inference access. An agent without endpoint or header configuration needs an explicit adapter.</p><div className="resource-actions"><a className="text-link" href={sourcePath('docs/AI_WORK_AGENT_INTEGRATION.md')}>Agent attachment, checks, and budget walkthrough ↗</a><CampaignLink className="text-link" href={sitePath('/work/')}>Open your configured AI Work gateway →</CampaignLink><CampaignLink className="text-link" href={sitePath('/evidence/')}>Inspect functional evidence →</CampaignLink></div></section>
     <section className="protocol-section" id="protocols"><div className="protocol-inner"><div><p className="section-label light">Provider protocols</p><h2>Model traffic, not every client action.</h2><p>Hormuz does not govern shell commands, MCP servers, browser requests, Git traffic, or requests that bypass it.</p></div><div className="protocol-table">
       <div className="protocol-head"><span>Surface</span><span>Current contract</span><span>Boundary</span></div>
       <div><strong>OpenAI</strong><span>Responses, streaming, compaction relay</span><i>HTTP / SSE</i></div>
-      <div><strong>OpenAI-compatible</strong><span>Chat Completions in the AI Work source path</span><i>Workflow qualification required</i></div>
+      <div><strong>OpenAI-compatible</strong><span>Chat Completions in the AI Work source path</span><i>Test with your workflow</i></div>
       <div><strong>Anthropic</strong><span>Messages, token counts, streaming</span><i>HTTP / SSE</i></div>
       <div><strong>Identity</strong><span>Unique credentials, OIDC JWT, or opt-in Hormuz sessions</span><i>Browser login Off by default</i></div>
       <div><strong>Evidence</strong><span>Identity, policy, usage, estimated cost, secret outcomes</span><i>Metadata only</i></div>
