@@ -8,3 +8,4 @@ These rules apply to all public website pages, components, metadata, and custome
 - Describe availability and limitations in plain customer language. Say what works, what is planned, what has been tested, and what the reader needs to check. Do not turn internal gates, candidate reviews, or claims-management notes into marketing paragraphs.
 - Keep prices, billing terms, supported versions, security boundaries, and service scope factual. Do not invent savings, customers, outcomes, or availability to make copy sound more confident.
 - Before publishing, read visible copy from the intended customer's perspective across the changed page and shared components. Keep necessary technical details in useful references or disclosures, and verify the next-step links on desktop and mobile.
+- After changing customer FAQs, run `npm run prepare:walkthrough` from `website/` and commit the refreshed plain-text guide so readers without JavaScript receive the same answers.

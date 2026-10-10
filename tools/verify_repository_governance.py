@@ -1705,7 +1705,7 @@ def _validate_native_contract_workflow(
         or "persist-credentials: false" not in text
         or "        run: python -m unittest -v tests.test_native_client_contracts\n" not in text
         or "        run: cargo fmt --all -- --check\n" not in text
-        or "        run: cargo test --workspace --locked\n" not in text
+        or "        run: cargo test --workspace --locked -- --test-threads=1\n" not in text
         or "        run: cargo clippy --workspace --all-targets --locked -- -D warnings\n" not in text
         or (
             "      - name: Verify existing Swift expectations\n"

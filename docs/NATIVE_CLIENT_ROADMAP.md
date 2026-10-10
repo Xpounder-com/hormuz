@@ -156,8 +156,10 @@ implementation and test boundaries. Source integration and synthetic CI do not
 complete #339/#340 or #331 manual Windows acceptance: login/helper adapters,
 authorized-account end-to-end proof, native desktop acceptance, connected
 measurements, signing and clean installation remain separate. The Windows
-package stays `1.5.0-dev.1`; the core package is v1.8.0. Its development
+package stays `1.5.0-dev.1`; the core package is v1.8.0 for the published release. Its development
 identity is not promoted to stable Windows support by the core release.
+Current core source prepares a 1.9.0 candidate with no newly qualified native
+download.
 
 Issue #341 adds the separate unpublished `1.6.0-dev.1`
 [governed relay](../clients/rust/relay/README.md). Its source tests exercise

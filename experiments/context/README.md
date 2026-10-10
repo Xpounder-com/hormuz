@@ -8,6 +8,11 @@ The experiment reads content-bearing JSONL records and writes a content-bearing 
 
 Install the matching core release first, then the experiment:
 
+The declared core dependency retains the 1.8.0 floor and includes the 1.9
+release line (`hormuz>=1.8.0,<1.10.0`). The next minor line requires a separate
+compatibility review; this range does not extend the core release's claims to
+the experiment.
+
 ```bash
 python -m pip install .
 python -m pip install ./experiments/context
