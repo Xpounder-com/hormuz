@@ -20,11 +20,17 @@ customer evidence, and final release remain separate decisions.
 
 ## OpenAI Costs response metadata
 
-The fixed `openai.organization-costs.v1` parser accepts optional
-`start_time_iso` / `end_time_iso` aliases only when they explicitly denote UTC
-(`Z` or `+00:00`) and equal the required numeric bucket boundaries. Other
-offsets, naive dates and precision beyond six fractional digits are rejected.
-The query and Usage-profile parsers retain their existing contracts.
+The fixed `openai.organization-costs.v1` parser treats required numeric bucket
+epochs as authoritative. Optional `start_time_iso` / `end_time_iso` aliases
+may be absent or null. Non-null aliases accept bounded ASCII calendar dates
+and times with `T` or a space, `Z`/`z` or standard numeric offsets, and up to
+nine fractional digits. A missing timezone means UTC for these redundant
+aliases; explicit offsets must convert to the exact numeric UTC boundary.
+Negative-zero offsets, invalid dates/offsets and any nonzero fraction are
+rejected, as integer-second epochs cannot agree with a fractional instant.
+No fraction is silently truncated or coverage reinterpreted. The query and
+Usage-profile parsers retain their existing contracts. This compatibility
+rule does not claim a particular live provider timestamp spelling.
 
 Optional `organization_name` and `project_name` labels must be null or valid
 Unicode strings of at most 2048 UTF-8 bytes; validated labels are discarded.

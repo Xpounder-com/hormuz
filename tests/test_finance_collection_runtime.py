@@ -279,14 +279,85 @@ class FinanceCollectionNormalizationTests(unittest.TestCase):
                 self.assertFalse(observed.cost_observations[0].provider_final)
                 self.assertFalse(observed.cost_observations[0].invoice_final)
 
-    def test_cost_iso_aliases_reject_mismatch_non_utc_and_malformed_types(self):
+    def test_cost_iso_alias_spellings_and_null_metadata_preserve_exact_identity(self):
+        baseline_bucket = openai_cost_metadata_bucket()
+        del baseline_bucket["start_time_iso"], baseline_bucket["end_time_iso"]
+        baseline = self.normalize_cost_metadata(baseline_bucket)
+        for separator in ("T", " "):
+            for fraction in ("", ".0", ".000000000"):
+                for suffix in ("", "Z", "z", "+00", "+0000", "+00:00"):
+                    with self.subTest(separator=separator, fraction=fraction, suffix=suffix):
+                        bucket = openai_cost_metadata_bucket()
+                        bucket.update(
+                            start_time_iso=START[:-1].replace("T", separator) + fraction + suffix,
+                            end_time_iso=MIDDLE[:-1].replace("T", separator) + fraction + suffix,
+                        )
+                        observed = self.normalize_cost_metadata(bucket)
+                        validate_normalized_collection(observed)
+                        self.assertEqual(observed, baseline)
+        for start, end in ((None, None), (None, MIDDLE), (START, None),
+                           ("2026-01-01T01:00:00+01:00", "2026-01-01T19:00:00-05:00"),
+                           ("2026-01-01 01:00:00+0100", "2026-01-01 19:00:00-0500"),
+                           ("2026-01-01T01:00:00+01", "2026-01-01T19:00:00-05")):
+            with self.subTest(start=start, end=end):
+                bucket = openai_cost_metadata_bucket()
+                bucket.update(start_time_iso=start, end_time_iso=end)
+                observed = self.normalize_cost_metadata(bucket)
+                validate_normalized_collection(observed)
+                self.assertEqual(observed, baseline)
+                self.assertEqual(observed.coverage[0].bucket_start_at, START)
+                self.assertEqual(observed.coverage[0].bucket_end_at, MIDDLE)
+
+    def test_cost_iso_aliases_cannot_replace_required_numeric_bounds(self):
+        for field in ("start_time", "end_time"):
+            for value in ("missing", None, True, "1767225600", 1767225600.5):
+                with self.subTest(field=field, value=value):
+                    bucket = openai_cost_metadata_bucket()
+                    if value == "missing":
+                        del bucket[field]
+                    else:
+                        bucket[field] = value
+                    with self.assertRaises(FinanceCollectionError):
+                        self.normalize_cost_metadata(bucket)
+
+    def test_cost_alias_compatibility_does_not_relax_query_or_usage_parsers(self):
+        for start in (START[:-1], START[:-1] + "z", START[:-1] + "+00:00"):
+            with self.subTest(start=start):
+                with self.assertRaisesRegex(FinanceCollectionError, "^invalid_request$"):
+                    query("openai.organization-costs.v1", start=start)
+        for value in (None, START, START[:-1]):
+            with self.subTest(value=value):
+                bucket = openai_bucket(START, MIDDLE, [openai_usage()])
+                bucket["start_time_iso"] = value
+                with self.assertRaisesRegex(FinanceCollectionError, "^provider_response_invalid$"):
+                    normalize_collection_pages(
+                        query("openai.organization-usage-completions.v1"), (openai_page([bucket]),),
+                        fingerprint_key=KEY, fingerprint_key_version=1,
+                    )
+
+    def test_cost_iso_aliases_reject_mismatch_and_malformed_types(self):
         for name, value in (("start_time_iso", MIDDLE), ("end_time_iso", START),
                             ("start_time_iso", "2026-01-01T00:00:00+01:00"),
-                            ("end_time_iso", None), ("start_time_iso", 1767225600),
+                            ("start_time_iso", 1767225600), ("start_time_iso", True),
+                            ("start_time_iso", []), ("start_time_iso", {}),
                             ("start_time_iso", "2026-01-01T00:00:00.000001Z"),
                             ("start_time_iso", "2026-01-01T00:00:00.0000001Z"),
+                            ("start_time_iso", "2026-01-01T00:00:00.000000001Z"),
+                            ("start_time_iso", "2026-01-01T00:00:00.0000000000Z"),
                             ("start_time_iso", "2026-01-01T00:00:00-00:00"),
-                            ("start_time_iso", "2026-01-01T00:00:00")):
+                            ("start_time_iso", "2026-01-01T00:00:00-0000"),
+                            ("start_time_iso", "2026-01-01T00:00:00-00"),
+                            ("start_time_iso", "2026-01-01T00:00:00+24:00"),
+                            ("start_time_iso", "2026-01-01T00:00:00+01:60"),
+                            ("start_time_iso", "2026-01-01T00:00:00+0:00"),
+                            ("start_time_iso", "2026-02-30T00:00:00Z"),
+                            ("start_time_iso", "2026-01-01T24:00:00Z"),
+                            ("start_time_iso", "2026-01-01T00:00:60Z"),
+                            ("start_time_iso", "2026-W01-4T00:00:00Z"),
+                            ("start_time_iso", "2026-01-01"),
+                            ("start_time_iso", "2026-01-01\u00a000:00:00Z"),
+                            ("start_time_iso", "2026-01-01T00:00:00Z "),
+                            ("start_time_iso", "Z" * 65)):
             with self.subTest(name=name, value=value):
                 bucket = openai_cost_metadata_bucket()
                 bucket[name] = value

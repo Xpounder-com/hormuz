@@ -1571,7 +1571,7 @@ def _bucket_parts(
         end = _unix_time(value.get("end_time"))
         if spec.source_kind == "cost":
             for field, canonical in (("start_time_iso", start), ("end_time_iso", end)):
-                if field in value and _cost_iso_time(value[field]) != _parse_time(canonical):
+                if value.get(field) is not None and _cost_iso_time(value[field]) != _parse_time(canonical):
                     raise FinanceCollectionError("provider_response_invalid")
     else:
         _exact_keys(value, {"starting_at", "ending_at", "results"})
@@ -1588,14 +1588,31 @@ def _bucket_parts(
 
 
 def _cost_iso_time(value: object) -> datetime:
-    # Restrict aliases to explicit UTC and at most datetime's six fractional
-    # digits, so parsing can never silently truncate a conflicting instant.
-    if type(value) is not str or re.fullmatch(
-        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
-        r"(?:\.[0-9]{1,6})?(?:Z|\+00:00)", value,
-    ) is None:
+    # Numeric bucket epochs are authoritative integer seconds. Aliases may
+    # vary in display format, but no nonzero fraction may be truncated into
+    # agreement. A missing timezone means UTC only for this redundant metadata.
+    if type(value) is not str or len(value) > 64:
         raise FinanceCollectionError("provider_response_invalid")
-    return _parse_time(value[:-6] + "Z" if value.endswith("+00:00") else value, response=True)
+    match = re.fullmatch(
+        r"(?P<clock>[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2})"
+        r"(?:\.(?P<fraction>[0-9]{1,9}))?"
+        r"(?P<offset>Z|z|[+-][0-9]{2}(?::?[0-9]{2})?)?", value,
+    )
+    if match is None or any(digit != "0" for digit in match.group("fraction") or ""):
+        raise FinanceCollectionError("provider_response_invalid")
+    zone = timezone.utc
+    offset = match.group("offset")
+    if offset is not None and offset not in {"Z", "z"}:
+        digits = offset[1:].replace(":", "")
+        hours, minutes = int(digits[:2]), int(digits[2:] or "0")
+        if hours > 23 or minutes > 59 or (offset[0] == "-" and hours == minutes == 0):
+            raise FinanceCollectionError("provider_response_invalid")
+        zone = timezone(timedelta(minutes=(hours * 60 + minutes) * (-1 if offset[0] == "-" else 1)))
+    try:
+        clock = _parse_time(match.group("clock").replace(" ", "T") + "Z", response=True)
+        return clock.replace(tzinfo=zone).astimezone(timezone.utc)
+    except (OverflowError, ValueError):
+        raise FinanceCollectionError("provider_response_invalid") from None
 
 
 def _decode_json_page(payload: bytes) -> Mapping[str, Any]:

@@ -145,6 +145,67 @@ class FinanceCollectionCLITests(unittest.TestCase):
                              ("failed", "normalization_failed"))
             self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0], 0)
 
+    def test_cost_iso_aliases_collect_to_authoritative_numeric_bounds_and_same_digest(self):
+        self.bind()
+        cases = ((START[:-1], MIDDLE[:-1]),
+                 (START[:-1].replace("T", " "), MIDDLE[:-1].replace("T", " ")),
+                 (START[:-1] + ".000000000z", MIDDLE[:-1] + ".000000000+0000"),
+                 ("2026-01-01T01:00:00+01:00", "2026-01-01T19:00:00-05:00"),
+                 (None, None), ("omitted", "omitted"))
+        receipts = []
+        for index, (start, end) in enumerate(cases):
+            with self.subTest(index=index):
+                bucket = openai_cost_metadata_bucket()
+                if start == "omitted":
+                    del bucket["start_time_iso"], bucket["end_time_iso"]
+                else:
+                    bucket.update(start_time_iso=start, end_time_iso=end)
+                fetched = mock.Mock(return_value=(openai_page([bucket]),))
+                dependencies = finance_commands.FinanceCommandDependencies(
+                    resolve_credentials=lambda *_args, **_kwargs: {"openai": "synthetic-key"},
+                    fetch_pages=fetched,
+                )
+                args = self.cost_collect_args()
+                args[args.index("--idempotency-key") + 1] = f"alias-{index}"
+                outcome = self.invoke(args, dependencies=dependencies)
+                self.assertEqual((outcome[0], outcome[2]), (0, ""))
+                receipts.append(json.loads(outcome[1]))
+                self.assertEqual(self.invoke(args, dependencies=dependencies), outcome)
+                fetched.assert_called_once()
+        self.assertEqual(len({receipt["content_digest"] for receipt in receipts}), 1)
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            rows = connection.execute(
+                "SELECT bucket_start_at,bucket_end_at,cost_basis,provider_final,invoice_final "
+                "FROM portfolio_finance_cost_observations"
+            ).fetchall()
+            self.assertEqual(rows, [(START, MIDDLE, "provider_reported_aggregate", 0, 0)] * len(cases))
+            self.assertEqual(connection.execute(
+                "SELECT count(DISTINCT observation_digest) FROM portfolio_finance_cost_observations"
+            ).fetchone()[0], 1)
+        self.assertNotIn(b"2026-01-01T01:00:00+01:00", self.config.database_path.read_bytes())
+
+    def test_cost_invalid_iso_aliases_fail_before_storage(self):
+        self.bind()
+        for index, value in enumerate(("2026-01-01T00:00:00.000000001Z", MIDDLE,
+                                       "2026-01-01T00:00:00-00:00", "2026-02-30T00:00:00Z", [])):
+            with self.subTest(index=index):
+                bucket = openai_cost_metadata_bucket()
+                bucket["start_time_iso"] = value
+                fetched = mock.Mock(return_value=(openai_page([bucket]),))
+                dependencies = finance_commands.FinanceCommandDependencies(
+                    resolve_credentials=lambda *_args, **_kwargs: {"openai": "synthetic-key"},
+                    fetch_pages=fetched,
+                )
+                args = self.cost_collect_args()
+                args[args.index("--idempotency-key") + 1] = f"invalid-alias-{index}"
+                status, stdout, stderr = self.invoke(args, dependencies=dependencies)
+                self.assertEqual((status, stdout), (2, ""))
+                self.assertEqual(json.loads(stderr), {"error": {"code": "provider_response_invalid"}})
+                fetched.assert_called_once()
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_cost_observations").fetchone()[0], 0)
+
     def test_cost_quantities_collect_exact_units_and_null_unit_to_storage_idempotently(self):
         self.bind()
         units = ("1000_tokens", "duration_seconds", "duration_minutes", "duration_hours", "gibibyte_hours", None)
