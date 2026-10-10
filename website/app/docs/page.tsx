@@ -49,7 +49,7 @@ export default function DocsPage() {
     <div className="docs-shell">
       <aside className="docs-sidebar" aria-label="Documentation navigation">
         <div><strong>Get started</strong><a href="#examples">Runnable examples</a><a href="#ai-work">AI Work connection</a><a href="#personal">Personal Optimizer</a><a href="#mac">Team Mac companion</a><a href="#first-request">First governed request</a><a href="#quickstart">Provider-free demo</a><a href="#downloads">Source & OCI versions</a><CampaignLink href={sitePath('/integrations/')}>Connect a client</CampaignLink><a href="#policy-tour">Try a policy change</a></div>
-        <div><strong>Team setup</strong><a href="#team-next">Free, Cloud, or managed?</a></div>
+        <div><strong>Team setup</strong><CampaignLink href={sitePath('/guides/software-agency-ai-budgets/')}>Software-agency walkthrough</CampaignLink><a href="#team-next">Free, Cloud, or managed?</a></div>
         <div><strong>Go deeper</strong>{references.map(([tag, title, , path]) => <a key={tag} href={sourcePath(path)}>{title} ↗</a>)}<a href={sourcePath('SUPPORT.md')}>Support matrix ↗</a></div>
       </aside>
       <article className="docs-content">
