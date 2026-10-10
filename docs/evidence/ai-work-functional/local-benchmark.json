@@ -1,0 +1,68 @@
+{
+  "attempts": 99990,
+  "background_build_ms": 30.819043,
+  "benchmark_episodes": 1000,
+  "budget_aware_selection": {
+    "expected_selection_passed": true,
+    "job_cap_microusd": 100,
+    "max_costs_microusd": {
+      "cheap": 10,
+      "fast": 20
+    },
+    "monthly_scope_relationship": "one_repository_workspace_and_repository_spend_are_identical",
+    "repository_cap_microusd": 1000000,
+    "route_max_ms": 19.780167,
+    "route_p50_ms": 16.615625,
+    "route_p95_ms": 19.28825,
+    "routing_target_ms": 30,
+    "routing_target_passed": true,
+    "samples": 100,
+    "scope": "snapshot_selector_plus_finite_work_budget_eligibility_excludes_gateway_normalization_policy_egress_and_atomic_admission",
+    "selected_models": [
+      "cheap"
+    ],
+    "workspace_cap_microusd": 2000000
+  },
+  "cohort": {
+    "completion_condition": "synthetic.completed.v1",
+    "context_signature": "830047c6a91720a29bf6f274b50b057ef9aaddea5642dde84e2a8febc31827f0",
+    "request_shape": "plain.830047c6a91720a29bf6f274b50b057e",
+    "task_origin": "declared",
+    "task_type": "benchmark"
+  },
+  "displayed_jobs": 100,
+  "expected_selection_passed": true,
+  "fixture": "synthetic_local_sqlite_metadata",
+  "jobs": 10000,
+  "limitations": [
+    "local_metadata_mechanics_only",
+    "single_process_single_machine",
+    "not_production_load_or_provider_latency",
+    "not_customer_savings_or_quality_evidence"
+  ],
+  "measured_at": "2026-10-09T02:20:01.226647+00:00",
+  "provider_calls": 0,
+  "report_json_bytes": 1170745,
+  "report_ms": 997.690958,
+  "route_max_ms": 0.812917,
+  "route_p50_ms": 0.334083,
+  "route_p95_ms": 0.420624,
+  "routing_samples": 500,
+  "routing_target_ms": 30,
+  "routing_target_passed": true,
+  "schema_id": "hormuz.ai-work-local-benchmark",
+  "schema_version": 1,
+  "selected_models": [
+    "cheap"
+  ],
+  "selector_scope": "snapshot_selector_excludes_gateway_normalization_policy_egress_and_atomic_admission",
+  "source_boundary": "working_tree_files_identified_by_sha256",
+  "source_files": {
+    "hormuz/work_accounting.py": "0d36b1312301da6aaeb41aafa5fd34a1b65bab9e0ea5ff066316ec2f25bd1379",
+    "hormuz/work_learning.py": "a054014cb5ee15285f6b077b3b55acd9098cc0d61f7fad49e9e521832268bd86",
+    "hormuz/work_provider_costs.py": "aa9b4594bbb72157ed98fd0beeb295548d9c2b804a1bc2966589b0870fbdede7",
+    "hormuz/work_runtime.py": "89869eb13ea8f5670526673d914394c66fe62a3944fa4b660166e09bb1d36e7d",
+    "tools/ai_work_benchmark.py": "8447da6589e164c29762f66dd8711608356cace3ba8befb08e2c3f0e1e7a0c08"
+  },
+  "total_jobs": 10000
+}

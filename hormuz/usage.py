@@ -38,9 +38,11 @@ class ParsedUsage:
 class ResponseUsageParser:
     """Extracts provider usage metadata without retaining response content."""
 
-    def __init__(self, protocol: str, *, is_event_stream: bool):
+    def __init__(self, protocol: str, *, is_event_stream: bool, chat_completions: bool = False):
         self.protocol = protocol
         self.is_event_stream = is_event_stream
+        self.chat_completions = chat_completions
+        self._chat_usage_valid = False
         self.usage = Usage()
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self._line_buffer = ""
@@ -86,6 +88,7 @@ class ResponseUsageParser:
                 self._native.note_parse_failure()
         self.usage.evidence_complete = (
             self._input_tokens_observed and self._output_tokens_observed
+            and (not self.chat_completions or self._chat_usage_valid)
         )
         self._finished = ParsedUsage(
             self.usage,
@@ -142,8 +145,24 @@ class ResponseUsageParser:
             )
             if isinstance(response, dict):
                 self._apply_provider_model(response.get("model"))
-                self._apply_openai_usage(response.get("usage"))
-                self._native.observe_openai_response(response)
+                usage = response.get("usage")
+                if self.chat_completions and isinstance(usage, dict):
+                    # Chat Completions names differ; preserve absent/invalid
+                    # fields rather than inventing zero-valued evidence.
+                    names = {"prompt_tokens": "input_tokens", "completion_tokens": "output_tokens",
+                        "prompt_tokens_details": "input_tokens_details", "completion_tokens_details": "output_tokens_details",
+                        "total_tokens": "total_tokens"}
+                    usage = {target: usage[source] for source, target in names.items() if source in usage}
+                self._apply_openai_usage(usage)
+                if self.chat_completions:
+                    # Validate canonical numeric semantics without publishing
+                    # converted Chat fields as native Responses wire evidence.
+                    if "usage" in response and response["usage"] is not None:
+                        canonical = NativeUsageAccumulator("openai")
+                        canonical.observe_openai_response({"usage": usage})
+                        self._chat_usage_valid = canonical.finish().state == "complete"
+                else:
+                    self._native.observe_openai_response(response)
         elif self.protocol == "anthropic":
             if self.is_event_stream and value.get("type") == "message_stop":
                 self._provider_completed = True

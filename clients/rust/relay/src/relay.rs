@@ -199,6 +199,7 @@ impl Drop for BlockingJobCompletion {
 struct State {
     gateway: String,
     client: AIClient,
+    expected_work_id: Option<header::HeaderValue>,
     local_token: Arc<Zeroizing<String>>,
     credentials: Arc<dyn CredentialSource>,
     optimization: Optimization,
@@ -226,6 +227,26 @@ impl LocalRelay {
         credentials: Arc<dyn CredentialSource>,
         optimization: Optimization,
     ) -> Result<Self, RelayError> {
+        Self::start_with_work_id(profile, credentials, optimization, None)
+    }
+
+    /// Bind every request in this invocation to one correlation ID. The
+    /// authenticated gateway still verifies its owner and enforces policy.
+    /// Invalid bindings fail before a listener or credential lookup exists.
+    pub fn start_with_work_id(
+        profile: &ConnectionProfile,
+        credentials: Arc<dyn CredentialSource>,
+        optimization: Optimization,
+        work_id: Option<&str>,
+    ) -> Result<Self, RelayError> {
+        let expected_work_id = work_id
+            .map(|value| {
+                if !crate::valid_work_id(value) {
+                    return Err(RelayError::InvalidConfiguration);
+                }
+                header::HeaderValue::from_str(value).map_err(|_| RelayError::InvalidConfiguration)
+            })
+            .transpose()?;
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| RelayError::RelayUnavailable)?;
         listener
@@ -245,6 +266,7 @@ impl LocalRelay {
         let state = Arc::new(State {
             gateway: profile.gateway().to_owned(),
             client: profile.client(),
+            expected_work_id,
             local_token: token.clone(),
             credentials,
             optimization,
@@ -452,6 +474,10 @@ async fn exchange(
     if !authenticated(request.headers(), &state.local_token) {
         return error(StatusCode::UNAUTHORIZED, "local_authentication_failed");
     }
+    let work_id = match work_id_header(request.headers(), state.expected_work_id.as_ref()) {
+        Ok(value) => value,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "local_work_id_invalid"),
+    };
     if request.headers().contains_key(header::TRANSFER_ENCODING) {
         return error(
             StatusCode::BAD_REQUEST,
@@ -612,6 +638,12 @@ async fn exchange(
             upstream = upstream.header(name, value.clone());
         }
     }
+    // A work ID is a job association, never an authority grant. A bound
+    // invocation cannot silently become unattributed or switch jobs; the
+    // authenticated gateway still verifies ownership and applies policy.
+    if let Some(value) = work_id {
+        upstream = upstream.header("X-Hormuz-Work-Id", value);
+    }
     if optimized {
         upstream = upstream.header("X-Hormuz-Context-Format", "structural-v1");
     }
@@ -640,6 +672,25 @@ async fn exchange(
         .header(header::CONNECTION, "close")
         .body(body)
         .unwrap_or_else(|_| error(StatusCode::BAD_GATEWAY, "gateway_unavailable"))
+}
+
+fn work_id_header(
+    headers: &hyper::HeaderMap,
+    expected: Option<&header::HeaderValue>,
+) -> Result<Option<header::HeaderValue>, RelayError> {
+    let mut values = headers.get_all("x-hormuz-work-id").iter();
+    let Some(value) = values.next() else {
+        return Ok(expected.cloned());
+    };
+    if values.next().is_some() {
+        return Err(RelayError::InvalidConfiguration);
+    }
+    if !value.to_str().ok().is_some_and(crate::valid_work_id)
+        || expected.is_some_and(|expected| value != expected)
+    {
+        return Err(RelayError::InvalidConfiguration);
+    }
+    Ok(Some(value.clone()))
 }
 
 fn authenticated(headers: &hyper::HeaderMap, expected: &str) -> bool {

@@ -264,6 +264,95 @@ final class StorageAndConnectorTests: PrivateStorageTestCase {
         XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o700)
     }
 
+    func testWorkBindingCommandIsBoundedAndNeverPersisted() throws {
+        let plan = try ConnectorPlan.preview(profile: profile(), directory: directory,
+            helper: URL(fileURLWithPath: "/Applications/Hormuz.app/Contents/MacOS/Hormuz"), ownerSocket: ownerSocket)
+        for id in ["job-1._-", "A", String(repeating: "a", count: 128)] {
+            XCTAssertEqual(try plan.command(workID: id), plan.command + " --work-id '" + id + "'")
+        }
+        for id in ["", ".job", "-job", "_job", "job space", "job/1", "job\nX-Actor: spoof", "é", "aé", String(repeating: "a", count: 129)] {
+            XCTAssertThrowsError(try plan.command(workID: id)) {
+                XCTAssertEqual($0 as? ClientError, .invalidArguments)
+            }
+        }
+        XCTAssertFalse(plan.previewText.contains("job-1._-"))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.root.path), [])
+    }
+
+    func testLaunchersForwardOnlyExplicitWorkBindingBeforeOwnerLease() async throws {
+        let relay = try directory.fileURL("synthetic-relay")
+        try directory.write(Data(("#!/bin/sh\n"
+            + "test -z \"${ANTHROPIC_CUSTOM_HEADERS+x}\" || exit 9\n"
+            + "test -z \"${OPENAI_API_KEY+x}\" || exit 10\n"
+            + "printf '%s\\n' \"$@\"\n").utf8), to: "synthetic-relay", expected: nil, executable: true)
+        for client in [AIClient.codex, .claudeCode] {
+            let profile = try profile(client: client)
+            try directory.saveProfile(profile)
+            let plan = try ConnectorPlan.preview(profile: profile, directory: directory, helper: relay,
+                contextHelper: relay, relay: relay, ownerSocket: ownerSocket)
+            try await plan.apply(in: directory)
+            for arguments in [[], ["--work-id", "job-123._-"], ["--work-id", String(repeating: "a", count: 128)]] {
+                let (status, output) = try await runLauncher(plan, arguments: arguments)
+                XCTAssertEqual(status, 0)
+                XCTAssertTrue(output.hasPrefix("--profile\n" + profile.key + "\n"))
+                XCTAssertTrue(output.hasSuffix("--owner-socket\n" + ownerSocket.path + "\n"))
+                if arguments.isEmpty {
+                    XCTAssertFalse(output.contains("--work-id"))
+                } else {
+                    XCTAssertTrue(output.contains("--work-id\n" + arguments[1] + "\n--owner-socket\n"))
+                }
+            }
+            XCTAssertEqual(try directory.loadProfile(), profile)
+            XCTAssertFalse(String(decoding: try XCTUnwrap(directory.read(plan.files[0].name)), as: UTF8.self).contains("job-123._-"))
+        }
+    }
+
+    func testInvalidWorkBindingExitsBeforeRelayOrCustodyAccess() async throws {
+        let marker = try directory.fileURL("custody-accessed")
+        let relay = try directory.fileURL("synthetic-relay")
+        try directory.write(Data(("#!/bin/sh\n: > " + ConnectorPlan.shellQuote(marker.path) + "\n").utf8),
+            to: "synthetic-relay", expected: nil, executable: true)
+        let profile = try profile()
+        try directory.saveProfile(profile)
+        let plan = try ConnectorPlan.preview(profile: profile, directory: directory, helper: relay,
+            contextHelper: relay, relay: relay, ownerSocket: ownerSocket)
+        try await plan.apply(in: directory)
+        for arguments in [
+            ["--work-id"], ["--model", "spoof"], ["--work-id", "job-1", "--work-id", "job-2"],
+            ["--work-id", ""], ["--work-id", ".job"], ["--work-id", "-job"], ["--work-id", "_job"],
+            ["--work-id", "job space"], ["--work-id", "job/1"], ["--work-id", "aé"],
+            ["--work-id", "job\nX-Actor: spoof"], ["--work-id", "$(touch " + marker.path + ")"],
+            ["--work-id", String(repeating: "a", count: 129)],
+        ] {
+            let (status, output) = try await runLauncher(plan, arguments: arguments)
+            XCTAssertEqual(status, 2)
+            XCTAssertFalse(output.contains("spoof"))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        }
+    }
+
+    private func runLauncher(_ plan: ConnectorPlan, arguments: [String]) async throws -> (Int32, String) {
+        let process = Process(), pipe = Pipe()
+        defer {
+            pipe.fileHandleForReading.closeFile()
+            pipe.fileHandleForWriting.closeFile()
+        }
+        let exited = expectation(description: "Owned synthetic launcher exits within five seconds")
+        process.executableURL = plan.launcher
+        process.arguments = arguments
+        process.environment = ["PATH": "/usr/bin:/bin", "OPENAI_API_KEY": "synthetic-test-only",
+            "ANTHROPIC_CUSTOM_HEADERS": "X-Hormuz-Actor: synthetic-spoof"]
+        process.standardOutput = pipe
+        process.standardError = pipe
+        process.terminationHandler = { _ in exited.fulfill() }
+        try process.run()
+        await fulfillment(of: [exited], timeout: 5)
+        if process.isRunning { process.terminate(); process.waitUntilExit() }
+        pipe.fileHandleForWriting.closeFile()
+        let output = pipe.fileHandleForReading.readDataToEndOfFile()
+        return (process.terminationStatus, String(decoding: output, as: UTF8.self))
+    }
+
     func testContextOptimizationDefaultsOffAndSharesClosedPrivateSetting() async throws {
         let profile = try profile()
         XCTAssertFalse(try ContextOptimizationSettings.load(profile: profile, directory: directory).enabled)

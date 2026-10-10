@@ -1,21 +1,426 @@
 """Mac Rust launch integration, with synthetic credentials and loopback only."""
 from __future__ import annotations
 
+import inspect
 import json
+from contextlib import closing, ExitStack
+from dataclasses import replace
 import os
+import selectors
+import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from tests.test_client_relay import ACCESS_TOKEN, _CodexToolGateway, _Gateway, _GatewayHandler
+from tests.test_client_relay import (
+    ACCESS_TOKEN, _CodexToolGateway, _CodexToolGatewayHandler, _Gateway, _GatewayHandler,
+    _codex_text_events,
+)
 from tests.test_gateway import FakeProviderHandler
+from hormuz.config import GatewayConfig
+from hormuz.server import GatewayRequestHandler, _provider_input_tokens_bounded
+from hormuz.work_client import WorkClient, WorkClientError
+from tools.ai_work_proof import ProofGatewayServer, ProofProviderServer, serving
+from tools.ai_work_provider_examples import gateway_profile
+from tools.provider_example_transport import LoopbackTransport
 
 
-class _ClaudeGatewayHandler(FakeProviderHandler):
+def _record_native_helper(root, kind):
+    return ('import os\n'
+        + f'open({str(root)!r} + "/native-helper-" + str(os.getpid()) + ".json", "w").write('
+        + 'json.dumps({"pid": os.getpid(), "pgid": os.getpgid(0), "ppid": os.getppid(), '
+        + f'"kind": {kind!r}' + '}))\n')
+
+
+def _group_absent(group):
+    # Signal zero observes only; never terminate a reaped/reused numeric ID.
+    for _ in range(20):
+        try:
+            os.killpg(group, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _codex_provider_origin(overrides):
+    # Codex applies each -c override independently. Joining them would attempt
+    # to extend the inline provider table with the separate http_headers key.
+    import tomllib
+    from urllib.parse import urlsplit
+
+    providers = [value for value in overrides
+                 if value.partition("=")[0] == "model_providers.hormuz_context_relay"]
+    if len(providers) != 1:
+        raise ValueError("native_provider_override_invalid")
+    try:
+        origin = tomllib.loads(providers[0])["model_providers"]["hormuz_context_relay"]["base_url"]
+    except (tomllib.TOMLDecodeError, KeyError, TypeError):
+        raise ValueError("native_provider_override_invalid") from None
+    try:
+        endpoint = urlsplit(origin) if isinstance(origin, str) else None
+        port = endpoint.port if endpoint is not None else None
+        valid = (port is not None and 1 <= port <= 65535
+                 and origin == f"http://127.0.0.1:{port}/v1")
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError("native_provider_url_invalid")
+    return origin
+
+
+def _terminal_output_diagnostics(stdout_size, stderr_size, stderr_prefix):
+    # Keep only fixed classifications from a bounded stderr prefix. Never
+    # publish arbitrary client output, prompts, bodies, paths or credentials.
+    markers = (
+        (b"native_provider_override_invalid", "provider_override_invalid"),
+        (b"native_provider_url_invalid", "provider_url_invalid"),
+        (b"TOMLDecodeError", "toml_decode_error"),
+        (b"Traceback (most recent call last):", "python_traceback"),
+        (b"KeyError:", "python_key_error"),
+        (b"ValueError:", "python_value_error"),
+        (b"unexpected argument", "client_argument_invalid"),
+        (b"Operation not permitted", "operation_denied"),
+        (b"The installed AI client version is unsupported.", "native_client_unsupported"),
+        (b"The gateway session credential is unavailable.", "native_credential_unavailable"),
+        (b"401 Unauthorized", "unauthorized"),
+    )
+    prefix = bytes(stderr_prefix[:8192])
+    return json.dumps({"stdout_bytes": stdout_size, "stderr_bytes": stderr_size,
+        "stderr_prefix_bytes": len(prefix), "stderr_prefix_truncated": stderr_size > len(prefix),
+        "stderr_markers": [code for pattern, code in markers if pattern in prefix] or ["unclassified"]},
+        sort_keys=True, separators=(",", ":"))
+
+
+_NATIVE_WORK_ERROR_CODES = frozenset({
+    "invalid_request", "invalid_json", "length_required", "invalid_content_length",
+    "request_too_large", "unauthorized", "hormuz_policy_denied", "hormuz_provider_policy_denied",
+    "hormuz_secret_detected", "hormuz_budget_denied", "hormuz_storage_unavailable",
+    "gateway_upstream_not_configured", "gateway_upstream_error", "gateway_upstream_redirect",
+    "hormuz_ai_work_request_cost_unbounded", "hormuz_ai_work_work_not_found",
+    "hormuz_ai_work_invalid_work_header", "hormuz_ai_work_invalid_request_kind",
+    "hormuz_ai_work_paid_workspace_required", "hormuz_ai_work_request_already_dispatched",
+})
+
+
+def _native_work_request_diagnostics(protocol, body):
+    """Classify admission shape only; never retain arbitrary request values."""
+    tier = body.get("service_tier")
+    tier = ("absent" if tier is None else tier
+            if type(tier) is str and tier in {"default", "auto", "priority", "flex", "standard_only"}
+            else "other")
+    output = "max_output_tokens" if protocol == "openai" else "max_tokens"
+    references = ("conversation", "previous_response_id", "prompt") if protocol == "openai" else ("container", "mcp_servers")
+    try:
+        bounded = _provider_input_tokens_bounded(protocol, body, text_only=True)
+    except TypeError:
+        # A malformed JSON kind may be unhashable. Observational diagnostics
+        # must not replace the gateway's own model/schema rejection.
+        bounded = None
+    return {"protocol": protocol if protocol in {"openai", "anthropic"} else "unclassified",
+        "service_tier": tier, "speed_present": body.get("speed") is not None,
+        "inference_geo_present": body.get("inference_geo") is not None,
+        "provider_state_present": any(body.get(field) is not None for field in references),
+        "output_limit_present": output in body,
+        "output_limit_positive": type(body.get(output)) is int and body[output] > 0,
+        "text_input_bounded": bounded}
+
+
+def _native_work_response_code(code):
+    return code if type(code) is str and code in _NATIVE_WORK_ERROR_CODES else "unclassified"
+
+
+class _WorkTerminalProvider(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_):
+        pass
+
+    def do_POST(self) -> None:  # noqa: N802
+        fixture = self.server.fixture
+        try:
+            fixture.count_http()
+            path = urlsplit(self.path).path
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= 1024 * 1024:
+                raise ValueError("fixture_body_limit")
+            body = json.loads(self.rfile.read(size))
+            with fixture.lock:
+                if path == "/v1/messages/count_tokens":
+                    fixture.token_counts += 1
+                    if fixture.token_counts > 2:
+                        raise ValueError("fixture_token_count_limit")
+                    raw, content_type = b'{"input_tokens":24}', "application/json"
+                else:
+                    if path not in {"/v1/responses", "/v1/messages"} or body.get("stream") is not True:
+                        raise ValueError("fixture_unexpected_endpoint")
+                    if len(fixture.provider_calls) >= 3:
+                        raise ValueError("fixture_inference_limit")
+                    if any(item.get("type") == "function_call_output" for item in body.get("input", [])
+                           if isinstance(item, dict)):
+                        raise ValueError("fixture_unexpected_tool_action")
+                    fixture.provider_calls.append({"path": path, "model": body["model"],
+                        "work_headers": self.headers.get_all("X-Hormuz-Work-Id", []),
+                        "client_credential_present": any(value in str(self.headers) for value in
+                            (ACCESS_TOKEN, "hox_a_" + "B" * 43, "synthetic-direct-key-must-not-reach-client")),
+                        "authority_header": any(name.lower().startswith(("x-hormuz-actor", "x-hormuz-organization",
+                                                                         "x-hormuz-team", "x-hormuz-role"))
+                                                for name in self.headers),
+                        "configured_provider_auth": (self.headers.get("Authorization") == "Bearer synthetic-provider-key"
+                            if path == "/v1/responses" else self.headers.get("x-api-key") == "synthetic-provider-key")})
+                    if path == "/v1/responses":
+                        events = [(event["type"], event) for event in _codex_text_events(body["model"])]
+                    else:
+                        message = {"id": "msg_native_work", "type": "message", "role": "assistant",
+                            "model": body["model"], "content": [], "stop_reason": None,
+                            "stop_sequence": None, "usage": {"input_tokens": 24, "output_tokens": 0}}
+                        events = [("message_start", {"message": message}),
+                            ("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}}),
+                            ("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": "42"}}),
+                            ("content_block_stop", {"index": 0}),
+                            ("message_delta", {"delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                                               "usage": {"output_tokens": 8}}), ("message_stop", {})]
+                        events = [(kind, {"type": kind, **value}) for kind, value in events]
+                    raw = "".join("event: " + kind + "\ndata: " + json.dumps(value) + "\n\n"
+                                  for kind, value in events).encode()
+                    content_type = "text/event-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+        except Exception:
+            fixture.failed = True
+            self.close_connection = True
+            self.send_error(503, "fixture refused")
+
+
+class _WorkRecordingHandler(GatewayRequestHandler):
+    def log_message(self, *_):
+        pass
+
+    def _record(self):
+        fixture = self.server.fixture
+        fixture.count_http()
+        self._native_work_record = None
+        path = urlsplit(self.path).path
+        if path in {"/v1/responses", "/v1/messages", "/v1/messages/count_tokens"}:
+            self._native_work_record = {"path": path,
+                "work_headers": self.headers.get_all("X-Hormuz-Work-Id", []),
+                "owner_auth": self.headers.get("Authorization") == "Bearer " + ACCESS_TOKEN,
+                "authority_header": any(name.lower().startswith(("x-hormuz-actor", "x-hormuz-organization",
+                                                                 "x-hormuz-team", "x-hormuz-role"))
+                                        for name in self.headers)}
+            fixture.gateway_calls.append(self._native_work_record)
+
+    def _read_json_body(self):
+        body = super()._read_json_body()
+        record = getattr(self, "_native_work_record", None)
+        if record is not None and body is not None:
+            protocol = "openai" if record["path"] == "/v1/responses" else "anthropic"
+            record["request_diagnostics"] = _native_work_request_diagnostics(protocol, body)
+        return body
+
+    def send_response(self, code, message=None):
+        record = getattr(self, "_native_work_record", None)
+        if record is not None:
+            record["status"] = int(code) if isinstance(code, int) and not isinstance(code, bool) and 100 <= code <= 599 else None
+        return super().send_response(code, message)
+
+    def _send_json(self, status, value, **kwargs):
+        record = getattr(self, "_native_work_record", None)
+        if record is not None:
+            error = value.get("error") if isinstance(value, dict) else None
+            code = kwargs.get("error_code") or (error.get("code") if isinstance(error, dict) else None)
+            record["error_code"] = _native_work_response_code(code)
+        return super()._send_json(status, value, **kwargs)
+
+    def do_GET(self) -> None:  # noqa: N802
+        self._record()
+        super().do_GET()
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._record()
+        super().do_POST()
+
+
+class _NativeWorkFixture:
+    """Two owned bounded listeners; real runtime/SQLite, synthetic terminal replies."""
+    def __init__(self, root):
+        self.lock = threading.Lock()
+        self.http_requests = self.token_counts = 0
+        self.failed = False
+        self.provider_calls, self.gateway_calls = [], []
+        self.expected_work = {}
+        self.initial_threads = set(threading.enumerate())
+        self.stack = ExitStack()
+        try:
+            self.provider = ProofProviderServer(("127.0.0.1", 0), _WorkTerminalProvider)
+            self.provider.fixture = self
+            self.stack.enter_context(serving(self.provider))
+            routes = {alias: {"protocol": protocol, "upstream_model": "synthetic-" + protocol,
+                      "input_cost_per_million": 3, "output_cost_per_million": 3}
+                      for alias, protocol in (("approved", "openai"), ("claude-sonnet-5", "anthropic"))}
+            upstreams = {protocol: {"base_url": f"http://127.0.0.1:{self.provider.server_port}",
+                                   "api_key_env": "NATIVE_WORK_PROVIDER"}
+                         for protocol in ("openai", "anthropic")}
+            profile = gateway_profile(routes, upstreams, live=True)
+            profile["upstream_timeout_seconds"] = 2
+            profile["max_request_bytes"] = 1024 * 1024
+            profile["policies"]["organization"]["fallback_models"] = {
+                "openai": "approved", "anthropic": "claude-sonnet-5"}
+            profile["identities"] = [{"token_env": variable, "actor_id": actor,
+                "actor_name": "Synthetic actor", "team_id": "fixture", "team_name": "Fixture",
+                "organization_id": "org-a", "allowed_clients": ["codex", "claude-code"]}
+                for variable, actor in (("NATIVE_WORK_OWNER", "native-owner"), ("NATIVE_WORK_OTHER", "native-other"))]
+            profile["ai_work"]["administrator_actor_ids"] = ["native-owner"]
+            path = root / "work-gateway.json"
+            path.write_text(json.dumps(profile))
+            environment = {"NATIVE_WORK_OWNER": ACCESS_TOKEN, "NATIVE_WORK_OTHER": "hox_a_" + "B" * 43,
+                           "NATIVE_WORK_PROVIDER": "synthetic-provider-key"}
+            self.config = GatewayConfig.load(path, environ=environment)
+            self.config = replace(self.config, listen=replace(self.config.listen, port=0))
+            self.gateway = ProofGatewayServer(self.config, environ=environment)
+            self.gateway.fixture = self
+            self.gateway.RequestHandlerClass = _WorkRecordingHandler
+            self.stack.enter_context(serving(self.gateway))
+            self.transport = self.stack.enter_context(LoopbackTransport(self.gateway.server_port))
+            self.client = WorkClient(self.transport.endpoint, ACCESS_TOKEN, allow_loopback_http=True, timeout=5)
+            self.client._opener = self.transport
+            self.other = WorkClient(self.transport.endpoint, environment["NATIVE_WORK_OTHER"],
+                                    allow_loopback_http=True, timeout=5)
+            self.other._opener = self.transport
+            self.client.set_plan("workspace", "org-a", budget_microusd=1_000_000,
+                                 objective="cost", exploration_enabled=False)
+        except BaseException:
+            self.stack.close()
+            raise
+
+    def count_http(self):
+        with self.lock:
+            self.http_requests += 1
+            if self.http_requests > 40:
+                self.failed = True
+                raise ValueError("fixture_http_limit")
+
+    def job(self, label, *, model="approved"):
+        work_id = self.client.create_job("qualification/native-work", title=label,
+            task_type="terminal-reply", context_revision="native-work-v1")["work_id"]
+        self.client.set_plan("job", work_id, budget_microusd=1_000_000, objective="cost")
+        self.expected_work[work_id] = (model, "openai" if model == "approved" else "anthropic",
+                                      45 if model == "approved" else 96)
+        return work_id
+
+    def assert_job(self, test, work_id):
+        state = self.client.job(work_id).state()
+        test.assertEqual((state["state"], state["observations"], state["outcome_evidence"]),
+                         ("active", [], "unknown"))
+        test.assertIsNone(state["completed_at"])
+        test.assertEqual((state["organization_id"], state["actor_id"], state["repository"]),
+                         ("org-a", "native-owner", "qualification/native-work"))
+        test.assertEqual(len(state["attempts"]), 1)
+        attempt = state["attempts"][0]
+        test.assertEqual((attempt["state"], attempt["response_succeeded"]),
+                         ("succeeded", True))
+        model, protocol, cost = self.expected_work[work_id]
+        test.assertEqual((attempt["model"], attempt["protocol"], attempt["cost_microusd"]),
+                         (model, protocol, cost))
+        test.assertGreaterEqual(attempt["reserved_microusd"], cost)
+        test.assertLessEqual(attempt["reserved_microusd"], 1_000_000)
+
+    def assert_refused_ownership(self, test, work_id):
+        before = len(self.provider_calls)
+        for client, target in ((self.other, work_id), (self.client, "unknown-native-work")):
+            with test.assertRaises(WorkClientError) as failure:
+                client.job(target).state()
+            test.assertEqual((failure.exception.status, failure.exception.reason), (404, "work_not_found"))
+            token = client._credential
+            status, _, raw = self.transport.request("POST", "/v1/responses",
+                json.dumps({"model": "approved", "input": "synthetic", "max_output_tokens": 32, "stream": True}),
+                {"Authorization": "Bearer " + token, "Content-Type": "application/json", "X-Hormuz-Work-Id": target},
+                timeout=5)
+            test.assertEqual((status, json.loads(raw)["error"]["code"]), (404, "hormuz_ai_work_work_not_found"))
+        test.assertEqual(len(self.provider_calls), before)
+
+    def close(self):
+        self.stack.close()
+
+    def assert_closed_ledger(self, test, work_ids):
+        test.assertEqual((self.provider.fileno(), self.gateway.fileno()), (-1, -1))
+        test.assertFalse(set(threading.enumerate()) - self.initial_threads)
+        test.assertFalse(self.failed)
+        test.assertEqual(len(self.provider_calls), 3)
+        test.assertTrue(all(row["work_headers"] == [] and not row["client_credential_present"]
+                            and not row["authority_header"] and row["configured_provider_auth"]
+                            for row in self.provider_calls))
+        test.assertEqual([(row["path"], row["model"]) for row in self.provider_calls],
+            [("/v1/responses", "synthetic-openai"), ("/v1/responses", "synthetic-openai"),
+             ("/v1/messages", "synthetic-anthropic")])
+        with closing(sqlite3.connect(self.config.ai_work.database_path.absolute().as_uri() + "?mode=ro", uri=True)) as ledger:
+            ledger.row_factory = sqlite3.Row
+            jobs = ledger.execute("SELECT * FROM ai_work_jobs").fetchall()
+            attempts = ledger.execute("SELECT * FROM ai_work_attempts").fetchall()
+            test.assertEqual({row["work_id"] for row in jobs}, set(work_ids))
+            test.assertEqual(len(jobs), 3)
+            test.assertTrue(all(row["state"] == "active" and row["completed_at"] is None for row in jobs))
+            test.assertTrue(all((row["organization_id"], row["actor_id"], row["repository"]) ==
+                               ("org-a", "native-owner", "qualification/native-work") for row in jobs))
+            test.assertEqual(len(attempts), 3)
+            test.assertEqual({row["work_id"] for row in attempts}, set(work_ids))
+            for row in attempts:
+                test.assertEqual((row["organization_id"], row["actor_id"], row["state"], row["response_succeeded"]),
+                                 ("org-a", "native-owner", "succeeded", 1))
+                model, protocol, cost = self.expected_work[row["work_id"]]
+                # Configured $3/million: Responses usage 10+5 =>45 microUSD;
+                # Messages usage 24+8 =>96. These are not provider invoices.
+                test.assertEqual((row["model"], row["protocol"], row["cost_microusd"]),
+                                 (model, protocol, cost))
+                test.assertGreaterEqual(row["reserved_microusd"], cost)
+                test.assertLessEqual(row["reserved_microusd"], 1_000_000)
+                test.assertEqual(row["reservation_exceeded"], 0)
+                test.assertIsNone(row["confirmed_cost_microusd"])
+                test.assertIsNone(row["cost_confirmation_source"])
+                test.assertIsNone(row["cost_confirmation_reference"])
+                test.assertIsNone(row["cache_source"])
+                test.assertGreaterEqual(row["latency_ms"], 0)
+                test.assertGreaterEqual(row["gateway_wall_ms"], 0)
+                test.assertGreaterEqual(row["gateway_overhead_ms"], 0)
+            plans = ledger.execute("SELECT scope_type,scope_id,budget_microusd FROM ai_work_plans").fetchall()
+            test.assertEqual({(row["scope_type"], row["scope_id"], row["budget_microusd"]) for row in plans},
+                             {("workspace", "org-a", 1_000_000), *(("job", work, 1_000_000) for work in work_ids)})
+            test.assertEqual(ledger.execute("SELECT COUNT(*) FROM ai_work_observations").fetchone()[0], 0)
+            test.assertEqual(ledger.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            test.assertIsNone(ledger.execute("PRAGMA foreign_key_check").fetchone())
+
+
+class _WorkHeaderRecordingMixin:
+    def do_POST(self) -> None:  # noqa: N802
+        # Preserve duplicate header fields; the inherited fixture's dictionary
+        # capture alone would hide two identical job headers.
+        self.server.work_header_values.append(self.headers.get_all("X-Hormuz-Work-Id", []))
+        super().do_POST()
+
+
+class _NativeCodexGatewayHandler(_WorkHeaderRecordingMixin, _CodexToolGatewayHandler):
+    pass
+
+
+class _NativeCodexGateway(_CodexToolGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.RequestHandlerClass = _NativeCodexGatewayHandler
+        self.work_header_values = []
+
+
+class _ClaudeGatewayHandler(_WorkHeaderRecordingMixin, FakeProviderHandler):
     @property
     def requests(self):
         return self.server.requests
@@ -29,6 +434,7 @@ class _ClaudeGateway(_Gateway):
         from http.server import ThreadingHTTPServer
 
         self.requests = []
+        self.work_header_values = []
         ThreadingHTTPServer.__init__(self, ("127.0.0.1", 0), _ClaudeGatewayHandler)
 
 
@@ -40,17 +446,22 @@ class NativeMacRelayTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.key = "12345678-1234-1234-1234-123456789abc"
-        if self._testMethodName == "test_official_codex_on_and_off":
-            self.gateway = _CodexToolGateway()
+        if self._testMethodName == "test_official_clients_settle_real_work_ledger":
+            self.work_fixture = _NativeWorkFixture(self.root)
+            self.addCleanup(self.work_fixture.close)
+            self.gateway = self.work_fixture.gateway
+        elif self._testMethodName == "test_official_codex_on_and_off":
+            self.gateway = _NativeCodexGateway()
         elif self._testMethodName == "test_official_claude_streams_through_native_relay":
             self.gateway = _ClaudeGateway()
         else:
             self.gateway = _Gateway()
-        self.thread = threading.Thread(target=self.gateway.serve_forever, daemon=True)
-        self.thread.start()
-        self.addCleanup(self.gateway.server_close)
-        self.addCleanup(self.thread.join, 3)
-        self.addCleanup(self.gateway.shutdown)
+        if self._testMethodName != "test_official_clients_settle_real_work_ledger":
+            self.thread = threading.Thread(target=self.gateway.serve_forever, daemon=True)
+            self.thread.start()
+            self.addCleanup(self.gateway.server_close)
+            self.addCleanup(self.thread.join, 3)
+            self.addCleanup(self.gateway.shutdown)
         self.origin = f"http://127.0.0.1:{self.gateway.server_address[1]}"
         profile = {"id": self.key, "gateway": self.origin, "organization": "org-a",
                    "client": "codex", "model": "approved", "allowLoopbackHTTP": True, "setup": "custom"}
@@ -62,13 +473,22 @@ class NativeMacRelayTests(unittest.TestCase):
         self.owner.settimeout(10)
         self.addCleanup(self.owner.close)
         self.broker = self.root / "broker"
+        helper_record = (_record_native_helper(self.root, "broker")
+                         if self._testMethodName == "test_official_clients_settle_real_work_ledger" else "")
         self._script(self.broker, f"#!{sys.executable}\n" + f"""
 import json, sys
+{helper_record}
 assert sys.argv[-1] == "--expected-profile-stdin"
 assert json.load(sys.stdin) == json.load(open({str(self.root / 'profile.json')!r}))
 print({ACCESS_TOKEN!r})
 """)
         self.optimizer = Path(os.environ["HORMUZ_NATIVE_OPTIMIZER_HELPER"])
+        if self._testMethodName == "test_official_clients_settle_real_work_ledger":
+            packaged_optimizer = self.optimizer
+            self.optimizer = self.root / "optimizer"
+            self._script(self.optimizer, f"#!{sys.executable}\nimport json, sys\n"
+                + _record_native_helper(self.root, "optimizer")
+                + f"os.execv({str(packaged_optimizer)!r}, [{str(packaged_optimizer)!r}, *sys.argv[1:]])\n")
         self.client = self.root / "codex"
 
     def _script(self, path: Path, source: str) -> None:
@@ -77,15 +497,15 @@ print({ACCESS_TOKEN!r})
 
     def _fake_client(self, body: bytes, *, hold: bool = False, bad_auth: bool = False) -> None:
         self._script(self.client, f"#!{sys.executable}\n" + f"""
-import http.client, os, sys, tomllib
+import http.client, os, sys
 from urllib.parse import urlsplit
+{inspect.getsource(_codex_provider_origin)}
 if sys.argv[1:] == ["--version"]:
     print("codex 0.147.0")
     raise SystemExit(0)
 assert "OPENAI_API_KEY" not in os.environ
 assert "ANTHROPIC_AUTH_TOKEN" not in os.environ
-settings = tomllib.loads("\\n".join(sys.argv[2::2]))
-origin = settings["model_providers"]["hormuz_context_relay"]["base_url"]
+origin = _codex_provider_origin(sys.argv[2::2])
 endpoint = urlsplit(origin)
 connection = http.client.HTTPConnection(endpoint.hostname, endpoint.port, timeout=10)
 token = "wrong" if {bad_auth!r} else os.environ["HORMUZ_LOCAL_RELAY_TOKEN"]
@@ -95,18 +515,19 @@ response = connection.getresponse()
 assert response.status == {401 if bad_auth else 200}
 response.read()
 connection.close()
-open({str(self.root / 'address')!r}, "w").write(endpoint.netloc)
+with open({str(self.root / 'address')!r}, "w") as address:
+    address.write(endpoint.netloc)
 if {hold!r}:
     sys.stdin.buffer.read()
 """)
 
-    def _start(self) -> tuple[subprocess.Popen, socket.socket]:
-        process = self._launch()
+    def _start(self, *, work_id: str | None = None) -> tuple[subprocess.Popen, socket.socket]:
+        process = self._launch(work_id=work_id)
         lease, _ = self.owner.accept()
         self.addCleanup(lease.close)
         return process, lease
 
-    def _launch(self) -> subprocess.Popen:
+    def _launch(self, *, work_id: str | None = None, terminal_only: bool = False) -> subprocess.Popen:
         environment = {name: value for name, value in os.environ.items() if name in {
             "PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR",
             "HORMUZ_CONTEXT_TOKENIZER_CACHE",
@@ -116,33 +537,81 @@ if {hold!r}:
         command = [os.environ["HORMUZ_NATIVE_RELAY_BINARY"], "--profile", self.key,
                    "--state-directory", str(self.root), "--credential-helper", str(self.broker),
                    "--optimizer-helper", str(self.optimizer), "--owner-socket", str(self.root / "lease")]
+        if work_id is not None:
+            command.extend(["--work-id", work_id])
+        if terminal_only:
+            environment["HOME"] = str(self.root / "home")
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            # Apply one network boundary, inherited by the version probe,
+            # official client and helpers. Darwin refuses sandbox re-init in
+            # descendants. The relay's dynamic listener requires loopback;
+            # all non-loopback traffic remains denied throughout the launch.
+            policy = ('(version 1) (allow default) (deny network*) '
+                '(allow network-bind network-inbound (local ip "localhost:*")) '
+                '(allow network-outbound (remote ip "localhost:*")) '
+                '(allow network-outbound (literal ' + json.dumps(str(self.root / "lease")) + '))')
+            command = ["/usr/bin/sandbox-exec", "-p", policy, *command]
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, env=environment, cwd=self.root)
-        self.addCleanup(self._stop, process)
+                                   stderr=subprocess.PIPE, env=environment, cwd=self.root,
+                                   start_new_session=terminal_only)
+        if terminal_only:
+            self.addCleanup(self._terminal_stop, process, self.root)
+        else:
+            self.addCleanup(self._stop, process)
         return process
 
-    def _official_client(self, name: str, arguments: list[str], *, bare_claude: bool = False) -> None:
+    def _official_client(self, name: str, arguments: list[str], *, bare_claude: bool = False,
+                         terminal_only: bool = False, omit_work_header: bool = False) -> None:
         real = str(Path(os.environ["HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY"]) / name)
         (self.root / "codex-config").mkdir(mode=0o700, exist_ok=True)
         (self.root / "claude-config").mkdir(mode=0o700, exist_ok=True)
+        (self.root / "home").mkdir(mode=0o700, exist_ok=True)
         self._script(self.root / name, f"#!{sys.executable}\n" + f"""
 import os, sys
+{inspect.getsource(_codex_provider_origin)}
 real = {real!r}
-if sys.argv[1:] == ["--version"]:
-    os.execv(real, [real, "--version"])
 os.environ["DISABLE_AUTOUPDATER"] = "1"
 os.environ["DISABLE_TELEMETRY"] = "1"
 os.environ["DISABLE_ERROR_REPORTING"] = "1"
 os.environ["CLAUDE_CONFIG_DIR"] = {str(self.root / 'claude-config')!r}
+os.environ["HOME"] = {str(self.root / 'home')!r}
+os.environ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+os.environ["CLAUDE_CODE_MAX_RETRIES"] = "0"
+os.environ["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = "32"
+os.environ["MAX_THINKING_TOKENS"] = "0"
 if not {bare_claude!r}:
     # The official client's supported configuration root applies only to this
     # child, not to the native broker, launcher, or user's installed setup.
     os.environ["CODEX_HOME"] = {str(self.root / 'codex-config')!r}
+if sys.argv[1:] == ["--version"]:
+    # The guard sees the genuine pinned client's output. Terminal launches
+    # inherit the parent's network policy; never try to apply it twice.
+    os.execv(real, [real, "--version"])
 if {bare_claude!r}:
     # Bare mode explicitly disables OAuth/Keychain reads and expects API-key
     # auth. Use only the invocation's synthetic local relay credential.
     os.environ["ANTHROPIC_API_KEY"] = os.environ.pop("ANTHROPIC_AUTH_TOKEN")
-os.execv(real, [real, *{arguments!r}, *sys.argv[1:]])
+command = [real, *{arguments!r}, *sys.argv[1:]]
+if {terminal_only!r}:
+    import json
+    from urllib.parse import urlsplit
+    if {name!r} == "codex":
+        origin = _codex_provider_origin(sys.argv[2::2])
+        command.extend(["-c", "model_providers.hormuz_context_relay.request_max_retries=0",
+                        "-c", "model_providers.hormuz_context_relay.stream_max_retries=0"])
+        if {omit_work_header!r}:
+            # Exercise the compiled relay's selected-job binding independently
+            # of the official client's optional correlation header.
+            command.extend(["-c", "model_providers.hormuz_context_relay.http_headers={{}}"])
+    else:
+        origin = os.environ["ANTHROPIC_BASE_URL"]
+    endpoint = urlsplit(origin)
+    assert endpoint.scheme == "http" and endpoint.hostname == "127.0.0.1" and endpoint.port
+    with open({str(self.root / 'terminal-relay-address.json')!r}, "w") as address:
+        address.write(json.dumps([endpoint.hostname, endpoint.port]))
+    # The relay and child share one inherited loopback-only policy. Applying
+    # sandbox-exec again here would prevent the actual client from starting.
+os.execv(real, command)
 """)
 
     def _preference(self, enabled: bool) -> None:
@@ -155,6 +624,156 @@ os.execv(real, [real, *{arguments!r}, *sys.argv[1:]])
         if process.poll() is None:
             process.kill()
         process.communicate(timeout=10)
+
+    @staticmethod
+    def _drain_terminal(process) -> None:
+        # macOS CPython has no os.waitid. EOF observes native stdio without
+        # reaping; keep the Popen leader owned until group signals are complete.
+        selector = selectors.DefaultSelector()
+        discarded = 0
+        deadline = time.monotonic() + 35
+        try:
+            for stream in (process.stdout, process.stderr):
+                if not stream.closed:
+                    os.set_blocking(stream.fileno(), False)
+                    selector.register(stream, selectors.EVENT_READ)
+            while selector.get_map() and time.monotonic() < deadline:
+                if discarded > 1024 * 1024:
+                    # Keep the native helper grace period even after excessive
+                    # output, without consuming unbounded bytes or memory.
+                    time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+                    continue
+                for key, _ in selector.select(timeout=0.1):
+                    data = os.read(key.fileobj.fileno(), 8192)
+                    if not data:
+                        selector.unregister(key.fileobj)
+                    else:
+                        discarded += len(data)
+        finally:
+            selector.close()
+
+    @staticmethod
+    def _owned_launcher_exited_unreaped(process) -> bool:
+        # Darwin excludes zombies from getpgid/group signalling, while a
+        # positive-PID signal-zero probe still finds an unreaped child. These
+        # observations are safe only while this Popen leader stays unreaped.
+        try:
+            os.getpgid(process.pid)
+        except ProcessLookupError:
+            try:
+                os.kill(process.pid, 0)
+            except OSError:
+                return False
+            return True
+        except OSError:
+            pass
+        return False
+
+    @staticmethod
+    def _terminal_stop(process: subprocess.Popen, root) -> None:
+        if getattr(process, "_hormuz_terminal_wait_called", False):
+            return
+        try:
+            # Lease EOF lets native cleanup cancel separately owned helpers.
+            # No poll/wait/communicate has reaped this leader, so its identity
+            # stays pinned through cleanup even if native already exited.
+            try:
+                NativeMacRelayTests._drain_terminal(process)
+            finally:
+                # A read/selector failure must still close this owned process
+                # group while the unreaped launcher identity remains pinned.
+                signal_error = None
+                try:
+                    for signum in (signal.SIGTERM, signal.SIGKILL):
+                        try:
+                            os.killpg(process.pid, signum)
+                        except ProcessLookupError:
+                            pass
+                        except PermissionError as error:
+                            # A zombie-only Darwin group can report EPERM. A
+                            # live leader or unavailable probes remain failures;
+                            # EPERM alone never establishes group closure.
+                            if not NativeMacRelayTests._owned_launcher_exited_unreaped(process):
+                                signal_error = signal_error or error
+                        except OSError as error:
+                            signal_error = signal_error or error
+                        if signum == signal.SIGTERM:
+                            time.sleep(0.1)
+                finally:
+                    # Never signal a numeric group after attempting to reap its
+                    # owned leader, including a registered cleanup invocation.
+                    process._hormuz_terminal_wait_called = True
+                    try:
+                        process.wait(timeout=3)
+                    except BaseException as error:
+                        if signal_error is not None:
+                            raise signal_error from error
+                        raise
+                if signal_error is not None:
+                    raise signal_error
+            if not _group_absent(process.pid):
+                raise AssertionError("owned native group closure unavailable")
+            records = list(root.glob("native-helper-*.json"))
+            if len(records) > 24:
+                raise AssertionError("bounded helper group inventory exceeded")
+            for path in records:
+                row = json.loads(path.read_text())
+                # Only this launch's records are relevant. Historical helper
+                # IDs are observational even when their parent is ours.
+                if row["ppid"] == process.pid and (row["pid"] != row["pgid"] or not _group_absent(row["pgid"])):
+                    raise AssertionError("native helper group closure unavailable")
+        finally:
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+
+    def _run_terminal(self, work_id, *, deadline):
+        # Reserve 46 seconds for the 35-second native helper fallback, owned
+        # group termination/reap, historical observations and endpoint probe.
+        deadline = min(deadline - 46, time.monotonic() + 134)
+        self.assertLess(time.monotonic(), deadline, "bounded native case start")
+        process = self._launch(work_id=work_id, terminal_only=True)
+        lease = None
+        output = bytearray()
+        stdout_size = stderr_size = 0
+        stderr_prefix = bytearray()
+        selector = selectors.DefaultSelector()
+        try:
+            lease, _ = self.owner.accept()
+            process.stdin.close()
+            for stream in (process.stdout, process.stderr):
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ)
+            while selector.get_map():
+                self.assertLess(time.monotonic(), deadline, "bounded native case deadline")
+                self.assertFalse(self.work_fixture.failed, "provider fixture refused a request")
+                for key, _ in selector.select(timeout=0.1):
+                    data = os.read(key.fileobj.fileno(), 8192)
+                    if not data:
+                        selector.unregister(key.fileobj)
+                    else:
+                        output.extend(data)
+                        self.assertLessEqual(len(output), 1024 * 1024, "bounded native output")
+                        if key.fileobj is process.stderr:
+                            stderr_size += len(data)
+                            stderr_prefix.extend(data[:max(0, 8192 - len(stderr_prefix))])
+                        else:
+                            stdout_size += len(data)
+        finally:
+            if lease is not None:
+                lease.close()
+            selector.close()
+            self._terminal_stop(process, self.root)
+        diagnostic = json.loads(_terminal_output_diagnostics(stdout_size, stderr_size, stderr_prefix))
+        diagnostic["gateway"] = [{"status": row.get("status"), "error_code": row.get("error_code", "unobserved"),
+            "request": row.get("request_diagnostics")} for row in self.work_fixture.gateway_calls[-4:]]
+        self.assertEqual(process.returncode, 0, "native terminal invocation failed; "
+            + json.dumps(diagnostic, sort_keys=True, separators=(",", ":")))
+        host, port = json.loads((self.root / "terminal-relay-address.json").read_text())
+        # This one bounded closure probe is to this invocation's actual endpoint.
+        with self.assertRaises(OSError):
+            socket.create_connection((host, port), timeout=1)
+        return output
 
     def test_off_is_exact_and_listener_ends_with_client(self) -> None:
         body = b'{ "model": "approved", "input": [] }\n'
@@ -456,16 +1075,22 @@ connection.getresponse().read()
         outputs = {}
         for enabled in (False, True):
             self.gateway.requests.clear()
+            self.gateway.work_header_values.clear()
             self._preference(enabled)
-            process, lease = self._start()
+            work_id = "work-native-codex-" + ("on" if enabled else "off")
+            process, lease = self._start(work_id=work_id)
             output, diagnostic = process.communicate(timeout=60)
             lease.close()
             self.assertEqual(process.returncode, 0, msg=diagnostic.decode(errors="replace"))
             self.assertIn(b"CONTEXT_OK", output + diagnostic)
             self.assertEqual(len(self.gateway.requests), 2)
+            self.assertEqual(self.gateway.work_header_values, [[work_id], [work_id]])
             requests = [(json.loads(body), {k.lower(): v for k, v in headers.items()})
                         for body, headers in self.gateway.requests]
             self.assertTrue(all(headers["authorization"] == "Bearer " + ACCESS_TOKEN
+                                for _, headers in requests))
+            self.assertTrue(all("x-hormuz-actor-id" not in headers
+                                and "x-hormuz-organization-id" not in headers
                                 for _, headers in requests))
             payload, headers = requests[-1]
             result = next(item["output"] for item in payload["input"]
@@ -495,7 +1120,8 @@ connection.getresponse().read()
             "-p", "--bare", "--no-session-persistence", "--tools", "",
             "--setting-sources", "", "Reply with exactly ok and do not call tools.",
         ], bare_claude=True)
-        process, _ = self._start()
+        work_id = "work-native-claude-stream"
+        process, _ = self._start(work_id=work_id)
         output, diagnostic = process.communicate(timeout=60)
         self.assertEqual(process.returncode, 0, msg=diagnostic.decode(errors="replace"))
         self.assertIn(b"ok", output.lower())
@@ -503,8 +1129,587 @@ connection.getresponse().read()
                     if request["path"].partition("?")[0] == "/v1/messages"]
         self.assertTrue(messages)
         self.assertTrue(any(message["body"].get("stream") for message in messages))
+        self.assertTrue(self.gateway.work_header_values)
+        self.assertTrue(all(values == [work_id] for values in self.gateway.work_header_values))
         self.assertTrue(all(message["headers"]["authorization"] == "Bearer " + ACCESS_TOKEN
                             for message in messages))
+        self.assertTrue(all("x-hormuz-actor-id" not in message["headers"]
+                            and "x-hormuz-organization-id" not in message["headers"]
+                            for message in messages))
+
+    @unittest.skipUnless(os.environ.get("HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY"),
+                         "Requires explicitly selected pinned official client installations")
+    def test_official_clients_settle_real_work_ledger(self) -> None:
+        """Actual pinned clients/native relay join the real gateway's closed ledger.
+
+        Three sequential terminal streams, no tools/retries/payment/provider calls.
+        On here proves successful bound transport, not tool-output compaction.
+        """
+        deadline, works = time.monotonic() + 570, []
+        for name, enabled in (("codex", False), ("codex", True), ("claude", False)):
+            # Plain sequencing: a failed native case aborts the remaining calls.
+            profile = json.loads((self.root / "profile.json").read_text())
+            profile.update(client="codex" if name == "codex" else "claude-code",
+                           model="approved" if name == "codex" else "claude-sonnet-5")
+            (self.root / "profile.json").write_text(json.dumps(profile))
+            self._preference(enabled)
+            arguments = (["exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
+                "--ephemeral", "--sandbox", "read-only", "-C", str(self.root),
+                "-c", "analytics.enabled=false", "-c", "feedback.enabled=false",
+                "-c", "features.plugins=false", "Reply with exactly CONTEXT_OK. Do not call tools."]
+                if name == "codex" else ["-p", "--bare", "--no-session-persistence", "--tools", "",
+                "--setting-sources", "", "--max-turns", "1", "Reply with exactly 42. Do not call tools."])
+            self._official_client(name, arguments, bare_claude=name == "claude", terminal_only=True,
+                                  omit_work_header=name == "codex" and enabled)
+            work_id = self.work_fixture.job(name + ("-on" if enabled else "-off"), model=profile["model"])
+            works.append(work_id)
+            before_provider = len(self.work_fixture.provider_calls)
+            before_gateway = len(self.work_fixture.gateway_calls)
+            output = self._run_terminal(work_id, deadline=deadline)
+            self.assertIn(b"CONTEXT_OK" if name == "codex" else b"42", output)
+            self.assertEqual(len(self.work_fixture.provider_calls) - before_provider, 1)
+            calls = self.work_fixture.gateway_calls[before_gateway:]
+            self.assertTrue(calls)
+            self.assertTrue(all(row["work_headers"] == [work_id] and row["owner_auth"]
+                                and not row["authority_header"] for row in calls))
+            self.work_fixture.assert_job(self, work_id)
+        self.work_fixture.assert_refused_ownership(self, works[0])
+        self.work_fixture.close()
+        self.work_fixture.assert_closed_ledger(self, works)
+
+
+class NativeMacRelayFixtureTests(unittest.TestCase):
+    def test_malformed_work_request_diagnostics_preserve_super_body_and_rejection(self) -> None:
+        from unittest.mock import patch
+
+        body = {"input": [{"type": []}], "private": "synthetic-private-input"}
+        before = json.dumps(body, sort_keys=True)
+        handler = _WorkRecordingHandler.__new__(_WorkRecordingHandler)
+        handler._native_work_record = {"path": "/v1/responses"}
+        with patch.object(GatewayRequestHandler, "_read_json_body", return_value=body) as read:
+            self.assertIs(handler._read_json_body(), body)
+        read.assert_called_once_with()
+        self.assertEqual(json.dumps(body, sort_keys=True), before)
+        self.assertIs(handler._native_work_record["request_diagnostics"]["text_input_bounded"], False)
+        payload = {"error": {"code": "invalid_request", "message": "Request field model must be a non-empty string"}}
+        with patch.object(GatewayRequestHandler, "_send_json") as send:
+            handler._send_json(400, payload, error_code="invalid_request")
+        send.assert_called_once_with(400, payload, error_code="invalid_request")
+        with patch.object(GatewayRequestHandler, "send_response") as response:
+            handler.send_response(400)
+        response.assert_called_once_with(400, None)
+        self.assertEqual(handler._native_work_record["status"], 400)
+        self.assertEqual(handler._native_work_record["error_code"], "invalid_request")
+        self.assertNotIn("synthetic-private-input", json.dumps(handler._native_work_record))
+
+    def test_work_request_diagnostics_classify_pricing_without_request_content(self) -> None:
+        private = "synthetic-private-prompt-credential-reference"
+        for tier, expected, bounded in ((None, "absent", True), ("default", "default", True),
+                ("auto", "auto", False), ("priority", "priority", False),
+                ("flex", "flex", False), (private, "other", False), ([private], "other", False)):
+            body = {"model": "approved", "input": private, "service_tier": tier,
+                    "max_output_tokens": 32, "tools": [{"type": "function", "name": private}]}
+            before = json.dumps(body, sort_keys=True)
+            diagnostic = _native_work_request_diagnostics("openai", body)
+            self.assertEqual((diagnostic["service_tier"], diagnostic["text_input_bounded"]), (expected, bounded))
+            self.assertNotIn(private, json.dumps(diagnostic))
+            self.assertTrue(diagnostic["output_limit_positive"])
+            self.assertEqual(json.dumps(body, sort_keys=True), before)
+        diagnostic = _native_work_request_diagnostics("openai", {"previous_response_id": private,
+            "speed": private, "inference_geo": private, "max_output_tokens": private})
+        self.assertTrue(diagnostic["provider_state_present"])
+        self.assertTrue(diagnostic["speed_present"])
+        self.assertTrue(diagnostic["inference_geo_present"])
+        self.assertFalse(diagnostic["output_limit_positive"])
+        self.assertFalse(diagnostic["text_input_bounded"])
+        self.assertNotIn(private, json.dumps(diagnostic))
+        self.assertEqual(_native_work_request_diagnostics("anthropic", {"max_tokens": 32})["protocol"], "anthropic")
+
+    def test_work_handler_diagnostics_preserve_wire_and_redact_unknown_error_codes(self) -> None:
+        from unittest.mock import patch
+
+        private = "synthetic-private-message-header-identity"
+        handler = _WorkRecordingHandler.__new__(_WorkRecordingHandler)
+        handler._native_work_record = {"path": "/v1/responses"}
+        body = {"service_tier": "auto", "input": private}
+        with patch.object(GatewayRequestHandler, "_read_json_body", return_value=body) as read:
+            self.assertIs(handler._read_json_body(), body)
+        read.assert_called_once_with()
+        for code, expected in (("hormuz_ai_work_request_cost_unbounded", "hormuz_ai_work_request_cost_unbounded"),
+                               (private, "unclassified"), ([private], "unclassified")):
+            payload = {"error": {"code": code, "message": private}}
+            with patch.object(GatewayRequestHandler, "_send_json", return_value="wire-preserved") as send:
+                self.assertEqual(handler._send_json(422, payload, error_code=code), "wire-preserved")
+            send.assert_called_once_with(422, payload, error_code=code)
+            self.assertEqual(handler._native_work_record["error_code"], expected)
+            with patch.object(GatewayRequestHandler, "send_response") as response:
+                handler.send_response(422, private)
+            response.assert_called_once_with(422, private)
+            self.assertEqual(handler._native_work_record["status"], 422)
+            self.assertNotIn(private, json.dumps(handler._native_work_record))
+
+    def test_terminal_codex_preserves_independent_overrides_and_arguments(self) -> None:
+        from unittest.mock import patch
+
+        provider = ('model_providers.hormuz_context_relay={name="Hormuz",'
+                    'base_url="http://127.0.0.1:43210/v1",wire_api="responses"}')
+        original = ["-c", 'model_provider="hormuz_context_relay"', "-c", provider,
+                    "-c", 'model="approved"', "-c",
+                    'model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-owned"}',
+                    "-c", "unrelated_override={ deliberately malformed"]
+        arguments = ["exec", "--ephemeral", "synthetic prompt with spaces"]
+        for omit_work_header in (False, True):
+            with self.subTest(omit_work_header=omit_work_header), \
+                    tempfile.TemporaryDirectory(prefix="hormuz-native-overrides-fixture-") as folder, \
+                    patch.dict(os.environ, {"HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY": "/synthetic/pinned-clients"},
+                               clear=True):
+                fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+                fixture.root = Path(folder)
+                fixture._official_client("codex", arguments, terminal_only=True,
+                                         omit_work_header=omit_work_header)
+                source = (fixture.root / "codex").read_text()
+                with patch.object(sys, "argv", ["codex", *original]), \
+                        patch.object(os, "execv", side_effect=RuntimeError("fixed exec boundary")) as execute:
+                    with self.assertRaisesRegex(RuntimeError, "fixed exec boundary"):
+                        exec(compile(source, "generated-native-codex", "exec"), {})
+                execute.assert_called_once()
+                program, command = execute.call_args.args
+                self.assertEqual(program, "/synthetic/pinned-clients/codex")
+                self.assertEqual(command[:1 + len(arguments) + len(original)],
+                                 ["/synthetic/pinned-clients/codex", *arguments, *original])
+                expected = ["-c", "model_providers.hormuz_context_relay.request_max_retries=0",
+                            "-c", "model_providers.hormuz_context_relay.stream_max_retries=0"]
+                if omit_work_header:
+                    expected += ["-c", "model_providers.hormuz_context_relay.http_headers={}"]
+                self.assertEqual(command[1 + len(arguments) + len(original):], expected)
+                self.assertEqual(json.loads((fixture.root / "terminal-relay-address.json").read_text()),
+                                 ["127.0.0.1", 43210])
+
+    def test_terminal_clients_inherit_one_network_boundary_for_real_version_probe(self) -> None:
+        from unittest.mock import patch
+
+        for name in ("codex", "claude"):
+            with self.subTest(client=name), \
+                    tempfile.TemporaryDirectory(prefix="hormuz-native-version-fixture-") as folder, \
+                    patch.dict(os.environ, {"HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY": "/synthetic/pinned-clients"},
+                               clear=True):
+                fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+                fixture.root = Path(folder)
+                fixture._official_client(name, ["synthetic"], bare_claude=name == "claude", terminal_only=True)
+                source = (fixture.root / name).read_text()
+                with patch.object(sys, "argv", [name, "--version"]), \
+                        patch.object(os, "execv", side_effect=RuntimeError("fixed version boundary")) as execute:
+                    with self.assertRaisesRegex(RuntimeError, "fixed version boundary"):
+                        exec(compile(source, "generated-native-version", "exec"), {})
+                execute.assert_called_once_with("/synthetic/pinned-clients/" + name,
+                                                ["/synthetic/pinned-clients/" + name, "--version"])
+                self.assertNotIn("/usr/bin/sandbox-exec", source)
+                self.assertFalse((fixture.root / "terminal-relay-address.json").exists())
+
+    def test_terminal_launch_keeps_inherited_kernel_network_boundary(self) -> None:
+        from unittest.mock import patch
+
+        fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+        fixture.root = Path("/private/tmp/synthetic-native-boundary")
+        fixture.key = "12345678-1234-1234-1234-123456789abc"
+        fixture.broker = fixture.root / "broker"
+        fixture.optimizer = fixture.root / "optimizer"
+        with patch.dict(os.environ, {"HORMUZ_NATIVE_RELAY_BINARY": "/synthetic/native-relay"}, clear=True), \
+                patch("tests.test_native_macos_relay.subprocess.Popen") as spawn:
+            fixture._launch(work_id="work-owned", terminal_only=True)
+        command = spawn.call_args.args[0]
+        self.assertEqual(command[:2], ["/usr/bin/sandbox-exec", "-p"])
+        policy = command[2]
+        self.assertIn("(deny network*)", policy)
+        self.assertIn('(allow network-bind network-inbound (local ip "localhost:*"))', policy)
+        self.assertIn('(allow network-outbound (remote ip "localhost:*"))', policy)
+        self.assertIn('(allow network-outbound (literal "/private/tmp/synthetic-native-boundary/lease"))', policy)
+        self.assertNotIn('(allow network*)', policy)
+        self.assertEqual(command[3], "/synthetic/native-relay")
+        self.assertEqual(command[-2:], ["--work-id", "work-owned"])
+        self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+        self.assertEqual(spawn.call_args.kwargs["env"]["HOME"], str(fixture.root / "home"))
+
+    def test_terminal_codex_refuses_missing_multiple_or_malformed_provider(self) -> None:
+        from unittest.mock import patch
+
+        provider = 'model_providers.hormuz_context_relay={base_url="http://127.0.0.1:43210/v1"}'
+        cases = ([], [provider, provider],
+                 [provider.replace("hormuz_context_relay=", "hormuz_context_relay_extra=")],
+                 ['model_providers.hormuz_context_relay={bad syntax'],
+                 ['model_providers.hormuz_context_relay=false'],
+                 ['model_providers.hormuz_context_relay={name="Hormuz"}'])
+        for overrides in cases:
+            with self.subTest(overrides=overrides), \
+                    tempfile.TemporaryDirectory(prefix="hormuz-native-provider-refusal-") as folder, \
+                    patch.dict(os.environ, {"HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY": "/synthetic/pinned-clients"},
+                               clear=True):
+                fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+                fixture.root = Path(folder)
+                fixture._official_client("codex", ["exec", "synthetic"], terminal_only=True)
+                source = (fixture.root / "codex").read_text()
+                original = [item for value in overrides for item in ("-c", value)]
+                with patch.object(sys, "argv", ["codex", *original]), patch.object(os, "execv") as execute:
+                    with self.assertRaisesRegex(ValueError, "^native_provider_override_invalid$"):
+                        exec(compile(source, "generated-native-codex", "exec"), {})
+                execute.assert_not_called()
+                self.assertFalse((fixture.root / "terminal-relay-address.json").exists())
+
+    def test_terminal_codex_refuses_noncanonical_provider_url_before_exec(self) -> None:
+        from unittest.mock import patch
+
+        values = ("https://127.0.0.1:43210/v1", "http://localhost:43210/v1", "http://example.test:43210/v1",
+                  "http://127.0.0.1:0/v1", "http://127.0.0.1:65536/v1", "http://127.0.0.1/v1",
+                  "http://user:secret@127.0.0.1:43210/v1", "http://127.0.0.1:43210/v1?token=secret",
+                  "http://127.0.0.1:43210/v1#fragment", "http://127.0.0.1:43210/other",
+                  "http://127.0.0.1:43210/v1/", "http://127.0.0.1:043210/v1", 42, ["http://127.0.0.1:43210/v1"])
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-url-refusal-") as folder, \
+                patch.dict(os.environ, {"HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY": "/synthetic/pinned-clients"},
+                           clear=True):
+            fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+            fixture.root = Path(folder)
+            fixture._official_client("codex", ["exec", "synthetic"], terminal_only=True)
+            source = (fixture.root / "codex").read_text()
+            for value in values:
+                with self.subTest(value=value):
+                    provider = "model_providers.hormuz_context_relay={base_url=" + json.dumps(value) + "}"
+                    with patch.object(sys, "argv", ["codex", "-c", provider]), \
+                            patch.object(os, "execv") as execute:
+                        with self.assertRaisesRegex(ValueError, "^native_provider_url_invalid$"):
+                            exec(compile(source, "generated-native-codex", "exec"), {})
+                    execute.assert_not_called()
+                    self.assertFalse((fixture.root / "terminal-relay-address.json").exists())
+
+    def test_fake_codex_accepts_separate_bound_work_header_override(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-fake-overrides-") as folder, \
+                patch.dict(os.environ, {"HORMUZ_LOCAL_RELAY_TOKEN": "synthetic-local-token"}, clear=True):
+            fixture = NativeMacRelayTests("test_off_is_exact_and_listener_ends_with_client")
+            fixture.root = Path(folder)
+            fixture.client = fixture.root / "codex"
+            fixture._fake_client(b"synthetic fixture body")
+            source = fixture.client.read_text()
+            overrides = ["-c", 'model_provider="hormuz_context_relay"', "-c",
+                'model_providers.hormuz_context_relay={base_url="http://127.0.0.1:43210/v1"}', "-c",
+                'model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-owned"}']
+            with patch.object(sys, "argv", ["codex", *overrides]), \
+                    patch("http.client.HTTPConnection") as connection:
+                connection.return_value.getresponse.return_value.status = 200
+                exec(compile(source, "generated-fake-codex", "exec"), {})
+            connection.assert_called_once_with("127.0.0.1", 43210, timeout=10)
+            connection.return_value.close.assert_called_once()
+            self.assertEqual((fixture.root / "address").read_text(), "127.0.0.1:43210")
+
+    def test_terminal_failure_diagnostics_are_bounded_fixed_markers_only(self) -> None:
+        secret = b"synthetic-credential-must-never-be-exported"
+        body = b"synthetic-prompt-and-body-must-never-be-exported"
+        diagnostic = (b"Traceback (most recent call last):\nValueError: native_provider_override_invalid\n"
+                      + secret + b"\n" + body + b"\n" + b"x" * 20000 + b"401 Unauthorized")
+        rendered = _terminal_output_diagnostics(123, len(diagnostic), diagnostic)
+        decoded = json.loads(rendered)
+        self.assertEqual(decoded["stderr_markers"],
+                         ["provider_override_invalid", "python_traceback", "python_value_error"])
+        self.assertEqual((decoded["stdout_bytes"], decoded["stderr_bytes"], decoded["stderr_prefix_bytes"]),
+                         (123, len(diagnostic), 8192))
+        self.assertTrue(decoded["stderr_prefix_truncated"])
+        self.assertLess(len(rendered), 512)
+        self.assertNotIn(secret.decode(), rendered)
+        self.assertNotIn(body.decode(), rendered)
+        self.assertNotIn("401 Unauthorized", rendered)
+        self.assertEqual(json.loads(_terminal_output_diagnostics(0, 7, b"unknown"))["stderr_markers"],
+                         ["unclassified"])
+
+    def test_terminal_exit_reports_sanitized_diagnostics_after_owned_cleanup(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+
+        fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+        fixture.root = Path("/private/tmp/synthetic-native-fixture")
+        fixture.work_fixture = SimpleNamespace(failed=False, gateway_calls=[{
+            "status": 422, "error_code": "hormuz_ai_work_request_cost_unbounded",
+            "request_diagnostics": _native_work_request_diagnostics("openai", {"service_tier": "auto"}),
+            "work_headers": ["private-work-identity"], "owner_auth": True}])
+        lease = Mock()
+        fixture.owner = Mock()
+        fixture.owner.accept.return_value = (lease, None)
+        process = Mock(returncode=1)
+        fixture._launch = Mock(return_value=process)
+        fixture._terminal_stop = Mock()
+        selector = Mock()
+        selector.get_map.side_effect = [{1: process.stdout, 2: process.stderr}, {}]
+        selector.select.return_value = [(SimpleNamespace(fileobj=process.stdout), None),
+                                        (SimpleNamespace(fileobj=process.stderr), None)]
+        stdout = b"private synthetic prompt/body"
+        stderr = b"ValueError: native_provider_url_invalid synthetic-private-credential"
+        with patch("tests.test_native_macos_relay.selectors.DefaultSelector", return_value=selector), \
+                patch.object(os, "set_blocking"), patch.object(os, "read", side_effect=[stdout, stderr]):
+            with self.assertRaises(AssertionError) as raised:
+                fixture._run_terminal("work-owned", deadline=time.monotonic() + 100)
+        fixture._terminal_stop.assert_called_once_with(process, fixture.root)
+        lease.close.assert_called_once()
+        selector.close.assert_called_once()
+        diagnostic = json.loads(str(raised.exception).split("native terminal invocation failed; ", 1)[1])
+        self.assertEqual(diagnostic["stderr_markers"], ["provider_url_invalid", "python_value_error"])
+        self.assertEqual((diagnostic["stdout_bytes"], diagnostic["stderr_bytes"]), (len(stdout), len(stderr)))
+        self.assertEqual(diagnostic["gateway"][0]["status"], 422)
+        self.assertEqual(diagnostic["gateway"][0]["error_code"], "hormuz_ai_work_request_cost_unbounded")
+        self.assertEqual(diagnostic["gateway"][0]["request"]["service_tier"], "auto")
+        self.assertFalse(diagnostic["gateway"][0]["request"]["text_input_bounded"])
+        self.assertNotIn("private", str(raised.exception))
+
+    def test_terminal_cleanup_retains_leader_and_observes_helpers_only(self) -> None:
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-cleanup-fixture-") as folder:
+            root = Path(folder)
+            (root / "native-helper-424243.json").write_text(json.dumps({
+                "pid": 424243, "pgid": 424243, "ppid": 424242, "kind": "optimizer"}))
+            process = Mock(pid=424242, _hormuz_terminal_wait_called=False)
+            order = []
+            process.wait.side_effect = lambda **_: order.append("reap")
+            with patch.object(NativeMacRelayTests, "_drain_terminal", side_effect=lambda _: order.append("drain")), \
+                    patch("tests.test_native_macos_relay.os.killpg",
+                          side_effect=lambda group, sig: order.append((group, sig))), \
+                    patch("tests.test_native_macos_relay._group_absent", side_effect=[True, False]) as observe:
+                with self.assertRaisesRegex(AssertionError, "helper group closure"):
+                    NativeMacRelayTests._terminal_stop(process, root)
+                NativeMacRelayTests._terminal_stop(process, root)
+            self.assertEqual(order, ["drain", (424242, signal.SIGTERM), (424242, signal.SIGKILL), "reap"])
+            self.assertEqual([call.args[0] for call in observe.call_args_list], [424242, 424243])
+            process.wait.assert_called_once()
+            process.poll.assert_not_called()
+            process.communicate.assert_not_called()
+            process.stdout.close.assert_called_once()
+            failed_drain = Mock(pid=424244, _hormuz_terminal_wait_called=False)
+            with patch.object(NativeMacRelayTests, "_drain_terminal", side_effect=OSError("fixed fixture failure")), \
+                    patch("tests.test_native_macos_relay.os.killpg") as terminate:
+                with self.assertRaisesRegex(OSError, "fixed fixture failure"):
+                    NativeMacRelayTests._terminal_stop(failed_drain, root)
+            self.assertEqual([call.args for call in terminate.call_args_list],
+                             [(424244, signal.SIGTERM), (424244, signal.SIGKILL)])
+            failed_drain.wait.assert_called_once()
+            failed_drain.poll.assert_not_called()
+            failed_drain.communicate.assert_not_called()
+            failed_drain.stdout.close.assert_called_once()
+
+    def test_terminal_cleanup_accepts_only_observed_unreaped_zombie(self) -> None:
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-zombie-fixture-") as folder:
+            process = Mock(pid=424245, _hormuz_terminal_wait_called=False)
+            order = []
+
+            def denied(group, signum):
+                order.append((group, signum))
+                raise PermissionError("fixed zombie group fixture")
+
+            process.wait.side_effect = lambda **_: order.append("reap")
+            with patch.object(NativeMacRelayTests, "_drain_terminal"), \
+                    patch("tests.test_native_macos_relay.os.killpg", side_effect=denied), \
+                    patch("tests.test_native_macos_relay.os.getpgid", side_effect=ProcessLookupError) as group, \
+                    patch("tests.test_native_macos_relay.os.kill") as leader, \
+                    patch("tests.test_native_macos_relay._group_absent", return_value=True) as observe:
+                NativeMacRelayTests._terminal_stop(process, Path(folder))
+                NativeMacRelayTests._terminal_stop(process, Path(folder))
+            self.assertEqual(order, [(424245, signal.SIGTERM), (424245, signal.SIGKILL), "reap"])
+            self.assertEqual([call.args for call in group.call_args_list], [(424245,), (424245,)])
+            self.assertEqual([call.args for call in leader.call_args_list], [(424245, 0), (424245, 0)])
+            observe.assert_called_once_with(424245)
+            process.wait.assert_called_once_with(timeout=3)
+            process.poll.assert_not_called()
+            process.communicate.assert_not_called()
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close.assert_called_once()
+
+    def test_terminal_cleanup_permission_denial_still_attempts_both_signals_and_reap(self) -> None:
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-denial-fixture-") as folder:
+            for wait_timeout in (False, True):
+                with self.subTest(wait_timeout=wait_timeout):
+                    process = Mock(pid=424246, _hormuz_terminal_wait_called=False)
+                    failure = PermissionError("fixed live leader fixture")
+                    timeout = subprocess.TimeoutExpired("owned fixture", 3)
+                    order = []
+
+                    def denied(group, signum):
+                        order.append((group, signum))
+                        raise failure
+
+                    def wait(**_):
+                        order.append("reap-attempt")
+                        if wait_timeout:
+                            raise timeout
+
+                    process.wait.side_effect = wait
+                    with patch.object(NativeMacRelayTests, "_drain_terminal"), \
+                            patch("tests.test_native_macos_relay.os.killpg", side_effect=denied), \
+                            patch("tests.test_native_macos_relay.os.getpgid", return_value=424246), \
+                            patch("tests.test_native_macos_relay.os.kill") as probe, \
+                            patch("tests.test_native_macos_relay._group_absent") as observe:
+                        with self.assertRaises(PermissionError) as raised:
+                            NativeMacRelayTests._terminal_stop(process, Path(folder))
+                        NativeMacRelayTests._terminal_stop(process, Path(folder))
+                    self.assertIs(raised.exception, failure)
+                    if wait_timeout:
+                        self.assertIs(raised.exception.__cause__, timeout)
+                    self.assertEqual(order, [(424246, signal.SIGTERM), (424246, signal.SIGKILL), "reap-attempt"])
+                    probe.assert_not_called()
+                    observe.assert_not_called()
+                    process.wait.assert_called_once_with(timeout=3)
+                    process.poll.assert_not_called()
+                    process.communicate.assert_not_called()
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        stream.close.assert_called_once()
+
+    def test_terminal_cleanup_requires_successful_retained_leader_probe(self) -> None:
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-probe-fixture-") as folder:
+            process = Mock(pid=424247, _hormuz_terminal_wait_called=False)
+            with patch.object(NativeMacRelayTests, "_drain_terminal"), \
+                    patch("tests.test_native_macos_relay.os.killpg", side_effect=PermissionError("fixed denied fixture")) as terminate, \
+                    patch("tests.test_native_macos_relay.os.getpgid", side_effect=ProcessLookupError), \
+                    patch("tests.test_native_macos_relay.os.kill", side_effect=ProcessLookupError) as probe, \
+                    patch("tests.test_native_macos_relay._group_absent") as observe:
+                with self.assertRaises(PermissionError):
+                    NativeMacRelayTests._terminal_stop(process, Path(folder))
+            self.assertEqual([call.args for call in terminate.call_args_list],
+                             [(424247, signal.SIGTERM), (424247, signal.SIGKILL)])
+            self.assertEqual([call.args for call in probe.call_args_list], [(424247, 0), (424247, 0)])
+            observe.assert_not_called()
+            process.wait.assert_called_once_with(timeout=3)
+            process.stdout.close.assert_called_once()
+
+    def test_terminal_cleanup_rejects_surviving_group_after_zombie_gate(self) -> None:
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-survivor-fixture-") as folder:
+            process = Mock(pid=424248, _hormuz_terminal_wait_called=False)
+            with patch.object(NativeMacRelayTests, "_drain_terminal"), \
+                    patch("tests.test_native_macos_relay.os.killpg", side_effect=PermissionError("fixed zombie fixture")) as terminate, \
+                    patch("tests.test_native_macos_relay.os.getpgid", side_effect=ProcessLookupError), \
+                    patch("tests.test_native_macos_relay.os.kill"), \
+                    patch("tests.test_native_macos_relay._group_absent", return_value=False) as observe:
+                with self.assertRaisesRegex(AssertionError, "owned native group closure"):
+                    NativeMacRelayTests._terminal_stop(process, Path(folder))
+                NativeMacRelayTests._terminal_stop(process, Path(folder))
+            self.assertEqual([call.args for call in terminate.call_args_list],
+                             [(424248, signal.SIGTERM), (424248, signal.SIGKILL)])
+            observe.assert_called_once_with(424248)
+            process.wait.assert_called_once_with(timeout=3)
+            process.stdout.close.assert_called_once()
+
+    def test_terminal_wrapper_and_helper_scripts_compile_without_launch(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-wrapper-fixture-") as folder, \
+                patch.dict(os.environ, {"HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY": "/synthetic/pinned-clients"}):
+            fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+            fixture.root = Path(folder)
+            for name in ("codex", "claude"):
+                fixture._official_client(name, ["synthetic"], bare_claude=name == "claude",
+                    terminal_only=True, omit_work_header=name == "codex")
+                compile((fixture.root / name).read_text(), name, "exec")
+            compile("import json\n" + _record_native_helper(fixture.root, "optimizer"), "helper", "exec")
+
+    def test_native_batch_stops_after_first_failed_case(self) -> None:
+        from unittest.mock import Mock
+
+        native = NativeMacRelayTests.test_official_clients_settle_real_work_ledger
+        native = getattr(native, "__wrapped__", native)
+        for configured in (False, True):
+            with self.subTest(official_client_configured=configured), \
+                    tempfile.TemporaryDirectory(prefix="hormuz-native-stop-fixture-") as folder:
+                fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+                fixture.root = Path(folder)
+                (fixture.root / "profile.json").write_text('{}')
+                fixture.work_fixture = Mock(spec=_NativeWorkFixture, provider_calls=[], gateway_calls=[])
+                fixture.work_fixture.job.return_value = "work-owned"
+                fixture._preference = Mock()
+                fixture._official_client = Mock()
+                fixture._run_terminal = Mock(side_effect=AssertionError("fixed fixture failure"))
+                # skipUnless returns the original method when enabled and a
+                # wrapped method otherwise. Exercise both without launching.
+                method = unittest.skipUnless(configured, "fixed fixture condition")(native)
+                with self.assertRaisesRegex(AssertionError, "fixed fixture failure"):
+                    getattr(method, "__wrapped__", method)(fixture)
+                fixture._run_terminal.assert_called_once()
+                fixture._official_client.assert_called_once()
+                fixture.work_fixture.job.assert_called_once()
+                fixture.work_fixture.assert_job.assert_not_called()
+
+    def test_real_work_fixture_settles_streams_and_refuses_unowned_jobs(self) -> None:
+        # Qualifies this real runtime/provider fixture locally; it does not
+        # substitute direct HTTP for the conditional official/native test above.
+        with tempfile.TemporaryDirectory(prefix="hormuz-native-work-fixture-") as folder:
+            fixture = _NativeWorkFixture(Path(folder))
+            works = []
+            try:
+                for path, model in (("/v1/responses", "approved"), ("/v1/responses", "approved"),
+                                    ("/v1/messages", "claude-sonnet-5")):
+                    work_id = fixture.job("local-terminal-fixture", model=model)
+                    works.append(work_id)
+                    body = {"model": model, "stream": True}
+                    body.update({"input": "synthetic", "max_output_tokens": 32} if path == "/v1/responses"
+                                else {"messages": [{"role": "user", "content": "synthetic"}], "max_tokens": 32})
+                    status, headers, raw = fixture.transport.request("POST", path, json.dumps(body),
+                        {"Authorization": "Bearer " + ACCESS_TOKEN, "Content-Type": "application/json",
+                         "X-Hormuz-Work-Id": work_id}, timeout=5)
+                    self.assertEqual(status, 200)
+                    self.assertEqual(headers["x-hormuz-work-id"], work_id)
+                    self.assertIn(b"response.completed" if path == "/v1/responses" else b"message_stop", raw)
+                    fixture.assert_job(self, work_id)
+                fixture.assert_refused_ownership(self, works[0])
+            finally:
+                fixture.close()
+            fixture.assert_closed_ledger(self, works)
+
+    def test_work_header_capture_preserves_absence_and_duplicate_fields(self) -> None:
+        from http.client import HTTPMessage
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        for handler_type, inherited in (
+            (_NativeCodexGatewayHandler, _CodexToolGatewayHandler),
+            (_ClaudeGatewayHandler, FakeProviderHandler),
+        ):
+            for values in ([], ["work-one"], ["work-one", "work-one"], ["work-one", "work-two"]):
+                with self.subTest(handler=handler_type.__name__, values=values):
+                    handler = object.__new__(handler_type)
+                    handler.headers = HTTPMessage()
+                    for value in values:
+                        handler.headers["X-Hormuz-Work-Id"] = value
+                    handler.server = SimpleNamespace(work_header_values=[])
+                    with patch.object(inherited, "do_POST") as exchange:
+                        handler.do_POST()
+                    exchange.assert_called_once_with()
+                    self.assertEqual(handler.server.work_header_values, [values])
+
+    def test_optional_fixture_binding_retains_fixed_custody_and_owner_arguments(self) -> None:
+        from unittest.mock import patch
+
+        fixture = NativeMacRelayTests("test_off_is_exact_and_listener_ends_with_client")
+        fixture.root = Path("/private/tmp/synthetic-native-fixture")
+        fixture.key = "12345678-1234-1234-1234-123456789abc"
+        fixture.broker = fixture.root / "broker"
+        fixture.optimizer = fixture.root / "optimizer"
+        with patch.dict(os.environ, {"HORMUZ_NATIVE_RELAY_BINARY": "/synthetic/native-relay"}, clear=True), \
+                patch("tests.test_native_macos_relay.subprocess.Popen") as spawn:
+            spawn.return_value.poll.return_value = 0
+            try:
+                fixture._launch()
+                unbound = spawn.call_args.args[0]
+                fixture._launch(work_id="work-owned")
+                bound = spawn.call_args.args[0]
+            finally:
+                fixture.doCleanups()
+        self.assertNotIn("--work-id", unbound)
+        self.assertEqual(bound, [*unbound, "--work-id", "work-owned"])
+        self.assertEqual(unbound[-2:], ["--owner-socket", str(fixture.root / "lease")])
+        self.assertEqual(unbound[unbound.index("--credential-helper") + 1], str(fixture.broker))
+        self.assertEqual(unbound[unbound.index("--optimizer-helper") + 1], str(fixture.optimizer))
 
 
 if __name__ == "__main__":

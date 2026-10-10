@@ -2,7 +2,9 @@
   "name": "Installation or first-run failure",
   "description": "Report a clean-checkout, package-installation, Docker, or first-run problem.",
   "title": "[Install]: ",
-  "labels": ["bug"],
+  "labels": [
+    "bug"
+  ],
   "body": [
     {
       "type": "markdown",
@@ -15,9 +17,17 @@
       "id": "method",
       "attributes": {
         "label": "Installation path",
-        "options": ["Clean source checkout", "Python package or wheel", "Official OCI image by digest", "Local Docker build", "Other"]
+        "options": [
+          "Clean source checkout",
+          "Python package or wheel",
+          "Official OCI image by digest",
+          "Local Docker build",
+          "Other"
+        ]
       },
-      "validations": {"required": true}
+      "validations": {
+        "required": true
+      }
     },
     {
       "type": "input",
@@ -27,7 +37,39 @@
         "description": "Commit SHA, tag, package version, or OCI digest.",
         "placeholder": "commit abc1234 or sha256:..."
       },
-      "validations": {"required": true}
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "dropdown",
+      "id": "example_mode",
+      "attributes": {
+        "label": "Example or connection mode",
+        "options": [
+          "Stable gateway demo",
+          "AI Work local provider tour",
+          "AI Work live OpenAI example",
+          "AI Work live Anthropic example",
+          "SDK connection",
+          "GitHub or Linear delivery",
+          "Other"
+        ]
+      },
+      "validations": {
+        "required": false
+      }
+    },
+    {
+      "type": "input",
+      "id": "example_scenario",
+      "attributes": {
+        "label": "Scenario and installed SDK version",
+        "description": "Use the catalog scenario name and exact SDK version when relevant; no keys, private rates or raw receipts."
+      },
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "textarea",
@@ -37,7 +79,9 @@
         "description": "Operating system, architecture, Python version, Docker/OCI runtime version if used, and shell.",
         "placeholder": "Linux amd64; Python 3.12; Docker 27; bash"
       },
-      "validations": {"required": true}
+      "validations": {
+        "required": true
+      }
     },
     {
       "type": "textarea",
@@ -47,7 +91,9 @@
         "description": "Show the first command that fails. Replace local names and paths with synthetic values.",
         "render": "shell"
       },
-      "validations": {"required": true}
+      "validations": {
+        "required": true
+      }
     },
     {
       "type": "textarea",
@@ -57,7 +103,9 @@
         "description": "Remove tokens, keys, customer configuration, usernames, internal hosts, private paths, and data before pasting.",
         "render": "text"
       },
-      "validations": {"required": true}
+      "validations": {
+        "required": true
+      }
     },
     {
       "type": "textarea",
@@ -66,7 +114,9 @@
         "label": "Checks already tried",
         "description": "Include the relevant SUPPORT.md check and whether a clean environment changes the result."
       },
-      "validations": {"required": true}
+      "validations": {
+        "required": true
+      }
     },
     {
       "type": "checkboxes",

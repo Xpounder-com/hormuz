@@ -9,6 +9,23 @@ launch it with the active profile UUID and its existing private state directory:
 hormuz-client-relay --profile <uuid> --state-directory <absolute-private-root>
 ```
 
+This source candidate optionally accepts `--work-id <job-id>` on that same
+invocation. IDs must match `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`. The launcher sets
+only `X-Hormuz-Work-Id` in the Codex provider override or Claude's child-only
+custom headers and pins the same ID in the relay for that invocation. A missing
+child header receives the pinned ID; exactly one matching field is accepted.
+Malformed, duplicate or different IDs receive HTTP 400 before optimization,
+credential lookup or upstream dispatch. The gateway still verifies access to
+the job. Omitting the argument preserves an unbound launch, which accepts an
+absent header or one valid ID and refuses malformed or duplicate fields.
+The ID is never saved in the connection
+profile or sent to the credential helper, and does not grant actor or tenant
+authority. Existing session, version and supervision checks remain required.
+On the Mac source candidate, invoke the generated `.command` launcher from a
+terminal with the same optional pair; its resident-app owner lease must still
+be live. The panel's existing Open action remains unbound. This addition does
+not qualify a released native build or provide a job-selection UI.
+
 The controller verifies that the stored profile matches and can supply a
 current access credential before launching a client. It discovers only Codex
 `0.147.0` or Claude Code `2.1.233`, supplies per-invocation local settings,

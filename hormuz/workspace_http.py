@@ -189,7 +189,7 @@ def _dispatch(handler):
 
 def _dashboard(handler, credential, current, origin, *, message=""):
     service = handler.server.workspace
-    _send(handler, 200, workspace_pages.dashboard(current, service.sessions.origin, service.domains.list(credential, origin), service.sessions.csrf(credential, origin), domains_enabled=service.domains.provider is not None, message=message))
+    _send(handler, 200, workspace_pages.dashboard(current, service.sessions.origin, service.domains.list(credential, origin), service.sessions.csrf(credential, origin), domains_enabled=service.domains.provider is not None, message=message, ai_work_enabled=getattr(handler.server, "work_runtime", None) is not None))
 
 
 def _cookie_name(handler, purpose):

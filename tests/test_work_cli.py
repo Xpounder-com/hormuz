@@ -1,0 +1,215 @@
+"""Work client boundary: explicit credentials, no redirects, real check results."""
+
+import argparse
+from contextlib import redirect_stderr, redirect_stdout
+import io
+import json
+import http.client
+from pathlib import Path
+import tomllib
+from unittest import TestCase, mock
+
+from hormuz.commands import work
+from hormuz.work_client import WorkClient, WorkClientError
+
+
+class WorkClientTests(TestCase):
+    def client(self):
+        return WorkClient("https://gateway.example", "secret-fixture-token")
+
+    def test_transport_requires_https_or_explicit_loopback(self):
+        for url in ("http://gateway.example", "https://user:pass@gateway.example", "https://gateway.example/path", "https://gateway.example?token=abc", "https://gateway.example#token"):
+            with self.assertRaises(WorkClientError):
+                WorkClient(url, "secret-fixture-token")
+        with self.assertRaises(WorkClientError):
+            WorkClient("http://127.0.0.1:8787", "secret-fixture-token")
+        WorkClient("http://127.0.0.1:8787", "secret-fixture-token", allow_loopback_http=True)
+        with self.assertRaises(WorkClientError):
+            WorkClient("http://example.com:8787", "secret-fixture-token", allow_loopback_http=True)
+
+    def test_job_attaches_id_without_leaking_credential(self):
+        client = self.client()
+        job = client.job("work-123")
+        self.assertEqual(job.headers, {"X-Hormuz-Work-Id": "work-123"})
+        with mock.patch.object(client, "_request", return_value={"result": "ok"}) as request:
+            for _ in range(2):
+                job.request("/v1/chat/completions", {"model": "fixture", "messages": []})
+            self.assertEqual(request.call_count, 2)
+            self.assertEqual(request.call_args.kwargs["headers"], job.headers)
+        with self.assertRaises(WorkClientError):
+            job.request("/v1/chat/completions", {"stream": True})
+
+    def test_checks_do_not_infer_completion_from_response_or_intermediate_pass(self):
+        client, reference = self.client(), "ci/run-1"
+        job = client.job("work-123")
+        with mock.patch.object(client, "_request", return_value={}) as request:
+            job.observe_check(0, reference=reference)
+            self.assertEqual(request.call_args.args[:2], ("GET", "/v1/work/jobs/work-123"))
+            job.observe_check(0, reference=reference, completes_work=True)
+            self.assertEqual(request.call_args.args[2], {"status": "completed", "source": "workflow", "reference": reference})
+            job.observe_check(1, reference="ci/run-2")
+            self.assertEqual(request.call_args.args[2]["status"], "corrected")
+
+    def test_history_pages_are_explicit_and_cursors_cannot_change_the_request(self):
+        client = self.client()
+        with mock.patch.object(client, "_request", return_value={"next_before": "request-50"}) as request:
+            self.assertEqual("request-50", client.job("work-123").attempts()["next_before"])
+            request.assert_called_once_with("GET", "/v1/work/jobs/work-123/attempts")
+            client.job("work-123").attempts(before="request-50")
+            self.assertEqual(("GET", "/v1/work/jobs/work-123/attempts/before/request-50"), request.call_args.args)
+            for value in ("", ".", "..", "../other", "id?token=private", "id\r\nAuthorization: private", "x" * 257, 5):
+                with self.assertRaises(WorkClientError):
+                    client.job("work-123").attempts(before=value)
+            self.assertEqual(2, request.call_count)
+            for cursor in ("x" * 129, "x" * 256, "prefix/path:@id"):
+                client.job("work-123").attempts(before=cursor)
+            self.assertEqual("/v1/work/jobs/work-123/attempts/before/prefix%2Fpath%3A%40id", request.call_args.args[1])
+
+    def test_cli_reads_only_one_requested_attempt_history_page(self):
+        parser = argparse.ArgumentParser()
+        work.add_work_commands(parser.add_subparsers(dest="command", required=True))
+        args = parser.parse_args(["work", "--gateway", "https://gateway.example", "attempts", "--work-id", "work-123", "--before", "request-50"])
+        output = io.StringIO()
+        with mock.patch.dict("os.environ", {"HORMUZ_TOKEN": "secret-fixture-token"}), mock.patch.object(WorkClient, "_request", return_value={"attempts": [], "next_before": None}) as request, redirect_stdout(output):
+            self.assertEqual(work.run(args), 0)
+        request.assert_called_once_with("GET", "/v1/work/jobs/work-123/attempts/before/request-50")
+        self.assertNotIn("secret-fixture-token", output.getvalue())
+
+    def test_plan_edits_preserve_or_explicitly_clear_exploration_and_repeat_kind(self):
+        client = self.client()
+        with mock.patch.object(client, "_request", return_value={}) as request:
+            client.set_plan("job", "work-123", budget_microusd=100)
+            self.assertNotIn("exploration_enabled", request.call_args.args[2])
+            client.set_plan("job", "work-123", budget_microusd=100, exploration_enabled=False)
+            self.assertIs(False, request.call_args.args[2]["exploration_enabled"])
+            client.set_plan("job", "work-123", budget_microusd=100, exploration_enabled=None)
+            self.assertIsNone(request.call_args.args[2]["exploration_enabled"])
+            client.job("work-123").request("/v1/responses", {}, request_kind="legitimate_iteration")
+            self.assertEqual("legitimate_iteration", request.call_args.kwargs["headers"]["X-Hormuz-Request-Kind"])
+            dispatched = request.call_count
+            for kind in ("invented", [], "retry\r\nAuthorization: attack"):
+                with self.assertRaises(WorkClientError):
+                    client.job("work-123").request("/v1/responses", {}, request_kind=kind)
+            self.assertEqual(dispatched, request.call_count)
+
+    def test_cli_parses_budget_exactly_and_prints_safe_work_header(self):
+        parser = argparse.ArgumentParser()
+        work.add_work_commands(parser.add_subparsers(dest="command", required=True))
+        args = parser.parse_args(["work", "--gateway", "https://gateway.example", "headers", "--work-id", "work-123"])
+        output = io.StringIO()
+        with mock.patch.dict("os.environ", {"HORMUZ_TOKEN": "secret-fixture-token"}), redirect_stdout(output):
+            self.assertEqual(work.run(args), 0)
+        self.assertEqual(json.loads(output.getvalue()), {"X-Hormuz-Work-Id": "work-123"})
+        self.assertNotIn("secret-fixture-token", output.getvalue())
+        self.assertEqual(work._amount("0.000001"), 1)
+        for value in ("-1", "NaN", "1e9", "0.0000001"):
+            with self.assertRaises(WorkClientError):
+                work._amount(value)
+
+    def test_native_session_config_attaches_work_without_opening_server_secrets(self):
+        from hormuz.cli import main
+        for name in ("codex", "claude"):
+            for work_id in (None, "work-123"):
+                output = io.StringIO()
+                argv = ["client", "config", name, "--auth-mode", "session", "--url", "https://gateway.example", "--model", "safe-openai"]
+                if work_id is not None:
+                    argv.extend(["--work-id", work_id])
+                with self.subTest(client=name, work_id=work_id), mock.patch("hormuz.cli.GatewayConfig.load", side_effect=AssertionError("server configuration read")), redirect_stdout(output):
+                    self.assertEqual(main(argv), 0)
+                if name == "codex":
+                    settings = tomllib.loads(output.getvalue())
+                    provider = settings["model_providers"]["hormuz"]
+                    self.assertEqual(settings.get("web_search"), "disabled" if work_id else None)
+                    self.assertNotIn("web_search", provider)
+                    self.assertEqual(provider.get("http_headers"), {"X-Hormuz-Work-Id": work_id} if work_id else None)
+                    self.assertEqual(provider["auth"]["command"], "hormuz")
+                else:
+                    settings = json.loads(output.getvalue())
+                    self.assertEqual(settings["env"].get("ANTHROPIC_CUSTOM_HEADERS"), "X-Hormuz-Work-Id: " + work_id if work_id else None)
+                    self.assertNotIn("web_search", output.getvalue())
+                    self.assertIn("auth session", settings["apiKeyHelper"])
+                self.assertNotIn("Authorization", output.getvalue())
+            for invalid in ("", 'work-123\r\nAuthorization: secret-fixture-token'):
+                output, diagnostic = io.StringIO(), io.StringIO()
+                with self.subTest(client=name, invalid=invalid), redirect_stdout(output), redirect_stderr(diagnostic):
+                    self.assertEqual(main([*argv[:-1], invalid]), 1)
+                self.assertEqual(output.getvalue(), "")
+                self.assertNotIn("secret-fixture-token", diagnostic.getvalue())
+
+    def test_native_static_config_preserves_private_credential_reference(self):
+        from hormuz.commands.client import _client_config
+        from hormuz.config import ConfigError, GatewayConfig
+        config = GatewayConfig.load(Path(__file__).parents[1] / "config.example.json", environ={"HORMUZ_TOKEN": "secret-fixture-token"})
+        for name in ("codex", "claude"):
+            for work_id in (None, "work-123"):
+                output = io.StringIO()
+                with self.subTest(client=name, work_id=work_id), redirect_stdout(output):
+                    self.assertEqual(_client_config(config, name, "https://gateway.example", work_id=work_id), 0)
+                self.assertEqual("X-Hormuz-Work-Id" in output.getvalue(), work_id is not None)
+                if name == "codex":
+                    settings = tomllib.loads(output.getvalue())
+                    self.assertEqual(settings.get("web_search"), "disabled" if work_id else None)
+                    self.assertNotIn("web_search", settings["model_providers"]["hormuz"])
+                else:
+                    self.assertNotIn("web_search", output.getvalue())
+                self.assertIn("HORMUZ_TOKEN", output.getvalue())
+                self.assertNotIn("secret-fixture-token", output.getvalue())
+            for invalid in ("", "work-123\r\nAuthorization: secret-fixture-token"):
+                output = io.StringIO()
+                with self.subTest(client=name, invalid=invalid), redirect_stdout(output), self.assertRaises(ConfigError):
+                    _client_config(config, name, "https://gateway.example", work_id=invalid)
+                self.assertEqual(output.getvalue(), "")
+
+    def test_managed_native_launch_and_relay_preserve_work_and_context_only(self):
+        from hormuz.client_relay import _client_command, _forward_headers, SavedClientProfile, ClientRelayError
+        local_token = "hox_l_" + "B" * 43
+        upstream_token = "hox_a_" + "A" * 43
+        for name in ("codex", "claude-code"):
+            profile = SavedClientProfile("fixture", "https://gateway.example", name, "approved", False)
+            for work_id in (None, "work-123"):
+                with self.subTest(client=name, work_id=work_id), mock.patch.dict("os.environ", {"ANTHROPIC_CUSTOM_HEADERS": "Authorization: attacker", "OPENAI_API_KEY": "direct-provider-secret"}, clear=True):
+                    argv, environment = _client_command(profile, "http://127.0.0.1:8787", local_token, executable="/usr/bin/" + name, work_id=work_id)
+                self.assertEqual(("-c", 'web_search="disabled"') in list(zip(argv, argv[1:])), name == "codex" and work_id is not None)
+                if name == "codex":
+                    self.assertEqual(any("X-Hormuz-Work-Id" in arg for arg in argv), work_id is not None)
+                    if work_id is not None:
+                        self.assertIn('model_providers.hormuz_context_relay.http_headers={"X-Hormuz-Work-Id"="work-123"}', argv)
+                    self.assertEqual(environment["HORMUZ_LOCAL_RELAY_TOKEN"], local_token)
+                else:
+                    self.assertEqual(environment.get("ANTHROPIC_CUSTOM_HEADERS"), "X-Hormuz-Work-Id: " + work_id if work_id else None)
+                    self.assertEqual(environment["ANTHROPIC_AUTH_TOKEN"], local_token)
+                self.assertNotIn("direct-provider-secret", argv)
+            for invalid in ("", "bad\nAuthorization: attacker"):
+                with self.assertRaises(ClientRelayError):
+                    _client_command(profile, "http://127.0.0.1:8787", local_token, executable="fixture", work_id=invalid)
+        headers = http.client.HTTPMessage()
+        for name, value in (("X-Hormuz-Work-Id", "work-123"), ("Authorization", "Bearer client-secret"), ("X-Api-Key", "client-key")):
+            headers[name] = value
+        context = {"X-Hormuz-Context-Format": "fixture-format"}
+        forwarded = _forward_headers(headers, upstream_token, 20, context)
+        self.assertEqual(forwarded["X-Hormuz-Work-Id"], "work-123")
+        self.assertEqual(forwarded["X-Hormuz-Context-Format"], "fixture-format")
+        self.assertEqual(forwarded["Authorization"], "Bearer " + upstream_token)
+        self.assertNotIn("X-Api-Key", forwarded)
+        for mode in ("openai", "anthropic"):
+            self.assertNotIn("X-Hormuz-Work-Id", _forward_headers(headers, "provider-secret", 20, context, upstream_auth=mode))
+        headers["X-Hormuz-Work-Id"] = "second-job"
+        self.assertNotIn("X-Hormuz-Work-Id", _forward_headers(headers, upstream_token, 20, context))
+
+    def test_cli_real_check_argv_and_completion_criterion(self):
+        parser = argparse.ArgumentParser()
+        work.add_work_commands(parser.add_subparsers(dest="command", required=True))
+        args = parser.parse_args(["work", "--gateway", "https://gateway.example", "check", "--work-id", "work-123", "--reference", "ci/run-2", "--completes-work", "--", "python", "-m", "unittest"])
+        with mock.patch.dict("os.environ", {"HORMUZ_TOKEN": "secret-fixture-token"}), mock.patch.object(work.subprocess, "run", return_value=mock.Mock(returncode=0)) as command, mock.patch("hormuz.work_client.WorkJob.observe_check") as observe:
+            self.assertEqual(work.run(args), 0)
+        command.assert_called_once_with(["python", "-m", "unittest"], check=False)
+        observe.assert_called_once_with(0, reference="ci/run-2", completes_work=True)
+
+    def test_errors_do_not_print_credentials(self):
+        parser = argparse.ArgumentParser()
+        work.add_work_commands(parser.add_subparsers(dest="command", required=True))
+        args = parser.parse_args(["work", "--gateway", "http://gateway.example", "state"])
+        output = io.StringIO()
+        with mock.patch.dict("os.environ", {"HORMUZ_TOKEN": "secret-fixture-token"}), redirect_stderr(output):
+            self.assertEqual(work.run(args), 1)
+        self.assertNotIn("secret-fixture-token", output.getvalue())

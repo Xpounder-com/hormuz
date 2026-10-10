@@ -20,7 +20,7 @@ custody integration tests separately prove encryption and recovery behavior.
 
 ## Ownership boundary
 
-The active core has seven custody categories:
+The active core has eight custody categories:
 
 1. **Hormuz-managed protected material.** Provider credentials may be stored
    in owner-only encrypted envelope files. Metadata-only audit artifacts use
@@ -98,6 +98,28 @@ The active core has seven custody categories:
    provenance hashes. Values are hidden from representations and added to the
    runtime redactor. The JSON configuration contains only environment-variable
    names and non-secret versions.
+8. **AI work fingerprints and campaign handoff.** The optional AI work runtime
+   generates a process-only HMAC key for exact request and answer-cache
+   fingerprints; stopping the process discards that key and prevents linking
+   those fingerprints across restart. Its signed-source workflow bridge has a
+   separate random key persisted only in the owner-only work database. This
+   `owner_only_local_key` custody mode describes filesystem protection, not
+   encryption at rest or managed KMS custody. The stopped-owner encrypted
+   backup includes that key with the ledger. Replacing it in place would break
+   existing object associations and delivery replay identities; the identity
+   operator must disable the bridge and arrange re-enrollment or a qualified
+   migration rather than silently replacing it. No key or raw source identifier
+   appears in the work report or export.
+
+   The consented campaign handoff uses the externally injected session master
+   key with a distinct signature domain. Its host-bound, Secure, HttpOnly cookie
+   lasts at most ten minutes and confers no login or acquisition authority.
+   Only a later authenticated consent mutation records its fixed campaign
+   labels. Session-key rotation invalidates pending handoffs; session owners
+   control browser retention. Inventory validation requires all reviewed work
+   coordinates and rejects changed key purpose, custody, owner, consumer or
+   rotation authority. Neither the local-key mode nor the cookie mode is
+   permitted for arbitrary writers or environment reads.
 
 The second category must not be recursively placed behind the same service it
 is needed to access. For example, Hormuz cannot use OpenBao Transit to decrypt

@@ -27,7 +27,7 @@ fn credential(calls: Arc<AtomicUsize>) -> Arc<dyn CredentialSource> {
     })
 }
 fn call(relay: &LocalRelay, path: &str, body: &[u8], extra: &str, token: &str) -> String {
-    let mut stream = TcpStream::connect(relay.address()).unwrap();
+    let mut stream = TcpStream::connect_timeout(&relay.address(), Duration::from_secs(5)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
@@ -143,6 +143,379 @@ fn rejects_bad_local_auth_host_routes_and_size_before_gateway_or_custody() {
     let text = read_response(&mut stream).unwrap();
     assert!(text.starts_with("HTTP/1.1 403"));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn work_id_header_requires_one_bounded_ascii_job_id() {
+    let mut headers = hyper::HeaderMap::new();
+    assert!(work_id_header(&headers, None).unwrap().is_none());
+    for id in ["w".to_owned(), "Work-123._".to_owned(), "a".repeat(128)] {
+        headers.insert(
+            "x-hormuz-work-id",
+            header::HeaderValue::from_str(&id).unwrap(),
+        );
+        assert_eq!(
+            work_id_header(&headers, None).unwrap().unwrap().as_bytes(),
+            id.as_bytes()
+        );
+    }
+    for id in [
+        "".to_owned(),
+        "a".repeat(129),
+        ".work".to_owned(),
+        "_work".to_owned(),
+        "-work".to_owned(),
+        "work/id".to_owned(),
+        "work:id".to_owned(),
+        "work@id".to_owned(),
+        "work id".to_owned(),
+        "work,other".to_owned(),
+        "work\tid".to_owned(),
+    ] {
+        headers.insert(
+            "x-hormuz-work-id",
+            header::HeaderValue::from_str(&id).unwrap(),
+        );
+        assert!(work_id_header(&headers, None).is_err());
+    }
+    headers.insert(
+        "x-hormuz-work-id",
+        header::HeaderValue::from_bytes(b"work\xff").unwrap(),
+    );
+    assert!(work_id_header(&headers, None).is_err());
+    headers.insert(
+        "x-hormuz-work-id",
+        header::HeaderValue::from_static("work-123"),
+    );
+    headers.append(
+        header::HeaderName::from_bytes(b"X-Hormuz-Work-Id").unwrap(),
+        header::HeaderValue::from_static("work-123"),
+    );
+    assert!(work_id_header(&headers, None).is_err());
+}
+
+#[test]
+fn bound_work_id_is_injected_or_exactly_matched_never_switched() {
+    let expected = header::HeaderValue::from_static("Work-123._");
+    let mut headers = hyper::HeaderMap::new();
+    assert_eq!(
+        work_id_header(&headers, Some(&expected)).unwrap(),
+        Some(expected.clone())
+    );
+    headers.insert("x-hormuz-work-id", expected.clone());
+    assert_eq!(
+        work_id_header(&headers, Some(&expected)).unwrap(),
+        Some(expected.clone())
+    );
+    for value in ["work-123._", "work-other", "", "work/invalid"] {
+        headers.insert(
+            "x-hormuz-work-id",
+            header::HeaderValue::from_str(value).unwrap(),
+        );
+        assert!(work_id_header(&headers, Some(&expected)).is_err());
+    }
+    headers.insert("x-hormuz-work-id", expected.clone());
+    headers.append("x-hormuz-work-id", expected.clone());
+    assert!(work_id_header(&headers, Some(&expected)).is_err());
+}
+
+#[test]
+fn invalid_expected_work_id_is_refused_before_relay_start() {
+    for value in ["", "-work", "work/id", &"a".repeat(129)] {
+        let credentials: Arc<dyn CredentialSource> =
+            Arc::new(|| panic!("invalid work ID must not access credentials"));
+        assert!(matches!(
+            LocalRelay::start_with_work_id(
+                &profile("http://127.0.0.1:9", "codex"),
+                credentials,
+                Optimization::Off,
+                Some(value),
+            ),
+            Err(RelayError::InvalidConfiguration)
+        ));
+    }
+}
+
+type CapturedWorkRequests = Vec<(String, Vec<u8>)>;
+
+struct WorkHeaderGateway {
+    address: SocketAddr,
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<CapturedWorkRequests>>,
+}
+
+impl WorkHeaderGateway {
+    fn start(expected_requests: usize) -> Self {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
+        let worker = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let mut captured = Vec::new();
+            for _ in 0..expected_requests {
+                let mut socket = loop {
+                    if stopping.load(Ordering::SeqCst) {
+                        return captured;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "owned gateway admission timed out"
+                    );
+                    match listener.accept() {
+                        Ok((socket, _)) => break socket,
+                        Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) => panic!("owned gateway admission failed: {error}"),
+                    }
+                };
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                socket
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut headers = Vec::new();
+                while !headers.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    socket.read_exact(&mut byte).unwrap();
+                    headers.push(byte[0]);
+                    assert!(headers.len() <= 8192);
+                }
+                let headers = String::from_utf8(headers).unwrap();
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length: ")
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                    })
+                    .unwrap();
+                assert!(length <= 1024);
+                let mut body = vec![0; length];
+                socket.read_exact(&mut body).unwrap();
+                captured.push((headers, body));
+                let reply = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+                socket.write_all(reply).unwrap();
+            }
+            captured
+        });
+        Self {
+            address,
+            stop,
+            worker: Some(worker),
+        }
+    }
+
+    fn finish(&mut self) -> CapturedWorkRequests {
+        self.worker.take().unwrap().join().unwrap()
+    }
+}
+
+impl Drop for WorkHeaderGateway {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(worker) = self.worker.take() {
+            // Panic cleanup still stops the owned accept loop and reaps its
+            // worker; accepted sockets have independent five-second deadlines.
+            let _ = worker.join();
+        }
+    }
+}
+
+#[test]
+fn relay_preserves_only_one_valid_work_id_without_forwarding_client_authority() {
+    // Four serial requests, one owned gateway, one relay at a time. The
+    // fixture stops and joins on both successful completion and panic unwind.
+    let mut gateway = WorkHeaderGateway::start(4);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let body = b"{\"input\":[]}";
+    for (client, path) in [("codex", "/v1/responses"), ("claude-code", "/v1/messages")] {
+        let relay = LocalRelay::start(
+            &profile(&format!("http://{}", gateway.address), client),
+            credential(calls.clone()),
+            Optimization::Off,
+        )
+        .unwrap();
+        for extra in ["X-Hormuz-Work-Id: Work-123._\r\n", ""] {
+            let headers = [
+                extra,
+                concat!(
+                    "X-Hormuz-Actor-Id: spoofed\r\n",
+                    "X-Hormuz-Organization-Id: spoofed\r\n",
+                    "OpenAI-Api-Key: client-provider-secret\r\n",
+                    "Anthropic-Api-Key: client-provider-secret\r\n",
+                    "X-Hormuz-Work-Attribution: tagged\r\n",
+                ),
+            ]
+            .concat();
+            let response = call(&relay, path, body, &headers, relay.local_credential());
+            assert!(response.starts_with("HTTP/1.1 200"));
+        }
+        let address = relay.address();
+        drop(relay);
+        assert!(TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_err());
+    }
+    let captured = gateway.finish();
+    assert_eq!(captured.len(), 4);
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    for (index, (headers, forwarded)) in captured.into_iter().enumerate() {
+        assert_eq!(forwarded, body);
+        let ids = headers
+            .lines()
+            .filter_map(|line| {
+                let (name, value) = line.split_once(": ")?;
+                name.eq_ignore_ascii_case("x-hormuz-work-id")
+                    .then_some(value)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            if index % 2 == 0 {
+                vec!["Work-123._"]
+            } else {
+                vec![]
+            }
+        );
+        let headers = headers.to_ascii_lowercase();
+        assert!(headers.contains("x-hormuz-work-attribution: tagged\r\n"));
+        assert!(headers.contains("authorization: bearer hox_a_"));
+        assert!(!headers.contains("hox_l_"));
+        assert!(!headers.contains("client-provider-secret"));
+        assert!(!headers.contains("x-api-key:"));
+        assert!(!headers.contains("x-hormuz-actor-id:"));
+        assert!(!headers.contains("x-hormuz-organization-id:"));
+    }
+    assert!(TcpStream::connect_timeout(&gateway.address, Duration::from_millis(100)).is_err());
+}
+
+#[test]
+fn bound_relay_keeps_exactly_one_work_id_through_optimization() {
+    let mut gateway = WorkHeaderGateway::start(4);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let optimizations = Arc::new(AtomicUsize::new(0));
+    for (client, path) in [("codex", "/v1/responses"), ("claude-code", "/v1/messages")] {
+        let relay = LocalRelay::start_with_work_id(
+            &profile(&format!("http://{}", gateway.address), client),
+            credential(calls.clone()),
+            Optimization::OnDemand(Arc::new(Change(optimizations.clone()))),
+            Some("work-selected"),
+        )
+        .unwrap();
+        for extra in ["", "X-Hormuz-Work-Id: work-selected\r\n"] {
+            assert!(call(
+                &relay,
+                path,
+                b"{\"input\":[1]}",
+                extra,
+                relay.local_credential()
+            )
+            .starts_with("HTTP/1.1 200"));
+        }
+        let address = relay.address();
+        drop(relay);
+        assert!(TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_err());
+    }
+    let captured = gateway.finish();
+    assert_eq!(captured.len(), 4);
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    assert_eq!(optimizations.load(Ordering::SeqCst), 4);
+    for (headers, body) in captured {
+        assert_eq!(body, b"{\"input\":[]}");
+        let ids: Vec<_> = headers
+            .lines()
+            .filter_map(|line| {
+                let (name, value) = line.split_once(": ")?;
+                name.eq_ignore_ascii_case("x-hormuz-work-id")
+                    .then_some(value)
+            })
+            .collect();
+        assert_eq!(ids, ["work-selected"]);
+        assert!(headers
+            .to_ascii_lowercase()
+            .contains("x-hormuz-context-format: structural-v1"));
+    }
+    assert!(TcpStream::connect_timeout(&gateway.address, Duration::from_millis(100)).is_err());
+}
+
+#[test]
+fn invalid_or_conflicting_work_ids_fail_before_optimizer_custody_or_egress() {
+    // One owned listener can accept an unexpected request, making accidental
+    // egress observable. Correct rejection stops it with zero accepted calls.
+    let mut gateway = WorkHeaderGateway::start(1);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let optimizations = Arc::new(AtomicUsize::new(0));
+    for (client, path) in [("codex", "/v1/responses"), ("claude-code", "/v1/messages")] {
+        for expected in [None, Some("work-selected")] {
+            let relay = LocalRelay::start_with_work_id(
+                &profile(&format!("http://{}", gateway.address), client),
+                credential(calls.clone()),
+                Optimization::OnDemand(Arc::new(CountOptimizationCalls(optimizations.clone()))),
+                expected,
+            )
+            .unwrap();
+            for extra in [
+                "X-Hormuz-Work-Id: \r\n",
+                "X-Hormuz-Work-Id: work/invalid\r\n",
+                "X-Hormuz-Work-Id: work-selected\r\nx-hormuz-work-id: work-selected\r\n",
+                "X-Hormuz-Work-Id: work-selected\r\nx-hormuz-work-id: work-other\r\n",
+            ] {
+                assert!(call(&relay, path, b"{}", extra, relay.local_credential())
+                    .starts_with("HTTP/1.1 400"));
+            }
+            if expected.is_some() {
+                assert!(call(
+                    &relay,
+                    path,
+                    b"{}",
+                    "X-Hormuz-Work-Id: work-other\r\n",
+                    relay.local_credential()
+                )
+                .starts_with("HTTP/1.1 400"));
+            }
+            let address = relay.address();
+            drop(relay);
+            assert!(TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_err());
+        }
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(optimizations.load(Ordering::SeqCst), 0);
+    gateway.stop.store(true, Ordering::SeqCst);
+    assert!(gateway.finish().is_empty());
+    assert!(TcpStream::connect_timeout(&gateway.address, Duration::from_millis(100)).is_err());
+}
+
+#[test]
+fn bound_optimizer_passthrough_keeps_original_bytes_and_selected_job_once() {
+    let mut gateway = WorkHeaderGateway::start(2);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let optimizations = Arc::new(AtomicUsize::new(0));
+    let body = b"{ \"input\": [] }\n";
+    for (client, path) in [("codex", "/v1/responses"), ("claude-code", "/v1/messages")] {
+        let relay = LocalRelay::start_with_work_id(
+            &profile(&format!("http://{}", gateway.address), client),
+            credential(calls.clone()),
+            Optimization::OnDemand(Arc::new(CountOptimizationCalls(optimizations.clone()))),
+            Some("work-selected"),
+        )
+        .unwrap();
+        assert!(call(&relay, path, body, "", relay.local_credential()).starts_with("HTTP/1.1 200"));
+        drop(relay);
+    }
+    let captured = gateway.finish();
+    assert_eq!(captured.len(), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(optimizations.load(Ordering::SeqCst), 2);
+    for (headers, forwarded) in captured {
+        assert_eq!(forwarded, body);
+        let headers = headers.to_ascii_lowercase();
+        assert_eq!(headers.matches("x-hormuz-work-id:").count(), 1);
+        assert!(headers.contains("x-hormuz-work-id: work-selected\r\n"));
+        assert!(!headers.contains("x-hormuz-context-format:"));
+    }
+    assert!(TcpStream::connect_timeout(&gateway.address, Duration::from_millis(100)).is_err());
 }
 
 #[test]

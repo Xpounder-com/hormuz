@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ast
 import json
+import shutil
 import stat
+import subprocess
 import tempfile
 import unittest
 from copy import deepcopy
@@ -651,6 +653,97 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         source_manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
         self.assertIn("include tools/verify_disaster_recovery_reference.py", source_manifest)
         self.assertIn("include tools/verify_disaster_recovery_reference.sh", source_manifest)
+
+
+@unittest.skipUnless(shutil.which("bash"), "The reference runner requires Bash")
+class DisasterRecoveryAdmissionReadinessTests(unittest.TestCase):
+    def run_gate(self, *, ready_on_attempt: int, error: str = "connection refused"):
+        runner = (ROOT / "tools" / "verify_disaster_recovery_reference.sh").read_text()
+        start = runner.index("wait_for_cnpg_admission() {\n")
+        end = runner.index("\n}\n", start) + 3
+        function = runner[start:end]
+        gate = runner.index('wait_for_cnpg_admission "${WORK_ROOT}/source-postgres.yaml"\n')
+        next_phase = runner.index("\nwait_for_cnpg_ready", gate)
+        # Execute the actual admission/create boundary with process-local stubs:
+        # no Kubernetes client, socket, background process or real sleep runs.
+        boundary = runner[gate:next_phase]
+        stubs = r'''
+set -euo pipefail
+WORK_ROOT='/synthetic manifest directory'
+ready_on_attempt=$1
+failure_reason=$2
+admission_attempts=0
+kubectl() {
+  printf 'CALL' >&2
+  printf '\t%s' "$@" >&2
+  printf '\n' >&2
+  if [[ "$*" == *'--dry-run=server'* ]]; then
+    admission_attempts=$((admission_attempts + 1))
+    if [[ "${admission_attempts}" -lt "${ready_on_attempt}" ]]; then
+      printf 'DEPENDENCY_FAILURE\t%s\n' "${failure_reason}" >&2
+      return 1
+    fi
+  else
+    printf 'CREATED\n' >&2
+  fi
+}
+sleep() { printf 'SLEEP\t%s\n' "$1" >&2; }
+fail() { printf 'FAIL\t%s\n' "$1" >&2; exit 1; }
+'''
+        return subprocess.run(
+            [shutil.which("bash"), "-c", stubs + function + "\n" + boundary,
+             "admission-readiness-fixture", str(ready_on_attempt), error],
+            cwd=ROOT, capture_output=True, text=True, timeout=5,
+        )
+
+    def calls(self, result):
+        return [line.split("\t")[1:] for line in result.stderr.splitlines()
+                if line.startswith("CALL\t")]
+
+    def assert_admission_calls(self, calls):
+        for call in calls:
+            self.assertEqual(call, ["apply", "--dry-run=server", "--request-timeout=15s",
+                                    "--filename", "/synthetic manifest directory/source-postgres.yaml"])
+
+    def test_immediately_ready_admission_creates_once_without_wait(self):
+        result = self.run_gate(ready_on_attempt=1)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.calls(result)
+        self.assertEqual(len(calls), 2)
+        self.assert_admission_calls(calls[:1])
+        self.assertEqual(calls[-1], ["apply", "--request-timeout=30s", "--filename", "/synthetic manifest directory/source-postgres.yaml"])
+        self.assertEqual(result.stderr.count("CREATED\n"), 1)
+        self.assertNotIn("SLEEP\t", result.stderr)
+
+    def test_webhook_connectivity_must_pass_before_creation(self):
+        result = self.run_gate(ready_on_attempt=3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.calls(result)
+        self.assertEqual(len(calls), 4)
+        self.assert_admission_calls(calls[:3])
+        self.assertEqual(result.stderr.count("DEPENDENCY_FAILURE\tconnection refused"), 2)
+        sleeps = [int(line.split("\t")[1]) for line in result.stderr.splitlines()
+                  if line.startswith("SLEEP\t")]
+        self.assertEqual(len(sleeps), 2)
+        self.assertTrue(5 <= sleeps[0] <= 7)
+        self.assertTrue(10 <= sleeps[1] <= 12)
+        self.assertEqual(result.stderr.count("CREATED\n"), 1)
+
+    def test_unavailable_or_invalid_tls_admission_stops_after_three_retries(self):
+        for error in ("connection refused", "x509: certificate is not trusted"):
+            with self.subTest(error=error):
+                result = self.run_gate(ready_on_attempt=99, error=error)
+                self.assertEqual(result.returncode, 1)
+                calls = self.calls(result)
+                self.assertEqual(len(calls), 4)
+                self.assert_admission_calls(calls)
+                sleeps = [int(line.split("\t")[1]) for line in result.stderr.splitlines()
+                          if line.startswith("SLEEP\t")]
+                self.assertEqual(len(sleeps), 3)
+                for delay, minimum in zip(sleeps, (5, 10, 20)):
+                    self.assertTrue(minimum <= delay <= minimum + 2)
+                self.assertNotIn("CREATED\n", result.stderr)
+                self.assertIn("FAIL\tCloudNativePG admission webhook did not become ready", result.stderr)
 
 
 if __name__ == "__main__":

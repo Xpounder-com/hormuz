@@ -35,6 +35,9 @@ from .compaction_enforcement import (
     inspect_request as inspect_compacted_request,
 )
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
+from . import work_gateway
+from .work_http import handle_work_request
+from .work_runtime import WorkRuntimeError
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
@@ -182,18 +185,68 @@ class _ProviderRehearsalResponse:
         return None
 
 
-def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) -> bool:
+def _openai_namespace_tools_bounded(tool: Mapping[str, Any]) -> bool:
+    """Qualify the pinned namespace shape containing only inline definitions."""
+
+    if (set(tool) != {"type", "name", "description", "tools"}
+            or type(tool.get("name")) is not str or not tool["name"]
+            or type(tool.get("description")) is not str
+            or type(tool.get("tools")) is not list or not tool["tools"]):
+        return False
+    for child in tool["tools"]:
+        if (type(child) is not dict or type(child.get("type")) is not str
+                or child["type"] not in _OPENAI_INLINE_TOOL_TYPES
+                or type(child.get("name")) is not str or not child["name"]
+                or type(child.get("description")) is not str
+                or ("defer_loading" in child and type(child["defer_loading"]) is not bool)):
+            return False
+        common = {"type", "name", "description", "defer_loading"}
+        if child["type"] == "function":
+            if (set(child) - (common | {"strict", "parameters"})
+                    or type(child.get("strict")) is not bool
+                    or type(child.get("parameters")) is not dict):
+                return False
+        else:
+            format_value = child.get("format")
+            if (set(child) - (common | {"format"})
+                    or type(format_value) is not dict
+                    or set(format_value) != {"type", "syntax", "definition"}
+                    or any(type(value) is not str for value in format_value.values())):
+                return False
+    return True
+
+
+def _provider_input_tokens_bounded(
+    protocol: str, request: Mapping[str, Any], *, text_only: bool = False
+) -> bool:
     """Recognize request inputs whose billed content is self-contained.
 
-    Serialized bytes conservatively bound inline text/data, but cannot bound
-    content a provider resolves from stored state, a URL, a file identifier,
-    or a server-side tool. Unknown reference forms fail closed when a work
-    budget is active; this classifier never fetches or inspects content.
+    Preserve the existing attribution contract for self-contained inline
+    data. AI Work additionally requires text-only reservations: serialized
+    bytes cannot bound modality-specific image/audio/document processing. Provider
+    references fail closed in either mode; this classifier never fetches or
+    inspects content.
     """
 
+    if text_only and not work_gateway.pricing_request_bounded(protocol, request):
+        return False
     if protocol == "openai":
         if any(request.get(field) is not None for field in _OPENAI_PROVIDER_STATE_FIELDS):
             return False
+        # Chat completion limits apply per choice. Work budgets currently
+        # reserve a single text answer, and cannot price hosted search or audio.
+        if ("n" in request and (type(request["n"]) is not int or request["n"] != 1)):
+            return False
+        if ("web_search_options" in request or "audio" in request
+                or request.get("modalities", ["text"]) != ["text"]):
+            return False
+        if text_only:
+            messages = request.get("messages")
+            if type(messages) is list and any(
+                type(message) is dict and message.get("audio") is not None
+                for message in messages
+            ):
+                return False
         inline_tool_types = _OPENAI_INLINE_TOOL_TYPES
     elif protocol == "anthropic":
         if any(request.get(field) is not None for field in _ANTHROPIC_PROVIDER_STATE_FIELDS):
@@ -212,10 +265,37 @@ def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) ->
             tool_type = tool.get("type")
             if protocol == "anthropic" and tool_type is None:
                 continue
+            if text_only and protocol == "openai" and tool_type == "namespace":
+                if not _openai_namespace_tools_bounded(tool):
+                    return False
+                continue
             if type(tool_type) is not str or tool_type not in inline_tool_types:
                 return False
 
-    pending: list[object] = [request]
+    # Qualified tool definitions, including JSON Schema defaults and properties,
+    # are serialized text, not provider-resolved content. This local walk view
+    # does not change the request or the complete body used for reservations.
+    # Keep the legacy non-text attribution classifier's traversal unchanged.
+    content_request = dict(request) if text_only else request
+    if text_only:
+        if tools is not None:
+            content_request.pop("tools", None)
+        if protocol == "openai":
+            text = request.get("text")
+            text_format = text.get("format") if type(text) is dict else None
+            if type(text_format) is dict and text_format.get("type") == "json_schema":
+                if type(text_format.get("schema")) is not dict:
+                    return False
+                content_request["text"] = {**text, "format": {
+                    key: value for key, value in text_format.items() if key != "schema"}}
+            response_format = request.get("response_format")
+            if type(response_format) is dict and response_format.get("type") == "json_schema":
+                json_schema = response_format.get("json_schema")
+                if type(json_schema) is not dict or type(json_schema.get("schema")) is not dict:
+                    return False
+                content_request["response_format"] = {**response_format, "json_schema": {
+                    key: value for key, value in json_schema.items() if key != "schema"}}
+    pending: list[object] = [content_request]
     while pending:
         value = pending.pop()
         if type(value) is list:
@@ -224,7 +304,17 @@ def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) ->
         if type(value) is not dict:
             continue
         kind = value.get("type")
+        if "type" in value and type(kind) is not str:
+            return False
         if kind == "item_reference":
+            return False
+        if kind == "image_url":
+            # Even inline images have modality-specific token pricing; a
+            # serialized text-byte bound cannot authorize their work cost.
+            return False
+        if text_only and kind in {"input_image", "input_file", "image", "document", "input_audio", "audio"}:
+            # Inline data is still not a text-token bound: compressed images
+            # and audio/documents have independently billed content.
             return False
         if kind == "input_image":
             if value.get("file_id") is not None:
@@ -239,7 +329,8 @@ def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) ->
             return False
         if kind in {"image", "document"}:
             source = value.get("source")
-            if type(source) is not dict or source.get("type") not in _INLINE_ANTHROPIC_SOURCE_TYPES:
+            if (type(source) is not dict or type(source.get("type")) is not str
+                    or source["type"] not in _INLINE_ANTHROPIC_SOURCE_TYPES):
                 return False
         pending.extend(value.values())
     return True
@@ -288,6 +379,8 @@ class GatewayServer(ThreadingHTTPServer):
         self.console_request_limit = SessionRequestLimit()
         self.console: ConsoleService | None = None
         self.workspace: WorkspaceService | None = None
+        self.work_runtime = None
+        self.work_billing = None
         self.impact_recorder = None
         # Keep injected-process tests and the hosted child's reviewed secret
         # inventory authoritative. Falling back to ``os.environ`` here would
@@ -383,6 +476,7 @@ class GatewayServer(ThreadingHTTPServer):
                 provider_reliability_requests=self.provider_reliability_store,
             )
             self.policy_engine.policy_runtime.verify_active_policies()
+            work_gateway.initialize(self, environ=environ)
             recovered_attempts = self.store.sweep_stale_request_attempts()
             if recovered_attempts:
                 LOGGER.warning("request_attempts_marked_outcome_unknown count=%d", recovered_attempts)
@@ -418,6 +512,8 @@ class GatewayServer(ThreadingHTTPServer):
                 protected_values.append(("workspace_domain_api_key", config.session_broker.workspace_domain_api_key))
             if config.outcome_connectors is not None:
                 protected_values.extend(config.outcome_connectors.protected_values())
+            if self.work_billing is not None:
+                protected_values.extend(self.work_billing.protected_values())
             self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
             if config.session_broker.policy_impact_enabled:
                 from .policy_impact import ImpactRecorder, ImpactStore, impact_path
@@ -427,6 +523,9 @@ class GatewayServer(ThreadingHTTPServer):
                 ))
             super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
         except Exception:
+            if self.work_runtime is not None:
+                self.work_runtime.close()
+            work_gateway.close(self)
             if self.impact_recorder is not None:
                 self.impact_recorder.close()
             self._close_postgres_pool()
@@ -493,6 +592,9 @@ class GatewayServer(ThreadingHTTPServer):
         try:
             super().server_close()
         finally:
+            if self.work_runtime is not None:
+                self.work_runtime.close()
+            work_gateway.close(self)
             if self.workspace is not None:
                 self.workspace.domains.close()
             if self.impact_recorder is not None:
@@ -509,10 +611,14 @@ class GatewayServer(ThreadingHTTPServer):
             if self.session_broker is not None:
                 self.session_broker.store.check_available()
             self.policy_engine.policy_runtime.verify_active_policies()
+            if self.work_runtime is not None:
+                self.work_runtime.verify_ready()
+            if self.work_billing is not None:
+                self.work_billing.verify_ready()
             if not self.custody_runtime_projection.readiness_healthy():
                 LOGGER.warning("readiness_custody_projection_stale")
                 return "dependency_unavailable"
-        except (*_STORAGE_FAILURES, SessionStoreError):
+        except (*_STORAGE_FAILURES, SessionStoreError, WorkRuntimeError, OSError):
             LOGGER.warning("readiness_dependency_unavailable")
             return "dependency_unavailable"
         # A shutdown may have started while the read-only checks ran. Never
@@ -577,6 +683,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         self._attribution_result = None
         path = urlsplit(self.path).path
+        if path == "/v1/work/billing/webhook":
+            self._send_json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": {"code": "hormuz_ai_work_method_not_allowed"}})
+            return
+        if handle_work_request(self):
+            return
         if is_workspace_path(path):
             handle_workspace_request(self)
             return
@@ -596,7 +707,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "service": "hormuz",
-                    "protocols": ["openai-responses", "anthropic-messages"],
+                    "protocols": ["openai-responses", "openai-chat-completions", "anthropic-messages"],
                 },
                 extra_headers={CONTEXT_FORMATS_HEADER: CONTEXT_FORMAT_VERSION},
             )
@@ -626,6 +737,21 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         identity = self._authenticate()
         if identity is None:
+            return
+        if path == "/v1/models":
+            try:
+                snapshot = self.server.policy_engine.policy_runtime.snapshot_for(identity)
+            except _STORAGE_FAILURES as error:
+                self._send_storage_failure(None, error)
+                return
+            allowed = snapshot.effective_policy.allowed_models
+            clients = snapshot.effective_policy.allowed_clients
+            can_use_openai = "codex" in identity.allowed_clients and (clients is None or "codex" in clients)
+            self._send_json(HTTPStatus.OK, {"object": "list", "data": [
+                {"id": alias, "object": "model", "created": 0, "owned_by": "hormuz-gateway"}
+                for alias, route in sorted(self.server.config.model_routes.items())
+                if can_use_openai and route.protocol == "openai" and (allowed is None or alias in allowed)
+            ]})
             return
         if path == "/v1/gateway/whoami":
             self._send_contract_json(
@@ -738,9 +864,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._work_started_ns = time.monotonic_ns()
+        self._work_attempt_started_ns = self._work_started_ns
+        self._work_is_retry = False
         self._response_started = False
         self._attribution_result = None
         path = urlsplit(self.path).path
+        if path == "/v1/work/billing/webhook":
+            from .work_billing import handle_webhook
+            handle_webhook(self)
+            return
+        if handle_work_request(self):
+            return
         if is_workspace_path(path):
             handle_workspace_request(self)
             return
@@ -763,6 +898,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             handle_session_request(self)
             return
         routes = {
+            # v1 enrollment calls its OpenAI API capability "codex". The
+            # compatibility endpoint uses that same explicit authorization.
+            "/v1/chat/completions": ("openai", "codex", True),
             "/v1/responses": ("openai", "codex", True),
             "/v1/responses/compact": ("openai", "codex", True),
             "/v1/messages": ("anthropic", "claude-code", True),
@@ -787,6 +925,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
         except AdmissionError as error:
             self._reject_attribution(identity, default_client, protocol, error)
+        except WorkRuntimeError as error:
+            self.close_connection = True
+            if getattr(self, "_response_started", False):
+                LOGGER.error("ai_work_post_relay_failure relay_started=true")
+                return
+            self._send_protocol_error(protocol, "AI work request requires attention: " + error.reason,
+                error.status, code="hormuz_ai_work_" + error.reason)
         except _STORAGE_FAILURES as error:
             self._send_storage_failure(protocol, error)
 
@@ -819,7 +964,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_protocol_error(protocol, "Request field model must be a non-empty string", HTTPStatus.BAD_REQUEST)
             return
         requested_model = requested_model.strip()
-        output_field = "max_output_tokens" if protocol == "openai" else "max_tokens"
+        chat = urlsplit(self.path).path == "/v1/chat/completions"
+        if chat and "max_tokens" in request_body and "max_completion_tokens" in request_body:
+            self._send_protocol_error(protocol, "Specify only one Chat Completions output limit.", HTTPStatus.BAD_REQUEST)
+            return
+        output_field = ("max_completion_tokens" if "max_completion_tokens" in request_body else "max_tokens") if chat else ("max_output_tokens" if protocol == "openai" else "max_tokens")
         requested_output = request_body.get(output_field)
         self._impact_requested_limit = requested_output
         if requested_output is not None and (
@@ -912,6 +1061,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         declared_context = context_headers[0].strip() if context_headers else None
         try:
+            redaction_started_ns = time.monotonic_ns()
             inspection = inspect_compacted_request(
                 request_body,
                 protocol=protocol,
@@ -920,6 +1070,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 declared_version=declared_context,
             )
             redaction = inspection.redaction
+            self._work_redaction_ms = (time.monotonic_ns() - redaction_started_ns) / 1_000_000
         except CompactionEnforcementError:
             self._send_protocol_error(
                 protocol,
@@ -977,6 +1128,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # Route only the sanitized request, after the same governance checks
+        # used by the configured baseline. Selection cannot widen its caps.
+        decision = work_gateway.prepare(self, identity, decision, redaction.value,
+            client=client, protocol=protocol, output=requested_output,
+            output_field=output_field, account_usage=account_usage)
+        sanitized = dict(redaction.value, model=decision.route.upstream_model)
+        if decision.max_output_tokens is not None:
+            previous = sanitized.get(output_field)
+            sanitized[output_field] = min(previous, decision.max_output_tokens) if type(previous) is int else decision.max_output_tokens
+        redaction = replace(redaction, value=sanitized)
         policy_action = decision.action
         if redaction.count:
             policy_action = f"{policy_action}+redacted"
@@ -1023,6 +1184,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 bindings=egress.finance_account_bindings,
             ),
         )
+        if account_usage and work_gateway.cache_hit(self, identity, decision, redaction.value):
+            return
         attempt: RequestAttempt | None = None
         if account_usage:
             try:
@@ -1107,6 +1270,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
 
         started_ns = time.monotonic_ns()
+        self._work_provider_ms = None
         try:
             if (
                 getattr(self, "_failover_rehearsal_requested", False)
@@ -1133,6 +1297,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         downstream_bytes_sent=0,
                     ),
                 )
+            work_gateway.settle(self, identity, attempt, started_ns=started_ns)
             self._send_protocol_error(
                 protocol,
                 f"Upstream provider is unavailable: {error}",
@@ -1142,6 +1307,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
 
         response_headers_us = self._elapsed_us(started_ns)
+        self._work_provider_ms = (time.monotonic_ns() - started_ns) / 1_000_000
         status = getattr(response, "status", response.getcode())
         if 300 <= status < 400:
             response.close()
@@ -1162,6 +1328,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         downstream_bytes_sent=0,
                     ),
                 )
+            work_gateway.settle(self, identity, attempt, started_ns=started_ns)
             self._send_protocol_error(
                 protocol,
                 "Upstream provider redirect refused.",
@@ -1195,6 +1362,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     downstream_bytes_sent=0,
                 ),
             )
+            work_gateway.settle(self, identity, attempt, cost=0, status="failed", started_ns=started_ns)
             observation = getattr(self, "_impact_observations", {}).get(attempt.attempt_id)
             if observation is not None and self.server.impact_recorder is not None:
                 self.server.impact_recorder.submit(replace(observation, status=request_status))
@@ -1281,7 +1449,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
 
         is_event_stream = "text/event-stream" in content_type.lower()
-        parser = ResponseUsageParser(protocol, is_event_stream=is_event_stream)
+        parser_type = work_gateway.WorkUsageParser if getattr(self, "_work_id", None) else ResponseUsageParser
+        parser = parser_type(protocol, is_event_stream=is_event_stream, chat_completions=urlsplit(self.path).path == "/v1/chat/completions")
+        cache_body = bytearray()
+        cache_capture = not is_event_stream and bool(getattr(self, "_work_id", None)) and self.server.config.ai_work.cache_enabled
 
         self._response_started = True
         self.send_response(status)
@@ -1292,6 +1463,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Hormuz-Policy-Decision", policy_action)
         self.send_header("X-Hormuz-Requested-Model", decision.requested_model)
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
+        work_gateway.response_headers(self)
         self.send_header(
             "Server-Timing",
             f"hormuz_upstream_headers;dur={response_headers_us / 1000:.3f}",
@@ -1329,7 +1501,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             read_chunk = response.read
         try:
             while True:
-                chunk = read_chunk(_RELAY_CHUNK_BYTES)
+                read_started_ns = time.monotonic_ns()
+                try:
+                    chunk = read_chunk(_RELAY_CHUNK_BYTES)
+                finally:
+                    # Provider transport blocking time excludes our parsing,
+                    # ledger operations and downstream writes. It is not the
+                    # provider's internal GPU execution time.
+                    self._work_provider_ms += (time.monotonic_ns() - read_started_ns) / 1_000_000
                 if not chunk:
                     break
                 if first_body_byte_us is None:
@@ -1343,6 +1522,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     )
                     refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
                 parser.feed(chunk)
+                if cache_capture:
+                    if len(cache_body) + len(chunk) <= 1_048_576:
+                        cache_body.extend(chunk)
+                    else:
+                        cache_capture = False
+                        cache_body.clear()
                 self._write_downstream_chunk(chunk)
                 downstream_bytes_sent += len(chunk)
         except (BrokenPipeError, ConnectionResetError):
@@ -1414,6 +1599,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     provider_metrics=provider_metrics,
                     finance_observation=parsed_usage.finance,
                 )
+                work_gateway.settle(self, identity, attempt, started_ns=started_ns)
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s requested_model=%s reason=provider_stream_interrupted",
                     identity.actor_id,
@@ -1433,6 +1619,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     provider_metrics=provider_metrics,
                     finance_observation=parsed_usage.finance,
                 )
+                work_gateway.settle(self, identity, attempt, status="succeeded", started_ns=started_ns)
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s "
                     "requested_model=%s reason=provider_usage_unavailable",
@@ -1461,6 +1648,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if configured_estimate.availability == "available":
                 assert configured_estimate.amount_microusd is not None
                 cost = configured_estimate.amount_microusd
+            # Commit provider evidence independently before optional work
+            # receipts/timing/cache: a work-store failure cannot erase a known
+            # provider charge or release an ambiguous provider reservation.
             self.server.provider_reliability_store.finalize_request_attempt(
                 attempt=attempt,
                 organization_id=identity.organization_id,
@@ -1477,12 +1667,22 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 finance_observation=parsed_usage.finance,
                 configured_estimate=configured_estimate,
             )
+            work_gateway.settle(self, identity, attempt,
+                cost=cost if getattr(parser, "work_pricing_known", True)
+                    and (usage.evidence_complete or status in {429, 529}) else None,
+                status="succeeded" if request_status == "succeeded" else "failed", started_ns=started_ns)
+            if request_status == "succeeded":
+                work_gateway.connection_observed(self, identity, attempt, parser, downstream_ok=downstream_ok)
+            if (request_status == "succeeded" and cache_capture and downstream_ok
+                    and getattr(parser, "work_pricing_known", True)):
+                work_gateway.cache_response(self, identity, decision, request_value, bytes(cache_body), status=status, content_type=content_type)
             observation = getattr(self, "_impact_observations", {}).get(attempt.attempt_id)
             if observation is not None and self.server.impact_recorder is not None:
                 self.server.impact_recorder.submit(replace(
                     observation, status=request_status,
                     output_tokens=usage.output_tokens if usage.evidence_complete else None,
-                    cost_microusd=cost if usage.evidence_complete else None,
+                    cost_microusd=cost if usage.evidence_complete
+                        and getattr(parser, "work_pricing_known", True) else None,
                 ))
             LOGGER.info(
                 "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d redactions=%d",
@@ -1531,7 +1731,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if not output_tokens_bounded:
             reserved_output_tokens = 0
         reserved_input_tokens = len(body)
-        input_tokens_bounded = _provider_input_tokens_bounded(protocol, request_value)
+        input_tokens_bounded = _provider_input_tokens_bounded(
+            protocol, request_value, text_only=self.server.work_runtime is not None
+        )
         reserved_cost_microusd = route.estimate_reservation_cost_microusd(
             input_tokens=reserved_input_tokens,
             output_tokens=max(0, reserved_output_tokens),
@@ -1614,6 +1816,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 raise
         if admission is not None:
             self._attribution_result = admission.result_header
+        try:
+            work_gateway.reserve(self, identity, attempt, decision, request_value, reserved_cost_microusd,
+                bounded=input_tokens_bounded and output_tokens_bounded,
+                retry_of=provider_failover.original_attempt_id if provider_failover else None)
+        except WorkRuntimeError:
+            # No egress occurred; release only this known unstarted provider hold.
+            self.server.store.finalize_request_attempt(attempt=attempt,
+                organization_id=identity.organization_id, status="failed", cost_microusd=0)
+            raise
         recorder = getattr(self.server, "impact_recorder", None)
         if recorder is not None:
             from .policy_impact import Observation, iso, utcnow, routing_fingerprint
@@ -1882,6 +2093,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         if contract_header_value is not None:
             self.send_header("X-Hormuz-Contract", contract_header_value)
         if error_code is not None:

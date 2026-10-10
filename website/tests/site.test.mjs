@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { sitePath, siteUrl, CONTACT_EMAIL, SOURCE_VERSION, OCI_VERSION, MACOS_VERSION } from '../lib/site.mjs';
+import { spawnSync } from 'node:child_process';
+import { sitePath, siteUrl, resolveSourceRevision, CONTACT_EMAIL, SOURCE_VERSION, OCI_VERSION, MACOS_VERSION } from '../lib/site.mjs';
 import { buildInquiry, campaignSource } from '../lib/contact.mjs';
 
 test('core and notarized Mac downloads agree with packaging while Windows stays preview', () => {
@@ -18,6 +19,12 @@ test('core and notarized Mac downloads agree with packaging while Windows stays 
   assert.ok(docs.includes('releases/download/${MACOS_VERSION}/SHA256SUMS.txt'));
   assert.doesNotMatch(docs, /77d463869f35c5bd|releases\/download\/v1\.3\.0/);
   assert.match(docs, /\/issues\/340/);
+  assert.match(docs, /reviewed source candidate on both the gateway and CLI client/);
+  assert.match(docs, /published v1\.8\.0 installers do not include these new AI Work commands/);
+  const workEntry = readFileSync(new URL('../app/work/page.tsx', import.meta.url), 'utf8');
+  assert.ok(workEntry.includes("href={sitePath('/docs/#ai-work')}>AI Work setup path"));
+  const workGuide = readFileSync(new URL('../../docs/AI_WORK_AGENT_INTEGRATION.md', import.meta.url), 'utf8');
+  assert.match(workGuide, /v1\.8\.0 source, signed Mac, and OCI artifacts do not include these new commands/);
   assert.match(docs, /comparison-table release-downloads/);
   const styles = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(styles, /\.release-downloads\s*\{\s*min-width:\s*720px;/);
@@ -38,10 +45,36 @@ test('native paths and metadata use the dedicated organization root', () => {
   assert.throws(() => sitePath('https://example.com'));
   assert.throws(() => sitePath('//example.com'));
 });
+test('source anchors use a validated immutable build revision and retain the local main fallback', () => {
+  const revision = '9af53c79d1671638a57dba9d758482c7d4f88ef8';
+  assert.equal(resolveSourceRevision(undefined), 'main');
+  assert.equal(resolveSourceRevision(''), 'main');
+  assert.equal(resolveSourceRevision(revision), revision);
+  for (const invalid of ['main', 'v1.8.0', revision.toUpperCase(), revision.slice(0, 7), `${revision}\n`, ' '.repeat(40), null, 123]) {
+    assert.throws(() => resolveSourceRevision(invalid));
+  }
+  const moduleUrl = new URL('../lib/site.mjs', import.meta.url).href;
+  for (const value of ['', revision]) {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `import { sourcePath } from ${JSON.stringify(moduleUrl)}; console.log(sourcePath('docs/AI_WORK_AGENT_INTEGRATION.md'));`], { env: { ...process.env, NEXT_PUBLIC_HORMUZ_SOURCE_REVISION: value }, encoding: 'utf8' });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout.trim(), `https://github.com/Xpounder-com/hormuz/blob/${value || 'main'}/docs/AI_WORK_AGENT_INTEGRATION.md`);
+  }
+});
 test('shared current-release labels derive from the source version', () => {
   for (const file of ['app/components/SiteFooter.tsx', 'app/components/SetupExample.tsx', 'app/enterprise/page.tsx', 'app/docs/page.tsx', 'app/integrations/page.tsx', 'app/security/page.tsx', 'app/resources/page.tsx', 'app/guides/codex-claude-code-gateway/page.tsx']) {
     const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
     assert.match(source, /\{SOURCE_VERSION(?:\.slice\(1\))?\}/, file);
+  }
+});
+test('compatibility guidance matches the Chat route while preserving native qualification limits', () => {
+  const gateway = readFileSync(new URL('../../hormuz/server.py', import.meta.url), 'utf8');
+  assert.match(gateway, /"\/v1\/chat\/completions": \("openai", "codex", True\)/);
+  for (const file of ['app/components/SetupExample.tsx', 'lib/customer-questions.mjs']) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert.match(source, /AI Work supports OpenAI Responses, OpenAI-compatible Chat Completions at \/v1\/chat\/completions, and Anthropic Messages/, file);
+    assert.match(source, /does not expose Ollama’s native \/api\/chat and \/api\/generate routes/, file);
+    assert.match(source, /Exact native-client versions, models, streaming, and tool behavior still require qualification/, file);
+    assert.doesNotMatch(source, /does not expose (?:\/v1\/chat\/completions|Chat Completions)/, file);
   }
 });
 test('inquiries encode user text as body, never additional recipients or headers', () => {
@@ -95,6 +128,54 @@ test('synthetic evidence has the expected bounded outcomes and no content fields
   for (const event of events) {
     for (const forbidden of ['prompt', 'response', 'messages', 'content', 'api_key', 'token']) assert.equal(Object.hasOwn(event, forbidden), false);
   }
+});
+test('published AI Work proof matches the executed receipt and keeps its conditions explicit', () => {
+  const published = readFileSync(new URL('../public/downloads/ai-work-proof.json', import.meta.url));
+  const executed = readFileSync(new URL('../../docs/evidence/ai-work-functional/receipt.json', import.meta.url));
+  assert.deepEqual(published, executed, 'Copy the regenerated execution receipt before publishing');
+  const proof = JSON.parse(published);
+  assert.equal(proof.schema_id, 'hormuz.ai-work-proof');
+  assert.equal(proof.schema_version, 1);
+  assert.equal(proof.conditions.provider, 'loopback_synthetic_fixture');
+  assert.equal(proof.conditions.real_provider_calls, 0);
+  assert.equal(proof.conditions.real_payments, 0);
+  assert.equal(proof.conditions.production_quality_validated, false);
+  assert.equal(proof.conditions.customer_savings_validated, false);
+  assert.ok(proof.checks.length > 0 && proof.checks.every(check => check.passed === true));
+  assert.match(proof.source_commit, /^[a-f0-9]{40}$/);
+  const sourceFiles = ['hormuz/work_runtime.py', 'hormuz/work_learning.py', 'hormuz/work_accounting.py', 'hormuz/work_provider_costs.py', 'hormuz/work_gateway.py', 'hormuz/work_workflow.py', 'hormuz/work_workflow_http.py', 'hormuz/work_http.py', 'hormuz/work_billing.py', 'hormuz/work_activation.py', 'hormuz/work_recovery.py', 'hormuz/work_pages.py', 'hormuz/work.css', 'hormuz/work_client.py', 'hormuz/commands/work.py', 'hormuz/config.py', 'hormuz/_config_input.py', 'hormuz/_config_work.py', 'hormuz/server.py', 'hormuz/usage.py', 'hormuz/_hosted_server.py', 'hormuz/_hosted_state.py', 'hormuz/_hosted_config.py', 'hormuz/_hosted_backup.py', 'hormuz/hosted.py', 'tools/ai_work_proof.py', 'tools/ai_work_browser_fixture.py', 'website/scripts/ai-work-browser-qa.mjs'];
+  assert.deepEqual(Object.keys(proof.source_files).sort(), [...sourceFiles].sort());
+  for (const path of sourceFiles) {
+    const digest = proof.source_files[path];
+    assert.match(digest, /^[a-f0-9]{64}$/);
+    const actual = createHash('sha256').update(readFileSync(new URL(`../../${path}`, import.meta.url))).digest('hex');
+    assert.equal(digest, actual, `${path}: regenerate the receipt after changing executed source`);
+  }
+  const forbidden = new Set(['prompt', 'messages', 'response_body', 'content', 'api_key', 'access_token', 'authorization']);
+  function checkMetadata(value) {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, child] of Object.entries(value)) {
+      assert.equal(forbidden.has(key.toLowerCase()), false, key);
+      checkMetadata(child);
+    }
+  }
+  checkMetadata(proof.covered_work);
+  for (const [publishedName, originalName] of [['ai-work-demo.webm', 'AI_WORK_DEMO.webm'], ['ai-work-desktop.png', 'AI_WORK_DESKTOP.png'], ['ai-work-browser-qa.json', 'AI_WORK_BROWSER_QA.json']]) {
+    const publishedMedia = readFileSync(new URL(`../public/demo/${publishedName}`, import.meta.url));
+    const originalMedia = readFileSync(new URL(`../../docs/evidence/ai-work-functional/${originalName}`, import.meta.url));
+    assert.ok(publishedMedia.equals(originalMedia), `${publishedName}: public media must match the actual validation artifact`);
+  }
+  const browser = JSON.parse(readFileSync(new URL('../public/demo/ai-work-browser-qa.json', import.meta.url), 'utf8'));
+  assert.equal(browser.real_provider_calls, 0);
+  assert.equal(browser.real_payments, 0);
+  assert.equal(browser.external_network_calls, 0);
+  assert.deepEqual(browser.browser_errors, []);
+  assert.deepEqual(browser.failed_requests, []);
+  assert.equal(browser.horizontal_overflow, false);
+  const browserSources = sourceFiles;
+  assert.deepEqual(Object.keys(browser.source_files).sort(), [...browserSources].sort());
+  for (const path of browserSources) assert.equal(browser.source_files[path], createHash('sha256').update(readFileSync(new URL(`../../${path}`, import.meta.url))).digest('hex'), `${path}: rerun browser qualification after source changes`);
+
 });
 test('claim ledger sources exist and social/commercial boundaries remain explicit', () => {
   const ledger = JSON.parse(readFileSync(new URL('../../marketing/claims-v1.json', import.meta.url), 'utf8'));

@@ -122,10 +122,11 @@ Q&A, and Show and tell. Public issue forms and Discussions must never request or
 contain provider credentials, customer prompts, outputs, or proprietary data.
 Security reports use GitHub's private security-advisory path.
 
-The repository description and topics describe only the bounded gateway
-boundary: policy enforcement, routing, redaction, and content-free usage/cost
-evidence for Codex and Claude Code. They do not claim enterprise readiness or
-include the separately packaged context experiment.
+The repository description and topics describe the bounded gateway: policy,
+work budgets, customer-local routing, redaction, and metadata-only usage/cost
+evidence across supported OpenAI and Anthropic APIs. The README identifies AI
+Work as a source candidate and separates its examples from published installers.
+The metadata does not claim enterprise readiness or measured customer savings.
 
 The website, social preview, public organization profile, organization pin, and
 anonymous checks remain release evidence—not assumptions. They are completed

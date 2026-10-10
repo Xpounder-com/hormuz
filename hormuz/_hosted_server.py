@@ -30,6 +30,20 @@ PROVIDER_SOCKET_TIMEOUT = 45
 PROVIDER_CONNECTION_LIFETIME_MARGIN = 30
 
 
+def _ai_work_route(path):
+    """The private hop admits only implemented work paths, never a catch-all."""
+    return path in {
+        "/work", "/work/", "/work.css", "/v1/work/state", "/v1/work/connect",
+        "/v1/work/jobs", "/v1/work/policies", "/v1/work/billing/portal",
+        "/v1/work/billing/webhook", "/v1/work/billing/checkout", "/work/acquisition",
+        "/v1/work/acquisition", "/v1/work/activation", "/v1/work/activation/request",
+        "/v1/work/activation/review", "/v1/work/activation/reset", "/v1/work/activation/reverify",
+        "/v1/work/support/receipt",
+    } or re.fullmatch(r"/work/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}", path) is not None or re.fullmatch(
+        r"/v1/work/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?:/(?:actions|observations|bindings))?", path
+    ) is not None
+
+
 class StagingGatewayServer(GatewayServer):
     request_queue_size = 32
 
@@ -386,6 +400,8 @@ class WorkspaceRequestHandler(StagingRequestHandler):
         if path in {"/health", "/ready"}:
             hosts = self.headers.get_all("Host", [])
             return len(hosts) == 1 and self.server.workspace.domains.health_host(hosts[0])
+        if path in {"/work", "/work/"}:
+            path = "/workspace"
         if not is_workspace_path(path):
             return False
         try:
@@ -396,7 +412,24 @@ class WorkspaceRequestHandler(StagingRequestHandler):
 
     def _path_allowed(self, request):
         from .workspace_http import is_workspace_path
-        return is_workspace_path(request.path) or request.path in {"/health", "/ready"}
+        return is_workspace_path(request.path) or request.path in {"/health", "/ready", "/work", "/work/"}
+
+
+    def do_GET(self):  # noqa: N802
+        if urlsplit(self.path).path in {"/work", "/work/"}:
+            if self.path not in {"/work", "/work/"}:
+                self.send_error(HTTPStatus.BAD_REQUEST)
+                return
+            # Workspace mode enrolls an account. It cannot activate provider
+            # traffic or payment entitlements and never invents an AI Work view.
+            self.send_response(HTTPStatus.SEE_OTHER)
+            self.send_header("Location", "/workspace")
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            return
+        super().do_GET()
 
 
 class ProviderPilotRequestHandler(StagingRequestHandler):
@@ -436,6 +469,7 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
                 "Content-Type", "Authorization", "Origin", "Cookie",
                 "X-Hormuz-Failover-Rehearsal",
                 "X-Hormuz-Cancellation-Rehearsal",
+                "Stripe-Signature",
             ))
             or len(lengths) > 1
             or (self.command == "POST" and len(lengths) != 1)
@@ -468,7 +502,7 @@ class ProviderPilotRequestHandler(StagingRequestHandler):
             "/v1/responses/compact",
             "/v1/messages",
             "/v1/messages/count_tokens",
-        } or request.path.startswith(("/v1/auth/", "/v1/admin/", "/console/"))
+        } or (request.path == "/v1/models" and self.command == "GET") or (request.path == "/v1/chat/completions" and self.command == "POST") or request.path.startswith(("/v1/auth/", "/v1/admin/", "/console/")) or _ai_work_route(request.path)
         if not allowed:
             self._stage_response(HTTPStatus.SERVICE_UNAVAILABLE, "route_disabled")
             return False

@@ -6,6 +6,8 @@ __pycache__/
 .coverage
 .pytest_cache/
 .venv/
+.venv-*/
+.hormuz-examples/
 build/
 dist/
 *.egg-info/
@@ -20,3 +22,4 @@ clients/rust/target/
 apps/macos/HormuzCompanion/.build/
 apps/macos/HormuzCompanion/.swiftpm/
 marketing/private/
+website/node_modules

@@ -95,6 +95,7 @@ def add_context_commands(
 
     run = commands.add_parser("run", help="Launch a supported client through the local relay")
     _profile_arguments(run)
+    run.add_argument("--work-id", help="Attach an existing owned AI Work job to this managed agent session")
     run.add_argument(
         "--credential-helper",
         type=Path,
@@ -135,6 +136,7 @@ def run(args: argparse.Namespace) -> int:
                 profile=profile,
                 state_directory=directory,
                 credential_helper=helper.expanduser().resolve(),
+                **({"work_id": args.work_id} if getattr(args, "work_id", None) else {}),
             )
         if command == "resources" and args.context_resources_command == "install":
             return _install_resources(args.directory)
