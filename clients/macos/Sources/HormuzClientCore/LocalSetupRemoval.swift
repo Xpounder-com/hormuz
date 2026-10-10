@@ -82,14 +82,32 @@ enum LocalSetupRemoval {
 
     static func selection(_ directory: PrivateDirectory, record: SessionRecord?, useIntent: Bool = true) throws -> [NativeOwnedFile] {
         if useIntent, let value = try intent(directory) { return value.files }
-        let profile = try directory.loadProfile()
-        if let record, let profile, profile != record.profile { throw ClientError.identityMismatch }
         var entries = try NativeOwnership.load(directory)
         let retained = try NativeOwnership.load(directory, name: NativeOwnership.retainedFileName)
+        let profileData = try directory.read("profile.json")
+        let profileDigest = profileData.map(NativeOwnership.digest)
+        // A safely readable edit retained during an earlier removal is no
+        // longer native setup. Its bytes need not decode as a profile. An
+        // active session or an exact current manifest generation stays strict.
+        let retainChangedProfile = record == nil && profileDigest.map { digest in
+            retained.contains { $0.kind == "profile" && $0.name == "profile.json" && $0.digest != digest }
+                && !entries.contains { $0.kind == "profile" && $0.name == "profile.json" && $0.digest == digest }
+        } == true
+        let profile: ConnectionProfile?
+        if retainChangedProfile {
+            profile = nil
+        } else if let profileData {
+            do { profile = try JSONDecoder().decode(ConnectionProfile.self, from: profileData).validated() }
+            catch let error as ClientError { throw error }
+            catch { throw ClientError.invalidProfile }
+        } else {
+            profile = nil
+        }
+        if let record, let profile, profile != record.profile { throw ClientError.identityMismatch }
         // The schema-validated current native selector predates the manifest.
         // Unmanifested legacy launchers are retained instead of inferred from
         // a familiar name/header. Saving them again records exact ownership.
-        if let profile, let data = try directory.read("profile.json"),
+        if let profile, let data = profileData,
            !entries.contains(where: { $0.name == "profile.json" }),
            !retained.contains(where: { $0.name == "profile.json"
                && $0.digest != NativeOwnership.digest(data) }) {

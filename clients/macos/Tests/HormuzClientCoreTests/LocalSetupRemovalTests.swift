@@ -326,6 +326,115 @@ final class LocalSetupRemovalTests: PrivateStorageTestCase {
         XCTAssertFalse(verified.server_revocation_confirmed)
     }
 
+    func testInterruptedRemovalRetainsMalformedProfileAcrossRetryVerifyAndNewPreview() async throws {
+        let (_, store, _, profile) = try fixture()
+        let files = try LocalSetupRemoval.selection(directory, record: store.load())
+        let intent = NativeRemovalIntent(schemaVersion: 1,
+            sessionFingerprint: try NativeOwnership.sessionFingerprint(store.load()), profileID: profile.id,
+            sessionWasPresent: true, revoked: true, files: files, removedCount: 0)
+        try LocalSetupRemoval.save(intent, directory: directory)
+        try store.delete()
+        let edited = Data("customer edited profile; no longer JSON\n".utf8)
+        try directory.write(edited, to: "profile.json", expected: directory.read("profile.json"))
+        let restarted = SessionController(directory: directory, store: store,
+                                          transport: FixtureTransport(clock: TestClock()))
+        let preview = try await restarted.previewLocalSetupRemoval()
+        let result = try await restarted.applyLocalSetupRemoval(previewToken: preview.preview_token)
+        XCTAssertEqual(result.status, "complete_with_retained_files")
+        XCTAssertTrue(result.keychain_session_absent)
+        XCTAssertTrue(result.generated_setup_absent)
+        XCTAssertEqual(result.retained_files, 2)
+        XCTAssertEqual(try directory.read("profile.json"), edited)
+        XCTAssertNotNil(try directory.read(NativeOwnership.retainedFileName))
+        XCTAssertNil(try directory.read(NativeOwnership.intentName))
+        let verified = try await restarted.verifyLocalSetupRemoval()
+        XCTAssertTrue(verified.generated_setup_absent)
+        XCTAssertEqual(verified.retained_files, 2)
+        let next = try await restarted.previewLocalSetupRemoval()
+        XCTAssertFalse(next.pending)
+        XCTAssertFalse(next.has_session)
+        XCTAssertEqual(next.generated_files, 0)
+        XCTAssertEqual(next.retained_files, 2)
+        let repeated = try await restarted.applyLocalSetupRemoval(previewToken: next.preview_token)
+        XCTAssertEqual(repeated.removed_files, 0)
+        XCTAssertEqual(try directory.read("profile.json"), edited)
+    }
+
+    func testMalformedProfileWithoutRetainedMarkerStillRefuses() async throws {
+        let (controller, store, _, _) = try fixture()
+        try store.delete()
+        let edited = Data("unmarked malformed profile\n".utf8)
+        try directory.write(edited, to: "profile.json", expected: directory.read("profile.json"))
+        do { _ = try await controller.previewLocalSetupRemoval(); XCTFail("Expected unmarked profile refusal") }
+        catch { XCTAssertEqual(error as? ClientError, .invalidProfile) }
+        do { _ = try await controller.verifyLocalSetupRemoval(); XCTFail("Expected unmarked verification refusal") }
+        catch { XCTAssertEqual(error as? ClientError, .invalidProfile) }
+        XCTAssertEqual(try directory.read("profile.json"), edited)
+        XCTAssertNil(try directory.read(NativeOwnership.intentName))
+    }
+
+    func testRetainedMalformedProfileKeepsActiveSessionAndCurrentOwnedGenerationStrict() async throws {
+        let (controller, store, _, profile) = try fixture()
+        let original = try XCTUnwrap(directory.read("profile.json"))
+        let prior = NativeOwnedFile(name: "profile.json", digest: NativeOwnership.digest(original),
+                                    profileID: profile.id, kind: "profile")
+        try NativeOwnership.record([prior], directory: directory, name: NativeOwnership.retainedFileName)
+        let edited = Data("retained malformed profile\n".utf8)
+        try directory.write(edited, to: "profile.json", expected: original)
+        // A retained-generation marker cannot bypass the active shared session.
+        do { _ = try await controller.previewLocalSetupRemoval(); XCTFail("Expected active session refusal") }
+        catch { XCTAssertEqual(error as? ClientError, .invalidProfile) }
+        XCTAssertEqual(try store.load()?.state, .active)
+        XCTAssertNil(try directory.read(NativeOwnership.intentName))
+        try store.delete()
+        let current = NativeOwnedFile(name: "profile.json", digest: NativeOwnership.digest(edited),
+                                      profileID: profile.id, kind: "profile")
+        try NativeOwnership.record([current], directory: directory)
+        // Exact current manifest ownership overrides the older retained marker.
+        do { _ = try await controller.previewLocalSetupRemoval(); XCTFail("Expected current owned profile refusal") }
+        catch { XCTAssertEqual(error as? ClientError, .invalidProfile) }
+        do { _ = try await controller.verifyLocalSetupRemoval(); XCTFail("Expected current owned verification refusal") }
+        catch { XCTAssertEqual(error as? ClientError, .invalidProfile) }
+        XCTAssertEqual(try directory.read("profile.json"), edited)
+        XCTAssertNil(try directory.read(NativeOwnership.intentName))
+    }
+
+    func testRetainedProfileAndLedgerUnsafeReadsStillRefuseWithoutTraversingTargets() async throws {
+        let (controller, store, _, profile) = try fixture()
+        try store.delete()
+        let original = try XCTUnwrap(directory.read("profile.json"))
+        let prior = NativeOwnedFile(name: "profile.json", digest: NativeOwnership.digest(original),
+                                    profileID: profile.id, kind: "profile")
+        try NativeOwnership.record([prior], directory: directory, name: NativeOwnership.retainedFileName)
+        let profileURL = try directory.fileURL("profile.json")
+        let target = try directory.fileURL("retained-profile-target.txt")
+        let sentinel = Data("synthetic retained target\n".utf8)
+        try directory.write(sentinel, to: target.lastPathComponent, expected: nil)
+        try FileManager.default.removeItem(at: profileURL)
+        try FileManager.default.createSymbolicLink(at: profileURL, withDestinationURL: target)
+        do { _ = try await controller.previewLocalSetupRemoval(); XCTFail("Expected retained symlink refusal") }
+        catch { XCTAssertEqual(error as? ClientError, .unsafeStorage) }
+        XCTAssertEqual(try directory.read(target.lastPathComponent), sentinel)
+        try FileManager.default.removeItem(at: profileURL)
+        XCTAssertEqual(link(target.path, profileURL.path), 0)
+        do { _ = try await controller.previewLocalSetupRemoval(); XCTFail("Expected retained hardlink refusal") }
+        catch { XCTAssertEqual(error as? ClientError, .unsafeStorage) }
+        XCTAssertEqual(try Data(contentsOf: target), sentinel)
+        try FileManager.default.removeItem(at: profileURL)
+        try directory.write(sentinel, to: "profile.json", expected: nil)
+        let ledgerURL = try directory.fileURL(NativeOwnership.retainedFileName)
+        let ledger = try XCTUnwrap(directory.read(NativeOwnership.retainedFileName))
+        let ledgerTarget = try directory.fileURL("retained-ledger-target.json")
+        try directory.write(ledger, to: ledgerTarget.lastPathComponent, expected: nil)
+        try FileManager.default.removeItem(at: ledgerURL)
+        try FileManager.default.createSymbolicLink(at: ledgerURL, withDestinationURL: ledgerTarget)
+        do { _ = try await controller.previewLocalSetupRemoval(); XCTFail("Expected retained ledger refusal") }
+        catch { XCTAssertEqual(error as? ClientError, .unsafeStorage) }
+        XCTAssertEqual(try directory.read(ledgerTarget.lastPathComponent), ledger)
+        XCTAssertEqual(try directory.read("profile.json"), sentinel)
+        XCTAssertNil(try directory.read(NativeOwnership.intentName))
+    }
+
     func testEditedOriginalWithAmbiguousStageRemainsRefusedAndIntact() async throws {
         let (_, store, _, profile) = try fixture()
         let plan = try await launcher(profile)
