@@ -16,6 +16,7 @@ function publishedSite() {
   bodies.set('/evidence/', bodies.get('/evidence/') + '<section id="work-proof"><a href="/downloads/ai-work-proof.json">Receipt</a></section>');
   for (const [route, sources] of Object.entries(LIVE_SOURCE_LINKS)) bodies.set(route, bodies.get(route) + sources.map(source => `<a href="https://github.com/${pin.repository}/blob/${pin.revision}/${source}">Source</a>`).join(''));
   bodies.set('/docs/', bodies.get('/docs/') + `<pre><code>python -m pip install 'hormuz[client,context] @ git+https://github.com/${pin.repository}.git@${pin.revision}'</code></pre>`);
+  bodies.set('/guides/software-agency-ai-budgets/', bodies.get('/guides/software-agency-ai-budgets/') + `<pre><code>git checkout --detach ${pin.revision}\nhormuz policy demo</code></pre><section id="team-next"><a href="/plans/#offers">Compare services</a><a href="/contact/?interest=review">Discuss setup</a></section>`);
   for (const name of LIVE_DOWNLOADS) bodies.set(`/downloads/${name}`, name.endsWith('.pdf') ? '%PDF-fixture' : name.endsWith('.json') ? JSON.stringify({ schema_id: 'hormuz.ai-work-proof', schema_version: 1, conditions: { real_provider_calls: 0, real_payments: 0, customer_savings_validated: false, production_quality_validated: false }, checks: [{ check: 'synthetic_verifier_fixture', passed: true }] }) : Buffer.from([0x50, 0x4b, 0x03, 0x04, 0]));
   const requests = [];
   return {
@@ -37,8 +38,8 @@ test('post-deploy verification checks the pinned source, all routes, metadata, a
   assert.equal(LIVE_ORIGIN, SITE_ORIGIN);
   assert.deepEqual(LIVE_ROUTES, SITE_ROUTES);
   const site = publishedSite();
-  assert.deepEqual(await verifyLiveSite(pin, site.fetcher), { verdict: 'passed', source_revision: pin.revision, pages: 16, downloads: 5 });
-  assert.equal(site.requests.length, 24);
+  assert.deepEqual(await verifyLiveSite(pin, site.fetcher), { verdict: 'passed', source_revision: pin.revision, pages: 17, downloads: 5 });
+  assert.equal(site.requests.length, 25);
 });
 
 test('a stale or invalid deployed pin fails before any page is accepted', async () => {
@@ -74,6 +75,7 @@ test('missing routes, wrong canonicals, HTML downloads, and incomplete metadata 
     ['/plans/', undefined],
     ['/workspace/', undefined],
     ['/guides/team-ai-budgets/', undefined],
+    ['/guides/software-agency-ai-budgets/', undefined],
     ['/guides/codex-claude-code-gateway/', '<h1>Guide</h1><link rel="canonical" href="https://wrong.example/"/>'],
     ['/enterprise/', '<h1>Hormuz</h1><link rel="canonical" href="https://wrong.example/"/>'],
     ['/downloads/hormuz-overview.pdf', '<html>Error</html>'],
@@ -114,5 +116,21 @@ test('a generic demo or missing proof link cannot satisfy work publication check
     const sources = (LIVE_SOURCE_LINKS[route] || []).map(source => `<a href="https://github.com/${pin.repository}/blob/${pin.revision}/${source}">Source</a>`).join('');
     site.bodies.set(route, `<link rel="canonical" href="${LIVE_ORIGIN}${route}"/><h1>Hormuz</h1>${sources}`);
     await assert.rejects(verifyLiveSite(pin, site.fetcher), /missing the/);
+  }
+});
+
+
+test('agency walkthrough rejects an unpinned install or missing service handoff', async () => {
+  const route = '/guides/software-agency-ai-budgets/';
+  for (const [from, to] of [
+    [`git checkout --detach ${pin.revision}`, 'git checkout --detach main'],
+    [`git checkout --detach ${pin.revision}`, `git checkout --detach ${pin.revision}0`],
+    ['id="team-next"', 'id="missing-next"'],
+    ['href="/plans/#offers"', 'href="/plans/"'],
+    ['href="/contact/?interest=review"', 'href="/contact/"'],
+  ]) {
+    const site = publishedSite();
+    site.bodies.set(route, site.bodies.get(route).replace(from, to));
+    await assert.rejects(verifyLiveSite(pin, site.fetcher), /agency walkthrough/);
   }
 });

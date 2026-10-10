@@ -48,7 +48,7 @@ export default function TeamBudgetsGuide() {
   return <PageFrame active="guides">
     <PageHero eyebrow="Practical guide / AI cost management" title={<>Understand AI costs.<br /><span>Set team budgets.</span></>}>
       <p>AI cost management starts with knowing which requests drive the bill. Use Hormuz to measure captured Codex and Claude Code usage, compare token costs, and put organization, team, and person limits around requests routed through your gateway.</p>
-      <p><CampaignLink href={sitePath('/resources/#tutorials')}>All practical guides →</CampaignLink></p>
+      <p><CampaignLink href={sitePath('/resources/#tutorials')}>All practical guides →</CampaignLink> · <CampaignLink href={sitePath('/guides/software-agency-ai-budgets/')}>Software-agency walkthrough →</CampaignLink></p>
     </PageHero>
     <div className="docs-shell">
       <aside className="docs-sidebar" aria-label="Guide navigation"><div><strong>In this guide</strong><a href="#measure">Measure AI spend</a><a href="#scopes">Choose the limits</a><a href="#create">Create a baseline</a><a href="#team">Add a team budget</a><a href="#compare">Inspect the change</a><a href="#activate">Activate and measure</a></div></aside>
