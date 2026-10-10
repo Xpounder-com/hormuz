@@ -6,7 +6,7 @@ import { PassageLines } from './Brand';
 
 const sections: Record<string, [string, string][]> = {
   evidence: [['AI Work in action', '#work-demo'], ['Work receipt', '#work-proof'], ['Recorded gateway', '#recording'], ['Qualification', '#qualification']],
-  plans: [['Software and Cloud', '#offers'], ['Appliances and sites', '#plans'], ['Reserve yours', '#reserve'], ['Cloud details', '#cloud'], ['How payment works', '#details']],
+  plans: [['Compare plans', '#offers'], ['Cloud details', '#cloud'], ['Managed sites', '#managed'], ['Appliances', '#plans'], ['How payment works', '#details']],
   enterprise: [['Prices', '#plans'], ['Reserve yours', '#reserve'], ['Compare', '#comparison'], ['Onboarding', '#onboarding'], ['Support allowance', '#support'], ['Activation', '#activate']],
   demo: [['Actual AI Work', '#work-demo'], ['Compaction', '#compaction'], ['Policy', '#policy'], ['Recorded gateway', '#recording']],
   security: [['At a glance', '#status'], ['Data handling', '#data-handling'], ['Controls', '#controls'], ['Open gates', '#gates']],

@@ -4,9 +4,13 @@ Static Next.js export for **https://usehormuz.github.io/**. This repository
 remains the authoritative website source; the dedicated
 [`usehormuz/usehormuz.github.io`](https://github.com/usehormuz/usehormuz.github.io)
 repository pins a reviewed source commit for publication.
-The primary journey serves engineering teams using existing agents: choose a
-budget and pace, connect qualified traffic, and inspect the work record. The home
-page leads to `/evidence/`, `/work/`, and an engineering workflow inquiry. The
+The primary journey serves small and medium engineering, agency, and IT teams
+using existing supported agents: start with free software, choose Cloud when
+hosting is needed, or discuss a managed site for defined operating help. The
+home page and `/plans/` make the three paths explicit; managed sites include
+their associated Cloud workspace. Application, traffic, retention, capacity,
+monitoring coverage, and activation are confirmed before paid checkout. The
+budget and pace controls, `/evidence/`, and `/work/` remain part of the journey. The
 primary `/demo/` shows the actual synthetic AI Work recording, with compaction
 and policy mechanics in technical disclosures. Pricing, appliance
 reservations, scoped onboarding, cancellation, and managed-site terms remain
