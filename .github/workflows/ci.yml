@@ -252,7 +252,7 @@ jobs:
             --report docs/evidence/public-disclosure-report-v1.json \
             --require-verdict public_transition_verified
       - name: Preserve distribution evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-distributions
           path: |
@@ -796,7 +796,7 @@ jobs:
         run: ./tools/verify_postgres_pitr_recovery.sh
       - name: Preserve PostgreSQL recovery evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-postgres-recovery
           path: |
@@ -956,7 +956,7 @@ jobs:
           PY
       - name: Preserve only content-free preflight evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-render-preflight
           path: ${{ runner.temp }}/hormuz-render-preflight/http.json
@@ -1019,7 +1019,7 @@ jobs:
           --output "${{ runner.temp }}/hormuz-render-gateway.json"
       - name: Preserve only content-free verification results
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-render-gateway
           path: ${{ runner.temp }}/hormuz-render-gateway.json
@@ -1077,7 +1077,7 @@ jobs:
         run: ./tools/verify_compose_profile.sh
       - name: Preserve only content-free Compose evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-compose-reference
           path: ${{ runner.temp }}/hormuz-compose-reference/summary.json
@@ -1169,7 +1169,7 @@ jobs:
         run: ./tools/verify_helm_profile.sh
       - name: Preserve only content-free Kubernetes evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-kubernetes-reference
           path: ${{ runner.temp }}/hormuz-kubernetes-reference/*.json
@@ -1231,7 +1231,7 @@ jobs:
         run: ./tools/verify_postgres_ha_reference.sh
       - name: Preserve only content-free PostgreSQL HA evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-postgres-ha-reference
           path: ${{ runner.temp }}/hormuz-postgres-ha-reference/summary.json
@@ -1294,7 +1294,7 @@ jobs:
         run: ./tools/verify_disaster_recovery_reference.sh
       - name: Preserve only content-free disaster-recovery evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-disaster-recovery-reference
           path: ${{ runner.temp }}/hormuz-disaster-recovery/summary.json
@@ -1352,7 +1352,7 @@ jobs:
         run: ./tools/verify_oci_supply_chain.sh
       - name: Preserve OCI supply-chain evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-oci-supply-chain
           path: ${{ runner.temp }}/hormuz-oci-supply-chain/*
@@ -1417,7 +1417,7 @@ jobs:
         run: ./tools/verify_oci_reproducibility.sh
       - name: Preserve reproducibility evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-oci-reproducibility
           path: ${{ runner.temp }}/hormuz-oci-reproducibility/summary.json
@@ -1449,7 +1449,7 @@ jobs:
       - name: Install Hormuz runtime
         run: python -m pip install --editable .
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
       - name: Install pinned official clients
