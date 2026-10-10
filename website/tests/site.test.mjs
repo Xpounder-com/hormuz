@@ -93,7 +93,7 @@ test('required fields, limits, unknown and prototype interest values are safe', 
   assert.throws(() => buildInquiry({ name: ' ', workflow: 'hello' }));
   assert.throws(() => buildInquiry({ name: 'name', workflow: '' }));
   for (const interest of ['bad', '__proto__', 'constructor']) {
-    assert.equal(buildInquiry({ name: 'n', workflow: 'w', interest }).subject, 'Hormuz — Appliance with scoped onboarding');
+    assert.equal(buildInquiry({ name: 'n', workflow: 'w', interest }).subject, 'Hormuz — Engineering AI work');
   }
   assert.equal(buildInquiry({ name: 'n', workflow: 'w', interest: 'enterprise' }).subject, 'Hormuz — Appliance');
   assert.equal(buildInquiry({ name: 'n', workflow: 'w', interest: 'pro' }).subject, 'Hormuz — Cloud workspace');
@@ -223,6 +223,10 @@ test('privacy notices distinguish host URL processing from application analytics
   }
   assert.match(page, /Optional Google Analytics and X Ads measurement each stay off until you allow that service/);
   assert.match(page, /An earlier choice to allow X does not allow Google Analytics/);
+  assert.match(page, /pricing and inquiry-link clicks including fixed Cloud or managed-site interest labels/);
+  assert.match(page, /you must make a new choice under this notice before Analytics starts/);
+  const choices = readFileSync(new URL('../app/components/AdConsent.tsx', import.meta.url), 'utf8');
+  assert.match(choices, /install and pricing links, Cloud or managed-site inquiry links/);
   assert.match(page, /Safari and browsers on iPhone and iPad do not load X Ads code/);
   assert.match(page, /process or save it before you send/);
 });

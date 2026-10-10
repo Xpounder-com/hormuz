@@ -3,7 +3,8 @@ import { SITE_ORIGIN, SITE_ROUTES, REPOSITORY } from './site.mjs';
 import { isSalesInquiry } from './contact.mjs';
 import { privacySignal, CONSENT_DURATION } from './x-ads.mjs';
 
-export const ANALYTICS_CONSENT_KEY = 'hormuz.analytics-consent.v1';
+// Pricing and service-interest clicks require a new choice under the updated notice.
+export const ANALYTICS_CONSENT_KEY = 'hormuz.analytics-consent.v2';
 const sessions = new WeakMap();
 const session = win => {
   if (!sessions.has(win)) sessions.set(win, { consent: 'unset', started: false, id: '', lead: false });
@@ -14,7 +15,8 @@ const eventDetails = Object.freeze({
   demo_open: ['website_demo'],
   demo_interaction: ['spend', 'policy', 'compaction', 'setup'],
   install_click: ['setup_guide', 'mac_download'],
-  inquiry_open: ['contact'],
+  pricing_open: ['comparison', 'cloud', 'managed'],
+  inquiry_open: ['contact', 'cloud', 'managed'],
   evidence_open: ['mechanics'],
   work_open: ['gateway_entry'],
 });
@@ -118,7 +120,11 @@ export function trackedDestination(href) {
       if (url.pathname === '/demo/') return ['demo_open', 'website_demo'];
       if (url.pathname === '/' && ['#spend', '#policy', '#compaction', '#setup'].includes(url.hash)) return ['demo_open', 'website_demo'];
       if (url.pathname === '/docs/') return ['install_click', 'setup_guide'];
-      if (url.pathname === '/contact/') return ['inquiry_open', 'contact'];
+      if (url.pathname === '/plans/') return ['pricing_open', url.hash === '#cloud' ? 'cloud' : url.hash === '#managed' ? 'managed' : 'comparison'];
+      if (url.pathname === '/contact/') {
+        const interest = url.searchParams.get('interest');
+        return ['inquiry_open', ['cloud', 'managed'].includes(interest) ? interest : 'contact'];
+      }
     }
     if (url.origin === 'https://github.com' && url.pathname.startsWith(new URL(REPOSITORY).pathname + '/releases/download/') && /^Hormuz-[\d.]+-notarized\.zip$/.test(url.pathname.split('/').at(-1))) return ['install_click', 'mac_download'];
   } catch { /* Unknown destinations do not become event data. */ }

@@ -19,6 +19,9 @@ definitions and does not collect automatic form entries, searches, or arbitrary
 outbound URLs. Keep Google signals and ad personalization off.
 
 Analytics requires a new, separate visitor choice; old X consent is never reused.
+The added pricing and Cloud/managed-site interest events use renewed Analytics
+consent under the updated notice. Earlier website-analytics preferences do not
+start the SDK or authorize these events.
 No Google script, queue, request or Analytics cookie is created before opt-in.
 Decline, Global Privacy Control and Do Not Track keep collection off. The consent
 choice lasts up to 180 days. With blocked storage it lasts only for the page.
@@ -38,7 +41,8 @@ passed to Analytics. Explicit events are:
 | `demo_open` | A link to the website demo is clicked | Demo interest, not completion |
 | `demo_interaction` | A user selects a spend, policy, compaction, or setup section | Use of the illustration, not a product evaluation |
 | `install_click` | A setup-guide or official Mac download link is clicked | Install interest, not a completed installation |
-| `inquiry_open` | A contact-page link is clicked | Inquiry intent, not a submitted lead |
+| `pricing_open` | A pricing-page link is clicked | Comparison, Cloud, or managed-site interest; not a buying decision |
+| `inquiry_open` | A contact-page link is clicked | Contact, Cloud, or managed-site intent; not a submitted lead |
 | `generate_lead` | A sales inquiry receives a positive Formspree acknowledgement | Consented receipt, not qualification or payment |
 
 Mark only `generate_lead` as the primary GA4 key event for the inquiry funnel.

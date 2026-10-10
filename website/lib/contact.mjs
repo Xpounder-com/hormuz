@@ -5,7 +5,7 @@ const LEGACY_INTERESTS = Object.freeze({ pro: 'cloud', pilot: 'onboarding', supp
 export function normalizeInterest(value) {
   const key = String(value ?? '');
   if (Object.hasOwn(INTERESTS, key)) return key;
-  return Object.hasOwn(LEGACY_INTERESTS, key) ? LEGACY_INTERESTS[key] : 'onboarding';
+  return Object.hasOwn(LEGACY_INTERESTS, key) ? LEGACY_INTERESTS[key] : 'work';
 }
 export const CAMPAIGN_TAGS = Object.freeze(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content']);
 export const isSalesInquiry = interest => ['work', 'reservation', 'cloud', 'appliance', 'onboarding', 'managed', 'review', ...Object.keys(LEGACY_INTERESTS)].includes(interest);
