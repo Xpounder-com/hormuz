@@ -6,10 +6,10 @@ timing for their recorded source snapshots. They do not establish customer
 savings, model quality, live payments, a signed distribution or production
 deployment readiness.
 
-The bounded gateway, provider tour, browser journey and installed SDK executions
-were regenerated after the reviewed billing portal and durable checkout fixes.
-Their source hashes identify the tested runtime, including its request, storage,
-configuration-loader and stream guards.
+The bounded gateway proof and browser journey were regenerated from source
+`bd0adf0562cea6eb2a6f412537ebb9b269b0ce50` after the HTTP-error response cleanup.
+Their 28 source hashes identify the executed runtime. The package and installed
+SDK receipts retain their earlier recorded source and do not qualify this cleanup.
 
 | Artifact | What it establishes |
 | --- | --- |
@@ -17,8 +17,8 @@ configuration-loader and stream guards.
 | [local-benchmark.json](local-benchmark.json) | Historical predecessor measurement over 10,000 synthetic jobs and 99,990 attempts; does not qualify this candidate |
 | [AI_WORK_BROWSER_QA.json](AI_WORK_BROWSER_QA.json) | 12 actual authenticated journey checks, three simulated provider responses, desktop/mobile rendering and 28 source hashes |
 | [AI_WORK_DEMO.webm](AI_WORK_DEMO.webm) | Recorded connection, synthetic billing activation, budgets, ordinary API work, route/cache evidence, a cap, continuation and a signed workflow result |
-| [PACKAGING_SMOKE.json](PACKAGING_SMOKE.json) | Offline wheel/source build, isolated installed imports/CLI/styles, owned SQLite history/totals/restart, and a source-matched installed HTTP smoke |
-| [INSTALLED_HTTP_SMOKE.json](INSTALLED_HTTP_SMOKE.json) | Exactly two authenticated local installed-gateway requests: create and read an owned job; zero provider inference or external calls |
+| [PACKAGING_SMOKE.json](PACKAGING_SMOKE.json) | Historical source-specific offline wheel/source build, isolated installed imports/CLI/styles, owned SQLite history/totals/restart and installed HTTP smoke |
+| [INSTALLED_HTTP_SMOKE.json](INSTALLED_HTTP_SMOKE.json) | Historical installed source: exactly two authenticated local create/read job requests, zero provider inference or external calls |
 
 The browser seeds no cost. Its estimate is calculated from captured fixture usage
 and configured synthetic rates. The passing run makes zero external network calls,

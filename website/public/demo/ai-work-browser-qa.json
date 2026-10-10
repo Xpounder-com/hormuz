@@ -1,7 +1,7 @@
 {
   "schema_id": "hormuz.ai-work-browser-validation",
   "schema_version": 1,
-  "generated_at": "2026-10-10T01:19:17.482Z",
+  "generated_at": "2026-10-10T12:56:39.103Z",
   "fixture": "actual gateway with synthetic local identity, provider, Stripe transport and signed GitHub fixture",
   "provider_calls": "3 local simulated provider responses; zero real or paid provider calls",
   "viewports": [
@@ -39,7 +39,7 @@
     "hormuz/work_workflow.py": "0cd9c0b9719f72b81badf9c098706cb0a3e45613f3eb05527fc380065181186d",
     "hormuz/work_workflow_http.py": "f15906f2675b6635cf8115c475ea1043bf6aed0a0c22978aed31c3a1552282d5",
     "hormuz/work_http.py": "515db882469550a2dccc29d33ccc686e459c4a299f0e82f072ac4886ff1a3aa0",
-    "hormuz/work_billing.py": "3e95239e5ed687fa19ba64fe74b6e51aae41a78a9fcc30671da087b5a9b8e6bb",
+    "hormuz/work_billing.py": "a960f5dd2709e667b0944e7a41d5ff93e2c70f8bfc9540011c5a3e80c275896d",
     "hormuz/work_activation.py": "8f77087426b036042942b60e78f2b0c4c2d5e176114b9531b233a6cfc8e50e3c",
     "hormuz/work_recovery.py": "7b1a9cbc6ebc2ddb9867bcb779b3285d44ba23ae6c8c2b479bc251ca68c02df1",
     "hormuz/work_pages.py": "ac0f0fe82b78d72783058706df1f6a57667e5bca4d4c88ddddc72f885e03053a",
