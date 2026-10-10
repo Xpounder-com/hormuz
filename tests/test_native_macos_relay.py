@@ -89,6 +89,7 @@ def _terminal_output_diagnostics(stdout_size, stderr_size, stderr_prefix):
         (b"ValueError:", "python_value_error"),
         (b"unexpected argument", "client_argument_invalid"),
         (b"Operation not permitted", "operation_denied"),
+        (b"The installed AI client version is unsupported.", "native_client_unsupported"),
         (b"The gateway session credential is unavailable.", "native_credential_unavailable"),
         (b"401 Unauthorized", "unauthorized"),
     )
@@ -479,8 +480,10 @@ if {hold!r}:
         if terminal_only:
             environment["HOME"] = str(self.root / "home")
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            # The native relay owns a dynamic loopback listener and the fixed
-            # Unix lease. The official child adds an exact-port sandbox below.
+            # Apply one network boundary, inherited by the version probe,
+            # official client and helpers. Darwin refuses sandbox re-init in
+            # descendants. The relay's dynamic listener requires loopback;
+            # all non-loopback traffic remains denied throughout the launch.
             policy = ('(version 1) (allow default) (deny network*) '
                 '(allow network-bind network-inbound (local ip "localhost:*")) '
                 '(allow network-outbound (remote ip "localhost:*")) '
@@ -519,10 +522,8 @@ if not {bare_claude!r}:
     # child, not to the native broker, launcher, or user's installed setup.
     os.environ["CODEX_HOME"] = {str(self.root / 'codex-config')!r}
 if sys.argv[1:] == ["--version"]:
-    # The native guard sees the genuine pinned client's output; no fake version.
-    if {terminal_only!r}:
-        os.execv("/usr/bin/sandbox-exec", ["sandbox-exec", "-p",
-            "(version 1) (allow default) (deny network*)", real, "--version"])
+    # The guard sees the genuine pinned client's output. Terminal launches
+    # inherit the parent's network policy; never try to apply it twice.
     os.execv(real, [real, "--version"])
 if {bare_claude!r}:
     # Bare mode explicitly disables OAuth/Keychain reads and expects API-key
@@ -546,9 +547,8 @@ if {terminal_only!r}:
     assert endpoint.scheme == "http" and endpoint.hostname == "127.0.0.1" and endpoint.port
     with open({str(self.root / 'terminal-relay-address.json')!r}, "w") as address:
         address.write(json.dumps([endpoint.hostname, endpoint.port]))
-    policy = ('(version 1) (allow default) (deny network*) '
-              '(allow network-outbound (remote ip "localhost:' + str(endpoint.port) + '"))')
-    os.execv("/usr/bin/sandbox-exec", ["sandbox-exec", "-p", policy, *command])
+    # The relay and child share one inherited loopback-only policy. Applying
+    # sandbox-exec again here would prevent the actual client from starting.
 os.execv(real, command)
 """)
 
@@ -1140,18 +1140,61 @@ class NativeMacRelayFixtureTests(unittest.TestCase):
                         exec(compile(source, "generated-native-codex", "exec"), {})
                 execute.assert_called_once()
                 program, command = execute.call_args.args
-                self.assertEqual(program, "/usr/bin/sandbox-exec")
-                self.assertEqual(command[3:3 + 1 + len(arguments) + len(original)],
+                self.assertEqual(program, "/synthetic/pinned-clients/codex")
+                self.assertEqual(command[:1 + len(arguments) + len(original)],
                                  ["/synthetic/pinned-clients/codex", *arguments, *original])
                 expected = ["-c", "model_providers.hormuz_context_relay.request_max_retries=0",
                             "-c", "model_providers.hormuz_context_relay.stream_max_retries=0"]
                 if omit_work_header:
                     expected += ["-c", "model_providers.hormuz_context_relay.http_headers={}"]
-                self.assertEqual(command[3 + 1 + len(arguments) + len(original):], expected)
-                self.assertIn('(remote ip "localhost:43210")', command[2])
-                self.assertIn("(deny network*)", command[2])
+                self.assertEqual(command[1 + len(arguments) + len(original):], expected)
                 self.assertEqual(json.loads((fixture.root / "terminal-relay-address.json").read_text()),
                                  ["127.0.0.1", 43210])
+
+    def test_terminal_clients_inherit_one_network_boundary_for_real_version_probe(self) -> None:
+        from unittest.mock import patch
+
+        for name in ("codex", "claude"):
+            with self.subTest(client=name), \
+                    tempfile.TemporaryDirectory(prefix="hormuz-native-version-fixture-") as folder, \
+                    patch.dict(os.environ, {"HORMUZ_NATIVE_OFFICIAL_CLIENT_DIRECTORY": "/synthetic/pinned-clients"},
+                               clear=True):
+                fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+                fixture.root = Path(folder)
+                fixture._official_client(name, ["synthetic"], bare_claude=name == "claude", terminal_only=True)
+                source = (fixture.root / name).read_text()
+                with patch.object(sys, "argv", [name, "--version"]), \
+                        patch.object(os, "execv", side_effect=RuntimeError("fixed version boundary")) as execute:
+                    with self.assertRaisesRegex(RuntimeError, "fixed version boundary"):
+                        exec(compile(source, "generated-native-version", "exec"), {})
+                execute.assert_called_once_with("/synthetic/pinned-clients/" + name,
+                                                ["/synthetic/pinned-clients/" + name, "--version"])
+                self.assertNotIn("/usr/bin/sandbox-exec", source)
+                self.assertFalse((fixture.root / "terminal-relay-address.json").exists())
+
+    def test_terminal_launch_keeps_inherited_kernel_network_boundary(self) -> None:
+        from unittest.mock import patch
+
+        fixture = NativeMacRelayTests("test_official_clients_settle_real_work_ledger")
+        fixture.root = Path("/private/tmp/synthetic-native-boundary")
+        fixture.key = "12345678-1234-1234-1234-123456789abc"
+        fixture.broker = fixture.root / "broker"
+        fixture.optimizer = fixture.root / "optimizer"
+        with patch.dict(os.environ, {"HORMUZ_NATIVE_RELAY_BINARY": "/synthetic/native-relay"}, clear=True), \
+                patch("tests.test_native_macos_relay.subprocess.Popen") as spawn:
+            fixture._launch(work_id="work-owned", terminal_only=True)
+        command = spawn.call_args.args[0]
+        self.assertEqual(command[:2], ["/usr/bin/sandbox-exec", "-p"])
+        policy = command[2]
+        self.assertIn("(deny network*)", policy)
+        self.assertIn('(allow network-bind network-inbound (local ip "localhost:*"))', policy)
+        self.assertIn('(allow network-outbound (remote ip "localhost:*"))', policy)
+        self.assertIn('(allow network-outbound (literal "/private/tmp/synthetic-native-boundary/lease"))', policy)
+        self.assertNotIn('(allow network*)', policy)
+        self.assertEqual(command[3], "/synthetic/native-relay")
+        self.assertEqual(command[-2:], ["--work-id", "work-owned"])
+        self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+        self.assertEqual(spawn.call_args.kwargs["env"]["HOME"], str(fixture.root / "home"))
 
     def test_terminal_codex_refuses_missing_multiple_or_malformed_provider(self) -> None:
         from unittest.mock import patch
