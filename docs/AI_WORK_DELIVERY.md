@@ -32,7 +32,7 @@ connector code against local synthetic provider/payment transports. It makes no
 real provider request or payment. Synthetic metadata tests exercise mechanisms;
 they are not the customer-local quality benchmark or measured customer value.
 
-Current bounded executions passed 35 mechanics checks, the 21-scenario provider
+Recorded bounded executions passed 35 mechanics checks, the 21-scenario provider
 tour and 12 browser journey checks. Their 28/31/28 source fingerprints match
 the tested candidate files. The [installed SDK qualification](evidence/sdk-examples/README.md)
 also passed six actual SDK JSON/streaming cases through the authenticated gateway
@@ -72,11 +72,18 @@ Its PR merge checkout had the same Git tree as that source. The Mac run passed
 18 relay tests, including the actual pinned Codex On/Off and Claude streaming
 clients through an extracted compiled relay. Those gateway simulators establish
 transport and correlation behavior; they do not exercise the real work ledger.
-The new composition case joins those clients to actual `GatewayServer`,
-`WorkRuntime` and SQLite using three bounded synthetic terminal replies. Its
-local fixture qualification is distinct from execution of the conditional
-native case, which requires a new completed CI run. No reply declares a job
-complete, and no test calls a live provider.
+The composition case joins those clients to actual `GatewayServer`,
+`WorkRuntime` and SQLite using three bounded synthetic terminal replies. For
+source `b1a1ac2c97e124d2f3e8583e55ec7718dbfc9adb`,
+[Mac CI](https://github.com/Xpounder-com/hormuz/actions/runs/38012962487) passed
+all four jobs and all 38 native cases with zero native skips, including the
+named `test_official_clients_settle_real_work_ledger` case. Its actual PR merge
+checkout `9ea53eab1155445c94a1e9fdc4c67e3acefca940` has the same complete tree
+and Git modes as that candidate. The separate actual packaged-helper compaction
+case also passed. Providers, identity and startup broker transports remain
+fixtures; no reply declares a job complete, and no test calls a live provider.
+The CI package is ad-hoc and unnotarized. This does not qualify signed installed
+delivery, live Keychain custody, customer outcomes or later changed source.
 
 Nine pricing-mode regressions exercise actual JSON and streaming gateway
 admission, complete uncertain holds, cache exclusion, continuation affinity and
@@ -91,7 +98,9 @@ totals and restart checks. Its offline stage starts no listener. A separate
 creates and reads an owned job through the same installed wheel with exactly
 two authenticated local requests and no provider inference. Both stages identify
 clean build snapshot `51a0ac07241350029fd0d1c6a02a1cd84c00dba4`, with 33 source
-and 10 packaging hashes matching this candidate. All 1,703 snapshot file modes
+and 10 packaging hashes verified against that build snapshot. Subsequent runtime
+changes mean that this retained installed package does not qualify the current
+runtime. All 1,703 snapshot file modes
 and 247 wheel/installed core files were independently verified; owned state closed.
 The unpacked source archive also passed the frozen Linear transition and
 recommendation runtime verifiers with their original acceptance gates retained.
@@ -110,14 +119,20 @@ and passed 21 desktop/mobile rendered checks. No inquiry, booking, payment or
 authenticated hosted workspace was created by that qualification. Subsequent
 source changes need their own matching CI and publication; a predecessor's
 green run does not qualify them.
-Fresh website verification passes 74 Node tests. TypeScript and the offline
+The retained offline website verification passed 74 Node tests. TypeScript and the offline
 export passed against clean snapshot `a9d59e523f71251475f0c55e766ca3b517cc4f01`
 using disclosed private fallback fonts and webpack: 16 canonical pages, 974
 local link occurrences, 29 source targets and 76 byte-identical public assets.
-Production fonts and CI's default compiler are qualified separately. The earlier
-10 Python delivery checks and 11 publication configuration checks remain
-retained predecessor results; they do not qualify the final source or a new
-publication pin. A predecessor's green CI does not qualify a successor.
+Production fonts and CI's default compiler are qualified separately. Fresh
+[Website CI](https://github.com/Xpounder-com/hormuz/actions/runs/38012962492)
+for `b1a1ac2c97e124d2f3e8583e55ec7718dbfc9adb` passed 74 Node and 10 Python
+checks, compile/typecheck and a 16-page export. The separate
+[publication PR verification](https://github.com/usehormuz/usehormuz.github.io/actions/runs/38013479725)
+checked that exact immutable product source and passed 11 publication Node,
+74 product Node and 10 Python checks plus compile/typecheck/export. Deployment
+and live verification were skipped on that PR. These recorded runs do not
+qualify subsequent source changes or a public deployment; consult the linked
+PRs for the exact revision currently under review.
 
 ## Supported operation boundary
 
@@ -137,7 +152,9 @@ authorizes the owned job; the ID grants no actor or tenant authority and is neve
 saved in a connection profile. The generated Mac `.command` accepts the same
 pair while its resident-app lease is live. The panel's existing Open action
 remains unbound. See the [governed relay contract](../clients/rust/relay/README.md);
-signed native distribution and actual managed-client qualification remain open.
+signed native distribution and installed customer/provider qualification remain
+open. Compiled supported-client fixture qualification is recorded separately
+above.
 
 Automatic signed connectors and integrated full-state recovery are available in
 the full SQLite single-node gateway profile with enrolled sources. The fixed
