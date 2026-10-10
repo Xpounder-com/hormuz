@@ -89,7 +89,7 @@ test('required fields, limits, unknown and prototype interest values are safe', 
   assert.throws(() => buildInquiry({ name: ' ', workflow: 'hello' }));
   assert.throws(() => buildInquiry({ name: 'name', workflow: '' }));
   for (const interest of ['bad', '__proto__', 'constructor']) {
-    assert.equal(buildInquiry({ name: 'n', workflow: 'w', interest }).subject, 'Hormuz — Appliance with scoped onboarding');
+    assert.equal(buildInquiry({ name: 'n', workflow: 'w', interest }).subject, 'Hormuz — Engineering AI work');
   }
   assert.equal(buildInquiry({ name: 'n', workflow: 'w', interest: 'enterprise' }).subject, 'Hormuz — Appliance');
   assert.equal(buildInquiry({ name: 'n', workflow: 'w', interest: 'pro' }).subject, 'Hormuz — Cloud workspace');

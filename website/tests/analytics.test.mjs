@@ -108,3 +108,29 @@ test('link measurement identifies allowed destinations without passing URLs or a
   assert.deepEqual(trackedDestination('https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip'), ['install_click', 'mac_download']);
   for (const href of ['mailto:someone@example.com', 'https://other.example/docs/', '/privacy/', 'javascript:alert(1)']) assert.equal(trackedDestination(href), null);
 });
+
+test('the free-to-paid funnel requires consent and excludes private data', () => {
+  const paths = [
+    ['/plans/#offers', ['pricing_open', 'comparison']],
+    ['/plans/#cloud', ['pricing_open', 'cloud']],
+    ['/plans/#managed', ['pricing_open', 'managed']],
+    ['/plans/?email=private@example.com#private-value', ['pricing_open', 'comparison']],
+    ['/contact/?interest=cloud&workflow=private', ['inquiry_open', 'cloud']],
+    ['/contact/?interest=managed', ['inquiry_open', 'managed']],
+    ['/contact/?interest=private-value', ['inquiry_open', 'contact']],
+  ];
+  const win = browser();
+  for (const [href, expected] of paths) {
+    assert.deepEqual(trackedDestination(href), expected);
+    assert.equal(trackAnalyticsEvent(...expected, win, id), false);
+  }
+  assert.equal(win.dataLayer, undefined);
+  saveAnalyticsConsent('allowed', win);
+  assert.equal(trackAnalyticsEvent('pricing_open', 'comparison', win, id), true);
+  assert.equal(trackAnalyticsEvent('inquiry_open', 'cloud', win, id), true);
+  assert.equal(trackAnalyticsEvent('inquiry_open', 'managed', win, id), true);
+  assert.equal(trackAnalyticsEvent('inquiry_open', 'private-value', win, id), false);
+  assert.deepEqual(commands(win).filter(args => args[0] === 'event').map(args => [args[1], args[2].action]), [
+    ['page_view', undefined], ['pricing_open', 'comparison'], ['inquiry_open', 'cloud'], ['inquiry_open', 'managed'],
+  ]);
+});

@@ -89,7 +89,7 @@ test('lead validation requires reply contact and rejects invalid fields before s
   for (const field of ['name', 'email', 'organization', 'workflow']) assert.throws(() => buildLead({ ...fields, [field]: ' ' }));
   assert.throws(() => buildLead({ ...fields, email: 'invalid' }));
   assert.equal(buildLead({ ...fields, workflow: 'w'.repeat(2000) }).workflow.length, 1200);
-  assert.equal(buildLead({ ...fields, interest: '__proto__' }).interest, 'Appliance with scoped onboarding');
+  assert.equal(buildLead({ ...fields, interest: '__proto__' }).interest, 'Engineering AI work');
 });
 
 test('a lead is acknowledged only after a positive service response', async () => {

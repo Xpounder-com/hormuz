@@ -1,5 +1,6 @@
 import { CampaignLink } from '../../components/CampaignLink';
 import { CodeBlock } from '../../components/CodeBlock';
+import { TeamServiceNextStep } from '../../components/TeamServiceNextStep';
 import { PageFrame, PageHero } from '../../components/PageFrame';
 import { pageMetadata } from '../../../lib/metadata';
 import { sitePath, sourcePath } from '../../../lib/site.mjs';
@@ -103,6 +104,7 @@ export default function TeamBudgetsGuide() {
           <CodeBlock label="Report captured usage on your configured gateway" code={'hormuz --config /etc/hormuz/hormuz.json status --group-by team\nhormuz --config /etc/hormuz/hormuz.json status --group-by model --team engineering'} />
           <p>Use your actual configuration path and team ID. Compare estimated cost, input/output/cache tokens, and policy outcomes. A lower output cap does not guarantee a fixed saving: accepted requests, model rates, and workload quality still matter. The <a href={sourcePath('docs/USAGE.md')}>usage reporting reference ↗</a> explains report coverage and cost estimates.</p>
         </section>
+        <TeamServiceNextStep />
         <section className="docs-next"><div><span>Next guide</span><h2>Route your coding clients through Hormuz.</h2></div><CampaignLink className="button button-primary" href={sitePath('/guides/codex-claude-code-gateway/')}>Connect Codex & Claude Code →</CampaignLink></section>
       </article>
     </div>
