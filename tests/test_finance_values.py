@@ -3,11 +3,46 @@ from __future__ import annotations
 from decimal import Decimal, Inexact, InvalidOperation, Rounded, localcontext
 import json
 import unittest
+from unittest import mock
 
-from hormuz.finance_values import FinanceValueError, ProviderAmount, decimal_text, decode_provider_json, provider_amount
+from hormuz.finance_values import FinanceValueError, ProviderAmount, decimal_text, decode_provider_json, openai_provider_decimal_text, provider_amount
 
 
 class FinanceValueTests(unittest.TestCase):
+    def test_openai_report_decimal_policy_preserves_36_places_and_54_coefficient_digits(self):
+        smallest = "0." + "0" * 35 + "1"
+        largest = "9" * 18 + "." + "9" * 36
+        cases = ((smallest, smallest), (largest, largest), ("-" + smallest, "-" + smallest),
+                 ("1.000000000000000000000000000000000000000", "1"),
+                 ("-0.000000000000000000000000000000000000000", "0"))
+        with localcontext() as context:
+            context.prec = 2
+            context.traps[Inexact] = context.traps[Rounded] = True
+            context.clear_flags()
+            before = dict(context.flags)
+            for native, canonical in cases:
+                with self.subTest(native=native):
+                    self.assertEqual(openai_provider_decimal_text(native), canonical)
+                    self.assertEqual(openai_provider_decimal_text(Decimal(native)), canonical)
+            self.assertEqual(dict(context.flags), before)
+        for value in (smallest, largest):
+            with self.assertRaises(FinanceValueError):
+                decimal_text(Decimal(value))
+        with self.assertRaises(FinanceValueError):
+            provider_amount("anthropic", "0.000000000000000001", "USD")
+
+    def test_openai_report_decimal_rejects_extreme_exponents_before_formatting(self):
+        with mock.patch("hormuz.finance_values.format", create=True) as render:
+            for value in (Decimal("1e1000000"), Decimal("1e-1000000"), Decimal("1e18"), Decimal("1e-37")):
+                with self.subTest(value=value), self.assertRaises(FinanceValueError):
+                    openai_provider_decimal_text(value)
+            self.assertEqual(openai_provider_decimal_text(Decimal("-0e-1000000")), "0")
+            render.assert_not_called()
+        for value in (True, 0.1, None, [], "01", "+1", "1e-36", " 1", "NaN", "Infinity",
+                      "0." + "0" * 36 + "1", "9" * 19, "0." + "0" * 127):
+            with self.subTest(value=type(value).__name__), self.assertRaises(FinanceValueError):
+                openai_provider_decimal_text(value)
+
     def test_exact_decimal_strings_have_no_float_round_trip(self):
         for value, expected in (("0.000000000000000001", "0.000000000000000001"),
                                 ("999999999999999999.999999999999999999", "999999999999999999.999999999999999999"),

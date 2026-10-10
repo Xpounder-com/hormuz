@@ -71,6 +71,14 @@ exact provider-native decimal under those same magnitude, precision, scale, and
 exponent limits. Its allowlisted unit or null is retained separately without
 unit conversion; an absent quantity remains unknown rather than zero.
 
+Those numeric domains describe the frozen generic v1 checkpoint. The current
+OpenAI Costs runtime has an explicit additive
+[provider decimal policy extension v1](finance-openai-provider-decimal-policy-v1.json):
+36 fractional places with the same magnitude, source-text and exactness gates.
+Current collection, stored validation and provider reports use that policy;
+configured rates/estimates and Anthropic retain their original limits. The
+frozen contract file and historical identities/proofs are not rewritten.
+
 Only a complete page chain can publish. The snapshot, exact bucket-coverage
 rows, typed observations, receipt, append-only terminal attempt event, and
 audit-chain entries commit or roll back together. A failure stores only a fixed

@@ -24,6 +24,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .finance_values import FinanceValueError, decimal_text, exact_context, openai_provider_decimal_text
+
 
 MAX_PAGE_BYTES = 1_048_576
 MAX_TOTAL_BYTES = 16_777_216
@@ -51,7 +53,6 @@ FINANCE_COLLECTION_SOURCE_SCHEMA_IDS = frozenset(
 )
 
 _MAX_INT64 = 9_223_372_036_854_775_807
-_MONEY_BOUND = Decimal("1000000000000000000")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _DIMENSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+ -]{0,127}\Z")
 _JSON_NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\Z")
@@ -1320,31 +1321,36 @@ def _decimal_value(value: object, *, require_number: bool) -> tuple[str, Decimal
     ):
         raise FinanceCollectionError("numeric_domain_invalid")
     try:
-        decimal_value = Decimal(source)
+        with exact_context():
+            decimal_value = Decimal(source)
     except InvalidOperation:
         raise FinanceCollectionError("numeric_domain_invalid") from None
-    _validate_decimal(decimal_value)
-    return source, decimal_value, _decimal_text(decimal_value)
+    try:
+        canonical = (
+            openai_provider_decimal_text(decimal_value)
+            if require_number else _anthropic_decimal_text(decimal_value)
+        )
+    except FinanceValueError:
+        raise FinanceCollectionError("numeric_domain_invalid") from None
+    return source, decimal_value, canonical
 
 
 def _validate_decimal(value: Decimal) -> None:
-    if not value.is_finite() or not -_MONEY_BOUND < value < _MONEY_BOUND:
+    # Anthropic native and converted money retain the existing 18-place value
+    # and raw-scale domain. Tuple bounds precede formatting so validation never
+    # rounds or expands a huge exponent; no OpenAI exception applies here.
+    parts = value.as_tuple()
+    if not value.is_finite() or parts.exponent < -18 or len(parts.digits) > 36:
         raise FinanceCollectionError("numeric_domain_invalid")
-    text = format(value, "f")
-    unsigned = text.lstrip("-")
-    integer, dot, fractional = unsigned.partition(".")
-    if len(integer.lstrip("0")) > 18 or (
-        bool(dot) and len(fractional) > 18
-    ):
-        raise FinanceCollectionError("numeric_domain_invalid")
-    digits = value.as_tuple().digits
-    first_nonzero = next((index for index, digit in enumerate(digits) if digit), len(digits))
-    if len(digits[first_nonzero:]) > 36:
-        raise FinanceCollectionError("numeric_domain_invalid")
-    if value:
-        exponent = value.normalize().as_tuple().exponent
-        if not -18 <= exponent <= 17:
-            raise FinanceCollectionError("numeric_domain_invalid")
+    try:
+        decimal_text(value)
+    except FinanceValueError:
+        raise FinanceCollectionError("numeric_domain_invalid") from None
+
+
+def _anthropic_decimal_text(value: Decimal) -> str:
+    _validate_decimal(value)
+    return decimal_text(value)
 
 
 def _decimal_text(value: Decimal) -> str:

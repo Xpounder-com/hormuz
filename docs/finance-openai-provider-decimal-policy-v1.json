@@ -1,0 +1,52 @@
+{
+  "schema_id": "hormuz.finance.openai-provider-decimal-policy",
+  "schema_version": 1,
+  "policy_id": "openai-provider-decimal.v1",
+  "collection_profile": "openai.organization-costs.v1",
+  "extends_frozen_generic_contract": {
+    "path": "finance-collection-contract-v1.json",
+    "sha256": "c2e6bb5b2b510733ab45f1db43c4f03fe0a71d998911d7dbc04f48e6b2978944",
+    "domains": ["money", "provider_quantity"],
+    "scope": "OpenAI Costs provider observations and derived provider subtotals/variance only"
+  },
+  "source": {
+    "type": "finite JSON number, never binary float or boolean",
+    "native_numeric_lexeme_maximum_ascii_bytes": 128,
+    "retention": "exact native numeric text",
+    "normalization": "remove only insignificant trailing coefficient zeroes using Decimal tuple"
+  },
+  "exact_value_domain": {
+    "minimum_exclusive": "-1000000000000000000",
+    "maximum_exclusive": "1000000000000000000",
+    "maximum_integer_digits": 18,
+    "maximum_fractional_places": 36,
+    "maximum_canonical_coefficient_digits": 54,
+    "normalized_nonzero_exponent_minimum": -36,
+    "normalized_nonzero_exponent_maximum": 17,
+    "validate_before_formatting": true,
+    "zero": "canonical 0 without exponent expansion",
+    "rounding": "forbidden"
+  },
+  "applies_to": [
+    "OpenAI native and canonical cost amounts",
+    "OpenAI optional native quantities",
+    "normalized and stored OpenAI observation validation",
+    "selected OpenAI provider cost subtotals",
+    "comparable-account OpenAI signed and absolute variance"
+  ],
+  "arithmetic": {
+    "owned_decimal_precision": 96,
+    "inexact_and_rounded_operations": "trapped",
+    "maximum_report_rows": 10000,
+    "aggregate_or_variance_absolute_magnitude_at_least_1e18": "unavailable, never rounded or clipped"
+  },
+  "unchanged": [
+    "configured rates and estimates: 18 fractional places",
+    "Anthropic native and converted money: 18 fractional places",
+    "legacy provider_amount and ProviderAmount foundation: 18 fractional places",
+    "collection/schema identities, accepted legacy row values and digests",
+    "amount/quantity TEXT columns and 128-character limits",
+    "account/group/coverage/pagination/privacy and provider/invoice finality gates"
+  ],
+  "evidence_limit": "The failed live response's numeric field and value are unknown; this policy is not a claim of live 36-place coverage."
+}

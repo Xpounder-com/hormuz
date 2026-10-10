@@ -14,7 +14,7 @@ from decimal import Decimal, DecimalException
 import re
 
 from .finance_collection import MAX_WINDOW_DAYS, PROFILE_SPECS, _time_text
-from .finance_values import FinanceValueError, currency_code, decimal_text, exact_context
+from .finance_values import FinanceValueError, currency_code, decimal_text, exact_context, openai_provider_decimal_text
 
 
 MAX_REFERENCE_ROWS = 10_000
@@ -221,6 +221,7 @@ def calculate_reference_variance(
     attempt_ids: list[str] = []
     price_identity_digests: list[str] = []
     unpriced = 0
+    provider_decimal = openai_provider_decimal_text if provider_grain.provider == "openai" else decimal_text
     try:
         with exact_context():
             provider_total = Decimal(0)
@@ -232,7 +233,7 @@ def calculate_reference_variance(
                 ):
                     raise FinanceVarianceReferenceError("finance_reference_invalid")
                 provider_keys.append((row.snapshot_id, row.observation_digest))
-                amount = decimal_text(row.signed_amount)
+                amount = provider_decimal(row.signed_amount)
                 if amount != row.signed_amount:
                     raise FinanceVarianceReferenceError("finance_reference_invalid")
                 provider_total += Decimal(amount)
@@ -255,10 +256,10 @@ def calculate_reference_variance(
                     raise FinanceVarianceReferenceError("finance_reference_invalid")
                 estimate_subtotal += Decimal(amount)
             signed = provider_total - estimate_subtotal
-            provider_text = decimal_text(provider_total)
+            provider_text = provider_decimal(provider_total)
             estimate_text = decimal_text(estimate_subtotal)
-            signed_text = decimal_text(signed)
-            absolute_text = decimal_text(abs(signed))
+            signed_text = provider_decimal(signed)
+            absolute_text = provider_decimal(abs(signed))
     except (FinanceValueError, DecimalException):
         raise FinanceVarianceReferenceError("finance_reference_invalid") from None
     if (

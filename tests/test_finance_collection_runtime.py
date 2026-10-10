@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime, timezone
+from decimal import Inexact, InvalidOperation, Rounded, localcontext
 import io
 import json
 from pathlib import Path
@@ -204,6 +205,96 @@ def normalized_usage(
 
 
 class FinanceCollectionNormalizationTests(unittest.TestCase):
+    def test_openai_cost_amount_and_quantity_preserve_exact_extended_decimal_lexemes(self):
+        cases = (("0." + "0" * 35 + "1", "0." + "0" * 35 + "1"),
+                 ("9" * 18 + "." + "9" * 36, "9" * 18 + "." + "9" * 36),
+                 ("-1.000000000000000000000000000000000001", "-1.000000000000000000000000000000000001"),
+                 ("1e-36", "0." + "0" * 35 + "1"),
+                 ("1." + "0" * 100, "1"), ("-0e-1000000", "0"))
+        with localcontext() as context:
+            context.prec = 2
+            context.traps[Inexact] = context.traps[Rounded] = True
+            original_flags = context.flags.copy()
+            for native, canonical in cases:
+                with self.subTest(native=native):
+                    record = openai_cost(amount={"value": "exact-amount", "currency": "usd"},
+                                         quantity="exact-quantity", quantity_unit=None)
+                    page = openai_page([openai_bucket(START, MIDDLE, [record])])
+                    page = page.replace(b'"exact-amount"', native.encode()).replace(b'"exact-quantity"', native.encode())
+                    collection = normalize_collection_pages(query("openai.organization-costs.v1"),
+                        (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+                    item = collection.cost_observations[0]
+                    self.assertEqual((item.native_amount, item.canonical_amount, item.native_quantity),
+                                     (native, canonical, native))
+                    self.assertEqual((item.provider_final, item.invoice_final), (False, False))
+                    validate_normalized_collection(collection)
+            self.assertEqual(context.flags, original_flags)
+
+    def test_collection_extreme_numeric_exponents_cannot_mutate_caller_flags(self):
+        for trapped in (False, True):
+            for field in ("amount", "quantity"):
+                for exponent in ("9" * 40, "-" + "9" * 40):
+                    record = openai_cost(amount={"value": "exact-amount", "currency": "USD"},
+                                         quantity="exact-quantity", quantity_unit=None)
+                    page = openai_page([openai_bucket(START, MIDDLE, [record])])
+                    for name in ("amount", "quantity"):
+                        raw = "1e" + exponent if name == field else "1"
+                        page = page.replace(('"exact-' + name + '"').encode(), raw.encode())
+                    with self.subTest(trapped=trapped, field=field, negative=exponent.startswith("-")), localcontext() as context:
+                        context.traps[InvalidOperation] = trapped
+                        context.clear_flags()
+                        original_flags = context.flags.copy()
+                        with self.assertRaisesRegex(FinanceCollectionError, "numeric_domain_invalid"):
+                            normalize_collection_pages(query("openai.organization-costs.v1"),
+                                (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+                        self.assertEqual(context.flags, original_flags)
+
+    def test_legacy_openai_canonical_values_and_snapshot_identities_are_unchanged(self):
+        from hormuz.finance_values import decimal_text
+
+        for native in ("1.25", "-0.000000000000000001", "999999999999999999.999999999999999999", "1e-18", "-0.00"):
+            record = openai_cost(amount={"value": "exact-amount", "currency": "USD"},
+                                 quantity="exact-quantity", quantity_unit="tokens")
+            page = openai_page([openai_bucket(START, MIDDLE, [record])])
+            page = page.replace(b'"exact-amount"', native.encode()).replace(b'"exact-quantity"', native.encode())
+            value = query("openai.organization-costs.v1")
+            actual = normalize_collection_pages(value, (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+            with mock.patch("hormuz.finance_collection.openai_provider_decimal_text", side_effect=decimal_text):
+                legacy = normalize_collection_pages(value, (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+            with self.subTest(native=native):
+                self.assertEqual(actual, legacy)
+                self.assertEqual(actual.content_digest, legacy.content_digest)
+                self.assertEqual(actual.cost_observations[0].observation_digest,
+                                 legacy.cost_observations[0].observation_digest)
+
+    def test_openai_cost_decimal_rejects_precision_range_and_lexeme_overruns_for_both_fields(self):
+        for field in ("amount", "quantity"):
+            for native in ("1e-37", "1e18", "-1e18", "1e-1000000", "1e1000000",
+                           "0." + "0" * 36 + "1", "1." + "0" * 127):
+                with self.subTest(field=field, native=native):
+                    record = openai_cost(amount={"value": "exact-amount", "currency": "USD"},
+                                         quantity="exact-quantity", quantity_unit=None)
+                    page = openai_page([openai_bucket(START, MIDDLE, [record])])
+                    page = page.replace(b'"exact-amount"', (native if field == "amount" else "1").encode())
+                    page = page.replace(b'"exact-quantity"', (native if field == "quantity" else "1").encode())
+                    with self.assertRaisesRegex(FinanceCollectionError, "numeric_domain_invalid"):
+                        normalize_collection_pages(query("openai.organization-costs.v1"),
+                            (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+
+    def test_openai_stored_decimal_validation_rejects_forged_extended_values_and_anthropic_stays_18_places(self):
+        page = openai_page([openai_bucket(START, MIDDLE, [openai_cost()])])
+        original = normalize_collection_pages(query("openai.organization-costs.v1"),
+            (page,), fingerprint_key=KEY, fingerprint_key_version=1)
+        for field in ("native_amount", "native_quantity"):
+            item = replace(original.cost_observations[0], **{field: "1e-37"})
+            with self.subTest(field=field), self.assertRaisesRegex(FinanceCollectionError, "snapshot_conflict"):
+                validate_normalized_collection(replace(original, cost_observations=(item,)))
+        for native in ("0." + "0" * 18 + "1", "0." + "0" * 16 + "1", "1." + "0" * 19):
+            with self.subTest(native=native), self.assertRaisesRegex(FinanceCollectionError, "numeric_domain_invalid"):
+                normalize_collection_pages(query("anthropic.organization-costs.v1"),
+                    (anthropic_page([anthropic_bucket(START, MIDDLE, [anthropic_cost(amount=native)])]),),
+                    fingerprint_key=KEY, fingerprint_key_version=1)
+
     def test_openai_cost_quantity_nullability_and_identity_preserve_native_values(self):
         value = query("openai.organization-costs.v1")
 
@@ -604,7 +695,7 @@ class FinanceCollectionNormalizationTests(unittest.TestCase):
                 fingerprint_key_version=1,
             )
         cost_query = query("openai.organization-costs.v1")
-        for amount in (True, 1e18, 0.0000000000000000001):
+        for amount in (True, 1e18, 1e-37):
             with self.subTest(amount=amount):
                 record = openai_cost(amount={"value": amount, "currency": "USD"})
                 with self.assertRaises(FinanceCollectionError):

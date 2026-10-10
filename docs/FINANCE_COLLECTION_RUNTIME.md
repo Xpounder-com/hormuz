@@ -58,6 +58,34 @@ existing nullable text storage needs no migration. Anthropic quantity fields,
 unknown units and invalid numeric/unit types remain rejected; provider and
 invoice finality remain false.
 
+## OpenAI provider decimal policy extension v1
+
+The current Costs runtime applies the versioned
+[OpenAI provider decimal policy](finance-openai-provider-decimal-policy-v1.json)
+as an explicit profile exception to the frozen generic numeric domains in
+`finance-collection-contract-v1.json`. Required JSON-number amounts and optional
+quantities keep their original numeric text, bounded to 128 ASCII bytes. Their
+exact values permit 18 integer digits and 36 fractional places, with magnitude
+strictly below `10^18` and at most 54 coefficient digits after removing only
+insignificant trailing zeroes. Canonical amounts never pass through binary
+floats, rounding or ambient `Decimal.normalize()`.
+
+The same policy validates stored OpenAI observations, selected provider cost
+subtotals and comparable-account variance. Arithmetic uses the owned 96-digit
+context with inexact/rounded operations trapped. Reports remain limited to
+10,000 rows; even valid individual rows can make a subtotal or variance whose
+absolute magnitude reaches `10^18`. That result is unavailable, never rounded
+or clipped. Canonical text fits the existing 128-character SQLite/PostgreSQL
+columns, so no migration or numeric cast is introduced.
+
+Configured rate/estimate values, the legacy `ProviderAmount` foundation, and
+Anthropic native/converted money retain the existing 18-place policy. Old
+accepted observations retain their native/canonical values, semantic identity
+and digests; schema/profile identities and provider/invoice finality do not
+change. The historical contract and its proof hashes remain unchanged.
+This bounded extension does not claim the failed live response's field/value
+is known or that a 36-place bound has been live-qualified.
+
 ## PostgreSQL security gate
 
 PostgreSQL schema 16 provisions the seven owner-controlled collection tables,

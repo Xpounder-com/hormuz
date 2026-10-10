@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
+from decimal import Inexact, Rounded, localcontext
 import io
 import json
 from pathlib import Path
@@ -144,6 +145,102 @@ class FinanceCollectionCLITests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT state,reason_code FROM portfolio_finance_collection_events").fetchone(),
                              ("failed", "normalization_failed"))
             self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0], 0)
+
+    def test_openai_extended_decimals_store_reopen_report_and_repeat_exactly(self):
+        self.bind()
+        positive = "1." + "0" * 35 + "2"
+        negative = "-0." + "0" * 35 + "1"
+        quantity = "123.123456789012345678901234567890123456"
+        bucket = openai_cost_metadata_bucket(
+            amount={"value": "exact-positive", "currency": "usd"},
+            quantity="exact-quantity", quantity_unit=None,
+        )
+        credit = {**bucket["results"][0],
+                  "amount": {"value": "exact-negative", "currency": "usd"},
+                  "quantity_unit": "1000_tokens"}
+        bucket["results"].append(credit)
+        page = openai_page([bucket])
+        for placeholder, raw in (("exact-positive", positive), ("exact-negative", negative),
+                                 ("exact-quantity", quantity)):
+            page = page.replace(('"' + placeholder + '"').encode(), raw.encode())
+        fetched = mock.Mock(return_value=(page,))
+        dependencies = finance_commands.FinanceCommandDependencies(
+            resolve_credentials=lambda *_args, **_kwargs: {"openai": "synthetic-key"},
+            fetch_pages=fetched,
+        )
+        with localcontext() as context:
+            context.prec = 2
+            context.traps[Inexact] = context.traps[Rounded] = True
+            outcome = self.invoke(self.cost_collect_args(), dependencies=dependencies)
+        self.assertEqual((outcome[0], outcome[2]), (0, ""))
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            rows = connection.execute(
+                "SELECT native_amount, canonical_amount, native_quantity, currency, cost_basis, "
+                "provider_final, invoice_final, typeof(canonical_amount) FROM portfolio_finance_cost_observations"
+            ).fetchall()
+        self.assertEqual(set(rows), {
+            (value, value, quantity, "USD", "provider_reported_aggregate", 0, 0, "text")
+            for value in (positive, negative)
+        })
+        reopened = create_finance_collection_repository(self.config).observations_as_of(
+            ADMIN, binding_id="provider-account", binding_version=1,
+            collection_profile="openai.organization-costs.v1", start_at=START, end_at=MIDDLE,
+        )
+        self.assertEqual({row["canonical_amount"] for row in reopened.observations}, {positive, negative})
+        self.assertEqual({row["native_quantity"] for row in reopened.observations}, {quantity})
+        current = create_finance_collection_repository(self.config).current_observations(
+            ADMIN, binding_id="provider-account", binding_version=1,
+            collection_profile="openai.organization-costs.v1", start_at=START, end_at=MIDDLE,
+        )
+        self.assertEqual(current.observations, reopened.observations)
+        blocked = finance_commands.FinanceCommandDependencies(
+            resolve_credentials=mock.Mock(side_effect=AssertionError("report resolves no credentials")),
+            fetch_pages=mock.Mock(side_effect=AssertionError("report performs no provider read")),
+        )
+        with localcontext() as context:
+            context.prec = 2
+            context.traps[Inexact] = context.traps[Rounded] = True
+            report = self.invoke(
+                ["finance", "report", "provider-account", "1", "openai.organization-costs.v1",
+                 START, MIDDLE, "--currency", "USD"], dependencies=blocked,
+            )
+        self.assertEqual((report[0], report[2]), (0, ""))
+        provider_cost = json.loads(report[1])["preview"]["provider_cost"]
+        self.assertEqual(provider_cost["known_subtotal"], "1." + "0" * 35 + "1")
+        self.assertEqual((provider_cost["provider_final"], provider_cost["invoice_final"]), (False, False))
+        self.assertEqual(self.invoke(self.cost_collect_args(), dependencies=dependencies), outcome)
+        fetched.assert_called_once()
+        blocked.resolve_credentials.assert_not_called()
+        blocked.fetch_pages.assert_not_called()
+
+    def test_openai_extended_decimal_rejection_records_failure_without_publishing(self):
+        self.bind()
+        for index, invalid_field in enumerate(("amount", "quantity")):
+            bucket = openai_cost_metadata_bucket(
+                amount={"value": "exact-amount", "currency": "usd"},
+                quantity="exact-quantity", quantity_unit=None,
+            )
+            page = openai_page([bucket])
+            for field in ("amount", "quantity"):
+                raw = "1e-37" if field == invalid_field else "1"
+                page = page.replace(('"exact-' + field + '"').encode(), raw.encode())
+            fetched = mock.Mock(return_value=(page,))
+            dependencies = finance_commands.FinanceCommandDependencies(
+                resolve_credentials=lambda *_args, **_kwargs: {"openai": "synthetic-key"},
+                fetch_pages=fetched,
+            )
+            args = self.cost_collect_args()
+            args[args.index("--idempotency-key") + 1] = f"invalid-decimal-{index}"
+            with self.subTest(field=invalid_field):
+                status, stdout, stderr = self.invoke(args, dependencies=dependencies)
+                self.assertEqual((status, stdout), (2, ""))
+                self.assertEqual(json.loads(stderr)["error"]["code"], "numeric_domain_invalid")
+                fetched.assert_called_once()
+        with managed_sqlite_connection(self.config.database_path) as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_snapshots").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT count(*) FROM portfolio_finance_cost_observations").fetchone()[0], 0)
+            events = connection.execute("SELECT state, reason_code FROM portfolio_finance_collection_events").fetchall()
+        self.assertEqual(events, [("failed", "normalization_failed"), ("failed", "normalization_failed")])
 
     def test_cost_iso_aliases_collect_to_authoritative_numeric_bounds_and_same_digest(self):
         self.bind()
