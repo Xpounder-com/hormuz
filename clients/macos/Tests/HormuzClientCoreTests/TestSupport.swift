@@ -7,6 +7,7 @@ final class MemorySessions: SessionStore, @unchecked Sendable {
     private var value: SessionRecord?
     var failNextSave = false
     var cancelOnNextSave = false
+    var failNextDelete = false
     func load() throws -> SessionRecord? { mutex.lock(); defer { mutex.unlock() }; return value }
     func save(_ record: SessionRecord) throws {
         mutex.lock(); defer { mutex.unlock() }
@@ -14,7 +15,11 @@ final class MemorySessions: SessionStore, @unchecked Sendable {
         value = record
         if cancelOnNextSave { cancelOnNextSave = false; withUnsafeCurrentTask { $0?.cancel() } }
     }
-    func delete() throws { mutex.lock(); defer { mutex.unlock() }; value = nil }
+    func delete() throws {
+        mutex.lock(); defer { mutex.unlock() }
+        if failNextDelete { failNextDelete = false; throw ClientError.secureStoreUnavailable }
+        value = nil
+    }
 }
 
 final class TestClock: @unchecked Sendable {

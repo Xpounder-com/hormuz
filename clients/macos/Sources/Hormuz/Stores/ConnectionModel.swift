@@ -24,6 +24,10 @@ import Observation
     private(set) var contextOptimizationEnabled = false
     private(set) var contextOptimizationStatus = ContextOptimizationStatus.off
     var showingPreview = false
+    var showingRemoval = false
+    private(set) var removalPreview: LocalSetupRemovalPreview?
+    private(set) var removalResult: LocalSetupRemovalResult?
+    var openRemovalControls: (() -> Void)?
     var message: String?
     private var controller: SessionController?
     private var directory: PrivateDirectory?
@@ -264,6 +268,60 @@ import Observation
     }
 
     func stopLaunchedClients() { relayOwner?.stop() }
+
+    func previewRemoval() {
+        openRemovalControls?()
+        run {
+            guard let controller = self.controller else { throw ClientError.storageUnavailable }
+            self.removalResult = nil
+            self.removalPreview = try await controller.previewLocalSetupRemoval()
+            self.showingRemoval = true
+        }
+    }
+
+    func applyRemoval(resetAppearanceSelected: Bool, resetAppearance: @escaping () -> Void) {
+        run {
+            guard let controller = self.controller, let preview = self.removalPreview else {
+                throw ClientError.storageUnavailable
+            }
+            self.dashboard = nil
+            self.relayOwner?.stop()
+            self.relayOwner = nil
+            self.connector = nil
+            self.connectorSaved = false
+            // This closes only our lease. Other detectable owners cause a
+            // bounded refusal; no unrelated process is terminated.
+            let result: LocalSetupRemovalResult
+            do { result = try await controller.applyLocalSetupRemoval(previewToken: preview.preview_token) }
+            catch {
+                // A persisted retry intent changes the preview token. Keep the
+                // retry action usable after logout or partial cleanup failure.
+                self.removalPreview = try? await controller.previewLocalSetupRemoval()
+                throw error
+            }
+            guard result.keychain_session_absent, result.generated_setup_absent, !result.pending else {
+                throw ClientError.removalPending
+            }
+            if resetAppearanceSelected { resetAppearance() }
+            self.removalResult = result.withAppearanceReset(resetAppearanceSelected)
+            self.profile = nil
+            self.hasSession = false
+            self.sessionState = nil
+            self.contextOptimizationEnabled = false
+            self.contextOptimizationStatus = .off
+            self.message = "Verified local setup was removed. Edited and shared files were retained."
+        }
+    }
+
+    func quitAndRevealApp() {
+        let bundle = Bundle.main
+        guard ["com.xpounder.hormuz", "com.hormuz.mac.local"].contains(bundle.bundleIdentifier ?? ""),
+              let executable = bundle.executableURL,
+              executable.standardizedFileURL.path.hasPrefix(bundle.bundleURL.standardizedFileURL.path + "/Contents/")
+        else { message = "The running app bundle could not be verified. Quit Hormuz and locate the app in Finder."; return }
+        NSWorkspace.shared.activateFileViewerSelecting([bundle.bundleURL])
+        NSApp.terminate(nil)
+    }
 
     func setContextOptimization(enabled: Bool) {
         run {

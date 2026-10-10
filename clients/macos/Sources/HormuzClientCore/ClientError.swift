@@ -10,6 +10,7 @@ public enum ClientError: String, Error, LocalizedError {
     case storageUnavailable, profileBusy, configurationChanged, invalidArguments
     case contextSettingsInvalid, contextHelperUnavailable
     case desktopProfileChanged, desktopUnavailable
+    case removalPending, removalRecoveryRequired
 
     public var errorDescription: String? {
         switch self {
@@ -37,6 +38,8 @@ public enum ClientError: String, Error, LocalizedError {
         case .contextHelperUnavailable: return "The local context optimization helper is unavailable. Save a new connector after reinstalling Hormuz."
         case .desktopProfileChanged: return "Your team's Hormuz settings changed. Sign out and connect again to update this client."
         case .desktopUnavailable: return "Hormuz sign-in is not configured for this app. Use Advanced to connect to a self-hosted gateway."
+        case .removalPending: return "Local setup removal is pending. Retry removal before starting a new connection."
+        case .removalRecoveryRequired: return "An edited local file could not be restored safely. Its bytes were retained; review local removal recovery."
         }
     }
 

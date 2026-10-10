@@ -1,11 +1,14 @@
 import Foundation
 import Security
 
-public protocol SessionStore: Sendable {
+public protocol SessionStore: AnyObject, Sendable {
+    var coordinationNamespace: String? { get }
     func load() throws -> SessionRecord?
     func save(_ record: SessionRecord) throws
     func delete() throws
 }
+
+public extension SessionStore { var coordinationNamespace: String? { nil } }
 
 /// A single active local connection. The app and its command-line helper are the
 /// same executable, avoiding a second executable's Keychain access requirements.
@@ -17,6 +20,7 @@ public final class KeychainSessionStore: SessionStore {
     private let account = "active-connection-v1"
 
     public init(service: String = "com.hormuz.mac.session.v1") { self.service = service }
+    public var coordinationNamespace: String? { service + ":" + account }
 
     private var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,

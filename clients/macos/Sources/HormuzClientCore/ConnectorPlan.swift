@@ -81,6 +81,7 @@ public struct ConnectorPlan: Sendable {
     public func apply(in directory: PrivateDirectory) async throws {
         let lock = try await directory.lock()
         defer { lock.unlock() }
+        try directory.requireSetupWritable()
         guard try directory.loadProfile() == profile else { throw ClientError.configurationChanged }
         // Check every snapshot before touching any file. A partially completed
         // write can be retried from a fresh preview without rewriting user files.
@@ -98,6 +99,9 @@ public struct ConnectorPlan: Sendable {
             }
             try directory.write(file.content, to: file.name, expected: file.previous, executable: file.executable)
         }
+        try NativeOwnership.record(files.map {
+            NativeOwnedFile(name: $0.name, digest: NativeOwnership.digest($0.content), profileID: profile.id, kind: "launcher")
+        }, directory: directory)
     }
 
     public var previewText: String {

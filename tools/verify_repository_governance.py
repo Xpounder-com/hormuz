@@ -1367,6 +1367,8 @@ def _validate_macos_pilot_operations_workflow(
         or text.count(scope_argument) != 2
         or prepare.count(scope_environment) != 1
         or prepare.count(scope_argument) != 1
+        or 'install -m 0600 tools/macos_pilot_bounded_process.pl' not in prepare
+        or '"$HORMUZ_STAGE/macos_pilot_bounded_process.pl"' not in prepare
         or assemble.count(scope_environment) != 1
         or assemble.count(scope_argument) != 1
         or assemble.count("HORMUZ_ASSEMBLE_ARGUMENTS=(") != 1
@@ -1416,12 +1418,20 @@ def _validate_macos_pilot_operations_workflow(
         )
     if (
         text.count("retention-days: 1") != 2
-        or text.count("retention-days: 30") != 1
-        or text.count("overwrite: false") != 3
+        or text.count("retention-days: 30") != 2
+        or text.count("overwrite: false") != 4
         or "hormuz-macos-pilot-operations-${{ github.run_number }}-"
         "${{ github.run_attempt }}" not in assemble
-        or "path: ${{ runner.temp }}/hormuz-macos-pilot-operations" not in assemble
-        or 'test "$(find "$HORMUZ_OUTPUT" -type f | wc -l | tr -d \' \')" = 1'
+        or "path: ${{ runner.temp }}/hormuz-macos-pilot-operations/"
+        "macos-pilot-operations-evidence.json\n" not in assemble
+        or "path: ${{ runner.temp }}/hormuz-macos-pilot-operations/removal.json\n"
+        not in assemble
+        or "hormuz-macos-native-removal-${{ github.run_number }}-"
+        "${{ github.run_attempt }}" not in assemble
+        or '--removal "$RUNNER_TEMP/hormuz-macos-arm64-records/removal.json"'
+        not in assemble
+        or '--removal-output "$HORMUZ_OUTPUT/removal.json"' not in assemble
+        or 'test "$(find "$HORMUZ_OUTPUT" -type f | wc -l | tr -d \' \')" = 2'
         not in assemble
     ):
         raise RepositoryGovernanceError(
