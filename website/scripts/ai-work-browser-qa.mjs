@@ -84,13 +84,18 @@ try {
     captureError = new Error('Browser recording exceeded its 90-second capture deadline');
     void context.close().catch(() => {});
   }, captureDeadlineMs);
-  const viewStep = async (name, target = page.locator('body'), holdMs = 1500) => {
+  const viewStep = async (name, target = page.locator('body'), holdMs = 1500, requireFullView = false) => {
     if (!readableRecording) return;
     if (captureError) throw captureError;
     assert.ok(viewingSteps.length < 20 && holdMs >= 1000 && holdMs <= 3000);
     await target.scrollIntoViewIfNeeded(); assert.equal(await target.isVisible(), true);
+    await target.evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
     // Let the verified state paint, then keep it visible for the recording.
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    if (requireFullView) assert.equal(await target.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.top >= 0 && bounds.bottom <= innerHeight && bounds.left >= 0 && bounds.right <= innerWidth;
+    }), true, 'The entire held outcome panel must fit in the viewport');
     const began = Math.round(performance.now() - captureStarted);
     await page.waitForTimeout(holdMs);
     if (captureError) throw captureError;
@@ -196,7 +201,9 @@ try {
   record('verified signed GitHub merge supplies declared completion condition');
   assert.match(await page.locator('body').innerText(), /verified_github/);
   assert.match(await page.locator('body').innerText(), /Gateway overhead/); assert.match(await page.locator('body').innerText(), /Provider-confirmed cost\s+Unknown/);
-  await viewStep('Verified completion and outcome receipt', page.getByText('Outcome evidence', { exact: true }), 3000);
+  const outcome = page.getByText('Outcome evidence', { exact: true }).locator('..');
+  assert.match(await outcome.innerText(), /completed/); assert.match(await outcome.innerText(), /verified_github/);
+  await viewStep('Verified completion and outcome receipt', outcome, 3000, true);
   await page.screenshot({ path: path.join(artifactRoot, 'AI_WORK_JOB_DESKTOP.png'), fullPage: true });
   const receipt = await backend(fixture, '/v1/work/jobs/' + job.work_id, 'GET', { cookie: fixture.cookie.name + '=' + fixture.cookie.value }, null);
   assert.equal(receipt.status, 200); assert.equal(JSON.parse(receipt.body).state, 'completed');
