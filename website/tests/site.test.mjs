@@ -176,6 +176,13 @@ test('published AI Work proof matches the executed receipt and keeps its conditi
   assert.deepEqual(browser.browser_errors, []);
   assert.deepEqual(browser.failed_requests, []);
   assert.equal(browser.horizontal_overflow, false);
+  assert.equal(browser.recording.mode, 'readable_journey');
+  assert.equal(browser.recording.performance_measurement, false);
+  assert.ok(browser.recording.presentation_holds_ms >= 20000);
+  assert.ok(browser.recording.video.duration_seconds >= 20 && browser.recording.video.duration_seconds < browser.recording.capture_deadline_ms / 1000);
+  assert.equal(browser.recording.video.error, null);
+  assert.ok(browser.recording.steps.length >= 10);
+  assert.ok(browser.recording.steps.every((step, index, steps) => step.ended_ms >= step.began_ms + step.presentation_hold_ms - 50 && (index === 0 || step.began_ms >= steps[index - 1].ended_ms)));
   const browserSources = sourceFiles;
   assert.deepEqual(Object.keys(browser.source_files).sort(), [...browserSources].sort());
   for (const path of browserSources) assert.equal(browser.source_files[path], createHash('sha256').update(readFileSync(new URL(`../../${path}`, import.meta.url))).digest('hex'), `${path}: rerun browser qualification after source changes`);

@@ -227,7 +227,7 @@ executed `docs/evidence/ai-work-functional/receipt.json`; recopy it after any
 regenerated execution before building. It records synthetic configured estimates
 and local timings, not customer savings or production model quality.
 
-Both execution receipts identify the same 27 gateway, billing, identity, CLI,
+Both execution receipts identify the same 28 gateway, billing, identity, CLI,
 UI and runner files by SHA-256. Website tests enforce exact current source hashes
 and byte-identical public recording, poster and browser-check copies. Reproduce
 the browser journey from the source root with installed test dependencies,
@@ -236,8 +236,12 @@ Playwright and Chrome:
 ```sh
 HORMUZ_QA_PYTHON=/path/to/project-venv/bin/python \
 HORMUZ_QA_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs \
-node website/scripts/ai-work-browser-qa.mjs
+node website/scripts/ai-work-browser-qa.mjs --readable-recording
 ```
+
+The readable recording holds verified visible screens under a 90-second capture
+deadline; those viewing pauses are not latency measurements. The default
+no-argument mode skips the holds for fast functional automation.
 
 See [the browser validation guide](../docs/AI_WORK_BROWSER_VALIDATION.md) for
 interception and qualification boundaries. Regenerate the browser run and gateway

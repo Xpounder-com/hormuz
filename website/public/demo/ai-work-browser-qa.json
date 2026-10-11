@@ -1,7 +1,7 @@
 {
   "schema_id": "hormuz.ai-work-browser-validation",
   "schema_version": 1,
-  "generated_at": "2026-10-11T13:27:09.592Z",
+  "generated_at": "2026-10-11T16:57:28.575Z",
   "fixture": "actual gateway with synthetic local identity, provider, Stripe transport and signed GitHub fixture",
   "provider_calls": "3 local simulated provider responses; zero real or paid provider calls",
   "viewports": [
@@ -58,7 +58,7 @@
     "hormuz/hosted.py": "8f7e685fe9ac89c67b012aa90c964ecb1d286debc34cc08f10434598463a4f76",
     "tools/ai_work_proof.py": "4ba8eefee4174f403b8cdf7cb83a1b611e481b15c1c1fc8fd8a38d829d2fdb62",
     "tools/ai_work_browser_fixture.py": "2e80a56bf59edfaef69599f8fe32fd4cbc91adf4c619ff2cf1ecf08c987c8c85",
-    "website/scripts/ai-work-browser-qa.mjs": "b5f8314ed6b919f2f0bf037cb16db91b824716a7906c882a18854e9ec449ba20"
+    "website/scripts/ai-work-browser-qa.mjs": "b3e962226fa58fd58f91c81e02a383353918b238149ef082381a16392d01b530"
   },
   "artifacts": [
     "AI_WORK_DEMO.webm",
@@ -73,5 +73,109 @@
     "synthetic signed Stripe events are not real payment or live billing qualification",
     "synthetic signed GitHub delivery is not live customer connector qualification",
     "API fixture work does not qualify a particular installed native coding agent version"
-  ]
+  ],
+  "recording": {
+    "mode": "readable_journey",
+    "presentation_holds_ms": 24000,
+    "performance_measurement": false,
+    "capture_deadline_ms": 90000,
+    "steps": [
+      {
+        "name": "Source confirmation",
+        "began_ms": 154,
+        "ended_ms": 1657,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Qualification requested",
+        "began_ms": 1913,
+        "ended_ms": 3415,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Qualification accepted",
+        "began_ms": 3613,
+        "ended_ms": 5115,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Synthetic checkout handoff",
+        "began_ms": 5280,
+        "ended_ms": 6783,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Workspace budget and speed priority",
+        "began_ms": 6961,
+        "ended_ms": 8463,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "A job with a declared completion condition",
+        "began_ms": 8646,
+        "ended_ms": 10149,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Explicit workflow association",
+        "began_ms": 10313,
+        "ended_ms": 11815,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Route decisions and exact cache reuse",
+        "began_ms": 12062,
+        "ended_ms": 13565,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "A correction bypasses cache reuse",
+        "began_ms": 13778,
+        "ended_ms": 15282,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Set a job budget limit",
+        "began_ms": 15444,
+        "ended_ms": 16947,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "The budget limit pauses work",
+        "began_ms": 17127,
+        "ended_ms": 18629,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Approve a bounded continuation",
+        "began_ms": 18727,
+        "ended_ms": 20230,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Verified completion and outcome receipt",
+        "began_ms": 20563,
+        "ended_ms": 23565,
+        "presentation_hold_ms": 3000
+      },
+      {
+        "name": "Provider account evidence remains unavailable",
+        "began_ms": 23811,
+        "ended_ms": 25313,
+        "presentation_hold_ms": 1500
+      },
+      {
+        "name": "Completed job on a mobile viewport",
+        "began_ms": 25711,
+        "ended_ms": 27212,
+        "presentation_hold_ms": 1500
+      }
+    ],
+    "video": {
+      "duration_seconds": 27.16,
+      "width": 1440,
+      "height": 1000,
+      "error": null
+    }
+  }
 }
