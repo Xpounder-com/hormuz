@@ -31,8 +31,10 @@ class AIWorkHostedCapacityTests(unittest.TestCase):
         self.config = replace(config, listen=replace(config.listen, port=0))
         self.gateway = AIWorkGatewayServer(self.config, environ=selected)
         self.handlers = []
+        self.released_connections = set()
         self.handler_condition = threading.Condition()
         original_setup = AIWorkRequestHandler.setup
+        original_release = self.gateway._release_connection
 
         def record_setup(handler):
             original_setup(handler)
@@ -40,9 +42,18 @@ class AIWorkHostedCapacityTests(unittest.TestCase):
                 self.handlers.append(handler)
                 self.handler_condition.notify_all()
 
+        def record_release(connection):
+            original_release(connection)
+            with self.handler_condition:
+                self.released_connections.add(connection)
+                self.handler_condition.notify_all()
+
         setup = patch.object(AIWorkRequestHandler, "setup", record_setup)
         setup.start()
         self.addCleanup(setup.stop)
+        release = patch.object(self.gateway, "_release_connection", record_release)
+        release.start()
+        self.addCleanup(release.stop)
         self.thread = threading.Thread(target=self.gateway.serve_forever, kwargs={"poll_interval": 0.01})
         self.thread.start()
         self.addCleanup(self.stop)
@@ -69,14 +80,26 @@ class AIWorkHostedCapacityTests(unittest.TestCase):
         if encoded is not None:
             fields["Content-Type"] = "application/json"
         try:
+            connection.connect()
+            client_address = connection.sock.getsockname()
             connection.request(method, path, body=encoded, headers=fields)
             response = connection.getresponse()
             try:
-                return response.status, response.read(65537)
+                result = response.status, response.read(65537)
             finally:
                 response.close()
         finally:
             connection.close()
+        # Reading the response does not prove that finish() and admission-slot
+        # cleanup have completed. Match this client to its actual server socket.
+        self.wait_for_connection_release(client_address)
+        return result
+
+    def wait_for_connection_release(self, client_address):
+        with self.handler_condition:
+            self.assertTrue(self.handler_condition.wait_for(lambda: any(
+                handler.client_address == client_address and handler.request in self.released_connections
+                for handler in self.handlers), timeout=3), client_address)
 
     def wait_for_handlers(self, count):
         with self.handler_condition:
@@ -145,13 +168,6 @@ class AIWorkHostedCapacityTests(unittest.TestCase):
                 self.assertEqual(503, status)
                 self.assertEqual("capacity_exhausted", json.loads(raw)["status"])
                 self.assertEqual(8, provider.call_count)
-                # A new byte resets a socket read timeout but cannot reset the
-                # overflow lane's hard two-second connection deadline.
-                self.assertFalse(self.handlers[9]._deadline.finished.wait(timeout=1.1))
-                clients[1].sendall(b" ")
-                clients[1].settimeout(2)
-                self.assertEqual(b"", clients[1].recv(1))
-                self.assertEqual(200, self.request("GET", "/health")[0])
             finally:
                 for client in clients:
                     client.close()
@@ -163,6 +179,91 @@ class AIWorkHostedCapacityTests(unittest.TestCase):
         self.assertEqual((8, 0, AI_WORK_MAX_CONNECTIONS),
                          (stats["peak_inflight"], stats["inflight"], stats["connection_capacity"]))
         self.assertEqual(200, self.request("GET", "/work")[0])
+
+    def test_sequential_probe_helper_waits_for_its_completed_connection_release(self):
+        completed = threading.Event()
+        helper_waiting = threading.Event()
+        resume_finish = threading.Event()
+        second_started = threading.Event()
+        original_finish = AIWorkRequestHandler.finish
+        original_wait = self.wait_for_connection_release
+
+        def hold_completed_probe(handler):
+            original_finish(handler)
+            if getattr(handler, "path", None) == "/health":
+                completed.set()
+                if not resume_finish.wait(timeout=5):
+                    raise TimeoutError("synthetic completed-probe release deadline")
+
+        def observe_wait(client_address):
+            helper_waiting.set()
+            original_wait(client_address)
+
+        def sequential_probes():
+            first = self.request("GET", "/health")
+            second_started.set()
+            return first, self.request("GET", "/ready")
+
+        for _ in range(PROVIDER_MAX_CONNECTIONS):
+            self.assertTrue(self.gateway._connection_slots.acquire(blocking=False))
+        # Reserve the other probe slot deterministically. The eight-stream test
+        # above proves the same occupancy with actual incomplete clients.
+        self.assertTrue(self.gateway._health_probe_slots.acquire(blocking=False))
+        try:
+            with patch.object(AIWorkRequestHandler, "finish", hold_completed_probe), patch.object(
+                    self, "wait_for_connection_release", observe_wait), ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(sequential_probes)
+                try:
+                    self.assertTrue(completed.wait(timeout=3))
+                    self.assertTrue(helper_waiting.wait(timeout=3))
+                    self.assertFalse(second_started.is_set())
+                    self.assertFalse(future.done())
+                    self.assertEqual(0, self.gateway._health_probe_slots._value)
+                finally:
+                    resume_finish.set()
+                first, second = future.result(timeout=6)
+                self.assertEqual((200, 200), (first[0], second[0]))
+                self.assertTrue(second_started.is_set())
+        finally:
+            resume_finish.set()
+            self.gateway._health_probe_slots.release()
+            for _ in range(PROVIDER_MAX_CONNECTIONS):
+                self.gateway._connection_slots.release()
+
+    def test_overflow_hard_deadline_closes_incomplete_headers_after_another_byte(self):
+        expired = threading.Event()
+        original_setup = AIWorkRequestHandler.setup
+        original_expire = AIWorkRequestHandler._expire_connection
+
+        def isolate_hard_deadline(handler):
+            original_setup(handler)
+            # Keep the read timeout from racing the real hard-deadline timer;
+            # the production two-second timer itself remains unchanged.
+            handler.connection.settimeout(4)
+
+        def record_expiry(handler):
+            original_expire(handler)
+            expired.set()
+
+        for _ in range(PROVIDER_MAX_CONNECTIONS):
+            self.assertTrue(self.gateway._connection_slots.acquire(blocking=False))
+        try:
+            with patch.object(AIWorkRequestHandler, "setup", isolate_hard_deadline), patch.object(
+                    AIWorkRequestHandler, "_expire_connection", record_expiry):
+                with socket.create_connection(("127.0.0.1", self.gateway.server_port), timeout=3) as client:
+                    client_address = client.getsockname()
+                    client.sendall(b"GET /work HTTP/1.1\r\nHost:")
+                    self.wait_for_handlers(1)
+                    self.assertTrue(self.handlers[0]._health_only)
+                    self.assertEqual(2, self.handlers[0]._deadline.interval)
+                    client.sendall(b" ")
+                    self.assertTrue(expired.wait(timeout=3))
+                    self.assertEqual(b"", client.recv(1))
+                    self.wait_for_connection_release(client_address)
+        finally:
+            for _ in range(PROVIDER_MAX_CONNECTIONS):
+                self.gateway._connection_slots.release()
+        self.assertEqual(200, self.request("GET", "/health")[0])
 
     def test_probe_lane_accepts_only_exact_health_methods_and_retains_ingress_host_and_drain_checks(self):
         for _ in range(PROVIDER_MAX_CONNECTIONS):
