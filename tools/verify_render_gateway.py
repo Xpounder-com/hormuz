@@ -12,6 +12,7 @@ import base64
 import hashlib
 import http.client
 import json
+import random
 import subprocess
 import time
 import uuid
@@ -369,7 +370,7 @@ def verify(image: str) -> dict:
             except (OSError, ValueError, http.client.HTTPException):
                 pass
             if attempt < 3:
-                time.sleep(0.5 * 2 ** attempt)
+                time.sleep(0.5 * 2 ** attempt + random.uniform(0, 0.1))
         raise RuntimeError("integrated_work_startup_timeout")
 
     try:

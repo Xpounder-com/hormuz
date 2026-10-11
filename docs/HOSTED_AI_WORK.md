@@ -70,7 +70,8 @@ After the operator's identity, disk and paid-hosting gates are met, explicitly s
 the image's existing `serve` entrypoint. Never resume or provision paid hosting
 before verified customer payment. Startup checks the marker and all store files;
 restart cannot reinitialize missing state. The supervisor starts the backend,
-checks readiness with at most four one-second attempts and 0.5/1/2-second backoff,
+checks readiness with at most four one-second attempts and 0.5/1/2-second backoff
+plus at most 100 milliseconds of jitter per retry,
 then starts Caddy. Failure cleans up every owned child.
 
 The proxy forwards only supported paths, strips forged caller identity and

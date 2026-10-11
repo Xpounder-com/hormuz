@@ -338,14 +338,16 @@ class AIWorkHostedLifecycleTests(unittest.TestCase):
         process.poll.return_value = None
         stopped.is_set.return_value = False
         opener.open.side_effect = OSError("synthetic unavailable")
-        with patch("hormuz.hosted.build_opener", return_value=opener):
+        with patch("hormuz.hosted.build_opener", return_value=opener), patch("hormuz.hosted.random.uniform", side_effect=[0.02, 0.09, 0.05]) as jitter:
             config = Mock()
             config.session_broker.public_base_url = "https://gateway.example.test"
             config.ingress.credential = "synthetic-ingress"
             with self.assertRaisesRegex(HostedError, "backend_not_ready"):
                 _backend_ready(process, config, stopped, bounded=True)
         self.assertEqual(opener.open.call_count, 4)
-        self.assertEqual([call.args[0] for call in stopped.wait.call_args_list], [0.5, 1.0, 2.0])
+        self.assertEqual([call.args[0] for call in stopped.wait.call_args_list], [0.52, 1.09, 2.05])
+        self.assertEqual(jitter.call_count, 3)
+        self.assertTrue(all(call.args == (0, 0.1) for call in jitter.call_args_list))
         self.assertTrue(all(call.kwargs["timeout"] == 1 for call in opener.open.call_args_list))
 
     def test_supervisor_selects_only_declared_child_secrets_and_closes_failed_startup(self):

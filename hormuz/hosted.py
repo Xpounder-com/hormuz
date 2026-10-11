@@ -12,6 +12,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import signal
 import subprocess
 import sys
@@ -135,7 +136,7 @@ def _backend_ready(process, config, stopped, *, bounded: bool = False) -> None:
             except OSError:
                 pass
             if attempt < 3:
-                stopped.wait(0.5 * 2 ** attempt)
+                stopped.wait(0.5 * 2 ** attempt + random.uniform(0, 0.1))
         raise HostedError("hosted_backend_not_ready")
     deadline = time.monotonic() + 20
     while not stopped.is_set() and process.poll() is None and time.monotonic() < deadline:
