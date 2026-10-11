@@ -54,8 +54,12 @@ Chrome:
 ```sh
 HORMUZ_QA_PYTHON=/path/to/project-venv/bin/python \
 HORMUZ_QA_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs \
-node website/scripts/ai-work-browser-qa.mjs
+node website/scripts/ai-work-browser-qa.mjs --readable-recording
 ```
+
+This mode holds verified visible screens for reading under a 90-second capture
+deadline. Viewing pauses are not latency measurements; the default no-argument
+mode skips them for fast functional automation.
 
 The [browser validation guide](../../AI_WORK_BROWSER_VALIDATION.md) explains the
 local transport, recording and remaining production qualification boundaries.

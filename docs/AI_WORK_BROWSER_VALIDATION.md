@@ -4,16 +4,20 @@ This development check runs the actual authenticated gateway UI and its HTTP
 forms against disposable local fixtures. It does not contact a real provider,
 Stripe, GitHub, an email service, a booking service, or an advertising service.
 
-The browser runner requires an installed Python environment with project test
-dependencies, Playwright, and Chrome. The Browser plugin is not available in the
-recorded environment, so this check uses regular Playwright. No browser dependency
-or Chrome installation is added to the customer package.
+The bounded local fixture recording runner requires an installed Python
+environment with project test dependencies, Playwright, and Chrome. No browser
+dependency or Chrome installation is added to the customer package.
 
 ```sh
 HORMUZ_QA_PYTHON=/path/to/project-venv/bin/python \
 HORMUZ_QA_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs \
-node website/scripts/ai-work-browser-qa.mjs
+node website/scripts/ai-work-browser-qa.mjs --readable-recording
 ```
+
+The recording mode holds verified visible screens for reading under a 90-second
+capture deadline and checks that the encoded video lasts at least 20 seconds.
+These viewing holds are not a latency measurement. The default no-argument mode
+skips the viewing holds for fast functional automation.
 
 The runner starts `tools/ai_work_browser_fixture.py`, completes the existing
 synthetic OIDC console sign-in, and keeps its temporary cookie and credential

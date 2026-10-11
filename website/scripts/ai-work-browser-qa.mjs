@@ -1,4 +1,4 @@
-/** Actual fixture journey. Browser plugin not available; use installed Playwright.
+/** Bounded local fixture recording runner using installed Playwright.
  * Set HORMUZ_QA_PYTHON and HORMUZ_QA_PLAYWRIGHT_MODULE to installed runtimes.
  * Every browser request is fulfilled from the local fixture, including Stripe.
  */
@@ -11,6 +11,10 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+const captureArguments = process.argv.slice(2);
+assert.ok(captureArguments.length === 0 || (captureArguments.length === 1 && captureArguments[0] === '--readable-recording'), 'Use no arguments or --readable-recording');
+const readableRecording = captureArguments.includes('--readable-recording');
+const captureDeadlineMs = 90000;
 const python = process.env.HORMUZ_QA_PYTHON || 'python3';
 const modulePath = process.env.HORMUZ_QA_PLAYWRIGHT_MODULE;
 if (!modulePath) throw new Error('Set HORMUZ_QA_PLAYWRIGHT_MODULE to installed Playwright index.mjs');
@@ -66,7 +70,7 @@ async function waitForFixtureExit(timeoutMs) {
     const timer = setTimeout(finish, timeoutMs); processFixture.once('exit', finish);
   });
 }
-let browser;
+let browser, captureDeadline;
 try {
   assert.equal((await nextEvent()).event, 'ready');
   const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
@@ -75,6 +79,23 @@ try {
   context.setDefaultTimeout(15000); context.setDefaultNavigationTimeout(20000);
   await context.addCookies([{ ...fixture.cookie, domain: new URL(fixture.public_origin).hostname, path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
   const failed = [], errors = [], external = []; let checkoutIntercepts = 0; const page = await context.newPage();
+  const captureStarted = performance.now(); const viewingSteps = []; let captureError;
+  captureDeadline = setTimeout(() => {
+    captureError = new Error('Browser recording exceeded its 90-second capture deadline');
+    void context.close().catch(() => {});
+  }, captureDeadlineMs);
+  const viewStep = async (name, target = page.locator('body'), holdMs = 1500) => {
+    if (!readableRecording) return;
+    if (captureError) throw captureError;
+    assert.ok(viewingSteps.length < 20 && holdMs >= 1000 && holdMs <= 3000);
+    await target.scrollIntoViewIfNeeded(); assert.equal(await target.isVisible(), true);
+    // Let the verified state paint, then keep it visible for the recording.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const began = Math.round(performance.now() - captureStarted);
+    await page.waitForTimeout(holdMs);
+    if (captureError) throw captureError;
+    viewingSteps.push({ name, began_ms: began, ended_ms: Math.round(performance.now() - captureStarted), presentation_hold_ms: holdMs });
+  };
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', event => { if (event.type() === 'error') errors.push(event.text()); });
   page.on('requestfailed', request => failed.push(request.url()));
@@ -105,51 +126,69 @@ try {
   };
   await go('/work/acquisition?utm_source=localqa&utm_medium=validation&utm_campaign=aiwork');
   assert.equal(await page.locator('[name=analytics_consent]').isChecked(), false);
-  await page.getByRole('checkbox').check(); await page.getByRole('button', { name: 'Confirm source and open AI work' }).click();
+  await page.getByRole('checkbox').check(); await viewStep('Source confirmation', page.getByRole('button', { name: 'Confirm source and open AI work' }));
+  await page.getByRole('button', { name: 'Confirm source and open AI work' }).click();
   await page.waitForURL('**/v1/work/acquisition'); record('consented campaign handoff persists privately');
   assert.equal((await state()).onboarding.state, 'qualification_required');
   await page.getByRole('button', { name: 'Request qualification for safe-openai' }).click();
   await page.waitForURL('**/activation/request'); assert.equal((await state()).onboarding.state, 'requested');
+  await viewStep('Qualification requested', page.getByText('Operator qualification review', { exact: true }));
   await page.getByText('Operator qualification review', { exact: true }).click();
   await page.locator('#qualification-reference').fill('local-fixture/provider-and-enrollment');
   await page.getByRole('button', { name: 'Record qualification decision' }).click();
   await page.waitForURL('**/activation/review'); assert.equal((await state()).onboarding.state, 'qualified'); record('actual requested and operator-qualified state transitions');
+  await viewStep('Qualification accepted', page.getByRole('button', { name: 'Continue to Stripe checkout' }));
   await page.getByRole('button', { name: 'Continue to Stripe checkout' }).click();
   await page.waitForURL('https://checkout.stripe.com/**');
   await page.waitForLoadState('domcontentloaded'); assert.equal(await page.title(), 'Local fixture checkout'); assert.equal(checkoutIntercepts, 1);
+  await viewStep('Synthetic checkout handoff', page.getByRole('heading', { name: 'Synthetic checkout transport' }));
   await control('checkout'); assert.equal((await state()).onboarding.state, 'payment_unverified');
   await control('payment'); assert.equal((await state()).onboarding.state, 'active'); record('server-owned checkout and signed synthetic payment events gate activation');
   await go('/work');
   const shared = page.locator('form').filter({ has: page.locator('[name=scope_type][value=workspace]') });
   await shared.locator('[name=budget_usd]').fill('1.00'); await shared.locator('[name=objective]').selectOption('speed'); await shared.locator('[name=exploration_enabled]').selectOption('false');
+  await viewStep('Workspace budget and speed priority', shared);
   await shared.getByRole('button', { name: 'Save plan', exact: true }).click(); await page.waitForURL('**/v1/work/policies');
   assert.equal((await state()).plans.find(plan => plan.scope_type === 'workspace').objective, 'speed'); record('workspace budget, speed priority and exploration choice save');
   const create = page.locator('.create-job form');
   await create.locator('[name=repository]').fill('example/checkout-service'); await create.locator('[name=title]').fill('Repair the checkout integration check');
   await create.locator('[name=task_type]').fill('ci-repair'); await create.locator('[name=context_revision]').fill('fixture-commit-1');
   await create.locator('[name=completion_condition]').selectOption('github.pull_request.merged.v1');
+  await viewStep('A job with a declared completion condition', create);
   await create.getByRole('button', { name: 'Create job' }).click(); await page.waitForURL('**/v1/work/jobs');
   let current = await state(); const job = current.works.find(work => work.title === 'Repair the checkout integration check'); assert.ok(job);
   let card = page.locator('.job-card').filter({ hasText: job.title });
   await card.getByText('Bind an existing workflow for automatic outcomes', { exact: true }).click();
   await card.locator('.workflow-binding [name=container_id]').selectOption('456'); await card.locator('.workflow-binding [name=object_id]').fill('1001');
+  await viewStep('Explicit workflow association', card.locator('.workflow-binding'));
   await card.locator('.workflow-binding').getByRole('button').click(); await page.waitForURL('**/bindings'); record('explicit signed GitHub object association is saved from allowed choices');
   const prompt = 'Repair the local checkout integration check using fixture commit 1.';
   assert.equal((await inference(job.work_id, prompt)).status, 200); assert.equal((await inference(job.work_id, prompt)).status, 200);
   current = await state(); let captured = current.works.find(work => work.work_id === job.work_id);
   assert.equal(captured.costs.cache_hits, 1); assert.equal(captured.state, 'active');
+  if (readableRecording) {
+    await go('/work/jobs/' + job.work_id); await page.getByText('Attempts and route decisions', { exact: false }).click();
+    await viewStep('Route decisions and exact cache reuse', page.getByText('Attempts and route decisions', { exact: false }));
+  }
   await control('corrected', { work_id: job.work_id }); assert.equal((await inference(job.work_id, prompt)).status, 200);
   current = await state(); captured = current.works.find(work => work.work_id === job.work_id);
   assert.ok(captured.attempts.some(attempt => attempt.cache_bypass_reason)); record('ordinary Responses API requests route, exact reuse skips provider, corrective recurrence bypasses reuse');
+  if (readableRecording) {
+    await go('/work/jobs/' + job.work_id); await page.getByText('Attempts and route decisions', { exact: false }).click();
+    await viewStep('A correction bypasses cache reuse', page.getByText('Attempts and route decisions', { exact: false }));
+  }
   await go('/work'); card = page.locator('.job-card').filter({ hasText: job.title });
   await card.getByText('Job budget and continuation', { exact: true }).click();
   const plan = card.locator('form').filter({ has: page.locator('[name=scope_type][value=job]') });
-  await plan.locator('[name=budget_usd]').fill('0'); await plan.getByRole('button', { name: 'Save job plan' }).click(); await page.waitForURL('**/v1/work/policies');
+  await plan.locator('[name=budget_usd]').fill('0'); await viewStep('Set a job budget limit', plan);
+  await plan.getByRole('button', { name: 'Save job plan' }).click(); await page.waitForURL('**/v1/work/policies');
   const capped = await inference(job.work_id, 'A separate local request after the cap.');
   assert.equal(capped.status, 402); assert.match(capped.body.error.code, /budget_exhausted/);
   await go('/work'); card = page.locator('.job-card').filter({ hasText: job.title });
+  await viewStep('The budget limit pauses work', card.locator(':scope > .section-heading'));
   await card.getByText('Job budget and continuation', { exact: true }).click();
-  await card.locator('.continuation [name=budget_usd]').fill('1'); await card.getByRole('button', { name: 'Approve allowance' }).click(); await page.waitForURL('**/actions');
+  await card.locator('.continuation [name=budget_usd]').fill('1'); await viewStep('Approve a bounded continuation', card.locator('.continuation'));
+  await card.getByRole('button', { name: 'Approve allowance' }).click(); await page.waitForURL('**/actions');
   assert.equal((await inference(job.work_id, 'Continue the local checkout integration check after approved capacity.')).status, 200); record('job cap denies before provider work and explicit allowance continues the same job');
   const merged = await control('signed_merge', { work_id: job.work_id });
   await go('/work/jobs/' + job.work_id); assert.equal(await page.locator('.job-card > .section-heading > .status').innerText(), 'completed');
@@ -157,6 +196,7 @@ try {
   record('verified signed GitHub merge supplies declared completion condition');
   assert.match(await page.locator('body').innerText(), /verified_github/);
   assert.match(await page.locator('body').innerText(), /Gateway overhead/); assert.match(await page.locator('body').innerText(), /Provider-confirmed cost\s+Unknown/);
+  await viewStep('Verified completion and outcome receipt', page.getByText('Outcome evidence', { exact: true }), 3000);
   await page.screenshot({ path: path.join(artifactRoot, 'AI_WORK_JOB_DESKTOP.png'), fullPage: true });
   const receipt = await backend(fixture, '/v1/work/jobs/' + job.work_id, 'GET', { cookie: fixture.cookie.name + '=' + fixture.cookie.value }, null);
   assert.equal(receipt.status, 200); assert.equal(JSON.parse(receipt.body).state, 'completed');
@@ -167,6 +207,7 @@ try {
   await page.locator('.provider-account-evidence > summary').click();
   assert.match(await page.locator('.provider-account-evidence').innerText(), /No amount is assumed/);
   record('provider account evidence remains explicitly unavailable for the loopback provider, with no allocation to jobs');
+  await viewStep('Provider account evidence remains unavailable', page.locator('.provider-account-evidence > summary'));
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   assert.equal(await page.evaluate(() => scrollY), 0);
   await page.screenshot({ path: path.join(artifactRoot, 'AI_WORK_DESKTOP.png') });
@@ -177,14 +218,32 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.screenshot({ path: path.join(artifactRoot, 'AI_WORK_MOBILE.png') });
   await go('/work/jobs/' + job.work_id); await page.locator('.job-card').screenshot({ path: path.join(artifactRoot, 'AI_WORK_JOB.png') });
+  await viewStep('Completed job on a mobile viewport', page.locator('.job-card > .section-heading'));
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false); record('desktop and mobile rendering without horizontal overflow');
   assert.deepEqual(errors, []); assert.deepEqual(failed, []); assert.deepEqual(external, []); record('no console errors, failed requests or external network calls');
   current = await state(); const costs = current.works.find(work => work.work_id === job.work_id).costs;
   const validation = { schema_id: 'hormuz.ai-work-browser-validation', schema_version: 1, generated_at: new Date().toISOString(), fixture: 'actual gateway with synthetic local identity, provider, Stripe transport and signed GitHub fixture', provider_calls: merged.provider_fixture_calls + ' local simulated provider responses; zero real or paid provider calls', viewports: ['1440x1000', '390x844'], checks, seeded_cost_microusd: 0, observed_configured_cost_microusd: costs.committed_microusd, real_provider_calls: 0, real_payments: 0, external_network_calls: 0, browser_errors: errors, failed_requests: failed, horizontal_overflow: false, source_files: fixture.source_files, artifacts: ['AI_WORK_DEMO.webm', 'AI_WORK_DESKTOP.png', 'AI_WORK_MOBILE.png', 'AI_WORK_JOB.png', 'AI_WORK_JOB_DESKTOP.png', 'AI_WORK_DASHBOARD_FULL.png'], limitations: ['local provider timings and configured estimates do not establish billed savings or customer latency', 'synthetic signed Stripe events are not real payment or live billing qualification', 'synthetic signed GitHub delivery is not live customer connector qualification', 'API fixture work does not qualify a particular installed native coding agent version'] };
-  fs.writeFileSync(path.join(artifactRoot, 'AI_WORK_BROWSER_QA.json'), JSON.stringify(validation, null, 2) + '\n');
   const video = page.video(); await context.close(); fs.copyFileSync(await video.path(), path.join(artifactRoot, 'AI_WORK_DEMO.webm'));
+  clearTimeout(captureDeadline); captureDeadline = undefined;
+  if (captureError) throw captureError;
+  // Inspect the actual encoded file with the same owned browser. Every media
+  // request is fulfilled from that local file; no second server is started.
+  const mediaContext = await browser.newContext({ serviceWorkers: 'block' });
+  try {
+    await mediaContext.route('**/*', route => route.fulfill({ status: 200, contentType: 'video/webm', body: fs.readFileSync(path.join(artifactRoot, 'AI_WORK_DEMO.webm')) }));
+    const mediaPage = await mediaContext.newPage(); mediaPage.setDefaultTimeout(5000); mediaPage.setDefaultNavigationTimeout(5000);
+    await mediaPage.setContent('<video id="recording" preload="metadata" src="https://local-recording.invalid/actual.webm"></video>');
+    await mediaPage.waitForFunction(() => document.querySelector('video').readyState >= 1 || document.querySelector('video').error);
+    const encoded = await mediaPage.locator('video').evaluate(element => ({ duration_seconds: element.duration, width: element.videoWidth, height: element.videoHeight, error: element.error?.code ?? null }));
+    assert.equal(encoded.error, null); assert.ok(Number.isFinite(encoded.duration_seconds));
+    assert.equal(encoded.width, 1440); assert.equal(encoded.height, 1000);
+    if (readableRecording) assert.ok(encoded.duration_seconds >= 20 && encoded.duration_seconds < captureDeadlineMs / 1000, 'Readable recording must have at least 20 seconds of actual video');
+    validation.recording = { mode: readableRecording ? 'readable_journey' : 'automation', presentation_holds_ms: viewingSteps.reduce((sum, step) => sum + step.presentation_hold_ms, 0), performance_measurement: false, capture_deadline_ms: captureDeadlineMs, steps: viewingSteps, video: encoded };
+  } finally { await mediaContext.close(); }
+  fs.writeFileSync(path.join(artifactRoot, 'AI_WORK_BROWSER_QA.json'), JSON.stringify(validation, null, 2) + '\n');
   console.log(JSON.stringify({ checks: checks.length, provider_fixture_calls: merged.provider_fixture_calls, real_provider_calls: 0, real_payments: 0, screenshots: validation.artifacts, errors, failures: failed }));
 } finally {
+  clearTimeout(captureDeadline);
   try { if (browser) await browser.close(); }
   finally {
     backendAgent.destroy();
