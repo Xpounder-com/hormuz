@@ -46,25 +46,16 @@ from ._hosted_state import (
 from .postgres import PostgresStorageError
 
 
-def runtime_settings() -> dict[str, str]:
+def runtime_settings(*, credentials: bool = True, legacy: bool = False) -> dict[str, str]:
     # The inventory reviews each direct read. Never inherit the full deployment
     # environment into the proxy or into the private gateway child.
+    mode = os.environ.get("HORMUZ_HOSTED_MODE", "maintenance")
     settings = {
         "HORMUZ_CONFIG": os.environ.get("HORMUZ_CONFIG", "/etc/secrets/hormuz-hosted.json"),
-        "HORMUZ_HOSTED_MODE": os.environ.get("HORMUZ_HOSTED_MODE", "maintenance"),
+        "HORMUZ_HOSTED_MODE": mode,
         "PORT": os.environ.get("PORT", "10000"),
-        "HORMUZ_INGRESS_CREDENTIAL": os.environ.get("HORMUZ_INGRESS_CREDENTIAL", ""),
-        "HORMUZ_SESSION_MASTER_KEY": os.environ.get("HORMUZ_SESSION_MASTER_KEY", ""),
-        "HORMUZ_OIDC_CLIENT_SECRET": os.environ.get("HORMUZ_OIDC_CLIENT_SECRET", ""),
         PROVIDER_PROFILE_ENV: os.environ.get(PROVIDER_PROFILE_ENV, "external_pilot"),
         PROVIDER_CONFIG_ENV: os.environ.get(PROVIDER_CONFIG_ENV, "/etc/secrets/hormuz-provider.json"),
-        "HORMUZ_OPENAI_PROVIDER_KEY": os.environ.get("HORMUZ_OPENAI_PROVIDER_KEY", ""),
-        "HORMUZ_ANTHROPIC_PROVIDER_KEY": os.environ.get("HORMUZ_ANTHROPIC_PROVIDER_KEY", ""),
-        "HORMUZ_WORK_BILLING_WEBHOOK_SECRET": os.environ.get("HORMUZ_WORK_BILLING_WEBHOOK_SECRET", ""),
-        "HORMUZ_WORK_BILLING_API_KEY": os.environ.get("HORMUZ_WORK_BILLING_API_KEY", ""),
-        PROVIDER_FAILOVER_REHEARSAL_ENV: os.environ.get(PROVIDER_FAILOVER_REHEARSAL_ENV, ""),
-        PROVIDER_RUNTIME_DSN_ENV: os.environ.get(PROVIDER_RUNTIME_DSN_ENV, ""),
-        PROVIDER_MIGRATION_DSN_ENV: os.environ.get(PROVIDER_MIGRATION_DSN_ENV, ""),
         "RENDER": os.environ.get("RENDER", ""),
         "RENDER_CPU_COUNT": os.environ.get("RENDER_CPU_COUNT", ""),
         "RENDER_EXTERNAL_HOSTNAME": os.environ.get("RENDER_EXTERNAL_HOSTNAME", ""),
@@ -77,6 +68,22 @@ def runtime_settings() -> dict[str, str]:
         "RENDER_SERVICE_TYPE": os.environ.get("RENDER_SERVICE_TYPE", ""),
         "RENDER_WEB_CONCURRENCY": os.environ.get("RENDER_WEB_CONCURRENCY", ""),
     }
+    if not credentials or mode == "ai-work" and not legacy:
+        # Full-config credentials are selected only after its non-secret
+        # structural validation. The fixed legacy profiles retain their reads.
+        return settings
+    settings.update({
+        "HORMUZ_INGRESS_CREDENTIAL": os.environ.get("HORMUZ_INGRESS_CREDENTIAL", ""),
+        "HORMUZ_SESSION_MASTER_KEY": os.environ.get("HORMUZ_SESSION_MASTER_KEY", ""),
+        "HORMUZ_OIDC_CLIENT_SECRET": os.environ.get("HORMUZ_OIDC_CLIENT_SECRET", ""),
+        "HORMUZ_OPENAI_PROVIDER_KEY": os.environ.get("HORMUZ_OPENAI_PROVIDER_KEY", ""),
+        "HORMUZ_ANTHROPIC_PROVIDER_KEY": os.environ.get("HORMUZ_ANTHROPIC_PROVIDER_KEY", ""),
+        "HORMUZ_WORK_BILLING_WEBHOOK_SECRET": os.environ.get("HORMUZ_WORK_BILLING_WEBHOOK_SECRET", ""),
+        "HORMUZ_WORK_BILLING_API_KEY": os.environ.get("HORMUZ_WORK_BILLING_API_KEY", ""),
+        PROVIDER_FAILOVER_REHEARSAL_ENV: os.environ.get(PROVIDER_FAILOVER_REHEARSAL_ENV, ""),
+        PROVIDER_RUNTIME_DSN_ENV: os.environ.get(PROVIDER_RUNTIME_DSN_ENV, ""),
+        PROVIDER_MIGRATION_DSN_ENV: os.environ.get(PROVIDER_MIGRATION_DSN_ENV, ""),
+    })
     if settings["HORMUZ_HOSTED_MODE"] == "workspace":
         settings["HORMUZ_DOMAIN_API_KEY"] = os.environ.get("HORMUZ_DOMAIN_API_KEY", "")
     return settings
@@ -110,12 +117,26 @@ def _spawn(arguments, settings):
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
 
 
-def _backend_ready(process, config, stopped) -> None:
+def _backend_ready(process, config, stopped, *, bounded: bool = False) -> None:
     request = Request(f"http://127.0.0.1:{BACKEND_PORT}/ready", headers={
         "Host": urlsplit(config.session_broker.public_base_url).netloc,
         "X-Hormuz-Ingress-Credential": config.ingress.credential,
     })
     opener = build_opener(ProxyHandler({}))
+    if bounded:
+        # One attempt plus three retries; no new-mode continuous polling.
+        for attempt in range(4):
+            if stopped.is_set() or process.poll() is not None:
+                break
+            try:
+                with opener.open(request, timeout=1) as response:
+                    if response.status == 200:
+                        return
+            except OSError:
+                pass
+            if attempt < 3:
+                stopped.wait(0.5 * 2 ** attempt)
+        raise HostedError("hosted_backend_not_ready")
     deadline = time.monotonic() + 20
     while not stopped.is_set() and process.poll() is None and time.monotonic() < deadline:
         try:
@@ -128,23 +149,31 @@ def _backend_ready(process, config, stopped) -> None:
     raise HostedError("hosted_backend_not_ready")
 
 
-def supervise(settings: dict[str, str], config_path: Path, provider_config_path: Path) -> int:
+def supervise(settings: dict[str, str], config_path: Path, provider_config_path: Path, *, environ=None) -> int:
     mode = settings["HORMUZ_HOSTED_MODE"]
-    if mode not in {"maintenance", "active", "workspace", "provider-pilot"}:
+    if mode not in {"maintenance", "active", "workspace", "provider-pilot", "ai-work"}:
         raise HostedError("hosted_mode_invalid")
-    child_settings = proxy_settings(settings, active=mode != "maintenance")
+    child_settings = proxy_settings(settings, active=mode not in {"maintenance", "ai-work"})
     stopped = threading.Event()
     previous = {sig: signal.signal(sig, lambda *_: stopped.set()) for sig in (signal.SIGINT, signal.SIGTERM)}
     backend = proxy = None
     successful = False
     try:
-        inference_enabled = mode == "provider-pilot"
+        inference_enabled = mode in {"provider-pilot", "ai-work"}
         if mode in {"active", "workspace"}:
             config = (load_workspace_profile if mode == "workspace" else load_profile)(config_path, settings)
             check_initialized(config)
             backend = _spawn([sys.executable, "-I", "-m", "hormuz.hosted", "--config", str(config_path), "workspace-backend" if mode == "workspace" else "backend"],
                              {name: settings[name] for name in (WORKSPACE_SECRET_NAMES if mode == "workspace" else SECRET_NAMES)})
             _backend_ready(backend, config, stopped)
+        elif mode == "ai-work":
+            from ._hosted_work import check_work_stores, load_profile as load_work_profile
+            config, selected = load_work_profile(config_path, os.environ if environ is None else environ)
+            check_initialized(config)
+            check_work_stores(config)
+            child_settings = proxy_settings({**settings, "HORMUZ_INGRESS_CREDENTIAL": config.ingress.credential}, active=True)
+            backend = _spawn([sys.executable, "-I", "-m", "hormuz.hosted", "--config", str(config_path), "ai-work-backend"], selected)
+            _backend_ready(backend, config, stopped, bounded=True)
         elif mode == "provider-pilot":
             config = load_provider_profile(config_path, provider_config_path, settings)
             check_initialized(config)
@@ -173,15 +202,19 @@ def supervise(settings: dict[str, str], config_path: Path, provider_config_path:
     return 0 if successful and proxy_clean and backend_clean else 1
 
 
-def backend(config, *, provider: bool = False, environ=None) -> None:
+def backend(config, *, provider: bool = False, full_work: bool = False, environ=None) -> None:
     from ._hosted_server import ProviderPilotGatewayServer, StagingGatewayServer, WorkspaceGatewayServer
 
     with state_lock(config, exclusive=False):
-        server = (
-            ProviderPilotGatewayServer(config, environ=environ or {})
-            if provider
-            else WorkspaceGatewayServer(config) if config.session_broker.workspace_enabled else StagingGatewayServer(config)
-        )
+        if full_work:
+            from ._hosted_work_server import AIWorkGatewayServer
+            server = AIWorkGatewayServer(config, environ=environ or {})
+        else:
+            server = (
+                ProviderPilotGatewayServer(config, environ=environ or {})
+                if provider
+                else WorkspaceGatewayServer(config) if config.session_broker.workspace_enabled else StagingGatewayServer(config)
+            )
         stopping = threading.Event()
 
         def terminate(*_):
@@ -206,17 +239,18 @@ def main(argv=None) -> int:
 
     logging.disable(logging.CRITICAL)
     os.umask(0o077)
-    settings = runtime_settings()
+    settings = runtime_settings(credentials=False)
     parser = argparse.ArgumentParser(description="Maintenance-first hosted authentication and provider pilot.")
     parser.add_argument("--config", type=Path, default=Path(settings["HORMUZ_CONFIG"]))
     parser.add_argument("--provider-config", type=Path, default=Path(settings[PROVIDER_CONFIG_ENV]))
     parser.add_argument("--workspace-profile", action="store_true", help="Use the workspace profile for offline operator commands")
     parser.add_argument("--provider-profile", action="store_true", help="Include provider-profile usage, AI Work and billing stores in offline maintenance")
     parser.add_argument("--gateway-profile", action="store_true", help="Use the full owner-controlled SQLite gateway profile for offline recovery")
+    parser.add_argument("--ai-work-profile", action="store_true", help="Use the integrated SQLite hosted profile for offline owner operations")
     commands = parser.add_subparsers(dest="command")
     for name in (
         "serve", "backend", "workspace-backend", "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate",
-        "initialize", "check", "recovery-check",
+        "ai-work-backend", "ai-work-check", "initialize", "check", "recovery-check",
     ):
         commands.add_parser(name)
     commands.add_parser("snapshot").add_argument("--output-directory", type=Path, required=True)
@@ -233,9 +267,14 @@ def main(argv=None) -> int:
         )
     add_onboarding_commands(commands)
     args = parser.parse_args(argv)
-    if sum((args.provider_profile, args.gateway_profile, args.workspace_profile)) > 1 or (args.provider_profile or args.gateway_profile) and args.command not in {"initialize", "snapshot", "restore", "backup-export", "backup-restore", "backup-verify", "check", "recovery-check"}:
+    if sum((args.provider_profile, args.gateway_profile, args.workspace_profile, args.ai_work_profile)) > 1 or (args.provider_profile or args.gateway_profile or args.ai_work_profile) and args.command not in {"initialize", "snapshot", "restore", "backup-export", "backup-restore", "backup-verify", "check", "recovery-check"}:
         parser.error("Full gateway profile selectors are exclusive and available only for offline maintenance")
-    if args.workspace_profile or args.command == "workspace-backend":
+    full_work = args.ai_work_profile or args.command in {"ai-work-backend", "ai-work-check"} or settings["HORMUZ_HOSTED_MODE"] == "ai-work" and not (args.gateway_profile or args.provider_profile or args.workspace_profile) and args.command not in {"workspace-backend", "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate"}
+    if not full_work:
+        # Explicit legacy selectors retain their fixed credentials even under
+        # an ambient ai-work serving mode. Parsing comes before secret reads.
+        settings = runtime_settings(credentials=True, legacy=True)
+    if not full_work and (args.workspace_profile or args.command == "workspace-backend"):
         settings["HORMUZ_DOMAIN_API_KEY"] = os.environ.get("HORMUZ_DOMAIN_API_KEY", "")
     try:
         if args.command in {None, "serve"}:
@@ -245,14 +284,19 @@ def main(argv=None) -> int:
             print(json.dumps({"event": "hosted_operator_complete", "operation": args.command,
                               "inference_enabled": False, **result}, sort_keys=True))
             return 0
-        config = (
-            load_gateway_recovery_profile(args.config)
-            if args.gateway_profile else load_provider_profile(args.config, args.provider_config, settings)
-            if args.provider_profile or args.command in {
-                "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate"
-            }
-            else load_workspace_profile(args.config, settings) if args.workspace_profile or args.command == "workspace-backend" or settings["HORMUZ_HOSTED_MODE"] == "workspace" else load_profile(args.config, settings)
-        )
+        selected = None
+        if full_work:
+            from ._hosted_work import load_profile as load_work_profile
+            config, selected = load_work_profile(args.config, os.environ)
+        else:
+            config = (
+                load_gateway_recovery_profile(args.config)
+                if args.gateway_profile else load_provider_profile(args.config, args.provider_config, settings)
+                if args.provider_profile or args.command in {
+                    "provider-backend", "provider-check", "provider-bootstrap-postgres", "provider-migrate"
+                }
+                else load_workspace_profile(args.config, settings) if args.workspace_profile or args.command == "workspace-backend" or settings["HORMUZ_HOSTED_MODE"] == "workspace" else load_profile(args.config, settings)
+            )
         result = {}
         if args.command in {"backend", "workspace-backend"}:
             backend(config)
@@ -262,6 +306,14 @@ def main(argv=None) -> int:
                 provider=True,
                 environ={name: settings[name] for name in PROVIDER_CHILD_ENV_NAMES},
             )
+        elif args.command == "ai-work-backend":
+            backend(config, full_work=True, environ=selected)
+        elif args.command == "ai-work-check":
+            from ._hosted_work import check_work_stores
+            with state_lock(config, exclusive=False):
+                check_initialized(config)
+                check_work_stores(config)
+            result = {"configuration_valid": True, "storage_backend": "sqlite", "serving_mode": "ai-work"}
         elif args.command == "provider-check":
             check_initialized(config)
             from .onboarding import TeamDirectory
@@ -373,7 +425,11 @@ def main(argv=None) -> int:
                 "postgresql_schema_complete": status.complete,
             }
         elif args.command == "initialize":
-            initialize(config)
+            if full_work:
+                from ._hosted_work import initialize as initialize_work
+                initialize_work(config, selected)
+            else:
+                initialize(config)
         elif args.command == "snapshot":
             snapshot(config, args.output_directory)
         elif args.command == "migrate":
@@ -397,6 +453,9 @@ def main(argv=None) -> int:
         else:
             with state_lock(config, exclusive=False):
                 check_initialized(config)
+                if full_work:
+                    from ._hosted_work import check_work_stores
+                    check_work_stores(config)
                 if args.command == "team":
                     return run_team(config, args)
         print(json.dumps({"event": "hosted_operator_complete", "operation": args.command,

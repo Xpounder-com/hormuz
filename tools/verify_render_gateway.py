@@ -150,7 +150,7 @@ for path in Path('/proc').iterdir():
         command = (path / 'cmdline').read_bytes().split(b'\\0')
         if command[:2] == [b'/usr/bin/caddy', b'run']:
             caddy = {item.split(b'=', 1)[0].decode() for item in (path / 'environ').read_bytes().split(b'\\0') if item}
-        elif b'hormuz.hosted' in command and any(item in {b'backend', b'workspace-backend', b'provider-backend'} for item in command):
+        elif b'hormuz.hosted' in command and any(item in {b'backend', b'workspace-backend', b'provider-backend', b'ai-work-backend'} for item in command):
             values = dict(item.split(b'=', 1) for item in (path / 'environ').read_bytes().split(b'\\0') if item)
             backend = {name.decode() for name in values}
             backend_work_billing_populated = [name for name in
@@ -167,9 +167,9 @@ import hashlib, json, hormuz
 from pathlib import Path
 package = Path(hormuz.__file__).parent
 paths = {'hormuz/' + name: package / name for name in
-    ('hosted.py', '_config_routing.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_provider.py', '_hosted_server.py', '_hosted_state.py', 'secret-inventory-v1.json')}
+    ('hosted.py', '_config_routing.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_provider.py', '_hosted_server.py', '_hosted_state.py', '_hosted_work.py', '_hosted_work_server.py', 'secret-inventory-v1.json')}
 paths.update({'deploy/render/gateway/' + name: Path('/etc/hormuz/caddy') / name
-    for name in ('active.Caddyfile', 'maintenance.Caddyfile', 'provider-pilot.Caddyfile', 'workspace.Caddyfile')})
+    for name in ('active.Caddyfile', 'maintenance.Caddyfile', 'provider-pilot.Caddyfile', 'workspace.Caddyfile', 'ai-work.Caddyfile')})
 print(json.dumps({name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}))
 '''
 SSH_ACCOUNT_BOUNDARY = '''
