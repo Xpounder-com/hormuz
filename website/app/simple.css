@@ -110,6 +110,7 @@
 .selected-offer .offer-checkout { width: 100%; }
 
 .landing-redesign .site-footer.simple-footer { display: block; min-height: 0; padding: 40px max(32px, calc((100% - 1120px) / 2)) 24px; background: transparent; }
+.landing-redesign .simple-footer .footer-brand { color: var(--ink); }
 .simple-footer-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 32px; }
 .landing-redesign .simple-footer .footer-intro p { margin: 16px 0 0; color: var(--muted); font-size: 13px; }
 .simple-footer-links { max-width: 490px; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px 24px; }

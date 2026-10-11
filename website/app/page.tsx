@@ -3,7 +3,7 @@ import { pageMetadata } from '../lib/metadata';
 import { sitePath } from '../lib/site.mjs';
 import { SiteFooter } from './components/SiteFooter';
 import { SiteHeader } from './components/SiteHeader';
-import { SOFTWARE_PRICE, CLOUD_PRICE, MANAGED_SITE_PRICE } from '../lib/commercial.mjs';
+import { SOFTWARE_PRICE, CLOUD_PRICE, MANAGED_SITE_PRICE, pricing } from '../lib/commercial.mjs';
 
 export const metadata = pageMetadata('Team AI budgets — Hormuz', 'Set spending limits and track usage across your team’s supported AI tools. Start with free software, choose Cloud hosting, or add managed-site support.', '/');
 
@@ -23,7 +23,7 @@ export default function Home() {
       <div className="simple-paths">
         <article><p className="section-label">SELF-HOSTED</p><h3>Free software</h3><p className="simple-price"><strong>{SOFTWARE_PRICE}</strong><span>software license</span></p><p>Run Hormuz on your own infrastructure. Documentation and community support included.</p><CampaignLink className="text-link" href={sitePath('/docs/')}>Install free →</CampaignLink></article>
         <article><p className="section-label">HOSTED</p><h3>Cloud</h3><p className="simple-price"><strong>{CLOUD_PRICE}</strong><span>/ workspace / month</span></p><p>A planned hosted gateway and dashboard. Confirm availability and your setup first.</p><CampaignLink className="text-link" href={sitePath('/plans/#cloud')}>Explore Cloud →</CampaignLink></article>
-        <article><p className="section-label">MANAGED</p><h3>Managed site</h3><p className="simple-price"><strong>{MANAGED_SITE_PRICE}</strong><span>/ site / month</span></p><p>Cloud included, with monitoring and up to 1 hour of remote assistance each month. Hardware sold separately.</p><CampaignLink className="text-link" href={sitePath('/plans/#managed')}>Explore managed sites →</CampaignLink></article>
+        <article><p className="section-label">MANAGED</p><h3>Managed site</h3><p className="simple-price"><strong>{MANAGED_SITE_PRICE}</strong><span>/ site / month</span></p><p>Cloud included, with monitoring and up to {pricing.managedSite.supportHoursPerMonth} {pricing.managedSite.supportHoursPerMonth === 1 ? 'hour' : 'hours'} of remote assistance each month. Hardware sold separately.</p><CampaignLink className="text-link" href={sitePath('/plans/#managed')}>Explore managed sites →</CampaignLink></article>
       </div>
       <p className="simple-caption">Prices in USD. Provider usage and applicable taxes are separate.</p>
     </section>
