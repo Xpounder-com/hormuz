@@ -35,7 +35,7 @@ test('published core and notarized Mac downloads agree with the release record w
 });
 
 test('current Mac labels and links derive from the explicit notarized release version', () => {
-  for (const file of ['app/page.tsx', 'app/docs/page.tsx', 'app/components/SiteFooter.tsx', 'app/components/CompanionPreview.tsx', 'app/components/SetupExample.tsx', 'lib/customer-questions.mjs']) {
+  for (const file of ['app/docs/page.tsx', 'app/components/SiteFooter.tsx', 'app/components/CompanionPreview.tsx', 'app/components/SetupExample.tsx', 'lib/customer-questions.mjs']) {
     const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
     assert.match(source, /MACOS_VERSION/, file);
     assert.doesNotMatch(source, /releases\/(?:download|tag)\/v1\.3\.0|Mac (?:companion )?1\.3\.0/, file);

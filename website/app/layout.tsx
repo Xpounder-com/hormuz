@@ -11,6 +11,7 @@ import './companion.css';
 import './context-optimization.css';
 import './experience.css';
 import './ai-work.css';
+import './simple.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
