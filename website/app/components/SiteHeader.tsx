@@ -3,11 +3,8 @@ import { BrandLockup } from './Brand';
 import { sitePath } from '../../lib/site.mjs';
 
 const navigation = [
-  { key: 'platform', label: 'Product', href: '/' },
-  { key: 'evidence', label: 'Evidence', href: '/evidence/' },
-  { key: 'docs', label: 'Install & docs', href: '/docs/' },
-  { key: 'plans', label: 'Pricing & pay', href: '/plans/' },
-  { key: 'security', label: 'Security', href: '/security/' },
+  { key: 'docs', label: 'Docs', href: '/docs/' },
+  { key: 'plans', label: 'Pricing', href: '/plans/' },
   { key: 'work', label: 'AI Work', href: '/work/' },
 ];
 
@@ -51,8 +48,7 @@ export function SiteHeader({
                 {item.label}
               </CampaignLink>
             ))}
-            <CampaignLink href={sitePath('/integrations/')} aria-current={active === 'integrations' ? 'page' : undefined}>Integrations</CampaignLink>
-            <CampaignLink className="mobile-pilot-cta" href={sitePath('/docs/')}>Start free →</CampaignLink>
+            <CampaignLink href={sitePath('/contact/?interest=work')}>Contact</CampaignLink>
           </div>
         </details>
 

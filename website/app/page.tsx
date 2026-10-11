@@ -1,43 +1,39 @@
 import { CampaignLink } from './components/CampaignLink';
 import { pageMetadata } from '../lib/metadata';
-import { sitePath, sourcePath, OWNER_NAME, OWNER_URL, MACOS_VERSION } from '../lib/site.mjs';
+import { sitePath } from '../lib/site.mjs';
 import { SiteFooter } from './components/SiteFooter';
 import { SiteHeader } from './components/SiteHeader';
-import { WorkPriorities } from './components/WorkPriorities';
 import { SOFTWARE_PRICE, CLOUD_PRICE, MANAGED_SITE_PRICE } from '../lib/commercial.mjs';
 
-export const metadata = pageMetadata('Hormuz for SMEs — Keep your agents. Choose your budget and pace.', 'For engineering, agency and IT teams managing growing AI bills across repositories. Start with free software, choose Cloud hosting, or discuss a managed site with defined operating help. Keep your supported agents and provider accounts.', '/');
+export const metadata = pageMetadata('Team AI budgets — Hormuz', 'Set spending limits and track usage across your team’s supported AI tools. Start with free software, choose Cloud hosting, or add managed-site support.', '/');
 
 export default function Home() {
-  return <div className="landing-home ai-work-home"><SiteHeader active="platform" /><main id="content" tabIndex={-1}>
-    <section className="landing-hero work-hero" id="top">
-      <div className="work-hero-grid"><div className="landing-hero-copy">
-        <p className="section-label">AI CONTROL FOR SMALL AND GROWING TEAMS</p>
-        <h1>Keep your agents.<br /><em>Choose your budget and pace.</em></h1>
-        <p className="landing-deck">For software agencies, engineering teams, and IT teams facing growing AI bills across repositories. Connect your existing agents through Hormuz, set spending boundaries, and see what each piece of work consumes. Start free and choose hosting or operating help as your needs grow.</p>
-        <div className="landing-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/#examples')}>Start free <span aria-hidden="true">→</span></CampaignLink><CampaignLink className="button landing-secondary" href={sitePath('/plans/#offers')}>Compare plans <span aria-hidden="true">→</span></CampaignLink></div>
-        <p className="landing-reassurance">Free software · Your provider accounts · Provider charges separate<br />Documented client versions: Codex 0.147.0 / OpenAI Responses; Claude Code 2.1.233 / Anthropic Messages.<br /><CampaignLink href={sitePath('/integrations/#clients')}>Check setup and coverage →</CampaignLink><br />Check compatibility with your tools and provider before connecting.</p>
-      </div><div className="work-passage" aria-label="The governed request path">
-        <div><span>01</span><h2>Your agents</h2><p>Connect a supported coding client.</p></div><div><span>02</span><h2>Hormuz</h2><p>Identity, spending limits, and request controls before dispatch.</p></div><div><span>03</span><h2>Your providers</h2><p>Eligible requests continue; usage returns to the work record.</p></div>
-      </div></div>
-      <p className="hero-owner">A product of <a href={OWNER_URL}>{OWNER_NAME} ↗</a> · Led by Mehrdad Zaker</p>
+  return <div className="simple-home"><SiteHeader active="platform" /><main id="content" tabIndex={-1}>
+    <section className="simple-hero" id="top">
+      <p className="section-label">AI BUDGETS FOR YOUR TEAM</p>
+      <h1>Keep your agents.<br /><em>Set your AI budget.</em></h1>
+      <p className="simple-deck">Set spending limits and track usage across your team’s supported AI tools. Start free, then add hosting or operating help.</p>
+      <div className="simple-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/#examples')}>Start free <span aria-hidden="true">→</span></CampaignLink><CampaignLink className="text-link" href={sitePath('/plans/#offers')}>See pricing →</CampaignLink></div>
+      <p className="simple-caption">Open source · Your provider accounts</p>
+      <ul className="simple-capabilities" id="spend"><li id="policy">Team budgets</li><li>Request controls</li><li>Usage reports</li></ul>
+      <span id="compaction" className="anchor-target" /><CampaignLink className="text-link simple-compatibility" id="setup" href={sitePath('/integrations/#clients')}>Check supported tools →</CampaignLink>
     </section>
-    <section className="landing-section sme-growth" id="growth" aria-labelledby="growth-title">
-      <div className="landing-heading"><h2 id="growth-title">Start with one workflow.<br /><em>Choose the help your team needs.</em></h2><p>Free software, hosted Cloud, and managed sites serve different operating needs. Choose the fit for your supported workflow; your model-provider accounts remain yours.</p></div>
-      <ol className="work-steps">
-        <li><span>01 / OPERATE IT YOURSELF</span><h3>Free software</h3><p className="sme-path-price"><strong>{SOFTWARE_PRICE}</strong> software license</p><p>Try the local examples, then run the Personal Optimizer or your own gateway on a supported setup. Documentation and community support are included.</p><CampaignLink className="text-link" href={sitePath('/docs/')}>Install free software →</CampaignLink></li>
-        <li><span>02 / CHOOSE HOSTING</span><h3>Cloud</h3><p className="sme-path-price"><strong>{CLOUD_PRICE}</strong> / workspace / month</p><p>A planned hosted gateway and dashboard for teams that want hosting. Confirm your applications, traffic, service coverage, and activation first.</p><CampaignLink className="text-link" href={sitePath('/plans/#cloud')}>Explore Cloud →</CampaignLink></li>
-        <li><span>03 / ADD OPERATING HELP</span><h3>Managed site</h3><p className="sme-path-price"><strong>{MANAGED_SITE_PRICE}</strong> / site / month</p><p>The associated Cloud workspace plus the defined monitoring and support service for one agreed site. Appliance hardware is purchased separately.</p><CampaignLink className="text-link" href={sitePath('/plans/#managed')}>Explore managed sites →</CampaignLink></li>
-      </ol>
-      <p className="landing-reassurance">Provider usage and applicable taxes are separate. Confirm compatibility and service coverage before checkout; monthly billing starts at checkout. Cloud is included in the managed-site fee.</p>
+    <section className="simple-section" id="growth" aria-labelledby="growth-title">
+      <h2 id="growth-title">Choose who runs it.</h2>
+      <div className="simple-paths">
+        <article><p className="section-label">SELF-HOSTED</p><h3>Free software</h3><p className="simple-price"><strong>{SOFTWARE_PRICE}</strong><span>software license</span></p><p>Run Hormuz on your own infrastructure. Documentation and community support included.</p><CampaignLink className="text-link" href={sitePath('/docs/')}>Install free →</CampaignLink></article>
+        <article><p className="section-label">HOSTED</p><h3>Cloud</h3><p className="simple-price"><strong>{CLOUD_PRICE}</strong><span>/ workspace / month</span></p><p>A planned hosted gateway and dashboard. Confirm availability and your setup first.</p><CampaignLink className="text-link" href={sitePath('/plans/#cloud')}>Explore Cloud →</CampaignLink></article>
+        <article><p className="section-label">MANAGED</p><h3>Managed site</h3><p className="simple-price"><strong>{MANAGED_SITE_PRICE}</strong><span>/ site / month</span></p><p>Cloud included, with monitoring and up to 1 hour of remote assistance each month. Hardware sold separately.</p><CampaignLink className="text-link" href={sitePath('/plans/#managed')}>Explore managed sites →</CampaignLink></article>
+      </div>
+      <p className="simple-caption">Prices in USD. Provider usage and applicable taxes are separate.</p>
     </section>
-    <section className="landing-section work-journey" id="spend" aria-labelledby="work-journey-title">
-      <div className="landing-heading"><h2 id="work-journey-title">A budget.<br /><em>A piece of work. A result.</em></h2><p>The AI bill belongs beside the work that consumed it. Follow the whole episode, including attempts and uncertain provider outcomes.</p></div>
-      <ol className="work-steps"><li id="policy"><span>01 / SET THE BOUNDARY</span><h3>Choose the commitment.</h3><p>Apply scoped gateway budgets using configured cost estimates and approved-model policies. Reservations account for requests in flight before dispatch.</p></li><li><span>02 / RUN THE WORK</span><h3>Keep your familiar tools.</h3><p>Connect a supported agent and attribute its requests to the work. Protocol, model, and credential compatibility remain part of the route.</p></li><li><span>03 / INSPECT THE RECORD</span><h3>See what happened.</h3><p>Review captured spending estimates, attempts, elapsed time, and available outcome evidence. A response or cache hit does not automatically mean a task is complete.</p></li></ol>
-      <WorkPriorities />
+    <section className="simple-section simple-guide" id="proof">
+      <div><p className="section-label">FOR SOFTWARE AGENCIES</p><h2>Try team budgets locally.</h2><p>Follow a runnable walkthrough for setting budgets and inspecting usage before connecting your provider account.</p></div>
+      <CampaignLink className="text-link" href={sitePath('/guides/software-agency-ai-budgets/')}>Read the walkthrough →</CampaignLink>
     </section>
-    <section className="landing-section work-proof-band" id="proof"><div><h2>Run it yourself.<br /><em>Then connect your work.</em></h2><p>Try OpenAI Responses, Chat Completions, and Anthropic Messages through a disposable local gateway. Explore spending limits, priorities, and answer reuse without a provider account, then select a small live example using your own account.</p><p>Recorded runs and local examples use simulated providers. Real usage, delivery, and outcomes stay visible as separate evidence.</p><div className="resource-actions"><a className="text-link" href={sourcePath('docs/TRY_HORMUZ.md')}>Read the GitHub walkthrough ↗</a><CampaignLink className="text-link" href={sitePath('/guides/software-agency-ai-budgets/')}>Software-agency budget walkthrough →</CampaignLink><CampaignLink className="text-link" href={sitePath('/evidence/')}>Inspect the recorded proof →</CampaignLink></div></div><CampaignLink className="button landing-primary" href={sitePath('/docs/#examples')}>Run the examples <span aria-hidden="true">→</span></CampaignLink></section>
-    <section className="landing-section work-coverage" id="setup"><span id="compaction" className="anchor-target" /><div className="landing-heading"><h2>Your exact stack.<br /><em>A clear boundary.</em></h2><p>Hormuz controls requests that pass through its governed route. Closed applications and unrelated subscriptions do not become controllable by connecting GitHub.</p></div><dl className="coverage-rows"><div><dt>Current gateway paths</dt><dd>OpenAI Responses and Anthropic Messages protocol paths, plus OpenAI-compatible Chat Completions in the AI Work source path. Verify your client version, tool behavior, streaming, and model configuration before expanding usage.</dd></div><div><dt>Personal and team connections</dt><dd>The Personal Optimizer runs from the terminal on Apple Silicon Macs, with pinned Codex CLI and your own OpenAI API account. Automatic compaction covers narrowly eligible repetitive tool output. The separate Mac gateway companion is version {MACOS_VERSION.slice(1)}.</dd></div><div><dt>Cost and speed decisions</dt><dd>The AI Work runtime uses explicit priorities and eligible routes. Check costs, speed, and work quality with your own provider and workload.</dd></div><div><dt>Cache and completion</dt><dd>Provider prompt caching remains a model execution. Opt-in exact answer reuse is bounded by work, identity, context, model, and policy. Reuse counts stay separate from task outcomes.</dd></div></dl><div className="resource-actions"><CampaignLink className="text-link" href={sitePath('/integrations/')}>Check supported connections →</CampaignLink><CampaignLink className="text-link" href={sitePath('/security/')}>Data and credential boundaries →</CampaignLink></div></section>
-    <section className="landing-section work-start" id="install"><div><h2>A clear next step<br /><em>for your team.</em></h2><p>Start with free software or discuss the Cloud or managed-site service that fits your supported workflow. Tell us which applications you use and how much traffic you expect. We confirm service coverage and an activation date with you before payment.</p></div><div className="work-start-actions"><CampaignLink className="button landing-primary" href={sitePath('/docs/')}>Start with free software →</CampaignLink><CampaignLink className="text-link" href={sitePath('/contact/?interest=work')}>Discuss your team’s setup ↗</CampaignLink><CampaignLink className="text-link" href={sitePath('/plans/#offers')}>Compare Cloud and managed sites →</CampaignLink><CampaignLink className="text-link" href={sitePath('/work/')}>Open AI Work →</CampaignLink></div></section>
+    <section className="simple-section simple-help" id="install">
+      <div><h2>Want help running Hormuz?</h2><p>Tell us about your team and applications. We’ll confirm scope and activation before payment.</p></div>
+      <CampaignLink className="button landing-primary" href={sitePath('/contact/?interest=work')}>Discuss your setup <span aria-hidden="true">→</span></CampaignLink>
+    </section>
   </main><SiteFooter /></div>;
 }

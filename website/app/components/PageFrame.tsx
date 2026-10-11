@@ -6,7 +6,6 @@ import { PassageLines } from './Brand';
 
 const sections: Record<string, [string, string][]> = {
   evidence: [['AI Work in action', '#work-demo'], ['Work receipt', '#work-proof'], ['Recorded gateway', '#recording'], ['What the tests show', '#qualification']],
-  plans: [['Compare plans', '#offers'], ['Cloud details', '#cloud'], ['Managed sites', '#managed'], ['Appliances', '#plans'], ['How payment works', '#details']],
   enterprise: [['Prices', '#plans'], ['Reserve yours', '#reserve'], ['Compare', '#comparison'], ['Onboarding', '#onboarding'], ['Support allowance', '#support'], ['Activation', '#activate']],
   demo: [['Actual AI Work', '#work-demo'], ['Compaction', '#compaction'], ['Policy', '#policy'], ['Recorded gateway', '#recording']],
   security: [['At a glance', '#status'], ['Data handling', '#data-handling'], ['Controls', '#controls'], ['Your security checks', '#gates']],
@@ -30,5 +29,5 @@ export function PageFrame({ active, children }: { active: string; children: Reac
 }
 
 export function PageHero({ eyebrow, title, children }: { eyebrow: string; title: React.ReactNode; children: React.ReactNode }) {
-  return <section className="subpage-hero"><div className="subpage-grid" aria-hidden="true" /><PassageLines /><div className="subpage-hero-inner wide"><p className="eyebrow"><span className="pulse-dot" aria-hidden="true" />{eyebrow}</p><h1>{title}</h1>{children}</div></section>;
+  return <section className="subpage-hero"><div className="subpage-hero-inner wide"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</div></section>;
 }
