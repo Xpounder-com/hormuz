@@ -1,7 +1,7 @@
 {
   "schema_id": "hormuz.ai-work-browser-validation",
   "schema_version": 1,
-  "generated_at": "2026-10-11T05:39:09.190Z",
+  "generated_at": "2026-10-11T13:27:09.592Z",
   "fixture": "actual gateway with synthetic local identity, provider, Stripe transport and signed GitHub fixture",
   "provider_calls": "3 local simulated provider responses; zero real or paid provider calls",
   "viewports": [
@@ -41,7 +41,7 @@
     "hormuz/work_http.py": "515db882469550a2dccc29d33ccc686e459c4a299f0e82f072ac4886ff1a3aa0",
     "hormuz/work_billing.py": "a960f5dd2709e667b0944e7a41d5ff93e2c70f8bfc9540011c5a3e80c275896d",
     "hormuz/work_activation.py": "8f77087426b036042942b60e78f2b0c4c2d5e176114b9531b233a6cfc8e50e3c",
-    "hormuz/work_recovery.py": "7b1a9cbc6ebc2ddb9867bcb779b3285d44ba23ae6c8c2b479bc251ca68c02df1",
+    "hormuz/work_recovery.py": "5708f4add807f6ec801f9ba1735974009b5fe410ca48e685c48daeefa649a5b3",
     "hormuz/work_pages.py": "277fb43613a9afa1f9c5cb5515e6c84129f54e2eb14e13f5f344ed08b8b38242",
     "hormuz/work.css": "20f7fb46ed83848a910800cd8a7b85cfc107a83ab3806f6bd4b7437da9f54072",
     "hormuz/work_client.py": "bc7448150586c4089706876087c75cac289f64cc9d320a39a42286e8b6499eb6",
@@ -52,10 +52,10 @@
     "hormuz/server.py": "f86db39ec164ce02bbb30af523de3e15c8764cf05ec748056877cff10ed30a55",
     "hormuz/usage.py": "6e3afd38de63ff8aaa63d83d93f8864437a3a703f305b52b09886a9be236a437",
     "hormuz/_hosted_server.py": "212656252e536935e95acac68641e62f152fe27a1092b1bca1194d1b62ca4b06",
-    "hormuz/_hosted_state.py": "ecc74bd2f278219e75183b688391e58742d3b666013e590c3c9ec1857e561370",
+    "hormuz/_hosted_state.py": "f3b2a29735edefdf0b9709deb2c029611558ec8952aa064b95393015ef9e0254",
     "hormuz/_hosted_config.py": "760f79f5809b5a7e5461a6e53ad1a04eb6ae273ebcac4d4ce09095b2dc23f0ef",
     "hormuz/_hosted_backup.py": "59468f65b37e14dda0235929947a1c269f785081015168f8d22c17e6b44cc1bf",
-    "hormuz/hosted.py": "09fc8614f5d5190f7ab3a10884f43c3a2fb33b8fcbaaa74843a720355fa34a3e",
+    "hormuz/hosted.py": "8f7e685fe9ac89c67b012aa90c964ecb1d286debc34cc08f10434598463a4f76",
     "tools/ai_work_proof.py": "4ba8eefee4174f403b8cdf7cb83a1b611e481b15c1c1fc8fd8a38d829d2fdb62",
     "tools/ai_work_browser_fixture.py": "2e80a56bf59edfaef69599f8fe32fd4cbc91adf4c619ff2cf1ecf08c987c8c85",
     "website/scripts/ai-work-browser-qa.mjs": "b5f8314ed6b919f2f0bf037cb16db91b824716a7906c882a18854e9ec449ba20"

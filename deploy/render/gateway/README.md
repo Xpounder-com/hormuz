@@ -1,5 +1,12 @@
 # Hosted authentication and provider pilot on Render
 
+The explicit `ai-work` mode serves the full single-node SQLite workspace,
+routing, work receipts, optional billing and enrolled signed connectors. It uses
+the existing gateway services behind a separate private-hop allowlist. See
+[integrated AI Work operations](../../../docs/HOSTED_AI_WORK.md). The four
+existing modes and the provider pilot's default dual-provider gates retain their
+contracts. Mode selection does not qualify a deployed paid service.
+
 The default and `active` profiles exercise team login, native sessions and the
 administrator console on a persistent single-node gateway. **`active` cannot
 configure or forward model requests.** A separate, explicit `provider-pilot`

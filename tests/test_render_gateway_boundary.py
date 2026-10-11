@@ -9,10 +9,33 @@ import unittest
 from unittest.mock import patch
 
 from hormuz._hosted_provider import PROVIDER_CHILD_ENV_NAMES
+from hormuz._hosted_work import load_profile
 from tools import verify_render_gateway as verifier
 
 
 class RenderProviderBoundaryTests(unittest.TestCase):
+    def test_container_setup_builds_valid_isolated_full_work_profile(self):
+        # Exercise the actual stdin fixture without Docker, redirects, accounts
+        # or provider requests. Only the fixed fixture root is relocated.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            original_path = Path
+            with patch("pathlib.Path", side_effect=lambda value: root if value == "/var/lib/hormuz" else original_path(value)):
+                exec(verifier.SETUP, {})
+            path = root / "private" / "config" / "ai-work-profile.json"
+            config, selected = load_profile(path, {**verifier.SECRETS, **verifier.PROVIDER_SECRETS,
+                                                   "UNRELATED_SECRET": verifier.CANARY})
+            self.assertEqual(config.database_path.parent, root / "private" / "integrated-state")
+            self.assertEqual(config.usage_storage.backend, "sqlite")
+            self.assertTrue(config.ai_work.enabled)
+            self.assertTrue(config.session_broker.workspace_enabled)
+            self.assertFalse(config.ai_work.billing_price_id)
+            self.assertNotIn("HORMUZ_POSTGRES_DSN", selected)
+            self.assertNotIn("HORMUZ_FAILOVER_REHEARSAL_KEY", selected)
+            self.assertNotIn("UNRELATED_SECRET", selected)
+            self.assertEqual(config.session_broker.database_path.parent, config.database_path.parent)
+            self.assertEqual(config.ai_work.database_path.parent, config.database_path.parent)
+
     def boundary(self, **changes):
         return {
             "backend_present": True,

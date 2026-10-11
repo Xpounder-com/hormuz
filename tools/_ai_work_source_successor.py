@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 
 CONTRACT_PATH = "docs/ai-work-source-successor-v1.json"
-CONTRACT_SHA256 = "2487ccb55dcf2248a570083a4890d143303537f30c62f820e94ce256d63ae50d"
+CONTRACT_SHA256 = "ad48ac4733c1fcdb9eac4ca0d568b3af8658d851ecf9000c8dcb70bfed6c1101"
 CI_SOURCE_PATH = ".github/workflows/ci.yml"
 APPROVED_CI_SOURCE_SUCCESSOR = {
     "path": CI_SOURCE_PATH,

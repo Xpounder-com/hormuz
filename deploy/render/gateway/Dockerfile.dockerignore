@@ -16,4 +16,5 @@
 !deploy/render/gateway/maintenance.Caddyfile
 !deploy/render/gateway/provider-pilot.Caddyfile
 !deploy/render/gateway/workspace.Caddyfile
+!deploy/render/gateway/ai-work.Caddyfile
 # No profile, credentials, state, tests or local artifacts enter any layer.

@@ -12,6 +12,9 @@ import base64
 import hashlib
 import http.client
 import json
+import os
+import random
+import selectors
 import subprocess
 import time
 import uuid
@@ -134,6 +137,17 @@ provider.write_text(json.dumps({
         'teams': {}, 'actors': {}}
 }))
 provider.chmod(0o600)
+work_document = json.loads(provider.read_text())
+work_state = root / 'private' / 'integrated-state'
+work_document['usage_storage'] = {'backend': 'sqlite'}
+work_document['database'] = str(work_state / 'usage.sqlite3')
+work_broker = work_document['authentication']['session_broker']
+work_broker.update(database=str(work_state / 'sessions.sqlite3'),
+    workspace_enabled=True, workspace_signup_issuer='https://idp.example.test')
+work_document['ai_work'] = {'enabled': True, 'database': str(work_state / 'hormuz-work.sqlite3')}
+work = config / 'ai-work-profile.json'
+work.write_text(json.dumps(work_document))
+work.chmod(0o600)
 key = config / 'backup.key'
 key.write_bytes(base64.b64encode(b'b' * 32) + b'\\n')
 key.chmod(0o600)
@@ -150,7 +164,7 @@ for path in Path('/proc').iterdir():
         command = (path / 'cmdline').read_bytes().split(b'\\0')
         if command[:2] == [b'/usr/bin/caddy', b'run']:
             caddy = {item.split(b'=', 1)[0].decode() for item in (path / 'environ').read_bytes().split(b'\\0') if item}
-        elif b'hormuz.hosted' in command and any(item in {b'backend', b'workspace-backend', b'provider-backend'} for item in command):
+        elif b'hormuz.hosted' in command and any(item in {b'backend', b'workspace-backend', b'provider-backend', b'ai-work-backend'} for item in command):
             values = dict(item.split(b'=', 1) for item in (path / 'environ').read_bytes().split(b'\\0') if item)
             backend = {name.decode() for name in values}
             backend_work_billing_populated = [name for name in
@@ -167,9 +181,9 @@ import hashlib, json, hormuz
 from pathlib import Path
 package = Path(hormuz.__file__).parent
 paths = {'hormuz/' + name: package / name for name in
-    ('hosted.py', '_config_routing.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_provider.py', '_hosted_server.py', '_hosted_state.py', 'secret-inventory-v1.json')}
+    ('hosted.py', '_config_routing.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_provider.py', '_hosted_server.py', '_hosted_state.py', '_hosted_work.py', '_hosted_work_server.py', 'work_recovery.py', 'secret-inventory-v1.json')}
 paths.update({'deploy/render/gateway/' + name: Path('/etc/hormuz/caddy') / name
-    for name in ('active.Caddyfile', 'maintenance.Caddyfile', 'provider-pilot.Caddyfile', 'workspace.Caddyfile')})
+    for name in ('active.Caddyfile', 'maintenance.Caddyfile', 'provider-pilot.Caddyfile', 'workspace.Caddyfile', 'ai-work.Caddyfile')})
 print(json.dumps({name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}))
 '''
 SSH_ACCOUNT_BOUNDARY = '''
@@ -241,6 +255,97 @@ def provider_backend_boundary_matches(boundary: dict) -> bool:
         and set(boundary.get("backend_names", ())) - {"LC_CTYPE"} == expected
         and boundary.get("backend_work_billing_populated") == []
     )
+
+
+def await_work_supervisor(name: str) -> None:
+    """Observe one owned startup stream before spending public HTTP retries.
+
+    The supervisor validates state, waits for its backend, then starts Caddy.
+    Starting the public retry clock concurrently with those stages can consume
+    all four probes before the proxy is even spawned. Its existing safe event
+    marks that boundary; raw Docker logs never leave this function.
+    """
+    selector = selectors.DefaultSelector()
+    process = None
+    try:
+        process = subprocess.Popen(
+            ["docker", "logs", "--follow", "--tail", "8", name],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
+        )
+        selector.register(process.stdout, selectors.EVENT_READ)
+        # Same startup ceiling as the existing container health checks, with
+        # one observation and no Docker/HTTP polling or automatic retries.
+        deadline = time.monotonic() + 25
+        pending = b""
+        received = 0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                raise RuntimeError("integrated_work_supervisor_startup_timeout")
+            chunk = os.read(process.stdout.fileno(), 4096)
+            if not chunk:
+                raise RuntimeError("integrated_work_supervisor_exited_before_start")
+            received += len(chunk)
+            if received > 16384:
+                raise RuntimeError("integrated_work_supervisor_log_limit")
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                if len(line) > 4096:
+                    raise RuntimeError("integrated_work_supervisor_log_limit")
+                try:
+                    event = json.loads(line)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("event") == "hosted_operation_failed":
+                    code = _safe_failure_code(line.decode("utf-8"))
+                    # Never turn an arbitrary lower-case log field into an
+                    # exception string: credentials can have that shape too.
+                    # These are the supervisor's fixed lifecycle failure codes;
+                    # other owner/config failures remain content-free.
+                    if code not in {"hosted_backend_not_ready", "hosted_child_exited", "hosted_operation_failed"}:
+                        code = "unclassified"
+                    raise RuntimeError("integrated_work_supervisor_failed:" + code)
+                if event.get("event") == "hosted_starting":
+                    if event.get("mode") != "ai-work" or event.get("inference_enabled") is not True:
+                        raise RuntimeError("integrated_work_supervisor_event_invalid")
+                    return
+            if len(pending) > 4096:
+                raise RuntimeError("integrated_work_supervisor_log_limit")
+    finally:
+        try:
+            selector.close()
+        finally:
+            if process is not None:
+                try:
+                    if process.poll() is None:
+                        process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=2)
+                finally:
+                    process.stdout.close()
+
+
+def await_work_health(name: str, request):
+    # Spend public retries only after the supervisor has spawned the proxy.
+    for attempt in range(4):
+        try:
+            response = request(name, "GET", "/health")
+            if response[0] == 200 and json.loads(response[2]).get("status") == "ai_work":
+                return response
+        except (OSError, ValueError, http.client.HTTPException):
+            pass
+        if attempt < 3:
+            time.sleep(0.5 * 2 ** attempt + random.uniform(0, 0.1))
+    raise RuntimeError("integrated_work_startup_timeout")
 
 
 def verify(image: str) -> dict:
@@ -323,7 +428,10 @@ def verify(image: str) -> dict:
                 connection.putheader("Content-Length", str(len(body)))
             connection.endheaders(body)
             response = connection.getresponse()
-            return response.status, dict(response.getheaders()), response.read(65536)
+            try:
+                return response.status, dict(response.getheaders()), response.read(65536)
+            finally:
+                response.close()
         finally:
             connection.close()
 
@@ -470,7 +578,7 @@ def verify(image: str) -> dict:
         # Elevated permissions apply ONLY to this disposable fixture setup.
         docker("run", "--rm", *common, "--user", "0:0", "--cap-add", "CHOWN", "--cap-add", "DAC_OVERRIDE",
                "--entrypoint", PYTHON, image, "-I", "-c",
-               "import os; from pathlib import Path; files=[Path('/var/lib/hormuz/private/config')/name for name in ('profile.json','restored-profile.json','workspace-profile.json','provider.json')]; [(os.chown(path,0,1000),path.chmod(0o640)) for path in files]")
+               "import os; from pathlib import Path; files=[Path('/var/lib/hormuz/private/config')/name for name in ('profile.json','restored-profile.json','workspace-profile.json','provider.json','ai-work-profile.json')]; [(os.chown(path,0,1000),path.chmod(0o640)) for path in files]")
         uninitialized = start("uninitialized", "active")
         passed("uninitialized_active_start_refused", docker("wait", uninitialized, timeout=25) == "1")
         maintenance = start("maintenance", "maintenance")
@@ -659,6 +767,34 @@ target.chmod(0o600)
                and restored_state.pop("recovered_closed", None) is True
                and all(value == 0 for value in restored_state.values()))
         passed("encrypted_archive_restores_closed_and_checks")
+        work_path = "/var/lib/hormuz/private/config/ai-work-profile.json"
+        operator("--config", work_path, "--ai-work-profile", "initialize")
+        work_check = json.loads(operator("--config", work_path, "ai-work-check"))
+        passed("integrated_work_offline_check", work_check["inference_enabled"] is False)
+        work = start("integrated-work", "ai-work", extra_environment=("--env", "HORMUZ_CONFIG=" + work_path))
+        await_work_supervisor(work)
+        passed("integrated_work_supervisor_started_before_public_probes")
+        health = await_work_health(work, request)
+        report = json.loads(health[2])
+        passed("integrated_work_caddy_serves_checked_sqlite_profile",
+               report["schema_id"] == "hormuz.hosted-ai-work"
+               and report["contract"]["storage_backend"] == "sqlite"
+               and report["contract"]["workspace_enabled"] is True
+               and report["contract"]["billing_configured"] is False)
+        for path in ("/ready", "/console", "/workspace", "/work"):
+            passed("integrated_work_public_" + path, request(work, "GET", path)[0] == 200)
+        for path in ("/v1/work/state", "/v1/models", "/v1/admin/members", "/v1/admin/teams"):
+            passed("integrated_work_session_required_" + path, request(work, "GET", path)[0] == 401)
+        passed("integrated_work_unknown_route_closed", request(work, "GET", "/v1/private")[0] == 503)
+        boundary = json.loads(execute(work, PYTHON, "-I", "-", input_text=PROCESS_BOUNDARY))
+        passed("integrated_work_proxy_has_only_ingress_secret", set(boundary["caddy_names"]) == {
+            "PORT", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HORMUZ_INGRESS_CREDENTIAL"})
+        passed("integrated_work_backend_has_only_declared_credentials", boundary["backend_present"]
+               and set(boundary["backend_names"]) - {"LC_CTYPE"} == set(SECRETS)
+               | {"HORMUZ_OPENAI_PROVIDER_KEY", "HORMUZ_ANTHROPIC_PROVIDER_KEY", "HORMUZ_HOSTED_MODE"}
+               | (PROVIDER_METADATA_NAMES - {"HORMUZ_PROVIDER_PROFILE"})
+               and not boundary["backend_work_billing_populated"])
+        stop(work)
         for name in containers:
             logs = docker("logs", name)
             passed("no_canary_or_secret_in_logs_" + name.rsplit("-", 1)[1], all(

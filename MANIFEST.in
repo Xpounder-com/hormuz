@@ -120,12 +120,16 @@ include tools/evaluate_context_compaction.py
 include clients/macos/Resources/hormuz-context-release
 recursive-include clients/macos/Resources/ThirdPartyNotices *.txt
 include tools/verify_render_gateway.py
+include requirements/oci-build-linux-amd64.lock
+include requirements/oci-runtime-linux-amd64.lock
 include deploy/render/gateway/Dockerfile
 include deploy/render/gateway/Dockerfile.dockerignore
 include deploy/render/gateway/active.Caddyfile
 include deploy/render/gateway/maintenance.Caddyfile
 include deploy/render/gateway/provider-pilot.Caddyfile
 include deploy/render/gateway/workspace.Caddyfile
+include deploy/render/gateway/ai-work.Caddyfile
+include deploy/render/gateway/ai-work-profile.example.json
 include deploy/render/gateway/workspace-profile.example.json
 include deploy/render/gateway/profile.example.json
 include deploy/render/gateway/provider-profile.example.json

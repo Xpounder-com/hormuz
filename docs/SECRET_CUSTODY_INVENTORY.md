@@ -58,6 +58,16 @@ The active core has eight custody categories:
    absent from the proxy and existing provider-pilot child environments, and never
    persisted or sent to a customer domain. Customer-domain TLS probes carry only a
    random challenge. See [workspace setup and recovery](../WORKSPACE_ADDRESSES.md).
+   The explicit hosted `ai-work` mode first validates a complete owner JSON
+   without resolving credentials, then selects only its declared credential
+   references and bounded non-secret Render metadata. This includes configured
+   provider/login/master/ingress, optional billing/domain/custom-detector secrets
+   and every configured GitHub/Linear rotation reference. It rejects process
+   controls, ambient AWS credentials, external custody and PostgreSQL adapters.
+   The backend receives this selected mapping; Caddy receives only its dedicated
+   ingress credential and public settings. Missing configured credentials fail
+   before serving. This is process-inheritance containment, not OS isolation
+   between the same-UID processes. See [the full serving boundary](HOSTED_AI_WORK.md).
 4. **Hosted off-disk backup.** The offline operator imports a distinct random
    `data_encryption` key from an owner-only file and streams the fixed hosted
    snapshot into an AES-256-GCM archive. The key is never an environment value,
