@@ -134,6 +134,17 @@ provider.write_text(json.dumps({
         'teams': {}, 'actors': {}}
 }))
 provider.chmod(0o600)
+work_document = json.loads(provider.read_text())
+work_state = root / 'private' / 'integrated-state'
+work_document['usage_storage'] = {'backend': 'sqlite'}
+work_document['database'] = str(work_state / 'usage.sqlite3')
+work_broker = work_document['authentication']['session_broker']
+work_broker.update(database=str(work_state / 'sessions.sqlite3'),
+    workspace_enabled=True, workspace_signup_issuer='https://idp.example.test')
+work_document['ai_work'] = {'enabled': True, 'database': str(work_state / 'hormuz-work.sqlite3')}
+work = config / 'ai-work-profile.json'
+work.write_text(json.dumps(work_document))
+work.chmod(0o600)
 key = config / 'backup.key'
 key.write_bytes(base64.b64encode(b'b' * 32) + b'\\n')
 key.chmod(0o600)
@@ -323,7 +334,10 @@ def verify(image: str) -> dict:
                 connection.putheader("Content-Length", str(len(body)))
             connection.endheaders(body)
             response = connection.getresponse()
-            return response.status, dict(response.getheaders()), response.read(65536)
+            try:
+                return response.status, dict(response.getheaders()), response.read(65536)
+            finally:
+                response.close()
         finally:
             connection.close()
 
@@ -344,6 +358,19 @@ def verify(image: str) -> dict:
         docker("stop", "--time", "25", name, timeout=30)
         passed("clean_shutdown_" + name.rsplit("-", 1)[1],
                time.monotonic() - started < 25 and docker("inspect", "--format", "{{.State.ExitCode}}", name) == "0")
+
+    def await_work_health(name):
+        # New mode: one attempt and at most three retries, with finite backoff.
+        for attempt in range(4):
+            try:
+                response = request(name, "GET", "/health")
+                if response[0] == 200 and json.loads(response[2]).get("status") == "ai_work":
+                    return response
+            except (OSError, ValueError, http.client.HTTPException):
+                pass
+            if attempt < 3:
+                time.sleep(0.5 * 2 ** attempt)
+        raise RuntimeError("integrated_work_startup_timeout")
 
     try:
         docker("volume", "create", volume)
@@ -470,7 +497,7 @@ def verify(image: str) -> dict:
         # Elevated permissions apply ONLY to this disposable fixture setup.
         docker("run", "--rm", *common, "--user", "0:0", "--cap-add", "CHOWN", "--cap-add", "DAC_OVERRIDE",
                "--entrypoint", PYTHON, image, "-I", "-c",
-               "import os; from pathlib import Path; files=[Path('/var/lib/hormuz/private/config')/name for name in ('profile.json','restored-profile.json','workspace-profile.json','provider.json')]; [(os.chown(path,0,1000),path.chmod(0o640)) for path in files]")
+               "import os; from pathlib import Path; files=[Path('/var/lib/hormuz/private/config')/name for name in ('profile.json','restored-profile.json','workspace-profile.json','provider.json','ai-work-profile.json')]; [(os.chown(path,0,1000),path.chmod(0o640)) for path in files]")
         uninitialized = start("uninitialized", "active")
         passed("uninitialized_active_start_refused", docker("wait", uninitialized, timeout=25) == "1")
         maintenance = start("maintenance", "maintenance")
@@ -659,6 +686,32 @@ target.chmod(0o600)
                and restored_state.pop("recovered_closed", None) is True
                and all(value == 0 for value in restored_state.values()))
         passed("encrypted_archive_restores_closed_and_checks")
+        work_path = "/var/lib/hormuz/private/config/ai-work-profile.json"
+        operator("--config", work_path, "--ai-work-profile", "initialize")
+        work_check = json.loads(operator("--config", work_path, "ai-work-check"))
+        passed("integrated_work_offline_check", work_check["inference_enabled"] is False)
+        work = start("integrated-work", "ai-work", extra_environment=("--env", "HORMUZ_CONFIG=" + work_path))
+        health = await_work_health(work)
+        report = json.loads(health[2])
+        passed("integrated_work_caddy_serves_checked_sqlite_profile",
+               report["schema_id"] == "hormuz.hosted-ai-work"
+               and report["contract"]["storage_backend"] == "sqlite"
+               and report["contract"]["workspace_enabled"] is True
+               and report["contract"]["billing_configured"] is False)
+        for path in ("/ready", "/console", "/workspace", "/work"):
+            passed("integrated_work_public_" + path, request(work, "GET", path)[0] == 200)
+        for path in ("/v1/work/state", "/v1/models", "/v1/admin/members", "/v1/admin/teams"):
+            passed("integrated_work_session_required_" + path, request(work, "GET", path)[0] == 401)
+        passed("integrated_work_unknown_route_closed", request(work, "GET", "/v1/private")[0] == 503)
+        boundary = json.loads(execute(work, PYTHON, "-I", "-", input_text=PROCESS_BOUNDARY))
+        passed("integrated_work_proxy_has_only_ingress_secret", set(boundary["caddy_names"]) == {
+            "PORT", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HORMUZ_INGRESS_CREDENTIAL"})
+        passed("integrated_work_backend_has_only_declared_credentials", boundary["backend_present"]
+               and set(boundary["backend_names"]) - {"LC_CTYPE"} == set(SECRETS)
+               | {"HORMUZ_OPENAI_PROVIDER_KEY", "HORMUZ_ANTHROPIC_PROVIDER_KEY", "HORMUZ_HOSTED_MODE"}
+               | (PROVIDER_METADATA_NAMES - {"HORMUZ_PROVIDER_PROFILE"})
+               and not boundary["backend_work_billing_populated"])
+        stop(work)
         for name in containers:
             logs = docker("logs", name)
             passed("no_canary_or_secret_in_logs_" + name.rsplit("-", 1)[1], all(
