@@ -64,14 +64,83 @@ def owned_databases(config):
     return (WORK_DATABASE, BILLING_DATABASE) if config.ai_work.billing_price_id else (WORK_DATABASE,)
 
 
+def _validate_store(connection, *, billing=False):
+    if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok" or connection.execute("PRAGMA foreign_key_check").fetchone():
+        raise HostedError("hosted_work_recovery_integrity_invalid")
+    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    expected = {"work_entitlements", "work_billing_events", "work_activation", "work_checkouts", "work_payment_facts"} if billing else {"ai_work_schema", "ai_work_plans", "ai_work_jobs", "ai_work_attempts", "ai_work_observations"}
+    if not expected <= tables or not billing and [row[0] for row in connection.execute("SELECT version FROM ai_work_schema")] != [1]:
+        raise HostedError("hosted_work_recovery_schema_invalid")
+    return tables
+
+
 def validate_store(path, *, billing=False):
     with closing(sqlite3.connect(Path(path).as_uri() + "?mode=ro", uri=True, timeout=5)) as connection:
-        if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok" or connection.execute("PRAGMA foreign_key_check").fetchone():
-            raise HostedError("hosted_work_recovery_integrity_invalid")
-        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        expected = {"work_entitlements", "work_billing_events", "work_activation", "work_checkouts", "work_payment_facts"} if billing else {"ai_work_schema", "ai_work_plans", "ai_work_jobs", "ai_work_attempts", "ai_work_observations"}
-        if not expected <= tables:
-            raise HostedError("hosted_work_recovery_schema_invalid")
+        _validate_store(connection, billing=billing)
+
+
+def recovery_authority_counts(config):
+    """Read closed Work/payment invariants under the quiescent owner lock.
+
+    Hosted callers hold their state lock first, matching snapshot lock order.
+    No runtime/billing constructor is used: missing stores and schema are never
+    initialized, and unknown spend reservations are only read.
+    """
+    from ._hosted_state import _private
+    directory = config.database_path.parent
+    names = owned_databases(config)
+    if not names:
+        return {}
+    with owner_lock(config.ai_work.database_path):
+        try:
+            before = {name: _private(directory / name) for name in names}
+            counts = {}
+            for name in names:
+                path = directory / name
+                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5)) as connection:
+                    connection.execute("PRAGMA query_only=ON")
+                    connection.execute("BEGIN")
+                    tables = _validate_store(connection, billing=name == BILLING_DATABASE)
+                    if name == WORK_DATABASE:
+                        counts.update({
+                            "pending_work_attempts": int(connection.execute(
+                                "SELECT count(*) FROM ai_work_attempts WHERE state='pending'"
+                            ).fetchone()[0]),
+                            "unclosed_work_jobs": int(connection.execute(
+                                "SELECT count(*) FROM ai_work_jobs "
+                                "WHERE state IS NOT 'stopped' AND state IS NOT 'completed' "
+                                "AND (state IS NOT 'paused' OR pause_reason IS NOT 'recovery_required')"
+                            ).fetchone()[0]),
+                            "pending_work_bridge_events": int(connection.execute(
+                                "SELECT count(*) FROM ai_work_bridge_events WHERE status='pending'"
+                            ).fetchone()[0]) if "ai_work_bridge_events" in tables else 0,
+                        })
+                    else:
+                        queries = {
+                            "unclosed_work_entitlements": (
+                                "SELECT count(*) FROM work_entitlements "
+                                "WHERE subscription_state IS NOT 'recovery_required' "
+                                "OR paid_until IS NOT 0 OR subscription_until IS NOT 0"
+                            ),
+                            "unclosed_work_activation": "SELECT count(*) FROM work_activation WHERE state IS NOT 'recovery_required'",
+                            "unclosed_work_checkouts": "SELECT count(*) FROM work_checkouts WHERE state IS NOT 'blocked' OR url IS NOT NULL",
+                            "retained_work_payment_facts": "SELECT count(*) FROM work_payment_facts",
+                        }
+                        counts.update({key: int(connection.execute(query).fetchone()[0]) for key, query in queries.items()})
+                # Check all identities again below too, so replacing an earlier
+                # store while a later one is inspected also fails closed.
+                after = _private(path)
+                if (after.st_dev, after.st_ino) != (before[name].st_dev, before[name].st_ino):
+                    raise HostedError("hosted_work_recovery_store_changed")
+            for name, info in before.items():
+                after = _private(directory / name)
+                if (after.st_dev, after.st_ino) != (info.st_dev, info.st_ino):
+                    raise HostedError("hosted_work_recovery_store_changed")
+            return counts
+        except OSError:
+            raise HostedError("hosted_work_recovery_store_unavailable") from None
+        except sqlite3.Error:
+            raise HostedError("hosted_work_recovery_database_invalid") from None
 
 
 def close_restored(directory, names):

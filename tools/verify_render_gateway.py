@@ -12,7 +12,9 @@ import base64
 import hashlib
 import http.client
 import json
+import os
 import random
+import selectors
 import subprocess
 import time
 import uuid
@@ -179,7 +181,7 @@ import hashlib, json, hormuz
 from pathlib import Path
 package = Path(hormuz.__file__).parent
 paths = {'hormuz/' + name: package / name for name in
-    ('hosted.py', '_config_routing.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_provider.py', '_hosted_server.py', '_hosted_state.py', '_hosted_work.py', '_hosted_work_server.py', 'secret-inventory-v1.json')}
+    ('hosted.py', '_config_routing.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_provider.py', '_hosted_server.py', '_hosted_state.py', '_hosted_work.py', '_hosted_work_server.py', 'work_recovery.py', 'secret-inventory-v1.json')}
 paths.update({'deploy/render/gateway/' + name: Path('/etc/hormuz/caddy') / name
     for name in ('active.Caddyfile', 'maintenance.Caddyfile', 'provider-pilot.Caddyfile', 'workspace.Caddyfile', 'ai-work.Caddyfile')})
 print(json.dumps({name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}))
@@ -253,6 +255,97 @@ def provider_backend_boundary_matches(boundary: dict) -> bool:
         and set(boundary.get("backend_names", ())) - {"LC_CTYPE"} == expected
         and boundary.get("backend_work_billing_populated") == []
     )
+
+
+def await_work_supervisor(name: str) -> None:
+    """Observe one owned startup stream before spending public HTTP retries.
+
+    The supervisor validates state, waits for its backend, then starts Caddy.
+    Starting the public retry clock concurrently with those stages can consume
+    all four probes before the proxy is even spawned. Its existing safe event
+    marks that boundary; raw Docker logs never leave this function.
+    """
+    selector = selectors.DefaultSelector()
+    process = None
+    try:
+        process = subprocess.Popen(
+            ["docker", "logs", "--follow", "--tail", "8", name],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
+        )
+        selector.register(process.stdout, selectors.EVENT_READ)
+        # Same startup ceiling as the existing container health checks, with
+        # one observation and no Docker/HTTP polling or automatic retries.
+        deadline = time.monotonic() + 25
+        pending = b""
+        received = 0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                raise RuntimeError("integrated_work_supervisor_startup_timeout")
+            chunk = os.read(process.stdout.fileno(), 4096)
+            if not chunk:
+                raise RuntimeError("integrated_work_supervisor_exited_before_start")
+            received += len(chunk)
+            if received > 16384:
+                raise RuntimeError("integrated_work_supervisor_log_limit")
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                if len(line) > 4096:
+                    raise RuntimeError("integrated_work_supervisor_log_limit")
+                try:
+                    event = json.loads(line)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("event") == "hosted_operation_failed":
+                    code = _safe_failure_code(line.decode("utf-8"))
+                    # Never turn an arbitrary lower-case log field into an
+                    # exception string: credentials can have that shape too.
+                    # These are the supervisor's fixed lifecycle failure codes;
+                    # other owner/config failures remain content-free.
+                    if code not in {"hosted_backend_not_ready", "hosted_child_exited", "hosted_operation_failed"}:
+                        code = "unclassified"
+                    raise RuntimeError("integrated_work_supervisor_failed:" + code)
+                if event.get("event") == "hosted_starting":
+                    if event.get("mode") != "ai-work" or event.get("inference_enabled") is not True:
+                        raise RuntimeError("integrated_work_supervisor_event_invalid")
+                    return
+            if len(pending) > 4096:
+                raise RuntimeError("integrated_work_supervisor_log_limit")
+    finally:
+        try:
+            selector.close()
+        finally:
+            if process is not None:
+                try:
+                    if process.poll() is None:
+                        process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=2)
+                finally:
+                    process.stdout.close()
+
+
+def await_work_health(name: str, request):
+    # Spend public retries only after the supervisor has spawned the proxy.
+    for attempt in range(4):
+        try:
+            response = request(name, "GET", "/health")
+            if response[0] == 200 and json.loads(response[2]).get("status") == "ai_work":
+                return response
+        except (OSError, ValueError, http.client.HTTPException):
+            pass
+        if attempt < 3:
+            time.sleep(0.5 * 2 ** attempt + random.uniform(0, 0.1))
+    raise RuntimeError("integrated_work_startup_timeout")
 
 
 def verify(image: str) -> dict:
@@ -359,19 +452,6 @@ def verify(image: str) -> dict:
         docker("stop", "--time", "25", name, timeout=30)
         passed("clean_shutdown_" + name.rsplit("-", 1)[1],
                time.monotonic() - started < 25 and docker("inspect", "--format", "{{.State.ExitCode}}", name) == "0")
-
-    def await_work_health(name):
-        # New mode: one attempt and at most three retries, with finite backoff.
-        for attempt in range(4):
-            try:
-                response = request(name, "GET", "/health")
-                if response[0] == 200 and json.loads(response[2]).get("status") == "ai_work":
-                    return response
-            except (OSError, ValueError, http.client.HTTPException):
-                pass
-            if attempt < 3:
-                time.sleep(0.5 * 2 ** attempt + random.uniform(0, 0.1))
-        raise RuntimeError("integrated_work_startup_timeout")
 
     try:
         docker("volume", "create", volume)
@@ -692,7 +772,9 @@ target.chmod(0o600)
         work_check = json.loads(operator("--config", work_path, "ai-work-check"))
         passed("integrated_work_offline_check", work_check["inference_enabled"] is False)
         work = start("integrated-work", "ai-work", extra_environment=("--env", "HORMUZ_CONFIG=" + work_path))
-        health = await_work_health(work)
+        await_work_supervisor(work)
+        passed("integrated_work_supervisor_started_before_public_probes")
+        health = await_work_health(work, request)
         report = json.loads(health[2])
         passed("integrated_work_caddy_serves_checked_sqlite_profile",
                report["schema_id"] == "hormuz.hosted-ai-work"

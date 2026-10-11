@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import io
 import http.client
 import json
+import logging
 import os
 import secrets
 from pathlib import Path
@@ -247,6 +248,9 @@ class AIWorkHostedHTTPTests(unittest.TestCase):
 
 
 class AIWorkHostedLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(logging.disable, logging.root.manager.disable)
+
     def test_interrupted_fresh_initialization_is_cleaned_and_retry_publishes_all_stores(self):
         from hormuz import work_gateway
         with tempfile.TemporaryDirectory() as directory:

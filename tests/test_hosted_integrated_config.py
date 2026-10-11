@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import io
 import json
+import logging
 import os
 from pathlib import Path
 import tempfile
@@ -44,6 +45,7 @@ class _Environment(dict):
 @unittest.skipUnless(os.name == "posix", "Hosted configuration validates POSIX ownership")
 class HostedIntegratedConfigTests(unittest.TestCase):
     def setUp(self):
+        self.addCleanup(logging.disable, logging.root.manager.disable)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()

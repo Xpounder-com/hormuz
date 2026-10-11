@@ -79,8 +79,11 @@ forwarding headers, preserves signed connector headers, and preserves the exact
 `Idempotency-Key` required by portfolio mutations. The backend rechecks framing,
 private-hop credential, canonical/registered Host and exact route shapes before
 dispatch. Existing tenant/owner, session, Origin/CSRF, signature, budget and paid
-checks remain authoritative. There are eight provider slots and nine connection
-slots, finite deadlines and zero proxy retries. Shutdown stops admission first
+checks remain authoritative. There are eight provider slots, nine normal connection
+slots and two overflow slots restricted to exact `GET`/`HEAD` health or readiness
+requests. Incomplete overflow clients expire after a hard two-second deadline;
+exhausting both overflow slots can still reject a probe. Deadlines are finite and
+the proxy performs zero retries. Shutdown stops admission first
 and uses the existing finite child drain/termination budget.
 
 The `hormuz.hosted-ai-work` health response describes liveness and this SQLite

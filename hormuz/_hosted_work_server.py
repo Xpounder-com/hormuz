@@ -42,6 +42,9 @@ GATEWAY_PATHS = frozenset({
 })
 POLICY_PATHS = frozenset({"/console/policy", "/console/policy.css", "/console/policy/activity",
                           "/console/policy/results", "/v1/admin/policy/scopes", "/v1/admin/policy/results"})
+AI_WORK_HEALTH_PROBE_CONNECTIONS = 2
+AI_WORK_HEALTH_PROBE_TIMEOUT = 2
+AI_WORK_MAX_CONNECTIONS = PROVIDER_MAX_CONNECTIONS + AI_WORK_HEALTH_PROBE_CONNECTIONS
 
 
 def workspace_route(path):
@@ -62,12 +65,17 @@ def allowed_route(method, path):
 
 
 class AIWorkGatewayServer(ProviderPilotGatewayServer):
-    """Reuse finite transport capacity, without pilot profiles or rehearsals."""
+    """Bound normal traffic separately from short, health-only overflow probes."""
+    request_queue_size = AI_WORK_MAX_CONNECTIONS
+
     def __init__(self, config, *, environ):
         self._state_identity = check_initialized(config)
         self._work_state_identity = check_work_stores(config)
         self._deployment_metadata = deployment_metadata(environ)
         self._connection_slots = threading.BoundedSemaphore(PROVIDER_MAX_CONNECTIONS)
+        self._health_probe_slots = threading.BoundedSemaphore(AI_WORK_HEALTH_PROBE_CONNECTIONS)
+        self._connection_lanes_lock = threading.Lock()
+        self._connection_lanes = {}
         self._provider_slots = threading.BoundedSemaphore(PROVIDER_MAX_INFERENCE_CONNECTIONS)
         self._provider_metrics_lock = threading.Lock()
         self._provider_inflight = self._provider_peak_inflight = self._provider_admitted_total = 0
@@ -75,6 +83,40 @@ class AIWorkGatewayServer(ProviderPilotGatewayServer):
         self.connection_lifetime = min(config.upstream_timeout_seconds + PROVIDER_CONNECTION_LIFETIME_MARGIN, 630)
         GatewayServer.__init__(self, config, environ=environ)
         self.RequestHandlerClass = AIWorkRequestHandler
+
+    def process_request(self, request, client_address):
+        health_only = not self._connection_slots.acquire(blocking=False)
+        if health_only and not self._health_probe_slots.acquire(blocking=False):
+            with self._provider_metrics_lock:
+                self._connection_saturated_total += 1
+            self.shutdown_request(request)
+            return
+        with self._connection_lanes_lock:
+            self._connection_lanes[request] = health_only
+        try:
+            if health_only:
+                request.settimeout(AI_WORK_HEALTH_PROBE_TIMEOUT)
+            # Bypass the pilot's shared pre-classification semaphore. The
+            # overflow handler may parse headers but cannot serve normal work.
+            GatewayServer.process_request(self, request, client_address)
+        except BaseException:
+            self._release_connection(request)
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            GatewayServer.process_request_thread(self, request, client_address)
+        finally:
+            self._release_connection(request)
+
+    def health_only_connection(self, request):
+        with self._connection_lanes_lock:
+            return self._connection_lanes[request]
+
+    def _release_connection(self, request):
+        with self._connection_lanes_lock:
+            health_only = self._connection_lanes.pop(request)
+        (self._health_probe_slots if health_only else self._connection_slots).release()
 
     def state_intact(self):
         if not super().state_intact():
@@ -98,15 +140,37 @@ class AIWorkGatewayServer(ProviderPilotGatewayServer):
             "signed_connectors_configured": self.config.outcome_connectors is not None,
             "consistent_closed_recovery": True, "availability_sla_claimed": False,
             "max_inflight_streams": PROVIDER_MAX_INFERENCE_CONNECTIONS,
+            "normal_connection_capacity": PROVIDER_MAX_CONNECTIONS,
+            "health_probe_connection_capacity": AI_WORK_HEALTH_PROBE_CONNECTIONS,
+            "health_probe_timeout_seconds": AI_WORK_HEALTH_PROBE_TIMEOUT,
         }
 
     def operational_stats(self):
         result = super().operational_stats()
         result["schema_id"] = "hormuz.ai-work-operations"
+        result["provider"].update(connection_capacity=AI_WORK_MAX_CONNECTIONS,
+            normal_connection_capacity=PROVIDER_MAX_CONNECTIONS,
+            health_probe_connection_capacity=AI_WORK_HEALTH_PROBE_CONNECTIONS,
+            health_probe_timeout_seconds=AI_WORK_HEALTH_PROBE_TIMEOUT)
         return result
 
 
 class AIWorkRequestHandler(StagingRequestHandler):
+    def setup(self):
+        self._health_only = self.server.health_only_connection(self.request)
+        GatewayRequestHandler.setup(self)
+        # A hard deadline also bounds a client that keeps trickling headers.
+        lifetime = AI_WORK_HEALTH_PROBE_TIMEOUT if self._health_only else self.server.connection_lifetime
+        self._deadline = threading.Timer(lifetime, self._expire_connection)
+        self._deadline.daemon = True
+        self._deadline.start()
+
+    def finish(self):
+        try:
+            super().finish()
+        finally:
+            self._deadline.join(timeout=1)
+
     def _stage_response(self, status, state):
         body = json.dumps({"schema_id": "hormuz.hosted-ai-work", "schema_version": 1,
                            "status": state, "inference_enabled": True,
@@ -162,6 +226,11 @@ class AIWorkRequestHandler(StagingRequestHandler):
             return False
         if self.command != "POST" and length:
             self.send_error(HTTPStatus.BAD_REQUEST)
+            return False
+        if self._health_only and (self.command not in {"GET", "HEAD"} or target not in {"/health", "/ready"}):
+            with self.server._provider_metrics_lock:
+                self.server._connection_saturated_total += 1
+            self._stage_response(HTTPStatus.SERVICE_UNAVAILABLE, "capacity_exhausted")
             return False
         request = urlsplit(self.path)
         if request.fragment:

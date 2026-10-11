@@ -230,6 +230,9 @@ def _recovery_authority_counts(config: GatewayConfig) -> dict[str, int]:
 
 def _assert_recovery_closed(config: GatewayConfig) -> dict[str, int]:
     counts = _recovery_authority_counts(config)
+    if config.ai_work.enabled:
+        from .work_recovery import recovery_authority_counts
+        counts.update(recovery_authority_counts(config))
     if any(counts.values()):
         raise HostedError("hosted_recovery_authority_open")
     return counts
