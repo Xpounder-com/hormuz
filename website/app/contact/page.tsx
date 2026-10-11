@@ -11,7 +11,7 @@ export const metadata = pageMetadata('Discuss your team’s AI setup — Hormuz'
 export default function ContactPage() {
   return <PageFrame active="contact">
     <PageHero eyebrow="LET’S TALK" title="Tell us about your setup.">
-      <p>Share your tools and operating needs. We’ll confirm compatibility, scope, and activation before any payment.</p>
+      <p>Share your tools and operating needs. We’ll help you choose the right setup and confirm next steps.</p>
     </PageHero>
     <section className="section contact-layout">
       <div className="contact-form-panel">
