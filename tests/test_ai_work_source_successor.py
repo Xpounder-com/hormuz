@@ -55,6 +55,42 @@ class AIWorkSourceSuccessorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verifier.verify(self.root)
 
+    def test_hosted_manifest_inputs_are_exact_additions_under_the_frozen_parent(self):
+        expected_additions = (
+            "include requirements/oci-build-linux-amd64.lock\ninclude requirements/oci-runtime-linux-amd64.lock\n",
+            "include deploy/render/gateway/ai-work.Caddyfile\ninclude deploy/render/gateway/ai-work-profile.example.json\n",
+        )
+        item = successor.contract(self.root)["source_edits"]["MANIFEST.in"]
+        expected = self.plan["source_sha256"]["MANIFEST.in"]
+        self.assertEqual(item["predecessor_sha256"], expected)
+        self.assertEqual(item["edits"][-2:], [{"predecessor": "", "addition": text} for text in expected_additions])
+        self.assertEqual(expected, successor.projected_sha256(self.root, "MANIFEST.in", expected))
+        self.assertEqual(verifier.PLAN_SHA256, verifier.canonical_digest(self.plan))
+
+    def test_hosted_manifest_inputs_cannot_be_missing_duplicated_or_replaced(self):
+        path = self.root / "MANIFEST.in"
+        original = path.read_bytes()
+        lines = (b"include requirements/oci-build-linux-amd64.lock\n",
+                 b"include requirements/oci-runtime-linux-amd64.lock\n",
+                 b"include deploy/render/gateway/ai-work.Caddyfile\n",
+                 b"include deploy/render/gateway/ai-work-profile.example.json\n")
+        for line in lines:
+            for replacement in (b"", line + line, b"include unreviewed-hosted-input\n"):
+                with self.subTest(line=line.decode().strip(), replacement=replacement.decode().strip()):
+                    self.assertEqual(original.count(line), 1)
+                    path.write_bytes(original.replace(line, replacement, 1))
+                    try:
+                        with self.assertRaisesRegex(verifier.RecommendationRuntimePlanError, "recommendation_runtime_source_changed"):
+                            verifier.verify(self.root)
+                    finally:
+                        path.write_bytes(original)
+
+    def test_other_manifest_additions_are_still_visible_to_the_frozen_source_guard(self):
+        path = self.root / "MANIFEST.in"
+        path.write_bytes(path.read_bytes() + b"include deploy/render/gateway/unreviewed.Caddyfile\n")
+        with self.assertRaisesRegex(verifier.RecommendationRuntimePlanError, "recommendation_runtime_source_changed"):
+            verifier.verify(self.root)
+
     def test_legacy_wire_and_schema_sources_remain_guarded(self):
         for name in ("hormuz/portfolio-intelligence-wire-v1.json", "hormuz/_sqlite_schema.py"):
             with self.subTest(source=name):

@@ -18,6 +18,14 @@
         {
           "predecessor": "",
           "addition": "include tools/ai_work_provider_examples.py\ninclude tools/provider_example_transport.py\ninclude tools/provider_example_responses.py\ninclude tools/ai_work_delivery_examples.py\ninclude tools/ai_work_sdk_qualification.py\ninclude website/scripts/ai-work-browser-qa.mjs\ninclude examples/providers/README.md\ninclude examples/providers/rate-card.template.json\ninclude examples/sdk/README.md\ninclude examples/sdk/work_sdk.py\ninclude examples/delivery/github-actions.yml\n"
+        },
+        {
+          "predecessor": "",
+          "addition": "include requirements/oci-build-linux-amd64.lock\ninclude requirements/oci-runtime-linux-amd64.lock\n"
+        },
+        {
+          "predecessor": "",
+          "addition": "include deploy/render/gateway/ai-work.Caddyfile\ninclude deploy/render/gateway/ai-work-profile.example.json\n"
         }
       ]
     },
