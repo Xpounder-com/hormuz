@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from urllib.parse import quote
 
 from hormuz._hosted_config import HostedError, SECRET_NAMES
 from hormuz._hosted_provider import (
@@ -93,6 +94,14 @@ class HostedWorkConfigTests(unittest.TestCase):
     def test_only_known_work_path_shapes_admitted_at_private_hop(self):
         for path in ("/work", "/work.css", "/v1/work/billing/webhook", "/v1/work/jobs/work_abc/observations", "/work/jobs/work_abc"):
             self.assertTrue(_ai_work_route(path), path)
+        for prefix in ("/work", "/v1/work"):
+            path = prefix + "/jobs/work_abc/attempts"
+            for suffix in ("", "/before/" + "x" * 129, "/before/prefix%2Fpath%3A%40id", "/before/" + "x" * 768):
+                self.assertTrue(_ai_work_route(path + suffix), path + suffix)
+            for suffix in ("/", "/before/", "/before/" + "x" * 769, "/before/raw/path", "/delete"):
+                self.assertFalse(_ai_work_route(path + suffix), path + suffix)
+            self.assertFalse(_ai_work_route(path.replace("work_abc", "..")))
+            self.assertFalse(_ai_work_route(path.replace("work_abc", "x" * 129)))
         for path in ("/v1/work/admin", "/work/jobs/../admin", "/v1/work/jobs/job/delete", "/v1/work/secrets", "/work-anything"):
             self.assertFalse(_ai_work_route(path), path)
         caddy = (Path(__file__).resolve().parents[1] / "deploy/render/gateway/provider-pilot.Caddyfile").read_text()
@@ -174,6 +183,74 @@ class HostedWorkHTTPTests(unittest.TestCase):
             self.assertEqual(self.request("GET", "/work", headers={"X-Hormuz-Ingress-Credential": "forged"})[0], 401)
             self.assertEqual(self.request("GET", "/v1/work/unknown")[0], 503)
             self.assertEqual(self.request("POST", "/v1/chat/completions", body={"model": "openai-primary", "messages": []})[0], 401)
+        provider.assert_not_called()
+
+    def test_owned_history_pages_reach_existing_api_and_browser_handlers(self):
+        identity = self.gateway.session_broker.authenticate(self.pair.access_token)
+        runtime = self.gateway.work_runtime
+        job = runtime.create_work(identity, "fixture/repo")
+        for index in range(52):
+            request_id = "x" * 129 if index == 2 else "prefix/path:@id" if index == 1 else "admit-" + str(index)
+            runtime.reserve(identity, job["work_id"], request_id, "openai-primary", "openai", 1,
+                logical_request_id="logical-1", retry_of="admit-0" if index else None)
+            runtime.settle(identity, request_id, 1)
+        api = "/v1/work/jobs/" + job["work_id"] + "/attempts"
+        browser = "/work/jobs/" + job["work_id"] + "/attempts"
+        with patch("hormuz.server._open_upstream") as provider:
+            status, _, raw = self.request("GET", api, headers=self.token_headers)
+            self.assertEqual(200, status, raw)
+            history = json.loads(raw)
+            self.assertEqual("owned_job", history["scope"])
+            self.assertEqual(50, len(history["attempts"]))
+            self.assertEqual("x" * 129, history["next_before"])
+            self.assertNotIn("rowid", history)
+            status, _, raw = self.request("GET", api + "/before/" + history["next_before"], headers=self.token_headers)
+            self.assertEqual(200, status, raw)
+            older = json.loads(raw)
+            self.assertEqual(["prefix/path:@id", "admit-0"], [row["request_id"] for row in older["attempts"]])
+            self.assertIsNone(older["next_before"])
+            encoded = quote("prefix/path:@id", safe="")
+            status, _, raw = self.request("GET", api + "/before/" + encoded, headers=self.token_headers)
+            self.assertEqual(200, status, raw)
+            self.assertEqual(["admit-0"], [row["request_id"] for row in json.loads(raw)["attempts"]])
+            status, _, raw = self.request("GET", browser, headers=self.token_headers)
+            self.assertEqual(200, status, raw)
+            self.assertIn((browser + "/before/" + "x" * 129).encode(), raw)
+            self.assertIn(b"Logical request: logical-1", raw)
+            status, _, raw = self.request("GET", browser + "/before/" + encoded, headers=self.token_headers)
+            self.assertEqual(200, status, raw)
+            self.assertNotIn(b"Older attempts", raw)
+        provider.assert_not_called()
+
+    def test_history_keeps_auth_ownership_cursor_and_method_checks(self):
+        identity = self.gateway.session_broker.authenticate(self.pair.access_token)
+        runtime = self.gateway.work_runtime
+        job = runtime.create_work(identity, "fixture/repo")
+        other = runtime.create_work(identity, "fixture/other")
+        runtime.reserve(identity, other["work_id"], "other-job-request", "openai-primary", "openai", 1)
+        _, teammate = activate_member(self.gateway.session_broker.store, self.gateway.session_broker.directory,
+            subject="other-subject", email="other@example.test")
+        directory = self.gateway.session_broker.directory
+        directory.create_organization(organization_id="customer-b", name="Synthetic B", issuer=next(iter(self.config.oidc_issuers)))
+        directory.create_team(organization_id="customer-b", team_id="customer-b-eng", name="Engineering")
+        _, outsider = activate_member(self.gateway.session_broker.store, self.gateway.session_broker.directory,
+            subject="outside-subject", email="outside@example.test", organization="customer-b", team="customer-b-eng")
+        api = "/v1/work/jobs/" + job["work_id"] + "/attempts"
+        browser = "/work/jobs/" + job["work_id"] + "/attempts"
+        with patch("hormuz.server._open_upstream") as provider:
+            for path in (api, browser):
+                self.assertEqual(401, self.request("GET", path)[0])
+                for token in (teammate.access_token, outsider.access_token):
+                    self.assertEqual(404, self.request("GET", path, headers={"Authorization": "Bearer " + token})[0])
+            self.assertEqual(401, self.request("GET", api, headers={**self.token_headers, "X-Hormuz-Ingress-Credential": "forged"})[0])
+            for cursor in ("other-job-request", "missing"):
+                self.assertEqual(404, self.request("GET", api + "/before/" + cursor, headers=self.token_headers)[0])
+            for cursor in ("x" * 257, "%FF", "%ZZ", "prefix%253Fquery", "prefix%3Fquery"):
+                self.assertEqual(400, self.request("GET", api + "/before/" + cursor, headers=self.token_headers)[0], cursor)
+            self.assertEqual(400, self.request("GET", api + "?limit=1000", headers=self.token_headers)[0])
+            self.assertEqual(404, self.request("POST", api, body={}, headers=self.token_headers)[0])
+            for suffix in ("/before/", "/before/" + "x" * 769, "/before/raw/path", "/delete"):
+                self.assertEqual(503, self.request("GET", api + suffix, headers=self.token_headers)[0], suffix)
         provider.assert_not_called()
 
     def test_browser_mutation_retains_origin_csrf_and_native_plan_authority(self):

@@ -41,6 +41,8 @@ def _ai_work_route(path):
         "/v1/work/support/receipt",
     } or re.fullmatch(r"/work/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}", path) is not None or re.fullmatch(
         r"/v1/work/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?:/(?:actions|observations|bindings))?", path
+    ) is not None or re.fullmatch(
+        r"/(?:v1/work|work)/jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}/attempts(?:/before/[^/]{1,768})?", path
     ) is not None
 
 
