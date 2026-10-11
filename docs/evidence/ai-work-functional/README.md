@@ -7,10 +7,12 @@ savings, model quality, live payments, a signed distribution or production
 deployment readiness.
 
 The bounded gateway proof and browser journey were regenerated from source
-`e9e551bec46bb1e5049ba318761696dcd0048097` after the HTTP-error response cleanup
-and correction of the mixed estimated/provider-confirmed cost labels.
-Their 28 source hashes identify the executed runtime. The package and installed
-SDK receipts retain their earlier recorded source and do not qualify this cleanup.
+`fd4917fcb93ed0107ffa1d6cab3e221d25f404bb` after adding readable viewing pauses
+to the actual customer journey. The encoded recording lasts 27.16 seconds,
+including 24 seconds of presentation holds across 15 verified visible states.
+These holds are not latency measurements. Their 28 source hashes identify the
+executed runtime. The package and installed SDK receipts retain their earlier
+recorded source and do not qualify this recording change.
 
 | Artifact | What it establishes |
 | --- | --- |
