@@ -151,7 +151,8 @@
 }
 @media (max-width: 600px) {
   .landing-redesign .site-nav { padding: 0; }
-  .landing-redesign .nav-cta { font-size: 11px; padding: 10px 12px; }
+  .landing-redesign .site-nav { grid-template-columns: 1fr auto auto; gap: 8px; }
+  .landing-redesign .nav-cta { display: inline-flex; font-size: 11px; padding: 10px 12px; }
   .simple-hero h1 { font-size: clamp(37px, 9.5vw, 54px); }
   .simple-deck { font-size: 16px; }
   .simple-capabilities { gap: 10px 20px; font-size: 13px; }

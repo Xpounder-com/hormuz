@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CampaignLink } from './CampaignLink';
 import { pixelStarted, privacySignal, readAdConsent, saveAdConsent, startXPixel, xPixelSupported } from '../../lib/x-ads.mjs';
-import { analyticsConfigured, analyticsStarted, readAnalyticsConsent, saveAnalyticsConsent, startAnalytics, trackAnalyticsEvent, trackedDestination } from '../../lib/analytics.mjs';
+import { analyticsConfigured, analyticsStarted, readAnalyticsConsent, saveAnalyticsConsent, startAnalytics, trackAnalyticsLinkClick } from '../../lib/analytics.mjs';
 import { sitePath } from '../../lib/site.mjs';
 
 const OPEN_PREFERENCES = 'hormuz:ad-preferences';
@@ -42,19 +42,13 @@ export function AdConsent() {
     // Opening the interactive preview dismisses this non-modal prompt only.
     // Unset choices stay unset; measurement still requires explicit consent.
     const makeRoomForPreview = () => setOpen(false);
-    const trackLink = (event: MouseEvent) => {
-      if (!event.isTrusted || !(event.target instanceof Element)) return;
-      const link = event.target.closest('a[href]');
-      const measurement = link && trackedDestination(link.getAttribute('href'));
-      if (measurement) trackAnalyticsEvent(measurement[0], measurement[1]);
-    };
     window.addEventListener(OPEN_PREFERENCES, show);
     window.addEventListener('hormuz:open-companion-preview', makeRoomForPreview);
-    document.addEventListener('click', trackLink);
+    document.addEventListener('click', trackAnalyticsLinkClick);
     return () => {
       window.removeEventListener(OPEN_PREFERENCES, show);
       window.removeEventListener('hormuz:open-companion-preview', makeRoomForPreview);
-      document.removeEventListener('click', trackLink);
+      document.removeEventListener('click', trackAnalyticsLinkClick);
     };
   }, [hasAnalytics]);
   useEffect(() => { if (open && reopened) heading.current?.focus(); }, [open, reopened]);
@@ -74,7 +68,7 @@ export function AdConsent() {
     <div><span className="section-label">Your privacy choices</span><h2 id="ad-consent-title" ref={heading} tabIndex={-1}>Help us understand what works.</h2>
       <p>Choose optional measurement. You can use the site and submit an inquiry either way. <CampaignLink href={sitePath('/privacy/#analytics')}>Details & choices</CampaignLink>.</p>
       <div className="measurement-options">
-        {hasAnalytics && <label><input type="checkbox" checked={allowAnalytics} disabled={signal} onChange={event => setAllowAnalytics(event.target.checked)} /><span><strong>Website analytics</strong><small>Allow Google Analytics cookies to measure page and campaign visits, demo use, install and pricing links, Cloud or managed-site inquiry links, and acknowledged sales inquiries. Form entries are never included.</small></span></label>}
+        {hasAnalytics && <label><input type="checkbox" checked={allowAnalytics} disabled={signal} onChange={event => setAllowAnalytics(event.target.checked)} /><span><strong>Website analytics</strong><small>Allow Google Analytics cookies to measure page and campaign visits, demo use, install and pricing links, Cloud or managed-site inquiry links, and acknowledged sales inquiries. Installation links include the GitHub quickstart. Form entries are never included.</small></span></label>}
         {supported && <label><input type="checkbox" checked={allowX} disabled={signal} onChange={event => setAllowX(event.target.checked)} /><span><strong>X ad measurement</strong><small>Allow X cookies and visit signals to measure ads and acknowledged sales inquiries.</small></span></label>}
       </div>
       {!supported && <p>X Ads measurement stays off in Safari and on iPhone and iPad browsers for site reliability.</p>}

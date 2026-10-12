@@ -40,10 +40,14 @@ passed to Analytics. Explicit events are:
 | `page_view` | One page view after Analytics consent | Measured visit; consent means this is not all visitors |
 | `demo_open` | A link to the website demo is clicked | Demo interest, not completion |
 | `demo_interaction` | A user selects a spend, policy, compaction, or setup section | Use of the illustration, not a product evaluation |
-| `install_click` | A setup-guide or official Mac download link is clicked | Install interest, not a completed installation |
+| `install_click` | The GitHub quickstart, a setup-guide or an official Mac download link is clicked | Install interest, not a completed installation |
 | `pricing_open` | A pricing-page link is clicked | Comparison, Cloud, or managed-site interest; not a buying decision |
 | `inquiry_open` | A contact-page link is clicked | Contact, Cloud, or managed-site intent; not a submitted lead |
 | `generate_lead` | A sales inquiry receives a positive Formspree acknowledgement | Consented receipt, not qualification or payment |
+
+The exact GitHub quickstart link uses the fixed `github_quickstart` action under
+the existing installation-click consent scope. It sends no destination URL or
+GitHub identifier and creates no X Ads event.
 
 Mark only `generate_lead` as the primary GA4 key event for the inquiry funnel.
 Its success, sales-interest, QA, spam-trap, and duplicate guards match the X Lead

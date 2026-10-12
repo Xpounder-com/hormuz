@@ -1,13 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyticsConfigured, ANALYTICS_CONSENT_KEY, analyticsContext, readAnalyticsConsent, saveAnalyticsConsent, startAnalytics, trackAnalyticsEvent, trackAnalyticsLead, trackedDestination } from '../lib/analytics.mjs';
+import { analyticsConfigured, ANALYTICS_CONSENT_KEY, analyticsContext, readAnalyticsConsent, saveAnalyticsConsent, startAnalytics, trackAnalyticsEvent, trackAnalyticsLead, trackedDestination, trackAnalyticsLinkClick } from '../lib/analytics.mjs';
 import { saveAdConsent, startXPixel, CONSENT_DURATION } from '../lib/x-ads.mjs';
 import { submitLead } from '../lib/lead.mjs';
+import { REPOSITORY_QUICKSTART } from '../lib/site.mjs';
 
 const id = 'G-TEST123456';
 function browser({ url = 'https://usehormuz.github.io/', blockedStorage = false, signal = false, safari = false } = {}) {
   const storage = new Map(); const scripts = [];
   return { storage, scripts, location: new URL(url),
+    Element: class {
+      constructor(link) { this.link = link; }
+      closest(selector) { assert.equal(selector, 'a[href]'); return this.link; }
+    },
     navigator: { globalPrivacyControl: signal, userAgent: safari ? 'AppleWebKit/605.1.15 Version/18.6 Safari/605.1.15' : 'Chrome/140.0.0.0' },
     localStorage: { getItem(key) { if (blockedStorage) throw Error('blocked'); return storage.get(key); }, setItem(key, value) { if (blockedStorage) throw Error('blocked'); storage.set(key, value); } },
     document: { referrer: 'https://t.co/ad?private=value', createElement: () => ({}), head: { appendChild(script) { scripts.push(script); } } },
@@ -122,8 +127,54 @@ test('link measurement identifies allowed destinations without passing URLs or a
   assert.deepEqual(trackedDestination('/demo/?utm_source=x#policy'), ['demo_open', 'website_demo']);
   assert.deepEqual(trackedDestination('/?utm_source=x#spend'), ['demo_open', 'website_demo']);
   assert.deepEqual(trackedDestination('/docs/#mac'), ['install_click', 'setup_guide']);
+  assert.deepEqual(trackedDestination(REPOSITORY_QUICKSTART), ['install_click', 'github_quickstart']);
   assert.deepEqual(trackedDestination('https://github.com/Xpounder-com/hormuz/releases/download/v1.2.0/Hormuz-1.2.0-notarized.zip'), ['install_click', 'mac_download']);
   for (const href of ['mailto:someone@example.com', 'https://other.example/docs/', '/privacy/', 'javascript:alert(1)']) assert.equal(trackedDestination(href), null);
+});
+
+test('only the exact public GitHub quickstart enters the install-click allowlist', () => {
+  for (const href of [
+    'https://github.com/Xpounder-com/hormuz',
+    'https://github.com/Xpounder-com/hormuz/#quickstart',
+    'https://github.com/Xpounder-com/hormuz#Quickstart',
+    'https://github.com/Xpounder-com/hormuz?token=private#quickstart',
+    'https://user:private@github.com/Xpounder-com/hormuz#quickstart',
+    'http://github.com/Xpounder-com/hormuz#quickstart',
+    'https://github.com/Xpounder-com/other#quickstart',
+    'https://github.com/Xpounder-com/hormuz/tree/main#quickstart',
+  ]) assert.equal(trackedDestination(href), null);
+});
+
+test('delegated GitHub trial clicks require Analytics consent and emit only fixed install data', () => {
+  const click = win => ({ isTrusted: true, target: new win.Element({
+    getAttribute(name) { assert.equal(name, 'href'); return REPOSITORY_QUICKSTART; },
+  }) });
+  for (const choice of ['unset', 'declined']) {
+    const win = browser();
+    saveAdConsent('allowed', win);
+    if (choice === 'declined') saveAnalyticsConsent(choice, win);
+    assert.equal(trackAnalyticsLinkClick(click(win), win, id), false);
+    assert.equal(win.dataLayer, undefined);
+    assert.deepEqual(win.scripts, []);
+  }
+
+  const win = browser({ url: 'https://usehormuz.github.io/?email=private@example.com&token=secret#private' });
+  saveAnalyticsConsent('allowed', win);
+  assert.equal(trackAnalyticsLinkClick({ ...click(win), isTrusted: false }, win, id), false);
+  assert.equal(trackAnalyticsLinkClick({ isTrusted: true, target: {} }, win, id), false);
+  assert.equal(win.dataLayer, undefined);
+  assert.equal(trackAnalyticsLinkClick(click(win), win, id), true);
+  assert.deepEqual(commands(win).filter(args => args[0] === 'event').map(args => args[1]), ['page_view', 'install_click']);
+  assert.deepEqual(commands(win).find(args => args[1] === 'install_click')[2], {
+    send_to: id, action: 'github_quickstart', page_location: 'https://usehormuz.github.io/',
+    page_title: 'Hormuz /', page_referrer: 'https://t.co/',
+  });
+  assert.equal(win.twq, undefined);
+  assert.equal(win.scripts.length, 1);
+  assert.equal(win.scripts[0].src, `https://www.googletagmanager.com/gtag/js?id=${id}`);
+  saveAnalyticsConsent('declined', win);
+  assert.equal(trackAnalyticsLinkClick(click(win), win, id), false);
+  assert.equal(commands(win).filter(args => args[1] === 'install_click').length, 1);
 });
 
 test('the free-to-paid funnel requires consent and excludes private data', () => {

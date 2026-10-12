@@ -5,7 +5,7 @@ import { REPOSITORY, REPOSITORY_QUICKSTART, sitePath } from '../lib/site.mjs';
 import { SiteFooter } from './components/SiteFooter';
 import { SiteHeader } from './components/SiteHeader';
 
-export const metadata = pageMetadata('Hormuz — Free, open-source AI controls', 'Keep your AI tools. Set budgets, apply secret controls, and inspect usage. Try Hormuz free on GitHub; optional hosting and operating help are available by inquiry.', '/');
+export const metadata = pageMetadata('Hormuz — Free, open-source AI controls', 'Keep your AI tools. Set budgets, apply secret controls, and inspect usage. Try Hormuz free on GitHub. Cloud hosting is planned; ask about availability and operating help.', '/');
 
 export default function Home() {
   return <div className="simple-home"><SiteHeader active="platform" /><main id="content" tabIndex={-1}>
