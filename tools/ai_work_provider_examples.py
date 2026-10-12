@@ -77,6 +77,31 @@ EXAMPLES = (
     Example("context-change", "/v1/responses", "Return 42.", "context", live=False),
 )
 
+TOUR_STEPS = {
+    "openai-smoke": "an API request reached the gateway",
+    "budget-stop": "a zero job budget blocked the request",
+    "exact-answer-reuse": "an eligible repeat reused its answer",
+    "correction-bypasses-reuse": "a correction forced a fresh provider response",
+}
+
+
+def print_tour(receipt, *, stream):
+    """Show checked local mechanics while retaining the complete JSON receipt."""
+    print("Hormuz local tour", file=stream)
+    print("Real gateway; simulated provider replies. No API key or payment required.", file=stream)
+    for check in receipt["checks"]:
+        label = "PASS" if check["passed"] else "FAIL"
+        name = check["example"]
+        print(f"{label} {name}: {TOUR_STEPS[name]}", file=stream)
+    failure = receipt.get("failure")
+    if failure:
+        print(f"FAIL {failure.get('example') or 'tour'}: {failure['reason']}", file=stream)
+    print(f"External provider calls: {receipt['conditions']['real_provider_calls']}", file=stream)
+    print(f"Tour result: {receipt['status']} ({receipt['examples_completed']}/{receipt['examples_selected']} scenarios)", file=stream)
+    verified = "yes" if receipt["source_verified_before_and_after"] else "no"
+    print(f"Source files verified before and after: {verified}", file=stream)
+    print(f"Source commit: {receipt['source_commit']}", file=stream)
+
 
 def request_body(example, *, output_tokens=256, anthropic_no_thinking=False):
     body = {"model": example.provider}
@@ -388,6 +413,7 @@ def execute(args, examples):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="List scenarios without starting servers or loading keys.")
+    parser.add_argument("--tour", action="store_true", help="Run four local first-use scenarios with readable results; no provider accounts.")
     parser.add_argument("--example", action="append", help="Select a scenario by name; repeat for several.")
     parser.add_argument("--live", choices=("openai", "anthropic", "both"), help="Explicitly allow real, potentially billed provider requests.")
     parser.add_argument("--rate-card", help="Private JSON with your selected models and qualified account rates.")
@@ -396,6 +422,8 @@ def main(argv=None):
     parser.add_argument("--budget-microusd", type=int, default=100_000, help="Workspace estimate allowance; default 0.10 USD, not an invoice cap.")
     parser.add_argument("--receipt", help="Write a metadata receipt; inspect before sharing.")
     args = parser.parse_args(argv)
+    if args.tour and (args.live or args.example or args.list):
+        parser.error("--tour cannot be combined with --live, --example or --list")
     if args.list:
         for example in EXAMPLES:
             print(f"{example.name:30} {example.api:22} {'live or local' if example.live else 'local mechanics only'}")
@@ -403,7 +431,7 @@ def main(argv=None):
     try:
         if not 0 < args.budget_microusd <= 100_000_000:
             raise ValueError("invalid_example_budget")
-        examples = selected_examples(args.example, args.live)
+        examples = selected_examples(list(TOUR_STEPS) if args.tour else args.example, args.live)
         if args.anthropic_no_thinking and (not args.live or not any(example.provider == "anthropic" for example in examples)):
             raise ValueError("anthropic_no_thinking_requires_live_anthropic")
         if args.live and len(examples) > args.max_live_calls:
@@ -415,7 +443,11 @@ def main(argv=None):
             if target is not None:
                 target.write(json.dumps(receipt, indent=2) + "\n")
         failed = receipt.get("status") == "failed"
-        print(json.dumps(receipt, indent=2), file=sys.stderr if failed else sys.stdout)
+        stream = sys.stderr if failed else sys.stdout
+        if args.tour:
+            print_tour(receipt, stream=stream)
+        else:
+            print(json.dumps(receipt, indent=2), file=stream)
         return 1 if failed else 0
     except Exception as failure:
         # No upstream bodies, environment values, request bodies or tracebacks.

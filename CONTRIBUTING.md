@@ -24,8 +24,9 @@ gates for the first alpha.
 
 ### First contribution quickstart
 
-This is source development on current `main`. The [README quickstart](README.md#quickstart)
-installs a published release tag for users instead. Fork Hormuz on GitHub if
+This is source development on current `main`, matching the
+[README quickstart](README.md#quickstart). Published v1.8.0 installers remain a
+separate release. Fork Hormuz on GitHub if
 you need your own remote for a PR, or clone upstream as shown; use your fork URL
 in the clone command if you made one. From an empty parent directory on a POSIX
 shell, choose a branch name for your change:
@@ -37,12 +38,15 @@ git switch -c docs/my-first-change
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --editable .
+python tools/ai_work_provider_examples.py --tour
 python -m hormuz demo
 ```
 
-Cloning and installing Python dependencies may use the network. The demo uses
-disposable local loopback simulators; it needs no provider key or external
-model service. A successful run shows allow, reroute, redact, and deny behavior,
+Cloning and installing Python dependencies may use the network. Both commands
+use disposable local loopback simulators and need no provider key or external
+model service. The short AI Work tour shows request admission, budget refusal,
+exact answer reuse and correction bypass. The stable policy demo shows allow,
+reroute, redact, and deny behavior,
 validates content-free evidence, reports zero external provider calls, and
 removes its temporary evidence. It does not verify a live provider.
 
@@ -50,6 +54,7 @@ Run one focused module from the repository root before the full suite:
 
 | Command | Purpose |
 | --- | --- |
+| `python -m unittest -v tests.test_ai_work_provider_examples` | Checks provider examples, the local tour and bounded request behavior. |
 | `python -m unittest -v tests.test_demo` | Checks the demo's output, provider-free path, and cleanup. |
 | `python -m unittest -v tests.test_public_community_paths` | Checks the public contribution and support paths. |
 | `python -m unittest -v tests.test_outcome_contract` | Checks the versioned, content-free outcome contract. |
