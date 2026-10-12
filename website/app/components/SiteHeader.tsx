@@ -1,11 +1,13 @@
 import { CampaignLink } from './CampaignLink';
 import { BrandLockup } from './Brand';
-import { sitePath } from '../../lib/site.mjs';
+import { REPOSITORY, REPOSITORY_QUICKSTART, sitePath } from '../../lib/site.mjs';
 
 const navigation = [
-  { key: 'docs', label: 'Docs', href: '/docs/' },
-  { key: 'plans', label: 'Pricing', href: '/plans/' },
-  { key: 'work', label: 'AI Work', href: '/work/' },
+  { key: 'github', label: 'GitHub ↗', href: REPOSITORY },
+  { key: 'docs', label: 'Docs', href: sitePath('/docs/') },
+  { key: 'demo', label: 'Demo', href: sitePath('/demo/') },
+  { key: 'work', label: 'AI Work', href: sitePath('/work/') },
+  { key: 'plans', label: 'Hosting', href: sitePath('/plans/') },
 ];
 
 export function SiteHeader({
@@ -27,7 +29,7 @@ export function SiteHeader({
           {navigation.map((item) => (
             <CampaignLink
               key={item.key}
-              href={sitePath(item.href)}
+              href={item.href}
               className={navigationActive === item.key ? 'nav-active' : undefined}
               aria-current={active === item.key ? 'page' : navigationActive === item.key ? 'location' : undefined}
             >
@@ -42,7 +44,7 @@ export function SiteHeader({
             {navigation.map((item) => (
               <CampaignLink
                 key={item.key}
-                href={sitePath(item.href)}
+                href={item.href}
                 aria-current={active === item.key ? 'page' : navigationActive === item.key ? 'location' : undefined}
               >
                 {item.label}
@@ -52,13 +54,13 @@ export function SiteHeader({
           </div>
         </details>
 
-        <CampaignLink
+        <a
           className="nav-cta"
-          href={sitePath('/docs/')}
+          href={REPOSITORY_QUICKSTART}
         >
-          Start free
+          Try free on GitHub
           <span aria-hidden="true">→</span>
-        </CampaignLink>
+        </a>
       </nav>
     </header>
   );

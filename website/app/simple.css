@@ -32,15 +32,28 @@
 
 .simple-hero,
 .simple-section { width: min(100% - 64px, 1120px); margin-inline: auto; }
-.simple-hero { padding-block: 80px 64px; }
+.simple-hero { display: grid; grid-template-columns: 1.15fr 1fr; align-items: center; gap: 48px; padding-block: 80px 64px; }
+.simple-hero-copy { min-width: 0; }
 .simple-home .section-label { font-size: 11px; color: #526349; letter-spacing: .1em; margin-bottom: 20px; }
-.simple-hero h1 { font-size: clamp(46px, 6vw, 78px); line-height: 1.06; letter-spacing: -.06em; margin-bottom: 24px; }
+.simple-hero h1 { font-size: clamp(44px, 4.3vw, 62px); line-height: 1.08; letter-spacing: -.055em; margin-bottom: 24px; }
 .simple-hero h1 em { color: #4a6442; }
 .simple-deck { max-width: 590px; font-size: 18px; line-height: 1.65; color: var(--ink-soft); margin-bottom: 28px; }
 .simple-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 28px; margin-bottom: 16px; }
 .simple-caption { font-size: 12px; line-height: 1.6; color: var(--muted); }
 .simple-capabilities { display: flex; flex-wrap: wrap; gap: 12px 28px; padding: 0; margin: 32px 0 16px; list-style: none; font-size: 14px; color: var(--ink-soft); }
 .simple-compatibility { font-size: 13px; }
+.simple-hero .simple-compatibility { display: inline-flex; margin-top: 16px; }
+.simple-preview { margin: 0; min-width: 0; }
+.simple-preview > a { display: block; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--paper-bright); }
+.simple-preview img { display: block; width: 100%; height: auto; }
+.simple-preview figcaption { margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.simple-preview figcaption a { color: var(--ink-soft); }
+.simple-free { display: grid; grid-template-columns: 1.2fr 1fr; align-items: center; gap: 64px; }
+.simple-free h2 { margin-bottom: 20px; }
+.simple-free p:not(.section-label):not(.simple-caption) { font-size: 16px; line-height: 1.7; color: var(--ink-soft); }
+.simple-free .simple-caption { margin-bottom: 0; }
+.simple-free-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 20px; }
+.simple-free-actions .text-link { font-size: 14px; }
 .simple-section { padding-block: 48px; border-top: 1px solid var(--line); }
 .simple-section h2 { font-size: clamp(28px, 3vw, 36px); line-height: 1.2; letter-spacing: -.04em; margin-bottom: 32px; }
 .simple-paths { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 36px; }
@@ -126,7 +139,9 @@
   .landing-redesign .simple-offers,
   .landing-redesign .simple-terms,
   .simple-hardware { width: calc(100% - 40px); }
-  .simple-hero { padding-block: 56px 40px; }
+  .simple-hero { grid-template-columns: 1fr; padding-block: 56px 40px; gap: 32px; }
+  .simple-preview { max-width: 600px; }
+  .simple-free { grid-template-columns: 1fr; gap: 28px; }
   .simple-paths { gap: 24px; }
   .simple-guide, .simple-help { align-items: flex-start; flex-direction: column; gap: 24px; }
   .simple-footer-main { flex-direction: column; gap: 24px; }
@@ -136,6 +151,7 @@
 }
 @media (max-width: 600px) {
   .landing-redesign .site-nav { padding: 0; }
+  .landing-redesign .nav-cta { font-size: 11px; padding: 10px 12px; }
   .simple-hero h1 { font-size: clamp(37px, 9.5vw, 54px); }
   .simple-deck { font-size: 16px; }
   .simple-capabilities { gap: 10px 20px; font-size: 13px; }

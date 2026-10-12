@@ -12,6 +12,7 @@ function publishedSite() {
     ['/sitemap.xml', LIVE_ROUTES.map(route => `<loc>${LIVE_ORIGIN}${route}</loc>`).join('')],
   ]);
   for (const route of LIVE_ROUTES) bodies.set(route, `<link rel="canonical" href="${LIVE_ORIGIN}${route}"/><h1>Hormuz</h1>`);
+  bodies.set('/', bodies.get('/') + '<header><a class="nav-cta" href="https://github.com/Xpounder-com/hormuz#quickstart">Try free on GitHub <span aria-hidden="true">→</span></a></header><section id="top"><a class="button landing-primary" href="https://github.com/Xpounder-com/hormuz#quickstart">Try free on GitHub <span aria-hidden="true">→</span></a><a href="/demo/#work-demo">Watch the demo</a></section><section id="benefits"></section><section id="free"></section><section id="hosting"></section>');
   bodies.set('/demo/', bodies.get('/demo/') + '<section id="work-demo"><video src="/demo/ai-work-demo.webm"></video></section>');
   bodies.set('/evidence/', bodies.get('/evidence/') + '<section id="work-proof"><a href="/downloads/ai-work-proof.json">Receipt</a></section>');
   for (const [route, sources] of Object.entries(LIVE_SOURCE_LINKS)) bodies.set(route, bodies.get(route) + sources.map(source => `<a href="https://github.com/${pin.repository}/blob/${pin.revision}/${source}">Source</a>`).join(''));
@@ -48,6 +49,20 @@ test('a stale or invalid deployed pin fails before any page is accepted', async 
     site.bodies.set('/site-source.json', body);
     await assert.rejects(verifyLiveSite(pin, site.fetcher));
     assert.deepEqual(site.requests, ['/site-source.json']);
+  }
+});
+
+test('homepage trial links must reach the quickstart and free setup must precede hosting', async () => {
+  for (const [from, to, message] of [
+    ['class="button landing-primary" href="https://github.com/Xpounder-com/hormuz#quickstart"', 'class="button landing-primary" href="https://github.com/Xpounder-com/hormuz"', /hero must point to the GitHub quickstart/],
+    ['class="nav-cta" href="https://github.com/Xpounder-com/hormuz#quickstart"', 'class="nav-cta" href="/plans/"', /header must point to the GitHub quickstart/],
+    ['<section id="free"></section><section id="hosting"></section>', '<section id="hosting"></section><section id="free"></section>', /benefits, free setup, then optional hosting/],
+    ['href="/demo/#work-demo"', 'href="/demo/"', /missing the work demo link/],
+  ]) {
+    const site = publishedSite();
+    site.bodies.set('/', site.bodies.get('/').replace(from, to));
+    await assert.rejects(verifyLiveSite(pin, site.fetcher), message);
+    assert.deepEqual(site.requests, ['/site-source.json', '/']);
   }
 });
 test('missing, mutable, or stale source anchors cannot satisfy exact-pin publication checks', async () => {
