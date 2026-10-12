@@ -1,16 +1,58 @@
 # Hormuz
 
-**Keep your agents. Choose your budget and pace.**
+**Keep your AI tools. See what each job did.**
 
-Your team already uses AI across repositories. Hormuz puts the spending boundary,
-model decision and work record in one gateway, while you keep your familiar tools.
-Choose cost, speed or outcome priorities; see the attempts and uncertainty behind
-the work; reuse eligible answers and bypass them when correction evidence arrives.
+Hormuz is an open-source gateway for AI work across repositories. Connect your
+existing agent or SDK, attach requests to a job, and inspect its attempts, routing
+decisions and usage. Job budgets can stop a request before provider work; eligible
+exact repeats can reuse an answer, and correction evidence bypasses that reuse.
 
-**Try the current AI Work source:** [first-run walkthrough](docs/TRY_HORMUZ.md) ·
+<a id="try-the-real-gateway-without-a-provider-account"></a>
+
+## Quickstart
+
+You need Git, Python 3.11+ and permission to bind local loopback ports. From a
+fresh directory:
+
+~~~bash
+git clone --branch main --depth 1 https://github.com/Xpounder-com/hormuz.git
+cd hormuz
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --editable .
+python tools/ai_work_provider_examples.py --tour
+~~~
+
+A successful tour shows:
+
+~~~text
+PASS openai-smoke: an API request reached the gateway
+PASS budget-stop: a zero job budget blocked the request
+PASS exact-answer-reuse: an eligible repeat reused its answer
+PASS correction-bypasses-reuse: a correction forced a fresh provider response
+External provider calls: 0
+~~~
+
+This runs the actual authenticated gateway and SQLite work ledger with simulated
+provider replies. No API key, provider account or payment is required. Installation
+downloads Python dependencies; tour requests stay on loopback, and temporary state
+is removed on exit. These checks demonstrate gateway behavior, not model quality,
+customer savings or completed customer work.
+
+Current `main` contains the AI Work 1.9.0 source candidate. Published v1.8.0
+installers and the [stable source demo](#stable-gateway-demo) remain separate.
+Pin a complete reviewed commit when operating a gateway.
+
+**Inspect and try your own workflow:** [tour source](tools/ai_work_provider_examples.py) ·
+[first-run walkthrough](docs/TRY_HORMUZ.md) ·
 [21 OpenAI and Anthropic scenarios](examples/providers/README.md) ·
 [vendor SDK recipes](examples/sdk/README.md) ·
 [actual GitHub / Linear delivery](docs/AI_WORK_DELIVERY_EXAMPLES.md).
+
+**Share your first run:** [installation or first-run failure](https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml) ·
+[discussion](https://github.com/Xpounder-com/hormuz/discussions/211).
+Include the source SHA, environment and sanitized result; omit credentials and
+private prompts or answers.
 
 ![AI Work dashboard with explicitly synthetic example work](docs/evidence/ai-work-functional/AI_WORK_DASHBOARD_FULL.png)
 
@@ -20,7 +62,6 @@ establish customer savings, model quality or faster completion.*
 OpenAI Responses, Chat Completions and Anthropic Messages are supported request
 paths. Applications need a configurable endpoint and work attachment. Closed
 applications and unrelated AI subscriptions are outside the gateway's controls.
-AI Work is a 1.9.0 source candidate; the published v1.8.0 installers remain separate.
 
 <details>
 <summary>Current AI Work mechanics and recorded validation</summary>
@@ -103,28 +144,20 @@ Hormuz is designed for usage governance, not employee surveillance. Token volume
 and estimated spend describe consumption; they are not measures of productivity,
 quality, or individual performance.
 
-<a id="try-the-real-gateway-without-a-provider-account"></a>
+## Explore the full provider tour
 
-## Quickstart
-
-For the current AI Work examples, install the candidate in an isolated Python
-3.11+ environment:
+From the installed source checkout, list or run all 21 scenarios:
 
 ~~~bash
-git clone --branch mehrdad/ai-work-experience https://github.com/Xpounder-com/hormuz.git
-cd hormuz
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --editable .
 python tools/ai_work_provider_examples.py --list
 python tools/ai_work_provider_examples.py
 ~~~
 
-The default tour makes no external provider calls. It runs the actual gateway
-with disposable local provider simulators and removes temporary state on exit.
-Allow local port binding. Use the branch for exploration; pin a complete reviewed
-commit when operating a gateway. [Live examples](examples/providers/README.md)
-use your own OpenAI/Anthropic accounts, explicit rates and a small request limit.
+The full tour uses the same disposable local providers and emits a JSON receipt
+with the executed conditions, source hashes and gateway results. To save the
+short tour's full receipt, use `--tour --receipt NEW_RECEIPT.json`. Existing receipt
+files are not overwritten. [Live examples](examples/providers/README.md) use your
+own OpenAI/Anthropic accounts, qualified rates and an explicit small request limit.
 Provider calls can be billed separately. [Connect real workflow results](docs/AI_WORK_DELIVERY_EXAMPLES.md)
 after choosing the job's completion criterion.
 
@@ -490,23 +523,17 @@ does not create a production-readiness or SLA claim.
 
 ## Software, Cloud, and appliances
 
-The core gateway remains Apache-2.0. Software is **$0**, Cloud is
-**$49.99 per workspace per month**, an appliance is **$999**, and
-an appliance with scoped onboarding is **$1,499**. A managed site
-is **$499 per month**, including the associated Cloud workspace and one hour of
-remote support per billing month, with a response within two business days.
+Self-hosted Hormuz is Apache-2.0 software and requires no paid Hormuz subscription.
+Model-provider usage and customer infrastructure are separate.
 
-See [all prices](https://usehormuz.github.io/plans/),
+For optional Cloud, managed support or appliance inquiries, see
+[prices](https://usehormuz.github.io/plans/),
 [appliance onboarding scope](marketing/PILOT.md),
 [commercial scope and support terms](marketing/COMMERCIAL_SETUP.md),
 [buyer resources](https://usehormuz.github.io/resources/), and
-[security brief](marketing/TRUST.md). Model-provider usage, customer
-infrastructure, and applicable taxes are separate. Appliances are **coming soon**,
-with rollout planned for **early 2027**. Reserve with a **$49** one-time deposit,
-fully refundable and credited toward the purchase. Cancel anytime before
-fulfillment for a full refund. All payments use Stripe. Compatibility, capacity,
-qualification, scope, and delivery are confirmed before the balance or service
-payment is collected. Cloud and managed services are accepting inquiries.
+[security brief](marketing/TRUST.md). Appliances are **coming soon**.
+Compatibility, capacity, qualification, scope and delivery are confirmed before
+service or balance payment; the linked terms govern any reservation.
 
 Public maintainer: **Mehrdad Zaker**. For evaluation inquiries, use
 `mehrdadz@neuralint.io` or the

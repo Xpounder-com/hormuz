@@ -420,6 +420,68 @@ print(json.dumps({'first_tempfile_choice_preserved': True, 'credentials_restored
         self.assertEqual(resolve_upstream_credentials(config, environ=environment)["openai"], "")
 
 
+class ProviderTourTests(unittest.TestCase):
+    def receipt(self, *, failed=False):
+        names = list(examples.TOUR_STEPS)
+        completed = names[:2] if failed else names
+        receipt = {
+            "status": "failed" if failed else "passed",
+            "checks": [{"example": name, "passed": True} for name in completed],
+            "examples_selected": 4,
+            "examples_completed": len(completed),
+            "conditions": {"real_provider_calls": 0},
+            "source_commit": "synthetic-source-commit",
+            "source_files": {"synthetic-source-file": "synthetic-sha256"},
+            "source_verified_before_and_after": True,
+        }
+        if failed:
+            receipt["failure"] = {"example": names[2], "reason": "example_transport_timeout"}
+        return receipt
+
+    def test_tour_selects_only_four_local_controls_and_shows_readable_results(self):
+        output = io.StringIO()
+        with mock.patch.object(examples, "execute", return_value=self.receipt()) as execute, contextlib.redirect_stdout(output):
+            self.assertEqual(examples.main(["--tour"]), 0)
+        args, selected = execute.call_args.args
+        self.assertIsNone(args.live)
+        self.assertEqual([example.name for example in selected], list(examples.TOUR_STEPS))
+        for name, description in examples.TOUR_STEPS.items():
+            self.assertIn(f"PASS {name}: {description}", output.getvalue())
+        self.assertIn("simulated provider replies", output.getvalue())
+        self.assertIn("External provider calls: 0", output.getvalue())
+        self.assertIn("Tour result: passed (4/4 scenarios)", output.getvalue())
+        self.assertNotIn("synthetic-source-file", output.getvalue())
+
+    def test_tour_cannot_opt_into_live_calls_or_override_its_local_selection(self):
+        for arguments in (["--live", "openai"], ["--example", "openai-smoke"], ["--list"]):
+            with self.subTest(arguments=arguments), mock.patch.object(examples, "execute") as execute, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    examples.main(["--tour", *arguments])
+                self.assertEqual(error.exception.code, 2)
+                execute.assert_not_called()
+
+    def test_failed_tour_keeps_nonzero_exit_partial_results_and_full_receipt(self):
+        receipt = self.receipt(failed=True)
+        output, errors = io.StringIO(), io.StringIO()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "tour.json"
+            with mock.patch.object(examples, "execute", return_value=receipt), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                self.assertEqual(examples.main(["--tour", "--receipt", str(path)]), 1)
+            self.assertEqual(json.loads(path.read_text()), receipt)
+        self.assertEqual(output.getvalue(), "")
+        self.assertIn("FAIL exact-answer-reuse: example_transport_timeout", errors.getvalue())
+        self.assertIn("Tour result: failed (2/4 scenarios)", errors.getvalue())
+        self.assertNotIn("PASS correction-bypasses-reuse", errors.getvalue())
+
+    def test_changed_source_cannot_be_presented_as_a_successful_tour(self):
+        receipt = {**self.receipt(), "status": "failed", "source_verified_before_and_after": False}
+        output = io.StringIO()
+        with mock.patch.object(examples, "execute", return_value=receipt), contextlib.redirect_stderr(output):
+            self.assertEqual(examples.main(["--tour"]), 1)
+        self.assertIn("Tour result: failed (4/4 scenarios)", output.getvalue())
+        self.assertIn("Source files verified before and after: no", output.getvalue())
+
+
 class ProviderExampleIntegrationTests(unittest.TestCase):
     """One explicitly selected local integration call; no provider accounts."""
 
