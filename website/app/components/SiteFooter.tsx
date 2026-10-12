@@ -8,13 +8,14 @@ export function SiteFooter() {
     <div className="simple-footer-main">
       <div className="footer-intro"><CampaignLink className="brand footer-brand" href={sitePath('/')} aria-label="Hormuz home"><BrandLockup /></CampaignLink><p>Open-source AI controls for teams.</p></div>
       <nav className="simple-footer-links" aria-label="Footer navigation">
+        <a href={REPOSITORY}>GitHub ↗</a>
         <CampaignLink href={sitePath('/docs/')}>Docs</CampaignLink>
-        <CampaignLink href={sitePath('/plans/')}>Pricing</CampaignLink>
+        <CampaignLink href={sitePath('/demo/')}>Demo</CampaignLink>
         <CampaignLink href={sitePath('/work/')}>AI Work</CampaignLink>
         <CampaignLink href={sitePath('/evidence/')}>Evidence</CampaignLink>
         <CampaignLink href={sitePath('/security/')}>Security</CampaignLink>
         <CampaignLink href={sitePath('/resources/')}>Resources</CampaignLink>
-        <a href={REPOSITORY}>GitHub ↗</a>
+        <CampaignLink href={sitePath('/plans/')}>Hosting and support</CampaignLink>
         <CampaignLink href={sitePath('/contact/?interest=work')}>Contact</CampaignLink>
       </nav>
     </div>

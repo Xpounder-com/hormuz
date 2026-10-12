@@ -4,6 +4,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { BASE_PATH, SITE_ORIGIN, SITE_ROUTES, SOURCE_REVISION, siteUrl } from '../lib/site.mjs';
 import { GA_MEASUREMENT_ID, GOOGLE_SITE_VERIFICATION } from '../lib/measurement-config.mjs';
+import { validateFreeLandingPage } from '../deployment/verify-live-site.mjs';
 
 import { commercial, PAYMENT_KEYS, CLOUD_PRICE, APPLIANCE_PRICE, ONBOARDING_PRICE, MANAGED_SITE_PRICE, RESERVATION_PRICE } from '../lib/commercial.mjs';
 
@@ -19,6 +20,10 @@ const decode = text => text.replaceAll('&amp;', '&').replaceAll('&#x27;', "'").r
 for (const route of routes) {
   const html = await readFile(path.join(out, route, 'index.html'), 'utf8');
   pages.set(route, html);
+  if (route === '/') {
+    try { validateFreeLandingPage(html, { demoPath: `${BASE_PATH}/demo/#work-demo` }); }
+    catch (error) { failures.push(`/: ${error.message}`); }
+  }
   if (route === '/docs/') {
     const candidateRef = SOURCE_REVISION === 'main' ? '&lt;REVIEWED_40_CHARACTER_COMMIT&gt;' : SOURCE_REVISION;
     const installUrl = `git+https://github.com/Xpounder-com/hormuz.git@${candidateRef}`;

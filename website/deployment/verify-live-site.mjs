@@ -14,6 +14,35 @@ export const LIVE_SOURCE_LINKS = Object.freeze({
   '/demo/': ['website/scripts/ai-work-browser-qa.mjs'],
 });
 
+/** Verify the free-first journey in HTML before JavaScript is available. */
+export function validateFreeLandingPage(html, { demoPath = '/demo/#work-demo' } = {}) {
+  const sections = [...html.matchAll(/<section\b([^>]*)>([\s\S]*?)<\/section>/g)];
+  const hero = sections.find(([, attrs]) => /\bid="top"/.test(attrs))?.[2];
+  assert.ok(hero, 'Homepage is missing the trial hero');
+
+  const quickstart = 'https://github.com/Xpounder-com/hormuz#quickstart';
+  function verifyTrialAnchor(markup, className, location) {
+    const links = [...markup.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)];
+    const primary = links.find(([, attrs]) => (attrs.match(/\bclass="([^"]*)"/)?.[1] || '').split(/\s+/).includes(className));
+    assert.ok(primary, `Homepage ${location} is missing the free trial link`);
+    const [, attrs, body] = primary;
+    assert.equal(attrs.match(/\bhref="([^"]*)"/)?.[1], quickstart, `Homepage ${location} must point to the GitHub quickstart`);
+    const label = attrs.match(/\baria-label="([^"]*)"/)?.[1] || body
+      .replace(/<span\b[^>]*\baria-hidden="true"[^>]*>[\s\S]*?<\/span>/g, '')
+      .replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    assert.equal(label, 'Try free on GitHub', `Homepage ${location} must label the free trial link`);
+  }
+  verifyTrialAnchor(hero, 'landing-primary', 'hero');
+  const header = html.match(/<header\b[^>]*>([\s\S]*?)<\/header>/)?.[1];
+  assert.ok(header, 'Homepage is missing the navigation header');
+  verifyTrialAnchor(header, 'nav-cta', 'header');
+  assert.ok([...hero.matchAll(/<a\b[^>]*\bhref="([^"]*)"/g)].some(([, href]) => href === demoPath), 'Homepage hero is missing the work demo link');
+
+  const sectionIds = sections.map(([, attrs]) => attrs.match(/\bid="([^"]*)"/)?.[1]);
+  const positions = ['benefits', 'free', 'hosting'].map(id => sectionIds.indexOf(id));
+  assert.ok(positions.every(index => index !== -1) && positions[0] < positions[1] && positions[1] < positions[2], 'Homepage must present benefits, free setup, then optional hosting');
+}
+
 export async function verifyLiveSite(sourcePin, fetcher = fetch, { dashboardOrigin } = {}) {
   const revision = validateSourcePin(sourcePin);
   let workDestination;
@@ -45,6 +74,7 @@ export async function verifyLiveSite(sourcePin, fetcher = fetch, { dashboardOrig
     const html = await (await request(route)).text();
     assert.ok(html.includes(`<link rel="canonical" href="${LIVE_ORIGIN}${route}"`), `Canonical mismatch: ${route}`);
     assert.equal((html.match(/<h1[ >]/g) || []).length, 1, `Expected one heading: ${route}`);
+    if (route === '/') validateFreeLandingPage(html);
     for (const source of LIVE_SOURCE_LINKS[route] || []) {
       assert.ok(html.includes(`href="https://github.com/${sourcePin.repository}/blob/${revision}/${source}"`), `Published source link does not match the reviewed pin: ${source}`);
     }

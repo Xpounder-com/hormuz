@@ -1,5 +1,5 @@
 import { GA_MEASUREMENT_ID } from './measurement-config.mjs';
-import { SITE_ORIGIN, SITE_ROUTES, REPOSITORY } from './site.mjs';
+import { SITE_ORIGIN, SITE_ROUTES, REPOSITORY, REPOSITORY_QUICKSTART } from './site.mjs';
 import { isSalesInquiry } from './contact.mjs';
 import { privacySignal, CONSENT_DURATION } from './x-ads.mjs';
 
@@ -14,7 +14,7 @@ const campaignFields = Object.freeze({ utm_source: 'campaign_source', utm_medium
 const eventDetails = Object.freeze({
   demo_open: ['website_demo'],
   demo_interaction: ['spend', 'policy', 'compaction', 'setup'],
-  install_click: ['setup_guide', 'mac_download'],
+  install_click: ['setup_guide', 'mac_download', 'github_quickstart'],
   pricing_open: ['comparison', 'cloud', 'managed'],
   inquiry_open: ['contact', 'cloud', 'managed'],
   evidence_open: ['mechanics'],
@@ -112,6 +112,7 @@ export function trackAnalyticsLead(win = window, { interest = '', testSubmission
 }
 
 export function trackedDestination(href) {
+  if (href === REPOSITORY_QUICKSTART) return ['install_click', 'github_quickstart'];
   try {
     const url = new URL(href, SITE_ORIGIN);
     if (url.origin === SITE_ORIGIN) {
@@ -129,4 +130,12 @@ export function trackedDestination(href) {
     if (url.origin === 'https://github.com' && url.pathname.startsWith(new URL(REPOSITORY).pathname + '/releases/download/') && /^Hormuz-[\d.]+-notarized\.zip$/.test(url.pathname.split('/').at(-1))) return ['install_click', 'mac_download'];
   } catch { /* Unknown destinations do not become event data. */ }
   return null;
+}
+
+/** Delegate only real anchor clicks; consent and bounded event data stay central. */
+export function trackAnalyticsLinkClick(event, win = window, id = GA_MEASUREMENT_ID) {
+  if (!event?.isTrusted || !(event.target instanceof win.Element)) return false;
+  const link = event.target.closest('a[href]');
+  const measurement = link && trackedDestination(link.getAttribute('href'));
+  return measurement ? trackAnalyticsEvent(measurement[0], measurement[1], win, id) : false;
 }
