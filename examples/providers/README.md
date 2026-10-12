@@ -5,7 +5,19 @@ OpenAI Responses, Chat Completions and Anthropic Messages, three streaming paths
 function declarations, code review, CI diagnosis, writing, structured extraction,
 priorities, budget refusal, exact answer reuse, correction and context changes.
 
-Install the [current source candidate](../../docs/TRY_HORMUZ.md) first. Then:
+Install the [current source candidate from `main`](../../docs/TRY_HORMUZ.md) first.
+Start with four local checks and readable results:
+
+```sh
+python tools/ai_work_provider_examples.py --tour
+```
+
+The short tour shows a gateway request, budget refusal, exact answer reuse and
+correction bypass. `--tour --receipt NEW_RECEIPT.json` also saves the full JSON
+receipt; it leaves existing files intact. Use `--tour` separately from `--live`,
+`--example` and `--list`.
+
+Then inspect the catalog or run the full tour:
 
 ```sh
 python tools/ai_work_provider_examples.py --list

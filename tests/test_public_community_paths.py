@@ -42,6 +42,7 @@ class PublicCommunityPathTests(unittest.TestCase):
             )
         (target / "tools").mkdir()
         for name in (
+            "ai_work_provider_examples.py",
             "verify_public_community_paths.py",
             "verify_oci_release_preflight.py",
         ):
