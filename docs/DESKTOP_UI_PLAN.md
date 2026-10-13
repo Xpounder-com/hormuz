@@ -2,14 +2,18 @@
 
 Planning scope confirmed on 2026-10-13. Parent: [desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
 This is the canonical UI scope for the full local project workspace. It refines
-the [desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md): the earlier ephemeral-chat-only
+the [desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md) and
+[Research Review contract](RESEARCH_REVIEW_MODE.md): the earlier ephemeral-chat-only
 first scope is superseded by saved local projects/chats plus a Temporary chat
 option. Existing gateway, native-client and installed qualification evidence
 keeps its original boundary.
 
-This document authorizes no application or backend implementation, real model
-downloads, provider calls, service activation or infrastructure shutdown. UI
-simulation and later implementation each need their explicit work order.
+This document starts no real application/backend implementation, model download
+or provider call. The scope is ready for bounded UI simulation with synthetic
+data; #492 still requires integrated review. Actual host/backend work follows UI
+approval and a named owner, exact model/provider/protocol choices, storage/context
+limits and platform qualification rows. Separate authorized account cleanup is
+recorded in [its ledger](DESKTOP_ACCOUNT_CLEANUP.md), not performed by a UI flow.
 No release version, delivery date or new platform support is assigned here.
 
 ## Confirmed experience
@@ -54,8 +58,9 @@ hosting provider or privileged process boundary must not block the mock flows.
 | [#489 files, instructions and context](https://github.com/Xpounder-com/hormuz/issues/489) | #487 and product/data decisions | Project membership versus request inclusion, instructions inheritance, effective context, permissions and unsupported/missing/changed/oversized states. Can proceed alongside #488. |
 | [#490 onboarding, library and connections](https://github.com/Xpounder-com/hormuz/issues/490) | #487 and product mode decisions | Local-first onboarding, download/load/remove state distinctions, optional paid connection and visible readiness/custody/connectivity errors. Can proceed alongside #488/#489. |
 | [#491 inherited preferences, Auto and pin](https://github.com/Xpounder-com/hormuz/issues/491) | #488/#489/#490 mock contracts | Effective defaults/overrides, privacy/cap/objective, prediction versus committed route, blocked pin and continuation constraints. |
+| [#502 Research Review simulation](https://github.com/Xpounder-com/hormuz/issues/502) | Project/context/preferences mock contracts and selected visual language | Explicit draft/project manifest, two distinct blind reviewers, optional bounded author/reconcile flow, disagreement/failure, citations/coverage and version-specific human decision. |
 | #481 final visual checkpoint; [#338 early UI fixtures](https://github.com/Xpounder-com/hormuz/issues/338) | Integrated #487–#491 flows | Cohesive selected finish, rendered state coverage and ordered interaction fixtures. Early fixture acceptance is separate from #338's later runtime integration closure. |
-| [#492 integrated UI review gate](https://github.com/Xpounder-com/hormuz/issues/492) | #487–#491, final #481 and early #338 checkpoint | One navigable mock experience, approved journeys, explicit adverse states and recorded decisions. No live backend or installed-platform claims. |
+| [#492 integrated UI review gate](https://github.com/Xpounder-com/hormuz/issues/492) | #487–#491, #502 mock review journeys, final #481 and early #338 checkpoint | One navigable mock experience, approved journeys, explicit adverse states and recorded decisions. No live backend or installed-platform claims. |
 
 After #492, finalize [#480's full architecture/support/migration contract](https://github.com/Xpounder-com/hormuz/issues/480)
 and plan [#493 backend storage/context](https://github.com/Xpounder-com/hormuz/issues/493)
@@ -65,6 +70,10 @@ backend contract is not a completion prerequisite for #492. #338's final
 closure is likewise not required for its early UI fixture checkpoint.
 An approved mock is an implementation input, not authorization to start runtime
 work. This separation prevents UI/backend dependency cycles.
+Optional [#503 real Research Review](https://github.com/Xpounder-com/hormuz/issues/503)
+follows qualified single-response #493/#483/#485/#484 contracts. It cannot become
+a prerequisite for drawing #502 or qualifying ordinary chat, but must pass
+before real Review execution is offered.
 
 ## Acceptance by product area
 
@@ -169,6 +178,27 @@ work. This separation prevents UI/backend dependency cycles.
   navigation must preserve origin. Temporary response handling is visibly
   different from saving a project conversation.
 
+### Research Review — #502
+
+- Keep Review in the project window, preserving the minimal bar. Default to an
+  existing frozen draft with two distinct blind reviewers; authoring and one
+  optional reconciliation are explicit variants, capped at four calls across
+  three model identities for the authoring path.
+- Show the selected draft/source manifest, coverage/exclusions, role/model
+  locations, local-only and whole-round cap. A whole-project label cannot imply
+  reading or approving omitted files. Pure role preview performs no calls or
+  loads; unknown provenance or a known author filling a reviewer slot is visible.
+- Preserve blind initial verdicts, source/claim locators and disagreements.
+  Failure, cancellation, missing evidence or a blocked reviewer makes the round
+  incomplete, never all approved. Same-version aliases are not distinct reviewers.
+- Distinguish reviewed v1 from an edited/reconciled v2 and invalidate stale
+  approval. Ready for your review leads to a deliberate human decision about a
+  named revision and scope, not an automatic scientific/project/deployment seal.
+- Simulate at most two explicitly started rounds, including local-role swaps,
+  cap/privacy blocks, project switching, canceled review and unreviewed edits.
+  Do not repeat until the models agree. Follow the detailed
+  [role/version/evidence contract](RESEARCH_REVIEW_MODE.md).
+
 ## Integrated review journeys — #492
 
 Use synthetic projects/files/models/history, simulated streams and a mock host.
@@ -196,6 +226,12 @@ decisions; do not silently substitute real service behavior for a mock.
 8. Keyboard/IME and screen-reader walk through sidebar, search, composer, picker,
    context, progress and dialogs; verify focus restoration, long names, narrow
    layout, high DPI, opaque/high-contrast materials and reduced motion.
+9. Review an existing draft → explicitly select source/project coverage → two
+   blind reviewer verdicts → compare findings/disagreement → human review of the
+   exact version. Repeat with a failed reviewer and a local-only/cloud-role block.
+10. Optionally author → review → reconcile an edited v2 → see v1 reviews become
+    stale → explicitly request a second bounded mock round → make a
+    revision-specific human decision. Neither consensus nor approval starts work.
 
 The earlier #338 checkpoint records ordered mock traces. Final installed
 keyboard, accessibility, platform activation, real failure/recovery and clean
@@ -216,8 +252,13 @@ Render, hosted provisioning, billing, remote sync and team collaboration are not
 required for local project setup, local inference or personal direct-provider
 access. A configured managed gateway remains optional. Existing services cannot
 be declared unused or shut down from this UI plan; dependency/usage/data/owner
-and recovery evidence is a separate review. Preserve shipped Mac/CLI and gateway
-paths until replacement and opt-in migration/rollback are qualified.
+and recovery evidence belongs to independent `track:cleanup` #494–#501,
+milestone 16. Separately authorized operations suspended the remaining active
+Render pilot; all three web services are now suspended. They removed two
+obsolete environment secrets and disabled the live pilot
+workflow; PostgreSQL and disks remain retained, with archive/restore and legacy
+transition obligations still pending. Preserve shipped Mac/CLI artifacts and gateway contracts, disclose paused
+hosted access and do not treat a pause as qualified replacement/migration.
 
 First scope stays text-focused, with a curated local model path and an optional
 qualified paid connection. Agent/MCP/computer control, arbitrary file editing or

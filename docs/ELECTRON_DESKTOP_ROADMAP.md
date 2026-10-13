@@ -3,14 +3,18 @@
 Planning baseline: 2026-10-13, main
 `46449d2a3f05de09d7d0a18c9688e189a6c3a68e`.
 Track delivery in [epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
-The [UI plan](DESKTOP_UI_PLAN.md), [infrastructure audit](DESKTOP_INFRASTRUCTURE_AUDIT.md)
+The [UI plan](DESKTOP_UI_PLAN.md), [Research Review contract](RESEARCH_REVIEW_MODE.md),
+[account cleanup](DESKTOP_ACCOUNT_CLEANUP.md),
+[infrastructure audit](DESKTOP_INFRASTRUCTURE_AUDIT.md)
 and [backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md) define the
 active scope and the disposition of the original open issues.
 
-This is planning and issue coverage. It does not start application implementation,
-read real project files, download models, call providers, publish a release or
-change services. A separate explicit work order starts implementation. Release
-identity, dates and owners remain unassigned.
+Application work remains planning and simulated UI exploration. This roadmap
+does not implement the host/backend, read real project context, download models,
+call providers or publish a release. A separate explicit application work order
+starts real implementation. Account cleanup has its own authorized operations
+and evidence below; it is not covered by a blanket claim of no service changes.
+Release identity, dates and implementation owners remain unassigned.
 
 ## Product outcome
 
@@ -49,7 +53,14 @@ installed platform qualification. #481 selects the shared visual reference;
 #492 reviews the integrated simulation. Native desktop blur is optional; the
 shared surface needs a beautiful legible opaque fallback.
 
-## UI first: no backend prerequisite
+## UI first: ready to begin simulation
+
+The scope is sufficient to start the bounded UI simulation with synthetic
+projects, sources, models, costs and responses. Finish the selected material and
+integrated journeys before #492 approval. Before actual host/backend work,
+assign a named owner and freeze exact model/provider versions, protocol and
+storage/context/output/time limits, custody and first OS/architecture/desktop
+qualification rows in #480. A mock or research paper is not runtime readiness.
 
 | Stage | Owned issue | Dependencies and exit |
 | --- | --- | --- |
@@ -57,7 +68,8 @@ shared surface needs a beautiful legible opaque fallback.
 | U1 | [#481 shared glossy visual system](https://github.com/Xpounder-com/hormuz/issues/481), [#487 app navigation and bar handoff](https://github.com/Xpounder-com/hormuz/issues/487) | Initial visual tokens and information architecture feed the following slices. Final #481 visual acceptance happens before U4, not before drawing every flow. |
 | U2 | [#488 projects, chats, history/search](https://github.com/Xpounder-com/hormuz/issues/488), [#489 files/instructions/context](https://github.com/Xpounder-com/hormuz/issues/489), [#490 onboarding/models/connections](https://github.com/Xpounder-com/hormuz/issues/490) | #487 and initial visual tokens. Proceed in parallel with synthetic storage, files, inventory, credentials, prices and responses. Cover normal, empty, blocked and recovery states. |
 | U3 | [#491 inherited preferences, Auto and overrides](https://github.com/Xpounder-com/hormuz/issues/491) | U2 mock contracts. Show effective app/project/chat/request settings, pure preview, explicit pin/Auto intent, changed-route disclosure and continuation limits. |
-| U4 | [#492 integrated simulation approval](https://github.com/Xpounder-com/hormuz/issues/492) | #487–#491, final #481 and early #338 ordered UI fixtures. One navigable project/window/bar experience, rendered accessibility/recovery journeys, user review and recorded unresolved decisions. |
+| U3r | [#502 Research Review UI/spec/simulation](https://github.com/Xpounder-com/hormuz/issues/502) | U2/U3 mock context/preferences and selected visual language. Review an existing frozen draft with two distinct blind reviewers; optionally author/reconcile within the bounded call plan. Show coverage, disagreement, failed reviews and revision-specific human decision. No real model prerequisite. |
+| U4 | [#492 integrated simulation approval](https://github.com/Xpounder-com/hormuz/issues/492) | #487–#491, #502 mock review journeys, final #481 and early #338 ordered UI fixtures. One navigable project/window/bar experience, rendered accessibility/recovery journeys, user review and recorded unresolved decisions. |
 
 U4 precedes final backend contract acceptance and host/runtime implementation.
 Read-only feasibility can inform UI work without installing or implementing
@@ -86,6 +98,7 @@ approved project window / quick bar / setup UI
 | B2b | [#483 managed llama.cpp and local setup](https://github.com/Xpounder-com/hormuz/issues/483) | B0, B1 | Verified engine/model packages, actual fit, recoverable owned download/load/unload and exact local protocol/process proof. |
 | B2c | [#485 direct paid baseline and streams](https://github.com/Xpounder-com/hormuz/issues/485) | B0, B1 | One named provider; qualified request/stream/cancel and existing custody/admission/accounting/unknown-outcome boundaries. Baseline synthetic context is sufficient while B2a advances. |
 | B3 | [#484 real pure Auto and pin integration](https://github.com/Xpounder-com/hormuz/issues/484) | Applicable B2a contract and qualified B2b/B2c baselines | Real eligibility snapshots, policy-bounded intent, send-time revalidation, immutable origin/context/model and truthful receipts. |
+| B3r — optional | [#503 bounded Research Review runtime](https://github.com/Xpounder-com/hormuz/issues/503) | #502/#492 UI approval and qualified single-response #493/#483/#485/#484 contracts | Exact distinct role/model qualification, frozen scope, blind verdicts, whole-round cap plus per-attempt accounting, disagreement/failure and stale-approval proof. Required before exposing real Review; not a plain-chat prerequisite. |
 | B4 | [#337 refresh/power](https://github.com/Xpounder-com/hormuz/issues/337), [#338 ordered fixtures](https://github.com/Xpounder-com/hormuz/issues/338), [#339 owned lifecycle](https://github.com/Xpounder-com/hormuz/issues/339) | Applicable frozen inputs and integrations | Project/view switching, suspend/hide/reopen/cancel/quit/update and helper ownership. Their contracts inform earlier work; closure is not a starting prerequisite. |
 | B5 | [#346 packages/update/data migration](https://github.com/Xpounder-com/hormuz/issues/346), [#347 responsiveness/footprint](https://github.com/Xpounder-com/hormuz/issues/347) | Integrated candidates | Per-target trust/update/project-data compatibility, measured project/chat/search/bar interaction and separate UI/inference resources. |
 | B6 | [#340 installed desktop journeys](https://github.com/Xpounder-com/hormuz/issues/340) | All applicable earlier gates | Exact declared OS rows pass installed project/create/return/search/context/setup/Auto/pin/stream/cancel/recovery/accessibility. Human evidence is distinct. |
@@ -93,6 +106,11 @@ approved project window / quick bar / setup UI
 B2a/B2b/B2c can advance in parallel. Candidate packaging and measurement precede
 final #340 closure; neither #346 nor #347 requires #340 closure. A stage is not
 a release version, support claim or automatic implementation authorization.
+Optional B3r contributes applicable package/lifecycle/installed evidence when
+real Review is exposed; otherwise label the mode simulated or unavailable. The
+one-curated-local-model baseline does not qualify two distinct local reviewers:
+local-only Review requires additional exact model qualification, not hidden
+cloud substitution or same-version self-review.
 
 ## Reuse boundaries
 
@@ -156,6 +174,16 @@ implicitly reopened.
 Catalog, downloads, updates and telemetry have controls separate from inference
 egress.
 
+The [Research Review contract](RESEARCH_REVIEW_MODE.md) applies these same
+boundaries to an explicit role plan. Default review starts from an existing
+draft and two blind reviewers; optional authoring plus two reviewers and one
+reconciliation has at most four calls across three selected identities in one
+pass. Whole-project review needs an explicit manifest and coverage limits.
+Edited or reconciled v2 does not inherit reviewers' approval of v1. The final
+decision is human and version-specific; consensus is not scientific validation
+or permission to implement/deploy. The UI mock permits two explicitly started
+rounds, never a loop until agreement.
+
 ## Qualification candidates and bounded first scope
 
 Electron supplies one UI codebase; platform services, CPU/GPU, drivers,
@@ -194,10 +222,22 @@ PostgreSQL, Okta, Stripe, hosted provisioning and public gateway are not require
 for local projects or direct BYOK.** Keep static docs/site/release distribution
 and appropriate CI/signing.
 
-The [live read-only inventory and assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md)
-records existing active and suspended resources. [#494](https://github.com/Xpounder-com/hormuz/issues/494)
-owns consumer/data/payment/cost evaluation and a concrete retirement proposal;
-it does not authorize shutdown. Optional managed work #437–#443 is deferred and
+The [infrastructure assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md) preserves the
+dated control-plane inventory; the [account cleanup ledger](DESKTOP_ACCOUNT_CLEANUP.md)
+records the separate current operations. [#494–#501](https://github.com/Xpounder-com/hormuz/issues/494)
+belong to `track:cleanup` and milestone 16, independently of desktop UI and
+deferred Hosted Pro. Cleanup examines actual consumers, retained data/custody,
+payment obligations, billed costs and verified recovery before final retirement.
+
+Separately authorized operations on 2026-10-13 suspended the remaining active
+Render pilot; all three inventoried web services are now suspended. It removed
+two obsolete GitHub environment secrets and
+disabled the live pilot workflow. PostgreSQL and attached disks remain retained;
+archive/export/restore and data/custody/recovery obligations are still pending.
+These bounded operations do not establish complete account retirement, zero
+cost or qualified replacement of legacy hosted client access. Preserve shipped
+artifacts and code contracts; record paused endpoints and recovery/transition
+conditions explicitly. Optional managed work #437–#443 remains deferred, and
 historical commercial terms require reconciliation before revival.
 
 Portfolio #226 and enterprise #9/#11/#13 remain independent programs with real

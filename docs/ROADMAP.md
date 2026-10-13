@@ -13,21 +13,34 @@ not an implemented or qualified desktop release. Follow
 [epic #479](https://github.com/Xpounder-com/hormuz/issues/479), the
 [delivery stages](ELECTRON_DESKTOP_ROADMAP.md), and the
 [complete backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md).
+The scope is ready to start bounded UI simulation; actual backend work follows
+#492 approval and a named owner, selected finish, exact model/provider/protocol
+choices, storage/context/output/time limits and platform qualification rows.
 
 | Program | Current boundary |
 | --- | --- |
-| Electron desktop | #479; UI #481/#487–#492 first, then #480/#482–#485/#493 backend and retained #337/#338/#339/#340/#346/#347 qualification gates. Version and dates TBD. |
+| Electron desktop | #479; UI #481/#487–#491 and #502 feed #492 first, then #480/#482–#485/#493 backend and retained #337/#338/#339/#340/#346/#347 qualification gates. Version and dates TBD. |
+| Research Review | [#502 UI/spec/mock](https://github.com/Xpounder-com/hormuz/issues/502) precedes #492; optional [#503 runtime](https://github.com/Xpounder-com/hormuz/issues/503) follows qualified single-response #493/#483/#485/#484 contracts. Required before exposing real Review, not a plain-chat prerequisite. [Bounded role/version/evidence contract](RESEARCH_REVIEW_MODE.md). |
 | Existing native clients | Preserve the v1.8.0 notarized Mac archive, CLI/agent paths and accepted shared contracts. The separate native-shell plan #329 is superseded; its [roadmap](NATIVE_CLIENT_ROADMAP.md) is historical. |
 | Optional Rust work | #341 existing agent-relay qualification and #342 measured optimizer migration. No blanket port prerequisite to first local chat. |
 | Portfolio intelligence | #226; #214/#219/#220/#225 remain open. Future release identity TBD; frozen evidence is retained. |
 | Enterprise qualification | Conditional #9/#10/#11/#13/#107 gates remain open; bounded reference proof is not general production certification. |
-| Hosted Pro | #437–#443 deferred; no Render/Okta/Stripe/Postgres requirement for local projects or direct BYOK. #494 evaluates existing infrastructure and a retirement proposal. |
+| Hosted Pro | #437–#443 deferred; no Render/Okta/Stripe/Postgres requirement for local projects or direct BYOK. Its unresolved tenant/payment/production obligations remain separate from cleanup. |
+| Account cleanup | #494–#501, `track:cleanup`, milestone 16; independent inventory, bounded authorized operations and retained data/custody/payment holds. [Account ledger](DESKTOP_ACCOUNT_CLEANUP.md) and [infrastructure assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md). Not a desktop UI prerequisite or Hosted Pro activation. |
 | Independent validation/tooling | #307 retains its exact v1.2 study; #369 retains unresolved independent review. New installed desktop evidence belongs to #340. |
 
 Current main contains the AI Work 1.9.0 source candidate; published v1.8.0
 installers remain separate. Legacy milestone numbers do not establish acceptance
 of those similarly numbered releases. Issue updates preserve original criteria
 and evidence; superseded UI-only plans are not labeled completed.
+
+Separate authorized cleanup on 2026-10-13 suspended the remaining active Render
+pilot; all three web services are now suspended. It removed two obsolete GitHub
+environment secrets and disabled the live pilot
+workflow. PostgreSQL and disks remain retained; archive/export/restore and
+data/recovery obligations are pending. These operations do not imply complete retirement,
+known savings or a qualified replacement for paused hosted access; application
+implementation and release acceptance remain separate.
 
 ## v1.8.0 notarized Mac companion; Windows preview
 

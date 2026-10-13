@@ -2,8 +2,10 @@
 
 Audit date: 2026-10-13. Source baseline:
 `46449d2a3f05de09d7d0a18c9688e189a6c3a68e`.
-Track the remaining read-only inventory and retirement proposal in
+Track verified retirement and remaining inventory in
 [#494](https://github.com/Xpounder-com/hormuz/issues/494).
+The [account cleanup ledger](DESKTOP_ACCOUNT_CLEANUP.md) covers #495–#501
+in the separate `track:cleanup` milestone.
 The product sequence is recorded in the
 [Electron desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md).
 
@@ -24,28 +26,31 @@ cancellation, eligibility and request accounting. Those responsibilities run on
 the user's machine. A direct cloud connection uses the user's provider account
 and the provider's API; it does not require a compulsory Hormuz-hosted hop.
 
-Existing hosted resources are evaluated separately. This audit authorizes no
-shutdown, deletion, restart, deployment, subscription cancellation, credential
-change, service activation or new paid resource. Removing a dependency from the
-new product is not evidence that an old service has no users or retained data.
+Existing hosted resources are evaluated separately. The owner confirmed no
+customers/testers or paid access commitments remain on the hosted pilot and
+requested retirement. The checkpoint below records the bounded operations
+performed under that request. Retained data and shared accounts remain intact
+pending archive/recovery, retention and consumer facts. Removing a dependency
+from the new product alone does not establish those facts.
 
 ## Verified Render resource state
 
-A read-only authenticated Render CLI inventory on 2026-10-13 reported the
-resources below. Public documentation records names and bounded configuration,
+An authenticated Render inventory on 2026-10-13 and subsequent suspension
+read-back reported the resources below. Public documentation records names and bounded configuration,
 without private resource/account identifiers or credential values.
 
 | Resource | Observed state | Declared size | Auto-deploy | Desktop disposition |
 | --- | --- | --- | --- | --- |
-| `hormuz-https-preflight` web service | Not suspended | One instance, 0.5 CPU / 512 MiB; attached 1 GB disk | Off | Existing hosted/pilot path; no first-desktop dependency. Evaluate consumers and retained state before proposing retirement. |
+| `hormuz-https-preflight` web service | Suspended; read-back verified | One instance configuration, 0.5 CPU / 512 MiB; attached 1 GB disk retained | Off | Unused pilot compute stopped. Disk/archive, remaining authority and cost verification remain open in #495. |
 | `hormuz-desktop` web service | Suspended | One instance, 0.5 CPU / 512 MiB; attached 1 GB disk | Off | Retirement candidate after origin/callback/data/support inventory. Suspension is not deletion or proof of zero retained cost. |
 | `hormuz-storage-qualify` web service | Suspended | One instance, 0.5 CPU / 512 MiB; attached 1 GB disk | Off | Qualification resource; retirement candidate after checking retained evidence/data and any recovery dependency. |
 | `hormuz-external-pilot-postgres` | Available; not suspended | PostgreSQL 16; 0.1 CPU / 256 MiB; 1 GB storage | Not applicable | Optional legacy hosted database; exclude from desktop installation. Inventory logical databases and consumers before any instance-level action. |
 
 These are control-plane state/configuration observations, not application
 health, usage, customer or billing evidence. The deployed serving mode and
-revision, actual workload, active tenants/sessions, database/disk contents,
-current billed line items and commitments were not inspected. **Cost savings
+revision, actual workload, database/disk contents and current billed line items
+were not independently inspected. The no-user/no-access-commitment statement is
+owner-reported; it does not establish absence of historical financial records. **Cost savings
 are unknown.** Do not calculate savings from plan names or assume a suspended
 service and its disk incur no charge.
 
@@ -73,10 +78,10 @@ possible consumers; they are not today's data/use inventory. Deleting the
 database instance to remove one pilot could affect both logical databases.
 
 The signed Mac client has its own bounded support and hosted-origin contract.
-Current installed users, configured manual origins, cached sessions, IdP
-callbacks and operator commitments must be inventoried before removing a
-legacy endpoint. Preserve the shipped app and existing installation paths until
-an explicit coexistence/migration and retirement plan is accepted.
+The owner reports no hosted pilot users or paid access commitments. Configured
+manual origins, cached sessions, IdP callbacks and historical operator records
+still need reconciliation. Preserve the shipped app and installation paths;
+the dated hosted pilot login proof is historical after this suspension.
 
 ## Dependency disposition
 
@@ -90,9 +95,9 @@ an explicit coexistence/migration and retirement plan is accepted.
 | Local state and optional SQLite | Required storage responsibilities; technology selected later | Confirmed saved local projects/chats/files/instructions/preferences with disclosure, plus unsaved Temporary mode. #493 owns separate retention/export/delete/isolation/migration; content, metadata receipts and credentials have distinct owners. Do not copy all hosted stores into desktop setup. |
 | Hugging Face or other model catalog/download host | Needed for online discovery/download only | Direct bounded metadata/download operations with provenance, license and integrity checks. No Render proxy required. Gated/private sources and marketplace loaders are separate later scope. No prompt upload is implied by downloading a model. |
 | Direct paid-provider APIs | Optional cloud path | User-owned provider account/credential and qualified protocol/stream/cancel behavior. Provider costs are separate from Hormuz service subscriptions. No paid call or model load on typing. |
-| Render services/disks | Not required | Optional existing managed/pilot support; hold new activation/expansion. Evaluate the observed resources as retirement candidates only after complete dependency/data/payment inventory. |
+| Render services/disks | Not required | All three observed web services suspended; hold activation/expansion. Retained disks, archives, remaining authority and cost disposition are tracked in #495. |
 | PostgreSQL | Not required | Optional shared gateway storage. [Core storage](STORAGE.md) already makes PostgreSQL opt-in; [Personal Optimizer](PERSONAL_OPTIMIZER.md) direct mode needs no organization, PostgreSQL or Hormuz gateway. Preserve legacy stores and recovery authority. |
-| Okta/OIDC/hosted sessions | Not required | Optional managed connection. Keep generic identity and existing credential/session contracts; do not require hosted enrollment for local model setup. Retire only selected callbacks/sessions after a separate accepted operations plan. |
+| Okta/OIDC/hosted sessions | Not required | Keep generic identity and credential contracts; local setup needs no hosted enrollment. #497 retires proved-obsolete dedicated apps/callbacks/sessions while preserving shared identity. |
 | Hosted workspace/team administration | Not required | Deferred optional managed-service experience. Tenant authority and invitations belong to that path, not ordinary local first-run. |
 | Stripe and hosted entitlements | Not required | Deferred optional service billing; retain existing payment/refund/subscription obligations. Public checkout buttons are neither payment proof nor proof that no customers exist. No new desktop billing model is approved here. |
 | Public GitHub Pages site | Not required to execute installed inference | Keep discovery/docs/downloads and public support boundaries. Static Pages cannot serve OIDC callbacks, sessions or model gateway routes. Canonical site publication uses its own reviewed source pin. |
@@ -120,7 +125,7 @@ contract cancellation.
 | #440 | Hosted production workload/service-account API qualification; direct desktop provider conformance is narrower. |
 | #441 | New hosted subscription/entitlement implementation; existing paid obligations remain intact. |
 | #442 | Hosted billable request meter/overage design; Auto preview is not an inference/billable request. |
-| #443 | Hosted serving capacity/recovery/support qualification; #494 owns the separate read-only rationalization inventory and proposal. No load test, capacity increase or deployment follows. |
+| #443 | Hosted serving capacity/recovery/support qualification; #494–#501 own the separate account cleanup program. No load test, capacity increase or deployment follows. |
 
 The historical $99/workspace and request-overage proposal in these issues is
 obsolete commercial scope. The current
@@ -138,9 +143,9 @@ pilot remain separate unresolved evidence programs. They are not prerequisites
 to drawing or testing the simulated desktop interface. Reusing their accepted
 custody/policy/source contracts does not create their broader claims.
 
-## Read-only inventory still needed
+## Remaining inventory and retirement work
 
-Issue #494 should prepare a concrete keep/retire recommendation from bounded,
+Issues #494–#501 maintain a concrete keep/retire ledger from bounded,
 non-secret observations:
 
 1. Current billed line items for all selected instances/disks/databases, actual
@@ -162,12 +167,27 @@ non-secret observations:
    window, verified export/restore evidence, rollback limits and current quote.
    Treat shared database instances and each attached disk separately.
 
-After that review, a **separate explicit operations work order** must name the
-exact resources and authorize any admission closure, export/restore, endpoint
-cutover, callback/session/credential retirement, suspension/deletion or billing
-change. It must preserve applicable users/data/custody/payment commitments and
-include cleanup and recovery checks. This planning audit does not satisfy that
-gate, and no infrastructure operation is queued by it.
+The owner's request already authorizes cleanup of proved-unused Hormuz pilot
+resources. Do not request blanket authorization again. Each remaining action
+needs exact resource/consumer/retention facts and recovery limits; unknown or
+shared resources and retained financial/data history stay intact. Export and
+restore must preserve recovery/key authority before retained-state deletion.
+No new service activation or paid resource is authorized.
+
+## Verified retirement checkpoint
+
+On 2026-10-13 the unused `hormuz-https-preflight` service was suspended through
+the Render API; its subsequent read-back confirmed `suspended`. The other two
+web services were already suspended. All three attached disks remain, and
+PostgreSQL remains available/not suspended. This is compute retirement, not
+deletion of retained state or completed account closure.
+
+The GitHub `external-pilot-qualification` environment's obsolete deploy-hook
+and failover-rehearsal secrets were removed; its secret-name read-back is empty.
+The **External pilot deployment qualification** workflow was disabled and
+read back as `disabled_manually`; source remains for history. Ordinary CI,
+Pages, provider conformance, Mac signing/notary and release custody remain.
+This retires specific authority, not every Render/account credential.
 
 ## CI and publication boundaries
 
@@ -190,8 +210,8 @@ source-pin and live verification process, separate from Render deployment.
 ## Outcome of this audit
 
 The first desktop can be local and account-free, with optional direct cloud
-models. Three web services and one PostgreSQL instance were inventoried
-read-only; two web services are suspended, one is not suspended, and PostgreSQL
-is available/not suspended. Their actual use, data obligations and costs still
-need review. No service, data, account, bill, credential, production code,
-customer release or acceptance count was changed.
+models. All three inventoried Render web services are now suspended, and
+specific obsolete GitHub pilot authority is retired. PostgreSQL and disks are
+retained; data, identity, commerce, other account dispositions and actual costs
+remain open under #494–#501. No application backend, customer release or
+installed acceptance claim follows from these operations.

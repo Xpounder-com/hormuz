@@ -1,8 +1,9 @@
 # Hormuz backlog reconciliation — 2026-10-13
 
 Scope: all 32 open issues and two open PRs in `Xpounder-com/hormuz` at this
-audit boundary, plus seven initial planning issues and eight follow-up UI,
-local-data and infrastructure issues created under
+audit boundary, plus seven initial planning issues, eight follow-up UI,
+local-data/infrastructure issues, seven focused account-cleanup children and two
+Research Review issues created under
 [desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
 Adjacent repositories, user-owned dirty checkouts, shipped products and
 implementation branches are not deleted or reset by this sweep.
@@ -48,7 +49,7 @@ not acceptance of the similarly numbered published releases.
 | #440 | Hosted | Open, deferred hosted production API gate; direct desktop provider conformance stays active. |
 | #441 | Hosted | Open, deferred subscription/entitlement implementation; existing payment obligations preserved. |
 | #442 | Hosted | Open, deferred meter/overage proposal; old $99 terms are historical, typing preview is not billable. |
-| #443 | Hosted | Open, deferred serving-capacity/recovery work; #494 separately evaluates actual resources and retirement. |
+| #443 | Hosted | Open, deferred serving-capacity/recovery work; independent cleanup #494–#501 evaluates and executes bounded authorized resource retirement. |
 
 Original acceptance and evidence are retained in issue bodies. Superseded
 outcomes are **not planned**, never relabeled completed. Re-scoped desktop
@@ -67,8 +68,17 @@ UI issues add #487 navigation/bar handoff, #488 projects/chats/history/search,
 After #492, #480 freezes the local host/data/support contract, then #482
 integrates the approved UI. #493 local project persistence/context, #483 local
 engine setup and #485 governed paid baselines advance in parallel. #484 then
-integrates real pure Auto and explicit model intent. #494 evaluates existing
-infrastructure independently; no shutdown follows from this planning work.
+integrates real pure Auto and explicit model intent. #502 adds bounded simulated
+Research Review journeys before #492; optional #503 real orchestration follows
+qualified single-response #493/#483/#485/#484 contracts and is required only
+when real Review is exposed. Failed reviewers, disagreement and stale revision
+approvals remain visible; model agreement does not authorize implementation.
+
+#494–#501 form independent `track:cleanup`, milestone 16, rather than deferred
+Hosted Pro delivery. The user authorized bounded cleanup of proved-unused Hormuz
+scope; current operations and retained holds are recorded in the
+[account ledger](DESKTOP_ACCOUNT_CLEANUP.md). UI completion does not wait for
+cleanup or infer its completion from issue labels or suspended compute.
 Reuse #337/#338/#339/#340/#346/#347 as integration/release gates, with separate
 early and final #338 checkpoints. Adapter evidence contributes to later #340;
 #340 closure is not an adapter prerequisite.
@@ -77,13 +87,18 @@ The old ephemeral-only first scope is superseded by disclosed saved local
 projects and unsaved Temporary chat, with a separate content ownership,
 context/export/delete/isolation contract. Original source/acceptance history
 remains intact. See the [UI coverage plan](DESKTOP_UI_PLAN.md) and
-[live read-only infrastructure assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md).
+[infrastructure assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md),
+[Research Review contract](RESEARCH_REVIEW_MODE.md) and
+[account cleanup ledger](DESKTOP_ACCOUNT_CLEANUP.md).
 
 Delivery is in named stages in [the desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md).
 New desktop, optional Rust and Hosted Pro milestones have version TBD. The
 portfolio milestone also has future version TBD. Legacy native milestones are
 marked historical and retired after their active work is moved or superseded;
 milestone retirement is not platform/release acceptance.
+The roadmap is sufficient to begin UI simulation. Backend work follows #492
+approval and a named owner, selected finish, exact model/provider/protocol and
+storage/context/time limits, with declared platform qualification rows.
 
 ## PR and evidence handling
 
@@ -100,7 +115,17 @@ milestone retirement is not platform/release acceptance.
   destructive authority. The completed enterprise references do not certify
   arbitrary customer environments.
 
-The primary local checkout was dirty and preserved. Read-only audits used
+The primary local checkout was dirty and preserved. Read-only source audits used
 current-main Git objects; roadmap documentation is prepared in an isolated
-branch. No application code, models, providers, credentials, paid services,
-release artifacts or deployments are changed by this work order.
+branch. Application/backend work remains planning and simulation; no real model
+download, paid-provider request, customer release or desktop support expansion
+is established.
+
+Separately authorized cleanup on 2026-10-13 suspended the remaining active Render
+pilot; all three inventoried web services are now suspended. It removed two
+obsolete GitHub environment secrets and disabled the
+live pilot workflow. PostgreSQL and disks remain retained; archive/export/restore
+and data/custody/recovery decisions are pending. This is bounded operations evidence,
+not complete account retirement, proved zero cost or replacement of paused
+legacy hosted access. Original shipped artifacts, code contracts and acceptance
+history remain intact; consult the cleanup ledger for remaining holds.
