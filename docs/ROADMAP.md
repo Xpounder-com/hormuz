@@ -6,8 +6,9 @@ This roadmap is evidence-gated. A milestone is not complete because code exists 
 
 ## Current program map — 2026-10-13
 
-The new desktop direction is a shared Electron/Svelte interface, managed
-llama.cpp setup and policy-bounded local/cloud Auto. It is **planning work**,
+The new desktop direction is a shared Electron/Svelte project workspace and
+minimal quick bar, managed llama.cpp setup and policy-bounded local/cloud Auto.
+Complete and review the simulated UI before backend integration. It is **planning work**,
 not an implemented or qualified desktop release. Follow
 [epic #479](https://github.com/Xpounder-com/hormuz/issues/479), the
 [delivery stages](ELECTRON_DESKTOP_ROADMAP.md), and the
@@ -15,12 +16,12 @@ not an implemented or qualified desktop release. Follow
 
 | Program | Current boundary |
 | --- | --- |
-| Electron desktop | #479; six focused new slices plus retained #337/#338/#339/#340/#346/#347 gates. Version and dates TBD. |
+| Electron desktop | #479; UI #481/#487–#492 first, then #480/#482–#485/#493 backend and retained #337/#338/#339/#340/#346/#347 qualification gates. Version and dates TBD. |
 | Existing native clients | Preserve the v1.8.0 notarized Mac archive, CLI/agent paths and accepted shared contracts. The separate native-shell plan #329 is superseded; its [roadmap](NATIVE_CLIENT_ROADMAP.md) is historical. |
 | Optional Rust work | #341 existing agent-relay qualification and #342 measured optimizer migration. No blanket port prerequisite to first local chat. |
 | Portfolio intelligence | #226; #214/#219/#220/#225 remain open. Future release identity TBD; frozen evidence is retained. |
 | Enterprise qualification | Conditional #9/#10/#11/#13/#107 gates remain open; bounded reference proof is not general production certification. |
-| Hosted Pro | #437–#443; optional service activation remains separate from a desktop paid-provider connection. |
+| Hosted Pro | #437–#443 deferred; no Render/Okta/Stripe/Postgres requirement for local projects or direct BYOK. #494 evaluates existing infrastructure and a retirement proposal. |
 | Independent validation/tooling | #307 retains its exact v1.2 study; #369 retains unresolved independent review. New installed desktop evidence belongs to #340. |
 
 Current main contains the AI Work 1.9.0 source candidate; published v1.8.0

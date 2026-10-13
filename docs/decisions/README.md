@@ -33,7 +33,8 @@ The Electron desktop direction is recorded in
 [epic #479](https://github.com/Xpounder-com/hormuz/issues/479) and the
 [desktop roadmap](../ELECTRON_DESKTOP_ROADMAP.md). Its complete support,
 backend ownership, migration and execution contract is still to be frozen in
-[#480](https://github.com/Xpounder-com/hormuz/issues/480); this planning record
+[#480](https://github.com/Xpounder-com/hormuz/issues/480) after the integrated
+project UI simulation is approved in [#492](https://github.com/Xpounder-com/hormuz/issues/492); this planning record
 does not invent an accepted implementation ADR or authorize runtime changes.
 
 ## Acceptance record

@@ -3,183 +3,215 @@
 Planning baseline: 2026-10-13, main
 `46449d2a3f05de09d7d0a18c9688e189a6c3a68e`.
 Track delivery in [epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
-The [backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md) records the
-disposition of every open issue at the audit boundary.
+The [UI plan](DESKTOP_UI_PLAN.md), [infrastructure audit](DESKTOP_INFRASTRUCTURE_AUDIT.md)
+and [backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md) define the
+active scope and the disposition of the original open issues.
 
-This is a roadmap and issue-planning change. It does not implement Electron,
-download models, call providers, publish a release, activate a service, or
-authorize application implementation. A separate explicit work order starts
-implementation. Release identity and delivery dates remain unassigned.
+This is planning and issue coverage. It does not start application implementation,
+read real project files, download models, call providers, publish a release or
+change services. A separate explicit work order starts implementation. Release
+identity, dates and owners remain unassigned.
 
 ## Product outcome
 
 One shared Electron + Svelte/TypeScript interface for declared Windows, Linux
-and macOS targets. The primary experience is a small glossy prompt bar with
-smooth curved edges, refined type, depth and restrained motion. It contains a
-prompt, Send, a model picker and a small Auto control. Setup, reasons,
-preferences and expanded answers appear when needed.
+and macOS targets. The user confirmed a **full project workspace**: each project
+owns its chats, files, instructions and model/Auto preferences. A normal desktop
+window provides project navigation, continuing conversations, history/search,
+visible context, model management, connections and settings.
 
-While a person types, Auto predicts an eligible model and shows Local or Cloud.
-Selecting a model pins that choice; explicitly selecting Auto resumes ranking.
-The app manages local llama.cpp setup, downloads and model readiness, alongside
-an optional qualified paid-provider connection. Local setup does not require
-an organization account or a separate model-management app.
+The global quick bar remains small and glossy, with curved edges, refined type,
+depth and restrained motion. Its primary controls are prompt, Send, compact
+model picker and small Auto control, plus a compact destination indicator. It
+uses the active project/chat or visibly Temporary chat. Opening the project
+window preserves the draft, included context and model intent.
 
-The exact glossy finish is not selected. The existing prompt-bar exploration
-and the glossy image concepts are simulations/design references, not approved
-runtime behavior or installer qualification. Stage D1 records the selected
-reference before implementation. Native desktop blur is an optional enhancement;
-the shared surface needs a beautiful legible opaque fallback.
+While typing, Auto predicts an eligible model and shows Local or Cloud. Selecting
+a model pins that choice; explicitly selecting Auto resumes ranking. Setup,
+reasons and preferences appear when needed. Installed models and secure provider
+connections are shared resources; projects choose effective settings rather
+than duplicating weights or credentials.
 
-## Reuse and architecture
+Named projects save chats locally with clear disclosure. Temporary chat is
+unsaved. A project's file list does not silently include every file in every
+request: selected context, instructions, exclusions and potential cloud egress
+are visible before Send. Project/profile/chat identity and content remain
+separate from hosted tenant, Portfolio repository and AI Work authority.
+
+[LM Studio classic chat organization](https://lmstudio.ai/docs/app/basics/chat)
+and [Bionic Projects and Sessions](https://lmstudio.ai/docs/bionic/projects-and-sessions)
+are workflow references. They do not commit Hormuz to agents, code/file editing,
+voice, browser tabs, remote sync or collaboration.
+
+The exact glossy finish is not selected. Existing prompt-bar simulation and
+glossy image concepts are references, not an approved full project UI or
+installed platform qualification. #481 selects the shared visual reference;
+#492 reviews the integrated simulation. Native desktop blur is optional; the
+shared surface needs a beautiful legible opaque fallback.
+
+## UI first: no backend prerequisite
+
+| Stage | Owned issue | Dependencies and exit |
+| --- | --- | --- |
+| U0 | Confirmed product boundary in #479 and this plan | Full local projects plus Temporary chat; local-first setup; typed mock operations, ownership and inheritance decisions. No database/hosting choice is required to explore the UI. |
+| U1 | [#481 shared glossy visual system](https://github.com/Xpounder-com/hormuz/issues/481), [#487 app navigation and bar handoff](https://github.com/Xpounder-com/hormuz/issues/487) | Initial visual tokens and information architecture feed the following slices. Final #481 visual acceptance happens before U4, not before drawing every flow. |
+| U2 | [#488 projects, chats, history/search](https://github.com/Xpounder-com/hormuz/issues/488), [#489 files/instructions/context](https://github.com/Xpounder-com/hormuz/issues/489), [#490 onboarding/models/connections](https://github.com/Xpounder-com/hormuz/issues/490) | #487 and initial visual tokens. Proceed in parallel with synthetic storage, files, inventory, credentials, prices and responses. Cover normal, empty, blocked and recovery states. |
+| U3 | [#491 inherited preferences, Auto and overrides](https://github.com/Xpounder-com/hormuz/issues/491) | U2 mock contracts. Show effective app/project/chat/request settings, pure preview, explicit pin/Auto intent, changed-route disclosure and continuation limits. |
+| U4 | [#492 integrated simulation approval](https://github.com/Xpounder-com/hormuz/issues/492) | #487–#491, final #481 and early #338 ordered UI fixtures. One navigable project/window/bar experience, rendered accessibility/recovery journeys, user review and recorded unresolved decisions. |
+
+U4 precedes final backend contract acceptance and host/runtime implementation.
+Read-only feasibility can inform UI work without installing or implementing
+services. #338 has an early UI checkpoint and a later runtime checkpoint; its
+full closure cannot become a circular prerequisite for the simulation.
+
+The [UI plan](DESKTOP_UI_PLAN.md) maps every first-scope screen and journey to
+an issue. Nested folders, split views and advanced organization can follow after
+the simple create/return/search workflow is usable.
+
+## Backend and installed qualification after UI approval
 
 ```text
-packaged Svelte prompt / picker / chat / setup
+approved project window / quick bar / setup UI
     -> narrow validated Electron host bridge
-    -> existing Hormuz policy, admission, work routing and custody owners
-    -> qualified managed llama.cpp process OR qualified paid provider
+    -> isolated local project store + selected request context
+    -> qualified Hormuz policy, custody, admission and execution adapters
+    -> owned llama.cpp process OR optional direct paid provider
 ```
-
-Preserve the shipped Mac app, CLI/agent adapters and existing gateway contracts
-until replacement installation, opt-in migration and rollback are proven.
-Electron changes presentation; it does not require a gateway rewrite, a new
-inference compiler or a blanket Rust port.
-
-Reuse the accepted Rust profile/custody/transport/session/snapshot/lifecycle
-contracts where qualified. They are not automatically a drop-in Electron
-backend: stage D0 chooses the process/IPC boundary and one authority for each
-state machine. Existing control-plane JSON transport is not the multi-GB model
-download or streaming inference transport. The existing agent relay launches
-Codex/Claude; it is not the llama.cpp model host.
-
-Current source already handles OpenAI Responses, Chat Completions and Anthropic
-Messages. Qualify the exact local/cloud request and stream envelopes rather
-than treating the phrase OpenAI compatible as complete conformance. Keep
-upstream llama.cpp UI/engine versions matched, retain required notices, and
-adapt useful components through Hormuz services. Avoid the private `/tools`
-endpoint and unrestricted agent/MCP behavior.
-
-The renderer receives bounded display data and typed operations. Credentials,
-arbitrary filesystem/process access and policy authority remain in the qualified
-host/backend. Model text, Markdown and catalog metadata are untrusted display
-inputs. Heavy inference runs outside the UI process. Choose between packaging
-the existing backend and a configured gateway binding in D0; users must not
-need a global Python, Node, Rust or development toolchain for the supported
-installed path.
-
-## Auto contract
-
-Reuse [ADR 0014](decisions/0014-customer-local-ai-work-and-exact-reuse.md), the
-approved baseline, continuing-session affinity and existing work evidence.
-This does not promise an objectively best model or create a second learning
-ledger.
-
-1. Preview reads a bounded available-state snapshot and is pure. It performs
-   no provider/classifier calls, downloads, model loads, budget/exploration
-   reservations, ledger writes or durable prompt storage. Existing
-   `choose_route` has stateful exploration/selection behavior and cannot be
-   used directly on each keystroke.
-2. Policy, identity, privacy, cap, capability/context, engine/model readiness
-   and verified provider availability filter candidates before ranking.
-3. A pin is explicit execution intent, never an authorization bypass. Passing
-   a model alias alone into an execution path that can rerank is insufficient.
-   An unavailable pin remains visibly blocked and is never silently replaced.
-4. Send revalidates current policy/inventory/budget, discloses a changed
-   preview, then commits one route/attempt for streaming, cancellation and
-   the receipt. Continuing opaque/tool/provider state preserves affinity.
-5. Local-only/private work cannot fail over to cloud. Other fallback remains
-   within existing explicit qualified one-hop rules; partial or uncertain
-   attempts are not replayed. Estimates, actuals and unknown costs remain
-   distinct. Local means inference on this machine, not free hardware/energy.
-
-The existing opt-in exact answer reuse boundary remains intact. It does not
-authorize indefinite conversation storage. First scope uses ephemeral chat;
-any history or attachments require a separate explicit retention, export/delete,
-profile isolation and migration contract. Catalog metadata, downloads, updates
-and telemetry have separately disclosed network controls from prompt egress.
-
-## Delivery sequence and gates
 
 | Stage | Work | Completion prerequisites | Exit evidence |
 | --- | --- | --- | --- |
-| D0 | [#480 architecture, support and migration contract](https://github.com/Xpounder-com/hormuz/issues/480) | None | Product modes, backend/custody owners, protocol subset, support matrix, donor-PR disposition and coexistence are explicit. |
-| D1 | [#481 glossy visual system and simulation](https://github.com/Xpounder-com/hormuz/issues/481) | D0 scope | Selected reference and tested idle/type/pin/blocked/setup/stream states; keyboard, accessibility, narrow layout and material fallback. |
-| D2 | [#482 Electron launcher and host bridge](https://github.com/Xpounder-com/hormuz/issues/482) | D0, D1 | Packaged isolated renderer, narrow IPC, owned application instance and working platform activation/recovery. |
-| D3a | [#483 local engine and model setup](https://github.com/Xpounder-com/hormuz/issues/483) | D0, D2 | Verified engine/model packages; bounded recoverable download/load/unload; exact owned-process and local protocol proof. |
-| D3b | [#485 governed paid execution baseline](https://github.com/Xpounder-com/hormuz/issues/485) | D0, D2 | One named provider, qualified envelopes/stream/cancel, preserved custody/policy/accounting and unknown-outcome behavior. Runs alongside D3a; no Auto completion prerequisite. |
-| D4 | [#484 pure Auto preview and model pin](https://github.com/Xpounder-com/hormuz/issues/484) | D3a, D3b qualified baseline | Typing has no execution effects; pin/Auto intent, eligibility races, revalidation and one committed route are tested. |
-| D5 | [#337 scheduling](https://github.com/Xpounder-com/hormuz/issues/337), [#338 ordered interaction fixtures](https://github.com/Xpounder-com/hormuz/issues/338), [#339 owned lifecycle](https://github.com/Xpounder-com/hormuz/issues/339) | Their frozen contract inputs and relevant new integrations | Crosscutting power, stale callback, reopen/cancel/quit/update and helper ownership acceptance. Existing foundations can be reused earlier; closure is not a circular prerequisite to D2/D3. |
-| D6 | [#346 packages and safe migration](https://github.com/Xpounder-com/hormuz/issues/346), [#347 responsiveness and footprint](https://github.com/Xpounder-com/hormuz/issues/347) | Integrated candidates from D2–D5 | Per-target candidate artifacts, trust/update/settings proof and separately measured UI/inference resources. Candidate evidence collection precedes final platform acceptance. |
-| D7 | [#340 installed desktop journeys](https://github.com/Xpounder-com/hormuz/issues/340) | All applicable earlier gates | Every declared OS/architecture/desktop passes installed setup, Auto/pin, generation/cancel/recovery and accessibility. Independent user evidence is recorded separately. |
+| B0 | [#480 host/data/support/migration contract](https://github.com/Xpounder-com/hormuz/issues/480) | U4 | One authority per state machine, typed UI-to-host seam, content/credential isolation, supported-target candidates and legacy coexistence. |
+| B1 | [#482 approved UI in Electron host](https://github.com/Xpounder-com/hormuz/issues/482) | U4, B0 | Isolated renderer, narrow IPC, private owned instance, scoped callbacks, activation/focus/recovery and packaged resources. |
+| B2a | [#493 local project/history/context storage](https://github.com/Xpounder-com/hormuz/issues/493) | B0, B1 | Explicit saved/temporary modes; bounded search and file subset; permission/ownership, export/delete, isolation, recovery and immutable request context. |
+| B2b | [#483 managed llama.cpp and local setup](https://github.com/Xpounder-com/hormuz/issues/483) | B0, B1 | Verified engine/model packages, actual fit, recoverable owned download/load/unload and exact local protocol/process proof. |
+| B2c | [#485 direct paid baseline and streams](https://github.com/Xpounder-com/hormuz/issues/485) | B0, B1 | One named provider; qualified request/stream/cancel and existing custody/admission/accounting/unknown-outcome boundaries. Baseline synthetic context is sufficient while B2a advances. |
+| B3 | [#484 real pure Auto and pin integration](https://github.com/Xpounder-com/hormuz/issues/484) | Applicable B2a contract and qualified B2b/B2c baselines | Real eligibility snapshots, policy-bounded intent, send-time revalidation, immutable origin/context/model and truthful receipts. |
+| B4 | [#337 refresh/power](https://github.com/Xpounder-com/hormuz/issues/337), [#338 ordered fixtures](https://github.com/Xpounder-com/hormuz/issues/338), [#339 owned lifecycle](https://github.com/Xpounder-com/hormuz/issues/339) | Applicable frozen inputs and integrations | Project/view switching, suspend/hide/reopen/cancel/quit/update and helper ownership. Their contracts inform earlier work; closure is not a starting prerequisite. |
+| B5 | [#346 packages/update/data migration](https://github.com/Xpounder-com/hormuz/issues/346), [#347 responsiveness/footprint](https://github.com/Xpounder-com/hormuz/issues/347) | Integrated candidates | Per-target trust/update/project-data compatibility, measured project/chat/search/bar interaction and separate UI/inference resources. |
+| B6 | [#340 installed desktop journeys](https://github.com/Xpounder-com/hormuz/issues/340) | All applicable earlier gates | Exact declared OS rows pass installed project/create/return/search/context/setup/Auto/pin/stream/cancel/recovery/accessibility. Human evidence is distinct. |
 
-Candidate packaging and platform evidence can advance in parallel. Neither
-#346 nor #347 requires #340 closure; #340 closes after their applicable evidence.
-The crosscutting #337/#338/#339 contracts are integration inputs, not completed
-prerequisites to starting the shell and runtime slices. Owners and dates are
-assigned before implementation; stages are not automatic release versions.
+B2a/B2b/B2c can advance in parallel. Candidate packaging and measurement precede
+final #340 closure; neither #346 nor #347 requires #340 closure. A stage is not
+a release version, support claim or automatic implementation authorization.
 
-## First qualification matrix proposal
+## Reuse boundaries
 
-These are candidates for D0, not newly supported targets. Electron provides a
-shared UI codebase and automated packages; platform services, CPU/GPU, drivers,
-desktop environment and installer behavior still require exact qualification.
+Preserve the shipped Mac app, CLI/agent adapters and gateway contracts until
+replacement installation, explicit migration and rollback are proven. Electron
+changes presentation; it does not require a gateway rewrite, inference compiler
+or general Rust port.
 
-| Dimension | First scope to qualify | Later/conditional scope |
+Qualified Rust profile/custody/transport/session/snapshot/lifecycle contracts
+can be reused selectively. They are not a drop-in model manager or project
+store. Control-plane bounded JSON is not multi-GB download or streaming transport.
+The existing external-agent relay is not the llama.cpp model host. B0 inventories
+useful donor PR #458 fixes separately from superseded GTK/Swift rendering.
+
+Current source handles OpenAI Responses, Chat Completions and Anthropic Messages.
+Qualify the selected local/cloud envelopes, rather than assume complete parity
+from “OpenAI compatible.” Pin upstream engine/UI compatibility and notices;
+adapt useful components through Hormuz services and avoid private /tools.
+
+Credentials, filesystem/process access, policy and storage authority stay in
+qualified owners outside the renderer. Model output, Markdown and catalog
+metadata are untrusted. Heavy inference stays outside the UI process. Supported
+installation needs no global developer Python, Node, Rust or separate model app.
+
+## Auto and project-data contract
+
+Reuse [ADR 0014](decisions/0014-customer-local-ai-work-and-exact-reuse.md), its
+approved baseline and continuing-session affinity; do not promise an objectively
+best model or create a second learning ledger.
+
+1. Preview reads a bounded snapshot and is pure: no provider/classifier call,
+   download/load, budget/exploration reservation, ledger write or prompt
+   persistence. Existing stateful `choose_route` cannot run per keystroke.
+   Scoped draft saving is a separate debounced local-storage operation.
+2. Policy, identity, privacy, cap, capability/context, engine/model readiness
+   and verified provider availability filter before ranking. Effective settings
+   have explicit app/project/chat/request precedence.
+3. Pin is explicit execution intent, never an authorization bypass. A model
+   alias alone is insufficient where the backend can rerank. Blocked pin remains
+   pinned; selecting Auto explicitly resumes ranking.
+4. Send revalidates policy/inventory/budget/context and visibly discloses a
+   changed preview before egress, requiring renewed intent for changed route or
+   disclosure boundaries. It captures one immutable origin and context/model
+   intent for streaming/cancel/receipt.
+5. Switching project/view changes presentation, not the submitted response's
+   identity. Later instructions/context edits affect future requests. Opaque
+   tool/provider state preserves affinity or requires an explicit new chat.
+6. Local-only/private work cannot fail over to cloud. Other fallback stays
+   within existing explicit qualified one-hop rules; partial or uncertain
+   attempts are not replayed. Estimates, actuals and unknown costs stay distinct.
+
+Saved project history is a separate explicit retention/export/delete/isolation
+contract in #488/#489/#493. It does not expand ADR0014 exact reuse or metadata-only
+gateway evidence. Imported files and linked originals have separate ownership;
+request context is selected and bounded. No automatic RAG, recursive indexing,
+file modification, sync or storage-encryption claim follows from this plan.
+Moving/importing a chat reviews destination instructions, file bindings and
+model/privacy/cap inheritance before the next Send, preserving original submitted
+snapshots. Credentials are never imported and linked-file access is never
+implicitly reopened.
+Catalog, downloads, updates and telemetry have controls separate from inference
+egress.
+
+## Qualification candidates and bounded first scope
+
+Electron supplies one UI codebase; platform services, CPU/GPU, drivers,
+compositor and installer behavior still need exact evidence.
+
+| Dimension | First scope to qualify | Later/conditional |
 | --- | --- | --- |
-| Mac | Apple Silicon arm64; exact tested OS versions, Keychain and notarized package | Intel only after native engine/package/clean-machine proof. |
-| Windows | Windows 11 x64; exact tested build, secure custody and launcher/window recovery | Other Windows versions/ARM64 only after runtime and maintenance decisions. |
-| Linux | Ubuntu 24.04 LTS x64 GNOME; separately tested X11/Wayland, Secret Service and ordinary-window recovery | KDE/other distributions/compositors/ARM64 are separate rows. |
-| Engine | CPU baseline on declared architectures; one curated small text GGUF and one loaded local model | Metal/CUDA/Vulkan acceleration only for exact independently qualified configurations. |
-| Model fit | Actual weights, context/KV cache, RAM/VRAM and system headroom measured | File size alone does not guarantee fit or acceptable speed. |
-| Cloud | One first qualified provider and protocol; clearly named personal or managed connection mode | More providers, subscription entitlement and hosted billing are separate. |
-| UI | Shared gloss/curves/type/motion with opaque, reduced-motion and high-contrast fallback | Native backdrop blur/shortcut/focus/placement vary by OS/desktop capability. |
+| Mac | Apple Silicon arm64, exact OS/Keychain/notarized package | Intel after engine/package/clean-machine proof. |
+| Windows | Windows 11 x64, exact build/custody/focus/trust path | Other Windows/ARM64 after maintenance/runtime decisions. |
+| Linux | Ubuntu 24.04 LTS x64 GNOME, X11 and Wayland separately, Secret Service/window recovery | KDE/distributions/compositors/ARM64 are separate rows. |
+| Engine | CPU baseline, one curated small text GGUF, one loaded model | Metal/CUDA/Vulkan only for exact qualified configurations. |
+| Model/context | Weights, KV cache, available RAM/VRAM/headroom and bounded supported text file subset | File size alone cannot establish fit, speed or document coverage. |
+| Cloud | One qualified direct provider/protocol with OS custody and visible costs/caps | More providers or managed profiles are separate. |
+| UI | Full local project workflow plus minimal bar; gloss/type/motion and legible opaque fallback | Native materials/shortcuts/placement vary by OS/desktop. |
 
-Model setup distinguishes offered, downloading, verified/downloaded, loaded,
-ready, too large and unavailable. Installation is atomic and recoverable;
-removal is limited to app-owned files. Network work follows bounded concurrency,
-timeouts and finite retry/backoff rules. The shell, download and inference
-process trees are finite owned resources.
+Downloads are atomic, recoverable and finite, with explicit timeouts, at most
+three retries with backoff and bounded concurrency (default <=8). Only app-owned
+files/processes are removed. No unauthorized stress/load tests or orphaned servers.
 
-## Scope and estimates
+First useful candidate supports project creation/return, saved text chats,
+history/search, instructions and bounded selected text context, local setup,
+optional one paid connection, stream/cancel, conservative Auto, override and
+visible recovery. All-three-platform publication needs all three qualified rows.
 
-First useful candidate: text rewrite, private summary and code explanation;
-local setup; optional one paid connection; streaming/cancel; conservative Auto;
-manual override; visible recovery. A development vertical slice can start on
-one OS while other target packages are prepared. An all-three-platform claim
-requires all three qualified rows.
+Defer image/audio/video inference, arbitrary marketplace loaders, agents/MCP/
+computer control, autonomous jobs, remote sync/team collaboration, fleet
+management, a full Rust rewrite and broad hardware support. #341 agent relay
+is required only if that path is exposed; optional #342 optimizer work is not
+a first-chat prerequisite.
 
-Defer image/audio/video inference, arbitrary marketplace loaders, agent/MCP or
-computer control, autonomous background tasks, fleet management, general Rust
-rewrites and broad hardware support. Optional Rust optimization #342 is not a
-first-chat prerequisite. Existing agent-relay qualification #341 is required
-only for the precise agent path the desktop chooses to expose.
+## Infrastructure and other programs
 
-Portfolio #226, enterprise #9/#11/#13 and Hosted Pro #437 remain independent
-programs. Their real unresolved gates stay open. Desktop paid-model use is not
-a Hormuz subscription, hosted-service activation or enterprise certification.
+The desktop needs a local host, local storage, OS custody, verified engine/model
+packages and optional provider/catalog/download/update endpoints. **Render,
+PostgreSQL, Okta, Stripe, hosted provisioning and public gateway are not required
+for local projects or direct BYOK.** Keep static docs/site/release distribution
+and appropriate CI/signing.
 
-Do not assign a calendar from the mockups. D0 and baseline protocol/packaging
-studies should establish team capacity and risks before dates. Numerical startup,
-idle memory/CPU and interaction budgets follow exact Electron release-build
-measurements; old small native-preview ceilings are not carried over blindly.
+The [live read-only inventory and assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md)
+records existing active and suspended resources. [#494](https://github.com/Xpounder-com/hormuz/issues/494)
+owns consumer/data/payment/cost evaluation and a concrete retirement proposal;
+it does not authorize shutdown. Optional managed work #437–#443 is deferred and
+historical commercial terms require reconciliation before revival.
 
-## Closure and source references
+Portfolio #226 and enterprise #9/#11/#13 remain independent programs with real
+unresolved gates. Numerical performance budgets and dates follow actual local
+release-build measurements and team capacity, not mockups or old native ceilings.
 
-Each slice needs exact commit/artifact evidence, meaningful relevant checks,
-normal protected review and explicit unsupported cases. Simulations, library
-tests, compile success and narrow local requests are distinct from installed
-acceptance, independent user results and release publication.
+## Closure and references
 
-Current-main seams: `hormuz/server.py`, `hormuz/work_gateway.py`,
-`hormuz/work_runtime.py`, `clients/contracts/`, `clients/rust/{core,platform,
-transport,session,interaction,relay,windows,context-optimizer}`,
-`clients/macos/`, `docs/AI_WORK_RUNTIME.md` and ADRs 0013/0014. Donor PR
-[#458](https://github.com/Xpounder-com/hormuz/pull/458) is still a draft proposal;
-its source/review/CI is not current-main acceptance. Dependency maintenance
-[#460](https://github.com/Xpounder-com/hormuz/pull/460) remains a separate PR.
+Each slice needs exact source/artifact evidence, appropriate checks and ordinary
+protected review. Simulation approval, compile/test success, installed support,
+independent user value and release publication remain separate claims.
 
 Framework references: [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model),
 [window materials](https://www.electronjs.org/docs/latest/api/browser-window),
-[Linux/global shortcuts](https://www.electronjs.org/docs/latest/api/global-shortcut),
+[global shortcuts](https://www.electronjs.org/docs/latest/api/global-shortcut),
 [llama.cpp UI](https://github.com/ggml-org/llama.cpp/blob/master/tools/ui/README.md)
 and [engine backends](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md).

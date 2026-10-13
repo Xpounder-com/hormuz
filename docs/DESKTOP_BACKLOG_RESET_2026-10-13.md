@@ -1,7 +1,8 @@
 # Hormuz backlog reconciliation — 2026-10-13
 
 Scope: all 32 open issues and two open PRs in `Xpounder-com/hormuz` at this
-audit boundary, plus seven focused planning issues created under
+audit boundary, plus seven initial planning issues and eight follow-up UI,
+local-data and infrastructure issues created under
 [desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
 Adjacent repositories, user-owned dirty checkouts, shipped products and
 implementation branches are not deleted or reset by this sweep.
@@ -30,24 +31,24 @@ not acceptance of the similarly numbered published releases.
 | #329 | Desktop history | Superseded by #479, closed not planned; accepted shared contracts retained. |
 | #331 | Desktop history | Separate native Windows shell superseded by #482/#340, closed not planned. |
 | #337 | Desktop | Re-scoped event-driven refresh/power integration; source checkpoint retained. |
-| #338 | Desktop | Re-scoped launcher/Auto/pin/setup interaction fixtures; old source evidence retained. |
+| #338 | Desktop | Early project/bar/context/Auto UI fixtures feed #492; final runtime integration follows later. Old source evidence retained. |
 | #339 | Desktop | Re-scoped app/backend/model ownership and recovery; source foundations retained. |
-| #340 | Desktop | Re-scoped exact installed journeys for every declared Windows/Linux/Mac row; Windows evidence cannot qualify the other platforms. |
+| #340 | Desktop | Exact installed project/history/context/setup/Auto journeys for every declared Windows/Linux/Mac row; Windows evidence cannot qualify the other platforms. |
 | #341 | Runtime | Existing external-agent relay qualification retained; conditional dependency for an exposed agent path, not llama.cpp model hosting. |
 | #342 | Runtime | Optional measured Rust optimizer migration deferred; preserve the shipping helper. |
 | #343 | Desktop history | Separate GTK UI superseded by #482/#340, closed not planned. |
 | #344 | Desktop history | Swift C UI bridge outcome superseded by #480/#482, closed not planned; narrow API/custody/ownership requirements transferred. |
 | #345 | Desktop history | Swift UI migration outcome superseded by #482/#340/#346, closed not planned; shipped Mac coexistence preserved. |
-| #346 | Desktop | Re-scoped packages, trusted updates, settings coexistence/migration and rollback. |
+| #346 | Desktop | Packages, trusted updates, project-data/settings migration and rollback. |
 | #347 | Desktop | Re-scoped bounded Electron process-tree and separate UI/inference footprint; obsolete exact-one-process rule removed. |
 | #369 | Validation | Open; merged implementation/protected checks reconciled, independent technical-lead review still outstanding. |
-| #437 | Hosted | Open separate Hosted Pro epic; paid desktop provider access does not activate it. |
-| #438 | Hosted | Open customer workspace/admin activation gate. |
-| #439 | Hosted | Open customer credential isolation/routing gate. |
-| #440 | Hosted | Open application access and production API compatibility gate. |
-| #441 | Hosted | Open verified subscription/entitlement gate. |
-| #442 | Hosted | Open metering/allowance/approved-overage gate; typing preview is not a billable request. |
-| #443 | Hosted | Open capacity/recovery/support qualification; no service activated. |
+| #437 | Hosted | Open, deferred optional managed product; no desktop activation dependency. Historical commercial proposal requires reconciliation. |
+| #438 | Hosted | Open, deferred hosted workspace/admin activation; local projects need no server tenant. |
+| #439 | Hosted | Open, deferred multi-tenant custody/routing; local OS custody remains required separately. |
+| #440 | Hosted | Open, deferred hosted production API gate; direct desktop provider conformance stays active. |
+| #441 | Hosted | Open, deferred subscription/entitlement implementation; existing payment obligations preserved. |
+| #442 | Hosted | Open, deferred meter/overage proposal; old $99 terms are historical, typing preview is not billable. |
+| #443 | Hosted | Open, deferred serving-capacity/recovery work; #494 separately evaluates actual resources and retirement. |
 
 Original acceptance and evidence are retained in issue bodies. Superseded
 outcomes are **not planned**, never relabeled completed. Re-scoped desktop
@@ -57,10 +58,26 @@ their accepted source/reference scopes; this sweep does not reopen them.
 
 ## New work and milestone policy
 
-The new focused slices are #480 contract, #481 glossy visual simulation, #482
-Electron shell/bridge, #483 local setup, #484 pure Auto/pin and #485 governed
-execution. Reuse #337/#338/#339/#340/#346/#347 as explicit integration and
-release gates rather than duplicating their outcomes.
+The user then confirmed a full project workspace with chats, files, instructions
+and model/Auto preferences. #481 now owns the whole glossy visual system. Six
+UI issues add #487 navigation/bar handoff, #488 projects/chats/history/search,
+#489 files/instructions/context, #490 onboarding/model library/connections,
+#491 inherited preferences/Auto, and #492 integrated simulated UI approval.
+
+After #492, #480 freezes the local host/data/support contract, then #482
+integrates the approved UI. #493 local project persistence/context, #483 local
+engine setup and #485 governed paid baselines advance in parallel. #484 then
+integrates real pure Auto and explicit model intent. #494 evaluates existing
+infrastructure independently; no shutdown follows from this planning work.
+Reuse #337/#338/#339/#340/#346/#347 as integration/release gates, with separate
+early and final #338 checkpoints. Adapter evidence contributes to later #340;
+#340 closure is not an adapter prerequisite.
+
+The old ephemeral-only first scope is superseded by disclosed saved local
+projects and unsaved Temporary chat, with a separate content ownership,
+context/export/delete/isolation contract. Original source/acceptance history
+remains intact. See the [UI coverage plan](DESKTOP_UI_PLAN.md) and
+[live read-only infrastructure assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md).
 
 Delivery is in named stages in [the desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md).
 New desktop, optional Rust and Hosted Pro milestones have version TBD. The
