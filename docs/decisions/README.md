@@ -24,10 +24,17 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0007](0007-tenant-custody-authority.md) | Accepted | Tenant custody authority and governed lifecycle approvals | [#89](https://github.com/Xpounder-com/hormuz/issues/89) |
 | [0008](0008-signed-oci-deployment-contract.md) | Accepted | Signed OCI digest contract, first GHCR publication, keyless Sigstore identity, and deployment-profile separation | [#101](https://github.com/Xpounder-com/hormuz/issues/101) |
 | [0009](0009-v1-deployment-profiles-and-recovery-objectives.md) | Accepted | v1 Compose and Kubernetes profile boundaries, state ownership, and reference-rehearsal RPO/RTO objectives | [#100](https://github.com/Xpounder-com/hormuz/issues/100) |
-| [0010](0010-v1.1-portfolio-intelligence-contract.md) | Accepted | Original v1.1 additive portfolio contract; remaining delivery now targets v1.3.0 | [#212](https://github.com/Xpounder-com/hormuz/issues/212) |
+| [0010](0010-v1.1-portfolio-intelligence-contract.md) | Accepted | Original v1.1 additive portfolio contract; accepted evidence retained, complete-program release identity TBD | [#212](https://github.com/Xpounder-com/hormuz/issues/212), [#226](https://github.com/Xpounder-com/hormuz/issues/226) |
 | [0011](0011-additive-budget-reports-and-linear-context.md) | Accepted; budget runtime complete, Linear gated | Separate versioned budget preview/report and metadata-only Linear parent/context records; frozen v1 preserved | [#217](https://github.com/Xpounder-com/hormuz/issues/217), [#220](https://github.com/Xpounder-com/hormuz/issues/220) |
 | [0012](0012-analytics-first-budget-management-output.md) | Accepted; budget runtime complete | First budget runtime uses an analytics-first version-2 current report and compact activation change fact | [#214](https://github.com/Xpounder-com/hormuz/issues/214), [#217](https://github.com/Xpounder-com/hormuz/issues/217) |
 | [0014](0014-customer-local-ai-work-and-exact-reuse.md) | Implementation authorized in product-owner conversation; production qualification separate | Customer-local routing, scoped work budgets, passive observations and opt-in exact answer reuse | Approval origin recorded in ADR; GitHub release approval remains separate |
+
+The Electron desktop direction is recorded in
+[epic #479](https://github.com/Xpounder-com/hormuz/issues/479) and the
+[desktop roadmap](../ELECTRON_DESKTOP_ROADMAP.md). Its complete support,
+backend ownership, migration and execution contract is still to be frozen in
+[#480](https://github.com/Xpounder-com/hormuz/issues/480); this planning record
+does not invent an accepted implementation ADR or authorize runtime changes.
 
 ## Acceptance record
 

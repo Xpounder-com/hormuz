@@ -486,6 +486,7 @@ Public TLS remains a customer-controlled ingress responsibility. Read
 | Executable verification evidence | [docs/VERIFICATION.md](docs/VERIFICATION.md) |
 | Compatibility and support | [SUPPORT.md](SUPPORT.md) |
 | Roadmap and maturity gates | [docs/ROADMAP.md](docs/ROADMAP.md) |
+| Planned Electron desktop, local model setup and Auto | [docs/ELECTRON_DESKTOP_ROADMAP.md](docs/ELECTRON_DESKTOP_ROADMAP.md) and [backlog reconciliation](docs/DESKTOP_BACKLOG_RESET_2026-10-13.md); planning only, no new desktop support claim |
 
 Inspect the versioned public contracts before integrating an external report or
 audit consumer:

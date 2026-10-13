@@ -1,0 +1,89 @@
+# Hormuz backlog reconciliation — 2026-10-13
+
+Scope: all 32 open issues and two open PRs in `Xpounder-com/hormuz` at this
+audit boundary, plus seven focused planning issues created under
+[desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
+Adjacent repositories, user-owned dirty checkouts, shipped products and
+implementation branches are not deleted or reset by this sweep.
+
+Source baseline is `46449d2a3f05de09d7d0a18c9688e189a6c3a68e`.
+Published v1.8.0 is the notarized Apple Silicon Mac release; Windows is an
+unsupported preview. Current main contains the AI Work 1.9.0 source candidate.
+Old native v1.4–v1.9 and portfolio v1.3 milestone names were planning sequences,
+not acceptance of the similarly numbered published releases.
+
+## Disposition of the complete original open set
+
+| Issue | Track | Reconciled disposition |
+| --- | --- | --- |
+| #9 | Enterprise | Open conditional production-readiness/independent review gate; scope does not include every future desktop/hosted issue. |
+| #10 | Enterprise | Open conditional organizational DLP gate; existing egress controls still apply to exposed managed paths. |
+| #11 | Enterprise | Open parent; completed bounded reference children #100/#101/#102/#103/#104/#105/#108 reconciled; #106 not planned and #107 still open. |
+| #13 | Enterprise | Open conditional generic browser/session qualification; no organization enrollment requirement for local setup. |
+| #107 | Enterprise | Open deferred OCI/deployment/database upgrade gate; separate from desktop updates. |
+| #214 | Portfolio | Open final-candidate/transition gate; future program release TBD; exact historical plans retained. |
+| #219 | Portfolio | Open trusted GitHub ingress; not a desktop Auto dependency. |
+| #220 | Portfolio | Open trusted Linear ingress; accepted context design is not live connector proof. |
+| #225 | Portfolio | Open independent organization pilot; no completion inferred. |
+| #226 | Portfolio | Open continuing epic; obsolete active v1.3 release commitment removed. |
+| #307 | Validation | Open exact v1.2 independent onboarding study; artifact and dated 0/1 counts preserved. |
+| #329 | Desktop history | Superseded by #479, closed not planned; accepted shared contracts retained. |
+| #331 | Desktop history | Separate native Windows shell superseded by #482/#340, closed not planned. |
+| #337 | Desktop | Re-scoped event-driven refresh/power integration; source checkpoint retained. |
+| #338 | Desktop | Re-scoped launcher/Auto/pin/setup interaction fixtures; old source evidence retained. |
+| #339 | Desktop | Re-scoped app/backend/model ownership and recovery; source foundations retained. |
+| #340 | Desktop | Re-scoped exact installed journeys for every declared Windows/Linux/Mac row; Windows evidence cannot qualify the other platforms. |
+| #341 | Runtime | Existing external-agent relay qualification retained; conditional dependency for an exposed agent path, not llama.cpp model hosting. |
+| #342 | Runtime | Optional measured Rust optimizer migration deferred; preserve the shipping helper. |
+| #343 | Desktop history | Separate GTK UI superseded by #482/#340, closed not planned. |
+| #344 | Desktop history | Swift C UI bridge outcome superseded by #480/#482, closed not planned; narrow API/custody/ownership requirements transferred. |
+| #345 | Desktop history | Swift UI migration outcome superseded by #482/#340/#346, closed not planned; shipped Mac coexistence preserved. |
+| #346 | Desktop | Re-scoped packages, trusted updates, settings coexistence/migration and rollback. |
+| #347 | Desktop | Re-scoped bounded Electron process-tree and separate UI/inference footprint; obsolete exact-one-process rule removed. |
+| #369 | Validation | Open; merged implementation/protected checks reconciled, independent technical-lead review still outstanding. |
+| #437 | Hosted | Open separate Hosted Pro epic; paid desktop provider access does not activate it. |
+| #438 | Hosted | Open customer workspace/admin activation gate. |
+| #439 | Hosted | Open customer credential isolation/routing gate. |
+| #440 | Hosted | Open application access and production API compatibility gate. |
+| #441 | Hosted | Open verified subscription/entitlement gate. |
+| #442 | Hosted | Open metering/allowance/approved-overage gate; typing preview is not a billable request. |
+| #443 | Hosted | Open capacity/recovery/support qualification; no service activated. |
+
+Original acceptance and evidence are retained in issue bodies. Superseded
+outcomes are **not planned**, never relabeled completed. Re-scoped desktop
+issues have new active dependency/acceptance sections with old native sections
+explicitly archived. Existing completed #330/#332–#336 remain completed within
+their accepted source/reference scopes; this sweep does not reopen them.
+
+## New work and milestone policy
+
+The new focused slices are #480 contract, #481 glossy visual simulation, #482
+Electron shell/bridge, #483 local setup, #484 pure Auto/pin and #485 governed
+execution. Reuse #337/#338/#339/#340/#346/#347 as explicit integration and
+release gates rather than duplicating their outcomes.
+
+Delivery is in named stages in [the desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md).
+New desktop, optional Rust and Hosted Pro milestones have version TBD. The
+portfolio milestone also has future version TBD. Legacy native milestones are
+marked historical and retired after their active work is moved or superseded;
+milestone retirement is not platform/release acceptance.
+
+## PR and evidence handling
+
+- #458 remains an open draft native integration proposal. Stage #480 must
+  inventory its useful fixes/contracts, latest exact head/review/CI and obsolete
+  rendering scope before deciding how to split, retain or retire it. Its
+  proposed GTK/Swift UI is not an Electron prerequisite or merged-main proof.
+- #460 remains an open dependency-maintenance PR. This planning sweep does not
+  review, merge or dismiss its code changes.
+- #369's post-merge checkpoint records protected head/main checks at
+  `8d338eb57a45eceaa89f76f950f5c3fde15684a1`; independent technical-lead
+  acceptance is still open. See [the recorded checkpoint](https://github.com/Xpounder-com/hormuz/issues/369#issuecomment-5754824669).
+- Closed #106 is a deferred/not-planned tenant-authority scope, not implemented
+  destructive authority. The completed enterprise references do not certify
+  arbitrary customer environments.
+
+The primary local checkout was dirty and preserved. Read-only audits used
+current-main Git objects; roadmap documentation is prepared in an isolated
+branch. No application code, models, providers, credentials, paid services,
+release artifacts or deployments are changed by this work order.
