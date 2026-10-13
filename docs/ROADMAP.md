@@ -27,6 +27,7 @@ choices, storage/context/output/time limits and platform qualification rows.
 | Enterprise qualification | Conditional #9/#10/#11/#13/#107 gates remain open; bounded reference proof is not general production certification. |
 | Hosted Pro | #437–#443 deferred; no Render/Okta/Stripe/Postgres requirement for local projects or direct BYOK. Its unresolved tenant/payment/production obligations remain separate from cleanup. |
 | Account cleanup | #494–#501, `track:cleanup`, milestone 16; independent inventory, bounded authorized operations and retained data/custody/payment holds. [Account ledger](DESKTOP_ACCOUNT_CLEANUP.md) and [infrastructure assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md). Not a desktop UI prerequisite or Hosted Pro activation. |
+| Local cleanup | [#504](https://github.com/Xpounder-com/hormuz/issues/504), same independent cleanup track; [local checkpoint](DESKTOP_LOCAL_CLEANUP.md) records approved generated-folder removal and remaining worktree/test-output holds. Retained source and required checks stay intact. |
 | Independent validation/tooling | #307 retains its exact v1.2 study; #369 retains unresolved independent review. New installed desktop evidence belongs to #340. |
 
 Current main contains the AI Work 1.9.0 source candidate; published v1.8.0
