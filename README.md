@@ -154,6 +154,15 @@ and unsigned unsupported Windows preview retain their
 Hosted pilot services are suspended; retained data and remaining account
 retirement are tracked in the [account ledger](docs/DESKTOP_ACCOUNT_CLEANUP.md).
 
+> Existing release qualification: Hormuz 1.0 established stable CLI and
+> policy/evidence contracts. Hormuz
+> 1.8 preserves those contracts and the terminal-first Personal Optimizer.
+> The original qualification included five isolated internal repetitions of one
+> exact offline policy workflow and exact-byte candidate custody. This bounded
+> result does not prove external human usability, general production fitness or
+> independent security review. See the
+> [release boundaries](docs/releases/v1.8.0-notarized-mac.md).
+
 Recorded same-revision Codex/OpenAI and Claude Code/Anthropic evidence is in
 [issue #115](https://github.com/Xpounder-com/hormuz/issues/115).
 It does not prove provider-invoice reconciliation, every client feature,

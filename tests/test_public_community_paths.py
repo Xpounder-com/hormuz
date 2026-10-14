@@ -19,6 +19,7 @@ class PublicCommunityPathTests(unittest.TestCase):
     def _copy_contract(self, target: Path) -> None:
         for name in (
             "README.md",
+            "LICENSE",
             "CONTRIBUTING.md",
             "CODE_OF_CONDUCT.md",
             "SECURITY.md",
