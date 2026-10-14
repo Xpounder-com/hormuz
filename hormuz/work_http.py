@@ -114,7 +114,7 @@ def _dispatch(handler):
         elif path in {"/v1/work/state", "/v1/work/connect", "/v1/work/jobs", "/v1/work/activation", "/v1/work/support/receipt"}:
             state = _state(handler, principal)
             if path.endswith("/connect"):
-                state = {"schema_id": "hormuz.ai-work-connect", "schema_version": 1, "connection": state["connection"], "billing": state["billing"]}
+                state = {"schema_id": "hormuz.ai-work-connect", "schema_version": state["schema_version"], "connection": state["connection"], "billing": state["billing"]}
             if path == "/v1/work/activation":
                 state = state["onboarding"]
             elif path == "/v1/work/support/receipt":
@@ -361,10 +361,15 @@ def _state(handler, principal):
     state["principal"] = {"organization_id": principal.identity.organization_id, "actor_id": principal.identity.actor_id, "can_manage_plans": principal.can_manage_plans, "can_mutate_work": principal.can_mutate_work, "csrf_token": principal.csrf}
     policy = handler.server.config.resolved_policy(principal.identity)
     routes = []
+    extended = handler.server.destinations.metadata_enabled
+    if extended:
+        state["schema_version"] = 2
     for alias in policy.allowed_models or ():
         route = handler.server.config.model_routes.get(alias)
         if route:
-            routes.append({"model": alias, "protocol": route.protocol, "credential_configured": bool(handler.server.upstream_credentials.get(route.protocol)), "eligible": bool(handler.server.upstream_credentials.get(route.protocol))})
+            destination = handler.server.destinations.describe(route)
+            routes.append({"model": alias, **(destination if extended else {
+                key: destination[key] for key in ("protocol", "credential_configured", "eligible")})})
     state["connection"] = {"endpoint": getattr(handler, "_workspace_origin", handler.server.config.session_broker.public_base_url), "routes": routes, "supported_protocols": ["openai-responses", "openai-chat-completions", "anthropic-messages"], "credential_location": "gateway_server", "application_access_enabled": bool(principal.identity.allowed_clients), "coverage": "only_authenticated_requests_attached_to_a_work_id", "billing_basis": "configured_provider_rates_estimate"}
     state["connection"]["supported_inputs"] = ["text"]
     state["connection"]["unsupported_budgeted_inputs"] = ["image", "audio", "document", "provider_resolved_input"]
@@ -377,7 +382,7 @@ def _state(handler, principal):
     activation = billing.activation.status(principal.identity.organization_id) if billing else {"state": "not_configured", "version": 0}
     if state["billing"].get("entitled"):
         activation["state"] = "active"
-    choices = [{**route, "client": "codex" if route["protocol"] == "openai" else "claude-code"} for route in routes if route["credential_configured"] and (policy.allowed_clients is None or ("codex" if route["protocol"] == "openai" else "claude-code") in policy.allowed_clients)]
+    choices = [{**route, "client": "codex" if route["protocol"] == "openai" else "claude-code"} for route in routes if route["eligible"] and (policy.allowed_clients is None or ("codex" if route["protocol"] == "openai" else "claude-code") in policy.allowed_clients)]
     operator = principal.can_manage_plans and principal.identity.actor_id in handler.server.config.ai_work.administrator_actor_ids
     activation.update({"identity_verified": True, "application_access_enabled": bool(principal.identity.allowed_clients),
         "choices": choices, "can_request_qualification": bool(billing and choices and principal.can_manage_plans and state["billing"].get("status") != "configuration_changed" and activation["state"] in {"qualification_required", "requested", "rejected", "recovery_required"}),
@@ -443,7 +448,7 @@ def _agent_choices(handler, principal):
                 or principal.identity.authentication_source == "browser_session" and not principal.identity.allowed_clients
                 or policy.allowed_clients is not None and client not in policy.allowed_clients
                 or policy.allowed_models is not None and alias not in policy.allowed_models
-                or not handler.server.upstream_credentials.get(route.protocol)):
+                or not handler.server.destinations.describe(route)["eligible"]):
             continue
         result.append({"client": client, "protocol": route.protocol, "model": alias})
         if len(result) == 100:

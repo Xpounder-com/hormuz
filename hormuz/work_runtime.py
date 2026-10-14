@@ -168,7 +168,7 @@ class WorkRuntime:
     def __init__(self, database_path: str | Path, config=None, *,
                  clock: Callable[[], float] | None = None, cache_enabled: bool = False,
                  minimum_samples: int = 5, cache_max_entries: int = 128,
-                 cache_max_bytes: int = 8_388_608):
+                 cache_max_bytes: int = 8_388_608, destinations=None):
         if type(minimum_samples) is not int or not 3 <= minimum_samples <= 1000:
             raise WorkRuntimeError("invalid_minimum_samples")
         if type(cache_enabled) is not bool:
@@ -179,6 +179,7 @@ class WorkRuntime:
             raise WorkRuntimeError("invalid_cache_bound")
         self.path = Path(database_path)
         self.config = config
+        self.destinations = destinations
         self.clock = clock or time.time
         self.cache_enabled = cache_enabled
         self.minimum_samples = minimum_samples
@@ -1318,9 +1319,6 @@ class WorkRuntime:
             ).fetchall()
             objective = plans[-1]["objective"] if plans else "cost"
             result["objective"] = objective
-            if work["repository"] == "unattributed" or work["task_type"] == "unattributed":
-                result.update(reason="unattributed_baseline")
-                return self._remember_selection(work_id, result)
             # Never translate opaque provider state or change model inside a
             # continuing tool interaction. The caller filters other capability
             # constraints before invoking this selector.
@@ -1329,7 +1327,18 @@ class WorkRuntime:
                 pinned = work["pinned_model"]
                 if pinned and pinned not in eligible:
                     raise WorkRuntimeError("session_route_not_eligible", 409)
+                if pinned and self.destinations is not None:
+                    previous = connection.execute(
+                        "SELECT route_fingerprint FROM ai_work_attempts WHERE organization_id=? AND actor_id=? "
+                        "AND work_id=? AND model=? AND response_succeeded=1 AND context_signature=? "
+                        "AND cache_generation=? ORDER BY rowid DESC LIMIT 1",
+                        (*owner, work_id, pinned, work["context_signature"], work["cache_generation"])).fetchone()
+                    if previous is None or previous["route_fingerprint"] != self._route_fingerprint(eligible[pinned]):
+                        raise WorkRuntimeError("session_destination_generation_changed", 409)
                 result.update(alias=pinned or baseline_alias, reason="session_affinity", sample_confidence="not_applicable")
+                return self._remember_selection(work_id, result)
+            if work["repository"] == "unattributed" or work["task_type"] == "unattributed":
+                result.update(reason="unattributed_baseline")
                 return self._remember_selection(work_id, result)
             if request_value.get("tools"):
                 declared = getattr(getattr(self.config, "ai_work", None), "tool_capable_aliases", ())
@@ -1510,12 +1519,10 @@ class WorkRuntime:
             model = getattr(self.config, "model_routes", {}).get(model, model)
         if not isinstance(model, ModelRoute):
             return None
-        fields = [model.alias, model.protocol, model.upstream_model, model.input_cost_per_million,
-                  model.cache_read_cost_per_million, model.cache_write_cost_per_million, model.output_cost_per_million]
-        upstream = getattr(self.config, "upstreams", {}).get(model.protocol) if self.config is not None else None
-        fields.append(getattr(upstream, "base_url", None))
         try:
-            return hashlib.sha256(json.dumps(fields, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+            from .execution_destination import route_fingerprint
+            return route_fingerprint(model, upstreams=getattr(self.config, "upstreams", {}),
+                                     destinations=self.destinations)
         except (TypeError, ValueError):
             raise WorkRuntimeError("invalid_model_evidence") from None
 

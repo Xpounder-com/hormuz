@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import ipaddress
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -27,13 +29,18 @@ def build_upstream_domain(
     key_custody: KeyCustodyConfig | None,
 ) -> dict[str, UpstreamConfig]:
     upstreams_raw = _object(raw.get("upstreams"), "upstreams")
-    if "openai" not in upstreams_raw or set(upstreams_raw) - {"openai", "anthropic"}:
-        raise ConfigError("upstreams must contain openai and may include anthropic")
+    if not upstreams_raw:
+        raise ConfigError("upstreams must contain at least one destination")
+    if raw.get("custody_lifecycle") is not None and set(upstreams_raw) - {"openai", "anthropic"}:
+        raise ConfigError("named destinations are not qualified for custody_lifecycle")
     upstreams: dict[str, UpstreamConfig] = {}
-    for protocol in ("openai", "anthropic"):
-        if protocol not in upstreams_raw:
-            continue
-        item = _object(upstreams_raw.get(protocol), f"upstreams.{protocol}")
+    for name, value in upstreams_raw.items():
+        if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name) is None:
+            raise ConfigError("upstreams keys must be destination identifiers")
+        item = _object(value, f"upstreams.{name}")
+        protocol = _string(item.get("protocol", name), f"upstreams.{name}.protocol")
+        if protocol not in {"openai", "anthropic"} or name in {"openai", "anthropic"} and protocol != name:
+            raise ConfigError(f"upstreams.{name}.protocol must be openai or anthropic")
         unsupported_upstream_fields = set(item).difference(
             {
                 "base_url",
@@ -42,52 +49,78 @@ def build_upstream_domain(
                 "allow_response_storage",
                 "allow_background",
                 "finance_identity",
+                "protocol", "locality", "authentication",
             }
         )
         if unsupported_upstream_fields:
             raise ConfigError(
-                f"upstreams.{protocol} contains unsupported fields: "
+                f"upstreams.{name} contains unsupported fields: "
                 + ", ".join(sorted(str(field) for field in unsupported_upstream_fields))
             )
-        base_url = _string(item.get("base_url"), f"upstreams.{protocol}.base_url").rstrip("/")
-        parsed = urlparse(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ConfigError(f"upstreams.{protocol}.base_url must be an HTTP(S) URL")
+        base_url = _string(item.get("base_url"), f"upstreams.{name}.base_url").rstrip("/")
+        try:
+            parsed = urlparse(base_url)
+            parsed.port  # Validate explicit port syntax and range before startup.
+            if any(ord(char) <= 32 or ord(char) == 127 for char in base_url):
+                raise ValueError("invalid origin")
+        except ValueError:
+            raise ConfigError(f"upstreams.{name}.base_url must be an HTTP(S) origin") from None
+        if (parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or parsed.query or parsed.fragment):
+            raise ConfigError(f"upstreams.{name}.base_url must be an HTTP(S) URL")
+        locality = _string(item.get("locality", "cloud"), f"upstreams.{name}.locality")
+        authentication = _string(item.get("authentication", "api_key"), f"upstreams.{name}.authentication")
+        if locality not in {"local", "cloud"} or authentication not in {"none", "api_key"}:
+            raise ConfigError(f"upstreams.{name} has invalid locality or authentication")
+        if locality == "local":
+            try:
+                loopback = ipaddress.ip_address(parsed.hostname or "").is_loopback
+            except ValueError:
+                loopback = False
+            if not loopback:
+                raise ConfigError(f"upstreams.{name} local destination requires a literal loopback address")
+        if authentication == "none" and locality != "local":
+            raise ConfigError(f"upstreams.{name} unauthenticated destination must be local")
         api_key_env_value = item.get("api_key_env")
         api_key_envelope_value = item.get("api_key_envelope")
-        if (api_key_env_value is None) == (api_key_envelope_value is None):
+        if authentication == "none" and (api_key_env_value is not None or api_key_envelope_value is not None):
+            raise ConfigError(f"upstreams.{name} unauthenticated destination cannot configure a credential")
+        if authentication == "api_key" and (api_key_env_value is None) == (api_key_envelope_value is None):
             raise ConfigError(
-                f"upstreams.{protocol} must configure exactly one of api_key_env or api_key_envelope"
+                f"upstreams.{name} must configure exactly one of api_key_env or api_key_envelope"
             )
         api_key_env: str | None = None
         api_key_envelope_path: Path | None = None
         if api_key_env_value is not None:
-            api_key_env = _environment_name(api_key_env_value, f"upstreams.{protocol}.api_key_env")
-        else:
+            api_key_env = _environment_name(api_key_env_value, f"upstreams.{name}.api_key_env")
+        elif api_key_envelope_value is not None:
             if key_custody is None:
-                raise ConfigError(f"upstreams.{protocol}.api_key_envelope requires key_custody")
+                raise ConfigError(f"upstreams.{name}.api_key_envelope requires key_custody")
             key_custody.key_reference_for(KEY_PURPOSE_PROVIDER_CREDENTIAL)
             api_key_envelope_path = _configured_path(
                 api_key_envelope_value,
-                f"upstreams.{protocol}.api_key_envelope",
+                f"upstreams.{name}.api_key_envelope",
                 source_path.parent,
             )
-        upstreams[protocol] = UpstreamConfig(
+        upstreams[name] = UpstreamConfig(
             base_url=base_url,
             api_key_env=api_key_env,
             api_key_envelope_path=api_key_envelope_path,
             allow_response_storage=_boolean(
                 item.get("allow_response_storage", False),
-                f"upstreams.{protocol}.allow_response_storage",
+                f"upstreams.{name}.allow_response_storage",
             ),
             allow_background=_boolean(
                 item.get("allow_background", False),
-                f"upstreams.{protocol}.allow_background",
+                f"upstreams.{name}.allow_background",
             ),
             finance_identity=(
                 parse_finance_identity(item["finance_identity"])
                 if "finance_identity" in item else UnavailableFinance("not_configured")
             ),
+            protocol=protocol if "protocol" in item or name not in {"openai", "anthropic"} else None,
+            locality=locality, authentication=authentication,
         )
     return upstreams
 
@@ -114,6 +147,8 @@ def build_model_route_domain(
                 "cache_write_cost_per_million",
                 "output_cost_per_million",
                 "failover_alias",
+                "destination",
+                "model_revision", "capabilities",
             }
         )
         if unsupported_route_fields:
@@ -122,8 +157,20 @@ def build_model_route_domain(
                 + ", ".join(sorted(str(field) for field in unsupported_route_fields))
             )
         protocol = _string(item.get("protocol"), f"model_routes.{alias}.protocol")
-        if protocol not in upstreams:
+        if protocol not in {"openai", "anthropic"}:
             raise ConfigError(f"model_routes.{alias}.protocol must be openai or anthropic")
+        destination = _optional_string(item.get("destination"), f"model_routes.{alias}.destination")
+        upstream = upstreams.get(destination or protocol)
+        if upstream is None or (upstream.protocol or destination or protocol) != protocol:
+            raise ConfigError(f"model_routes.{alias}.destination must reference a matching protocol")
+        revision = _optional_string(item.get("model_revision"), f"model_routes.{alias}.model_revision")
+        if revision is not None and (len(revision) > 128 or any(ord(char) < 32 or ord(char) == 127 for char in revision)):
+            raise ConfigError(f"model_routes.{alias}.model_revision must be bounded printable text")
+        capabilities = item.get("capabilities", [])
+        if (not isinstance(capabilities, list) or len(capabilities) > 16
+                or any(not isinstance(value, str) or re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", value) is None
+                       for value in capabilities) or len(set(capabilities)) != len(capabilities)):
+            raise ConfigError(f"model_routes.{alias}.capabilities must be distinct bounded identifiers")
         model_routes[alias] = ModelRoute(
             alias=alias,
             protocol=protocol,
@@ -148,5 +195,7 @@ def build_model_route_domain(
                 item.get("failover_alias"),
                 f"model_routes.{alias}.failover_alias",
             ),
+            destination=destination,
+            model_revision=revision, capabilities=tuple(capabilities),
         )
     return model_routes

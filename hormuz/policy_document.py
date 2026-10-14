@@ -330,17 +330,17 @@ class PolicyDocument:
 def local_policy_snapshot(config: GatewayConfig, identity: Identity) -> PolicySnapshot:
     """Adapt the single-process configuration policy to the shared snapshot API."""
 
+    from .execution_destination import configured_response_permissions
+    policy = config.resolved_policy(identity)
     return PolicySnapshot(
         policy_version=config.policy_version,
         content_sha256=config.policy_content_sha256,
         organization_policy=config.organization_policy,
         team_policy=config.team_policies.get(identity.team_id),
         actor_policy=config.actor_policies.get(identity.actor_id),
-        effective_policy=config.resolved_policy(identity),
-        openai_egress=OpenAIEgressPolicy(
-            allow_response_storage=config.upstreams["openai"].allow_response_storage,
-            allow_background=config.upstreams["openai"].allow_background,
-        ),
+        effective_policy=policy,
+        openai_egress=OpenAIEgressPolicy(**configured_response_permissions(
+            config.upstreams, config.model_routes, policy.allowed_models)),
         secret_mode=config.secret_controls.mode,
     )
 
