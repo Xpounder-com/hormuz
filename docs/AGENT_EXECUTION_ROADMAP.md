@@ -1,9 +1,10 @@
 # Hormuz project Agent execution roadmap
 
 Planning extension: 2026-10-13. Desktop parent: [#479](https://github.com/Xpounder-com/hormuz/issues/479).
-Agent epic: [#505 — [Epic] Add project agent execution: Codex first, then Claude](https://github.com/Xpounder-com/hormuz/issues/505). The user requested this roadmap and implementation backlog;
-this change schedules work and does not start application implementation,
-runtime installation, real workspace access, paid inference or a release.
+Agent epic: [#505 — [Epic] Add project agent execution: Codex first, then Claude](https://github.com/Xpounder-com/hormuz/issues/505).
+Backend source preview: 2026-10-13, following the user's instruction to implement
+the backend issues. The roadmap and desktop release gates remain separate from
+the developer host described below.
 
 ## Outcome and delivery order
 
@@ -52,8 +53,11 @@ build the candidate that must supply that evidence.
 | Claude diff and resume | [#516 — Claude: integrate diff review and explicit session resume](https://github.com/Xpounder-com/hormuz/issues/516) | Claude runtime/planning and accepted Codex review/resume outcomes. Actual changes/tests, isolated SDK session history, checkpoint limits and safe explicit continuation. |
 | Claude qualification | [#517 — Claude: qualify the installed plan-to-resume Agent journey](https://github.com/Xpounder-com/hormuz/issues/517) | All Claude slices and Codex qualification. Complete second-engine journey, permission/admission coverage and declared installed platform rows. |
 
-Claude design and synthetic fixtures may be prepared earlier; real SDK
-integration starts after Codex qualification. #485 direct-provider and #341
+The implementation work order authorizes a supervised backend candidate for
+both engines, beginning with Codex. Claude's SDK integration is available to
+developers for local qualification after the Codex provider-free journey;
+enabling it in the desktop still requires #513 and its own #517 release gates.
+#485 direct-provider and #341
 legacy-relay dependencies apply only where their implementations are reused.
 Neither llama.cpp nor a hosted gateway is a universal prerequisite for Agent
 sessions. Both engine qualification issues contribute applicable lifecycle,
@@ -61,6 +65,37 @@ package/update/footprint and installed evidence to #339/#340/#346/#347 when
 their engine is exposed. Start with an exact Apple Silicon macOS candidate;
 Windows/Linux stay unavailable or explicitly preview until separately proven.
 Release versions, dates and implementation owners remain unassigned.
+
+## Backend source preview
+
+[`clients/agent-runtime`](../clients/agent-runtime/README.md) implements the
+host-owned contracts for #506 and the backend slices of #508–#512 and #514–#516.
+It supplies a trusted Node/Electron library, a bounded JSONL developer host,
+private named-project sessions, revision-bound read-only planning and acceptance,
+concrete expiring action decisions, supervised execution, observed diff review,
+interrupt and explicit session resume. Codex app-server is pinned to 0.160.0 and
+Claude Agent SDK to 0.3.299. Runtime selection is fixed for each session.
+
+Provider credentials stay in the host. An authenticated loopback proxy reserves
+configured-rate input/output estimates before each generation request. A private
+content-free journal enforces lifetime session/project/profile ceilings, retains
+unknown dispatched holds and survives session deletion. It is not a monthly or
+account-wide provider invoice cap. Source review text is bounded and sensitive
+files are omitted; persisted baselines retain hashes and coverage. Runtime
+conversation history stays in the session's private content subtree.
+
+The production process launcher currently supports macOS only. Portable mock
+tests do not qualify another platform. The installed-engine fixtures use local
+synthetic provider responses, actual pinned runtimes and disposable workspaces;
+they are separate from paid-provider evidence. Opaque reasoning history and
+proxy compaction remain blocked until their admission bounds are established.
+
+This source preview does not complete #507 human UI acceptance, the desktop
+host/content/custody acceptance checkpoints, capped live-provider evidence,
+packaged toolchain-free installation, signing/update evidence, or Windows/Linux
+qualification. These are tracked explicitly in #513/#517 and #339/#340/#346/#347.
+The backend can be integrated into the accepted UI without claiming that those
+release gates have passed.
 
 ## Session ownership and authority
 

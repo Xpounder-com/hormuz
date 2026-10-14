@@ -31,6 +31,19 @@ jobs:
           python-version: "3.12"
       - name: Verify existing gateway expectations
         run: python -m unittest -v tests.test_native_client_contracts
+      - name: Set up Node.js for macOS agent confinement checks
+        if: runner.os == 'macOS'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Verify macOS agent backend and installed Claude SDK against synthetic providers
+        if: runner.os == 'macOS'
+        env:
+          HORMUZ_TEST_INSTALLED_CLAUDE: "1"
+        run: |
+          npm ci --prefix clients/agent-runtime --ignore-scripts --maxsockets=4 --fetch-retries=2 --fetch-timeout=30000 --no-audit --no-fund
+          npm --prefix clients/agent-runtime run check
+          npm --prefix clients/agent-runtime test
       - name: Install pinned Rust toolchain
         working-directory: clients/rust
         run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt,clippy

@@ -333,6 +333,23 @@ class RepositoryGovernanceTests(unittest.TestCase):
             with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow is required"):
                 validate_repository_governance(root)
 
+    def test_macos_agent_checks_cannot_skip_installed_sdk_or_mask_failures(self) -> None:
+        mutations = (
+            ('HORMUZ_TEST_INSTALLED_CLAUDE: "1"', 'HORMUZ_TEST_INSTALLED_CLAUDE: "0"'),
+            ('npm --prefix clients/agent-runtime test\n', 'npm --prefix clients/agent-runtime test || true\n'),
+            ('node-version: "24"', 'node-version: "25"'),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/native-client-contracts.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertIn(original, value)
+                workflow.write_text(value.replace(original, replacement, 1), encoding="utf-8")
+                with self.assertRaisesRegex(RepositoryGovernanceError, "native contract workflow"):
+                    validate_repository_governance(root)
+
     def test_windows_preview_steps_keep_their_named_platform_gates(self) -> None:
         names = (
             "Build native Windows development candidate",

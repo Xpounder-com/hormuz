@@ -1,0 +1,12 @@
+export { AgentSessions, ApplicationScheduler } from './sessions.ts';
+export type { Session, Connection, AcceptedPlan, AgentSessionOptions } from './sessions.ts';
+export { CodexAdapter, CODEX_VERSION } from './codex.ts';
+export { ClaudeAdapter, CLAUDE_SDK_VERSION } from './claude.ts';
+export { SessionStore } from './store.ts';
+export { InferenceProxy } from './admission.ts';
+export { createAgentBridge, registerAgentIPC } from './bridge.ts';
+export type { AgentIPCEvent } from './bridge.ts';
+export { snapshotWorkspace, diffWorkspace, assertWorkspacePath } from './workspace.ts';
+export { observeWorkspaceSnapshot, observeWorkspaceDiff, cleanupWorkspaceObservers } from './workspace-observer.ts';
+export { AgentError, SCHEMA_VERSION } from './types.ts';
+export type { AgentSessionAdapter, RuntimeEvent, ActionRequest, ApprovalDecision } from './types.ts';
