@@ -7,19 +7,19 @@ savings, model quality, live payments, a signed distribution or production
 deployment readiness.
 
 The bounded gateway proof and browser journey were regenerated from source
-`57008c5e3d9b627554ac09f4575207bb0ddeae03` after adding execution destination
-ownership and tracking its executed source in the proof manifests. The encoded
-recording lasts 27.2 seconds,
+`95488df72972678f19fea55a76e21e88f28a6888` after adding automatic routing and
+hard local-only admission and tracking their executed source in the proof manifests. The encoded
+recording lasts 27.24 seconds,
 including 24 seconds of presentation holds across 15 verified visible states.
-These holds are not latency measurements. Their 30 source hashes identify the
+These holds are not latency measurements. Their 35 source hashes identify the
 executed runtime. The package and installed SDK receipts retain their earlier
-recorded source and do not qualify this destination change.
+recorded source and do not qualify this admission change.
 
 | Artifact | What it establishes |
 | --- | --- |
 | [receipt.json](receipt.json) | 35 real gateway checks, 13 simulated provider calls and source-file hashes |
 | [local-benchmark.json](local-benchmark.json) | Historical predecessor measurement over 10,000 synthetic jobs and 99,990 attempts; does not qualify this candidate |
-| [AI_WORK_BROWSER_QA.json](AI_WORK_BROWSER_QA.json) | 12 actual authenticated journey checks, three simulated provider responses, desktop/mobile rendering and 30 source hashes |
+| [AI_WORK_BROWSER_QA.json](AI_WORK_BROWSER_QA.json) | 12 actual authenticated journey checks, three simulated provider responses, desktop/mobile rendering and 35 source hashes |
 | [AI_WORK_DEMO.webm](AI_WORK_DEMO.webm) | Recorded connection, synthetic billing activation, budgets, ordinary API work, route/cache evidence, a cap, continuation and a signed workflow result |
 | [PACKAGING_SMOKE.json](PACKAGING_SMOKE.json) | Historical source-specific offline wheel/source build, isolated installed imports/CLI/styles, owned SQLite history/totals/restart and installed HTTP smoke |
 | [INSTALLED_HTTP_SMOKE.json](INSTALLED_HTTP_SMOKE.json) | Historical installed source: exactly two authenticated local create/read job requests, zero provider inference or external calls |
