@@ -119,7 +119,7 @@
             : chat.inheritIntent
               ? 'Inherited model preference'
               : 'Model pinned for this chat'}{plan.model?.place === 'cloud'
-        ? ' · estimate $0.02, upper allowance $0.12 · fictional'
+        ? ` · estimate $${plan.estimate.toFixed(2)}, upper allowance $${plan.upper.toFixed(2)} · fictional`
         : ''}</span
     ><span>Enter to send <span class="hint-separator">·</span> Shift + Enter for a new line</span>
   </div>{/if}

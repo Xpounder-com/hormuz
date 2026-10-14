@@ -33,6 +33,88 @@ function fixture() {
   return { service, jobs, flush };
 }
 
+test('portable historical instructions accept the full app/project/chat/skill packet', () => {
+  const { service } = fixture();
+  service.setAppInstructions('a'.repeat(8000));
+  service.setProjectInstructions('p'.repeat(8000));
+  activeChat(service.state).instructions = 'c'.repeat(8000);
+  service.toggleSkill('paper-roast');
+  service.setDraft('/roast supplied paper');
+  const frozen = preview(service.state).instructions;
+  assert.ok(frozen.length > 24000);
+  activeChat(service.state).messages.at(-1)!.receipt!.instructions = frozen;
+  const imported = inspectImport(exportProject(service.state, 'research'), service.state);
+  assert.equal(imported.error, '');
+  assert.equal(imported.bundle?.chats[0].messages.at(-1)?.receipt?.instructions, frozen);
+});
+
+test('portable chat caps remain restrictive and absent legacy caps default to zero', () => {
+  const { service } = fixture();
+  service.setChatCap(0.05);
+  const exported = exportProject(service.state, 'research');
+  assert.ok(service.importProject(exported, true));
+  assert.equal(activeChat(service.state).cap, 0.05);
+  const legacy = JSON.parse(exported);
+  for (const c of legacy.chats) delete c.cap;
+  assert.equal(inspectImport(JSON.stringify(legacy), service.state).bundle?.chats[0].cap, 0);
+  for (const cap of [-1, 11, '10']) {
+    legacy.chats[0].cap = cap;
+    assert.ok(inspectImport(JSON.stringify(legacy), service.state).error);
+  }
+});
+
+test('project creation and empty import cannot mutate a full chat profile', () => {
+  const { service } = fixture();
+  const exported = JSON.parse(exportProject(service.state, 'launch'));
+  exported.chats = [];
+  while (service.state.chats.length < 500)
+    service.state.chats.push({
+      ...structuredClone(activeChat(service.state)),
+      id: `limit-${service.state.chats.length}`,
+    });
+  const projects = structuredClone(service.state.projects);
+  const active = service.state.activeChatId;
+  service.createProject('No room');
+  assert.deepEqual(service.state.projects, projects);
+  assert.equal(service.state.activeChatId, active);
+  assert.equal(service.importProject(JSON.stringify(exported), true), false);
+  assert.deepEqual(service.state.projects, projects);
+});
+
+test('opening a project prefers an active chat to its first archived chat', () => {
+  const { service } = fixture();
+  const first = activeChat(service.state);
+  service.archiveChat(first.id);
+  service.selectProject('launch');
+  service.selectProject('research');
+  assert.equal(activeChat(service.state).id, 'chat-outline');
+  assert.equal(Boolean(activeChat(service.state).archived), false);
+});
+
+test('multibyte replacement refusal leaves the previous copy and revision intact', () => {
+  const { service } = fixture();
+  const before = structuredClone(service.state.projects[0].files[0]);
+  assert.equal(service.replaceFile(before.id, '雪'.repeat(90000)), false);
+  assert.deepEqual(service.state.projects[0].files[0], before);
+  assert.equal(service.replaceFile(before.id, 'Smaller replacement'), true);
+  assert.equal(service.state.projects[0].files[0].revision, before.revision + 1);
+});
+
+test('refused restart preserves an active response when another profile has unsaved work', () => {
+  const { service } = fixture();
+  service.switchProfile('sandbox');
+  service.newChat(null);
+  service.setDraft('Keep this Temporary draft');
+  service.switchProfile('personal');
+  service.setDraft('Write an active response');
+  service.send();
+  const attempt = service.state.attempt?.id;
+  assert.ok(attempt);
+  assert.equal(service.restartMock(false, true), false);
+  assert.equal(service.state.attempt?.id, attempt);
+  service.dispose();
+});
+
 test('search distinguishes content/title, project/archive scope and excludes Temporary bodies and drafts', () => {
   const { service } = fixture();
   const first = activeChat(service.state);

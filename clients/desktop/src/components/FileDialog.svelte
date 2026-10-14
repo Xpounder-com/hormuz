@@ -74,8 +74,7 @@
         >{#if file.ownership !== 'unbound-link' && /\.(md|txt)$/i.test(file.name)}<button
             class="primary-button"
             onclick={() => {
-              service.replaceFile(id, text);
-              onclose();
+              if (service.replaceFile(id, text)) onclose();
             }}>Replace copy</button
           >{/if}
       </div>

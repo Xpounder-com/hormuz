@@ -13,7 +13,7 @@ export type PortableProject = {
   files: ProjectFile[];
   chats: Pick<
     Chat,
-    'title' | 'draft' | 'instructions' | 'localOnly' | 'messages' | 'archived' | 'pinned'
+    'title' | 'draft' | 'instructions' | 'localOnly' | 'cap' | 'messages' | 'archived' | 'pinned'
   >[];
 };
 export type ImportPreview = {
@@ -64,6 +64,7 @@ export function exportProject(state: WorkspaceState, id: string, chatIds?: strin
       draft: c.draft,
       instructions: c.instructions,
       localOnly: c.localOnly,
+      cap: c.cap,
       archived: !!c.archived,
       pinned: !!c.pinned,
       messages: c.messages.map((m) => ({
@@ -189,6 +190,7 @@ export function inspectImport(text: string, state: WorkspaceState): ImportPrevie
         'draft',
         'instructions',
         'localOnly',
+        'cap',
         'messages',
         'archived',
         'pinned',
@@ -197,6 +199,8 @@ export function inspectImport(text: string, state: WorkspaceState): ImportPrevie
       !boundedText(c.draft, 30000) ||
       !boundedText(c.instructions, 8000) ||
       typeof c.localOnly !== 'boolean' ||
+      (c.cap !== undefined &&
+        (typeof c.cap !== 'number' || !Number.isFinite(c.cap) || c.cap < 0 || c.cap > 10)) ||
       (c.archived !== undefined && typeof c.archived !== 'boolean') ||
       (c.pinned !== undefined && typeof c.pinned !== 'boolean') ||
       !Array.isArray(c.messages) ||
@@ -243,7 +247,7 @@ export function inspectImport(text: string, state: WorkspaceState): ImportPrevie
           !Array.isArray(r.context) ||
           r.context.length > 20 ||
           !r.context.every((x) => boundedText(x, 200)) ||
-          !boundedText(r.instructions, 17000) ||
+          !boundedText(r.instructions, 32256) ||
           !boundedText(r.origin, 100) ||
           typeof r.estimate !== 'number' ||
           !Number.isFinite(r.estimate) ||
@@ -284,6 +288,7 @@ export function inspectImport(text: string, state: WorkspaceState): ImportPrevie
       draft: c.draft,
       instructions: c.instructions,
       localOnly: c.localOnly,
+      cap: c.cap === undefined ? 0 : (c.cap as number),
       messages,
       archived: !!c.archived,
       pinned: !!c.pinned,

@@ -64,7 +64,6 @@
     else error = service.state.notice;
   }
   function restart(save = false) {
-    service.stop();
     if (save && temporary) {
       service.navigate(temporary.id);
       service.saveTemporary(destination);

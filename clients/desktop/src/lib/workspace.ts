@@ -151,7 +151,9 @@ export class MockWorkspace {
     this.#emit();
   }
   selectProject(projectId: string) {
-    const existing = this.state.chats.find((c) => c.projectId === projectId);
+    const existing =
+      this.state.chats.find((c) => c.projectId === projectId && !c.archived) ??
+      this.state.chats.find((c) => c.projectId === projectId);
     if (existing) this.navigate(existing.id);
     else this.newChat(projectId);
   }
@@ -175,6 +177,12 @@ export class MockWorkspace {
   }
   createProject(name: string) {
     if (!name.trim()) return;
+    if (this.state.chats.length >= 500) {
+      this.#notice(
+        'The profile limit is 500 chats. Export or remove work before creating a project.',
+      );
+      return;
+    }
     if (this.state.projects.length >= 100) {
       this.#notice('The sample profile limit is 100 projects. Export or remove work first.');
       return;
@@ -486,7 +494,7 @@ export class MockWorkspace {
     }
     if (
       this.state.projects.length >= 100 ||
-      this.state.chats.length + p.bundle.chats.length > 500
+      this.state.chats.length + Math.max(1, p.bundle.chats.length) > 500
     ) {
       this.#notice('Profile sample limits reached. Nothing was imported.');
       return false;
@@ -524,10 +532,10 @@ export class MockWorkspace {
     const project = this.state.projects.find((p) => p.id === activeChat(this.state).projectId);
     const file = project?.files.find((f) => f.id === id);
     if (!project || !file || file.ownership === 'unbound-link' || !/\.(md|txt)$/i.test(file.name))
-      return;
+      return false;
     if (new TextEncoder().encode(text).length > 256 * 1024) {
       this.#notice('Copy exceeds the sample 256 KiB limit. Nothing was replaced.');
-      return;
+      return false;
     }
     project.files = project.files.map((f) =>
       f.id === id ? { ...f, text, revision: f.revision + 1, status: 'available' } : f,
@@ -536,6 +544,7 @@ export class MockWorkspace {
     this.#notice(
       'Imported copy replaced with a new revision. Originals and submitted snapshots are unchanged.',
     );
+    return true;
   }
   setFileStatus(id: string, status: ProjectFile['status']) {
     const project = this.state.projects.find((p) => p.id === activeChat(this.state).projectId);
