@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from contextlib import ExitStack
 import hmac
 import http.client
 import ipaddress
@@ -1300,16 +1301,31 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def _forward(self, **options) -> None:
         entered = False
+        previous_resources = getattr(self, "_provider_response_resources", None)
+        previous_headers_pending = getattr(self, "_provider_headers_pending", False)
+        self._provider_headers_pending = False
         try:
             with self.server.route_admission.lease(self, options["decision"].route):
                 entered = True
-                self._forward_admitted(**options)
+                with ExitStack() as resources:
+                    self._provider_response_resources = resources
+                    self._forward_admitted(**options)
         except RouteAdmissionError:
             if not entered and options["attempt"] is not None:
                 self.server.store.finalize_request_attempt(attempt=options["attempt"],
                     organization_id=options["identity"].organization_id, status="failed", cost_microusd=0)
                 work_gateway.settle(self, options["identity"], options["attempt"], cost=0, status="failed")
             raise
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            if self._provider_headers_pending and options["attempt"] is not None:
+                self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
+                    attempt=options["attempt"], organization_id=options["identity"].organization_id,
+                    reason_code="provider_stream_interrupted", provider_metrics=self._pending_header_metrics)
+                work_gateway.settle(self, options["identity"], options["attempt"])
+            self.close_connection = True
+        finally:
+            self._provider_response_resources = previous_resources
+            self._provider_headers_pending = previous_headers_pending
 
     def _forward_admitted(
         self,
@@ -1391,6 +1407,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        self._provider_response_resources.callback(response.close)
         response_headers_us = self._elapsed_us(started_ns)
         self._work_provider_ms = (time.monotonic_ns() - started_ns) / 1_000_000
         status = getattr(response, "status", response.getcode())
@@ -1539,6 +1556,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         cache_capture = not is_event_stream and bool(getattr(self, "_work_id", None)) and self.server.config.ai_work.cache_enabled
 
         self._response_started = True
+        self._provider_headers_pending = True
+        self._pending_header_metrics = self._provider_metrics(started_ns=started_ns,
+            provider_status=status, response_headers_us=response_headers_us, first_body_byte_us=None,
+            provider_bytes_read=0, downstream_bytes_sent=0)
+        if getattr(self, "_local_route_lease", False):
+            self.connection.settimeout(self.server.route_admission.remaining_timeout(self))
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
@@ -1570,6 +1593,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             ):
                 self.send_header(name, value)
         self.end_headers()
+        self._provider_headers_pending = False
         self.close_connection = True
 
         downstream_ok = True
@@ -1616,6 +1640,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     else:
                         cache_capture = False
                         cache_body.clear()
+                if getattr(self, "_local_route_lease", False):
+                    self.connection.settimeout(self.server.route_admission.remaining_timeout(self))
                 self._write_downstream_chunk(chunk)
                 downstream_bytes_sent += len(chunk)
         except (BrokenPipeError, ConnectionResetError):

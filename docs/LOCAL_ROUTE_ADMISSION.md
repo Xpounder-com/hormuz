@@ -83,7 +83,9 @@ The lease covers the entire response/stream and existing same-destination retry,
 and releases in `finally` after completion, failure or disconnect cleanup. A
 local request has an absolute elapsed-time deadline using the configured upstream
 timeout, covering headers and body even when the provider sends periodic bytes.
-The owned transport cancels and joins its single deadline timer on close. A disconnect
+The owned transport cancels and joins its single deadline timer on close. Response
+cleanup covers downstream header delivery as well as body relay. Downstream
+headers and body writes also use the remaining absolute deadline. A disconnect
 is observed by the existing relay when it next reads/writes, not by a separate
 background cancellation worker.
 

@@ -25,7 +25,7 @@ from hormuz.server import GatewayServer, serve_in_thread
 
 
 CLIENT = r'''
-import http.client, json, os, sys, tomllib
+import http.client, json, os, socket, struct, sys, time, tomllib
 from urllib.parse import urlsplit
 value = json.load(sys.stdin)
 config = tomllib.loads(value["configuration"])
@@ -33,6 +33,9 @@ provider = config["model_providers"][config["model_provider"]]
 origin = urlsplit(provider["base_url"])
 connection = http.client.HTTPConnection(origin.hostname, origin.port, timeout=5)
 try:
+    if value.get("stall_after_headers"):
+        connection.connect()
+        connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
     connection.request(value.get("method", "POST"), origin.path.rstrip("/") + value.get("path", "/responses"),
         None if value.get("method") == "GET" else json.dumps(value["request"] if value.get("control") else
                    {"model": config["model"], "input": "Reply with the fixture answer.",
@@ -40,7 +43,15 @@ try:
         {"Content-Type": "application/json",
          "Authorization": "Bearer " + os.environ[provider["env_key"]],
          **provider.get("http_headers", {}), **value.get("headers", {})})
+    if value.get("cancel_before_headers"):
+        time.sleep(0.2)
+        connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        connection.close()
+        print(json.dumps({"status": "cancelled", "body": None, "headers": {}}))
+        sys.exit(0)
     response = connection.getresponse()
+    if value.get("stall_after_headers"):
+        time.sleep(1.8)
     data = response.readline() if value.get("cancel_after_event") else response.read()
     print(json.dumps({"status": response.status,
                       "headers": dict((k.lower(), v) for k, v in response.getheaders()),
@@ -51,7 +62,7 @@ finally:
 
 
 @contextmanager
-def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False):
+def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -84,6 +95,8 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                 events = [{"type": "response.output_item.done", "item": tool},
                           {"type": "response.completed", "response": result}]
                 data = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
+            if backpressure_first and len(received) == 1:
+                data = b"data: " + b" " * (16 * 1024 * 1024) + b"\n\n" + data
             self.send_response(status(body) if callable(status) else status)
             self.send_header("Content-Type", "text/event-stream" if event_stream else "application/json")
             if not ((cancel_stream or slow_stream) and len(received) == 1):
@@ -111,7 +124,17 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                 except (BrokenPipeError, ConnectionResetError):
                     pass
             else:
-                self.wfile.write(data)
+                if backpressure_first and len(received) == 1:
+                    backpressure_first.set()
+                try:
+                    self.wfile.write(data)
+                    if observe_close and len(received) == 1:
+                        self.connection.settimeout(2)
+                        if self.rfile.read(1) == b"":
+                            observe_close.set()
+                except (BrokenPipeError, ConnectionResetError):
+                    if observe_close:
+                        observe_close.set()
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -450,6 +473,46 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual(state["body"]["local_capacity"]["active"], 0)
                 self.assertEqual(submit(request={"input": "Summarize after deadline."})["status"], 200)
                 self.assertEqual((len(local_requests), cloud_requests), (2, []))
+
+    def test_stalled_coding_client_cannot_hold_local_capacity_past_deadline(self):
+        delivered = threading.Event()
+        with provider("LOCAL_DESTINATION", event_stream=True, backpressure_first=delivered) as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud)
+            value["upstream_timeout_seconds"] = 1
+            value["model_routes"]["local-code"]["capabilities"].append("streaming")
+            with self.connected_client(value) as submit:
+                with ThreadPoolExecutor(max_workers=1) as worker:
+                    first = worker.submit(submit, stall_after_headers=True,
+                        request={"input": "Summarize this fixture.", "stream": True})
+                    self.assertTrue(delivered.wait(timeout=2))
+                    time.sleep(1.2)
+                    state = submit(method="GET", path="/router/state")
+                    self.assertEqual(state["body"]["local_capacity"]["active"], 0)
+                    first.result(timeout=5)
+                self.assertEqual(submit(request={"input": "Summarize after deadline."})["status"], 200)
+                self.assertEqual((len(local_requests), cloud_requests), (2, []))
+
+    def test_client_reset_before_headers_closes_the_owned_local_response(self):
+        entered, release, closed = threading.Event(), threading.Event(), threading.Event()
+        with provider("LOCAL_DESTINATION", hold_first=(entered, release), observe_close=closed) as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.connected_client(value) as submit:
+                job = submit(control=True, path="/work/jobs", request={"repository": "example/repository",
+                    "task_type": "implementation", "context_revision": "fixture-revision"})
+                try:
+                    cancelled = submit(cancel_before_headers=True, headers={"X-Hormuz-Work-Id": job["body"]["work_id"]},
+                        request={"input": "Summarize this fixture."})
+                    self.assertEqual(cancelled["status"], "cancelled")
+                    self.assertTrue(entered.wait(timeout=2))
+                finally:
+                    release.set()
+                self.assertTrue(closed.wait(timeout=2))
+                history = submit(method="GET", path="/work/jobs/" + job["body"]["work_id"] + "/attempts")
+                self.assertEqual(history["body"]["attempts"][0]["state"], "unknown")
+                self.assertEqual((len(local_requests), cloud_requests), (1, []))
 
     def test_cancelled_local_stream_releases_capacity_and_never_replays_to_cloud(self):
         entered, release, finished = threading.Event(), threading.Event(), threading.Event()
