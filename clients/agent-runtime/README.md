@@ -120,7 +120,7 @@ HORMUZ_TEST_INSTALLED_CLAUDE=1 node --test --test-concurrency=1 test/claude-inst
 
 Local verification on 2026-10-14: macOS 26.2 (25C56), arm64, Node 25.2.1.
 TypeScript check/build passed. The serial suite with both installed-engine flags
-passed **201/201**, with no skips; it includes a compiled package installed under
+passed **203/203**, with no skips; it includes a compiled package installed under
 `node_modules`, hoisted Claude dependencies and a sandboxed synthetic native
 plan. Codex 0.160.0 and SDK 0.3.299 / bundled CLI 2.1.299 completed the synthetic
 host journeys. The Python CLI, legacy ownership, governance, CI-scope,
@@ -130,6 +130,8 @@ status/listing and clean interruption. External provider requests and paid spend
 were zero. CI evidence is separate from these local checks.
 The suite also covers required Claude native initialization, positive cost rates,
 finite authority/startup waits and pending preparation retaining its owner lease.
+Successful operations also close outstanding approval revalidation, and aborted
+Claude iterators report interruption even when they end without a result frame.
 
 | Boundary | Source-preview limit |
 | --- | --- |

@@ -120,7 +120,9 @@ export class AgentSessions extends EventEmitter {
     let finish!: () => void;
     this.#mutationDone = new Promise(resolve => { finish = resolve; });
     try { return await action(); } finally {
-      clearTimeout(timeout); this.#mutating = false;
+      // Approval revalidation may still await authority after its request has
+      // expired. End every captured operation signal before removing its owner.
+      controller.abort(); clearTimeout(timeout); this.#mutating = false;
       if (!this.#cleanupOwner && this.#activeController === controller) this.#activeController = null;
       finish();
     }

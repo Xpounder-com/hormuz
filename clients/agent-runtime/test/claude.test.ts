@@ -80,8 +80,15 @@ test('Claude interruption cleans the active worker and supports explicit persist
   const { adapter, options, cleanup } = await setup();
   try {
     const { threadId } = await adapter.start(options);
-    const running = adapter.run(runOptions('execute', 'HANG'));
-    await new Promise(resolve => setTimeout(resolve, 250)); await adapter.interrupt();
+    let initialized!: () => void;
+    const ready = new Promise<void>(resolve => { initialized = resolve; });
+    const running = adapter.run({ ...runOptions('execute', 'HANG'), onEvent: event => {
+      if (event.type === 'tool' && (event.data as { runtime?: unknown }).runtime) initialized();
+    } });
+    let timer: NodeJS.Timeout | undefined;
+    try { await Promise.race([ready, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('fixture_init_timeout')), 3000); })]); }
+    finally { if (timer) clearTimeout(timer); }
+    await adapter.interrupt();
     assert.equal((await running).status, 'interrupted');
     await adapter.dispose();
     const resumed = new ClaudeAdapter({ sdkFixture: fixture, prepareLaunch: async ({ command, args }) => ({ command, args }), shutdownTimeoutMs: 100 });
