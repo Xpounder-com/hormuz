@@ -1,8 +1,63 @@
 # Hormuz project Agent backend
 
-Source preview of the host-owned backend for [Agent epic #505](https://github.com/Xpounder-com/hormuz/issues/505).
+macOS CLI and source preview of the host-owned backend for [Agent epic #505](https://github.com/Xpounder-com/hormuz/issues/505).
 This package is independent of the simulated desktop UI. It is not a packaged
 desktop release or a claim that either vendor's full application is embedded.
+
+## CLI quickstart
+
+Requires macOS, Node.js 24+, and an interactive terminal. Codex requires a
+separately installed trusted Codex CLI **0.160.0**; its default executable is
+`/opt/homebrew/bin/codex`. Configure another absolute path with
+`--codex-executable`. Claude uses this package's pinned SDK **0.3.299** and
+bundled CLI. Set `OPENAI_API_KEY` for Codex or `ANTHROPIC_API_KEY` for Claude in
+the launching shell through your credential-management workflow. Profile
+configuration stores no API keys or cloud consent. This preview uses API auth;
+subscription login is not used.
+
+The package is unpublished. From this package directory, build and install a
+local artifact:
+
+```sh
+npm ci --ignore-scripts --maxsockets=4 --fetch-retries=2 --fetch-timeout=30000 --no-audit --no-fund
+npm run build
+npm pack
+npm install --global ./hormuz-agent-runtime-0.1.0.tgz --ignore-scripts --maxsockets=4 --fetch-retries=2 --fetch-timeout=30000 --no-audit --no-fund
+cd /absolute/path/to/your-project
+hormuz-agent init --engine codex
+hormuz-agent doctor
+hormuz-agent
+```
+
+Setup asks for an explicit provider model and conservative current **USD per
+million input/output tokens**; vendor prices are never assumed. For Claude, use
+`hormuz-agent init --profile claude --engine claude`, then
+`hormuz-agent --profile claude`. Setup defaults to lifetime session/project/profile
+allowances of $1/$5/$10. These are configured-rate estimates for admitted work,
+not account-wide provider billing caps; usage and uncertain holds survive
+restart and session deletion.
+
+Type a request to plan, then `/accept` and `/execute`. Concrete actions still
+require one-time approval. Use `/diff`, `/review accept|reject|changes`, `/status`,
+and `/sessions`; `/interrupt` or Ctrl+C stops active work. Resume explicitly with
+`hormuz-agent --resume last` or `/resume ID`, and accept any retained plan again.
+Ctrl+C while idle or `/quit` closes the terminal.
+
+Private profile state defaults to `~/.hormuz/agent-cli/profiles/default`, shared
+by folders for that profile's lifetime budget. Use `--profile NAME` and
+`--state-root PATH` consistently; state must remain outside the selected folder.
+After restart, diff provenance remains but prior baseline text can be
+unavailable. Help, init, doctor, and session listing perform no inference;
+doctor locates dependencies without verifying a native runtime handshake.
+Windows/Linux interactive execution remains unavailable.
+
+The Python Hormuz source launcher additionally requires Python 3.11+ and
+`python -m pip install --editable .` from the repository root. Run the bounded
+`npm ci` command above with `--prefix clients/agent-runtime`, then
+`npm run build --prefix clients/agent-runtime`. In a project folder, bare
+`hormuz` or explicit `hormuz agent` opens the same terminal. See the
+[complete CLI guide](https://github.com/Xpounder-com/hormuz/blob/main/docs/AGENT_CLI.md)
+for source installation, configuration, consent, command details, and resume.
 
 ## Implemented behavior
 
@@ -61,14 +116,18 @@ HORMUZ_TEST_INSTALLED_CODEX=1 node --test --test-concurrency=1 test/codex-instal
 HORMUZ_TEST_INSTALLED_CLAUDE=1 node --test --test-concurrency=1 test/claude-installed.test.ts
 ```
 
-Local verification on 2026-10-14: macOS 26.2 (25C56), arm64, Node 25.2.1;
-`npm run check` passed and the serial suite with both installed flags passed
-**110/110**, with no skips. Codex 0.160.0 and SDK 0.3.299 / bundled CLI 2.1.299
-completed their full synthetic host journeys. External provider requests and
-paid spend were zero. Repository governance, CI-scope, secret-inventory and
-public-community-path tests passed **126/126**. CI checks run separately.
-
 ## Default limits and compatibility
+
+Local verification on 2026-10-14: macOS 26.2 (25C56), arm64, Node 25.2.1.
+TypeScript check/build passed. The serial suite with both installed-engine flags
+passed **163/163**, with no skips; it includes a compiled package installed under
+`node_modules`, hoisted Claude dependencies and a sandboxed synthetic native
+plan. Codex 0.160.0 and SDK 0.3.299 / bundled CLI 2.1.299 completed the synthetic
+host journeys. The Python CLI, legacy ownership, governance, CI-scope,
+secret-inventory and public-community-path suite passed **211/211**. Installed
+CLI and Python-entry TTY checks covered folder session creation, cloud denial,
+status/listing and clean interruption. External provider requests and paid spend
+were zero. CI evidence is separate from these local checks.
 
 | Boundary | Source-preview limit |
 | --- | --- |
@@ -107,7 +166,8 @@ accepted from the renderer or persisted session data.
 
 ## Host integration
 
-Import `src/index.ts` from a trusted Node/Electron host. Construct `AgentSessions`
+Import `@hormuz/agent-runtime` from a trusted Node/Electron host (source entry:
+`src/index.ts`). Construct `AgentSessions`
 with a private `SessionStore`, shared `ApplicationScheduler`, exact runtime
 factory, host-owned connection resolver, workspace/allowance/cloud authorization
 and finite parent allowances. Connecting a provider is separate from project cloud
@@ -174,7 +234,7 @@ history stays in its named private runtime subtree. Removing a session deletes
 that history but preserves incurred/uncertain content-free budget receipts.
 Parent ceilings are lifetime ceilings for this preview, not monthly billing.
 
-See [the implementation roadmap](../../docs/AGENT_EXECUTION_ROADMAP.md). UI human
+See [the implementation roadmap](https://github.com/Xpounder-com/hormuz/blob/main/docs/AGENT_EXECUTION_ROADMAP.md). UI human
 acceptance, capped live-provider checks, model-quality assessment and packaged
 per-platform installation qualification remain separate gates in #513/#517 and
 #340/#346/#347.

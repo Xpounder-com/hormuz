@@ -120,6 +120,27 @@ test('failed native startup consumes a persisted attempt before history can grow
     assert.equal(f.scheduler.activeOwner, null);
   } finally { await f.cleanup(); }
 });
+test('interrupt owns startup preparation and shutdown waits for its cleanup', async () => {
+  let entered!: () => void, finish!: () => void;
+  const starting = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  let runs = 0;
+  class PreparingRuntime extends FakeRuntime {
+    override async start(options: RuntimeStart) { const result = await super.start(options); entered(); await gate; return result; }
+    override async run(options: RuntimeRun) { runs++; return super.run(options); }
+    override async dispose() { if (this.options) finish(); }
+  }
+  const f = await fixture(() => new PreparingRuntime());
+  try {
+    const planning = f.manager.plan(f.session.id, 'project', 'Stop while the runtime is starting.');
+    const rejected = assert.rejects(planning, /interrupted/);
+    await starting;
+    await f.manager.interrupt(f.session.id, 'project');
+    await rejected;
+    assert.equal(runs, 0); assert.equal(f.scheduler.activeOwner, null);
+    assert.equal((await f.manager.get(f.session.id, 'project')).phase, 'interrupted');
+  } finally { finish(); await f.cleanup(); }
+});
 test('oversized persisted history prevents native resume or another startup', async () => {
   let starts = 0;
   class CountingRuntime extends FakeRuntime {

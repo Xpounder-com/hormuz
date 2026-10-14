@@ -1,5 +1,6 @@
 import { mkdir, realpath, lstat, mkdtemp, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, relative, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +12,7 @@ import type { AgentSessionAdapter, RuntimeStart, RuntimeRun, RunResult, Approval
 
 export const CLAUDE_SDK_VERSION = '0.3.299';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const workerPath = fileURLToPath(new URL('./claude-worker.ts', import.meta.url));
+const workerPath = fileURLToPath(new URL('./claude-worker' + (import.meta.url.endsWith('.ts') ? '.ts' : '.js'), import.meta.url));
 export type ClaudeAdapterOptions = {
   command?: string;
   /** Trusted test/application wiring, never renderer input. */
@@ -25,6 +26,32 @@ const record = (input: unknown): Record<string, unknown> => {
   return input as Record<string, unknown>;
 };
 const within = (root: string, path: string) => { const rel = relative(root, path); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); };
+
+/** Resolve from trusted installed code, never from the project being worked on. */
+async function runtimeReadPaths(sdkFixture?: string): Promise<string[]> {
+  const sdkEntry = await realpath(createRequire(workerPath).resolve('@anthropic-ai/claude-agent-sdk'));
+  const paths = [await realpath(dirname(workerPath)), await realpath(fileURLToPath(new URL('../package.json', import.meta.url))), dirname(sdkEntry)];
+  if (sdkFixture) paths.push(await realpath(dirname(sdkFixture)));
+  else {
+    // The pinned SDK uses createRequire at its own entry to find the optional
+    // platform package. This also handles npm hoisting and pnpm's real paths.
+    const sdkRequire = createRequire(sdkEntry);
+    const base = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`;
+    const report = process.platform === 'linux' ? process.report?.getReport() as { header?: { glibcVersionRuntime?: string } } | undefined : undefined;
+    const musl = report !== undefined && report.header?.glibcVersionRuntime === undefined;
+    const packages = process.platform === 'linux' ? musl ? [base + '-musl', base] : [base, base + '-musl'] : [base];
+    let binary: string | undefined;
+    for (const name of packages) {
+      try { binary = await realpath(sdkRequire.resolve(`${name}/claude${process.platform === 'win32' ? '.exe' : ''}`)); break; }
+      catch (error) {
+        if (!['MODULE_NOT_FOUND', 'ENOENT', 'ERR_PACKAGE_PATH_NOT_EXPORTED'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      }
+    }
+    if (!binary) throw new AgentError('claude_native_unavailable');
+    paths.push(dirname(binary));
+  }
+  return [...new Set(paths)];
+}
 
 /** Claude's SDK runs only in a supervised worker, never in the privileged host/renderer. */
 export class ClaudeAdapter implements AgentSessionAdapter {
@@ -95,12 +122,14 @@ export class ClaudeAdapter implements AgentSessionAdapter {
       CLAUDE_CODE_MAX_RETRIES: '2', API_TIMEOUT_MS: '60000',
     };
     const args = [workerPath, ...(this.settings.sdkFixture ? [this.settings.sdkFixture] : [])];
+    const trustedReadPaths = await runtimeReadPaths(this.settings.sdkFixture);
     const launch = await (this.settings.prepareLaunch ?? prepareSandbox)({ command: this.settings.command ?? process.execPath, args,
       workspace: options.workspace, configDir: options.configDir, endpoint: options.endpoint, env, workspaceWrite,
       allowPrivateUnixSockets: true,
       privateTempDir: temporary.path,
-      trustedReadPaths: [dirname(workerPath), fileURLToPath(new URL('../node_modules', import.meta.url)), ...(this.settings.sdkFixture ? [dirname(this.settings.sdkFixture)] : [])],
+      trustedReadPaths,
     });
+    if (this.disposed) throw new AgentError('runtime_closed');
     this.rpc = new RpcProcess({ ...launch, env, cwd: options.workspace, requestTimeoutMs: this.settings.requestTimeoutMs,
       shutdownTimeoutMs: this.settings.shutdownTimeoutMs, onNotification: (method, params) => this.notification(method, params),
       onRequest: (method, params, id) => this.approval(method, params, id), onFailure: () => this.finish('unknown'),

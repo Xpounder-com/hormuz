@@ -171,6 +171,7 @@ export class CodexAdapter implements AgentSessionAdapter {
       const command = executable.command;
       const args = [...(this.settings.args ?? []), 'app-server', '--stdio', '--strict-config'];
       const launch = await (this.settings.prepareLaunch ?? prepareSandbox)({ command, args, workspace, configDir, endpoint: endpoint.href, env, managedPreferenceDomain: 'com.openai.codex' });
+      if (this.disposed) throw new AgentError('runtime_closed');
       this.rpc = new RpcProcess({ ...launch, cwd: workspace, env,
         requestTimeoutMs: this.settings.requestTimeoutMs, shutdownTimeoutMs: this.settings.shutdownTimeoutMs,
         maxFrameBytes: this.settings.maxFrameBytes, maxOutputBytes: this.settings.maxOutputBytes,

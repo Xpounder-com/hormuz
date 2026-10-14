@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, access, realpath, rename, writeFile, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, basename, isAbsolute } from 'node:path';
+import { join, dirname, basename, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { ClaudeAdapter } from '../src/claude.ts';
 import type { ActionRequest, RuntimeEvent } from '../src/types.ts';
 
@@ -145,4 +146,20 @@ test('Claude production SDK import and version handshake work inside real read-o
   const adapter = new ClaudeAdapter({ requestTimeoutMs: 5000, shutdownTimeoutMs: 100 });
   try { assert.match((await adapter.start(options)).threadId, /^[0-9a-f-]{36}$/); }
   finally { await adapter.dispose(); await cleanup(); }
+});
+
+test('Claude launcher grants canonical SDK/native roots instead of an entire nested node_modules tree', { skip: process.platform !== 'darwin' }, async () => {
+  let paths: string[] = [];
+  const f = await setup({ sdkFixture: undefined, prepareLaunch: async ({ command, args, trustedReadPaths }) => {
+    paths = trustedReadPaths ?? []; return { command, args };
+  } });
+  try {
+    await f.adapter.start(f.options);
+    const sdkEntry = await realpath(createRequire(import.meta.url).resolve('@anthropic-ai/claude-agent-sdk'));
+    const native = await realpath(createRequire(sdkEntry).resolve(`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/claude`));
+    assert.ok(paths.includes(dirname(sdkEntry))); assert.ok(paths.includes(dirname(native)));
+    assert.ok(paths.includes(await realpath(fileURLToPath(new URL('../package.json', import.meta.url)))));
+    assert.equal(paths.some(path => basename(path) === 'node_modules'), false);
+    assert.equal(paths.length, 4);
+  } finally { await f.cleanup(); }
 });
