@@ -93,6 +93,9 @@ private struct HormuzMenu: View {
 
         Divider()
 
+        if connection.pendingQuit {
+            Button("Cancel pending quit", action: connection.cancelPendingQuit)
+        }
         Button("Quit Hormuz") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q", modifiers: .command)
     }

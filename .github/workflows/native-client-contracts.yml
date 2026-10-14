@@ -12,6 +12,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  linux-gtk:
+    name: Linux GTK shell (native synthetic session)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install native GTK build and isolated display dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libgtk-4-dev libssl-dev pkg-config xvfb xauth dbus-x11 at-spi2-core
+      - name: Install pinned Rust toolchain
+        working-directory: clients/rust
+        run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt,clippy
+      - name: Build the actual Linux GTK executable
+        working-directory: clients/rust
+        run: cargo build -p hormuz-linux -p hormuz-client-relay --features hormuz-linux/gtk-ui --release --locked
+      - name: Lint GTK shell and native fixtures
+        working-directory: clients/rust
+        run: cargo clippy -p hormuz-linux --features gtk-ui --all-targets --locked -- -D warnings
+      - name: Exercise actual GTK controls with an isolated session
+        working-directory: clients/rust
+        shell: bash
+        env:
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          HORMUZ_GTK_PROOF_DIRECTORY: ${{ github.workspace }}/clients/rust/target/linux-gtk-proof
+        run: |
+          mkdir -p target/linux-gtk-proof
+          xvfb-run -a dbus-run-session -- cargo test -p hormuz-linux --features gtk-ui --locked -- --test-threads=1 2>&1 | tee target/linux-gtk-proof/gtk-tests.txt
+      - name: Bind GTK fixture proof to its original development executable
+        working-directory: clients/rust
+        env:
+          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 linux/verify-gtk-proof.py target/linux-gtk-proof
+      - name: Save native Linux development proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-linux-gtk-candidate-${{ github.sha }}
+          path: |
+            clients/rust/target/release/hormuz-linux
+            clients/rust/target/release/hormuz-client-relay
+            clients/rust/target/linux-gtk-proof
+          if-no-files-found: error
+          retention-days: 14
   contracts:
     name: Shared contracts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

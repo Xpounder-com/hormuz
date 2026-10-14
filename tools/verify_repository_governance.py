@@ -1600,7 +1600,7 @@ def _validate_native_contract_workflow(
     job_blocks: dict[str, str],
     job_fields: dict[str, dict[str, str]],
 ) -> None:
-    """Keep one reusable native matrix, required by the calling CI aggregate."""
+    """Keep the native matrix and actual GTK session in the required aggregate."""
 
     windows_steps = {
         "Build native Windows development candidate": (
@@ -1690,7 +1690,7 @@ def _validate_native_contract_workflow(
         or "pull_request:" in text
         or "push:" in text
         or "continue-on-error:" in text
-        or set(job_blocks) != {"contracts"}
+        or set(job_blocks) != {"contracts", "linux-gtk"}
         or job_fields["contracts"].get("name") != "Shared contracts (${{ matrix.os }})"
         or job_fields["contracts"].get("runs-on") != "${{ matrix.os }}"
         or "if" in job_fields["contracts"]
@@ -1702,7 +1702,7 @@ def _validate_native_contract_workflow(
         or "      fail-fast: false\n" not in text
         or "        os: [ubuntu-latest, windows-latest, macos-15]\n" not in text
         or "group: native-client-contracts-${{ github.workflow }}-${{ github.ref }}" not in text
-        or "persist-credentials: false" not in text
+        or "persist-credentials: false" not in job_blocks["contracts"]
         or "        run: python -m unittest -v tests.test_native_client_contracts\n" not in text
         or "        run: cargo fmt --all -- --check\n" not in text
         or "        run: cargo test --workspace --locked -- --test-threads=1\n" not in text
@@ -1725,6 +1725,65 @@ def _validate_native_contract_workflow(
             raise RepositoryGovernanceError(
                 f"native contract workflow Windows step changed: {name}"
             )
+    _validate_linux_gtk_job(job_blocks["linux-gtk"], job_fields["linux-gtk"])
+
+
+def _validate_linux_gtk_job(job: str, fields: dict[str, str]) -> None:
+    """Require native widgets/socket fixtures, then original-binary proof.
+
+    Exact ordered steps make test filters, shell-error suppression, synthetic
+    stand-in builds and optional proof uploads fail closed without a YAML
+    dependency or another parser.
+    """
+    expected_fields = {
+        "name": "Linux GTK shell (native synthetic session)",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": "20",
+        "steps": "",
+    }
+    expected_steps = """      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install native GTK build and isolated display dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libgtk-4-dev libssl-dev pkg-config xvfb xauth dbus-x11 at-spi2-core
+      - name: Install pinned Rust toolchain
+        working-directory: clients/rust
+        run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt,clippy
+      - name: Build the actual Linux GTK executable
+        working-directory: clients/rust
+        run: cargo build -p hormuz-linux -p hormuz-client-relay --features hormuz-linux/gtk-ui --release --locked
+      - name: Lint GTK shell and native fixtures
+        working-directory: clients/rust
+        run: cargo clippy -p hormuz-linux --features gtk-ui --all-targets --locked -- -D warnings
+      - name: Exercise actual GTK controls with an isolated session
+        working-directory: clients/rust
+        shell: bash
+        env:
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          HORMUZ_GTK_PROOF_DIRECTORY: ${{ github.workspace }}/clients/rust/target/linux-gtk-proof
+        run: |
+          mkdir -p target/linux-gtk-proof
+          xvfb-run -a dbus-run-session -- cargo test -p hormuz-linux --features gtk-ui --locked -- --test-threads=1 2>&1 | tee target/linux-gtk-proof/gtk-tests.txt
+      - name: Bind GTK fixture proof to its original development executable
+        working-directory: clients/rust
+        env:
+          HORMUZ_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 linux/verify-gtk-proof.py target/linux-gtk-proof
+      - name: Save native Linux development proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-linux-gtk-candidate-${{ github.sha }}
+          path: |
+            clients/rust/target/release/hormuz-linux
+            clients/rust/target/release/hormuz-client-relay
+            clients/rust/target/linux-gtk-proof
+          if-no-files-found: error
+          retention-days: 14
+"""
+    if fields != expected_fields or job.partition("    steps:\n")[2] != expected_steps:
+        raise RepositoryGovernanceError("native contract workflow Linux GTK job changed")
 
 
 def _validate_workflows(

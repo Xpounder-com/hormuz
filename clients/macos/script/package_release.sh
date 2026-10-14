@@ -215,16 +215,26 @@ trap cleanup EXIT
 
 export CLANG_MODULE_CACHE_PATH="$HORMUZ_TEMPORARY/clang-module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$HORMUZ_TEMPORARY/swiftpm-module-cache"
+
 if [ -n "$HORMUZ_PREBUILT_BINARY" ]; then
   HORMUZ_BINARY_SOURCE="$HORMUZ_PREBUILT_BINARY"
   HORMUZ_DSYM_SOURCE="$HORMUZ_PREBUILT_DSYM"
 else
+  # Link the same-source UI core into the Swift executable. Custody stays in
+  # that executable, not a second helper or Rust-selected Keychain backend.
+  (cd "$HORMUZ_REPO_ROOT/clients/rust"; "${HORMUZ_CARGO:-cargo}" build \
+    --target-dir "$HORMUZ_TEMPORARY/rust" --locked --release --package hormuz-client-ui)
+  export HORMUZ_RUST_UI_LIBRARY_DIR="$HORMUZ_TEMPORARY/rust/release"
   HORMUZ_SCRATCH="$HORMUZ_TEMPORARY/build"
   swift build --package-path "$HORMUZ_MAC_ROOT" --scratch-path "$HORMUZ_SCRATCH" \
     --configuration release --arch arm64 --product Hormuz
   HORMUZ_BINARY_SOURCE="$(swift build --package-path "$HORMUZ_MAC_ROOT" --scratch-path "$HORMUZ_SCRATCH" \
     --configuration release --arch arm64 --show-bin-path)/Hormuz"
   HORMUZ_DSYM_SOURCE="$(dirname "$HORMUZ_BINARY_SOURCE")/Hormuz.dSYM"
+fi
+if ! nm -gU "$HORMUZ_BINARY_SOURCE" | grep ' _hormuz_ui_abi_version$' > /dev/null; then
+  echo "The source-matched Rust UI ABI must be embedded in the Mac executable." >&2
+  exit 1
 fi
 if [ -n "$HORMUZ_PREBUILT_RELAY" ]; then
   HORMUZ_RELAY_SOURCE="$HORMUZ_PREBUILT_RELAY"

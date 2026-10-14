@@ -1,7 +1,9 @@
 # Hormuz macOS companion integration
 
-Status: implemented locally on `mehrdad/hormuz-companion-ui` from repository
-`main` at `5815081`.
+The original native presentation evidence below was captured on
+`mehrdad/hormuz-companion-ui` from `main` at `5815081`. The newer bounded shared
+Rust integration has separate ownership/compatibility tests; that historical
+visual evidence does not qualify its new scheduling, power or release artifacts.
 
 ## Product behavior
 
@@ -41,10 +43,19 @@ scroll inside it. The resting three-ring body remains approximately 70 points wi
 
 ## Runtime ownership
 
-`ConnectionModel` remains the sole owner of the live client state. It delegates to
-the existing `SessionController`, `PrivateDirectory`, `KeychainSessionStore`,
-`HTTPGatewayTransport`, and `ConnectorPlan` implementations. The companion reads a
-derived `CompanionSnapshot`; it does not access Keychain or the gateway itself.
+`ConnectionModel` owns one source-linked Rust/C/Swift bridge for dashboard state,
+explicit freshness, scheduling, aggregate native visibility and lifecycle inputs.
+It retains the existing Swift manual/hosted enrollment, team join, revocation,
+private-directory, Keychain and governed-launcher paths during this bounded
+migration. Rust custody calls are explicit callbacks into that Swift executable;
+it never silently selects a second Keychain implementation. The companion reads
+a derived `CompanionSnapshot`; individual views access neither custody nor the
+gateway. See [`clients/rust/ui/README.md`](../clients/rust/ui/README.md) for ABI,
+shutdown, compatibility and remaining native qualification boundaries.
+
+Closing controls preserves active relay leases. Quit pauses new admissions and
+requires Wait, Cancel or explicitly confirmed Stop and Quit for active clients.
+Idle UI restoration does not start the optimizer; readiness is request-owned.
 
 The `Hormuz` executable still supports the credential-helper command path before
 starting AppKit. Arguments beginning with `--companion-` are the only nonempty
@@ -70,9 +81,10 @@ failed refresh cannot leave a current green state.
 ./clients/macos/script/build_and_run.sh --verify
 ```
 
-The integrated Swift package has 33 tests: the existing authentication, secure
+The integrated Swift package exercises the existing authentication, secure
 storage, transport, and connector checks plus companion geometry, threshold,
-clamping, pinning, hover-dismissal, navigation, and settled-scale regression coverage. The opt-in isolated Keychain
+clamping, pinning, hover-dismissal, navigation, settled-scale, owned bridge and
+active-client drainage regression coverage. The opt-in isolated Keychain
 round-trip remains skipped unless `HORMUZ_TEST_KEYCHAIN=1` is set.
 
 Visual evidence and normalized source comparisons are in

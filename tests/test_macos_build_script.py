@@ -41,7 +41,8 @@ class MacOSBuildScriptTests(unittest.TestCase):
     def test_relative_target_and_xcode_fallback_are_set_before_cargo(self) -> None:
         setup, root = self._cargo_setup("relative-target")
         self.assertEqual(setup["arguments"], ["build", "--target-dir", str(root / "relative-target"),
-                                               "--locked", "--package", "hormuz-client-relay"])
+                                               "--locked", "--package", "hormuz-client-relay",
+                                               "--package", "hormuz-client-ui"])
         self.assertEqual(setup["developer"], str(XCODE) if XCODE.is_dir() else None)
 
     def test_absolute_target_and_explicit_developer_directory_are_preserved(self) -> None:

@@ -2,6 +2,9 @@ import AppKit
 import Foundation
 import HormuzClientCore
 import Observation
+#if canImport(HormuzRustBridge)
+import HormuzRustBridge
+#endif
 
 @MainActor @Observable final class ConnectionModel {
     var gateway = ""
@@ -34,6 +37,18 @@ import Observation
     private var relayOwner: RelayOwner?
     private var operation: Task<Void, Never>?
     private var didRestore = false
+    private(set) var readingStatus: CompanionReadingStatus = .offline
+    private(set) var pendingQuit = false
+    private var quitTask: Task<Void, Never>?
+    private var dashboardSurfaces: [String: UInt32] = [:]
+    // Start blocked until the shell has observed a usable native session.
+    private var sessionLocked = true
+    private var sleeping = false
+    #if canImport(HormuzRustBridge)
+    private var nativeClient: RustNativeClient?
+    private var nativeSubscription: RustNativeSubscription?
+    private var nativeLauncherGeneration: ConnectionProfile?
+    #endif
     private let desktopOrigin = Bundle.main.object(forInfoDictionaryKey: "HormuzDesktopOrigin") as? String
 
     init() {
@@ -63,7 +78,14 @@ import Observation
         if sessionState == .revocationPending { return "Sign-out pending" }
         if sessionState == .refreshPending { return "Sign-in needs attention" }
         if let expiresAt, expiresAt <= Date(), hasSession { return "Session expired" }
-        if dashboard != nil { return "Gateway verified" }
+        if dashboard != nil {
+            switch readingStatus {
+            case .current: return "Gateway verified"
+            case .stale: return "Gateway reading stale"
+            case .offline: return "Gateway offline · last reading retained"
+            case .needsAuthentication: return "Sign-in needs attention"
+            }
+        }
         return hasSession ? "Signed in · not yet verified" : "Not connected"
     }
 
@@ -78,7 +100,23 @@ import Observation
             relayOwner = try RelayOwner()
             controller = SessionController(directory: directory)
             try await syncStatus()
+            #if canImport(HormuzRustBridge)
+            nativeClient = try await RustNativeClient.open(directory: directory.root,
+                store: KeychainSessionStore(), openBrowser: { [weak self] url in
+                    Task { @MainActor in
+                        self?.loginURL = url
+                        self?.awaitingBrowser = true
+                        if !NSWorkspace.shared.open(url) { self?.message = "The browser could not open. Use Open sign-in page to continue." }
+                    }
+                    return true
+                })
+            nativeSubscription = try await nativeClient?.subscribe { [weak self] data in
+                self?.applyNativeDisplay(data)
+            }
+            await updateNativeLifecycle()
+            #else
             if hasSession { refresh() }
+            #endif
         } catch { message = ClientError.message(for: error) }
     }
 
@@ -130,7 +168,10 @@ import Observation
         loginURL = nil
         try await syncStatus()
         guard let profile else { throw ClientError.loginRequired }
+        #if !canImport(HormuzRustBridge)
         dashboard = try await controller.dashboard(profileID: profile.id)
+        readingStatus = .current
+        #endif
         try await prepareLauncher()
     }
 
@@ -168,7 +209,10 @@ import Observation
         awaitingBrowser = false
         loginURL = nil
         try await syncStatus()
+        #if !canImport(HormuzRustBridge)
         dashboard = try await controller.dashboard(profileID: profile.id)
+        readingStatus = .current
+        #endif
     }
 
     func cancelSignIn() { operation?.cancel() }
@@ -188,11 +232,19 @@ import Observation
     func reopenBrowser() { if let loginURL { NSWorkspace.shared.open(loginURL) } }
 
     func refresh() {
+        #if canImport(HormuzRustBridge)
+        guard let nativeClient else { return }
+        Task {
+            do { try await nativeClient.refresh() }
+            catch { message = ClientError.message(for: error) }
+        }
+        #else
         run {
             guard let controller = self.controller, let profile = self.profile else { throw ClientError.loginRequired }
             // A previous success must not remain a green indicator after failure.
             self.dashboard = nil
             self.dashboard = try await controller.dashboard(profileID: profile.id)
+            self.readingStatus = .current
             try await self.syncStatus()
             // A saved launcher holds this app lifetime's lease. Rebind it after
             // restart only once the restored session is gateway-verified. First
@@ -203,6 +255,7 @@ import Observation
                 try await self.prepareLauncher()
             }
         }
+        #endif
     }
 
     func signOut() {
@@ -251,10 +304,25 @@ import Observation
 
     func openClient() {
         guard connectorSaved, let connector, hasSession, dashboard != nil,
+              readingStatus == .current,
               sessionState == .active, expiresAt.map({ $0 > Date() }) == true else { return }
+        #if canImport(HormuzRustBridge)
+        run {
+            guard let nativeClient = self.nativeClient else { throw ClientError.storageUnavailable }
+            try await nativeClient.launch { approved in
+                try await MainActor.run {
+                    guard !self.pendingQuit, approved == connector.profile else { throw ClientError.configurationChanged }
+                    if !NSWorkspace.shared.open(connector.launcher) {
+                        self.message = "Terminal could not open the Hormuz launcher. Review the client setup in Advanced."
+                    }
+                }
+            }
+        }
+        #else
         if !NSWorkspace.shared.open(connector.launcher) {
             message = "Terminal could not open the Hormuz launcher. Review the client setup in Advanced."
         }
+        #endif
     }
 
     private func prepareLauncher() async throws {
@@ -268,6 +336,111 @@ import Observation
     }
 
     func stopLaunchedClients() { relayOwner?.stop() }
+
+    var activeClientCount: Int { relayOwner?.activeClientCount ?? 0 }
+    func beginClientDrain() -> Int { relayOwner?.beginDrain() ?? 0 }
+    func cancelPendingQuit() {
+        quitTask?.cancel()
+        quitTask = nil
+        pendingQuit = false
+        relayOwner?.resumeAdmissions()
+        message = "Quit cancelled. Active clients were not interrupted."
+    }
+    func waitForClientsBeforeQuit(_ quit: @escaping @MainActor () -> Void) {
+        quitTask?.cancel()
+        pendingQuit = true
+        message = "Waiting for launched clients to exit. New launches are paused. You can cancel the pending quit from the menu."
+        quitTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if self.activeClientCount == 0 {
+                    self.pendingQuit = false
+                    self.quitTask = nil
+                    quit()
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+    }
+    func shutdown() async {
+        quitTask?.cancel()
+        quitTask = nil
+        let activeOperation = operation
+        activeOperation?.cancel()
+        await activeOperation?.value
+        #if canImport(HormuzRustBridge)
+        await nativeSubscription?.cancel()
+        nativeSubscription = nil
+        await nativeClient?.shutdown()
+        nativeClient = nil
+        #endif
+        stopLaunchedClients()
+    }
+
+    /// Aggregate only the two owned native surfaces; no timer or worker per view.
+    func dashboardVisibility(surface: String, detail: Bool, visible: Bool) {
+        guard ["edge", "controlCenter"].contains(surface) else { return }
+        let value: UInt32 = visible ? (detail ? 2 : 1) : 0
+        guard dashboardSurfaces[surface] != value else { return }
+        dashboardSurfaces[surface] = value
+        #if canImport(HormuzRustBridge)
+        Task { await updateNativeLifecycle() }
+        #endif
+    }
+    func systemLifecycle(locked: Bool? = nil, asleep: Bool? = nil, networkChanged: Bool = false) {
+        if let locked { sessionLocked = locked }
+        if let asleep { sleeping = asleep }
+        #if canImport(HormuzRustBridge)
+        Task {
+            await updateNativeLifecycle()
+            if networkChanged { try? await nativeClient?.lifecycle(.networkChanged) }
+        }
+        #endif
+    }
+    #if canImport(HormuzRustBridge)
+    private func updateNativeLifecycle() async {
+        guard let nativeClient else { return }
+        try? await nativeClient.lifecycle(sessionLocked || operation != nil ? .locked : .unlocked)
+        try? await nativeClient.lifecycle(sleeping ? .sleep : .wake)
+        let visible = dashboardSurfaces.values.max() ?? 0
+        try? await nativeClient.visibility(RustNativeClient.Visibility(rawValue: visible) ?? .hidden)
+    }
+    private func applyNativeDisplay(_ data: Data) {
+        guard operation == nil else { return }
+        do {
+            let native = try NativeDisplayState(data: data)
+            if let status = native.connection {
+                profile = status.profile
+                hasSession = status.hasSession
+                sessionState = status.sessionState
+                expiresAt = status.expiresAt
+            } else {
+                hasSession = false
+                sessionState = nil
+                expiresAt = nil
+            }
+            dashboard = native.dashboard
+            readingStatus = native.readingStatus
+            if let error = native.error { message = ClientError.message(for: error) }
+            if readingStatus == .current, connector == nil, hasSession,
+               nativeLauncherGeneration != profile {
+                nativeLauncherGeneration = profile
+                run { try await self.syncStatus(); try await self.prepareLauncherIfSaved() }
+            }
+        } catch {
+            dashboard = nil
+            readingStatus = .needsAuthentication
+            message = ClientError.message(for: error)
+        }
+    }
+    private func prepareLauncherIfSaved() async throws {
+        guard let profile else { return }
+        let saved = profile.client.rawValue + "-" + profile.key + ".command"
+        let wasSaved = try directory?.read(saved) != nil
+        if profile.desktopManaged || wasSaved { try await prepareLauncher() }
+    }
+    #endif
 
     func previewRemoval() {
         openRemovalControls?()
@@ -328,13 +501,20 @@ import Observation
             guard let profile = self.profile, let directory = self.directory else {
                 throw ClientError.loginRequired
             }
-            let preference = try await ContextOptimizationSettings.save(
-                enabled: enabled, profile: profile, directory: directory
-            )
+            #if canImport(HormuzRustBridge)
+            guard let nativeClient = self.nativeClient else { throw ClientError.storageUnavailable }
+            try await nativeClient.changeContextSetting(enabled: enabled) { canonical in
+                _ = try await ContextOptimizationSettings.save(enabled: enabled, profile: profile, directory: directory)
+                guard try directory.read(ContextOptimizationSettings.fileName(profile: profile)) == canonical else {
+                    throw ClientError.configurationChanged
+                }
+            }
+            let preference = try ContextOptimizationSettings.load(profile: profile, directory: directory)
+            #else
+            let preference = try await ContextOptimizationSettings.save(enabled: enabled, profile: profile, directory: directory)
+            #endif
             self.contextOptimizationEnabled = preference.enabled
-            self.contextOptimizationStatus = await self.contextStatus(
-                preference: preference, profile: profile, directory: directory
-            )
+            self.contextOptimizationStatus = preference.enabled ? .onDemand : .off
             self.message = preference.enabled
                 ? "Context optimization is on. Its readiness applies to the next request; new chats have the most stable cache behavior."
                 : "Context optimization is off. Requests pass through the local helper unchanged."
@@ -362,9 +542,7 @@ import Observation
                         profile: profile, directory: directory
                     )
                     contextOptimizationEnabled = preference.enabled
-                    contextOptimizationStatus = await contextStatus(
-                        preference: preference, profile: profile, directory: directory
-                    )
+                    contextOptimizationStatus = preference.enabled ? .onDemand : .off
                 } catch {
                     contextOptimizationEnabled = false
                     contextOptimizationStatus = .settingsInvalid
@@ -376,27 +554,14 @@ import Observation
         }
     }
 
-    private func contextStatus(
-        preference: ContextOptimizationPreference,
-        profile: ConnectionProfile,
-        directory: PrivateDirectory
-    ) async -> ContextOptimizationStatus {
-        guard preference.enabled else { return .off }
-        guard let executable = Bundle.main.executableURL else {
-            return .resourcesUnavailable
-        }
-        let helper = executable.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Resources/ContextHelper/hormuz-context")
-        return await ContextOptimizationSettings.probeStatus(
-            profile: profile, directory: directory, helper: helper
-        )
-    }
-
     private func run(_ action: @escaping @MainActor () async throws -> Void) {
         guard !isBusy else { return }
         isBusy = true
         message = nil
         operation = Task {
+            #if canImport(HormuzRustBridge)
+            try? await nativeClient?.lifecycle(.locked)
+            #endif
             do { try await action() }
             catch { message = ClientError.message(for: error) }
             awaitingBrowser = false
@@ -405,6 +570,10 @@ import Observation
             try? await syncStatus()
             isBusy = false
             operation = nil
+            #if canImport(HormuzRustBridge)
+            try? await nativeClient?.retry()
+            await updateNativeLifecycle()
+            #endif
         }
     }
 }

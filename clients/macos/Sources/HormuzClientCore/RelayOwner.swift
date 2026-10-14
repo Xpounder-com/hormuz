@@ -11,6 +11,8 @@ public final class RelayOwner: @unchecked Sendable {
     private let queueKey = DispatchSpecificKey<Bool>()
     private var listener: DispatchSourceRead?
     private var connections: [Int32: DispatchSourceRead] = [:]
+    private var listenerFD: Int32 = -1
+    private var accepting = true
 
     public init() throws {
         // Keep the Unix socket pathname below Darwin's 104-byte limit, even
@@ -54,6 +56,7 @@ public final class RelayOwner: @unchecked Sendable {
         source.setEventHandler { [weak self] in self?.acceptConnections(fd) }
         source.setCancelHandler { close(fd) }
         listener = source
+        listenerFD = fd
         succeeded = true
         source.resume()
     }
@@ -62,6 +65,8 @@ public final class RelayOwner: @unchecked Sendable {
         let closeConnections = {
             self.listener?.cancel()
             self.listener = nil
+            self.listenerFD = -1
+            self.accepting = false
             for source in self.connections.values { source.cancel() }
             self.connections.removeAll()
         }
@@ -73,12 +78,35 @@ public final class RelayOwner: @unchecked Sendable {
 
     deinit { stop() }
 
+    /// Drain admissions, not active traffic. Existing lease sockets remain open
+    /// until their clients exit or the user explicitly confirms Stop and Quit.
+    public func beginDrain() -> Int {
+        queue.sync {
+            if listenerFD >= 0 { acceptConnections(listenerFD) }
+            accepting = false
+            return connections.count
+        }
+    }
+    public func resumeAdmissions() {
+        queue.sync { if listener != nil { accepting = true } }
+    }
+    public var activeClientCount: Int {
+        queue.sync {
+            if listenerFD >= 0 { acceptConnections(listenerFD) }
+            return connections.count
+        }
+    }
+
     private func acceptConnections(_ fd: Int32) {
         guard listener != nil else { return }
-        while true {
+        // A bounded batch keeps drain/count checks responsive even if another
+        // process under this same user repeatedly attempts private lease opens.
+        for _ in 0..<32 {
             let connection = accept(fd, nil, nil)
             guard connection >= 0 else { return }
-            guard connections.count < 16,
+            var user: uid_t = 0, group: gid_t = 0
+            guard accepting, connections.count < 16,
+                  getpeereid(connection, &user, &group) == 0, user == getuid(),
                   fcntl(connection, F_SETFD, FD_CLOEXEC) == 0,
                   fcntl(connection, F_SETFL, O_NONBLOCK) == 0 else {
                 close(connection)

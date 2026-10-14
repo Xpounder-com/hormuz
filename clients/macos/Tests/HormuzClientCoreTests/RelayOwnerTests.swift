@@ -67,4 +67,28 @@ final class RelayOwnerTests: XCTestCase {
         XCTAssertEqual(recv(unrelated, &byte, 1, MSG_DONTWAIT), -1)
         XCTAssertEqual(errno, EAGAIN)
     }
+
+    func testDrainRejectsNewLaunchesWithoutInterruptingExistingClientsAndCanResume() throws {
+        let owner = try RelayOwner()
+        defer { owner.stop() }
+        let active = try connect(owner.socketURL)
+        defer { close(active) }
+        XCTAssertEqual(owner.activeClientCount, 1)
+        XCTAssertEqual(owner.beginDrain(), 1)
+        var byte: UInt8 = 0
+        XCTAssertEqual(recv(active, &byte, 1, MSG_DONTWAIT), -1)
+        XCTAssertEqual(errno, EAGAIN) // Panel close / waiting to quit retains traffic.
+        let rejected = try connect(owner.socketURL)
+        defer { close(rejected) }
+        assertClosed(rejected)
+        XCTAssertEqual(owner.activeClientCount, 1)
+        owner.resumeAdmissions()
+        let next = try connect(owner.socketURL)
+        defer { close(next) }
+        XCTAssertEqual(owner.activeClientCount, 2)
+        owner.stop() // Explicit forced quit releases both leases.
+        assertClosed(active)
+        assertClosed(next)
+        XCTAssertEqual(owner.activeClientCount, 0)
+    }
 }

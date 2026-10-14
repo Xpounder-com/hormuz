@@ -479,7 +479,7 @@ fn run_with_executable(
 
 /// A native shell owns this lease independently of its panels. Owner exit or
 /// explicit quit ends the invocation without replaying any in-flight request.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn run_client_until(
     profile: &ConnectionProfile,
     credentials: Arc<dyn CredentialSource>,
@@ -489,7 +489,7 @@ pub fn run_client_until(
     run_client_until_with_work_id(profile, credentials, optimization, None, stopped)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn run_client_until_with_work_id(
     profile: &ConnectionProfile,
     credentials: Arc<dyn CredentialSource>,

@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "platform", "transport", "session", "interaction", "relay", "windows", "context-optimizer"]
+members = ["core", "platform", "transport", "session", "interaction", "relay", "desktop", "ui", "windows", "linux", "context-optimizer"]
 resolver = "2"
 
 [workspace.package]

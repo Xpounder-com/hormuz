@@ -133,6 +133,20 @@ credentials are resolved inside the launcher. The literal-argument switch
 requires systemd 254 or newer and fails closed when unavailable. This source
 path is not wired to a resident native Linux shell yet.
 
+An app-owned launcher can additionally pass `--owner-socket <absolute-path>`.
+After verifying the user service, the relay requires a socket owned by the
+effective UID in a private 0700 directory and checks the connected Linux peer's
+UID. The app must accept that peer and send exactly one byte (`0x01`) within
+three seconds, before private state, credential access or client discovery.
+A pending connection alone is not acceptance. The app retains the socket for
+the invocation; EOF, unexpected data or channel failure cancels launch and
+running client work. The socket is close-on-exec and is never owned by panel
+visibility. Cancellation is checked between startup phases; a blocking Secret
+Service operation retains its existing bounded timeout, while an explicit
+app quit must also stop the exact user unit. Omitting the owner socket retains
+the existing terminal-controlled invocation. The Mac lease keeps its existing
+no-data protocol rather than adopting the Linux startup acknowledgement.
+
 On Linux, the command opens the validated private directory and uses the
 Secret Service default collection through `NativeCredentialStore`. It rejects
 missing or locked credentials, pending or lifetime-expired sessions, and

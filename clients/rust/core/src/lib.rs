@@ -12,11 +12,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 /// Matches the existing Mac transport bound; transport must also bound reads.
 pub const MAX_RESPONSE_BYTES: usize = 128 * 1024;
 
+mod desktop;
 mod error;
 mod profile;
 mod settings;
 mod status;
 
+pub use desktop::DesktopProfile;
 pub use error::ClientError;
 pub use profile::{normalize_gateway, ConnectionProfile, GatewaySetup};
 pub use settings::{

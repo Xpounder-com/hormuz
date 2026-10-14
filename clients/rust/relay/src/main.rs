@@ -3,6 +3,9 @@
 #[cfg(any(target_os = "macos", target_os = "linux", all(test, unix)))]
 mod helper_exchange;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod owner_lease;
+
 // The same suspended-start Job Object owner used for launched AI clients also
 // owns Windows optimizer helpers. Keep the native calls in one reviewed module.
 #[cfg(windows)]

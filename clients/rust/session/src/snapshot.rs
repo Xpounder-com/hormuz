@@ -40,6 +40,7 @@ pub(crate) fn authentication_lost(error: ClientError) -> bool {
             | ClientError::SecureStoreUnavailable
             | ClientError::StorageUnavailable
             | ClientError::UnsafeStorage
+            | ClientError::DesktopProfileChanged
     )
 }
 
