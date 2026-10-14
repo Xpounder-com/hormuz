@@ -223,8 +223,11 @@ the local credential out of process arguments, and restores normal setup when
 the process exits. Aider does not expose its local shell transcript as the
 typed tool-result messages required by `structural-v1`; the benefit view
 therefore reports zero eligible transforms honestly while still showing
-captured usage and waiting. Managed Aider routing is rejected because the
-current managed gateway does not expose Chat Completions.
+captured usage and waiting. Managed Aider routing remains rejected by the
+qualified Personal Optimizer adapter contract. The newer AI Work gateway path
+does expose Chat Completions; endpoint availability alone does not qualify the
+managed Aider identity, work binding and adapter behavior. Personal-adapter
+support and the future desktop execution adapter keep separate acceptance.
 
 Run the provider-free contract check with:
 

@@ -1,6 +1,16 @@
 # Hormuz Mac: one sign-in path
 
-Status: the one-button flow is verified in an internal development Mac build
+Current pilot disposition — 2026-10-13: the owner confirmed no hosted pilot
+users/testers or paid access commitments and requested retirement. The
+`hormuz-https-preflight` web service is now suspended, its obsolete GitHub deploy
+authority removed, and its live-pilot qualification workflow disabled. The
+dated hosted-login evidence below is historical; it does not describe a
+currently available hosted login. PostgreSQL and disks remain pending
+archive/recovery and retention checks, with current retained costs unverified.
+See the [account cleanup ledger](DESKTOP_ACCOUNT_CLEANUP.md). Existing shipped
+client assets and generic manual/self-hosted origin contracts remain preserved.
+
+Historical status: the one-button flow was verified in an internal development Mac build
 against the existing paid `hormuz-https-preflight` service. The app completes
 browser sign-in with the existing Okta setup, saves its session in Keychain,
 loads its server-selected Codex profile and usage, and prepares **Open Codex**.

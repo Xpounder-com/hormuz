@@ -1,11 +1,50 @@
-# Hormuz core hardening roadmap
+# Hormuz roadmap and qualification tracks
 
 Hormuz is a model-neutral enterprise AI gateway and policy control plane for employees' existing Codex and Claude Code workflows. Its core job is to authenticate a request, apply organization policy, route or deny it, protect secrets before provider egress, and retain metadata-only evidence of governed usage.
 
 This roadmap is evidence-gated. A milestone is not complete because code exists or a narrow test passes. Every closure needs an explicit scope, executable checks, package or deployment proof where relevant, and a truthful statement of what remains unproven.
 
-The additive native-companion program is tracked in [epic #329](https://github.com/Xpounder-com/hormuz/issues/329)
-and the [v1.4.0–v1.9.0 desktop roadmap](NATIVE_CLIENT_ROADMAP.md).
+## Current program map — 2026-10-13
+
+The new desktop direction is a shared Electron/Svelte project workspace and
+minimal quick bar, managed llama.cpp setup and policy-bounded local/cloud Auto.
+Complete and review the simulated UI before backend integration. It is **planning work**,
+not an implemented or qualified desktop release. Follow
+[epic #479](https://github.com/Xpounder-com/hormuz/issues/479), the
+[delivery stages](ELECTRON_DESKTOP_ROADMAP.md), and the
+[complete backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md).
+The scope is ready to start bounded UI simulation with
+[recorded UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md), #480 A.
+This defines product/mock defaults now without implementing a backend or
+closing #480. Actual backend work follows
+#492 approval and a named owner, selected finish, exact model/provider/protocol
+choices, storage/context/output/time limits and platform qualification rows.
+
+| Program | Current boundary |
+| --- | --- |
+| Electron desktop | #479; recorded #480 A boundaries feed UI #481/#487–#491/#502 and #492 first, then #480 B/#482–#485/#493 backend and retained #337/#338/#339/#340/#346/#347 qualification gates. Version and dates TBD. |
+| Research Review | [#502 UI/spec/mock](https://github.com/Xpounder-com/hormuz/issues/502) precedes #492; optional [#503 runtime](https://github.com/Xpounder-com/hormuz/issues/503) follows qualified single-response #493/#483/#485/#484 contracts. Required before exposing real Review, not a plain-chat prerequisite. [Bounded role/version/evidence contract](RESEARCH_REVIEW_MODE.md). |
+| Existing native clients | Preserve the v1.8.0 notarized Mac archive, CLI/agent paths and accepted shared contracts. The separate native-shell plan #329 is superseded; its [roadmap](NATIVE_CLIENT_ROADMAP.md) is historical. |
+| Optional Rust work | #341 existing agent-relay qualification and #342 measured optimizer migration. No blanket port prerequisite to first local chat. |
+| Portfolio intelligence | #226; #214/#219/#220/#225 remain open. Future release identity TBD; frozen evidence is retained. |
+| Enterprise qualification | Conditional #9/#10/#11/#13/#107 gates remain open; bounded reference proof is not general production certification. |
+| Hosted Pro | #437–#443 deferred; no Render/Okta/Stripe/Postgres requirement for local projects or direct BYOK. Its unresolved tenant/payment/production obligations remain separate from cleanup. |
+| Account cleanup | #494–#501, `track:cleanup`, milestone 16; independent inventory, bounded authorized operations and retained data/custody/payment holds. [Account ledger](DESKTOP_ACCOUNT_CLEANUP.md) and [infrastructure assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md). Not a desktop UI prerequisite or Hosted Pro activation. |
+| Local cleanup | [#504](https://github.com/Xpounder-com/hormuz/issues/504) audited disposition complete: 699 generated folders removed, 113 old merged checkouts retired and 19 test/export folders archived and retired. Exact recovery, seven package assets, 100 retained content roots and all 31 protected checkouts are preserved. [Verified checkpoint](DESKTOP_LOCAL_CLEANUP.md). No application build or backend work starts. |
+| Independent validation/tooling | #307 retains its exact v1.2 study; #369 retains unresolved independent review. New installed desktop evidence belongs to #340. |
+
+Current main contains the AI Work 1.9.0 source candidate; published v1.8.0
+installers remain separate. Legacy milestone numbers do not establish acceptance
+of those similarly numbered releases. Issue updates preserve original criteria
+and evidence; superseded UI-only plans are not labeled completed.
+
+Separate authorized cleanup on 2026-10-13 suspended the remaining active Render
+pilot; all three web services are now suspended. It removed two obsolete GitHub
+environment secrets and disabled the live pilot
+workflow. PostgreSQL and disks remain retained; archive/export/restore and
+data/recovery obligations are pending. These operations do not imply complete retirement,
+known savings or a qualified replacement for paused hosted access; application
+implementation and release acceptance remain separate.
 
 ## v1.8.0 notarized Mac companion; Windows preview
 
@@ -13,8 +52,9 @@ Hormuz v1.8.0 publishes the signed and notarized Apple Silicon archive with
 the native Rust relay and packaged on-demand Python optimizer. Owner exit
 cancels stalled startup credential helpers before client launch or gateway
 egress. Windows stays an unsigned, unsupported preview. The remaining #341
-lifecycle/platform criteria, #342 Rust optimizer port and #343 GTK4 shell
-are separate work. See the [v1.8.0 release scope](releases/v1.8.0-notarized-mac.md).
+lifecycle/platform criteria and optional #342 Rust optimizer work retain their
+own boundaries. The former #343 GTK4 shell plan is superseded by the Electron
+desktop program. See the [v1.8.0 release scope](releases/v1.8.0-notarized-mac.md).
 
 ## Previous release scopes
 
@@ -81,7 +121,9 @@ portfolio acceptance continue separately; they do not hold this release.
 The accepted [portfolio-intelligence contract](PORTFOLIO_INTELLIGENCE.md) and
 [ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md) originated
 under the unreleased v1.1.0 plan. Because v1.2.0 shipped first, the remaining
-portfolio program continued alongside v1.3.0. Frozen v1.1 contract identifiers and
+portfolio program continued alongside v1.3.0. Its future complete-program release
+identity is now TBD; the published v1.3.0 Personal Optimizer and v1.8.0 Mac
+releases did not complete it. Frozen v1.1 contract identifiers and
 accepted checkpoint evidence remain historical inputs and are not rewritten.
 The work is organized under
 [epic #226](https://github.com/Xpounder-com/hormuz/issues/226) and must proceed
@@ -123,9 +165,11 @@ The #217 analytics-first work-budget runtime is complete through PR #262 and
 merged main `4e3133f19db4c34d7a181848ebc36754bce164ea`, with exact-main CI run
 `33630063750`. It provides additive SQLite 9/PostgreSQL 13 storage, atomic
 event-time attribution and reservation binding, conservative settlement, and a
-current management report. Its accepted evidence remains a prerequisite for
-the open finance, association, scorecard, API, recommendation, and pilot gates;
-it does not make the v1.3.0 portfolio milestone complete.
+current management report. The latest issue reconciliation records finance #8,
+association #221, scorecards #222, role views #223 and recommendations #224 as
+closed within their accepted scopes. #214/#219/#220/#225 remain open for the
+complete program. These feature checkpoints do not establish portfolio release
+completion or the independent pilot.
 
 The issue #224 source candidate is specified in
 [Portfolio policy recommendations](PORTFOLIO_RECOMMENDATIONS.md). It adds a

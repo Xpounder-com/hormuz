@@ -1,4 +1,14 @@
-# Native companion roadmap
+# Historical native companion roadmap
+
+> Superseded planning direction — 2026-10-13. The active desktop program is
+> [Electron desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479)
+> and [its delivery roadmap](ELECTRON_DESKTOP_ROADMAP.md). The separate
+> Win32/GTK/Swift rendering outcomes are retired as not planned. Reusable
+> #337/#338/#339/#340/#346/#347 acceptance moves to the new program;
+> #341/#342 retain their explicit runtime scopes. The original plan and accepted
+> implementation/reference evidence below are retained as history, not current
+> version commitments or Electron qualification. The shipped Mac/CLI remains
+> available until a qualified replacement and migration exist.
 
 Track the program in [epic #329](https://github.com/Xpounder-com/hormuz/issues/329).
 The architecture is one resident native app per OS containing a shared Rust

@@ -17,7 +17,7 @@ Hormuz HTTP transport
         +--> atomically reserve applicable token and spend budget
         +--> replace the employee token with the company provider key
         v
-OpenAI Responses API / Anthropic Messages API
+OpenAI Responses / Chat Completions / Anthropic Messages API
         |
         +--> stream response to the original client
         +--> parse provider usage metadata without retaining content
@@ -40,11 +40,20 @@ Custody authorization (managed PostgreSQL mode)
         +--> no KMS work in the human-authorization service
 ```
 
+The current AI Work request path supports `/v1/responses`,
+`/v1/chat/completions` and `/v1/messages` through existing authentication,
+policy, admission and usage parsing. The installed SDK examples qualify bounded
+JSON/streaming behavior against synthetic providers; they do not qualify a
+future llama.cpp adapter or managed agent by endpoint name alone. See
+[AI Work runtime](AI_WORK_RUNTIME.md) and the
+[planned desktop boundaries](ELECTRON_DESKTOP_ROADMAP.md).
+
 ## Planned portfolio plane
 
 The accepted design originated under the unreleased v1.1.0 plan. Its remaining
-product work now targets v1.3.0 after v1.2.0 shipped, while frozen contract
-identifiers remain unchanged. It adds a portfolio-intelligence plane beside the
+product work later continued alongside v1.3.0 after v1.2.0 shipped. The future
+complete-program release identity is now unassigned; frozen contract identifiers
+and accepted feature evidence remain unchanged. It adds a portfolio-intelligence plane beside the
 v1 request and evidence path; the complete plane is planned work, not a current
 runtime claim:
 
