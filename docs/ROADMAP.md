@@ -13,13 +13,16 @@ not an implemented or qualified desktop release. Follow
 [epic #479](https://github.com/Xpounder-com/hormuz/issues/479), the
 [delivery stages](ELECTRON_DESKTOP_ROADMAP.md), and the
 [complete backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md).
-The scope is ready to start bounded UI simulation; actual backend work follows
+The scope is ready to start bounded UI simulation with
+[recorded UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md), #480 A.
+This defines product/mock defaults now without implementing a backend or
+closing #480. Actual backend work follows
 #492 approval and a named owner, selected finish, exact model/provider/protocol
 choices, storage/context/output/time limits and platform qualification rows.
 
 | Program | Current boundary |
 | --- | --- |
-| Electron desktop | #479; UI #481/#487–#491 and #502 feed #492 first, then #480/#482–#485/#493 backend and retained #337/#338/#339/#340/#346/#347 qualification gates. Version and dates TBD. |
+| Electron desktop | #479; recorded #480 A boundaries feed UI #481/#487–#491/#502 and #492 first, then #480 B/#482–#485/#493 backend and retained #337/#338/#339/#340/#346/#347 qualification gates. Version and dates TBD. |
 | Research Review | [#502 UI/spec/mock](https://github.com/Xpounder-com/hormuz/issues/502) precedes #492; optional [#503 runtime](https://github.com/Xpounder-com/hormuz/issues/503) follows qualified single-response #493/#483/#485/#484 contracts. Required before exposing real Review, not a plain-chat prerequisite. [Bounded role/version/evidence contract](RESEARCH_REVIEW_MODE.md). |
 | Existing native clients | Preserve the v1.8.0 notarized Mac archive, CLI/agent paths and accepted shared contracts. The separate native-shell plan #329 is superseded; its [roadmap](NATIVE_CLIENT_ROADMAP.md) is historical. |
 | Optional Rust work | #341 existing agent-relay qualification and #342 measured optimizer migration. No blanket port prerequisite to first local chat. |

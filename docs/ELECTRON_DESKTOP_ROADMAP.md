@@ -3,7 +3,9 @@
 Planning baseline: 2026-10-13, main
 `46449d2a3f05de09d7d0a18c9688e189a6c3a68e`.
 Track delivery in [epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
-The [UI plan](DESKTOP_UI_PLAN.md), [Research Review contract](RESEARCH_REVIEW_MODE.md),
+The [UI plan](DESKTOP_UI_PLAN.md),
+[UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md),
+[Research Review contract](RESEARCH_REVIEW_MODE.md),
 [account cleanup](DESKTOP_ACCOUNT_CLEANUP.md),
 [infrastructure audit](DESKTOP_INFRASTRUCTURE_AUDIT.md)
 and [backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md) define the
@@ -62,15 +64,21 @@ shared surface needs a beautiful legible opaque fallback.
 ## UI first: ready to begin simulation
 
 The scope is sufficient to start the bounded UI simulation with synthetic
-projects, sources, models, costs and responses. Finish the selected material and
+projects, sources, models, costs and responses. #480 checkpoint A now records
+the [product/mock boundaries](DESKTOP_BACKEND_BOUNDARIES.md): saved/Temporary
+lifetime, imported text-copy ownership, explicit context, inherited restrictions,
+Auto/pin intent, governed Send, one active inference attempt, setup/cancel/recovery
+and version-specific Review. These planning defaults are inputs to the UI,
+not rendered approval or runtime support. Finish the selected material and
 integrated journeys before #492 approval. Before actual host/backend work,
 assign a named owner and freeze exact model/provider versions, protocol and
 storage/context/output/time limits, custody and first OS/architecture/desktop
-qualification rows in #480. A mock or research paper is not runtime readiness.
+qualification rows in #480 checkpoint B. A mock or research paper is not runtime
+readiness. #480 stays open until B; its full closure never blocks the UI.
 
 | Stage | Owned issue | Dependencies and exit |
 | --- | --- | --- |
-| U0 | Confirmed product boundary in #479 and this plan | Full local projects plus Temporary chat; local-first setup; typed mock operations, ownership and inheritance decisions. No database/hosting choice is required to explore the UI. |
+| U0 | Confirmed product boundary in #479; #480 A recorded | Full local projects plus Temporary chat; concrete product defaults and logical mock operations in DESKTOP_BACKEND_BOUNDARIES.md. No database/hosting choice or #480 final closure is required to explore the UI. |
 | U1 | [#481 shared glossy visual system](https://github.com/Xpounder-com/hormuz/issues/481), [#487 app navigation and bar handoff](https://github.com/Xpounder-com/hormuz/issues/487) | Initial visual tokens and information architecture feed the following slices. Final #481 visual acceptance happens before U4, not before drawing every flow. |
 | U2 | [#488 projects, chats, history/search](https://github.com/Xpounder-com/hormuz/issues/488), [#489 files/instructions/context](https://github.com/Xpounder-com/hormuz/issues/489), [#490 onboarding/models/connections](https://github.com/Xpounder-com/hormuz/issues/490) | #487 and initial visual tokens. Proceed in parallel with synthetic storage, files, inventory, credentials, prices and responses. Cover normal, empty, blocked and recovery states. |
 | U3 | [#491 inherited preferences, Auto and overrides](https://github.com/Xpounder-com/hormuz/issues/491) | U2 mock contracts. Show effective app/project/chat/request settings, pure preview, explicit pin/Auto intent, changed-route disclosure and continuation limits. |
@@ -98,7 +106,7 @@ approved project window / quick bar / setup UI
 
 | Stage | Work | Completion prerequisites | Exit evidence |
 | --- | --- | --- | --- |
-| B0 | [#480 host/data/support/migration contract](https://github.com/Xpounder-com/hormuz/issues/480) | U4 | One authority per state machine, typed UI-to-host seam, content/credential isolation, supported-target candidates and legacy coexistence. |
+| B0 | [#480 B host/data/support/migration acceptance](https://github.com/Xpounder-com/hormuz/issues/480) | U4; reconcile recorded A defaults with approved UI | One authority per state machine, typed UI-to-host seam, content/credential isolation, exact resource/protocol choices, supported-target candidates and legacy coexistence. |
 | B1 | [#482 approved UI in Electron host](https://github.com/Xpounder-com/hormuz/issues/482) | U4, B0 | Isolated renderer, narrow IPC, private owned instance, scoped callbacks, activation/focus/recovery and packaged resources. |
 | B2a | [#493 local project/history/context storage](https://github.com/Xpounder-com/hormuz/issues/493) | B0, B1 | Explicit saved/temporary modes; bounded search and file subset; permission/ownership, export/delete, isolation, recovery and immutable request context. |
 | B2b | [#483 managed llama.cpp and local setup](https://github.com/Xpounder-com/hormuz/issues/483) | B0, B1 | Verified engine/model packages, actual fit, recoverable owned download/load/unload and exact local protocol/process proof. |
@@ -168,8 +176,14 @@ best model or create a second learning ledger.
    within existing explicit qualified one-hop rules; partial or uncertain
    attempts are not replayed. Estimates, actuals and unknown costs stay distinct.
 
-Saved project history is a separate explicit retention/export/delete/isolation
-contract in #488/#489/#493. It does not expand ADR0014 exact reuse or metadata-only
+Saved project history follows the
+[recorded product/default contract](DESKTOP_BACKEND_BOUNDARIES.md), with separate
+retention/export/delete/isolation acceptance in #488/#489/#493. First UI file
+scope is imported app-owned UTF-8 text/Markdown copies; live linked files remain
+deferred/unbound. Temporary content remains in memory across window hiding and
+navigation, then clears on explicit discard/app quit; crashes do not restore it.
+The first plan permits one active inference attempt per application and no
+hidden queue. It does not expand ADR0014 exact reuse or metadata-only
 gateway evidence. Imported files and linked originals have separate ownership;
 request context is selected and bounded. No automatic RAG, recursive indexing,
 file modification, sync or storage-encryption claim follows from this plan.

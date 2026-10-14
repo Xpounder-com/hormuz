@@ -69,7 +69,13 @@ UI issues add #487 navigation/bar handoff, #488 projects/chats/history/search,
 #489 files/instructions/context, #490 onboarding/model library/connections,
 #491 inherited preferences/Auto, and #492 integrated simulated UI approval.
 
-After #492, #480 freezes the local host/data/support contract, then #482
+#480 now has two checkpoints: A records concrete
+[UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md) before UI work;
+B freezes actual local host/data/support/migration acceptance after #492. A
+defines saved/Temporary lifetime, imported text-copy/context scope, privacy/cap
+inheritance, chat pins, Send/recovery, bounded setup and Research Review without
+implementing or completing #480. No new issue or UI/backend dependency cycle is
+required. After #492, #480 B freezes the runtime contract, then #482
 integrates the approved UI. #493 local project persistence/context, #483 local
 engine setup and #485 governed paid baselines advance in parallel. #484 then
 integrates real pure Auto and explicit model intent. #502 adds bounded simulated

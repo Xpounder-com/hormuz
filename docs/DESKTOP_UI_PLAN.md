@@ -2,7 +2,8 @@
 
 Planning scope confirmed on 2026-10-13. Parent: [desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
 This is the canonical UI scope for the full local project workspace. It refines
-the [desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md) and
+the [desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md),
+[UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md) and
 [Research Review contract](RESEARCH_REVIEW_MODE.md): the earlier ephemeral-chat-only
 first scope is superseded by saved local projects/chats plus a Temporary chat
 option. Existing gateway, native-client and installed qualification evidence
@@ -49,6 +50,11 @@ not a Hosted Pro tenant or an enterprise workspace.
 The UI review completes before backend integration. Early product decisions and
 mock service envelopes are enough to design the UI; finalizing a database,
 hosting provider or privileged process boundary must not block the mock flows.
+Use #480 checkpoint A's recorded defaults for saved/Temporary lifetime,
+imported-copy text scope, context/privacy/budgets, chat pins, Send and cancellation.
+Checkpoint B remains after #492. The shared mocks consume the logical seam and
+finite synthetic fixtures in DESKTOP_BACKEND_BOUNDARIES.md; they implement no
+actual IPC, storage schema, custody, model manager or provider service.
 
 | Slice | UI prerequisites | Reviewable outcome |
 | --- | --- | --- |
@@ -65,7 +71,7 @@ hosting provider or privileged process boundary must not block the mock flows.
 After #492, finalize [#480's full architecture/support/migration contract](https://github.com/Xpounder-com/hormuz/issues/480)
 and plan [#493 backend storage/context](https://github.com/Xpounder-com/hormuz/issues/493)
 alongside the existing authorized-later host, engine, routing and execution
-slices #482–#485. #480 can record product-scope inputs early, but its full
+slices #482–#485. #480 A records the product/mock inputs now, while its B/full
 backend contract is not a completion prerequisite for #492. #338's final
 closure is likewise not required for its early UI fixture checkpoint.
 An approved mock is an implementation input, not authorization to start runtime
@@ -100,6 +106,9 @@ before real Review execution is offered.
 - Named project chats save locally, with a clear first-use disclosure and
   visible saved/saving/failed states. Temporary chat is unsaved; define what
   happens to its in-memory draft/response on close and app quit.
+  The recorded default retains Temporary across hide/window close/navigation;
+  explicit chat discard or app quit clears it, offering save/discard/cancel for
+  content or active work. Crash recovery does not save Temporary bodies.
 - Search within the active profile with explicit project and archive filters;
   distinguish title search and content search. Include no-results, large lists
   and unavailable/corrupt/disk-full storage states. Saved history is not
@@ -123,6 +132,9 @@ before real Review execution is offered.
   choose the first supported mode before accepting the mocks. Show permission,
   missing/changed/unsupported/too-large and read-failed states. Folder selection
   does not imply recursive reading, continuous indexing, writing or execution.
+  First mode is imported UTF-8 `.txt`/`.md` copies; linked entries are deferred
+  or unbound with an explicit supported-copy import remedy. Model/context fit
+  uses separate byte/token constraints and never silently truncates the packet.
 - Project instructions and chat overrides expose their effective scope. Show
   context limits and honest unknown estimates; model changes may change what
   fits. Define the first supported file types/size limits in the UI contract;
@@ -155,6 +167,10 @@ before real Review execution is offered.
   with inherit/reset and an effective-value view. Record the default choices in
   the mocks. Managed privacy/budget ceilings always constrain these choices;
   project preferences cannot loosen them.
+  Use Auto, balanced/local preference and Local-only first; distinguish defaults
+  from enforced restrictions. Picker pins persist for the chat until Auto/reset;
+  a labeled one-request override is consumed only on dispatch. A connection alone
+  does not enable cloud use. Busy blocks a second attempt without a hidden queue.
 - Preview is a pure bounded read of available simulated state: no classifier or
   provider call, model load/download, budget reservation, ledger write or prompt
   storage. Scoped draft persistence is a separate, debounced local-data operation
@@ -198,6 +214,9 @@ before real Review execution is offered.
   cap/privacy blocks, project switching, canceled review and unreviewed edits.
   Do not repeat until the models agree. Follow the detailed
   [role/version/evidence contract](RESEARCH_REVIEW_MODE.md).
+  A disclosed finite swap plan may select downloaded/qualified but unloaded
+  local reviewers. Explicit Start authorizes those loads; each role must become
+  Ready before dispatch. No preview load, download or silent reviewer replacement.
 
 ## Integrated review journeys — #492
 

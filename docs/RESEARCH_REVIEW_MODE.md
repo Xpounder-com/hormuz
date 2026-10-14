@@ -5,7 +5,10 @@ The [integrated UI gate #492](https://github.com/Xpounder-com/hormuz/issues/492)
 must include the simulated review journeys before any exposed runtime mode is
 implemented. This document supplements the
 [desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md) and
-[project UI plan](DESKTOP_UI_PLAN.md). Focused delivery is tracked in
+[project UI plan](DESKTOP_UI_PLAN.md).
+[UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md) record #480 A's
+saved/Temporary, context/privacy, service and finite mock inputs now; #480 B
+accepts real execution after UI approval. Focused delivery is tracked in
 [#502 — Research Review UI/spec/simulation](https://github.com/Xpounder-com/hormuz/issues/502)
 and [#503 — bounded Research Review runtime](https://github.com/Xpounder-com/hormuz/issues/503).
 
@@ -27,7 +30,8 @@ The first mock slice reviews an existing draft, with synthetic sources and two
 distinct reviewer identities. Show the selected scope, role plan, privacy,
 whole-round cap, progress, findings and version-specific human decision. Add
 optional authoring and reconciliation as explicit variants of that flow.
-Complete the integrated simulation in #492 before final host/data contracts and
+Use the recorded #480 A product/mock defaults without waiting for #480 closure.
+Complete the integrated simulation in #492 before #480 B final host/data contracts and
 real execution. Current simulations and papers do not satisfy this gate by
 themselves.
 
@@ -188,9 +192,14 @@ Before starting a real round:
    bounded round-level link. Estimates, known actuals and uncertain holds remain
    distinct. A failed or interrupted attempt is not assumed free. Do not create
    a second learning or finance ledger that contradicts existing owners.
-5. Bound role execution, output, timeouts and cancellation. Under the first
-   one-loaded-local-model policy, local roles swap/load sequentially under exact
-   owned handles; the UI shows that wait. No hidden concurrent multi-model
+5. Bound role execution, output, timeouts and cancellation. The first application
+   plan permits one active inference attempt, so all roles run sequentially.
+   Under the one-loaded-local-model policy, local roles swap/load sequentially
+   under exact owned handles; the UI shows that wait. Plan eligibility may include
+   a verified, downloaded, qualified model requiring a disclosed load/swap step.
+   Explicit Start authorizes that finite preparation; no downloads occur, each
+   role must become Ready and revalidate before dispatch, and failed setup stays
+   incomplete. No hidden concurrent multi-model
    residency or unlimited worker fan-out. Metadata/download and inference
    channels retain separate resource controls.
 6. Never replay an ambiguous request or partial stream automatically. Existing
