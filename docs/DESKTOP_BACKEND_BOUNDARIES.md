@@ -141,6 +141,23 @@ These caps govern attempts admitted through Hormuz; they are not a provider's
 account-wide bill cap or a promise that interrupted work is free. Currency,
 window/expiry rules and concrete custody/accounting adapters are accepted in B.
 
+Temporary chat has no parent project and starts Local-only independently of app
+defaults. Its full-window preferences offer an explicit **Allow cloud for this
+Temporary chat** action; adding a connection or pinning a cloud model cannot
+perform that opt-in. The permission lasts only for that Temporary chat and applies
+to its disclosed chat/review context, subject to enforced profile/source
+restrictions. It needs a finite lifetime allowance under the profile allowance
+and the same per-request/per-round ceilings; missing consent, price or allowance
+blocks Send. No invented project ID confers execution/budget authority.
+The mock uses a USD 10 Temporary lifetime ceiling beneath the fictional USD 25
+profile/UTC-month ceiling, with USD 1 request and USD 3 round ceilings.
+Discard/quit clears Temporary content, preferences and cloud consent; incurred
+usage and unknown holds remain in the separate content-free accounting owner
+and still count against the profile cap. A new Temporary chat does not refund
+them. Saving to a named project previews destination settings and requires its
+own cloud opt-in; session consent never silently transfers. B qualifies the
+actual personal-authority binding, allowance window and settlement contract.
+
 Prompt egress is separate from catalog lookup, model downloads, connection test,
 update checks and telemetry. First-run telemetry is off. Catalog/test/download
 and update-check actions require their own explicit controls; the mock preview
@@ -330,7 +347,7 @@ claims; #480 B must replace or explicitly accept them after qualification.
 | History / search | Latest ten complete exchanges selected visibly; 50 search results per page; no unbounded all-project read |
 | Work residency | One active inference attempt/application, one loaded local model, no hidden queue; roles sequential |
 | Time | Simulated 60-second attempt ceiling and five-minute review-round ceiling, with explicit timeout/cancel states; animations need not consume those durations |
-| Budget | Fictional USD 25 profile ceiling per UTC month, USD 10 project ceiling in the same window, USD 1 request and USD 3 review-round upper allowance; lower/zero/unknown cases exercise refusal |
+| Budget | Fictional USD 25 profile ceiling per UTC month, USD 10 project ceiling in the same window or USD 10 per Temporary lifetime, USD 1 request and USD 3 review-round upper allowance; lower/zero/unknown cases exercise refusal |
 | Review | Two explicit mock rounds maximum; two reviewers, optional author/reconciler within the documented three/four-call path |
 
 Byte ceilings do not guarantee token fit. Include synthetic over-limit, missing

@@ -171,6 +171,11 @@ before real Review execution is offered.
   from enforced restrictions. Picker pins persist for the chat until Auto/reset;
   a labeled one-request override is consumed only on dispatch. A connection alone
   does not enable cloud use. Busy blocks a second attempt without a hidden queue.
+  Temporary starts Local-only and has its own explicit session-only cloud opt-in
+  and finite lifetime allowance under the profile cap. Discard/quit clears that
+  permission; usage/unknown holds remain content-free and saving to a project
+  requires the destination's separate consent. The minimal bar adds no settings
+  controls; use the full-window preferences and blocked-pin remedy.
   Auto may propose a verified/downloaded/qualified loadable local model, showing
   loads on Send when needed. Send authorizes bounded preparation; Ready and
   revalidation precede inference. Explicit Load in Models remains optional;
