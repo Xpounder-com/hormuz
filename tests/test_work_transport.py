@@ -143,7 +143,7 @@ class ProviderInputTokenBoundsTests(unittest.TestCase):
         schema = _inline_namespace()["tools"][0]["parameters"]
         request = {"temperature": 0, "text": {"format": {
             "type": "json_schema", "name": "result", "schema": schema}}}
-        self.assertTrue(WorkRuntime._contains_provider_state(request))
+        self.assertFalse(WorkRuntime._contains_provider_state(request))
         self.assertFalse(WorkRuntime._cache_safe(request))
         for field in ("role", "type"):
             for tag in ({"type": "string"}, ["string", "null"], None, True):

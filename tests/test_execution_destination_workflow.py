@@ -52,6 +52,11 @@ try:
     response = connection.getresponse()
     if value.get("stall_after_headers"):
         time.sleep(1.8)
+        connection.close()
+        print(json.dumps({"status": response.status,
+                          "headers": dict((k.lower(), v) for k, v in response.getheaders()),
+                          "body": None}))
+        sys.exit(0)
     data = response.readline() if value.get("cancel_after_event") else response.read()
     print(json.dumps({"status": response.status,
                       "headers": dict((k.lower(), v) for k, v in response.getheaders()),

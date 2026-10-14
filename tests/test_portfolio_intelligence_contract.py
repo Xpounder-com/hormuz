@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from hormuz.contracts import contract_manifest
 from tools import verify_portfolio_intelligence_contract as contract_verifier
 from tools.verify_portfolio_intelligence_contract import (
     BASELINE_MANIFEST_PATH,
@@ -62,7 +63,7 @@ class PortfolioIntelligenceContractTests(unittest.TestCase):
     def test_current_manifest_compatibility_cannot_drift(self) -> None:
         for field in self._baseline_manifest()["compatibility"]:
             with self.subTest(field=field):
-                current = self._baseline_manifest()
+                current = contract_manifest()
                 current["compatibility"][field] = "unreviewed_change"
                 with self.assertRaisesRegex(
                     PortfolioIntelligenceContractError, "v1_compatibility_changed"
@@ -82,7 +83,7 @@ class PortfolioIntelligenceContractTests(unittest.TestCase):
         }
         for missing in schema:
             with self.subTest(missing=missing):
-                current = self._baseline_manifest()
+                current = contract_manifest()
                 current["schemas"].append(
                     {key: value for key, value in schema.items() if key != missing}
                 )
@@ -413,14 +414,14 @@ runpy.run_path(str(script), run_name="__main__")
                     validate_portfolio_intelligence_contract(root)
 
     def test_existing_v1_schema_cannot_change_or_disappear(self) -> None:
-        baseline = self._baseline_manifest()
-        schemas = baseline["schemas"]
+        current_manifest = contract_manifest()
+        schemas = current_manifest["schemas"]
         assert isinstance(schemas, list)
         for current, error in (
-            ({**baseline, "schemas": schemas[1:]}, "v1_schema_changed"),
+            ({**current_manifest, "schemas": schemas[1:]}, "v1_schema_changed"),
             (
                 {
-                    **baseline,
+                    **current_manifest,
                     "schemas": [
                         {
                             **schemas[0],
