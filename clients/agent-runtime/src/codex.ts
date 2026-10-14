@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { isAbsolute, relative, join, resolve, basename, dirname } from 'node:path';
 import { RpcProcess } from './rpc.ts';
 import { prepareSandbox } from './sandbox.ts';
+import { RuntimePreparation } from './preparation.ts';
 import type { LaunchOptions } from './sandbox.ts';
 import { AgentError } from './types.ts';
 import type { AgentSessionAdapter, RuntimeStart, RuntimeRun, RunResult, ActionRequest, ApprovalDecision, RuntimeEvent, RuntimeHistoryPolicy } from './types.ts';
@@ -18,6 +19,7 @@ export type CodexAdapterOptions = {
   approvalTimeoutMs?: number;
   runTimeoutMs?: number;
   shutdownTimeoutMs?: number;
+  preparationTimeoutMs?: number;
   maxFrameBytes?: number;
   maxOutputBytes?: number;
 };
@@ -87,6 +89,7 @@ export class CodexAdapter implements AgentSessionAdapter {
   private disposed = false;
   private startCalled = false;
   private executable?: Promise<{ command: string; packageRoot?: string }>;
+  private preparation = new RuntimePreparation();
 
   constructor(options: CodexAdapterOptions = {}) { this.settings = options; }
 
@@ -119,12 +122,15 @@ export class CodexAdapter implements AgentSessionAdapter {
   }
 
   async historyPolicy(): Promise<RuntimeHistoryPolicy> {
-    return { engine: 'codex', runtimeVersion: CODEX_VERSION, executablePath: (await this.resolveExecutable()).command };
+    const finishPreparation = this.preparation.begin();
+    try { return { engine: 'codex', runtimeVersion: CODEX_VERSION, executablePath: (await this.resolveExecutable()).command }; }
+    finally { finishPreparation(); }
   }
 
   async start(options: RuntimeStart): Promise<{ threadId: string }> {
     if (this.disposed || this.startCalled) throw new AgentError('runtime_already_started');
     this.startCalled = true;
+    const finishPreparation = this.preparation.begin();
     try {
       const endpoint = endpointUrl(options.endpoint);
       if (options.threadId !== undefined) identifier(options.threadId);
@@ -133,11 +139,14 @@ export class CodexAdapter implements AgentSessionAdapter {
       if (!isAbsolute(options.workspace) || !isAbsolute(options.configDir)) throw new AgentError('invalid_runtime_path');
       const workspace = await realpath(options.workspace);
       if (!(await lstat(workspace)).isDirectory()) throw new AgentError('invalid_runtime_path');
+      if (this.disposed) throw new AgentError('runtime_closed');
       await mkdir(options.configDir, { recursive: true, mode: 0o700 });
       if ((await lstat(options.configDir)).isSymbolicLink()) throw new AgentError('invalid_runtime_path');
       const configDir = await realpath(options.configDir);
       if (inside(workspace, configDir) || inside(configDir, workspace)) throw new AgentError('runtime_home_not_isolated');
+      if (this.disposed) throw new AgentError('runtime_closed');
       await mkdir(join(configDir, 'tmp'), { mode: 0o700, recursive: true });
+      if (this.disposed) throw new AgentError('runtime_closed');
       await mkdir(join(configDir, 'Library', 'Preferences'), { mode: 0o700, recursive: true });
       const executable = await this.resolveExecutable();
       const safePath = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
@@ -166,11 +175,14 @@ export class CodexAdapter implements AgentSessionAdapter {
       const configPath = join(configDir, 'config.toml');
       try { if ((await lstat(configPath)).isSymbolicLink()) throw new AgentError('invalid_runtime_path'); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      if (this.disposed) throw new AgentError('runtime_closed');
       await writeFile(configPath, config, { mode: 0o600 });
+      if (this.disposed) throw new AgentError('runtime_closed');
       this.startOptions = { ...options, workspace, configDir };
       const command = executable.command;
       const args = [...(this.settings.args ?? []), 'app-server', '--stdio', '--strict-config'];
       const launch = await (this.settings.prepareLaunch ?? prepareSandbox)({ command, args, workspace, configDir, endpoint: endpoint.href, env, managedPreferenceDomain: 'com.openai.codex' });
+      if (this.disposed) throw new AgentError('runtime_closed');
       this.rpc = new RpcProcess({ ...launch, cwd: workspace, env,
         requestTimeoutMs: this.settings.requestTimeoutMs, shutdownTimeoutMs: this.settings.shutdownTimeoutMs,
         maxFrameBytes: this.settings.maxFrameBytes, maxOutputBytes: this.settings.maxOutputBytes,
@@ -178,6 +190,7 @@ export class CodexAdapter implements AgentSessionAdapter {
         onRequest: (method, params, id) => this.serverRequest(method, params, id),
         onFailure: () => this.finish('unknown'),
       });
+      finishPreparation();
       const initialized = object(await this.rpc.request('initialize', {
         clientInfo: { name: 'hormuz', version: '0.1.0' },
         capabilities: { experimentalApi: true, requestAttestation: false, explicitGatewayOauth: true },
@@ -197,9 +210,12 @@ export class CodexAdapter implements AgentSessionAdapter {
       if (thread.cwd !== undefined && thread.cwd !== workspace) throw new AgentError('runtime_workspace_mismatch');
       return { threadId: this.threadId };
     } catch (error) {
+      // Release this token before self-disposal; otherwise cleanup would wait
+      // for the very start call that is awaiting cleanup.
+      finishPreparation();
       await this.dispose();
       throw error instanceof AgentError ? error : new AgentError('runtime_start_failed');
-    }
+    } finally { finishPreparation(); }
   }
 
   async run(options: RuntimeRun): Promise<RunResult> {
@@ -364,6 +380,7 @@ export class CodexAdapter implements AgentSessionAdapter {
   async dispose(): Promise<void> {
     this.disposed = true;
     this.finish('unknown');
+    await this.preparation.drain(this.settings.preparationTimeoutMs);
     await this.rpc?.dispose();
     if (this.startOptions) this.startOptions.credential = '';
   }

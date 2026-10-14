@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { readFile, realpath } from 'node:fs/promises';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
+import { setImmediate as immediate } from 'node:timers/promises';
 
 const VERSION = '0.3.299';
 const CLI_VERSION = '2.1.299';
@@ -62,10 +63,25 @@ async function scopedPath(value: unknown, root = session!.workspace): Promise<st
 }
 
 async function runTurn(turn: Turn, prompt: string): Promise<void> {
+  let initialization: 'pending' | 'validated' | 'failed' = 'pending';
+  const initializationFailed = () => initialization === 'failed';
+  const rejectRuntime = (): void => {
+    initialization = 'failed';
+    turn.controller.abort();
+    turn.query?.close();
+  };
+  const requireInitialization = (): void => {
+    if (initialization !== 'validated') { rejectRuntime(); throw new Error('Native runtime not initialized'); }
+  };
   const decisions = new Map<string, { originalHash: string; approvedHash: string; result: PermissionResult }>();
   const hash = (name: string, value: unknown) => createHash('sha256').update(name + JSON.stringify(value)).digest('hex');
   const deny = (message: string): PermissionResult => ({ behavior: 'deny', message });
   const decide = async (name: string, raw: Record<string, unknown>, toolId: string): Promise<PermissionResult> => {
+    // The SDK dispatches control callbacks independently from its async message
+    // iterator. Let an already queued init frame drain, but never wait for a
+    // future init while a tool is requesting authority.
+    if (initialization === 'pending') await immediate();
+    if (initialization !== 'validated') { rejectRuntime(); return deny('Native runtime not initialized'); }
     if (active !== turn || turn.controller.signal.aborted) return deny('Turn ended');
     const existing = decisions.get(toolId);
     if (existing) { const requestHash = hash(name, raw); return [existing.originalHash, existing.approvedHash].includes(requestHash) ? existing.result : deny('Tool identity changed'); }
@@ -146,10 +162,13 @@ async function runTurn(turn: Turn, prompt: string): Promise<void> {
       const value = message as SDKMessage & Record<string, unknown>;
       if (value.session_id && value.session_id !== session!.threadId) throw new Error('Foreign session message');
       if (value.type === 'system' && value.subtype === 'init') {
-        if (value.claude_code_version !== CLI_VERSION || value.cwd !== session!.workspace || value.permissionMode !== (turn.mode === 'plan' ? 'plan' : 'default')) throw new Error('Unsupported native runtime configuration');
-        if (Array.isArray(value.mcp_servers) && value.mcp_servers.length) throw new Error('Unconfigured MCP runtime');
+        if (initialization !== 'pending' || value.session_id !== session!.threadId || value.claude_code_version !== CLI_VERSION || value.cwd !== session!.workspace || value.permissionMode !== (turn.mode === 'plan' ? 'plan' : 'default') || !Array.isArray(value.mcp_servers) || value.mcp_servers.length) {
+          rejectRuntime(); throw new Error('Unsupported native runtime configuration');
+        }
+        initialization = 'validated';
         event('tool', { runtime: { sdkVersion: VERSION, cliVersion: value.claude_code_version, apiKeySource: value.apiKeySource } });
       } else if (value.type === 'assistant') {
+        requireInitialization();
         const body = object(value.message);
         if (Array.isArray(body.content)) for (const block of body.content) {
           const content = object(block);
@@ -157,19 +176,25 @@ async function runTurn(turn: Turn, prompt: string): Promise<void> {
           else if (content.type === 'tool_use') event('tool', { id: content.id, name: content.name, input: content.input });
         }
       } else if (value.type === 'stream_event') {
+        requireInitialization();
         const data = object(value.event);
         if (data.type === 'content_block_delta' && data.delta && typeof data.delta === 'object') {
           const delta = object(data.delta); if (delta.type === 'text_delta') event('message', { delta: delta.text });
         }
       } else if (value.type === 'result') {
+        requireInitialization();
         status = value.subtype === 'success' && value.is_error === false ? 'completed' : turn.controller.signal.aborted ? 'interrupted' : 'failed';
         if (typeof value.result === 'string') finalText = value.result;
         event('usage', { usage: value.usage, modelUsage: value.modelUsage, estimatedCostUsd: value.total_cost_usd });
         break;
-      } else if (value.type === 'tool_progress') event('tool', { toolId: value.tool_use_id, name: value.tool_name, elapsedSeconds: value.elapsed_time_seconds });
+      } else if (value.type === 'tool_progress') {
+        requireInitialization();
+        event('tool', { toolId: value.tool_use_id, name: value.tool_name, elapsedSeconds: value.elapsed_time_seconds });
+      }
     }
-  } catch { status = turn.controller.signal.aborted ? 'interrupted' : 'failed'; }
+  } catch { status = initializationFailed() ? 'failed' : turn.controller.signal.aborted ? 'interrupted' : 'failed'; }
   finally { turn.query?.close(); }
+  if (initializationFailed() || (initialization === 'pending' && !turn.controller.signal.aborted)) status = 'failed';
   if (active !== turn) return;
   if (turn.mode === 'plan' && status === 'completed' && finalText) event('plan', { text: finalText });
   send({ method: 'turn/completed', params: { threadId: session!.threadId, turnId: turn.turnId, status } });

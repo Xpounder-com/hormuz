@@ -63,10 +63,13 @@ HORMUZ_TEST_INSTALLED_CLAUDE=1 node --test --test-concurrency=1 test/claude-inst
 
 Local verification on 2026-10-14: macOS 26.2 (25C56), arm64, Node 25.2.1;
 `npm run check` passed and the serial suite with both installed flags passed
-**110/110**, with no skips. Codex 0.160.0 and SDK 0.3.299 / bundled CLI 2.1.299
+**154/154**, with no skips. Codex 0.160.0 and SDK 0.3.299 / bundled CLI 2.1.299
 completed their full synthetic host journeys. External provider requests and
 paid spend were zero. Repository governance, CI-scope, secret-inventory and
 public-community-path tests passed **126/126**. CI checks run separately.
+Regressions include required Claude init validation, positive cost rates,
+stalled authority callbacks, plan-grant cancellation and retained ownership of
+pending filesystem preparation before native startup.
 
 ## Default limits and compatibility
 
@@ -75,7 +78,7 @@ public-community-path tests passed **126/126**. CI checks run separately.
 | Application | One active inference owner; one read-only workspace observer |
 | Host request / prompt / plan | 128 KiB / 64 KiB / 64 KiB |
 | Pending approvals | Eight, expiring after 60 seconds by default |
-| Session run | Five-minute host deadline; no automatic restart/replay |
+| Session operation | Five-minute default deadline across authority checks, startup, run and plan validation; owned cleanup is awaited separately |
 | Provider lane | One active request; at most eight sockets; 2 MiB request, 8 MiB response; explicit timeout and no proxy retries |
 | Runtime stdio | 1 MiB frame, 64 MiB total output; 16 pending RPCs |
 | Workspace observation | 5,000 files, 1 MiB per file, 8 MiB total captured text; 15-second worker deadline, explicit omitted coverage |
@@ -118,6 +121,16 @@ revoke registration on navigation, project switch or window disposal.
 `registerAgentIPC` also requires an `authorizeEvent` callback that checks the
 current trusted main-frame document; a registered webContents ID alone does not
 authorize child frames or a document loaded after navigation.
+
+Input and output token rates must be positive safe integers in micro-USD per
+million tokens. A zero allowance can deny all proxy generation, but zero rates
+cannot establish a paid-work spending boundary. Authority/connection callbacks
+receive an optional `AbortSignal`; they only resolve authority and must honor
+the signal for any I/O they own. Late callback results cannot continue startup.
+Cancellation consumes prior plan grants and prevents new acceptance after a
+cancelled workspace observation. Owned filesystem preparation, observers and
+process cleanup remain under the scheduler/profile lease; incomplete cleanup
+reports an error and retains ownership until an explicit cleanup retry succeeds.
 
 Listen for `event`, `approval` and `review`. An approval has a request identity,
 fingerprint and deadline. Return it through `decide` with approve, deny or cancel;

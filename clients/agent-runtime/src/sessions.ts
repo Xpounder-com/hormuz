@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { BudgetLedger } from './budgets.ts';
 import { AgentError, SCHEMA_VERSION } from './types.ts';
-import type { ActionRequest, AgentSessionAdapter, ApprovalDecision, Engine, Phase, RuntimeEvent, RuntimeHistoryPolicy } from './types.ts';
+import type { ActionRequest, AgentSessionAdapter, ApprovalDecision, Engine, Phase, RuntimeEvent, RuntimeHistoryPolicy, RunResult } from './types.ts';
 import { SessionStore } from './store.ts';
 import { diffWorkspace, assertWorkspacePath } from './workspace.ts';
 import { observeWorkspaceSnapshot, observeWorkspaceDiff, cleanupWorkspaceObservers } from './workspace-observer.ts';
@@ -44,10 +44,11 @@ type Running = { session: Session; adapter: AgentSessionAdapter; proxy: Inferenc
 export type AgentSessionOptions = {
   profileId: string; store: SessionStore; scheduler: ApplicationScheduler;
   runtimeFactory: (engine: Engine) => AgentSessionAdapter;
-  resolveConnection: (id: string) => Promise<Connection>;
-  authorizeWorkspace: (projectId: string, workspace: string) => Promise<boolean>;
-  authorizeAllowance: (projectId: string, allowanceMicrousd: number) => Promise<boolean>;
-  authorizeCloud: (projectId: string) => Promise<boolean>;
+  /** Callbacks only resolve authority; honor the supplied signal for owned I/O. */
+  resolveConnection: (id: string, signal?: AbortSignal) => Promise<Connection>;
+  authorizeWorkspace: (projectId: string, workspace: string, signal?: AbortSignal) => Promise<boolean>;
+  authorizeAllowance: (projectId: string, allowanceMicrousd: number, signal?: AbortSignal) => Promise<boolean>;
+  authorizeCloud: (projectId: string, signal?: AbortSignal) => Promise<boolean>;
   parentAllowances: { profileMicrousd: number; projectMicrousd: number };
   runTimeoutMs?: number; approvalTimeoutMs?: number;
   /** Trusted test/application wiring only; production defaults to OS-sandboxed observation. */
@@ -73,9 +74,12 @@ export class AgentSessions extends EventEmitter {
   #closed = false;
   #mutating = false;
   #activeController: AbortController | null = null;
+  #activeSessionId: string | null = null;
+  #preparing: { sessionId: string; adapter?: AgentSessionAdapter } | null = null;
+  #initializing: Promise<void> | null = null;
   #quiescent: Promise<void> = Promise.resolve();
   #finishRun: (() => void) | null = null;
-  #releaseRun: (() => void) | null = null;
+  #cleanupOwner: { adapter?: AgentSessionAdapter; proxy?: InferenceProxy; release: () => void } | null = null;
   #mutationDone: Promise<void> = Promise.resolve();
   #shutdown: Promise<void> | null = null;
   #budgets: BudgetLedger;
@@ -87,13 +91,19 @@ export class AgentSessions extends EventEmitter {
     for (const secret of secrets) if (secret.length >= 8) encoded = encoded.split(secret).join('[REDACTED]');
     return JSON.parse(encoded) as T;
   }
-  constructor(options: AgentSessionOptions) { super(); id(options.profileId); finiteAmount(options.parentAllowances.profileMicrousd); finiteAmount(options.parentAllowances.projectMicrousd); this.#options = options; this.#budgets = new BudgetLedger(join(options.store.root, 'usage')); }
+  constructor(options: AgentSessionOptions) { super(); id(options.profileId); finiteAmount(options.parentAllowances.profileMicrousd); finiteAmount(options.parentAllowances.projectMicrousd); if (options.runTimeoutMs !== undefined && (!Number.isSafeInteger(options.runTimeoutMs) || options.runTimeoutMs < 1 || options.runTimeoutMs > 1_800_000)) throw new AgentError('invalid_run_timeout'); this.#options = options; this.#budgets = new BudgetLedger(join(options.store.root, 'usage')); }
   #snapshot(root: string) { this.#available(); return (this.#options.observeWorkspace ?? observeWorkspaceSnapshot)(root, this.#options.store.root); }
   #diff(baseline: WorkspaceSnapshot) { this.#available(); return (this.#options.observeDiff ?? observeWorkspaceDiff)(baseline, this.#options.store.root); }
   async initialize() {
     if (this.#closed) throw new AgentError('host_unavailable');
     if (this.#releaseLease) return;
-    this.#releaseLease = await this.#options.store.acquireLease();
+    if (!this.#initializing) {
+      const acquiring = this.#options.store.acquireLease().then(release => { this.#releaseLease = release; });
+      this.#initializing = acquiring;
+      void acquiring.finally(() => { if (this.#initializing === acquiring) this.#initializing = null; }).catch(() => {});
+    }
+    await this.#initializing;
+    if (this.#closed) throw new AgentError('host_unavailable');
   }
   #available() {
     if (this.#closed || !this.#releaseLease) throw new AgentError('host_unavailable');
@@ -102,18 +112,66 @@ export class AgentSessions extends EventEmitter {
     this.#available();
     if (this.#mutating || this.#options.scheduler.activeOwner) throw new AgentError('application_busy');
     this.#mutating = true;
+    const controller = new AbortController();
+    this.#activeController = controller;
+    // The same deadline covers authorization, native startup, execution and
+    // post-run plan validation. Owned resource cleanup is awaited separately.
+    const timeout = setTimeout(() => controller.abort(), this.#options.runTimeoutMs ?? 300_000);
     let finish!: () => void;
     this.#mutationDone = new Promise(resolve => { finish = resolve; });
-    try { return await action(); } finally { this.#mutating = false; finish(); }
+    try { return await action(); } finally {
+      clearTimeout(timeout); this.#mutating = false;
+      if (!this.#cleanupOwner && this.#activeController === controller) this.#activeController = null;
+      finish();
+    }
+  }
+  async #operate<T>(sessionId: string, projectId: string, action: () => Promise<T>): Promise<T> {
+    const controller = this.#activeController!;
+    this.#activeSessionId = sessionId;
+    try { return await action(); }
+    catch (error) {
+      if (controller.signal.aborted && !this.#cleanupOwner) {
+        const record = await this.#options.store.load(sessionId, this.#options.profileId, projectId);
+        if (record.phase !== 'unknown') record.phase = 'interrupted';
+        record.updatedAt = Date.now(); delete record.acceptedPlanFingerprint;
+        await this.#options.store.save(record);
+      }
+      throw error;
+    }
+    finally {
+      if (this.#activeSessionId === sessionId) this.#activeSessionId = null;
+    }
+  }
+  #checkInterrupted() {
+    if (this.#closed || this.#activeController?.signal.aborted) throw new AgentError('interrupted');
+  }
+  async #cancellable<T>(action: (signal: AbortSignal) => Promise<T> | T): Promise<T> {
+    const signal = this.#activeController?.signal;
+    if (!signal) throw new AgentError('host_unavailable');
+    this.#checkInterrupted();
+    // A late callback completion has no continuation capable of creating a
+    // runtime or dispatching inference. Both outcomes stay observed after abort.
+    return await new Promise<T>((resolve, reject) => {
+      const abort = () => { signal.removeEventListener('abort', abort); reject(new AgentError('interrupted')); };
+      signal.addEventListener('abort', abort, { once: true });
+      Promise.resolve().then(() => {
+        if (signal.aborted || this.#closed) throw new AgentError('interrupted');
+        return action(signal);
+      }).then(value => {
+        signal.removeEventListener('abort', abort);
+        if (signal.aborted || this.#closed) reject(new AgentError('interrupted')); else resolve(value);
+      }, error => { signal.removeEventListener('abort', abort); reject(error); });
+    });
   }
   create(input: Parameters<AgentSessions['createInternal']>[0]) { return this.#mutate(() => this.createInternal(input)); }
-  plan(sessionId: string, projectId: string, prompt: string) { return this.#mutate(() => this.planInternal(sessionId, projectId, prompt)); }
+  plan(sessionId: string, projectId: string, prompt: string) { return this.#mutate(() => this.#operate(sessionId, projectId, () => this.planInternal(sessionId, projectId, prompt))); }
   acceptPlan(sessionId: string, projectId: string, revision: string) { return this.#mutate(() => this.acceptPlanInternal(sessionId, projectId, revision)); }
   revisePlan(sessionId: string, projectId: string, revision: string, text: string) {
     return this.#mutate(async () => {
       if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text) > 64 * 1024) throw new AgentError('invalid_plan');
       const session = await this.#load(sessionId, projectId);
       if (session.phase !== 'ready' || session.plan?.revision !== revision) throw new AgentError('stale_plan');
+      delete session.acceptedPlanFingerprint; await this.#save(session);
       const current = await this.#snapshot(session.workspace), connection = await this.#connection(session);
       if (current.fingerprint !== session.plan.workspaceFingerprint || connection.version !== session.plan.connectionVersion) throw new AgentError('stale_plan');
       session.plan = { ...session.plan, text, revision: digest({ ...session.plan, revision: undefined, text, engine: session.engine, model: session.model, runtime: session.runtimeVersion, workspace: session.workspace }) };
@@ -129,16 +187,18 @@ export class AgentSessions extends EventEmitter {
       await this.#save(session); return this.#view(session);
     });
   }
-  execute(sessionId: string, projectId: string, revision: string) { return this.#mutate(() => this.executeInternal(sessionId, projectId, revision)); }
+  execute(sessionId: string, projectId: string, revision: string) { return this.#mutate(() => this.#operate(sessionId, projectId, () => this.executeInternal(sessionId, projectId, revision))); }
   resume(sessionId: string, projectId: string) { return this.#mutate(() => this.resumeInternal(sessionId, projectId)); }
   remove(sessionId: string, projectId: string) { return this.#mutate(() => this.removeInternal(sessionId, projectId)); }
   private async createInternal(input: { projectId: string; workspace: string; engine: Engine; model: string; connectionId: string; cloudAllowed: boolean; allowanceMicrousd: number }) {
     this.#available(); id(input.projectId); id(input.connectionId);
     if (!['codex', 'claude'].includes(input.engine) || typeof input.model !== 'string' || !input.model || input.model.length > 128) throw new AgentError('invalid_engine_model');
-    if (!await this.#options.authorizeWorkspace(input.projectId, input.workspace)) throw new AgentError('workspace_not_authorized');
+    if (!await this.#cancellable(signal => this.#options.authorizeWorkspace(input.projectId, input.workspace, signal))) throw new AgentError('workspace_not_authorized');
     finiteAmount(input.allowanceMicrousd);
-    if (!await this.#options.authorizeAllowance(input.projectId, input.allowanceMicrousd)) throw new AgentError('allowance_not_authorized');
+    if (!await this.#cancellable(signal => this.#options.authorizeAllowance(input.projectId, input.allowanceMicrousd, signal))) throw new AgentError('allowance_not_authorized');
     const baseline = await this.#snapshot(input.workspace);
+    this.#available();
+    this.#checkInterrupted();
     if (this.#options.store.root === baseline.root || this.#options.store.root.startsWith(baseline.root + '/')) throw new AgentError('store_inside_workspace');
     const adapter = this.#options.runtimeFactory(input.engine);
     if (adapter.engine !== input.engine) { await adapter.dispose(); throw new AgentError('runtime_engine_mismatch'); }
@@ -151,7 +211,9 @@ export class AgentSessions extends EventEmitter {
       createdAt: Date.now(), updatedAt: Date.now(), runtimeAttempts: 0,
     };
     await adapter.dispose();
+    this.#checkInterrupted();
     await this.#budgets.checkpoint(session.id, session.profileId, session.projectId, session.accounting, this.#options.parentAllowances);
+    this.#checkInterrupted();
     await this.#save(session);
     return this.#view(session);
   }
@@ -180,13 +242,15 @@ export class AgentSessions extends EventEmitter {
     const session = await this.#load(sessionId, projectId);
     if (this.#running?.session.id === sessionId) throw new AgentError('session_busy');
     if (session.runtimeAttempts >= MAX_RUNTIME_ATTEMPTS) throw new AgentError('runtime_attempt_limit');
+    delete session.acceptedPlanFingerprint; await this.#save(session);
     const connection = await this.#connection(session);
     const adapter = this.#options.runtimeFactory(session.engine);
     try {
       if (adapter.engine !== session.engine) throw new AgentError('runtime_engine_mismatch');
       if (adapter.version !== session.runtimeVersion) throw new AgentError('runtime_version_changed');
-      if (session.threadId) await this.#history(session, await adapter.historyPolicy?.());
+      if (session.threadId) await this.#history(session, await this.#cancellable(() => adapter.historyPolicy?.()));
       const current = await this.#snapshot(session.workspace);
+      this.#checkInterrupted();
       if (current.root !== session.workspace) throw new AgentError('workspace_changed');
       if (session.plan && connection.version !== session.plan.connectionVersion) session.plan = undefined;
       if (session.plan && current.fingerprint !== session.plan.workspaceFingerprint) session.plan = undefined;
@@ -199,12 +263,13 @@ export class AgentSessions extends EventEmitter {
   }
   async #connection(session: Session) {
     if (!session.cloudAllowed) throw new AgentError('cloud_not_authorized');
-    if (!await this.#options.authorizeCloud(session.projectId)) throw new AgentError('cloud_not_authorized');
-    if (!await this.#options.authorizeAllowance(session.projectId, session.allowanceMicrousd)) throw new AgentError('allowance_not_authorized');
-    if (!await this.#options.authorizeWorkspace(session.projectId, session.workspace)) throw new AgentError('workspace_not_authorized');
-    const connection = await this.#options.resolveConnection(session.connectionId);
+    if (!await this.#cancellable(signal => this.#options.authorizeCloud(session.projectId, signal))) throw new AgentError('cloud_not_authorized');
+    if (!await this.#cancellable(signal => this.#options.authorizeAllowance(session.projectId, session.allowanceMicrousd, signal))) throw new AgentError('allowance_not_authorized');
+    if (!await this.#cancellable(signal => this.#options.authorizeWorkspace(session.projectId, session.workspace, signal))) throw new AgentError('workspace_not_authorized');
+    const connection = await this.#cancellable(signal => this.#options.resolveConnection(session.connectionId, signal));
     if ((session.engine === 'codex' ? 'openai' : 'anthropic') !== connection.provider || !connection.models.includes(session.model)) throw new AgentError('connection_model_mismatch');
     if (!connection.credential || !connection.version) throw new AgentError('credential_unavailable');
+    if (![connection.inputMicrousdPerMillion, connection.outputMicrousdPerMillion].every(value => Number.isSafeInteger(value) && value > 0)) throw new AgentError('invalid_connection_rates');
     if (session.accounting.spentMicrousd + session.accounting.heldMicrousd >= session.allowanceMicrousd) throw new AgentError('allowance_exhausted');
     return connection;
   }
@@ -234,12 +299,16 @@ export class AgentSessions extends EventEmitter {
   private async planInternal(sessionId: string, projectId: string, prompt: string) {
     if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt) > 64 * 1024) throw new AgentError('invalid_prompt');
     const session = await this.#load(sessionId, projectId);
-    const before = await this.#snapshot(session.workspace);
+    this.#checkInterrupted();
     session.plan = undefined; delete session.acceptedPlanFingerprint;
+    await this.#save(session);
+    const before = await this.#snapshot(session.workspace);
+    this.#checkInterrupted();
     const result = await this.#run(session, 'plan', prompt, before);
     if (result.status === 'completed' && result.plan?.trim()) {
       if (Buffer.byteLength(result.plan) > 64 * 1024) throw new AgentError('plan_too_large');
       const after = await this.#snapshot(session.workspace);
+      this.#checkInterrupted();
       if (before.fingerprint !== after.fingerprint) { session.phase = 'unknown'; await this.#save(session); throw new AgentError('planning_workspace_changed'); }
       const connection = await this.#connection(session);
       const plan = { text: result.plan, workspaceFingerprint: after.fingerprint, connectionVersion: connection.version };
@@ -251,19 +320,26 @@ export class AgentSessions extends EventEmitter {
   private async acceptPlanInternal(sessionId: string, projectId: string, revision: string) {
     const session = await this.#load(sessionId, projectId);
     if (session.phase !== 'ready' || !session.plan || session.plan.revision !== revision) throw new AgentError('stale_plan');
+    delete session.acceptedPlanFingerprint; await this.#save(session);
     const connection = await this.#connection(session);
     const current = await this.#snapshot(session.workspace);
+    this.#checkInterrupted();
     if (current.fingerprint !== session.plan.workspaceFingerprint || connection.version !== session.plan.connectionVersion) throw new AgentError('stale_plan');
     session.acceptedPlanFingerprint = revision;
-    await this.#save(session); return this.#view(session);
+    await this.#save(session);
+    try { this.#checkInterrupted(); }
+    catch (error) { delete session.acceptedPlanFingerprint; await this.#save(session); throw error; }
+    return this.#view(session);
   }
   private async executeInternal(sessionId: string, projectId: string, revision: string) {
     const session = await this.#load(sessionId, projectId);
     if (session.phase !== 'ready' || !session.plan || session.plan.revision !== revision || session.acceptedPlanFingerprint !== revision) throw new AgentError('plan_not_accepted');
+    this.#checkInterrupted();
+    delete session.acceptedPlanFingerprint; await this.#save(session);
     const before = await this.#snapshot(session.workspace);
     const connection = await this.#connection(session);
+    this.#checkInterrupted();
     if (before.fingerprint !== session.plan.workspaceFingerprint || connection.version !== session.plan.connectionVersion) throw new AgentError('stale_plan');
-    delete session.acceptedPlanFingerprint;
     session.baseline = before;
     this.#reviewBaseline = { sessionId, snapshot: before };
     await this.#run(session, 'execute', `Execute this accepted plan within the authorized workspace. Ask for concrete tool permission when required.\n\n${session.plan.text}`, before);
@@ -271,14 +347,15 @@ export class AgentSessions extends EventEmitter {
   }
   async #run(session: Session, mode: 'plan' | 'execute', prompt: string, _before: WorkspaceSnapshot) {
     this.#available();
+    this.#checkInterrupted();
     if (session.runtimeAttempts >= MAX_RUNTIME_ATTEMPTS) throw new AgentError('runtime_attempt_limit');
     const release = this.#options.scheduler.acquire(session.id);
     let adapter: AgentSessionAdapter | undefined; let proxy: InferenceProxy | undefined;
     let historyPolicy: RuntimeHistoryPolicy | undefined;
-    const controller = new AbortController();
+    const controller = this.#activeController ?? new AbortController();
     this.#activeController = controller;
+    this.#preparing = { sessionId: session.id };
     this.#quiescent = new Promise(resolve => { this.#finishRun = resolve; });
-    const timeout = setTimeout(() => controller.abort(), this.#options.runTimeoutMs ?? 300_000);
     let runtimeReady = false, monitorStopped = false;
     let monitorTimer: ReturnType<typeof setTimeout> | undefined;
     let monitoring: Promise<void> = Promise.resolve();
@@ -295,23 +372,27 @@ export class AgentSessions extends EventEmitter {
     };
     try {
       const connection = await this.#connection(session);
+      if (controller.signal.aborted || this.#closed) throw new AgentError('interrupted');
       adapter = this.#options.runtimeFactory(session.engine);
+      this.#preparing.adapter = adapter;
       if (adapter.engine !== session.engine) throw new AgentError('runtime_engine_mismatch');
       if (adapter.version !== session.runtimeVersion) throw new AgentError('runtime_version_changed');
-      historyPolicy = await adapter.historyPolicy?.();
+      historyPolicy = await this.#cancellable(() => adapter!.historyPolicy?.());
       // Count every native startup, including failures before any paid request.
       // Saving first prevents a crash/reopen from resetting this lifetime limit.
       if (session.threadId) await this.#history(session, historyPolicy);
       const configDir = await this.#options.store.runtimeDirectory(session.id);
       runtimeReady = true; await this.#history(session, historyPolicy);
+      this.#checkInterrupted();
       session.runtimeAttempts++; await this.#save(session);
+      this.#checkInterrupted();
       proxy = new InferenceProxy({ ...connection, model: session.model, allowanceMicrousd: session.allowanceMicrousd, initialAccounting: session.accounting,
         authorizeDispatch: async () => {
           await this.#history(session, historyPolicy);
-          if (!session.cloudAllowed || !await this.#options.authorizeCloud(session.projectId)) throw new AgentError('cloud_not_authorized');
-          if (!await this.#options.authorizeWorkspace(session.projectId, session.workspace)) throw new AgentError('workspace_not_authorized');
-          if (!await this.#options.authorizeAllowance(session.projectId, session.allowanceMicrousd)) throw new AgentError('allowance_not_authorized');
-          const current = await this.#options.resolveConnection(session.connectionId);
+          if (!session.cloudAllowed || !await this.#cancellable(signal => this.#options.authorizeCloud(session.projectId, signal))) throw new AgentError('cloud_not_authorized');
+          if (!await this.#cancellable(signal => this.#options.authorizeWorkspace(session.projectId, session.workspace, signal))) throw new AgentError('workspace_not_authorized');
+          if (!await this.#cancellable(signal => this.#options.authorizeAllowance(session.projectId, session.allowanceMicrousd, signal))) throw new AgentError('allowance_not_authorized');
+          const current = await this.#cancellable(signal => this.#options.resolveConnection(session.connectionId, signal));
           if (current.version !== connection.version || current.credential !== connection.credential || current.upstream !== connection.upstream || current.provider !== connection.provider || !current.models.includes(session.model)) throw new AgentError('stale_connection');
         },
         onAccounting: async accounting => {
@@ -319,17 +400,20 @@ export class AgentSessions extends EventEmitter {
           session.accounting = accounting; await this.#save(session);
         } });
       const endpoint = await proxy.start();
-      const started = await adapter.start({ workspace: session.workspace, model: session.model, configDir, ...endpoint, threadId: session.threadId, maxOutputTokens: connection.maxOutputTokens });
+      if (controller.signal.aborted || this.#closed) throw new AgentError('interrupted');
+      const started = await this.#cancellable(() => adapter!.start({ workspace: session.workspace, model: session.model, configDir, ...endpoint, threadId: session.threadId, maxOutputTokens: connection.maxOutputTokens }));
       await this.#history(session, historyPolicy);
       if (controller.signal.aborted || this.#closed) throw new AgentError('interrupted');
       session.threadId = started.threadId; session.phase = mode === 'plan' ? 'planning' : 'executing';
       this.#running = { session, adapter, proxy, controller, secrets: [connection.credential, endpoint.credential] }; await this.#save(session);
+      this.#preparing = null;
       const abort = () => { this.#clearApprovals(session.id); void adapter?.interrupt().catch(() => {}); };
       controller.signal.addEventListener('abort', abort, { once: true });
       scheduleMonitor();
       try {
-        const result = await adapter.run({ sessionId: session.id, prompt, mode, signal: controller.signal,
-          onEvent: event => this.#event(session, event), onApproval: request => this.#approve(session, mode, request, controller.signal) });
+        const result = await this.#cancellable(() => adapter!.run({ sessionId: session.id, prompt, mode, signal: controller.signal,
+          onEvent: event => { if (!controller.signal.aborted && this.#running?.controller === controller) this.#event(session, event); }, onApproval: request => this.#approve(session, mode, request, controller.signal) }))
+          .catch((error): RunResult => { if (controller.signal.aborted && error instanceof AgentError && error.code === 'interrupted') return { status: 'interrupted' }; throw error; });
         session.phase = result.status; if (result.threadId) session.threadId = result.threadId;
         return this.#scrub(result, this.#running.secrets);
       } finally { controller.signal.removeEventListener('abort', abort); }
@@ -340,7 +424,7 @@ export class AgentSessions extends EventEmitter {
       Object.defineProperty(failure, 'cause', { value: error, enumerable: false });
       throw failure;
     } finally {
-      clearTimeout(timeout); this.#clearApprovals(session.id);
+      this.#clearApprovals(session.id);
       monitorStopped = true; clearTimeout(monitorTimer); await monitoring;
       // Stop dispatch and owned processes before settling or relinquishing ownership.
       let cleanupFailed = false;
@@ -352,8 +436,11 @@ export class AgentSessions extends EventEmitter {
         catch (error) { historyFailure ??= error as AgentError; }
       }
       if (historyFailure) session.phase = 'unknown';
-      if (cleanupFailed && adapter && proxy) { session.phase = 'unknown'; this.#running ??= { session, adapter, proxy, controller, secrets: [] }; this.#releaseRun = release; }
-      else { this.#running = null; release(); this.#activeController = null; }
+      this.#preparing = null;
+      if (cleanupFailed) {
+        session.phase = 'unknown'; this.#cleanupOwner = { adapter, proxy, release };
+        if (adapter && proxy) this.#running ??= { session, adapter, proxy, controller, secrets: [] };
+      } else { this.#running = null; release(); }
       try { await this.#save(session); } finally { this.#finishRun?.(); this.#finishRun = null; }
       if (cleanupFailed) throw new AgentError('cleanup_required');
       if (historyFailure) throw historyFailure;
@@ -414,12 +501,17 @@ export class AgentSessions extends EventEmitter {
   #resolve(approvalId: string, decision: ApprovalDecision) {
     const pending = this.#pending.get(approvalId); if (!pending) return;
     this.#pending.delete(approvalId); clearTimeout(pending.timer); pending.resolve(decision);
+    this.emit('approval-resolved', { sessionId: pending.sessionId, approvalId });
   }
   #clearApprovals(sessionId: string) { for (const [key, value] of this.#pending) if (value.sessionId === sessionId) this.#resolve(key, { decision: 'cancel' }); }
   async interrupt(sessionId: string, projectId: string) {
     await this.#load(sessionId, projectId);
-    if (this.#running?.session.id !== sessionId) throw new AgentError('session_not_running');
-    this.#running.controller.abort(); await this.#running.adapter.interrupt();
+    if (this.#running?.session.id === sessionId) {
+      this.#running.controller.abort(); await this.#running.adapter.interrupt();
+    } else if (this.#activeSessionId === sessionId && this.#activeController) {
+      this.#activeController.abort();
+      if (this.#preparing?.sessionId === sessionId) await this.#preparing.adapter?.dispose();
+    } else throw new AgentError('session_not_running');
   }
   async review(sessionId: string, projectId: string) {
     this.#available();
@@ -463,15 +555,18 @@ export class AgentSessions extends EventEmitter {
     return shutdown;
   }
   private async disposeInternal() {
+    await this.#initializing?.catch(() => {});
     this.#activeController?.abort();
+    if (this.#preparing?.adapter) await this.#preparing.adapter.dispose().catch(() => {});
     if (this.#running) await this.#running.adapter.interrupt().catch(() => {});
     await this.#quiescent;
     await this.#mutationDone;
     await Promise.allSettled([...this.#reads]);
     await cleanupWorkspaceObservers(this.#options.store.root);
-    if (this.#running) {
-      await this.#running.adapter.dispose(); await this.#running.proxy.stop();
-      this.#releaseRun?.(); this.#releaseRun = null; this.#running = null;
+    if (this.#cleanupOwner) {
+      await this.#cleanupOwner.adapter?.dispose(); await this.#cleanupOwner.proxy?.stop();
+      this.#cleanupOwner.release(); this.#cleanupOwner = null;
+      this.#running = null; this.#activeController = null;
     }
     await this.#releaseLease?.(); this.#releaseLease = null; this.removeAllListeners();
     this.#reviewBaseline = null;
