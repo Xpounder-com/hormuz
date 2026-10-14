@@ -67,7 +67,8 @@
               >
             {:else if ['downloading', 'verifying', 'loading'].includes(model.state)}<button
                 class="secondary-button"
-                disabled={snapshot.attempt?.modelId === model.id}
+                disabled={snapshot.attempt?.modelId === model.id ||
+                  snapshot.reviewActivity?.modelId === model.id}
                 onclick={() => service.cancelSetup(model.id)}><X size={14} />Cancel</button
               >
             {:else if model.state === 'downloaded'}<button

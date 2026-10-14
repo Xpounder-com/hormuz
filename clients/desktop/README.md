@@ -31,6 +31,17 @@ own draft. Send returns to the workspace for the simulated response. Escape
 returns from the bar; Shift+Enter adds a line and Enter sends outside IME composition.
 This browser shortcut is not an OS-wide launcher.
 
+Open Research for **Roast my paper**. Select Gentle/Spicy/Scorched heat and two
+distinct model fixtures; Start freezes the sample paper, criteria and selected
+copies. Reviews run sequentially and keep their origin across navigation. Each
+finding has a response approach, point-by-point reply and evidence/change locator.
+**Rebuttal** produces a copyable draft letter from those findings or pasted
+external reviewer comments. One optional Check rebuttals pass may suggest
+support, missing evidence or pushback; only your explicit decision closes a
+supported resolution. Edited paper/replies make applicable checks stale. Two
+explicit roast rounds are available, with no automatic reruns. Findings remain
+scripted sample-paper fixtures even when the editor contains different text.
+
 Models offers explicit simulated download/verify/load/unload/remove and canceled
 states. Connections has working/invalid/offline test fixtures and collects no
 keys. Only one response and one local loaded model are allowed. Navigation
@@ -59,6 +70,6 @@ production policy, accounting or host contract.
 
 The first slice contributes to #481 and #487–#491. Integrated acceptance #492
 remains open: full adverse-state coverage, project move/import/export, persistence
-failure fixtures and Research Review #502 are follow-up UI work. Runtime
+failure fixtures and remaining Research Review #502 journeys are follow-up UI work. Runtime
 contracts #480 B and Electron/storage/llama.cpp/providers/real Auto follow that
 gate under a separate work order.

@@ -18,7 +18,12 @@ deployment or infrastructure change. Simulations and later application/runtime
 implementation each follow their explicit work order. A model review is not
 scientific validation, a truth guarantee or deployment authority.
 
-## Ready to start the UI
+## Research UI exploration
+
+The first source simulation in `clients/desktop` now includes **Roast my paper**
+and **Rebuttal** under Research. It supplies scripted sample-paper outcomes,
+not model analysis of arbitrary pasted text. The remaining #502 journeys and
+integrated #492 approval stay open; this starts no research engine.
 
 The existing roadmap is sufficient to begin a bounded UI work order. Start with
 the selected glossy visual language and project-window/quick-bar handoff, then
@@ -46,16 +51,74 @@ retirement work in [#494](https://github.com/Xpounder-com/hormuz/issues/494); it
 not a UI prerequisite and this review mode neither deletes nor activates an
 account or service.
 
+## Roast my paper and rebuttal loop
+
+The user requested a heat-selectable paper roast across multiple reviewers,
+followed by work to refute, rebut or address the findings. Keep these controls in
+the full project workspace; the minimal Auto bar remains ordinary chat.
+
+- Choose two distinct eligible reviewers and **Gentle**, **Spicy** or
+  **Scorched**. Heat controls rhetorical tone and directness, never severity,
+  citation validity or the burden of evidence. Critique the paper and claims,
+  not the author; avoid invented faults to make a hotter review.
+- Freeze the paper version, selected copies, instructions, criteria, reviewer
+  identities and heat. Initial reviews are blind. Each criticism retains its
+  reviewer, severity, section/claim locator, requested evidence and original
+  wording as the author responds.
+- For each finding choose **Revise**, **Rebut / refute**, **Accept a limitation**
+  or **Need evidence**. Store the point-by-point response and an evidence/change
+  locator. Drafted responses alone do not resolve the criticism. A claimed
+  revision needs a changed artifact; an unverified citation is still unverified.
+- Offer one explicit optional **Check rebuttals** pass after both initial
+  reviews. In the first simulation, reviewer A performs this follow-up after
+  seeing the stored findings and replies; disclose its identity and coverage.
+  It is not another blind independent review and cannot claim that reviewer B
+  accepted anything. It uses the existing default round's optional third call
+  in place of reconciliation, not in addition to it.
+- Preserve **Evidence needed**, **Still disputed**, incomplete/canceled checks
+  and stale outcomes. The first UI only suggests supported resolutions from
+  scripted input fixtures; **Accept this resolution** records the person's
+  revision-specific decision. No automated all-project green light follows.
+- Edits to the paper or response invalidate applicable earlier checks and
+  accepted resolutions. Keep v1 critiques as history when working on v2. A
+  full fresh review of the changed paper needs another explicitly started
+  blind round. Never rerun automatically until the models agree.
+  Matching earlier responses may carry to that new round as drafts, with their
+  prior version shown; checks and accepted resolutions never carry forward.
+- **Rebuttal** also accepts pasted external reviewer comments and a manually
+  written response, producing a copyable draft letter without a model call.
+  External reviewer provenance and acceptance remain unknown. This option
+  remains available independently of whether a roast already exists.
+
+The default exploration permits two explicitly started roast rounds, each with
+two initial reviews plus at most one response check (three calls maximum).
+Preview remains pure; Start quotes/reserves the whole fictional upper allowance,
+including that optional check, under existing profile/project/Temporary caps.
+Roles and loads serialize with ordinary chat on the shared one-active-work
+scheduler. Cancellation releases unstarted allowance and retains dispatched
+unknown holds. Deleting/discarding content cannot refund incurred/unknown usage.
+Saving Temporary research copies the draft and history, releases unused check
+allowance and resets future role intent under destination context/consent;
+old reviews retain their original Temporary scope and cannot authorize execution.
+
+The UI's sample findings, response checks and locators are synthetic even after
+editing the paper. Real heat prompts, source/claim verification, multiple
+original-reviewer follow-ups, false-positive evaluation and settlement are
+separate #503 qualification work. Any additional call path must declare its
+finite call/round budget before execution; it does not silently expand this
+three-call default.
+
 ## Bounded workflow
 
 Two entry points share the same review contract:
 
 | Entry point | One explicit round | Maximum model calls |
 | --- | --- | --- |
-| Review an existing draft — default | Freeze selected draft and source packet → two blind reviews → findings/disagreement summary → human decision | Two reviews; at most one optional model reconciliation, for a maximum of three calls. A deterministic findings summary needs no extra model call. |
+| Review / roast an existing draft — default | Freeze selected draft and source packet → two blind reviews → findings → optional response check or reconciliation → human decision | Two reviews; at most one optional response check or model reconciliation, for a maximum of three calls. A deterministic summary or rebuttal letter needs no extra model call. |
 | Draft and review — optional | One author drafts from the selected packet → freeze that result → two blind reviews → at most one author reconciliation → human decision | Four calls across at most three selected model identities: author, reviewer A and reviewer B. |
 
-There is one reviewer pass per round. Do not repeat calls until the models agree,
+There is one blind reviewer pass per round, with its disclosed optional follow-up.
+Do not repeat calls until the models agree,
 hide failed reviews behind retries, use majority voting as the sole approval
 rule, or generate speculative parallel answers. The UI exploration permits at
 most **two explicitly started mock rounds**; it never starts round two merely

@@ -44,6 +44,12 @@ state, including named projects. “Saved” is always labeled simulated.
 - Eligibility before keyword-based fixture ranking; blocked pins remain pinned,
   no hidden fallback, no mutation during preview, one inference at a time,
   captured response context/origin, scripted streaming and explicit Stop.
+- Research **Roast my paper** with selectable heat and two distinct model
+  fixtures, blind initial results, immutable v1 scope and sequential load/cancel.
+  **Rebuttal** tracks response/evidence per finding, an optional disclosed third
+  check, explicit human resolution and stale v2 changes; pasted external reviews
+  produce a draft letter with unknown reviewer provenance. Two explicit rounds
+  are allowed; every result remains scripted sample output.
 
 All fit, model versions, sizes, cost and quality evidence are synthetic. No
 Electron app, database, real file chooser, OS-wide shortcut, engine process,
@@ -55,7 +61,9 @@ This slice starts #481/#487–#491; it does not close those issues or #492. Comp
 the recorded [UI journeys](DESKTOP_UI_PLAN.md), including project/chat move,
 bounded import/export, content search/archive filters, storage/save-failure and
 other adverse-state fixtures, changed-plan confirmation, advanced request
-overrides and the full Research Review simulation #502. Confirm the selected
+overrides and remaining Research Review #502 journeys, including authoring,
+known-author/alias provenance fixtures and broader failed-review/source states.
+Confirm the selected
 finish, accessible keyboard/focus recovery and early #338 fixtures in the
 integrated review. Runtime #480 B/#482–#485/#493 remains after #492 and requires
 separate authorization and qualification.

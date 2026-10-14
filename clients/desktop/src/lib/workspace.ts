@@ -13,6 +13,7 @@ export class MockWorkspace {
   #timer: Timer;
   #timers = new Set<unknown>();
   #listeners = new Set<(state: WorkspaceState) => void>();
+  #temporaryCopies = new Set<(sourceId: string, copyId: string) => void>();
   #sequence = 0;
   #disposed = false;
   #modelJobs = new Map<string, number>();
@@ -27,6 +28,12 @@ export class MockWorkspace {
     listener(structuredClone(this.state));
     return () => {
       this.#listeners.delete(listener);
+    };
+  }
+  onTemporaryCopy(listener: (sourceId: string, copyId: string) => void) {
+    this.#temporaryCopies.add(listener);
+    return () => {
+      this.#temporaryCopies.delete(listener);
     };
   }
   #emit() {
@@ -106,7 +113,7 @@ export class MockWorkspace {
     }
   }
   deleteProject(id: string) {
-    if (this.state.attempt?.projectId === id) {
+    if (this.state.attempt?.projectId === id || this.state.reviewActivity?.projectId === id) {
       this.#notice('Stop the active response before deleting its project.');
       return;
     }
@@ -129,7 +136,7 @@ export class MockWorkspace {
     }
   }
   deleteChat(id: string) {
-    if (this.state.attempt?.chatId === id) {
+    if (this.state.attempt?.chatId === id || this.state.reviewActivity?.chatId === id) {
       this.#notice('Stop the active response before deleting its chat.');
       return;
     }
@@ -151,7 +158,10 @@ export class MockWorkspace {
   saveTemporary(projectId: string) {
     const source = activeChat(this.state);
     if (source.projectId !== null) return;
-    if (this.state.attempt?.chatId === source.id) {
+    if (
+      this.state.attempt?.chatId === source.id ||
+      this.state.reviewActivity?.chatId === source.id
+    ) {
       this.#notice('Stop the Temporary response before saving a copy.');
       return;
     }
@@ -169,6 +179,7 @@ export class MockWorkspace {
     this.state.chats = this.state.chats.filter((c) => c.id !== source.id);
     this.state.chats.push(copy);
     this.state.activeChatId = copy.id;
+    for (const listener of this.#temporaryCopies) listener(source.id, copy.id);
     this.#notice(
       `Saved a simulated copy to ${project.name}. Future requests use its context and permission; earlier receipts keep their origin.`,
     );
@@ -271,7 +282,11 @@ export class MockWorkspace {
     this.#notice('Demo connection added. Cloud permission is still a separate choice.');
   }
   setConnectionScenario(value: 'success' | 'invalid' | 'offline') {
-    if (this.state.models.find((m) => m.id === this.state.attempt?.modelId)?.place === 'cloud') {
+    if (
+      this.state.models.find(
+        (m) => m.id === (this.state.attempt?.modelId ?? this.state.reviewActivity?.modelId),
+      )?.place === 'cloud'
+    ) {
       this.#notice('Stop the cloud response before changing its connection test.');
       return;
     }
@@ -279,7 +294,11 @@ export class MockWorkspace {
     this.#emit();
   }
   testConnection() {
-    if (this.state.models.find((m) => m.id === this.state.attempt?.modelId)?.place === 'cloud') {
+    if (
+      this.state.models.find(
+        (m) => m.id === (this.state.attempt?.modelId ?? this.state.reviewActivity?.modelId),
+      )?.place === 'cloud'
+    ) {
       this.#notice('Stop the cloud response before testing its connection again.');
       return;
     }
@@ -299,7 +318,9 @@ export class MockWorkspace {
     }, 900);
   }
   removeConnection() {
-    const running = this.state.models.find((m) => m.id === this.state.attempt?.modelId);
+    const running = this.state.models.find(
+      (m) => m.id === (this.state.attempt?.modelId ?? this.state.reviewActivity?.modelId),
+    );
     if (running?.place === 'cloud') {
       this.#notice('Stop the cloud response before removing its connection.');
       return;
@@ -352,7 +373,11 @@ export class MockWorkspace {
   loadModel(id: string) {
     const model = this.state.models.find((m) => m.id === id);
     if (!model || model.state !== 'downloaded') return;
-    if (this.state.attempt || this.state.models.some((m) => m.state === 'loading')) {
+    if (
+      this.state.attempt ||
+      this.state.reviewActivity ||
+      this.state.models.some((m) => m.state === 'loading')
+    ) {
       this.#notice('One model operation at a time. Finish or stop current work.');
       return;
     }
@@ -375,7 +400,11 @@ export class MockWorkspace {
   unloadModel(id: string, remove = false) {
     const model = this.state.models.find((m) => m.id === id);
     if (!model || model.place !== 'local') return;
-    if (this.state.attempt?.modelId === id || model.state === 'loading') {
+    if (
+      this.state.attempt?.modelId === id ||
+      this.state.reviewActivity?.modelId === id ||
+      model.state === 'loading'
+    ) {
       this.#notice('Stop current work before unloading or removing its model.');
       return;
     }
@@ -391,7 +420,11 @@ export class MockWorkspace {
   send() {
     const chat = activeChat(this.state);
     if (!chat.draft.trim()) return;
-    if (this.state.attempt || this.state.models.some((m) => m.state === 'loading')) {
+    if (
+      this.state.attempt ||
+      this.state.reviewActivity ||
+      this.state.models.some((m) => m.state === 'loading')
+    ) {
       this.#notice('Another operation is active. Return to it or stop it before Send.');
       return;
     }
@@ -526,6 +559,57 @@ export class MockWorkspace {
         : 'Stopped. Partial output retained in its original chat.',
     );
   }
+  beginReview(chatId: string): boolean {
+    if (
+      this.state.attempt ||
+      this.state.reviewActivity ||
+      this.state.models.some((m) => m.state === 'loading')
+    ) {
+      this.#notice('One response or review at a time. Return to active work or stop it.');
+      return false;
+    }
+    const chat = this.state.chats.find((c) => c.id === chatId);
+    if (!chat) return false;
+    this.state.reviewActivity = {
+      chatId,
+      projectId: chat.projectId,
+      origin: this.state.projects.find((p) => p.id === chat.projectId)?.name ?? 'Temporary chat',
+      modelId: null,
+      phase: 'Starting review',
+    };
+    this.#emit();
+    return true;
+  }
+  reviewRole(modelId: string, phase: string, preparing = false) {
+    if (!this.state.reviewActivity) return;
+    this.state.reviewActivity.modelId = modelId;
+    this.state.reviewActivity.phase = phase;
+    const model = this.state.models.find((m) => m.id === modelId);
+    if (preparing && model?.place === 'local') model.state = 'loading';
+    this.#emit();
+  }
+  readyReviewModel(modelId: string) {
+    const model = this.state.models.find((m) => m.id === modelId);
+    if (model?.place === 'local') {
+      this.state.models
+        .filter((m) => m.place === 'local' && m.state === 'ready')
+        .forEach((m) => (m.state = 'downloaded'));
+      model.state = 'ready';
+    }
+    this.#emit();
+  }
+  finishReview() {
+    const model = this.state.models.find((m) => m.id === this.state.reviewActivity?.modelId);
+    if (model?.state === 'loading') model.state = 'downloaded';
+    this.state.reviewActivity = null;
+    this.#emit();
+  }
+  adjustReviewAllowance(key: string, amount: number) {
+    // Same content-free fixture accounting owner used by ordinary chat.
+    this.state.profileUsed = Math.max(0, this.state.profileUsed + amount);
+    this.state.usage[key] = Math.max(0, (this.state.usage[key] ?? 0) + amount);
+    this.#emit();
+  }
   dispose() {
     this.stop();
     this.#disposed = true;
@@ -533,6 +617,7 @@ export class MockWorkspace {
     this.#timers.clear();
     this.#modelJobs.clear();
     this.#listeners.clear();
+    this.#temporaryCopies.clear();
   }
 }
 

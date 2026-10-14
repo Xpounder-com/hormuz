@@ -29,7 +29,8 @@
   let composing = false;
   const ownAttempt = $derived(snapshot.attempt?.chatId === chat.id);
   function submit() {
-    if (chat.draft.trim() && !plan.blocked && !snapshot.attempt) onsend();
+    if (chat.draft.trim() && !plan.blocked && !snapshot.attempt && !snapshot.reviewActivity)
+      onsend();
   }
   function key(event: KeyboardEvent) {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !composing) {
@@ -90,13 +91,14 @@
         type="submit"
         class="send-button"
         aria-label="Send prompt"
-        title={snapshot.attempt
+        title={snapshot.attempt || snapshot.reviewActivity
           ? 'Another response is active'
           : plan.blocked
             ? plan.reason
             : 'Send · Enter'}
-        disabled={!chat.draft.trim() || plan.blocked || Boolean(snapshot.attempt)}
-        ><ArrowUp size={20} /></button
+        disabled={!chat.draft.trim() ||
+          plan.blocked ||
+          Boolean(snapshot.attempt || snapshot.reviewActivity)}><ArrowUp size={20} /></button
       >{/if}
   </div>
 </form>

@@ -10,6 +10,7 @@
     PanelLeftClose,
     Clock3,
     Archive,
+    FlaskConical,
   } from '@lucide/svelte';
   import type { WorkspaceState } from '../lib/types.ts';
   let {
@@ -83,7 +84,8 @@
   </div>
   <nav class="project-list" aria-label="Projects">
     {#each projects as project}<button
-        class:active={chat.projectId === project.id && view === 'workspace'}
+        class:active={chat.projectId === project.id &&
+          (view === 'workspace' || view === 'research')}
         class="nav-row"
         title={project.name}
         onclick={() => {
@@ -98,7 +100,7 @@
         {showArchive ? 'No archived projects' : 'Create a project to get started'}
       </p>{/if}
     <button
-      class:active={chat.projectId === null && view === 'workspace'}
+      class:active={chat.projectId === null && (view === 'workspace' || view === 'research')}
       class="nav-row temporary-row"
       onclick={() => {
         ontemporary();
@@ -124,6 +126,9 @@
     {#if !chats.length}<p class="sidebar-empty">No matching chat titles</p>{/if}
   </nav>
   <nav class="utility-nav" aria-label="App navigation">
+    <button class:active={view === 'research'} class="nav-row" onclick={() => onview('research')}
+      ><FlaskConical size={17} /><span>Research</span></button
+    >
     <button class:active={view === 'models'} class="nav-row" onclick={() => onview('models')}
       ><Monitor size={17} /><span>Models</span><span class="ready-indicator"
         >{snapshot.models.filter((m) => m.place === 'local' && m.state === 'ready').length}</span

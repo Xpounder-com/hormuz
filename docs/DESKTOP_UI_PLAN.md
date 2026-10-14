@@ -207,6 +207,18 @@ before real Review execution is offered.
 
 ### Research Review — #502
 
+- Add **Roast my paper** with two selectable distinct reviewers and
+  Gentle/Spicy/Scorched heat. Preserve a fixed evidence standard across tone
+  levels, original blind findings, version and explicit selected scope.
+- Add a **Rebuttal** workspace for per-finding responses, evidence/change
+  locators, revision/limitation/disagreement dispositions and a copyable letter.
+  It also accepts pasted external reviews with unknown provenance.
+  One optional disclosed response check uses the existing third-call allowance;
+  suggested support requires a deliberate human decision. Edited paper/replies
+  make earlier checks stale; a fresh blind roast needs explicit intent.
+  Follow the [roast/rebuttal contract](RESEARCH_REVIEW_MODE.md), retaining the
+  two-round demo cap and no automatic repeat-until-agreement loop.
+
 - Keep Review in the project window, preserving the minimal bar. Default to an
   existing frozen draft with two distinct blind reviewers; authoring and one
   optional reconciliation are explicit variants, capped at four calls across

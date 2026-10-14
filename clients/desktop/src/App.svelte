@@ -20,11 +20,15 @@
   import Connections from './components/Connections.svelte';
   import Settings from './components/Settings.svelte';
   import Modal from './components/Modal.svelte';
+  import ResearchView from './components/ResearchView.svelte';
+  import { MockResearch } from './lib/research.ts';
   import { MockWorkspace } from './lib/workspace.ts';
   import { activeChat, preview } from './lib/planner.ts';
   import { sampleFiles } from './lib/fixtures.ts';
   const service = new MockWorkspace();
+  const research = new MockResearch(service);
   let snapshot = $state.raw(structuredClone(service.state));
+  let researchSnapshot = $state.raw(structuredClone(research.state));
   let view = $state('workspace');
   let compact = $state(false);
   let sidebarOpen = $state(false);
@@ -47,12 +51,16 @@
   });
   onMount(() => {
     const off = service.subscribe((next) => (snapshot = next));
+    const offResearch = research.subscribe((next) => (researchSnapshot = next));
     return () => {
+      offResearch();
+      research.dispose();
       off();
       service.dispose();
     };
   });
   function navigate(next: string) {
+    if (next === 'research') research.open(activeChat(service.state).id);
     view = next;
     sidebarOpen = false;
     compact = false;
@@ -188,16 +196,20 @@
             onclick={() => (sidebarOpen = true)}><PanelLeft size={19} /></button
           >
           <div class="breadcrumb">
-            {#if view === 'workspace'}{#if project}<Folder size={15} /><span title={project.name}
-                  >{project.name}</span
+            {#if view === 'workspace' || view === 'research'}{#if project}<Folder size={15} /><span
+                  title={project.name}>{project.name}</span
                 >{:else}<Clock3 size={15} /><span>Temporary</span>{/if}<ChevronRight
                 size={13}
-              /><strong title={chat.title}>{chat.title}</strong>{:else}<strong
+              /><strong title={chat.title}
+                >{chat.title}{view === 'research' ? ' · Research' : ''}</strong
+              >{:else}<strong
                 >{view === 'models'
                   ? 'Model library'
-                  : view === 'connections'
-                    ? 'Personal connections'
-                    : 'App preferences'}</strong
+                  : view === 'research'
+                    ? 'Research workspace'
+                    : view === 'connections'
+                      ? 'Personal connections'
+                      : 'App preferences'}</strong
               >{/if}
           </div>
           <div class="header-actions">
@@ -247,6 +259,17 @@
               }}>Return to chat<ArrowUpRight size={13} /></button
             >
           </div>{/if}
+        {#if snapshot.reviewActivity && (view !== 'research' || snapshot.reviewActivity.chatId !== chat.id)}
+          <div class="background-work" role="status">
+            <span class="busy-dot"></span>Research review in {snapshot.reviewActivity.origin}<button
+              class="text-button"
+              onclick={() => {
+                service.navigate(snapshot.reviewActivity!.chatId);
+                navigate('research');
+              }}>Return to review<ArrowUpRight size={13} /></button
+            ><button class="text-button" onclick={() => research.stop()}>Stop</button>
+          </div>
+        {/if}
         {#if view === 'workspace'}
           <Conversation {chat} ondraft={(text) => service.setDraft(text)} />
           <div class="composer-region">
@@ -268,6 +291,13 @@
               oncontext={() => showContext('files')}
             />
           </div>
+        {:else if view === 'research'}<ResearchView
+            {snapshot}
+            {researchSnapshot}
+            session={researchSnapshot.sessions[chat.id]}
+            service={research}
+            oncontext={() => showContext('files')}
+          />
         {:else if view === 'models'}<ModelLibrary
             {snapshot}
             {service}
@@ -347,9 +377,9 @@
               ></label
             >
             <p class="modal-description">
-              Copy messages and draft; clear Temporary after acknowledgment. Reset pins, chat
-              instructions and selections. Future requests use the destination’s instructions,
-              objective and separate cloud permission.
+              Copy messages, draft and research history; clear Temporary after acknowledgment. Reset
+              pins, chat instructions and selections. Future requests use the destination’s
+              instructions, objective and separate cloud permission.
             </p>
             <div class="save-preview">
               <strong>{snapshot.projects.find((p) => p.id === destination)?.name}</strong><span

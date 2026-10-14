@@ -32,7 +32,7 @@ legacy clients; their release and qualification boundaries remain separate.
 | Local model setup | Discover, download, verify, load and remove curated text models inside Hormuz through a managed llama.cpp engine. |
 | Auto with an override | While typing, preview the proposed model and a small Local/Cloud indicator. Selecting a model pins it; selecting Auto resumes routing. |
 | Optional paid models | Connect your own provider API account, enable cloud use explicitly and set an allowance. Provider usage is billed separately. |
-| Research Review | Optional full-window review with distinct blind reviewers, visible findings/disagreement and human sign-off for a named revision. |
+| Roast and rebuttal | Optional full-window paper roast with selectable heat and distinct reviewers, per-finding responses/evidence, a rebuttal letter and human decisions for a named revision. Currently simulated. |
 
 The planned host is **Electron**, with a shared **Svelte/TypeScript** interface
 and **llama.cpp** for local inference. Windows, Linux and macOS are target

@@ -79,6 +79,13 @@ export type WorkspaceState = {
   activeChatId: string;
   connection: Connection;
   attempt: Attempt | null;
+  reviewActivity: {
+    chatId: string;
+    projectId: string | null;
+    origin: string;
+    modelId: string | null;
+    phase: string;
+  } | null;
   revision: number;
   notice: string;
   theme: 'dark' | 'light';

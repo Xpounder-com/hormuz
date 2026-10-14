@@ -197,6 +197,7 @@ export function initialState(): WorkspaceState {
     activeChatId: first.id,
     connection: { status: 'absent', scenario: 'success' },
     attempt: null,
+    reviewActivity: null,
     revision: 0,
     notice: '',
     theme: 'dark',

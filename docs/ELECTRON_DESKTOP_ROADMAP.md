@@ -74,6 +74,15 @@ shared surface needs a beautiful legible opaque fallback.
 
 ## UI first: simulation implementation started
 
+The research exploration now includes **Roast my paper** with selectable heat
+and distinct reviewer fixtures, plus **Rebuttal** for original findings or
+pasted external comments. It preserves critiques and evidence requirements,
+uses one optional disclosed third-call response check and records human
+resolutions for a named revision. Edited text invalidates earlier checks;
+another blind round needs explicit intent. See the
+[research contract](RESEARCH_REVIEW_MODE.md). This advances #502 without closing
+its full criteria, #492 or any runtime gate; the minimal Auto bar stays unchanged.
+
 The scope is sufficient to start the bounded UI simulation with synthetic
 projects, sources, models, costs and responses. #480 checkpoint A now records
 the [product/mock boundaries](DESKTOP_BACKEND_BOUNDARIES.md): saved/Temporary
