@@ -31,7 +31,7 @@ legacy clients; their release and qualification boundaries remain separate.
 | Auto with an override | While typing, preview the proposed model and a small Local/Cloud indicator. Selecting a model pins it; selecting Auto resumes routing. |
 | Optional paid models | Connect your own provider API account, enable cloud use explicitly and set an allowance. Provider usage is billed separately. |
 | Research Review | Optional full-window review with distinct blind reviewers, visible findings/disagreement and human sign-off for a named revision. |
-| Agent execution — later phase | Codex first, then Claude Agent: enforced read-only planning, separate plan/tool/spend approvals, execution, actual diff review and explicit named-project session resume. [Implementation roadmap](docs/AGENT_EXECUTION_ROADMAP.md). |
+| Agent execution — later phase | [Backend source preview](clients/agent-runtime/README.md): Codex first, then Claude Agent, with read-only planning, separate plan/tool/spend approvals, execution, observed diff review and explicit named-project session resume. Desktop integration and installed release qualification remain [roadmap gates](docs/AGENT_EXECUTION_ROADMAP.md). |
 
 The planned host is **Electron**, with a shared **Svelte/TypeScript** interface
 and **llama.cpp** for local inference. Windows, Linux and macOS are target

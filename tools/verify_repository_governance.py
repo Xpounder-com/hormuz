@@ -1602,6 +1602,18 @@ def _validate_native_contract_workflow(
 ) -> None:
     """Keep one reusable native matrix, required by the calling CI aggregate."""
 
+    macos_agent_steps = {
+        "Set up Node.js for macOS agent confinement checks": (
+            "        with:\n          node-version: \"24\"\n",
+        ),
+        "Verify macOS agent backend and installed Claude SDK against synthetic providers": (
+            "          HORMUZ_TEST_INSTALLED_CLAUDE: \"1\"\n",
+            "          npm ci --prefix clients/agent-runtime --ignore-scripts --maxsockets=4 --fetch-retries=2 --fetch-timeout=30000 --no-audit --no-fund\n",
+            "          npm --prefix clients/agent-runtime run check\n",
+            "          npm --prefix clients/agent-runtime test\n",
+        ),
+    }
+
     windows_steps = {
         "Build native Windows development candidate": (
             "        working-directory: clients/rust\n",
@@ -1695,9 +1707,11 @@ def _validate_native_contract_workflow(
         or job_fields["contracts"].get("runs-on") != "${{ matrix.os }}"
         or "if" in job_fields["contracts"]
         or re.findall(r"^        if: (.+)$", text, re.MULTILINE)
-        != ["runner.os == 'Windows'"] * len(windows_steps) + ["runner.os == 'macOS'"]
+        != ["runner.os == 'macOS'"] * len(macos_agent_steps)
+        + ["runner.os == 'Windows'"] * len(windows_steps) + ["runner.os == 'macOS'"]
         or re.findall(r"^      - name: (.+)\n        if: (.+)$", text, re.MULTILINE)
-        != [(name, "runner.os == 'Windows'") for name in windows_steps]
+        != [(name, "runner.os == 'macOS'") for name in macos_agent_steps]
+        + [(name, "runner.os == 'Windows'") for name in windows_steps]
         + [("Verify existing Swift expectations", "runner.os == 'macOS'")]
         or "      fail-fast: false\n" not in text
         or "        os: [ubuntu-latest, windows-latest, macos-15]\n" not in text
@@ -1714,6 +1728,10 @@ def _validate_native_contract_workflow(
         ) not in text
     ):
         raise RepositoryGovernanceError("native contract workflow changed")
+    for name, markers in macos_agent_steps.items():
+        step = _workflow_named_step(text, name=name)
+        if any(marker not in step for marker in markers):
+            raise RepositoryGovernanceError("native contract workflow agent verification changed")
     for name, markers in windows_steps.items():
         try:
             step = _workflow_named_step(text, name=name)

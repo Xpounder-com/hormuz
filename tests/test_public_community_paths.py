@@ -29,6 +29,12 @@ class PublicCommunityPathTests(unittest.TestCase):
             shutil.copy2(REPOSITORY_ROOT / name, target / name)
         shutil.copytree(REPOSITORY_ROOT / ".github", target / ".github")
         shutil.copytree(REPOSITORY_ROOT / "docs", target / "docs")
+        agent_docs = target / "clients/agent-runtime"
+        agent_docs.mkdir(parents=True)
+        shutil.copy2(
+            REPOSITORY_ROOT / "clients/agent-runtime/README.md",
+            agent_docs / "README.md",
+        )
         shutil.copytree(REPOSITORY_ROOT / "examples", target / "examples")
         shutil.copytree(
             REPOSITORY_ROOT / "marketing",
