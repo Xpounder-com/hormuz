@@ -63,7 +63,7 @@ HORMUZ_TEST_INSTALLED_CLAUDE=1 node --test --test-concurrency=1 test/claude-inst
 
 Local verification on 2026-10-14: macOS 26.2 (25C56), arm64, Node 25.2.1;
 `npm run check` passed and the serial suite with both installed flags passed
-**105/105**, with no skips. Codex 0.160.0 and SDK 0.3.299 / bundled CLI 2.1.299
+**110/110**, with no skips. Codex 0.160.0 and SDK 0.3.299 / bundled CLI 2.1.299
 completed their full synthetic host journeys. External provider requests and
 paid spend were zero. Repository governance, CI-scope, secret-inventory and
 public-community-path tests passed **126/126**. CI checks run separately.

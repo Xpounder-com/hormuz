@@ -13,6 +13,8 @@ export type RpcProcessOptions = {
   shutdownTimeoutMs?: number;
   maxFrameBytes?: number;
   maxOutputBytes?: number;
+  /** Trusted host/test syscall wiring only; never exposed through the UI bridge. */
+  signalProcess?: (pid: number, signal: NodeJS.Signals | 0) => boolean;
   onNotification: (method: string, params: unknown) => void;
   onRequest: (method: string, params: unknown, id: RpcId) => Promise<unknown>;
   onFailure: (error: AgentError) => void;
@@ -178,15 +180,35 @@ export class RpcProcess {
       if (timer) clearTimeout(timer);
     };
     // This process has its own session/process group. Only its descendants are signalled.
-    const signalGroup = (signal: NodeJS.Signals) => {
-      if (this.child.pid) try { process.kill(-this.child.pid, signal); } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    let groupGone = false;
+    const signalProcess = this.options.signalProcess ?? process.kill;
+    const signalGroup = async (signal: NodeJS.Signals) => {
+      if (groupGone || !this.child.pid) return;
+      const pid = -this.child.pid;
+      try { signalProcess(pid, signal); }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ESRCH') { groupGone = true; return; }
+        if (code !== 'EPERM') throw error;
+        // Darwin can report EPERM while an exiting group disappears. The
+        // owned root's waitpid/exit event plus group ESRCH are both required;
+        // root exit alone says nothing about surviving descendants.
+        if (!this.exited) await wait();
+        if (!this.exited) throw new AgentError('runtime_cleanup_required');
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try { signalProcess(pid, 0); }
+          catch (probe) {
+            if ((probe as NodeJS.ErrnoException).code === 'ESRCH') { groupGone = true; return; }
+          }
+          if (attempt < 2) await new Promise<void>(resolve => setTimeout(resolve, Math.max(1, Math.min(waitMs, 25))));
+        }
+        throw new AgentError('runtime_cleanup_required');
       }
     };
-    signalGroup('SIGTERM');
+    await signalGroup('SIGTERM');
     this.child.stdin.end();
     await wait();
-    signalGroup('SIGKILL');
+    await signalGroup('SIGKILL');
     // Node's exit event follows waitpid/reaping. A signalled PID alone is not proof
     // of cleanup; retain the transport for a bounded disposal retry if uncertain.
     await wait();
