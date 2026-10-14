@@ -18,6 +18,14 @@ starts real implementation. Account cleanup has its own authorized operations
 and evidence below; it is not covered by a blanket claim of no service changes.
 Release identity, dates and implementation owners remain unassigned.
 
+README cleanup is part of the planning/documentation scope in #479. The
+[repository introduction](../README.md) now leads with the planned desktop
+workspace, minimal bar, local/cloud Auto and optional Research Review. It labels
+simulation versus available gateway/legacy clients, retains runnable quickstart
+anchors, and directs operational detail to the existing guides. Keep this
+overview aligned with later accepted UI/runtime/release evidence; the rewrite
+does not claim that the desktop has shipped or replace the gateway contracts.
+
 Local cleanup [#504](https://github.com/Xpounder-com/hormuz/issues/504) is complete
 within its audited scope: old merged checkouts and test exports were retired
 with verified recovery, while unique work and release assets remain preserved.

@@ -63,6 +63,12 @@ their accepted source/reference scopes; this sweep does not reopen them.
 
 ## New work and milestone policy
 
+README cleanup is included in #479's planning/documentation changes: lead with
+the upcoming desktop project workspace, bar, model setup/Auto and Review; label
+available versus planned capabilities, preserve existing runnable quickstart
+anchors and link detailed gateway/operational guides. The draft documentation
+rewrite does not close a UI/runtime gate or publish a desktop release.
+
 The user then confirmed a full project workspace with chats, files, instructions
 and model/Auto preferences. #481 now owns the whole glossy visual system. Six
 UI issues add #487 navigation/bar handoff, #488 projects/chats/history/search,

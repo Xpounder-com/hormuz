@@ -1,15 +1,99 @@
 # Hormuz
 
-**Keep your AI tools. See what each job did.**
+**One workspace for local and cloud AI.**
 
-Hormuz is an open-source gateway for AI work across repositories. Connect your
-existing agent or SDK, attach requests to a job, and inspect its attempts, routing
-decisions and usage. Job budgets can stop a request before provider work; eligible
-exact repeats can reuse an answer, and correction evidence bypasses that reuse.
+Hormuz is being redesigned as an open-source desktop workspace for your projects,
+chats, files, instructions and model preferences. A small glossy prompt bar gives
+quick access to the active project. Choose a model yourself, or use Auto to
+suggest an eligible local or paid model for the task.
+
+**Status: planning and simulated prototypes.** The new Electron desktop,
+managed llama.cpp setup and project-aware local/cloud Auto are planned. This
+repository already contains the Python gateway, CLI, Personal Optimizer and
+legacy clients; their release and qualification boundaries remain separate.
+
+[Desktop direction](#the-desktop-were-planning) ·
+[Roadmap](docs/ELECTRON_DESKTOP_ROADMAP.md) ·
+[Backend boundaries](docs/DESKTOP_BACKEND_BOUNDARIES.md) ·
+[Try the existing gateway](#quickstart) ·
+[Contribute](#contributing-and-community)
+
+[![CI](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+## The desktop we're planning
+
+| Experience | Planned behavior |
+| --- | --- |
+| Full project workspace | Each project owns chats, selected files, instructions and model/Auto preferences, with local history and search. |
+| Minimal prompt bar | Prompt, Send, compact model picker, small Auto control and project/Temporary destination, using the same glossy curved visual language as the full window. |
+| Local model setup | Discover, download, verify, load and remove curated text models inside Hormuz through a managed llama.cpp engine. |
+| Auto with an override | While typing, preview the proposed model and a small Local/Cloud indicator. Selecting a model pins it; selecting Auto resumes routing. |
+| Optional paid models | Connect your own provider API account, enable cloud use explicitly and set an allowance. Provider usage is billed separately. |
+| Research Review | Optional full-window review with distinct blind reviewers, visible findings/disagreement and human sign-off for a named revision. |
+
+The planned host is **Electron**, with a shared **Svelte/TypeScript** interface
+and **llama.cpp** for local inference. Windows, Linux and macOS are target
+platforms; exact supported OS, architecture and hardware rows require installed
+qualification. No new cross-platform release is available from this plan.
+
+First scope is text work. Arbitrary marketplace loaders, image/audio inference,
+agents/computer control, file editing, remote sync and collaborative cloud
+projects remain later decisions. Local projects and direct provider access need
+no hosted Hormuz login, Render service or Hormuz subscription.
+
+## Projects, privacy and model choice
+
+Named projects are planned to save conversations and drafts locally. Temporary
+chat stays in memory across navigation and hidden windows, then clears on
+explicit discard or app quit. First file scope uses imported UTF-8 text/Markdown
+copies; project membership does not automatically include a file in a request.
+The composer shows selected context and effective instructions.
+
+Local-only is the initial default. Connecting a provider does not enable cloud
+processing: project cloud use needs explicit opt-in, eligible context and a
+finite allowance. Credential custody and content-free usage records remain
+separate from saved project content.
+
+Auto preview has no provider calls, model loads or downloads. Send revalidates
+the proposed plan and can authorize a disclosed load/swap of a qualified,
+already downloaded local model. A blocked manual pin stays pinned; local-only
+work cannot silently become a cloud request. Estimates, actual costs and unknown
+outcomes are shown separately.
+
+Research Review freezes an explicit draft/source packet and uses two distinct
+blind reviewers. Local roles swap sequentially under the first one-loaded-model
+plan. Edited or reconciled versions need fresh review; model agreement does not
+establish correctness or approve an entire project. A human decides the scope
+and revision to accept.
+
+These are [recorded planning boundaries](docs/DESKTOP_BACKEND_BOUNDARIES.md).
+The final glossy finish and integrated UI still need review.
+
+## Delivery order
+
+1. Define the shared visual system and project-window/prompt-bar handoff.
+2. Complete simulated projects, chats, context, local setup, connections,
+   preferences, Auto and Research Review; review the integrated UI in
+   [#492](https://github.com/Xpounder-com/hormuz/issues/492).
+3. Accept the runtime contract, then implement Electron hosting, local storage,
+   llama.cpp and one paid-provider baseline; integrate real Auto afterward.
+4. Qualify lifecycle, packages, updates, accessibility and each declared platform.
+   Real Research Review follows a useful single-response baseline.
+
+Follow [desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479),
+the [UI plan](docs/DESKTOP_UI_PLAN.md) and
+[delivery roadmap](docs/ELECTRON_DESKTOP_ROADMAP.md). UI work uses mock services
+first. Dates, implementation owners, exact models/providers and final runtime
+limits remain explicit later decisions.
 
 <a id="try-the-real-gateway-without-a-provider-account"></a>
 
 ## Quickstart
+
+**Try the existing gateway from source.** This provider-free tour exercises the
+implemented gateway and work ledger with simulated replies. It is separate from
+the planned desktop and requires no API key, provider account or payment.
 
 You need Git, Python 3.11+ and permission to bind local loopback ports. From a
 fresh directory:
@@ -33,571 +117,106 @@ PASS correction-bypasses-reuse: a correction forced a fresh provider response
 External provider calls: 0
 ~~~
 
-This runs the actual authenticated gateway and SQLite work ledger with simulated
-provider replies. No API key, provider account or payment is required. Installation
-downloads Python dependencies; tour requests stay on loopback, and temporary state
-is removed on exit. These checks demonstrate gateway behavior, not model quality,
-customer savings or completed customer work.
+Installation downloads Python dependencies; tour requests stay on loopback and
+temporary state is removed on exit. This shows gateway mechanics, not model
+quality, customer savings or desktop setup.
 
-Current `main` contains the AI Work 1.9.0 source candidate. Published v1.8.0
-installers and the [stable source demo](#stable-gateway-demo) remain separate.
-Pin a complete reviewed commit when operating a gateway.
-
-**Inspect and try your own workflow:** [tour source](tools/ai_work_provider_examples.py) ·
-[first-run walkthrough](docs/TRY_HORMUZ.md) ·
-[21 OpenAI and Anthropic scenarios](examples/providers/README.md) ·
-[vendor SDK recipes](examples/sdk/README.md) ·
-[actual GitHub / Linear delivery](docs/AI_WORK_DELIVERY_EXAMPLES.md).
-
-**Share your first run:** [installation or first-run failure](https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml) ·
-[discussion](https://github.com/Xpounder-com/hormuz/discussions/211).
-Include the source SHA, environment and sanitized result; omit credentials and
-private prompts or answers.
-
-![AI Work dashboard with explicitly synthetic example work](docs/evidence/ai-work-functional/AI_WORK_DASHBOARD_FULL.png)
-
-*Recorded local gateway UI with synthetic provider data. These examples do not
-establish customer savings, model quality or faster completion.*
-
-OpenAI Responses, Chat Completions and Anthropic Messages are supported request
-paths. Applications need a configurable endpoint and work attachment. Closed
-applications and unrelated AI subscriptions are outside the gateway's controls.
-
-<details>
-<summary>Current AI Work mechanics and recorded validation</summary>
-
-The AI work experience adds an opt-in customer-owned job ledger, workspace,
-repository and job budgets, fast local routing for cost/speed/outcome priorities,
-and correction-aware exact answer reuse. Existing compaction and secret controls
-still govern every provider request. See [the product operating guide](docs/AI_WORK_PRODUCT.md)
-and [runtime configuration](docs/AI_WORK_RUNTIME.md) for implemented behavior,
-supported agent/API connections and the remaining production qualification gates.
-
-The [reproducible browser journey](docs/AI_WORK_BROWSER_VALIDATION.md) passes
-12 checks across qualification, synthetic payment-gated activation, budget and
-priority selection, ordinary Responses API work, cache reuse and corrective
-repeat, a budget stop and approved continuation, and a signed workflow result.
-Its [recording and conditions](docs/evidence/ai-work-functional/AI_WORK_BROWSER_QA.json)
-use three local simulated provider responses. The separate
-[mechanics receipt](docs/evidence/ai-work-functional/receipt.json) passes 35 checks
-across 13 local fixture calls. Both identify 28 executed source files by SHA-256;
-neither makes real-provider calls or payments, qualifies an installed native agent,
-or proves customer savings or production model quality.
-
-The [installed SDK qualification](docs/evidence/sdk-examples/README.md) passes
-six real SDK calls through an authenticated disposable gateway: JSON and streaming
-for Responses, Chat Completions and Messages. It records one synthetic provider
-call per case, complete response metadata and the actual SQLite ledger, with
-33 source fingerprints. SDK versions and cleanup checks are in its receipt;
-live provider and native-agent qualification remain separate.
-
-</details>
-
-[![CI](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Xpounder-com/hormuz)](https://github.com/Xpounder-com/hormuz/releases)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](pyproject.toml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-
-Keep the AI clients people already use. Put organization policy between those
-clients and model providers.
-
-Hormuz is a CLI-first gateway that authenticates the person and team behind each
-request, applies model and budget policy, controls secret egress, routes allowed
-traffic to OpenAI or Anthropic, and records metadata-only evidence. Provider
-credentials remain on the Hormuz service; prompts and responses are relayed, not
-written to the usage database.
-
-> [!IMPORTANT]
-> Hormuz 1.0 established the stable CLI and policy/evidence contracts. Hormuz
-> 1.8 preserves those contracts and the terminal-first Personal Optimizer,
-> its adapter SDK, and Aider support. The notarized Apple Silicon Mac app includes
-> the native Rust relay and cancels stalled startup helpers when its owner exits.
-> Windows remains an unsigned, unsupported preview. See the
-> [v1.8 release boundaries](docs/releases/v1.8.0-notarized-mac.md). The original
-> release qualification included five isolated internal repetitions of one exact
-> offline policy workflow plus exact-byte candidate custody. That bounded result
-> does not prove external human usability, blanket production fitness, customer
-> SLA coverage, provider billing accuracy, or independent security review.
-
-[Website](https://usehormuz.github.io/) ·
-[Recorded demo](https://usehormuz.github.io/demo/) ·
-[Enterprise evaluation](https://usehormuz.github.io/enterprise/)
-
-[Benefits](#why-hormuz) · [Quickstart](#quickstart) ·
-[Usage reporting](#usage-visibility-without-content-capture) ·
-[Documentation](#documentation) · [Contributing](#contributing-and-community)
-
-## Why Hormuz
-
-| Benefit | What Hormuz provides |
-| --- | --- |
-| Preserve developer workflows | Supported API agents use OpenAI Responses, Chat Completions or Anthropic Messages; Codex and Claude Code retain their native protocol paths. |
-| Centralize AI policy | Enforce allowed clients and models, policy-bounded one-hop capacity failover, output caps, monthly token limits, and USD budgets at organization, team, and person scope. |
-| Preview a policy change | Opt-in local console compares a proposed team/model output cap with captured requests, requires review, and shows request receipts and rollback. [Setup and limits](docs/POLICY_IMPACT.md). |
-| Understand adoption and spend | Group current-month requests, tokens, and estimated cost by organization, team, person, model, client, or provider. |
-| Attribute usage responsibly | Bind each request to a unique human or workload identity and preserve event-time team attribution without storing prompts or responses. |
-| Reduce secret-egress risk | Detect, redact, or deny configured credentials and high-confidence secret formats before provider serialization. |
-| Reduce repetitive tool context | Optionally encode eligible structured tool results on the user's machine before the governed request leaves the device. |
-| Keep control in your environment | Self-host the gateway and metadata store, keep provider keys server-side, and export versioned evidence for independent analysis. |
-
-Hormuz is designed for usage governance, not employee surveillance. Token volume
-and estimated spend describe consumption; they are not measures of productivity,
-quality, or individual performance.
-
-## Explore the full provider tour
-
-From the installed source checkout, list or run all 21 scenarios:
-
-~~~bash
-python tools/ai_work_provider_examples.py --list
-python tools/ai_work_provider_examples.py
-~~~
-
-The full tour uses the same disposable local providers and emits a JSON receipt
-with the executed conditions, source hashes and gateway results. To save the
-short tour's full receipt, use `--tour --receipt NEW_RECEIPT.json`. Existing receipt
-files are not overwritten. [Live examples](examples/providers/README.md) use your
-own OpenAI/Anthropic accounts, qualified rates and an explicit small request limit.
-Provider calls can be billed separately. [Connect real workflow results](docs/AI_WORK_DELIVERY_EXAMPLES.md)
-after choosing the job's completion criterion.
+[First-run walkthrough](docs/TRY_HORMUZ.md) ·
+[Full provider tour](examples/providers/README.md) ·
+[SDK recipes](examples/sdk/README.md) ·
+[Workflow results](docs/AI_WORK_DELIVERY_EXAMPLES.md)
 
 ### Stable gateway demo
 
-The provider-free demo exercises the real HTTP gateway, policy, redaction,
-request-attempt, and SQLite evidence paths with disposable loopback providers:
+The [v1.8.0 source release](https://github.com/Xpounder-com/hormuz/releases/tag/v1.8.0)
+retains the provider-free `hormuz demo` and `hormuz policy demo` workflows.
+See [the release scope](docs/releases/v1.8.0-notarized-mac.md) and
+[policy workflow guide](docs/POLICY_ADMIN_USABILITY.md) for their exact conditions.
 
-~~~bash
-git clone --branch v1.8.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
-cd hormuz
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --editable .
-hormuz demo
-~~~
+## Existing gateway and clients
 
-The commands above select the stable v1.8.0 source tag. Installation downloads
-Python dependencies; the demo itself uses only disposable local loopback
-providers. No OpenAI or Anthropic account is required. A successful run reports:
+<a id="why-hormuz"></a>
+<a id="what-works"></a>
+<a id="how-it-works"></a>
 
-~~~text
-PASS allowed request reached the loopback provider simulator
-PASS unapproved model was rerouted and output-capped
-PASS detected secret was redacted before provider egress
-PASS denied request made no provider call
-PASS content-free evidence validated: 4 usage events, 1 security event
-PASS external provider calls: 0 (3 loopback simulator calls)
-~~~
+The existing gateway governs supported Codex, Claude Code and SDK requests with
+identity, model policy, budget admission, secret-egress controls, streaming and
+metadata-only evidence. OpenAI Responses, Chat Completions and Anthropic
+Messages have their own implemented protocol paths. The AI Work runtime adds
+job attribution and opt-in exact answer reuse under its existing contract.
 
-Try the separate zero-network policy-administration workflow:
+<a id="personal-optimizer"></a>
 
-~~~bash
-hormuz policy demo
-~~~
+The terminal-first [Personal Optimizer](docs/PERSONAL_OPTIMIZER.md) remains a
+separate runnable path. The published v1.8.0 notarized Apple Silicon Mac archive
+and unsigned unsupported Windows preview retain their
+[documented release boundaries](docs/releases/v1.8.0-notarized-mac.md).
+Hosted pilot services are suspended; retained data and remaining account
+retirement are tracked in the [account ledger](docs/DESKTOP_ACCOUNT_CLEANUP.md).
 
-Both demos remove their temporary state by default. They are executable product
-tours, not provider-compatibility or production-deployment certifications. See
-[policy administrator usability](docs/POLICY_ADMIN_USABILITY.md) for the exact
-v1 repeatability and custody boundary.
+Recorded same-revision Codex/OpenAI and Claude Code/Anthropic evidence is in
+[issue #115](https://github.com/Xpounder-com/hormuz/issues/115).
+It does not prove provider-invoice reconciliation, every client feature,
+enterprise production readiness, or coverage of traffic bypassing Hormuz.
+[Support](SUPPORT.md) and [verification](docs/VERIFICATION.md) define the exact
+available and qualified boundaries.
 
-## Personal Optimizer
+### Configure providers and clients
 
-The terminal-first Personal Optimizer runs without an organization or
-PostgreSQL. It keeps the provider credential in the operating-system keyring,
-launches a supported coding agent through an authenticated loopback relay, and
-shows content-free local benefit measurements. Unsupported or non-beneficial
-traffic follows the ordinary request path.
+Use [client setup](docs/CLIENTS.md), [runtime configuration](docs/AI_WORK_RUNTIME.md)
+and [policy control](docs/POLICY_CONTROL.md) for existing gateway connections.
+Keep credentials outside source control. Live provider examples require your
+own API account and an explicit bounded spend scope; paid chat subscriptions
+are separate from provider API access.
 
-~~~bash
-python -m pip install 'PyJWT[crypto]>=2.14,<3' 'hormuz[client,context]'
-hormuz context resources install
-hormuz personal contract --json
-hormuz personal qualify --json
-~~~
+<a id="usage-visibility-without-content-capture"></a>
+<a id="policy-workflow"></a>
+<a id="deployment-options"></a>
+<a id="project-status-and-scope"></a>
+<a id="software-cloud-and-appliances"></a>
 
-See the [Personal Optimizer guide](docs/PERSONAL_OPTIMIZER.md) for direct and
-managed setup, the simple On/Off controls, removal, and the bounded release
-claim.
-
-## Usage visibility without content capture
-
-Hormuz records one metadata-only event for each accounted generation attempt.
-The event includes the organization, person, team, identity type, client,
-provider, requested and routed model, provider-reported token categories,
-configured-rate-card estimate, policy outcome, status, and redaction count.
-
-Use the built-in report to answer common operational questions:
-
-| Question | Command |
-| --- | --- |
-| How much is each person using? | `hormuz --config hormuz.json status --group-by person` |
-| Which models drive token consumption and cost? | `hormuz --config hormuz.json status --group-by model` |
-| What is one team's model mix? | `hormuz --config hormuz.json status --group-by model --team engineering` |
-| Which providers does one identity use? | `hormuz --config hormuz.json status --group-by provider --actor alice` |
-| How can another tool consume the report? | `hormuz --config hormuz.json status --group-by person --json` |
-
-Rows include request outcomes, input and output tokens, cache-read and
-cache-write tokens, reasoning tokens, total tokens, estimated cost, active
-actors, redactions, and applicable budget utilization.
-
-<details>
-<summary>Example metadata-only JSON report (synthetic)</summary>
-
-~~~json
-{
-  "schema_id": "hormuz.usage-report",
-  "schema_version": 1,
-  "month": "current",
-  "group_by": "person",
-  "filters": {
-    "actor_id": null,
-    "team_id": null
-  },
-  "cost_basis": "configured_rate_card_estimate",
-  "allocation_basis": "direct_gateway_request",
-  "coverage": "gateway_captured_requests_only",
-  "rows": [
-    {
-      "scope_id": "alice",
-      "scope_name": "Alice Example",
-      "team_id": "engineering",
-      "team_name": "Engineering",
-      "requests": 3,
-      "succeeded": 2,
-      "failed": 0,
-      "denied": 1,
-      "rate_limited": 0,
-      "input_tokens": 120,
-      "output_tokens": 30,
-      "cache_read_tokens": 20,
-      "cache_write_tokens": 0,
-      "reasoning_tokens": 7,
-      "total_tokens": 150,
-      "cost_microusd": 120,
-      "cost_usd": 0.00012,
-      "budget_usd": 500.0,
-      "budget_remaining_usd": 499.99988,
-      "budget_used_percent": 0.000024,
-      "active_actors": 1,
-      "redactions": 1
-    }
-  ]
-}
-~~~
-
-</details>
-
-Reports cover the current UTC month and only requests captured by Hormuz.
-Per-person attribution requires a unique identity for every human, service
-account, and CI workload; shared credentials collapse attribution. Costs are
-configured-rate-card estimates until separately reconciled with provider
-invoices. Read [usage, cost, and budget reporting](docs/USAGE.md) for the exact
-field semantics and coverage limits.
-
-## What works
-
-### Gateway, identity, and policy
-
-- OpenAI-compatible `POST /v1/responses` proxying, including streaming.
-- Anthropic-compatible `POST /v1/messages`, `/v1/messages/count_tokens`, and
-  streaming.
-- Provider model IDs by default, with optional organization aliases,
-  policy-driven fallback routing, and opt-in, policy-bounded one-hop failover
-  after explicit provider capacity rejection.
-- Incremental provider streaming plus content-free header, first-byte, total
-  latency, and byte-count evidence for each accounted egress.
-- Organization, team, and person policy overlays that can only become more
-  restrictive.
-- Output-token caps, monthly token limits, USD budgets, and atomic reservations
-  that close the concurrent-request budget race.
-- Unique bootstrap identities and generic OIDC JWT access-token mapping with
-  strict discovery, issuer, audience, expiry, asymmetric-signature, subject, and
-  signing-key-rotation checks.
-- Immutable PostgreSQL-backed policy documents with authenticated bootstrap,
-  semantic comparison, preview, audited activation, history, and rollback.
-
-### Usage, evidence, and security
-
-- Per-person, team, model, client, provider, and organization reporting.
-- Input, output, cache-read, cache-write, and reasoning-token accounting when
-  providers report those values.
-- SQLite metadata storage by default, with an optional PostgreSQL adapter for
-  the same usage and evidence contract.
-- Metadata-only JSONL audit export with private file permissions and a SHA-256
-  checksum.
-- Per-organization, digest-linked audit chains with explicit recovery epochs
-  and optional external Object Lock checkpoints.
-- Pre-provider secret redaction or denial without retaining matched values.
-- OpenAI response storage and background mode disabled by default as enforceable
-  provider policy.
-- Versioned content-free contracts and a strict durable-data inventory.
-
-### Packaging and operations
-
-- Python 3.11 through 3.14 in blocking Linux CI.
-- A deterministic, non-root Linux `amd64` OCI image identified by immutable
-  digest, with keyless Cosign signing, CycloneDX SBOM, bounded provenance, and
-  vulnerability and reproducibility gates.
-- A provider-free single-VM Docker Compose evaluation profile.
-- An optional Kubernetes and Helm multi-replica reference with customer-supplied
-  immutable inputs and default-deny network policy.
-- Optional PostgreSQL compatibility, migration, row-security, pooling,
-  interruption, backup/restore, and bounded HA reference proofs.
-- Versioned liveness and readiness endpoints plus graceful shutdown.
-
-### Client-side context optimization
-
-- A persistent **Context optimization** toggle that is Off by default and scoped
-  to one saved connection on one device.
-- An authenticated, launcher-owned loopback helper for Codex and Claude Code;
-  selection, exact reconstruction, and token estimates happen locally.
-- Four bounded, lossless representations for uniform JSON rows, repeated lines,
-  single-file search output, and shared-prefix path lists.
-- No context cache, prompt/response storage, content hash, or optimization
-  telemetry. The gateway still sees the selected request and applies all normal
-  identity, policy, budget, accounting, and secret controls.
-
-See [client-side context optimization](docs/CONTEXT_OPTIMIZATION.md) for setup,
-supported tool shapes, limits, privacy boundaries, and current evidence.
-
-The included rate cards are examples current as of August 15, 2026. Verify them
-against provider pricing before production use and reconcile estimates against
-provider invoices before describing spend as final.
-
-## How it works
-
-~~~text
-Codex / Claude Code
-        |
-        v
-optional authenticated helper on the user's loopback interface
-        |
-        v
-authenticated person + team
-        |
-        v
-policy: allow / deny / reroute / cap / reserve budget
-        |
-        v
-secret control: allow / redact / deny
-        |
-        v
-OpenAI / Anthropic
-
-Every accounted outcome -> versioned metadata-only evidence
-~~~
-
-Hormuz governs provider-bound requests and their organizational usage evidence.
-It is not an identity provider, model, organizational-memory system, metadata
-compiler, provider billing authority, or employee-productivity system.
-
-See [architecture](docs/ARCHITECTURE.md) for request flow, trust boundaries, and
-component ownership.
-
-## Configure providers and clients
-
-Hormuz requires Python 3.11 or newer. Start from the example configuration and
-keep all credentials outside source control:
-
-~~~bash
-cp config.example.json hormuz.json
-export HORMUZ_TOKEN="replace-with-a-long-random-identity-token"
-export OPENAI_API_KEY="your-company-openai-key"
-export ANTHROPIC_API_KEY="your-company-anthropic-key"
-python3 -m hormuz --config hormuz.json doctor
-python3 -m hormuz --config hormuz.json serve
-~~~
-
-In another terminal, print the settings for an existing AI client:
-
-~~~bash
-python3 -m hormuz --config hormuz.json client config codex
-python3 -m hormuz --config hormuz.json client config claude
-~~~
-
-People authenticate to Hormuz with unique identities. Hormuz removes the Hormuz
-credential before egress and authenticates upstream with the organization's
-provider key. Continue with the [Codex and Claude Code client guide](docs/CLIENTS.md).
-
-## Policy workflow
-
-Create and validate a policy locally before touching provider or managed
-deployment state:
-
-~~~bash
-python3 -m hormuz policy templates
-python3 -m hormuz --config hormuz.json policy create \
-  --template standard \
-  --output engineering-standard.json
-python3 -m hormuz --config hormuz.json policy validate engineering-standard.json
-~~~
-
-Review behavior and then apply with an optional optimistic-concurrency guard:
-
-~~~bash
-python3 -m hormuz --config hormuz.json policy compare engineering-standard.json \
-  --organization xpounder
-python3 -m hormuz --config hormuz.json policy preview engineering-standard.json \
-  --organization xpounder \
-  --actor alice \
-  --client codex \
-  --protocol openai \
-  --model gpt-5.4-mini \
-  --max-output-tokens 1000
-python3 -m hormuz --config hormuz.json policy apply engineering-standard.json \
-  --organization xpounder \
-  --if-active sha256:...
-~~~
-
-Inspect or reverse managed state with `policy show`, `policy history`,
-`policy export`, and `policy rollback`. The [policy control
-guide](docs/POLICY_CONTROL.md) documents authority, immutable versions,
-concurrency, rollback, and compatibility behavior.
-
-## Deployment options
-
-| Path | Intended use | Boundary |
-| --- | --- | --- |
-| Source + SQLite | Local evaluation and one-process operation | Not a shared or HA store |
-| [Signed OCI image](docs/OCI.md) | Version-matched Linux `amd64` reference | Digest is the artifact contract; no mutable `latest` tag |
-| [Signed Mac companion](docs/MACOS_DISTRIBUTION.md) | Apple Silicon (`arm64`) on macOS 14 or later | [v1.8.0 notarized archive](https://github.com/Xpounder-com/hormuz/releases/download/v1.8.0/Hormuz-1.8.0-notarized.zip); [checksums and qualification evidence](https://github.com/Xpounder-com/hormuz/releases/tag/v1.8.0); Intel Macs are unsupported |
-| [Docker Compose](deploy/compose/README.md) | Provider-free single-VM evaluation or pilot | One gateway replica; not HA or production certification |
-| [Kubernetes + Helm](deploy/kubernetes/README.md) | Bounded multi-replica reference | Customer-operated PostgreSQL and ingress; not general HA/DR certification |
-
-Public TLS remains a customer-controlled ingress responsibility. Read
-[deployment](docs/DEPLOYMENT.md), [storage](docs/STORAGE.md), and
-[operations](docs/OPERATIONS.md) before using a shared environment.
+Detailed usage reporting, deployment references and historical hosted/commercial
+scope are linked below. Hosted Pro is deferred; it is not a prerequisite for the
+planned local desktop. Existing gateway usage/evidence stores remain content-free;
+future saved project history has its own local content contract.
 
 ## Documentation
 
 | Topic | Guide |
 | --- | --- |
-| Architecture and trust boundaries | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| Codex and Claude Code setup | [docs/CLIENTS.md](docs/CLIENTS.md) |
-| Client-side context optimization and privacy boundary | [docs/CONTEXT_OPTIMIZATION.md](docs/CONTEXT_OPTIMIZATION.md) |
-| Policy administration | [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) |
-| Usage, tokens, cost, and budgets | [docs/USAGE.md](docs/USAGE.md) |
-| Provider streaming, latency, failover, and compute boundaries | [docs/PROVIDER_RELIABILITY.md](docs/PROVIDER_RELIABILITY.md) |
-| Portfolio development: registry, attribution, outcomes, finance, internal work budgets, and reviewable recommendations | [docs/PORTFOLIO_INTELLIGENCE.md](docs/PORTFOLIO_INTELLIGENCE.md), [docs/WORK_BUDGETS.md](docs/WORK_BUDGETS.md), and [docs/PORTFOLIO_RECOMMENDATIONS.md](docs/PORTFOLIO_RECOMMENDATIONS.md) |
-| Secret-egress controls | [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) |
-| Audit contracts and export | [docs/AUDIT.md](docs/AUDIT.md) |
-| Persistence and migrations | [docs/STORAGE.md](docs/STORAGE.md) |
-| Deployment and recovery | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md) |
-| OCI signing and supply chain | [docs/OCI.md](docs/OCI.md) |
-| Executable verification evidence | [docs/VERIFICATION.md](docs/VERIFICATION.md) |
-| Compatibility and support | [SUPPORT.md](SUPPORT.md) |
-| Roadmap and maturity gates | [docs/ROADMAP.md](docs/ROADMAP.md) |
-| Planned Electron project workspace, minimal bar and Auto | [UI-first roadmap](docs/ELECTRON_DESKTOP_ROADMAP.md), [backend boundaries for UI mocks](docs/DESKTOP_BACKEND_BOUNDARIES.md), [UI coverage](docs/DESKTOP_UI_PLAN.md), [Research Review](docs/RESEARCH_REVIEW_MODE.md) and [backlog reconciliation](docs/DESKTOP_BACKLOG_RESET_2026-10-13.md); planning only, no new desktop support claim |
-| Unused Hormuz account cleanup | [Account ledger](docs/DESKTOP_ACCOUNT_CLEANUP.md) and [infrastructure assessment](docs/DESKTOP_INFRASTRUCTURE_AUDIT.md); pilot compute/automation retirement verified, retained-data and other account dispositions still open |
-| Local workspace cleanup | [Completed audited cleanup](docs/DESKTOP_LOCAL_CLEANUP.md); generated folders, old merged checkouts and test exports retired with verified recovery. Unique source/history, environments, release assets and required Docker/test contracts retained |
-
-Inspect the versioned public contracts before integrating an external report or
-audit consumer:
-
-~~~bash
-python3 -m hormuz contract manifest
-~~~
-
-## Project status and scope
-
-| Status | Current boundary |
-| --- | --- |
-| Stable public contract | v1.8.0 preserves the v1.0 CLI and policy/evidence contracts and the v1.3 Personal Optimizer, adapter SDK, and Aider integration. The Windows shell remains an unsigned, unqualified development preview; see the [release boundaries](docs/releases/v1.8.0-notarized-mac.md). |
-| Production certification | None claimed; deployment fitness remains operator- and environment-specific. |
-| Verified references | Only the exact profiles documented in [SUPPORT.md](SUPPORT.md) and their retained evidence. |
-| Unfinished | Independent external onboarding, general production HA/DR, cloud certification, complete provider-account coverage, and independent review. |
-
-Exact same-revision Codex/OpenAI and Claude Code/Anthropic BYO-provider evidence
-is recorded in [issue #115](https://github.com/Xpounder-com/hormuz/issues/115).
-It does not prove provider-invoice reconciliation or every client feature.
-It does not prove enterprise production readiness.
-It does not cover traffic bypassing Hormuz.
-
-Current external onboarding is tracked in
-[issue #307](https://github.com/Xpounder-com/hormuz/issues/307) against the exact
-published v1.2.0 Apple Silicon app and the bounded Okta/Codex/OpenAI hosted path.
-As of September 10, 2026, its published count is **0/1 independent completion**
-and **0/1 returning session**. AI assistance may explain the shipped
-instructions, but an AI-only run cannot count as the external participant or
-customer acceptance. The earlier v1.0.0 source-archive study remains as the
-[historical protocol](docs/EXTERNAL_ONBOARDING.md) and closed
-[issue #110](https://github.com/Xpounder-com/hormuz/issues/110); its 0/5 result
-was not reclassified. This post-release validation does not block v1.2.0 and
-does not create a production-readiness or SLA claim.
-
-## Software, Cloud, and appliances
-
-Self-hosted Hormuz is Apache-2.0 software and requires no paid Hormuz subscription.
-Model-provider usage and customer infrastructure are separate.
-
-For optional Cloud, managed support or appliance inquiries, see
-[prices](https://usehormuz.github.io/plans/),
-[appliance onboarding scope](marketing/PILOT.md),
-[commercial scope and support terms](marketing/COMMERCIAL_SETUP.md),
-[buyer resources](https://usehormuz.github.io/resources/), and
-[security brief](marketing/TRUST.md). Appliances are **coming soon**.
-Compatibility, capacity, qualification, scope and delivery are confirmed before
-service or balance payment; the linked terms govern any reservation.
-
-Public maintainer: **Mehrdad Zaker**. For evaluation inquiries, use
-`mehrdadz@neuralint.io` or the
-[local email-draft form](https://usehormuz.github.io/contact/).
-Vulnerabilities must still follow [SECURITY.md](SECURITY.md).
-
-The [current marketing packet](marketing/README.md) is separate from the
-archived, non-publishable v0.1.3 drafts in [docs/launch](docs/launch/README.md).
+| Desktop direction and delivery | [Roadmap](docs/ELECTRON_DESKTOP_ROADMAP.md), [UI plan](docs/DESKTOP_UI_PLAN.md), [backend boundaries](docs/DESKTOP_BACKEND_BOUNDARIES.md) |
+| Research Review | [Role, revision and evidence contract](docs/RESEARCH_REVIEW_MODE.md) |
+| Cleanup and transition | [Backlog reconciliation](docs/DESKTOP_BACKLOG_RESET_2026-10-13.md), [account ledger](docs/DESKTOP_ACCOUNT_CLEANUP.md), [completed local cleanup](docs/DESKTOP_LOCAL_CLEANUP.md) |
+| Existing gateway architecture and runtime | [Architecture](docs/ARCHITECTURE.md), [AI Work guide](docs/AI_WORK_PRODUCT.md), [runtime](docs/AI_WORK_RUNTIME.md) |
+| Clients and context optimization | [Client setup](docs/CLIENTS.md), [Personal Optimizer](docs/PERSONAL_OPTIMIZER.md), [context optimization](docs/CONTEXT_OPTIMIZATION.md) |
+| Existing policy, usage and evidence | [Policy](docs/POLICY_CONTROL.md), [usage](docs/USAGE.md), [secret controls](docs/SECRET_CONTROLS.md), [audit](docs/AUDIT.md) |
+| Existing deployment and storage | [Deployment](docs/DEPLOYMENT.md), [storage](docs/STORAGE.md), [operations](docs/OPERATIONS.md), [OCI](docs/OCI.md) |
+| Program and qualification history | [Program map](docs/ROADMAP.md), [verification](docs/VERIFICATION.md), [support](SUPPORT.md) |
 
 ## Development and testing
 
-The default suite uses local fake providers and requires no OpenAI or Anthropic
-credential:
-
-~~~bash
-python tools/verify_secret_inventory.py
-python -m unittest -v
-~~~
-
-To validate the public contribution, support, and documentation surfaces:
-
-~~~bash
-python tools/verify_public_community_paths.py
-python -m unittest -v tests.test_public_community_paths
-~~~
-
-Blocking CI runs on Python 3.11, 3.12, 3.13, and 3.14, builds and installs the
-distribution, executes the provider-free quickstart, and runs the unit and
-gateway integration suite. Additional PostgreSQL, deployment, live-provider,
-and supply-chain checks retain their own explicit prerequisites and claims. See
-[verification](docs/VERIFICATION.md) for the complete test boundary.
-
-Pull requests use a fail-closed CI scope classifier. Only a change set composed
-entirely of `website/**`, `marketing/COMMERCIAL_SETUP.md`, and
-`marketing/MEASUREMENT.md` may skip the named PostgreSQL, Kubernetes, HA, DR,
-and OCI jobs. Unknown paths, mixed changes, invalid or unreadable diffs, every
-push to `main`, and every manual run execute the complete suite. The stable
-`CI / required` check accepts only successful applicable jobs and the exact
-expected skips; the independent website and native Mac aggregate checks remain
-required as well.
+Existing source-development setup and checks are in
+[CONTRIBUTING.md](CONTRIBUTING.md). Routine verification uses local fake providers;
+live provider/deployment checks retain their own explicit prerequisites.
+This planning change starts no application build, real model execution or release.
 
 ## Contributing and community
 
-Contributions that make Hormuz safer, easier to operate, or easier to verify are
-welcome.
+Start with the [desktop roadmap](docs/ELECTRON_DESKTOP_ROADMAP.md) or an existing
+bounded gateway issue, and read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
-- Join [Discussions](https://github.com/Xpounder-com/hormuz/discussions/211) or
-  choose a [bounded newcomer task](marketing/CONTRIBUTOR_STARTERS.md).
-- Follow the [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) in every project space.
-- Check [SUPPORT.md](SUPPORT.md) before filing an installation or compatibility
-  report.
-- Report suspected vulnerabilities through the private process in
-  [SECURITY.md](SECURITY.md), never a public issue.
+- Discuss the planned experience in [Discussions](https://github.com/Xpounder-com/hormuz/discussions/211).
 - Use the [issue tracker](https://github.com/Xpounder-com/hormuz/issues) for
-  synthetic, reproducible bugs, documentation problems, and feature proposals.
+  reproducible bugs, documentation problems and feature proposals.
+- Check [SUPPORT.md](SUPPORT.md) for installation and compatibility boundaries.
+- Follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- Report suspected vulnerabilities through [SECURITY.md](SECURITY.md).
 
-Community support is best effort and carries no response, remediation, uptime,
-compatibility, or enterprise-support SLA.
+Use synthetic examples in public reports; omit keys, private prompts and
+responses. Community support is best effort and carries no response, remediation,
+uptime, compatibility or enterprise-support SLA.
 
 ## License
 
-Hormuz is available under the Apache License 2.0. See `LICENSE` for the full
-terms.
+Hormuz is Apache-2.0 software. See [LICENSE](LICENSE). Provider usage and any
+optional services are separate costs.
