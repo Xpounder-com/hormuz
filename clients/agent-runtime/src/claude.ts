@@ -1,5 +1,6 @@
 import { mkdir, realpath, lstat, mkdtemp, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, relative, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RpcProcess } from './rpc.ts';
@@ -71,7 +72,11 @@ export class ClaudeAdapter implements AgentSessionAdapter {
   private async launch(workspaceWrite: boolean): Promise<void> {
     const options = this.options!;
     if (!this.temporary) {
-      const path = await realpath(await mkdtemp('/private/tmp/hm-c-'));
+      // Darwin Unix socket addresses need a short path. Portable injected
+      // fixtures use the host OS temp directory; production remains fail closed
+      // on platforms without a qualified sandbox launcher.
+      const parent = process.platform === 'darwin' ? '/private/tmp' : tmpdir();
+      const path = await realpath(await mkdtemp(join(parent, 'hm-c-')));
       const info = await lstat(path);
       this.temporary = { path, dev: info.dev, ino: info.ino };
     }

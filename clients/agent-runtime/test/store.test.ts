@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
-import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { MAX_SESSION_BYTES, SessionStore } from '../src/store.ts';
 import type { SessionRecord } from '../src/store.ts';
 
 async function fixture(): Promise<{ root: string; cleanup: () => Promise<void> }> {
-  const root = await mkdtemp('/private/tmp/hormuz-store-test-');
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'hormuz-store-test-')));
   return { root, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 function record(overrides: Partial<SessionRecord> = {}): SessionRecord {
-  return { schemaVersion: 1, id: 'session-1', profileId: 'profile-1', projectId: 'project-1', workspace: '/private/tmp/workspace', engine: 'codex', model: 'gpt-test', runtimeVersion: 'test-v1', threadId: 'provider-thread', phase: 'interrupted', plan: 'run the focused tests', acceptedPlanFingerprint: 'approved-in-this-process', accounting: { spentMicrousd: 23, heldMicrousd: 0, unknownMicrousd: 0, requestCount: 1 }, ...overrides };
+  return { schemaVersion: 1, id: 'session-1', profileId: 'profile-1', projectId: 'project-1', workspace: join(tmpdir(), 'workspace'), engine: 'codex', model: 'gpt-test', runtimeVersion: 'test-v1', threadId: 'provider-thread', phase: 'interrupted', plan: 'run the focused tests', acceptedPlanFingerprint: 'approved-in-this-process', accounting: { spentMicrousd: 23, heldMicrousd: 0, unknownMicrousd: 0, requestCount: 1 }, ...overrides };
 }
 
 test('private atomic persistence survives a new process-facing store and filters project/profile scope', async () => {

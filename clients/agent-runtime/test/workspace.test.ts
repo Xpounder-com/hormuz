@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { assertWorkspacePath, diffWorkspace, snapshotWorkspace, WORKSPACE_LIMITS } from '../src/workspace.ts';
 
 async function fixture(): Promise<{ root: string; cleanup: () => Promise<void> }> {
-  const root = await mkdtemp('/private/tmp/hormuz-workspace-test-');
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'hormuz-workspace-test-')));
   return { root, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 

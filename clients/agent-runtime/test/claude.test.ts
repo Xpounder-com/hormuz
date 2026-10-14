@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, access, realpath, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdtemp, mkdir, readFile, rm, access, realpath, rename, writeFile, lstat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, basename, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ClaudeAdapter } from '../src/claude.ts';
 import type { ActionRequest, RuntimeEvent } from '../src/types.ts';
 
 const fixture = fileURLToPath(new URL('./fixtures/claude-query.mjs', import.meta.url));
 async function setup(settings: ConstructorParameters<typeof ClaudeAdapter>[0] = {}) {
-  const root = await realpath(await mkdtemp('/private/tmp/hormuz-claude-test-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'hormuz-claude-test-')));
   const workspace = join(root, 'project'), configDir = join(root, 'runtime');
   await mkdir(workspace); await mkdir(configDir, { mode: 0o700 });
   const adapter = new ClaudeAdapter({ sdkFixture: fixture, prepareLaunch: async ({ command, args }) => ({ command, args }),
@@ -39,7 +40,12 @@ test('Claude worker plans read-only, asks once for each execution side effect ev
     assert.deepEqual(trace[0].settingSources, []); assert.equal(trace[0].tools.includes('Agent'), false); assert.equal(trace[0].tools.includes('WebFetch'), false);
     assert.equal(trace[0].envKeys.includes('OPENAI_API_KEY'), false); assert.equal(trace[0].baseUrl, 'http://127.0.0.1:9999');
     assert.equal(trace[0].outputLimit, '1024'); assert.deepEqual(trace[0].thinking, { type: 'disabled' });
-    assert.match(trace[0].temporary, /^\/private\/tmp\/hm-c-/); assert.equal(trace[0].temporary, trace[1].temporary);
+    assert.match(basename(trace[0].temporary), /^hm-c-/); assert.ok(isAbsolute(trace[0].temporary));
+    assert.equal(await realpath(trace[0].temporary), trace[0].temporary);
+    const temporary = await lstat(trace[0].temporary);
+    assert.equal(temporary.isDirectory(), true); assert.equal(temporary.isSymbolicLink(), false);
+    assert.equal(temporary.mode & 0o777, 0o700); assert.equal(temporary.uid, process.getuid?.());
+    assert.equal(trace[0].temporary, trace[1].temporary);
     await adapter.dispose(); await assert.rejects(access(trace[0].temporary), /ENOENT/);
   } finally { await cleanup(); }
 });

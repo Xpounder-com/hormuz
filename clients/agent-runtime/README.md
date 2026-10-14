@@ -48,7 +48,7 @@ Routine tests use fake protocols/SDK behavior and disposable local provider
 simulators. They make no paid provider calls. Test files run serially and all
 local servers and child processes have cleanup. Actual macOS sandbox tests run
 on macOS; other targets do not imply a qualified runtime launcher.
-CI runs portable fixtures in the client compatibility job and macOS confinement
+CI runs portable fixtures in the Agent backend workflow and macOS confinement
 plus the installed Claude SDK fixture in the existing native contracts job.
 The installed Codex 0.160.0 fixture is an explicit local opt-in.
 
