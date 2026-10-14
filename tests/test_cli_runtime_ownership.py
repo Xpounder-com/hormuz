@@ -243,6 +243,7 @@ if loaded:
     def test_complete_primary_command_tree_is_frozen(self) -> None:
         tree = _command_tree(cli.build_parser())
         self.assertIsInstance(tree, dict)
+        self.assertIsNone(tree.pop("agent"))
         self.assertEqual(tree.pop("portfolio"), {
             "attribute": None, "attributions": None,
             "archive": None, "bind": None, "bindings": None, "create": None,

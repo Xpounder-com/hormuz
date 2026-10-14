@@ -195,6 +195,9 @@ async function runTurn(turn: Turn, prompt: string): Promise<void> {
   } catch { status = initializationFailed() ? 'failed' : turn.controller.signal.aborted ? 'interrupted' : 'failed'; }
   finally { turn.query?.close(); }
   if (initializationFailed() || (initialization === 'pending' && !turn.controller.signal.aborted)) status = 'failed';
+  // An SDK iterator may stop cleanly on abort without yielding a result or
+  // throwing. Preserve the host's cancellation intent in that terminal frame.
+  if (turn.controller.signal.aborted && status === 'unknown') status = 'interrupted';
   if (active !== turn) return;
   if (turn.mode === 'plan' && status === 'completed' && finalText) event('plan', { text: finalText });
   send({ method: 'turn/completed', params: { threadId: session!.threadId, turnId: turn.turnId, status } });

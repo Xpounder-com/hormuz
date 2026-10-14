@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .audit_chain import AuditChainError
 from .auth import Authenticator
+from .commands import agent as agent_commands
 from .commands import audit as audit_commands
 from .commands import client as client_commands
 from .commands import context as context_commands
@@ -72,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verbose", action="store_true", help="Enable request-boundary logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    agent_commands.add_agent_commands(subparsers)
     runtime_commands.add_runtime_commands(subparsers)
 
     policy_commands.add_policy_commands(subparsers)
@@ -105,9 +107,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if not raw_argv:
+        return agent_commands.run([], require_tty=True)
+    if raw_argv[0] == "agent":
+        return agent_commands.run(raw_argv[1:], require_tty=len(raw_argv) == 1)
     if _is_deprecated_context_command(raw_argv):
         return _context_experiment_moved()
     args = build_parser().parse_args(_normalize_command_argv(raw_argv))
+    if args.command == "agent":
+        print(
+            "Agent options must follow 'hormuz agent'. Gateway --config and --verbose "
+            "do not apply to the Agent terminal.",
+            file=sys.stderr,
+        )
+        return 2
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING if args.command == "demo" else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
