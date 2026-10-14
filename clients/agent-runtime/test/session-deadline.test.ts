@@ -191,12 +191,15 @@ test('the operation deadline also bounds authority revalidation after the adapte
 });
 
 for (const stage of ['snapshot', 'grant_write'] as const) {
-  test('acceptance cancellation during an owned ' + stage + ' cannot persist a grant or release its lease early', { timeout: 3000 }, async () => {
-    const f = await fixture(), started = deferred<void>(), finish = deferred<void>();
+  test('acceptance cancellation during an owned ' + stage + ' cannot persist a grant or release its lease early', { timeout: 5000 }, async () => {
+    // Setup must succeed independently of CI filesystem latency. Keep the short
+    // deadline on the deliberately blocked acceptance operation under test.
+    const f = await fixture(2000), started = deferred<void>(), finish = deferred<void>();
     const save = f.store.save.bind(f.store); let signal: AbortSignal | undefined;
     try {
       const session = await f.create(), planned = await f.manager.plan(session.id, 'project', 'Work.');
       await f.manager.acceptPlan(session.id, 'project', planned.plan!.revision);
+      f.options.runTimeoutMs = 250;
       f.options.authorizeWorkspace = async (_project, _workspace, currentSignal) => { signal = currentSignal; return true; };
       if (stage === 'snapshot') f.options.observeWorkspace = async root => { started.resolve(); await finish.promise; return await snapshotWorkspace(root); };
       else f.store.save = async record => { if (record.acceptedPlanFingerprint) { started.resolve(); await finish.promise; } await save(record); };

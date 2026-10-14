@@ -8,7 +8,7 @@ the developer host described below.
 
 ## Outcome and delivery order
 
-Add optional **Agent mode** to the full Electron project window. Codex app-server
+Later skills may use optional **Agent execution** to the full Electron project window. Codex app-server
 is the first execution engine. Claude Agent SDK follows the qualified Codex
 journey through the same host-owned session contract and Hormuz interface.
 The intended flow is:
@@ -22,7 +22,7 @@ select named project + engine + authorized working directory
     -> interrupt or finish; explicitly resume with current authority
 ```
 
-Ordinary local/direct-provider chat, model Auto and Research Review keep their
+Ordinary local/direct-provider chat, model Auto and instruction-based skills keep their
 own contracts. Agent runtime selection is separate from model selection. An
 engine maintains its session affinity; Auto cannot silently replace Codex with
 Claude or a local model during execution. A cross-engine handoff creates a new
@@ -153,7 +153,7 @@ Keep three separate decisions:
    applicable parent restrictions. Plan or tool acceptance cannot increase it.
 
 Existing AI Work `plan` and `approve` concern budget policy and a new total
-allowance; they are not coding plans or tool permissions. Research Review
+allowance; they are not coding plans or tool permissions. A skill/model review
 sign-off accepts a revision-specific artifact and grants no execution authority.
 
 Read-only planning is enforced by actual tools/permissions/sandbox policy,
@@ -196,7 +196,7 @@ Claude subscription-backed product login is not assumed; use supported API auth
 unless Anthropic has approved the integration.
 
 Preserve the initial one-active-inference-attempt application scheduler across
-chat, Agent and Research Review. No hidden parallel subagents in first Agent
+chat, Agent and future skill execution. No hidden parallel subagents in first Agent
 scope. Set finite worker/output/history limits and explicit timeouts, at most
 three retries with backoff/jitter, outbound concurrency at most eight and owned
 cleanup on success, failure and quit. Never auto-retry uncertain side effects or

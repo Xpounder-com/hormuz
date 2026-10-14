@@ -9,15 +9,17 @@ Planning scope confirmed on 2026-10-13. Parent: [desktop epic #479](https://gith
 This is the canonical UI scope for the full local project workspace. It refines
 the [desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md),
 [UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md) and
-[Research Review contract](RESEARCH_REVIEW_MODE.md): the earlier ephemeral-chat-only
+[skills contract](RESEARCH_REVIEW_MODE.md): the earlier ephemeral-chat-only
 first scope is superseded by saved local projects/chats plus a Temporary chat
 option. Existing gateway, native-client and installed qualification evidence
 keeps its original boundary.
 
-This document starts no real application/backend implementation, model download
-or provider call. The scope is ready for bounded UI simulation with synthetic
-data; #492 still requires integrated review. Actual host/backend work follows UI
-approval and a named owner, exact model/provider/protocol choices, storage/context
+Planning PR #486 is merged. The user authorized a first source UI slice in
+`clients/desktop`; see the [implementation candidate](DESKTOP_UI_IMPLEMENTATION.md)
+for completed mock journeys and the recorded direction approval. The new UI makes no
+real backend/model/provider calls and saves only in browser memory. On 2026-10-14 the owner approved the core UI
+direction, removed dedicated research modes and authorized Electron/llama.cpp
+work after #518 merges. Actual host/backend scope still records a named owner, exact model/provider/protocol choices, storage/context
 limits and platform qualification rows. Separate authorized account cleanup is
 recorded in [its ledger](DESKTOP_ACCOUNT_CLEANUP.md), not performed by a UI flow.
 No release version, delivery date or new platform support is assigned here.
@@ -28,7 +30,7 @@ Hormuz owns projects, chats, files, instructions and model/Auto preferences in
 one Electron + Svelte/TypeScript app. A normal project window supports continuing
 work; a minimal global prompt bar provides quick access to the active project.
 Both use the same cohesive glossy visual language: smooth curved edges, refined
-type, restrained highlights, depth and motion. The exact finish is unselected.
+type, restrained highlights, depth and motion. The working reference is the glossy #518 source at `9a0191b`, retained after the user called it a great start; the owner approved this UI direction on 2026-10-14. Actual accessibility/platform qualification remains separate.
 Readable opaque, reduced-motion and high-contrast alternatives are required;
 native desktop blur is an optional platform enhancement.
 
@@ -69,9 +71,9 @@ actual IPC, storage schema, custody, model manager or provider service.
 | [#489 files, instructions and context](https://github.com/Xpounder-com/hormuz/issues/489) | #487 and product/data decisions | Project membership versus request inclusion, instructions inheritance, effective context, permissions and unsupported/missing/changed/oversized states. Can proceed alongside #488. |
 | [#490 onboarding, library and connections](https://github.com/Xpounder-com/hormuz/issues/490) | #487 and product mode decisions | Local-first onboarding, download/load/remove state distinctions, optional paid connection and visible readiness/custody/connectivity errors. Can proceed alongside #488/#489. |
 | [#491 inherited preferences, Auto and pin](https://github.com/Xpounder-com/hormuz/issues/491) | #488/#489/#490 mock contracts | Effective defaults/overrides, privacy/cap/objective, prediction versus committed route, blocked pin and continuation constraints. |
-| [#502 Research Review simulation](https://github.com/Xpounder-com/hormuz/issues/502) | Project/context/preferences mock contracts and selected visual language | Explicit draft/project manifest, two distinct blind reviewers, optional bounded author/reconcile flow, disagreement/failure, citations/coverage and version-specific human decision. |
+| [#502 skill instruction packs](https://github.com/Xpounder-com/hormuz/issues/502) | Context and ordinary chat | Reusable instructions invoked through the existing prompt; no dedicated research mode. |
 | #481 final visual checkpoint; [#338 early UI fixtures](https://github.com/Xpounder-com/hormuz/issues/338) | Integrated #487–#491 flows | Cohesive selected finish, rendered state coverage and ordered interaction fixtures. Early fixture acceptance is separate from #338's later runtime integration closure. |
-| [#492 integrated UI review gate](https://github.com/Xpounder-com/hormuz/issues/492) | #487–#491, #502 mock review journeys, final #481 and early #338 checkpoint | One navigable mock experience, approved journeys, explicit adverse states and recorded decisions. No live backend or installed-platform claims. |
+| [#492 integrated UI review gate](https://github.com/Xpounder-com/hormuz/issues/492) | #487–#491, core #481 direction and early #338 checkpoint | One navigable mock experience, approved journeys, explicit adverse states and recorded decisions. No live backend or installed-platform claims. |
 
 After #492, finalize [#480's full architecture/support/migration contract](https://github.com/Xpounder-com/hormuz/issues/480)
 and plan [#493 backend storage/context](https://github.com/Xpounder-com/hormuz/issues/493)
@@ -81,10 +83,7 @@ backend contract is not a completion prerequisite for #492. #338's final
 closure is likewise not required for its early UI fixture checkpoint.
 An approved mock is an implementation input, not authorization to start runtime
 work. This separation prevents UI/backend dependency cycles.
-Optional [#503 real Research Review](https://github.com/Xpounder-com/hormuz/issues/503)
-follows qualified single-response #493/#483/#485/#484 contracts. It cannot become
-a prerequisite for drawing #502 or qualifying ordinary chat, but must pass
-before real Review execution is offered.
+Optional #503 generic skill execution follows qualified ordinary chat and has its own tools/calls/authority boundary. It does not delay the core UI or first local runtime.
 
 ## Acceptance by product area
 
@@ -208,29 +207,15 @@ before real Review execution is offered.
   navigation must preserve origin. Temporary response handling is visibly
   different from saving a project conversation.
 
-### Research Review — #502
+### Skills — #502
 
-- Keep Review in the project window, preserving the minimal bar. Default to an
-  existing frozen draft with two distinct blind reviewers; authoring and one
-  optional reconciliation are explicit variants, capped at four calls across
-  three model identities for the authoring path.
-- Show the selected draft/source manifest, coverage/exclusions, role/model
-  locations, local-only and whole-round cap. A whole-project label cannot imply
-  reading or approving omitted files. Pure role preview performs no calls or
-  loads; unknown provenance or a known author filling a reviewer slot is visible.
-- Preserve blind initial verdicts, source/claim locators and disagreements.
-  Failure, cancellation, missing evidence or a blocked reviewer makes the round
-  incomplete, never all approved. Same-version aliases are not distinct reviewers.
-- Distinguish reviewed v1 from an edited/reconciled v2 and invalidate stale
-  approval. Ready for your review leads to a deliberate human decision about a
-  named revision and scope, not an automatic scientific/project/deployment seal.
-- Simulate at most two explicitly started rounds, including local-role swaps,
-  cap/privacy blocks, project switching, canceled review and unreviewed edits.
-  Do not repeat until the models agree. Follow the detailed
-  [role/version/evidence contract](RESEARCH_REVIEW_MODE.md).
-  A disclosed finite swap plan may select downloaded/qualified but unloaded
-  local reviewers. Explicit Start authorizes those loads; each role must become
-  Ready before dispatch. No preview load, download or silent reviewer replacement.
+Specialised procedures live in bounded instruction packs, not feature-specific
+screens. Context → Skills enables the pack for the destination; a leading
+`/roast`, `/rebuttal` or `/review` explicitly adds its instructions to an ordinary
+request. They appear in effective context and submitted provenance. Typing stays
+pure, import restores no binding, and a skill grants no tools or model runs.
+Later multi-model/tool execution has its own host contract in #503. The old
+research exploration is historical, linked from RESEARCH_REVIEW_MODE.md.
 
 ## Integrated review journeys — #492
 
@@ -259,12 +244,9 @@ decisions; do not silently substitute real service behavior for a mock.
 8. Keyboard/IME and screen-reader walk through sidebar, search, composer, picker,
    context, progress and dialogs; verify focus restoration, long names, narrow
    layout, high DPI, opaque/high-contrast materials and reduced motion.
-9. Review an existing draft → explicitly select source/project coverage → two
-   blind reviewer verdicts → compare findings/disagreement → human review of the
-   exact version. Repeat with a failed reviewer and a local-only/cloud-role block.
-10. Optionally author → review → reconcile an edited v2 → see v1 reviews become
-    stale → explicitly request a second bounded mock round → make a
-    revision-specific human decision. Neither consensus nor approval starts work.
+9. Enable a skill for this destination → type its command → inspect effective
+   instructions → use ordinary model/Auto selection and Send. A different project
+   inherits its own availability; imports require explicit reselection.
 
 The earlier #338 checkpoint records ordered mock traces. Final installed
 keyboard, accessibility, platform activation, real failure/recovery and clean
