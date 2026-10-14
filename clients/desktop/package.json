@@ -1,0 +1,31 @@
+{
+  "name": "@hormuz/desktop-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "node --test src/lib/*.test.ts",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5173 --strictPort",
+    "format": "prettier --write src package.json tsconfig.json vite.config.ts index.html .prettierrc.json",
+    "format:check": "prettier --check src package.json tsconfig.json vite.config.ts index.html .prettierrc.json"
+  },
+  "dependencies": {
+    "@lucide/svelte": "1.56.0",
+    "svelte": "5.57.2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@types/node": "22.19.19",
+    "prettier": "3.9.10",
+    "prettier-plugin-svelte": "4.1.1",
+    "svelte-check": "4.7.6",
+    "typescript": "5.9.3",
+    "vite": "8.3.4"
+  }
+}

@@ -11,10 +11,13 @@ The [UI plan](DESKTOP_UI_PLAN.md),
 and [backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md) define the
 active scope and the disposition of the original open issues.
 
-Application work remains planning and simulated UI exploration. This roadmap
-does not implement the host/backend, read real project context, download models,
-call providers or publish a release. A separate explicit application work order
-starts real implementation. Account cleanup has its own authorized operations
+Planning PR #486 merged at `20b8ff04659e9b4ab40c67b429f1def37e115092`.
+The user authorized the first simulated UI implementation after that merge.
+The [first source slice](DESKTOP_UI_IMPLEMENTATION.md) starts U1–U3 with a glossy
+project workspace and minimal Auto bar; remaining journeys and #492 approval
+stay open. No host/backend, real project context, model download, provider call
+or release is introduced. Runtime work requires a separate work order after
+the UI gate. Account cleanup has its own authorized operations
 and evidence below; it is not covered by a blanket claim of no service changes.
 Release identity, dates and implementation owners remain unassigned.
 
@@ -69,7 +72,7 @@ installed platform qualification. #481 selects the shared visual reference;
 #492 reviews the integrated simulation. Native desktop blur is optional; the
 shared surface needs a beautiful legible opaque fallback.
 
-## UI first: ready to begin simulation
+## UI first: simulation implementation started
 
 The scope is sufficient to start the bounded UI simulation with synthetic
 projects, sources, models, costs and responses. #480 checkpoint A now records

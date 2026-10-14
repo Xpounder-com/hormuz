@@ -8,8 +8,9 @@ This roadmap is evidence-gated. A milestone is not complete because code exists 
 
 The new desktop direction is a shared Electron/Svelte project workspace and
 minimal quick bar, managed llama.cpp setup and policy-bounded local/cloud Auto.
-Complete and review the simulated UI before backend integration. It is **planning work**,
-not an implemented or qualified desktop release. Follow
+Complete and review the simulated UI before backend integration. Planning #486
+is merged and the authorized [first source UI simulation](DESKTOP_UI_IMPLEMENTATION.md)
+has started. It is not a qualified desktop release. Follow
 [epic #479](https://github.com/Xpounder-com/hormuz/issues/479), the
 [delivery stages](ELECTRON_DESKTOP_ROADMAP.md), and the
 [complete backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md).

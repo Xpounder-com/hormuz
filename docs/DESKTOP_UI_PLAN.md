@@ -9,9 +9,11 @@ first scope is superseded by saved local projects/chats plus a Temporary chat
 option. Existing gateway, native-client and installed qualification evidence
 keeps its original boundary.
 
-This document starts no real application/backend implementation, model download
-or provider call. The scope is ready for bounded UI simulation with synthetic
-data; #492 still requires integrated review. Actual host/backend work follows UI
+Planning PR #486 is merged. The user authorized a first source UI slice in
+`clients/desktop`; see the [implementation checkpoint](DESKTOP_UI_IMPLEMENTATION.md)
+for delivered mock interactions and outstanding journeys. The new UI makes no
+real backend/model/provider calls and saves only in browser memory; #492 still
+requires integrated review. Actual host/backend work follows UI
 approval and a named owner, exact model/provider/protocol choices, storage/context
 limits and platform qualification rows. Separate authorized account cleanup is
 recorded in [its ledger](DESKTOP_ACCOUNT_CLEANUP.md), not performed by a UI flow.
