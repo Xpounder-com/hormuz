@@ -459,6 +459,18 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                                  (409, "hormuz_route_affinity_required"))
                 self.assertEqual((local_requests, cloud_requests), ([], []))
 
+    def test_function_parameter_schema_does_not_create_false_session_affinity(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud, mode="auto")
+            value["model_routes"]["local-code"]["capabilities"].append("tools")
+            with self.connected_client(value) as submit:
+                result = submit(request={"model": "cloud-code", "input": "Summarize this fixture.",
+                    "tools": [{"type": "function", "name": "fixture_tool", "parameters": {
+                        "type": "object", "properties": {"type": {"type": ["string", "null"]}}}}]})
+                self.assertEqual(result["status"], 200, result)
+                self.assertEqual((len(local_requests), cloud_requests), (1, []))
+
     def test_periodic_local_stream_bytes_cannot_extend_the_request_deadline(self):
         with provider("LOCAL_DESTINATION", event_stream=True, slow_stream=True) as (local, local_requests), \
              provider("CLOUD_DESTINATION") as (cloud, cloud_requests):

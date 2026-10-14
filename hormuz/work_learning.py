@@ -9,6 +9,11 @@ REQUEST_KINDS = frozenset({"interactive", "retry", "automatic_retry", "poll", "p
 
 
 def contains_provider_state(value, depth=0):
+    if depth == 0 and isinstance(value, dict):
+        # Tool/format schemas and caller tags describe a fresh request. A
+        # schema property named type or role is not provider-owned history.
+        value = {key: item for key, item in value.items()
+                 if key not in {"tools", "tool_choice", "text", "response_format", "metadata"}}
     if depth > 40:
         return True
     if isinstance(value, dict):
