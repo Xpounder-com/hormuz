@@ -24,6 +24,7 @@ choices, storage/context/output/time limits and platform qualification rows.
 | --- | --- |
 | Electron desktop | #479; recorded #480 A boundaries feed UI #481/#487–#491/#502 and #492 first, then #480 B/#482–#485/#493 backend and retained #337/#338/#339/#340/#346/#347 qualification gates. Version and dates TBD. |
 | Research Review | [#502 UI/spec/mock](https://github.com/Xpounder-com/hormuz/issues/502) precedes #492; optional [#503 runtime](https://github.com/Xpounder-com/hormuz/issues/503) follows qualified single-response #493/#483/#485/#484 contracts. Required before exposing real Review, not a plain-chat prerequisite. [Bounded role/version/evidence contract](RESEARCH_REVIEW_MODE.md). |
+| Project Agent execution | Planned optional extension: Codex app-server first, then Claude Agent SDK after Codex qualification. Separate shared contract/UI, read-only planning, plan/action/spend decisions, actual diff review and explicit named-project resume. [Ordered implementation backlog](AGENT_EXECUTION_ROADMAP.md); not a prerequisite for plain chat or #492. |
 | Existing native clients | Preserve the v1.8.0 notarized Mac archive, CLI/agent paths and accepted shared contracts. The separate native-shell plan #329 is superseded; its [roadmap](NATIVE_CLIENT_ROADMAP.md) is historical. |
 | Optional Rust work | #341 existing agent-relay qualification and #342 measured optimizer migration. No blanket port prerequisite to first local chat. |
 | Portfolio intelligence | #226; #214/#219/#220/#225 remain open. Future release identity TBD; frozen evidence is retained. |

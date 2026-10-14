@@ -6,6 +6,7 @@ Track delivery in [epic #479](https://github.com/Xpounder-com/hormuz/issues/479)
 The [UI plan](DESKTOP_UI_PLAN.md),
 [UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md),
 [Research Review contract](RESEARCH_REVIEW_MODE.md),
+[project Agent execution roadmap](AGENT_EXECUTION_ROADMAP.md),
 [account cleanup](DESKTOP_ACCOUNT_CLEANUP.md),
 [infrastructure audit](DESKTOP_INFRASTRUCTURE_AUDIT.md)
 and [backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md) define the
@@ -60,8 +61,10 @@ separate from hosted tenant, Portfolio repository and AI Work authority.
 
 [LM Studio classic chat organization](https://lmstudio.ai/docs/app/basics/chat)
 and [Bionic Projects and Sessions](https://lmstudio.ai/docs/bionic/projects-and-sessions)
-are workflow references. They do not commit Hormuz to agents, code/file editing,
-voice, browser tabs, remote sync or collaboration.
+are workflow references. The separately requested Agent execution phase now
+plans scoped workspace editing with Codex first, then Claude; those references
+do not authorize that work. Voice, browser tabs, remote sync and collaboration
+remain later decisions.
 
 The exact glossy finish is not selected. Existing prompt-bar simulation and
 glossy image concepts are references, not an approved full project UI or
@@ -133,6 +136,30 @@ real Review is exposed; otherwise label the mode simulated or unavailable. The
 one-curated-local-model baseline does not qualify two distinct local reviewers:
 local-only Review requires additional exact model qualification, not hidden
 cloud substitution or same-version self-review.
+
+## Optional project Agent execution: Codex first, then Claude
+
+The [Agent execution roadmap](AGENT_EXECUTION_ROADMAP.md) adds a separate later
+phase: shared session/authority contract and simulated Agent UI; Codex runtime,
+read-only Plan, concrete action approvals, actual diff/test review and explicit
+session resume; Codex qualification; then the Claude Agent SDK workflow and its
+qualification. This is the requested implementation backlog, not implemented
+agent support or permission to start runtime/provider work.
+
+Its UI acceptance is additive and does not delay #492 or the useful first chat
+desktop. Runtime integration follows its accepted extension contract and
+applicable #480 B/#482/#493 inputs. #485/#341 apply only when their transports
+are reused. Engine-specific installed evidence feeds #339/#340/#346/#347 when
+exposed; their final closure does not block building the candidate. Claude
+design/mocks can proceed earlier, but real integration follows Codex proof.
+
+Named-project Agent sessions require an explicit real workspace grant, distinct
+from imported text copies. Temporary Agent stays unavailable initially. Plan,
+tool and budget approvals are separate; Research Review sign-off grants no
+execution authority. Preserve engine affinity, dirty user work and current
+restrictions; no automatic replay or stale grants on resume. Agent inference
+shares the application scheduler and cannot bypass privacy or qualified cost
+admission. Exact capabilities/auth/runtime/platform support remain evidence-gated.
 
 ## Reuse boundaries
 
@@ -236,8 +263,10 @@ history/search, instructions and bounded selected text context, local setup,
 optional one paid connection, stream/cancel, conservative Auto, override and
 visible recovery. All-three-platform publication needs all three qualified rows.
 
-Defer image/audio/video inference, arbitrary marketplace loaders, agents/MCP/
-computer control, autonomous jobs, remote sync/team collaboration, fleet
+Optional Codex-then-Claude Agent execution and scoped workspace editing follow
+their own later track; they are not a first-chat prerequisite. Defer image/audio/
+video inference, arbitrary marketplace loaders, general MCP/computer control,
+autonomous jobs, remote sync/team collaboration, fleet
 management, a full Rust rewrite and broad hardware support. #341 agent relay
 is required only if that path is exposed; optional #342 optimizer work is not
 a first-chat prerequisite.

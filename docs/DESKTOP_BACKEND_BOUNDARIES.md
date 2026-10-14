@@ -31,6 +31,19 @@ B. The rendered visual choice remains #481, integrated user acceptance remains
 #494–#501 is independent. Local/direct-provider operation requires no Render,
 PostgreSQL, hosted login, Hormuz subscription or mandatory managed gateway.
 
+## Optional Agent extension — separate acceptance
+
+The user requested a [Codex-first, then Claude Agent implementation track](AGENT_EXECUTION_ROADMAP.md)
+on 2026-10-13. It adds a later named-project execution contract and simulated
+Agent UI, without changing the first chat's imported-copy, Temporary, pure Auto
+or #492 acceptance boundaries below. A real workspace grant, host-owned runtime,
+separate plan/action/spend decisions, diff provenance and explicit resume need
+that extension's acceptance and qualification before use. Temporary Agent is
+unavailable initially because vendor runtimes may persist transcripts.
+Research Review acceptance cannot grant agent/tool authority. Applicable
+host/content/custody inputs are reused without making the optional extension a
+prerequisite to first-chat delivery or introducing mandatory hosted services.
+
 ## 1. Local projects, saved content and Temporary work
 
 Named projects retain chats, drafts, instructions, preferences, imported copies

@@ -1,5 +1,10 @@
 # Hormuz desktop UI plan
 
+Optional later [Agent execution](AGENT_EXECUTION_ROADMAP.md) is now scheduled
+Codex first, then Claude Agent, with its own simulated plan/approval/execution/
+diff/resume journey and acceptance. It does not expand this first-chat #492 gate
+or start actual file editing, runtime processes or provider calls.
+
 Planning scope confirmed on 2026-10-13. Parent: [desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
 This is the canonical UI scope for the full local project workspace. It refines
 the [desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md),
