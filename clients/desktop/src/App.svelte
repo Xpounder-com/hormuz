@@ -20,18 +20,14 @@
   import Connections from './components/Connections.svelte';
   import Settings from './components/Settings.svelte';
   import Modal from './components/Modal.svelte';
-  import ResearchView from './components/ResearchView.svelte';
   import HistoryView from './components/HistoryView.svelte';
   import WorkspaceDialog from './components/WorkspaceDialog.svelte';
   import FileDialog from './components/FileDialog.svelte';
-  import { MockResearch } from './lib/research.ts';
   import { MockWorkspace } from './lib/workspace.ts';
   import { activeChat, preview } from './lib/planner.ts';
   import { sampleFiles } from './lib/fixtures.ts';
   const service = new MockWorkspace();
-  const research = new MockResearch(service);
   let snapshot = $state.raw(structuredClone(service.state));
-  let researchSnapshot = $state.raw(structuredClone(research.state));
   let view = $state('workspace');
   let compact = $state(false);
   let sidebarOpen = $state(false);
@@ -57,16 +53,12 @@
   });
   onMount(() => {
     const off = service.subscribe((next) => (snapshot = next));
-    const offResearch = research.subscribe((next) => (researchSnapshot = next));
     return () => {
-      offResearch();
-      research.dispose();
       off();
       service.dispose();
     };
   });
   function navigate(next: string) {
-    if (next === 'research') research.open(activeChat(service.state).id);
     view = next;
     sidebarOpen = false;
     compact = false;
@@ -174,7 +166,7 @@
         The application simulation stays alive. Drafts, Temporary work and owned operations keep
         their original destination.
       </p>
-      {#if snapshot.attempt || snapshot.reviewActivity}<p role="status">
+      {#if snapshot.attempt || snapshot.externalActivity}<p role="status">
           Work is still active in its originating chat.
         </p>{/if}
       <div class="history-actions">
@@ -280,22 +272,18 @@
             onclick={() => (sidebarCollapsed = !sidebarCollapsed)}><PanelLeft size={17} /></button
           >
           <div class="breadcrumb">
-            {#if view === 'workspace' || view === 'research'}{#if project}<Folder size={15} /><span
-                  title={project.name}>{project.name}</span
+            {#if view === 'workspace'}{#if project}<Folder size={15} /><span title={project.name}
+                  >{project.name}</span
                 >{:else}<Clock3 size={15} /><span>Temporary</span>{/if}<ChevronRight
                 size={13}
-              /><strong title={chat.title}
-                >{chat.title}{view === 'research' ? ' · Research' : ''}</strong
-              >{:else}<strong
+              /><strong title={chat.title}>{chat.title}</strong>{:else}<strong
                 >{view === 'history'
                   ? 'Chat history'
                   : view === 'models'
                     ? 'Model library'
-                    : view === 'research'
-                      ? 'Research workspace'
-                      : view === 'connections'
-                        ? 'Personal connections'
-                        : 'App preferences'}</strong
+                    : view === 'connections'
+                      ? 'Personal connections'
+                      : 'App preferences'}</strong
               >{/if}
           </div>
           <div class="header-actions">
@@ -359,17 +347,6 @@
               }}>Return to chat<ArrowUpRight size={13} /></button
             >
           </div>{/if}
-        {#if snapshot.reviewActivity && (view !== 'research' || snapshot.reviewActivity.chatId !== chat.id)}
-          <div class="background-work" role="status">
-            <span class="busy-dot"></span>Research review in {snapshot.reviewActivity.origin}<button
-              class="text-button"
-              onclick={() => {
-                service.navigate(snapshot.reviewActivity!.chatId);
-                navigate('research');
-              }}>Return to review<ArrowUpRight size={13} /></button
-            ><button class="text-button" onclick={() => research.stop()}>Stop</button>
-          </div>
-        {/if}
         {#if snapshot.storage.save === 'failed' && chat.projectId}<div
             class="background-work recovery-banner"
             role="status"
@@ -443,13 +420,6 @@
             }}
             onaction={request}
             onsettings={() => navigate('settings')}
-          />
-        {:else if view === 'research'}<ResearchView
-            {snapshot}
-            {researchSnapshot}
-            session={researchSnapshot.sessions[chat.id]}
-            service={research}
-            oncontext={() => showContext('files')}
           />
         {:else if view === 'models'}<ModelLibrary
             {snapshot}
@@ -546,7 +516,6 @@
         modal = '';
         navigate('workspace');
       }}
-      onstopreview={() => research.stop()}
     />
   {:else if modal}
     <Modal title={titles[modal]} onclose={() => (modal = '')}>
@@ -590,9 +559,9 @@
               ></label
             >
             <p class="modal-description">
-              Copy messages, draft and research history; clear Temporary after acknowledgment. Reset
-              pins, chat instructions and selections. Future requests use the destination’s
-              instructions, objective and separate cloud permission.
+              Copy messages and draft; clear Temporary after acknowledgment. Reset pins, chat
+              instructions and selections. Future requests use the destination’s instructions,
+              objective and separate cloud permission.
             </p>
             <div class="save-preview">
               <strong>{snapshot.projects.find((p) => p.id === destination)?.name}</strong><span
@@ -612,7 +581,7 @@
                   ? 'Remove this chat and draft. Project copies and separate usage are retained.'
                   : 'Clear the Temporary draft, conversation and cloud permission. Fictional usage and unknown holds remain.'}
             </p>{/if}
-          {#if (modal.includes('delete') || modal === 'save-temp') && (modal === 'delete-project' ? snapshot.attempt?.projectId === project?.id || snapshot.reviewActivity?.projectId === project?.id : snapshot.attempt?.chatId === chat.id || snapshot.reviewActivity?.chatId === chat.id)}<p
+          {#if (modal.includes('delete') || modal === 'save-temp') && (modal === 'delete-project' ? snapshot.attempt?.projectId === project?.id || snapshot.externalActivity?.projectId === project?.id : snapshot.attempt?.chatId === chat.id || snapshot.externalActivity?.chatId === chat.id)}<p
               class="blocked-operation"
             >
               Stop the active response first.
@@ -627,11 +596,12 @@
               disabled={modal === 'delete-project'
                 ? Boolean(
                     (snapshot.attempt && snapshot.attempt.projectId === project?.id) ||
-                    (snapshot.reviewActivity && snapshot.reviewActivity.projectId === project?.id),
+                    (snapshot.externalActivity &&
+                      snapshot.externalActivity.projectId === project?.id),
                   )
                 : modal === 'delete-chat' || modal === 'save-temp'
                   ? snapshot.attempt?.chatId === chat.id ||
-                    snapshot.reviewActivity?.chatId === chat.id
+                    snapshot.externalActivity?.chatId === chat.id
                   : !name.trim()}
               >{modal.includes('delete')
                 ? 'Remove content'

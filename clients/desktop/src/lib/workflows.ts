@@ -346,6 +346,6 @@ export function movePreview(state: WorkspaceState, chatId: string, destination: 
     target,
     copies: source.files.filter((f) => chat.selectedFiles.includes(f.id)),
     localOnly: chat.localOnly || !!source.localOnly || !source.cloudAllowed,
-    busy: state.attempt?.chatId === chat.id || state.reviewActivity?.chatId === chat.id,
+    busy: state.attempt?.chatId === chat.id || state.externalActivity?.chatId === chat.id,
   };
 }

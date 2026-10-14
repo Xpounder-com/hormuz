@@ -12,14 +12,12 @@
     service,
     onclose,
     oncomplete,
-    onstopreview,
   }: {
     action: string;
     snapshot: WorkspaceState;
     service: MockWorkspace;
     onclose: () => void;
     oncomplete: () => void;
-    onstopreview: () => void;
   } = $props();
   const chat = $derived(activeChat(snapshot));
   const project = $derived(snapshot.projects.find((p) => p.id === chat.projectId));
@@ -36,13 +34,13 @@
   const importPreview = $derived(inspectImport(imported, snapshot));
   const exported = $derived(project ? exportProject(snapshot, project.id) : '');
   const busy = $derived(
-    snapshot.attempt?.chatId === chat.id || snapshot.reviewActivity?.chatId === chat.id,
+    snapshot.attempt?.chatId === chat.id || snapshot.externalActivity?.chatId === chat.id,
   );
   const temporary = $derived(
     snapshot.chats.find(
       (c) =>
         c.projectId === null &&
-        (c.draft || c.messages.length || snapshot.reviewActivity?.chatId === c.id),
+        (c.draft || c.messages.length || snapshot.externalActivity?.chatId === c.id),
     ),
   );
   const titles: Record<string, string> = {
@@ -66,7 +64,6 @@
     else error = service.state.notice;
   }
   function restart(save = false) {
-    onstopreview();
     service.stop();
     if (save && temporary) {
       service.navigate(temporary.id);
@@ -134,7 +131,7 @@
     <div class="context-summary">
       <ShieldCheck size={18} />
       <p>
-        Excludes Temporary work, research review sessions, other profiles, credentials, connection
+        Excludes Temporary work, skills selections, other profiles, credentials, connection
         bindings, model weights, runtime handles and execution authority. This version only
         previews/copies a simulation bundle.
       </p>
@@ -224,7 +221,7 @@
       resumes. Temporary bodies and permission are cleared. Unknown usage holds remain. Browser
       reload still resets everything.
     </p>
-    {#if snapshot.attempt || snapshot.reviewActivity}<p class="blocked-operation">
+    {#if snapshot.attempt || snapshot.externalActivity}<p class="blocked-operation">
         This action will Stop owned work first, retain terminal/unknown receipts, then reopen. It
         does not guarantee provider-side cancellation.
       </p>{/if}

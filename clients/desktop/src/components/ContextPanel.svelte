@@ -2,6 +2,7 @@
   import { X, Plus, FileText, Trash2, ShieldCheck, ArrowUpRight } from '@lucide/svelte';
   import type { Chat, RoutePlan, WorkspaceState } from '../lib/types.ts';
   import type { MockWorkspace } from '../lib/workspace.ts';
+  import { skills, activeSkills } from '../lib/skills.ts';
   let {
     snapshot,
     chat,
@@ -39,7 +40,7 @@
     >
   </div>
   <div class="context-tabs" role="tablist" aria-label="Context tabs">
-    {#each ['Files', 'Instructions', 'Preferences'] as label}<button
+    {#each ['Files', 'Instructions', 'Skills', 'Preferences'] as label}<button
         role="tab"
         id={`context-${label.toLowerCase()}`}
         aria-controls="context-tabpanel"
@@ -155,6 +156,36 @@
       </details>
       <p class="panel-description">
         Edits apply to the next request. Submitted instructions stay frozen.
+      </p>
+    {:else if tab === 'skills'}
+      <h2>Skills, in your chat.</h2>
+      <p class="panel-description">
+        Make an instruction pack available here, then use its command with your work in the normal
+        prompt.
+      </p>
+      {#each skills as skill}<label class="toggle-field">
+          <span
+            ><strong>{skill.name}</strong><small>{skill.command} · v{skill.version}</small><small
+              >{skill.description}</small
+            ></span
+          >
+          <input
+            type="checkbox"
+            aria-label={`${skill.name} ${skill.command}`}
+            checked={(project?.skillIds ?? chat.skillIds ?? []).includes(skill.id)}
+            onchange={() => service.toggleSkill(skill.id)}
+          />
+        </label>{/each}
+      <p class="panel-description">
+        <strong>Active for the next request</strong><br />
+        {activeSkills(project?.skillIds ?? chat.skillIds, chat.draft)
+          .map((s) => s.name)
+          .join(', ') || 'No skill active in the current prompt.'}
+      </p>
+      <p class="panel-description">
+        Skills add visible instructions to the selected model. They grant no tools, file access or
+        spending, and do not run other reviewers. Imported projects require explicit skill
+        selection.
       </p>
     {:else}
       <div class="panel-section-title">

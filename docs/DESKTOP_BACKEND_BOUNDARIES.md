@@ -1,19 +1,19 @@
-# Desktop backend boundaries for UI planning
+# Desktop backend boundaries
 
-Planning checkpoint: 2026-10-13. Parent: [#479](https://github.com/Xpounder-com/hormuz/issues/479).
-The user requested backend boundaries and roadmap/issue updates before starting
-the UI, with no application implementation. This document records checkpoint A
-of [#480](https://github.com/Xpounder-com/hormuz/issues/480). It supplies concrete
-product behavior and mock service responsibilities to the
-[UI plan](DESKTOP_UI_PLAN.md); checkpoint B accepts the actual host, protocols,
-storage, custody and supported-target candidates after
-[#492](https://github.com/Xpounder-com/hormuz/issues/492).
+Current decision: 2026-10-14. The owner approved the glossy core project workspace
+and minimal Auto bar, requested specialised workflows through skills, and
+explicitly authorized the Electron shell and llama.cpp backend after #518 merges.
+Checkpoint A remains the product/input baseline. Checkpoint B is now the bounded
+local-text development slice, with source/runtime/package evidence recorded
+separately. Actual accessibility/installed-platform qualification is not inferred
+from direction approval and does not block this authorized development start.
 
-These are planning defaults for the first UI work order, not approved rendered
-UI, executable schemas or qualified runtime limits. No code, database, real
-project-file access, model download, provider call or deployment is introduced.
-Changing a default during UI review updates this document and its issue fixtures
-before runtime acceptance. Existing public/durable contracts remain unchanged.
+The initial runtime seam will be versioned, host-owned and local-only: one owned
+llama.cpp process/model, one inference, bounded text/stream/Stop, no hosted login
+or paid calls. Durable project storage, curated downloads, provider custody,
+measured fit and installed platform support remain separately qualified work in
+#493/#483/#485/#340/#346/#347. Existing public/durable gateway contracts remain
+unchanged. Skills grant instructions, never execution permissions.
 
 ## Decisions made now and decisions kept for later
 
@@ -22,7 +22,7 @@ before runtime acceptance. Existing public/durable contracts remain unchanged.
 | Saved versus Temporary work, file ownership, selected context, export/delete, effective settings and privacy defaults | Content-store technology/schema, exact file/token/storage limits, retention mechanics, migration, backup and rollback |
 | Pure Auto preview, persistent chat pin, explicit request override, revalidation and immutable submitted origin | Qualified ranking/admission adapter, legitimate execution authority, protocol framing and compatible versions |
 | Local setup states, one active inference attempt and one loaded local model, explicit network actions | Exact llama.cpp/curated GGUF/cloud model versions, provider/prices, fit, transport, cancellation and process ownership |
-| Stream failure/cancel/unknown states and bounded revision-specific Research Review | Real time/resource/budget envelopes, secure custody on each target and installed qualification |
+| Stream failure/cancel/unknown states and bounded skill instruction context | Real time/resource/budget envelopes, secure custody on each target and installed qualification |
 | Logical service responsibilities and bounded mock snapshots/events | Exact IPC/schema versions, sender validation, subscriptions, recovery and implementation owners |
 
 UI issues consume A without waiting for #480 to close. #482–#485 and #493 consume
@@ -30,6 +30,19 @@ B. The rendered visual choice remains #481, integrated user acceptance remains
 #492, and package/installed support remains #346/#347/#340. Account retirement
 #494–#501 is independent. Local/direct-provider operation requires no Render,
 PostgreSQL, hosted login, Hormuz subscription or mandatory managed gateway.
+
+## Optional Agent extension — separate acceptance
+
+The user requested a [Codex-first, then Claude Agent implementation track](AGENT_EXECUTION_ROADMAP.md)
+on 2026-10-13. It adds a later named-project execution contract and simulated
+Agent UI, without changing the first chat's imported-copy, Temporary, pure Auto
+or #492 acceptance boundaries below. A real workspace grant, host-owned runtime,
+separate plan/action/spend decisions, diff provenance and explicit resume need
+that extension's acceptance and qualification before use. Temporary Agent is
+unavailable initially because vendor runtimes may persist transcripts.
+A skill or model review cannot grant agent/tool authority. Applicable
+host/content/custody inputs are reused without making the optional extension a
+prerequisite to first-chat delivery or introducing mandatory hosted services.
 
 ## 1. Local projects, saved content and Temporary work
 
@@ -41,7 +54,7 @@ content belongs to one profile-qualified local store owner outside the renderer.
 Credential custody and content-free usage/admission evidence are separate owners.
 No cloud sync, answer cache or encryption claim follows from local saving.
 
-Temporary chat/review stays in memory, including drafts and partial responses.
+Temporary chat stays in memory, including drafts and partial responses.
 Hiding, navigating or closing a window retains it while the application remains
 alive. Explicitly closing/discarding the Temporary chat or quitting the app
 clears it; with content or active work, offer Save to project, Discard or Cancel.
@@ -128,7 +141,7 @@ that the selected model is objectively best.
 Effective defaults follow app → project → chat → request. A default is distinct
 from a restriction: the app's default Local-only can be changed by explicit
 project opt-in, while an enforced profile/project Local-only restriction cannot
-be loosened by a chat, request pin or review role. Chat/source restrictions may
+be loosened by a chat, request pin or skill. Chat/source restrictions may
 tighten the project setting. Managed policy, if explicitly configured, is an
 additional authority ceiling. A model change cannot remove a restriction.
 
@@ -145,7 +158,7 @@ Temporary chat has no parent project and starts Local-only independently of app
 defaults. Its full-window preferences offer an explicit **Allow cloud for this
 Temporary chat** action; adding a connection or pinning a cloud model cannot
 perform that opt-in. The permission lasts only for that Temporary chat and applies
-to its disclosed chat/review context, subject to enforced profile/source
+to its disclosed chat/skill context, subject to enforced profile/source
 restrictions. It needs a finite lifetime allowance under the profile allowance
 and the same per-request/per-round ceilings; missing consent, price or allowance
 blocks Send. No invented project ID confers execution/budget authority.
@@ -224,7 +237,7 @@ duplicate weights. Inventory access and provider connections are profile
 qualified; no cross-profile prompt, key or private connection sharing follows.
 The first plan permits **one loaded local model and one active inference attempt
 per application**. A second Send shows Busy and a return/stop remedy; there is
-no hidden queue or speculative parallel answer. Review roles execute sequentially
+no hidden queue or speculative parallel answer. Later multi-step skills execute sequentially
 under this same scheduler; future concurrency needs a separate qualified limit.
 
 The library distinguishes Offered → Downloading → Verifying → Downloaded →
@@ -274,39 +287,19 @@ disk full, denied access, missing credential store and lost engine are explicit
 recoverable/blocking states; no automatic reset/delete of user content. Update
 waits for quiescence; migration, recovery and rollback are accepted in B/#346.
 
-## 7. Research Review uses the same boundaries
+## 7. Skills use the same boundaries
 
-Follow the [Research Review contract](RESEARCH_REVIEW_MODE.md). Default: existing
-draft + explicit frozen source/criteria packet + two distinct blind reviewers.
-Existing-draft review has at most three calls with optional reconciliation;
-author + two reviewers + optional reconciliation has at most four. Roles run
-sequentially, with one loaded local model; distinct local reviewers require two
-separately qualified model identities, not two sessions of the one-model baseline.
+Follow the [skills contract](RESEARCH_REVIEW_MODE.md). The retired Research UI is
+not a backend prerequisite. Bundled instruction-only packs are explicitly enabled
+for a destination and invoked in ordinary chat. Their exact instructions/version
+join the frozen request packet and its limits. They grant no workspace access,
+extra reviewers, tools, cloud egress or spending. Import restores no skill binding.
 
-Existing-draft reviewers share the frozen target/source/criteria packet and
-effective restrictions. For authoring, freeze question/sources first; the author
-creates v1, then freeze v1 and give both reviewers identical v1 review packets.
-Only afterward may reconciliation see recorded verdicts. Show exact role
-identities/locations, coverage/exclusions, whole-round upper allowance and
-per-attempt costs before Start. A pure role preview neither loads nor runs a
-model. Missing reviewer, context/cap/privacy failure, cancellation and unknown
-outcome stay incomplete; disagreement stays visible. Freeze blind initial
-verdicts before exposing peer conclusions. Reconciliation does not rewrite them.
-
-Review-plan eligibility is separate from immediate inference readiness. A
-verified, downloaded, qualified model may be eligible for a disclosed load/swap
-step even while another model is loaded. Start explicitly authorizes that finite
-sequence, without authorizing downloads; each role must reach Ready and pass
-current policy/context/budget checks before its own dispatch. A failed load or
-changed plan leaves the round incomplete or requires renewed intent, never a
-silent substitute. This permits local-only review with one model resident.
-
-An edited/reconciled v2 is unreviewed/stale relative to v1 findings. Another round
-requires explicit intent and fresh admission. Human sign-off names revision and
-scope, with disclosed limitations; it is not model proof or permission to deploy,
-publish, edit files or run agents. Research bodies use the local content owner,
-Temporary remains memory-only, and accounting stays content-free. #502 feeds the
-UI gate; optional #503 follows a useful qualified single-response baseline.
+Any later tool-capable or multi-model skill uses the same authoritative host
+scheduler/admission, finite context/calls/allowance and cancellation/accounting
+as chat. Different model sessions are not independent identities; revised sources
+cannot inherit an old assessment. #503 is optional generic skill execution and
+is not part of first local-chat delivery. Agent engine contracts remain separate.
 
 ## 8. Logical UI-to-host seam
 
@@ -323,7 +316,7 @@ snapshots and sends narrow intent; owners outside it commit authoritative state.
 | Connections | Add/test/edit/remove; opaque binding, custody/availability status and price snapshot | One qualified custody/transport owner per mode; never returns raw secrets |
 | Preview | Effective settings + current packet/intent; eligible prediction/reasons/block and snapshot generation | Pure policy/ranking adapter over bounded available state; no admission or side effects |
 | Execution | Submit/stop/query captured attempt; ordered progress/partial/result/receipt | Existing qualified admission/accounting plus owned scheduler/transport; immutable origin and separate content save |
-| Review | Preview/start/stop bounded plan; frozen revisions, role findings, dispositions and scoped human decision | Same policy/execution owners plus revision-bound review orchestration/content records |
+| Skills | Explicit pack availability, leading command and frozen instruction provenance | Instruction/context owner; no new file/tool/model/spend authority; later execution is separate |
 
 Every failure identifies its origin/operation, stable category, recoverability
 and next action without leaking raw credentials, prompts or private paths into
@@ -346,18 +339,17 @@ claims; #480 B must replace or explicitly accept them after qualification.
 | Token capacity | Fictional 8,192-token model window; at most 6,144 input tokens including all instructions/history and 2,048 output tokens; smaller/unknown model cases block separately |
 | History / search | Latest ten complete exchanges selected visibly; 50 search results per page; no unbounded all-project read |
 | Work residency | One active inference attempt/application, one loaded local model, no hidden queue; roles sequential |
-| Time | Simulated 60-second attempt ceiling and five-minute review-round ceiling, with explicit timeout/cancel states; animations need not consume those durations |
-| Budget | Fictional USD 25 profile ceiling per UTC month, USD 10 project ceiling in the same window or USD 10 per Temporary lifetime, USD 1 request and USD 3 review-round upper allowance; lower/zero/unknown cases exercise refusal |
-| Review | Two explicit mock rounds maximum; two reviewers, optional author/reconciler within the documented three/four-call path |
+| Time | Simulated 60-second attempt ceiling, with explicit timeout/cancel states; animations need not consume those durations |
+| Budget | Fictional USD 25 profile ceiling per UTC month, USD 10 project ceiling in the same window or USD 10 per Temporary lifetime, USD 1 request; lower/zero/unknown cases exercise refusal |
+| Skills | Three bounded instruction-only packs; no workflow executor or automatic extra model calls |
 
 Byte ceilings do not guarantee token fit. Include synthetic over-limit, missing
 price/usage, stale snapshot, cancel/save failure and unknown-token cases, not just
 the success fixture. Real prices, limits and a finance schema are not created by
-these examples. One round budget admission must reserve the whole plan while
+these examples. Later multi-step skill admission must reserve its whole plan while
 settling individual attempts without double-counting or releasing unknown holds.
 
 Checkpoint A is recorded when this document and consuming issue criteria agree.
-That prepares UI work; it does not complete #480, select the final finish or
-approve #492. Before B/runtime: assign owners, qualify the minimal reused backend,
+The owner has approved the UI direction and authorized the bounded local runtime start. Broader #480 completion still requires: assign owners, qualify the minimal reused backend,
 exact engine/model/provider/protocol, content/custody/migration, real limits and
 OS/architecture/desktop rows. No all-machines support claim follows from Electron.

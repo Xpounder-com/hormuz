@@ -46,6 +46,7 @@ export type Project = {
   pinned?: boolean;
   modelIntent?: string;
   localOnly?: boolean;
+  skillIds?: string[];
 };
 export type Receipt = {
   model: string;
@@ -82,6 +83,7 @@ export type Chat = {
   inheritIntent?: boolean;
   continuationModel?: string;
   retryOf?: string;
+  skillIds?: string[];
 };
 export type ConnectionScenario =
   'success' | 'invalid' | 'offline' | 'expired' | 'locked' | 'rate-limited' | 'provider-error';
@@ -108,7 +110,7 @@ export type WorkspaceState = {
   activeChatId: string;
   connection: Connection;
   attempt: Attempt | null;
-  reviewActivity: {
+  externalActivity: {
     chatId: string;
     projectId: string | null;
     origin: string;

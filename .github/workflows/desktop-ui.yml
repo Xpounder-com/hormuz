@@ -38,6 +38,8 @@ jobs:
         run: npm ci --ignore-scripts --no-fund --no-audit --fetch-retries=2 --fetch-timeout=20000 --maxsockets=4
       - name: Check components and types
         run: npm run check
+      - name: Check bounded skill catalog matches instruction packs
+        run: npm run skills:check
       - name: Check source formatting
         run: npm run format:check
       - name: Test routing, privacy and owned work with mock timers

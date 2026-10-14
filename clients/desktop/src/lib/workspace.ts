@@ -1,6 +1,7 @@
 import { emptyChat, initialState, sampleFiles } from './fixtures.ts';
 import { activeChat, preview } from './planner.ts';
 import { inspectImport, movePreview } from './workflows.ts';
+import { skills } from './skills.ts';
 import type {
   Chat,
   ConnectionScenario,
@@ -63,9 +64,6 @@ export class MockWorkspace {
     return () => {
       this.#journalListeners.delete(listener);
     };
-  }
-  researchChanged(chatId: string) {
-    if (this.state.chats.some((c) => c.id === chatId && c.projectId !== null)) this.#changed();
   }
   #emit() {
     this.state.revision++;
@@ -212,7 +210,7 @@ export class MockWorkspace {
     }
   }
   deleteProject(id: string) {
-    if (this.state.attempt?.projectId === id || this.state.reviewActivity?.projectId === id) {
+    if (this.state.attempt?.projectId === id || this.state.externalActivity?.projectId === id) {
       this.#notice('Stop the active response before deleting its project.');
       return;
     }
@@ -237,7 +235,7 @@ export class MockWorkspace {
     }
   }
   deleteChat(id: string) {
-    if (this.state.attempt?.chatId === id || this.state.reviewActivity?.chatId === id) {
+    if (this.state.attempt?.chatId === id || this.state.externalActivity?.chatId === id) {
       this.#notice('Stop the active response before deleting its chat.');
       return;
     }
@@ -262,7 +260,7 @@ export class MockWorkspace {
     if (source.projectId !== null) return;
     if (
       this.state.attempt?.chatId === source.id ||
-      this.state.reviewActivity?.chatId === source.id
+      this.state.externalActivity?.chatId === source.id
     ) {
       this.#notice('Stop the Temporary response before saving a copy.');
       return;
@@ -315,6 +313,15 @@ export class MockWorkspace {
   setChatInstructions(value: string) {
     activeChat(this.state).instructions = value.slice(0, 8000);
     if (activeChat(this.state).projectId) this.#changed();
+    else this.#emit();
+  }
+  toggleSkill(id: string) {
+    if (!skills.some((s) => s.id === id)) return;
+    const chat = activeChat(this.state);
+    const target = this.state.projects.find((p) => p.id === chat.projectId) ?? chat;
+    const ids = target.skillIds ?? [];
+    target.skillIds = ids.includes(id) ? ids.filter((s) => s !== id) : [...ids, id];
+    if (chat.projectId) this.#changed();
     else this.#emit();
   }
   setChatObjective(value: Objective | 'inherit') {
@@ -417,7 +424,7 @@ export class MockWorkspace {
     this.#changed();
   }
   clearConversation(id: string) {
-    if (this.state.attempt?.chatId === id || this.state.reviewActivity?.chatId === id) {
+    if (this.state.attempt?.chatId === id || this.state.externalActivity?.chatId === id) {
       this.#notice('Stop active work before clearing this conversation.');
       return;
     }
@@ -586,7 +593,8 @@ export class MockWorkspace {
     const chat = activeChat(this.state);
     const index = chat.messages.findIndex((m) => m.id === id);
     const previous = chat.messages[index];
-    if (!previous?.receipt || index < 1 || this.state.attempt || this.state.reviewActivity) return;
+    if (!previous?.receipt || index < 1 || this.state.attempt || this.state.externalActivity)
+      return;
     if (chat.draft.trim()) {
       this.#notice('Keep or clear your existing draft before preparing a retry.');
       return;
@@ -647,7 +655,7 @@ export class MockWorkspace {
     this.#changed();
   }
   restartMock(discardUnsaved = false, discardTemporary = false) {
-    if (this.state.reviewActivity) {
+    if (this.state.externalActivity) {
       this.#notice('Stop the review before simulating restart.');
       return false;
     }
@@ -738,7 +746,7 @@ export class MockWorkspace {
     if (profile === this.state.profileId) return;
     if (
       this.state.attempt ||
-      this.state.reviewActivity ||
+      this.state.externalActivity ||
       this.#modelJobs.size ||
       this.state.connection.status === 'testing'
     ) {
@@ -785,7 +793,7 @@ export class MockWorkspace {
   connectionDetails(label: string, provider: 'demo' | 'claude' | 'gpt') {
     if (
       this.state.models.find(
-        (m) => m.id === (this.state.attempt?.modelId ?? this.state.reviewActivity?.modelId),
+        (m) => m.id === (this.state.attempt?.modelId ?? this.state.externalActivity?.modelId),
       )?.place === 'cloud'
     ) {
       this.#notice('Stop cloud work before editing its binding.');
@@ -816,7 +824,7 @@ export class MockWorkspace {
   setConnectionScenario(value: ConnectionScenario) {
     if (
       this.state.models.find(
-        (m) => m.id === (this.state.attempt?.modelId ?? this.state.reviewActivity?.modelId),
+        (m) => m.id === (this.state.attempt?.modelId ?? this.state.externalActivity?.modelId),
       )?.place === 'cloud'
     ) {
       this.#notice('Stop the cloud response before changing its connection test.');
@@ -836,7 +844,7 @@ export class MockWorkspace {
     }
     if (
       this.state.models.find(
-        (m) => m.id === (this.state.attempt?.modelId ?? this.state.reviewActivity?.modelId),
+        (m) => m.id === (this.state.attempt?.modelId ?? this.state.externalActivity?.modelId),
       )?.place === 'cloud'
     ) {
       this.#notice('Stop the cloud response before testing its connection again.');
@@ -859,7 +867,7 @@ export class MockWorkspace {
   }
   removeConnection() {
     const running = this.state.models.find(
-      (m) => m.id === (this.state.attempt?.modelId ?? this.state.reviewActivity?.modelId),
+      (m) => m.id === (this.state.attempt?.modelId ?? this.state.externalActivity?.modelId),
     );
     if (running?.place === 'cloud') {
       this.#notice('Stop the cloud response before removing its connection.');
@@ -938,7 +946,7 @@ export class MockWorkspace {
     if (!model || model.state !== 'downloaded' || !model.fit) return;
     if (
       this.state.attempt ||
-      this.state.reviewActivity ||
+      this.state.externalActivity ||
       this.state.models.some((m) => m.state === 'loading')
     ) {
       this.#notice('One model operation at a time. Finish or stop current work.');
@@ -976,7 +984,7 @@ export class MockWorkspace {
     if (!remove && model.state !== 'ready') return;
     if (
       this.state.attempt?.modelId === id ||
-      this.state.reviewActivity?.modelId === id ||
+      this.state.externalActivity?.modelId === id ||
       model.state === 'loading'
     ) {
       this.#notice('Stop current work before unloading or removing its model.');
@@ -1000,7 +1008,7 @@ export class MockWorkspace {
     if (!chat.draft.trim()) return;
     if (
       this.state.attempt ||
-      this.state.reviewActivity ||
+      this.state.externalActivity ||
       this.state.models.some((m) => m.state === 'loading')
     ) {
       this.#notice('Another operation is active. Return to it or stop it before Send.');
@@ -1221,7 +1229,7 @@ export class MockWorkspace {
   beginReview(chatId: string): boolean {
     if (
       this.state.attempt ||
-      this.state.reviewActivity ||
+      this.state.externalActivity ||
       this.state.models.some((m) => m.state === 'loading')
     ) {
       this.#notice('One response or review at a time. Return to active work or stop it.');
@@ -1230,7 +1238,7 @@ export class MockWorkspace {
     const chat = this.state.chats.find((c) => c.id === chatId);
     if (!chat) return false;
     this.#clearSaveTimer();
-    this.state.reviewActivity = {
+    this.state.externalActivity = {
       chatId,
       projectId: chat.projectId,
       origin: this.state.projects.find((p) => p.id === chat.projectId)?.name ?? 'Temporary chat',
@@ -1241,9 +1249,9 @@ export class MockWorkspace {
     return true;
   }
   reviewRole(modelId: string, phase: string, preparing = false) {
-    if (!this.state.reviewActivity) return;
-    this.state.reviewActivity.modelId = modelId;
-    this.state.reviewActivity.phase = phase;
+    if (!this.state.externalActivity) return;
+    this.state.externalActivity.modelId = modelId;
+    this.state.externalActivity.phase = phase;
     const model = this.state.models.find((m) => m.id === modelId);
     if (preparing && model?.place === 'local') model.state = 'loading';
     this.#emit();
@@ -1259,9 +1267,9 @@ export class MockWorkspace {
     this.#emit();
   }
   finishReview() {
-    const model = this.state.models.find((m) => m.id === this.state.reviewActivity?.modelId);
+    const model = this.state.models.find((m) => m.id === this.state.externalActivity?.modelId);
     if (model?.state === 'loading') model.state = 'downloaded';
-    this.state.reviewActivity = null;
+    this.state.externalActivity = null;
     this.#emit();
   }
   adjustReviewAllowance(key: string, amount: number, profile = this.state.profileId) {

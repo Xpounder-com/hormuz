@@ -1,4 +1,5 @@
 import type { Chat, Model, RoutePlan, WorkspaceState } from './types.ts';
+import { activeSkills } from './skills.ts';
 
 export function activeChat(state: WorkspaceState): Chat {
   return state.chats.find((c) => c.id === state.activeChatId)!;
@@ -9,7 +10,14 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
   const project = state.projects.find((p) => p.id === chat.projectId);
   const context = chat.selectedFiles.map((id) => project?.files.find((f) => f.id === id));
   const files = context.filter((f) => f !== undefined);
-  const instructions = [state.appInstructions, project?.instructions, chat.instructions]
+  const instructions = [
+    state.appInstructions,
+    project?.instructions,
+    ...activeSkills(project?.skillIds ?? chat.skillIds, chat.draft).map(
+      (s) => `Skill: ${s.name} (${s.id} v${s.version})\n${s.instructions}`,
+    ),
+    chat.instructions,
+  ]
     .filter(Boolean)
     .join('\n\n');
   const complete = chat.messages.filter(

@@ -10,7 +10,6 @@
     PanelLeftClose,
     Clock3,
     Archive,
-    FlaskConical,
     Pin,
   } from '@lucide/svelte';
   import type { WorkspaceState } from '../lib/types.ts';
@@ -91,8 +90,7 @@
   </div>
   <nav class="project-list" aria-label="Projects">
     {#each projects as project}<button
-        class:active={chat.projectId === project.id &&
-          (view === 'workspace' || view === 'research')}
+        class:active={chat.projectId === project.id && view === 'workspace'}
         class="nav-row"
         title={project.name}
         onclick={() => {
@@ -107,7 +105,7 @@
         {showArchive ? 'No archived projects' : 'Create a project to get started'}
       </p>{/if}
     <button
-      class:active={chat.projectId === null && (view === 'workspace' || view === 'research')}
+      class:active={chat.projectId === null && view === 'workspace'}
       class="nav-row temporary-row"
       onclick={() => {
         ontemporary();
@@ -140,9 +138,6 @@
   <nav class="utility-nav" aria-label="App navigation">
     <button class:active={view === 'history'} class="nav-row" onclick={() => onview('history')}
       ><Search size={17} /><span>History</span></button
-    >
-    <button class:active={view === 'research'} class="nav-row" onclick={() => onview('research')}
-      ><FlaskConical size={17} /><span>Research</span></button
     >
     <button class:active={view === 'models'} class="nav-row" onclick={() => onview('models')}
       ><Monitor size={17} /><span>Models</span><span class="ready-indicator"

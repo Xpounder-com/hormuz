@@ -1,0 +1,26 @@
+[
+  {
+    "id": "paper-roast",
+    "name": "Paper roast",
+    "command": "/roast",
+    "description": "Critique a paper or draft with selectable heat, grounded objections and concrete remedies.",
+    "version": 1,
+    "instructions": "Use the draft and sources explicitly supplied in this chat. If the draft is missing,\nask for it. Never infer permission to read other project files or browse the web.\n\nThe user may request gentle, spicy or scorched heat. Heat changes tone, never the\nseverity of a finding or the evidence required. Be direct about the work and avoid\npersonal attacks. Default to spicy if no heat is supplied.\n\nFor each substantive finding, give the claim or passage, its section locator,\nseverity, the supporting reasoning, missing evidence and a concrete remedy.\nSeparate factual errors, unsupported conclusions, methods limitations and writing\nsuggestions. Do not invent citations or claim a criticism is refuted without proof.\n\nLabel this as one model's critique. A second independent review requires an actual\ndifferent model/version and a fresh blind packet; never invent reviewer identities\nor pretend this instruction itself ran other models. Preserve disagreement and\nlimitations. Offer a next revision or rebuttal task through ordinary chat.\n\nNo model assessment is scientific validation, human acceptance or permission to\npublish, change files, execute tools or spend money."
+  },
+  {
+    "id": "paper-rebuttal",
+    "name": "Paper rebuttal",
+    "command": "/rebuttal",
+    "description": "Draft a traceable response to supplied reviewer objections without inventing evidence or acceptance.",
+    "version": 1,
+    "instructions": "Use only the supplied review, paper and evidence. Ask for missing material when\nnecessary. Preserve the original objections and identify external-review provenance\nas unknown unless the user supplied it.\n\nFor each objection, propose one of: supported rebuttal, paper revision, limitation\nacknowledgment, or evidence still needed. State the exact claim, response, supporting\nevidence and proposed change. Clearly distinguish a draft response from a verified\nrefutation. Never fabricate experiments, references, revised passages or a reviewer's\nacceptance. Retain dissent and unresolved findings.\n\nProduce a polite point-by-point letter with section locators. A revised paper is a\nnew, unreviewed version; earlier review or agreement does not transfer automatically.\nAdditional model reviews require explicit intent and genuine identity/provenance.\n\nThese are text instructions, not authority to access files, run tools, contact\nreviewers, submit the paper or spend money. Leave the final decision to the user."
+  },
+  {
+    "id": "evidence-review",
+    "name": "Evidence review",
+    "command": "/review",
+    "description": "Inspect supplied research or project claims for evidence, assumptions and gaps.",
+    "version": 1,
+    "instructions": "State the exact draft/version and supplied source scope being reviewed. Separate\nclaims supported by those sources from inferences, assumptions and missing evidence.\nUse source or section locators when available. Never invent citations or treat model\nagreement as independent validation.\n\nReport the most consequential gaps first, explain their impact and identify the\nsmallest useful next check. Keep contradictions and incomplete coverage visible.\nIf sources are missing, give a limited review and explain what remains unresolved.\n\nThis is a single-model text review unless actual distinct reviewer evidence is\nprovided. Do not run an automatic loop until agreement or claim another model was\nconsulted. Changed material needs a fresh review. Human decisions, file/tool access\nand spending permission remain separate from these instructions."
+  }
+]

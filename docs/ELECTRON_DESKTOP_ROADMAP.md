@@ -5,25 +5,26 @@ Planning baseline: 2026-10-13, main
 Track delivery in [epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
 The [UI plan](DESKTOP_UI_PLAN.md),
 [UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md),
-[Research Review contract](RESEARCH_REVIEW_MODE.md),
+[skills contract](RESEARCH_REVIEW_MODE.md),
+[project Agent execution roadmap](AGENT_EXECUTION_ROADMAP.md),
 [account cleanup](DESKTOP_ACCOUNT_CLEANUP.md),
 [infrastructure audit](DESKTOP_INFRASTRUCTURE_AUDIT.md)
 and [backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md) define the
 active scope and the disposition of the original open issues.
 
 Planning PR #486 merged at `20b8ff04659e9b4ab40c67b429f1def37e115092`.
-The user authorized the first simulated UI implementation after that merge.
-The [UI implementation candidate](DESKTOP_UI_IMPLEMENTATION.md) covers U1–U3/U3r
-mock journeys with the glossy workspace and minimal Auto bar. Final #481
-visual/accessibility and #492 integrated user acceptance stay open. No host/backend, real project context, model download, provider call
-or release is introduced. Runtime work requires a separate work order after
-the UI gate. Account cleanup has its own authorized operations
-and evidence below; it is not covered by a blanket claim of no service changes.
-Release identity, dates and implementation owners remain unassigned.
+On 2026-10-14 the owner approved the glossy core workspace and minimal Auto bar,
+requested specialised workflows through skills and authorized the Electron shell
+and llama.cpp backend after #518 merges. The [UI checkpoint](DESKTOP_UI_IMPLEMENTATION.md)
+records that decision. Dedicated research screens and the bespoke review engine
+are retired. Direction approval does not prove actual accessibility, installed
+platform support, model quality or production readiness. Broader packages,
+persistence, curated downloads, paid-provider execution and release gates remain
+separate. Account cleanup retains its own evidence and authorization.
 
 README cleanup is part of the planning/documentation scope in #479. The
 [repository introduction](../README.md) now leads with the planned desktop
-workspace, minimal bar, local/cloud Auto and optional Research Review. It labels
+workspace, minimal bar, local/cloud Auto and instruction-based skills. It labels
 simulation versus available gateway/legacy clients, retains runnable quickstart
 anchors, and directs operational detail to the existing guides. Keep this
 overview aligned with later accepted UI/runtime/release evidence; the rewrite
@@ -63,44 +64,30 @@ separate from hosted tenant, Portfolio repository and AI Work authority.
 
 [LM Studio classic chat organization](https://lmstudio.ai/docs/app/basics/chat)
 and [Bionic Projects and Sessions](https://lmstudio.ai/docs/bionic/projects-and-sessions)
-are workflow references. They do not commit Hormuz to agents, code/file editing,
-voice, browser tabs, remote sync or collaboration.
+are workflow references. The separately requested Agent execution phase now
+plans scoped workspace editing with Codex first, then Claude; those references
+do not authorize that work. Voice, browser tabs, remote sync and collaboration
+remain later decisions.
 
-The exact glossy finish is not selected. Existing prompt-bar simulation and
-glossy image concepts are references, not an approved full project UI or
-installed platform qualification. #481 selects the shared visual reference;
-#492 reviews the integrated simulation. Native desktop blur is optional; the
-shared surface needs a beautiful legible opaque fallback.
+The owner selected the current glossy #518 direction on 2026-10-14. Native blur
+remains optional; the shared UI provides a legible opaque fallback. Actual IME,
+assistive technology, high-DPI and installed platform qualification stay in later
+UI/release evidence and are not claimed from simulation or direction approval.
 
-## UI first: complete simulation candidate
+## UI direction approved; local runtime authorized
 
-The renderer in `clients/desktop` now covers project/chat pin/archive/move,
-scoped title/content search, bounded import/export, file preview/replacement and
-adverse states, onboarding/setup/connection failures, inherited/request intent,
-changed-plan confirmation, partial/unknown/retry and memory-journal recovery.
-Research includes **Roast my paper**, **Rebuttal**, explicit source coverage,
-known-author/alias lineage, authoring with two freeze points, distinct blind
-reviews, incomplete/disagreement and optional check OR reconciliation into an
-unreviewed revision. Two rounds and scoped human decisions stay bounded.
-The minimal Auto bar remains the single-response entry point.
+The core renderer covers #487–#491 and early #338 fixtures: projects/history,
+selected context, setup/connections, inherited Auto/pins, explicit confirmation,
+stream/cancel and memory recovery. Context → Skills offers reusable instruction
+packs through ordinary chats. There is no dedicated Research mode. See
+[implementation evidence](DESKTOP_UI_IMPLEMENTATION.md) and the
+[skills boundary](RESEARCH_REVIEW_MODE.md).
 
-See the [implementation/gate evidence](DESKTOP_UI_IMPLEMENTATION.md) and
-[research contract](RESEARCH_REVIEW_MODE.md). This is the implementation
-candidate for #487–#491/#502 and #338's early ordered mock fixtures, with final
-#481/#492 review still pending. It is not acceptance of any runtime gate.
-
-The scope now has a runnable bounded UI simulation with synthetic
-projects, sources, models, costs and responses. #480 checkpoint A now records
-the [product/mock boundaries](DESKTOP_BACKEND_BOUNDARIES.md): saved/Temporary
-lifetime, imported text-copy ownership, explicit context, inherited restrictions,
-Auto/pin intent, governed Send, one active inference attempt, setup/cancel/recovery
-and version-specific Review. These planning defaults are inputs to the UI,
-not rendered approval or runtime support. Finish the selected material and
-integrated journeys before #492 approval. Before actual host/backend work,
-assign a named owner and freeze exact model/provider versions, protocol and
-storage/context/output/time limits, custody and first OS/architecture/desktop
-qualification rows in #480 checkpoint B. A mock or research paper is not runtime
-readiness. #480 stays open until B; its full closure never blocks the UI.
+#492 records the owner's core direction approval and modified scope. #480 B now
+freezes a narrow local-text development slice; Electron and llama.cpp start after
+normal review/CI merge of #518. No all-platform or production qualification is
+inferred. Future context/storage, managed packages/downloads, paid providers and
+measured routing remain separately evidenced work.
 
 | Stage | Owned issue | Dependencies and exit |
 | --- | --- | --- |
@@ -108,8 +95,8 @@ readiness. #480 stays open until B; its full closure never blocks the UI.
 | U1 | [#481 shared glossy visual system](https://github.com/Xpounder-com/hormuz/issues/481), [#487 app navigation and bar handoff](https://github.com/Xpounder-com/hormuz/issues/487) | Initial visual tokens and information architecture feed the following slices. Final #481 visual acceptance happens before U4, not before drawing every flow. |
 | U2 | [#488 projects, chats, history/search](https://github.com/Xpounder-com/hormuz/issues/488), [#489 files/instructions/context](https://github.com/Xpounder-com/hormuz/issues/489), [#490 onboarding/models/connections](https://github.com/Xpounder-com/hormuz/issues/490) | #487 and initial visual tokens. Proceed in parallel with synthetic storage, files, inventory, credentials, prices and responses. Cover normal, empty, blocked and recovery states. |
 | U3 | [#491 inherited preferences, Auto and overrides](https://github.com/Xpounder-com/hormuz/issues/491) | U2 mock contracts. Show effective app/project/chat/request settings, pure preview, explicit pin/Auto intent, changed-route disclosure and continuation limits. |
-| U3r | [#502 Research Review UI/spec/simulation](https://github.com/Xpounder-com/hormuz/issues/502) | U2/U3 mock context/preferences and selected visual language. Review an existing frozen draft with two distinct blind reviewers; optionally author/reconcile within the bounded call plan. Show coverage, disagreement, failed reviews and revision-specific human decision. No real model prerequisite. |
-| U4 | [#492 integrated simulation approval](https://github.com/Xpounder-com/hormuz/issues/492) | #487–#491, #502 mock review journeys, final #481 and early #338 ordered UI fixtures. One navigable project/window/bar experience, rendered accessibility/recovery journeys, user review and recorded unresolved decisions. |
+| U3s | [#502 reusable skill packs](https://github.com/Xpounder-com/hormuz/issues/502) | Ordinary chat/context; instruction-only selection, provenance and no new authority. |
+| U4 | [#492 integrated simulation approval](https://github.com/Xpounder-com/hormuz/issues/492) | #487–#491, approved core #481 direction and early #338 fixtures. One navigable project/window/bar experience, rendered accessibility/recovery journeys, user review and recorded unresolved decisions. |
 
 U4 precedes final backend contract acceptance and host/runtime implementation.
 Read-only feasibility can inform UI work without installing or implementing
@@ -138,7 +125,7 @@ approved project window / quick bar / setup UI
 | B2b | [#483 managed llama.cpp and local setup](https://github.com/Xpounder-com/hormuz/issues/483) | B0, B1 | Verified engine/model packages, actual fit, recoverable owned download/load/unload and exact local protocol/process proof. |
 | B2c | [#485 direct paid baseline and streams](https://github.com/Xpounder-com/hormuz/issues/485) | B0, B1 | One named provider; qualified request/stream/cancel and existing custody/admission/accounting/unknown-outcome boundaries. Baseline synthetic context is sufficient while B2a advances. |
 | B3 | [#484 real pure Auto and pin integration](https://github.com/Xpounder-com/hormuz/issues/484) | Applicable B2a contract and qualified B2b/B2c baselines | Real eligibility snapshots, policy-bounded intent, send-time revalidation, immutable origin/context/model and truthful receipts. |
-| B3r — optional | [#503 bounded Research Review runtime](https://github.com/Xpounder-com/hormuz/issues/503) | #502/#492 UI approval and qualified single-response #493/#483/#485/#484 contracts | Exact distinct role/model qualification, frozen scope, blind verdicts, whole-round cap plus per-attempt accounting, disagreement/failure and stale-approval proof. Required before exposing real Review; not a plain-chat prerequisite. |
+| B3s — optional | [#503 generic skill execution](https://github.com/Xpounder-com/hormuz/issues/503) | Qualified chat/admission/adapters and explicit tools/calls/allowance | Bounded model/tool handoffs for skills; no dedicated research UI or plain-chat prerequisite. |
 | B4 | [#337 refresh/power](https://github.com/Xpounder-com/hormuz/issues/337), [#338 ordered fixtures](https://github.com/Xpounder-com/hormuz/issues/338), [#339 owned lifecycle](https://github.com/Xpounder-com/hormuz/issues/339) | Applicable frozen inputs and integrations | Project/view switching, suspend/hide/reopen/cancel/quit/update and helper ownership. Their contracts inform earlier work; closure is not a starting prerequisite. |
 | B5 | [#346 packages/update/data migration](https://github.com/Xpounder-com/hormuz/issues/346), [#347 responsiveness/footprint](https://github.com/Xpounder-com/hormuz/issues/347) | Integrated candidates | Per-target trust/update/project-data compatibility, measured project/chat/search/bar interaction and separate UI/inference resources. |
 | B6 | [#340 installed desktop journeys](https://github.com/Xpounder-com/hormuz/issues/340) | All applicable earlier gates | Exact declared OS rows pass installed project/create/return/search/context/setup/Auto/pin/stream/cancel/recovery/accessibility. Human evidence is distinct. |
@@ -146,11 +133,34 @@ approved project window / quick bar / setup UI
 B2a/B2b/B2c can advance in parallel. Candidate packaging and measurement precede
 final #340 closure; neither #346 nor #347 requires #340 closure. A stage is not
 a release version, support claim or automatic implementation authorization.
-Optional B3r contributes applicable package/lifecycle/installed evidence when
-real Review is exposed; otherwise label the mode simulated or unavailable. The
-one-curated-local-model baseline does not qualify two distinct local reviewers:
-local-only Review requires additional exact model qualification, not hidden
-cloud substitution or same-version self-review.
+Optional B3s contributes its own lifecycle/accounting/identity evidence only when
+generic tool-capable or multi-model skill execution is introduced. Instruction
+packs in ordinary chats are not a second executor. No one-model baseline can claim
+independent multi-model review or automatic approval.
+
+## Optional project Agent execution: Codex first, then Claude
+
+The [Agent execution roadmap](AGENT_EXECUTION_ROADMAP.md) adds a separate later
+phase: shared session/authority contract and simulated Agent UI; Codex runtime,
+read-only Plan, concrete action approvals, actual diff/test review and explicit
+session resume; Codex qualification; then the Claude Agent SDK workflow and its
+qualification. This is the requested implementation backlog, not implemented
+agent support or permission to start runtime/provider work.
+
+Its UI acceptance is additive and does not delay #492 or the useful first chat
+desktop. Runtime integration follows its accepted extension contract and
+applicable #480 B/#482/#493 inputs. #485/#341 apply only when their transports
+are reused. Engine-specific installed evidence feeds #339/#340/#346/#347 when
+exposed; their final closure does not block building the candidate. Claude
+design/mocks can proceed earlier, but real integration follows Codex proof.
+
+Named-project Agent sessions require an explicit real workspace grant, distinct
+from imported text copies. Temporary Agent stays unavailable initially. Plan,
+tool and budget approvals are separate; A skill/model review grants no
+execution authority. Preserve engine affinity, dirty user work and current
+restrictions; no automatic replay or stale grants on resume. Agent inference
+shares the application scheduler and cannot bypass privacy or qualified cost
+admission. Exact capabilities/auth/runtime/platform support remain evidence-gated.
 
 ## Reuse boundaries
 
@@ -220,15 +230,11 @@ implicitly reopened.
 Catalog, downloads, updates and telemetry have controls separate from inference
 egress.
 
-The [Research Review contract](RESEARCH_REVIEW_MODE.md) applies these same
-boundaries to an explicit role plan. Default review starts from an existing
-draft and two blind reviewers; optional authoring plus two reviewers and one
-reconciliation has at most four calls across three selected identities in one
-pass. Whole-project review needs an explicit manifest and coverage limits.
-Edited or reconciled v2 does not inherit reviewers' approval of v1. The final
-decision is human and version-specific; consensus is not scientific validation
-or permission to implement/deploy. The UI mock permits two explicitly started
-rounds, never a loop until agreement.
+The [skills contract](RESEARCH_REVIEW_MODE.md) keeps specialised workflows out
+of the core UI. Instruction packs use ordinary chat and explicit model selection.
+Later orchestration needs real identity/provenance, bounded calls/allowance,
+immutable source/version scope and incomplete/unknown outcomes. A skill or model
+assessment never grants execution/publication authority.
 
 ## Qualification candidates and bounded first scope
 
@@ -254,8 +260,10 @@ history/search, instructions and bounded selected text context, local setup,
 optional one paid connection, stream/cancel, conservative Auto, override and
 visible recovery. All-three-platform publication needs all three qualified rows.
 
-Defer image/audio/video inference, arbitrary marketplace loaders, agents/MCP/
-computer control, autonomous jobs, remote sync/team collaboration, fleet
+Optional Codex-then-Claude Agent execution and scoped workspace editing follow
+their own later track; they are not a first-chat prerequisite. Defer image/audio/
+video inference, arbitrary marketplace loaders, general MCP/computer control,
+autonomous jobs, remote sync/team collaboration, fleet
 management, a full Rust rewrite and broad hardware support. #341 agent relay
 is required only if that path is exposed; optional #342 optimizer work is not
 a first-chat prerequisite.

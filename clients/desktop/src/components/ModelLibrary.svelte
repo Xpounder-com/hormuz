@@ -98,7 +98,7 @@
             {:else if ['downloading', 'verifying', 'loading'].includes(model.state)}<button
                 class="secondary-button"
                 disabled={snapshot.attempt?.modelId === model.id ||
-                  snapshot.reviewActivity?.modelId === model.id}
+                  snapshot.externalActivity?.modelId === model.id}
                 onclick={() => service.cancelSetup(model.id)}><X size={14} />Cancel</button
               >
             {:else if model.state === 'downloaded'}<button
@@ -159,7 +159,7 @@
         <button class="secondary-button" onclick={() => (removing = '')}>Cancel</button><button
           class="primary-button danger"
           disabled={snapshot.attempt?.modelId === selected.id ||
-            snapshot.reviewActivity?.modelId === selected.id ||
+            snapshot.externalActivity?.modelId === selected.id ||
             selected.state === 'loading'}
           onclick={() => {
             service.unloadModel(selected.id, true);

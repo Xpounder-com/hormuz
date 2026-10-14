@@ -257,7 +257,7 @@
     <label class="toggle-field"
       ><span
         ><strong>Managed profile Local-only ceiling</strong><small
-          >Overrides all project/chat/request/research choices.</small
+          >Overrides all project/chat/request/skill choices.</small
         ></span
       ><input
         type="checkbox"

@@ -30,7 +30,7 @@
   let composing = false;
   const ownAttempt = $derived(snapshot.attempt?.chatId === chat.id);
   function submit() {
-    if (chat.draft.trim() && !plan.blocked && !snapshot.attempt && !snapshot.reviewActivity)
+    if (chat.draft.trim() && !plan.blocked && !snapshot.attempt && !snapshot.externalActivity)
       onsend();
   }
   function key(event: KeyboardEvent) {
@@ -92,14 +92,14 @@
         type="submit"
         class="send-button"
         aria-label="Send prompt"
-        title={snapshot.attempt || snapshot.reviewActivity
+        title={snapshot.attempt || snapshot.externalActivity
           ? 'Another response is active'
           : plan.blocked
             ? plan.reason
             : 'Send · Enter'}
         disabled={!chat.draft.trim() ||
           plan.blocked ||
-          Boolean(snapshot.attempt || snapshot.reviewActivity)}><ArrowUp size={20} /></button
+          Boolean(snapshot.attempt || snapshot.externalActivity)}><ArrowUp size={20} /></button
       >{/if}
   </div>
 </form>

@@ -7,6 +7,8 @@
     "node": ">=24"
   },
   "scripts": {
+    "skills:compile": "node scripts/compile-skills.mjs",
+    "skills:check": "node scripts/compile-skills.mjs --check",
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "node --test src/lib/*.test.ts",
