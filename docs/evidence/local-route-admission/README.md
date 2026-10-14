@@ -1,7 +1,9 @@
 # Local route admission validation
 
 Executed source: `95488df72972678f19fea55a76e21e88f28a6888`.
-Parent destination slice: `4d1093375cbe18e7216333c26b2b204a0c07d43b`.
+Parent destination slice: `93eb480518a7f7545545a684e1613b2951864990`.
+The parent test-only fixture correction was merged after execution; all 35
+executed runtime/proof source fingerprints remain unchanged.
 This is a partial implementation of issue #523. The
 [admission guide](../../LOCAL_ROUTE_ADMISSION.md) states configuration, contracts,
 privacy scope, qualification and rollback.
@@ -46,6 +48,9 @@ finite waits, explicit timeouts and owned-resource cleanup.
   **364 tests passed with 3 skips**. This preceded the final delivery fixes;
   it is supporting evidence rather than an exact-final-source result.
 - State-detector repair plus work-runtime regressions: **50 passed**.
+- Parent connection-evidence fixture under the admission source: **17 passed**.
+  Its credential-unavailability case now uses an actual missing startup credential
+  instead of mocking the immutable owner's compatibility property.
 - Isolated wheel build using pinned `setuptools==83.0.0`: passed.
 - Secret inventory and deployment contract: passed. The existing secret inventory
   remains unchanged: `4a5e1ab3145b89366a2d9b8b7b88736a45cde26157229093edbe44b51d1febcf`.
