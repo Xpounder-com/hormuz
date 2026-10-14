@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { BudgetLedger } from './budgets.ts';
 import { AgentError, SCHEMA_VERSION } from './types.ts';
-import type { ActionRequest, AgentSessionAdapter, ApprovalDecision, Engine, Phase, RuntimeEvent } from './types.ts';
+import type { ActionRequest, AgentSessionAdapter, ApprovalDecision, Engine, Phase, RuntimeEvent, RuntimeHistoryPolicy } from './types.ts';
 import { SessionStore } from './store.ts';
 import { diffWorkspace, assertWorkspacePath } from './workspace.ts';
 import { observeWorkspaceSnapshot, observeWorkspaceDiff, cleanupWorkspaceObservers } from './workspace-observer.ts';
@@ -27,12 +27,13 @@ export type Connection = {
 };
 type Accounting = { spentMicrousd: number; heldMicrousd: number; unknownMicrousd: number; requestCount: number; coverage?: string };
 export type AcceptedPlan = { revision: string; text: string; workspaceFingerprint: string; connectionVersion: string };
+export const MAX_RUNTIME_ATTEMPTS = 128;
 export type Session = {
   schemaVersion: 1; id: string; profileId: string; projectId: string; workspace: string;
   engine: Engine; model: string; runtimeVersion: string; connectionId: string; cloudAllowed: boolean;
   allowanceMicrousd: number; phase: Phase; threadId?: string; plan?: AcceptedPlan;
   acceptedPlanFingerprint?: string; accounting: Accounting; baseline?: WorkspaceSnapshot;
-  createdAt: number; updatedAt: number;
+  createdAt: number; updatedAt: number; runtimeAttempts: number;
   review?: { observedRevision: string; disposition: 'accepted' | 'rejected' | 'request_changes'; recordedAt: number };
 };
 type Pending = {
@@ -80,6 +81,7 @@ export class AgentSessions extends EventEmitter {
   #budgets: BudgetLedger;
   #reviewBaseline: { sessionId: string; snapshot: WorkspaceSnapshot } | null = null;
   #reads = new Set<Promise<unknown>>();
+  #historyCheck: { sessionId: string; policyKey: string; promise: Promise<void> } | null = null;
   #scrub<T>(value: T, secrets: string[]): T {
     let encoded = JSON.stringify(value);
     for (const secret of secrets) if (secret.length >= 8) encoded = encoded.split(secret).join('[REDACTED]');
@@ -146,7 +148,7 @@ export class AgentSessions extends EventEmitter {
       runtimeVersion: adapter.version, connectionId: input.connectionId, cloudAllowed: input.cloudAllowed,
       allowanceMicrousd: input.allowanceMicrousd, phase: 'idle',
       accounting: { spentMicrousd: 0, heldMicrousd: 0, unknownMicrousd: 0, requestCount: 0 },
-      createdAt: Date.now(), updatedAt: Date.now(),
+      createdAt: Date.now(), updatedAt: Date.now(), runtimeAttempts: 0,
     };
     await adapter.dispose();
     await this.#budgets.checkpoint(session.id, session.profileId, session.projectId, session.accounting, this.#options.parentAllowances);
@@ -158,6 +160,7 @@ export class AgentSessions extends EventEmitter {
     const record = await this.#options.store.load(sessionId, this.#options.profileId, projectId);
     const session = record as Session;
     if (typeof session.connectionId !== 'string' || typeof session.cloudAllowed !== 'boolean' || !Number.isSafeInteger(session.allowanceMicrousd) || session.allowanceMicrousd <= 0 || !Number.isFinite(session.createdAt) || !Number.isFinite(session.updatedAt) || !session.accounting) throw new AgentError('corrupt_session');
+    if (!Number.isSafeInteger(session.runtimeAttempts) || session.runtimeAttempts < 0 || session.runtimeAttempts > MAX_RUNTIME_ATTEMPTS) throw new AgentError('corrupt_session');
     id(session.connectionId);
     for (const value of Object.values(session.accounting)) if (typeof value !== 'string' && (!Number.isSafeInteger(value) || Number(value) < 0)) throw new AgentError('corrupt_session');
     for (const key of ['spentMicrousd', 'heldMicrousd', 'unknownMicrousd', 'requestCount'] as const) if (!Number.isSafeInteger(session.accounting[key]) || session.accounting[key] < 0) throw new AgentError('corrupt_session');
@@ -176,10 +179,13 @@ export class AgentSessions extends EventEmitter {
   private async resumeInternal(sessionId: string, projectId: string) {
     const session = await this.#load(sessionId, projectId);
     if (this.#running?.session.id === sessionId) throw new AgentError('session_busy');
+    if (session.runtimeAttempts >= MAX_RUNTIME_ATTEMPTS) throw new AgentError('runtime_attempt_limit');
     const connection = await this.#connection(session);
     const adapter = this.#options.runtimeFactory(session.engine);
     try {
+      if (adapter.engine !== session.engine) throw new AgentError('runtime_engine_mismatch');
       if (adapter.version !== session.runtimeVersion) throw new AgentError('runtime_version_changed');
+      if (session.threadId) await this.#history(session, await adapter.historyPolicy?.());
       const current = await this.#snapshot(session.workspace);
       if (current.root !== session.workspace) throw new AgentError('workspace_changed');
       if (session.plan && connection.version !== session.plan.connectionVersion) session.plan = undefined;
@@ -208,6 +214,22 @@ export class AgentSessions extends EventEmitter {
     // Persist provenance hashes, not copies of arbitrary working-tree credentials/content.
     if (record.baseline) for (const file of Object.values(record.baseline.files) as Record<string, unknown>[]) delete file.text;
     await this.#options.store.save(record);
+  }
+  async #history(session: Session, policy?: RuntimeHistoryPolicy) {
+    if (policy && (policy.engine !== session.engine || policy.runtimeVersion !== session.runtimeVersion)) throw new AgentError('runtime_history_unavailable');
+    const policyKey = digest(policy ?? null);
+    if (this.#historyCheck) {
+      if (this.#historyCheck.sessionId !== session.id || this.#historyCheck.policyKey !== policyKey) throw new AgentError('application_busy');
+      return this.#historyCheck.promise;
+    }
+    const promise = this.#options.store.checkRuntimeTree(session.id, policy).then(() => {}, error => {
+      const failure = new AgentError('runtime_history_unavailable');
+      Object.defineProperty(failure, 'cause', { value: error, enumerable: false });
+      throw failure;
+    });
+    const check = { sessionId: session.id, policyKey, promise };
+    this.#historyCheck = check;
+    try { await promise; } finally { if (this.#historyCheck === check) this.#historyCheck = null; }
   }
   private async planInternal(sessionId: string, projectId: string, prompt: string) {
     if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt) > 64 * 1024) throw new AgentError('invalid_prompt');
@@ -249,19 +271,43 @@ export class AgentSessions extends EventEmitter {
   }
   async #run(session: Session, mode: 'plan' | 'execute', prompt: string, _before: WorkspaceSnapshot) {
     this.#available();
+    if (session.runtimeAttempts >= MAX_RUNTIME_ATTEMPTS) throw new AgentError('runtime_attempt_limit');
     const release = this.#options.scheduler.acquire(session.id);
     let adapter: AgentSessionAdapter | undefined; let proxy: InferenceProxy | undefined;
+    let historyPolicy: RuntimeHistoryPolicy | undefined;
     const controller = new AbortController();
     this.#activeController = controller;
     this.#quiescent = new Promise(resolve => { this.#finishRun = resolve; });
     const timeout = setTimeout(() => controller.abort(), this.#options.runTimeoutMs ?? 300_000);
+    let runtimeReady = false, monitorStopped = false;
+    let monitorTimer: ReturnType<typeof setTimeout> | undefined;
+    let monitoring: Promise<void> = Promise.resolve();
+    let historyFailure: AgentError | undefined;
+    // One local metadata scan at a time; no overlapping timers or content reads.
+    const scheduleMonitor = () => {
+      if (monitorStopped || controller.signal.aborted) return;
+      monitorTimer = setTimeout(() => {
+        monitorTimer = undefined;
+        monitoring = this.#history(session, historyPolicy).then(scheduleMonitor, error => {
+          historyFailure = error; controller.abort();
+        });
+      }, 500);
+    };
     try {
       const connection = await this.#connection(session);
       adapter = this.#options.runtimeFactory(session.engine);
       if (adapter.engine !== session.engine) throw new AgentError('runtime_engine_mismatch');
       if (adapter.version !== session.runtimeVersion) throw new AgentError('runtime_version_changed');
+      historyPolicy = await adapter.historyPolicy?.();
+      // Count every native startup, including failures before any paid request.
+      // Saving first prevents a crash/reopen from resetting this lifetime limit.
+      if (session.threadId) await this.#history(session, historyPolicy);
+      const configDir = await this.#options.store.runtimeDirectory(session.id);
+      runtimeReady = true; await this.#history(session, historyPolicy);
+      session.runtimeAttempts++; await this.#save(session);
       proxy = new InferenceProxy({ ...connection, model: session.model, allowanceMicrousd: session.allowanceMicrousd, initialAccounting: session.accounting,
         authorizeDispatch: async () => {
+          await this.#history(session, historyPolicy);
           if (!session.cloudAllowed || !await this.#options.authorizeCloud(session.projectId)) throw new AgentError('cloud_not_authorized');
           if (!await this.#options.authorizeWorkspace(session.projectId, session.workspace)) throw new AgentError('workspace_not_authorized');
           if (!await this.#options.authorizeAllowance(session.projectId, session.allowanceMicrousd)) throw new AgentError('allowance_not_authorized');
@@ -273,13 +319,14 @@ export class AgentSessions extends EventEmitter {
           session.accounting = accounting; await this.#save(session);
         } });
       const endpoint = await proxy.start();
-      const configDir = await this.#options.store.runtimeDirectory(session.id);
       const started = await adapter.start({ workspace: session.workspace, model: session.model, configDir, ...endpoint, threadId: session.threadId, maxOutputTokens: connection.maxOutputTokens });
+      await this.#history(session, historyPolicy);
       if (controller.signal.aborted || this.#closed) throw new AgentError('interrupted');
       session.threadId = started.threadId; session.phase = mode === 'plan' ? 'planning' : 'executing';
       this.#running = { session, adapter, proxy, controller, secrets: [connection.credential, endpoint.credential] }; await this.#save(session);
       const abort = () => { this.#clearApprovals(session.id); void adapter?.interrupt().catch(() => {}); };
       controller.signal.addEventListener('abort', abort, { once: true });
+      scheduleMonitor();
       try {
         const result = await adapter.run({ sessionId: session.id, prompt, mode, signal: controller.signal,
           onEvent: event => this.#event(session, event), onApproval: request => this.#approve(session, mode, request, controller.signal) });
@@ -294,15 +341,22 @@ export class AgentSessions extends EventEmitter {
       throw failure;
     } finally {
       clearTimeout(timeout); this.#clearApprovals(session.id);
+      monitorStopped = true; clearTimeout(monitorTimer); await monitoring;
       // Stop dispatch and owned processes before settling or relinquishing ownership.
       let cleanupFailed = false;
       try { await adapter?.dispose(); } catch { cleanupFailed = true; }
       try { await proxy?.stop(); } catch { cleanupFailed = true; }
       if (proxy) session.accounting = proxy.summary();
+      if (runtimeReady) {
+        try { await this.#history(session, historyPolicy); }
+        catch (error) { historyFailure ??= error as AgentError; }
+      }
+      if (historyFailure) session.phase = 'unknown';
       if (cleanupFailed && adapter && proxy) { session.phase = 'unknown'; this.#running ??= { session, adapter, proxy, controller, secrets: [] }; this.#releaseRun = release; }
       else { this.#running = null; release(); this.#activeController = null; }
       try { await this.#save(session); } finally { this.#finishRun?.(); this.#finishRun = null; }
       if (cleanupFailed) throw new AgentError('cleanup_required');
+      if (historyFailure) throw historyFailure;
     }
   }
   #event(session: Session, event: RuntimeEvent) {

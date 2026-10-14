@@ -1,13 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, opendir, rename, rm, rmdir } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
-import type { Engine, Phase } from './types.ts';
+import type { Stats } from 'node:fs';
+import { lstat, mkdir, open, opendir, readlink, rename, rm, rmdir } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import type { Engine, Phase, RuntimeHistoryPolicy } from './types.ts';
 
 export const MAX_SESSION_BYTES = 16 * 1024 * 1024;
+export const SESSION_RUNTIME_LIMITS = Object.freeze({
+  maxBytes: 64 * 1024 * 1024,
+  maxEntries: 4096,
+  maxDepth: 16,
+  maxScanDurationMs: 10_000,
+});
+export type SessionRuntimeUsage = { bytes: number; entries: number };
 const MAX_RECORD_DEPTH = 40;
 const PHASES = new Set<Phase>(['idle', 'planning', 'ready', 'executing', 'completed', 'interrupted', 'failed', 'unknown']);
-const FORBIDDEN_KEYS = new Set(['credential', 'credentials', 'secret', 'secrets', 'password', 'apikey', 'apikeys', 'apitoken', 'authtoken', 'bearertoken', 'accesstoken', 'refreshtoken', 'authorization', 'environment', 'env', 'headers', 'grants', 'toolgrants', 'permissions', 'runtimeauthority', 'configdir']);
+const FORBIDDEN_KEYS = new Set(['credential', 'credentials', 'secret', 'secrets', 'password', 'apikey', 'apikeys', 'apitoken', 'authtoken', 'bearertoken', 'accesstoken', 'refreshtoken', 'authorization', 'environment', 'env', 'headers', 'grants', 'toolgrants', 'permissions', 'runtimeauthority', 'configdir', 'historypolicy', 'runtimehistorypolicy']);
 const EXPORT_ONLY_KEYS = new Set(['threadid', 'runtimeid', 'runtimepath', 'runtimedirectory', 'sessionhandle', 'workspace', 'baseline', 'acceptedplanfingerprint', 'pendingapprovals', 'approvaldecisions']);
 export type SessionRecord = {
   schemaVersion: 1;
@@ -20,6 +28,7 @@ export type SessionRecord = {
   runtimeVersion: string;
   threadId?: string;
   phase: Phase;
+  runtimeAttempts?: number;
   plan?: unknown;
   [key: string]: unknown;
 };
@@ -67,12 +76,36 @@ function validate(value: unknown): asserts value is SessionRecord {
   }
   if (record.allowanceMicrousd !== undefined && (!Number.isSafeInteger(record.allowanceMicrousd) || (record.allowanceMicrousd as number) <= 0)) throw new Error('SESSION_ALLOWANCE_INVALID');
   if (record.cloudAllowed !== undefined && typeof record.cloudAllowed !== 'boolean') throw new Error('SESSION_RECORD_INVALID');
+  if (record.runtimeAttempts !== undefined && (!Number.isSafeInteger(record.runtimeAttempts) || (record.runtimeAttempts as number) < 0 || (record.runtimeAttempts as number) > 128)) throw new Error('SESSION_RUNTIME_ATTEMPTS_INVALID');
   if (record.connectionId !== undefined) identifier(record.connectionId, 'CONNECTION');
 }
 function assertIdentity(record: SessionRecord, id: string, profileId: string, projectId: string): void {
   if (record.id !== id || record.profileId !== profileId || record.projectId !== projectId) throw new Error('SESSION_SCOPE_DENIED');
 }
 function missing(error: unknown): boolean { return (error as NodeJS.ErrnoException).code === 'ENOENT'; }
+
+function runtimeEntry(info: Stats, privateRoot = false): void {
+  if (info.isSymbolicLink() || !info.isDirectory() && !info.isFile() || info.isFile() && info.nlink !== 1) throw new Error('SESSION_RUNTIME_ENTRY_DENIED');
+  if (info.uid !== process.getuid!() || (info.mode & 0o022) !== 0 || privateRoot && (info.mode & 0o777) !== 0o700) throw new Error('SESSION_RUNTIME_NOT_PRIVATE');
+  if (!Number.isSafeInteger(info.size) || info.size < 0) throw new Error('SESSION_RUNTIME_METADATA_INVALID');
+}
+function sameRuntimeIdentity(first: Pick<Stats, 'dev' | 'ino'>, second: Pick<Stats, 'dev' | 'ino'>): boolean {
+  return first.dev === second.dev && first.ino === second.ino;
+}
+function checkHistoryPolicy(policy: RuntimeHistoryPolicy): void {
+  if (!policy || typeof policy !== 'object' || policy.engine !== 'codex' || policy.runtimeVersion !== '0.160.0' || typeof policy.executablePath !== 'string' || policy.executablePath.includes('\0') || policy.executablePath.length > 4096 || !isAbsolute(policy.executablePath) || resolve(policy.executablePath) !== policy.executablePath || parse(policy.executablePath).root === policy.executablePath) throw new Error('SESSION_RUNTIME_POLICY_INVALID');
+  // The host adapter supplies a canonical realpath. Do not resolve or open a
+  // launcher target here: this policy is ephemeral host authority, never history.
+}
+async function checkLauncherAlias(root: string, path: string, info: Stats, policy?: RuntimeHistoryPolicy): Promise<void> {
+  const name = relative(root, path);
+  if (!policy || !/^tmp\/arg0\/codex-arg0[A-Za-z0-9]+\/(?:apply_patch|applypatch|codex-execve-wrapper)$/.test(name) || info.uid !== process.getuid!() || info.nlink !== 1 || !Number.isSafeInteger(info.size) || info.size < 0) throw new Error('SESSION_RUNTIME_ENTRY_DENIED');
+  // Symlink permissions are normally 0777; only the owned parent directories
+  // establish privacy. Read the link text itself, never the pinned target bytes.
+  if (await readlink(path) !== policy.executablePath) throw new Error('SESSION_RUNTIME_ENTRY_DENIED');
+  const after = await lstat(path);
+  if (!after.isSymbolicLink() || after.uid !== process.getuid!() || after.nlink !== 1 || !sameRuntimeIdentity(info, after) || after.size !== info.size || after.ctimeMs !== info.ctimeMs) throw new Error('SESSION_RUNTIME_CHANGED');
+}
 
 async function directory(path: string, create: boolean, privateMode: boolean): Promise<void> {
   let info;
@@ -150,6 +183,7 @@ export class SessionStore {
   readonly root: string;
   #ready: Promise<void> | undefined;
   #leaseOwner: string | undefined;
+  #runtimeAnchors = new Map<string, Pick<Stats, 'dev' | 'ino'>>();
   constructor(root: string) {
     if (!isAbsolute(root) || root.includes('\0') || resolve(root) === parse(resolve(root)).root) throw new Error('SESSION_STORE_ROOT_INVALID');
     this.root = resolve(root);
@@ -226,7 +260,97 @@ export class SessionStore {
     identifier(id, 'ID'); await this.#initialize();
     const path = join(this.root, 'runtime', id);
     await directory(path, true, true);
+    const info = await lstat(path);
+    const known = this.#runtimeAnchors.get(path);
+    if (known && !sameRuntimeIdentity(known, info)) throw new Error('SESSION_RUNTIME_CHANGED');
+    this.#runtimeAnchors.set(path, { dev: info.dev, ino: info.ino });
     return path;
+  }
+
+  /** Bounded metadata observation, without opening or reading transcript files. */
+  async checkRuntimeTree(id: string, policy?: RuntimeHistoryPolicy): Promise<SessionRuntimeUsage> {
+    identifier(id, 'ID');
+    if (!['darwin', 'linux'].includes(process.platform) || !process.getuid) throw new Error('SESSION_RUNTIME_PLATFORM_UNSUPPORTED');
+    if (policy !== undefined) checkHistoryPolicy(policy);
+    await this.#initialize();
+    const path = join(this.root, 'runtime', id);
+    const started = performance.now();
+    const usage: SessionRuntimeUsage = { bytes: 0, entries: 0 };
+    const anchors: { path: string; info: Stats; privateRoot: boolean }[] = [];
+    const checkDeadline = () => {
+      if (performance.now() - started > SESSION_RUNTIME_LIMITS.maxScanDurationMs) throw new Error('SESSION_RUNTIME_SCAN_LIMIT');
+    };
+    const checkDirectory = async (anchor: { path: string; info: Stats; privateRoot: boolean }) => {
+      checkDeadline();
+      let current: Stats;
+      try { current = await lstat(anchor.path); }
+      catch (error) { if (missing(error)) throw new Error('SESSION_RUNTIME_CHANGED'); throw error; }
+      runtimeEntry(current, anchor.privateRoot);
+      if (!current.isDirectory() || !sameRuntimeIdentity(current, anchor.info)) throw new Error('SESSION_RUNTIME_CHANGED');
+    };
+    for (const anchorPath of [this.root, join(this.root, 'runtime'), path]) {
+      let info: Stats;
+      try { info = await lstat(anchorPath); }
+      catch (error) { if (missing(error)) throw new Error('SESSION_RUNTIME_MISSING'); throw error; }
+      runtimeEntry(info, true);
+      if (!info.isDirectory()) throw new Error('SESSION_RUNTIME_PATH_DENIED');
+      const known = this.#runtimeAnchors.get(anchorPath);
+      if (known && !sameRuntimeIdentity(known, info)) throw new Error('SESSION_RUNTIME_CHANGED');
+      this.#runtimeAnchors.set(anchorPath, { dev: info.dev, ino: info.ino });
+      anchors.push({ path: anchorPath, info, privateRoot: true });
+    }
+    const visit = async (currentPath: string, depth: number, initial: Stats): Promise<void> => {
+      checkDeadline();
+      if (depth > SESSION_RUNTIME_LIMITS.maxDepth) throw new Error('SESSION_RUNTIME_DEPTH_LIMIT');
+      const anchor = { path: currentPath, info: initial, privateRoot: depth === 0 };
+      // O_NOFOLLOW and inode checks guard replaced directories. No transcript
+      // descriptor is opened, including for a planted FIFO or device entry.
+      const handle = await open(currentPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      let iterator;
+      try {
+        const actual = await handle.stat(); runtimeEntry(actual, anchor.privateRoot);
+        if (!actual.isDirectory() || !sameRuntimeIdentity(initial, actual)) throw new Error('SESSION_RUNTIME_CHANGED');
+        await checkDirectory(anchor);
+        iterator = await opendir(currentPath, { bufferSize: 1 });
+        await checkDirectory(anchor);
+        for (;;) {
+          checkDeadline();
+          const entry = await iterator.read();
+          if (!entry) break;
+          if (++usage.entries > SESSION_RUNTIME_LIMITS.maxEntries) throw new Error('SESSION_RUNTIME_ENTRIES_LIMIT');
+          if (depth + 1 > SESSION_RUNTIME_LIMITS.maxDepth) throw new Error('SESSION_RUNTIME_DEPTH_LIMIT');
+          await checkDirectory(anchor);
+          const entryPath = join(currentPath, entry.name);
+          let info: Stats;
+          try { info = await lstat(entryPath); }
+          catch (error) { if (missing(error)) continue; throw error; }
+          if (info.isSymbolicLink()) {
+            try { await checkLauncherAlias(path, entryPath, info, policy); }
+            catch (error) { if (missing(error)) continue; throw error; }
+          } else runtimeEntry(info);
+          if (info.isDirectory()) await visit(entryPath, depth + 1, info);
+          else {
+            // Logical size counts sparse files too. Content may legitimately
+            // change during a live scan; the next serialized scan observes it.
+            usage.bytes += info.size;
+            if (usage.bytes > SESSION_RUNTIME_LIMITS.maxBytes) throw new Error('SESSION_RUNTIME_BYTES_LIMIT');
+          }
+        }
+        await checkDirectory(anchor);
+        const after = await handle.stat(); runtimeEntry(after, anchor.privateRoot);
+        if (!sameRuntimeIdentity(initial, after) || after.nlink === 0) throw new Error('SESSION_RUNTIME_CHANGED');
+      } finally {
+        try { await iterator?.close(); } finally { await handle.close(); }
+      }
+    };
+    try {
+      await visit(path, 0, anchors[2]!.info);
+      for (const anchor of anchors) await checkDirectory(anchor);
+      return usage;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('SESSION_RUNTIME_')) throw error;
+      throw new Error('SESSION_RUNTIME_SCAN_FAILED', { cause: error });
+    }
   }
 
   async remove(id: string, profileId: string, projectId: string): Promise<void> {

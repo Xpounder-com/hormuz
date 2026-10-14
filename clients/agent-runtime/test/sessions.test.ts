@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
-import { AgentSessions, ApplicationScheduler } from '../src/sessions.ts';
-import { SessionStore } from '../src/store.ts';
+import { AgentSessions, ApplicationScheduler, MAX_RUNTIME_ATTEMPTS } from '../src/sessions.ts';
+import { SessionStore, SESSION_RUNTIME_LIMITS } from '../src/store.ts';
 import { snapshotWorkspace, diffWorkspace } from '../src/workspace.ts';
 import { createAgentBridge, registerAgentIPC } from '../src/bridge.ts';
 import type { AgentIPCEvent } from '../src/bridge.ts';
@@ -89,6 +89,76 @@ test('session consent cannot override the trusted host cloud restriction', async
     assert.equal((await f.manager.get(f.session.id, 'project')).accounting.requestCount, 0);
     allowed = true;
     assert.equal((await f.manager.plan(f.session.id, 'project', 'Work.')).phase, 'ready');
+  } finally { await f.cleanup(); }
+});
+test('runtime attempts remain bounded even when no inference request was admitted', async () => {
+  const f = await fixture();
+  try {
+    const record = await f.store.load(f.session.id, 'profile', 'project');
+    await f.store.save({ ...record, runtimeAttempts: MAX_RUNTIME_ATTEMPTS - 1 });
+    const planned = await f.manager.plan(f.session.id, 'project', 'Final bounded attempt.');
+    assert.equal(planned.runtimeAttempts, MAX_RUNTIME_ATTEMPTS);
+    assert.equal(planned.accounting.requestCount, 0);
+    await assert.rejects(f.manager.plan(f.session.id, 'project', 'Do not start again.'), /runtime_attempt_limit/);
+    await assert.rejects(f.manager.resume(f.session.id, 'project'), /runtime_attempt_limit/);
+    assert.equal((await f.store.load(f.session.id, 'profile', 'project')).runtimeAttempts, MAX_RUNTIME_ATTEMPTS);
+    assert.equal(f.scheduler.activeOwner, null);
+  } finally { await f.cleanup(); }
+});
+test('failed native startup consumes a persisted attempt before history can grow', async () => {
+  class FailedStart extends FakeRuntime {
+    override async start(options: RuntimeStart): Promise<{ threadId: string }> {
+      await super.start(options); throw new Error('synthetic startup failure');
+    }
+  }
+  const f = await fixture(() => new FailedStart());
+  try {
+    await assert.rejects(f.manager.plan(f.session.id, 'project', 'No admitted inference.'), /runtime_failed/);
+    const saved = await f.store.load(f.session.id, 'profile', 'project');
+    assert.equal(saved.runtimeAttempts, 1);
+    assert.equal((await f.manager.get(f.session.id, 'project')).accounting.requestCount, 0);
+    assert.equal(f.scheduler.activeOwner, null);
+  } finally { await f.cleanup(); }
+});
+test('oversized persisted history prevents native resume or another startup', async () => {
+  let starts = 0;
+  class CountingRuntime extends FakeRuntime {
+    override async start(options: RuntimeStart) { starts++; return super.start(options); }
+  }
+  const f = await fixture(() => new CountingRuntime());
+  try {
+    const runtime = await f.store.runtimeDirectory(f.session.id);
+    const file = await open(join(runtime, 'oversized.jsonl'), 'w', 0o600);
+    try { await file.truncate(SESSION_RUNTIME_LIMITS.maxBytes + 1); } finally { await file.close(); }
+    const saved = await f.store.load(f.session.id, 'profile', 'project');
+    await f.store.save({ ...saved, threadId: 'fixture-thread' });
+    await assert.rejects(f.manager.resume(f.session.id, 'project'), /runtime_history_unavailable/);
+    await assert.rejects(f.manager.plan(f.session.id, 'project', 'Do not load oversized history.'), /runtime_history_unavailable/);
+    assert.equal(starts, 0);
+    assert.equal((await f.manager.get(f.session.id, 'project')).runtimeAttempts, 0);
+  } finally { await f.cleanup(); }
+});
+test('serialized history monitor stops disk-only growth and retains a failed session', { timeout: 5000 }, async () => {
+  let interrupted = false;
+  class GrowingRuntime extends FakeRuntime {
+    override async run(options: RuntimeRun): Promise<RunResult> {
+      const file = await open(join(this.options!.configDir, 'oversized.jsonl'), 'w', 0o600);
+      try { await file.truncate(SESSION_RUNTIME_LIMITS.maxBytes + 1); } finally { await file.close(); }
+      await new Promise<void>(resolve => {
+        if (options.signal.aborted) resolve(); else options.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      return { status: 'interrupted' };
+    }
+    override async interrupt() { interrupted = true; }
+  }
+  const f = await fixture(() => new GrowingRuntime());
+  try {
+    await assert.rejects(f.manager.plan(f.session.id, 'project', 'Synthetic disk-only growth.'), /runtime_history_unavailable/);
+    const saved = await f.manager.get(f.session.id, 'project');
+    assert.equal(interrupted, true); assert.equal(saved.phase, 'unknown');
+    assert.equal(saved.runtimeAttempts, 1); assert.equal(saved.accounting.requestCount, 0);
+    assert.equal(f.scheduler.activeOwner, null);
+    await assert.rejects(f.manager.plan(f.session.id, 'project', 'Do not replay.'), /runtime_history_unavailable/);
   } finally { await f.cleanup(); }
 });
 test('editing or rejecting a plan clears its prior execution authority', async () => {

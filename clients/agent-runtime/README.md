@@ -61,12 +61,12 @@ HORMUZ_TEST_INSTALLED_CODEX=1 node --test --test-concurrency=1 test/codex-instal
 HORMUZ_TEST_INSTALLED_CLAUDE=1 node --test --test-concurrency=1 test/claude-installed.test.ts
 ```
 
-Local verification on 2026-10-13: macOS 26.2 (25C56), arm64, Node 25.2.1;
+Local verification on 2026-10-14: macOS 26.2 (25C56), arm64, Node 25.2.1;
 `npm run check` passed and the serial suite with both installed flags passed
-**94/94**, with no skips. Codex 0.160.0 and SDK 0.3.299 / bundled CLI 2.1.299
+**105/105**, with no skips. Codex 0.160.0 and SDK 0.3.299 / bundled CLI 2.1.299
 completed their full synthetic host journeys. External provider requests and
-paid spend were zero. Repository governance, CI-scope and secret-inventory tests
-passed **119/119**. This is local evidence; a newly submitted PR still needs CI.
+paid spend were zero. Repository governance, CI-scope, secret-inventory and
+public-community-path tests passed **126/126**. CI checks run separately.
 
 ## Default limits and compatibility
 
@@ -80,6 +80,7 @@ passed **119/119**. This is local evidence; a newly submitted PR still needs CI.
 | Runtime stdio | 1 MiB frame, 64 MiB total output; 16 pending RPCs |
 | Workspace observation | 5,000 files, 1 MiB per file, 8 MiB total captured text; 15-second worker deadline, explicit omitted coverage |
 | Durable records | Schema 1, private atomic records; 16 MiB session record, 4 KiB content-free usage receipt |
+| Runtime history | 64 MiB logical bytes, 4,096 entries, depth 16; 128 persisted native startup attempts per session |
 
 Each connection supplies explicit generation input/output caps, request lifetime
 limit and conservative prices. The developer host allows at most 25 admitted
@@ -88,6 +89,21 @@ cross-profile/project lookup, unknown schemas and runtime-version changes fail
 closed. There is no migration from existing desktop/gateway storage. To roll
 back, stop the owned host and revert this optional package; preserve the separate
 usage journal and uncertain holds. No existing gateway API/schema changes.
+
+Runtime history is checked before startup/resume, after startup and reaped
+cleanup, and before every inference dispatch. A single local metadata scan every
+500 ms interrupts a running turn on overflow, unsafe entries or uncertain
+observation. This is a detection and stop threshold; in-flight writes can
+overshoot it before interruption. No transcript bytes are read by this guard,
+and it is not an OS disk quota. Attempts are saved before native startup even
+when no inference is admitted. Over-limit history is preserved for explicit
+removal; it is never truncated or automatically replayed. Earlier source-preview
+records without the attempt counter fail closed and require a new session.
+The exact three Codex 0.160.0 launcher aliases under `tmp/arg0` are counted as
+link metadata only when they point to the adapter's trusted canonical executable.
+Their targets are never opened by the history guard; all other links and special
+entries are rejected. This policy comes from the host adapter and is never
+accepted from the renderer or persisted session data.
 
 ## Host integration
 

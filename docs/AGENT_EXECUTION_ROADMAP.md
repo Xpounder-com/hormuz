@@ -82,7 +82,13 @@ content-free journal enforces lifetime session/project/profile ceilings, retains
 unknown dispatched holds and survives session deletion. It is not a monthly or
 account-wide provider invoice cap. Source review text is bounded and sensitive
 files are omitted; persisted baselines retain hashes and coverage. Runtime
-conversation history stays in the session's private content subtree.
+conversation history stays in the session's private content subtree. The host
+checks 64 MiB logical bytes, 4,096 entries and depth 16 before loading or
+dispatching, after reaped cleanup, and through one serialized 500 ms metadata
+monitor. It persists at most 128 native startup attempts per session, including
+failed or non-admitted attempts. Overflow or unsafe history blocks continuation;
+in-flight writes may overshoot this detection threshold before interruption.
+This is not an OS disk quota, and history is never automatically truncated.
 
 The production process launcher currently supports macOS only. Portable mock
 tests do not qualify another platform. The installed-engine fixtures use local

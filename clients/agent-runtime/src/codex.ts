@@ -1,10 +1,11 @@
-import { mkdir, realpath, writeFile, lstat } from 'node:fs/promises';
-import { isAbsolute, relative, join, resolve } from 'node:path';
+import { mkdir, realpath, writeFile, lstat, open } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { isAbsolute, relative, join, resolve, basename, dirname } from 'node:path';
 import { RpcProcess } from './rpc.ts';
 import { prepareSandbox } from './sandbox.ts';
 import type { LaunchOptions } from './sandbox.ts';
 import { AgentError } from './types.ts';
-import type { AgentSessionAdapter, RuntimeStart, RuntimeRun, RunResult, ActionRequest, ApprovalDecision, RuntimeEvent } from './types.ts';
+import type { AgentSessionAdapter, RuntimeStart, RuntimeRun, RunResult, ActionRequest, ApprovalDecision, RuntimeEvent, RuntimeHistoryPolicy } from './types.ts';
 
 export const CODEX_VERSION = '0.160.0';
 export type CodexLaunchOptions = LaunchOptions;
@@ -46,6 +47,33 @@ function endpointUrl(input: string): URL {
   }
   return url;
 }
+async function manifest(path: string): Promise<Record<string, unknown>> {
+  const file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const before = await file.stat();
+    if (!before.isFile() || before.size > 16_384) throw new AgentError('unsupported_codex_layout');
+    const buffer = Buffer.alloc(16_385);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    const after = await file.stat();
+    if (bytesRead > 16_384 || before.size !== bytesRead || after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw new AgentError('unsupported_codex_layout');
+    return object(JSON.parse(buffer.subarray(0, bytesRead).toString()));
+  } finally { await file.close(); }
+}
+const npmTargets: Record<string, string> = {
+  'darwin-arm64': 'aarch64-apple-darwin', 'darwin-x64': 'x86_64-apple-darwin',
+  'linux-arm64': 'aarch64-unknown-linux-musl', 'linux-x64': 'x86_64-unknown-linux-musl',
+  'win32-arm64': 'aarch64-pc-windows-msvc', 'win32-x64': 'x86_64-pc-windows-msvc',
+};
+async function platformManifestPath(packageRoot: string, target: string): Promise<string> {
+  const candidates = [join(packageRoot, 'node_modules', '@openai', `codex-${target}`, 'package.json'), join(dirname(packageRoot), `codex-${target}`, 'package.json')];
+  const found = new Set<string>();
+  for (const path of candidates) {
+    try { found.add(await realpath(path)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+  if (found.size !== 1) throw new AgentError('unsupported_codex_layout');
+  return found.values().next().value!;
+}
 
 /** One pinned Codex app-server process per host session; no renderer-supplied RPC. */
 export class CodexAdapter implements AgentSessionAdapter {
@@ -58,8 +86,41 @@ export class CodexAdapter implements AgentSessionAdapter {
   private active?: ActiveRun;
   private disposed = false;
   private startCalled = false;
+  private executable?: Promise<{ command: string; packageRoot?: string }>;
 
   constructor(options: CodexAdapterOptions = {}) { this.settings = options; }
+
+  private resolveExecutable(): Promise<{ command: string; packageRoot?: string }> {
+    return this.executable ??= (async () => {
+      try {
+        const supplied = this.settings.command ?? '/opt/homebrew/bin/codex';
+        if (!isAbsolute(supplied)) throw new AgentError('absolute_runtime_required');
+        let command = await realpath(supplied);
+        let packageRoot: string | undefined;
+        if (basename(command) === 'codex.js' && basename(dirname(command)) === 'bin') {
+          // Resolve the pinned official npm layout without executing/importing
+          // its wrapper. Its aliases point at the native binary, not codex.js.
+          packageRoot = dirname(dirname(command));
+          const cli = await manifest(join(packageRoot, 'package.json'));
+          const target = `${process.platform}-${process.arch}`, triple = npmTargets[target];
+          const platformPackage = `@openai/codex-${target}`;
+          if (cli.name !== '@openai/codex' || cli.version !== CODEX_VERSION) throw new AgentError('unsupported_codex_version');
+          if (!triple || object(cli.bin).codex !== 'bin/codex.js' || object(cli.optionalDependencies)[platformPackage] !== `npm:@openai/codex@${CODEX_VERSION}-${target}`) throw new AgentError('unsupported_codex_layout');
+          const packagePath = await platformManifestPath(packageRoot, target);
+          const native = await manifest(packagePath);
+          if (native.name !== '@openai/codex' || native.version !== `${CODEX_VERSION}-${target}` || !Array.isArray(native.os) || native.os.length !== 1 || native.os[0] !== process.platform || !Array.isArray(native.cpu) || native.cpu.length !== 1 || native.cpu[0] !== process.arch) throw new AgentError('unsupported_codex_layout');
+          command = await realpath(join(dirname(packagePath), 'vendor', triple, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex'));
+        }
+        const info = await lstat(command);
+        if (!info.isFile() || (process.platform !== 'win32' && (info.mode & 0o111) === 0)) throw new AgentError('unsupported_codex_layout');
+        return { command, ...(packageRoot ? { packageRoot } : {}) };
+      } catch (error) { throw error instanceof AgentError ? error : new AgentError('unsupported_codex_layout'); }
+    })();
+  }
+
+  async historyPolicy(): Promise<RuntimeHistoryPolicy> {
+    return { engine: 'codex', runtimeVersion: CODEX_VERSION, executablePath: (await this.resolveExecutable()).command };
+  }
 
   async start(options: RuntimeStart): Promise<{ threadId: string }> {
     if (this.disposed || this.startCalled) throw new AgentError('runtime_already_started');
@@ -78,12 +139,14 @@ export class CodexAdapter implements AgentSessionAdapter {
       if (inside(workspace, configDir) || inside(configDir, workspace)) throw new AgentError('runtime_home_not_isolated');
       await mkdir(join(configDir, 'tmp'), { mode: 0o700, recursive: true });
       await mkdir(join(configDir, 'Library', 'Preferences'), { mode: 0o700, recursive: true });
+      const executable = await this.resolveExecutable();
       const safePath = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
       const env = {
         PATH: safePath, HOME: configDir, CODEX_HOME: configDir, TMPDIR: join(configDir, 'tmp'), LANG: 'en_US.UTF-8',
         OPENSSL_CONF: '/dev/null',
         CFFIXED_USER_HOME: configDir,
         HORMUZ_CODEX_GATEWAY_TOKEN: options.credential,
+        ...(executable.packageRoot ? { CODEX_MANAGED_PACKAGE_ROOT: executable.packageRoot, CODEX_MANAGED_BY_NPM: '1' } : {}),
       };
       // No user profile, inherited auth, MCP, login-shell environment, telemetry, or provider fallback.
       const config = [
@@ -105,7 +168,7 @@ export class CodexAdapter implements AgentSessionAdapter {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       await writeFile(configPath, config, { mode: 0o600 });
       this.startOptions = { ...options, workspace, configDir };
-      const command = this.settings.command ?? '/opt/homebrew/bin/codex';
+      const command = executable.command;
       const args = [...(this.settings.args ?? []), 'app-server', '--stdio', '--strict-config'];
       const launch = await (this.settings.prepareLaunch ?? prepareSandbox)({ command, args, workspace, configDir, endpoint: endpoint.href, env, managedPreferenceDomain: 'com.openai.codex' });
       this.rpc = new RpcProcess({ ...launch, cwd: workspace, env,

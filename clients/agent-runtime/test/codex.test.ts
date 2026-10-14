@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, access, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, access, realpath, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +28,32 @@ function runOptions(mode: 'plan' | 'execute', events: RuntimeEvent[] = [], appro
     onEvent: (event: RuntimeEvent) => events.push(event),
     onApproval: async (request: ActionRequest) => { approvals.push(request); return { decision: 'accept' as const }; } };
 }
+
+test('trusted npm-wrapper history policy pins the native executable used for launch without evaluating wrapper code', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'hormuz-codex-npm-')));
+  const packageRoot = join(root, 'package'), wrapper = join(packageRoot, 'bin', 'codex.js');
+  const target = `${process.platform}-${process.arch}`;
+  const triples: Record<string, string> = { 'darwin-arm64': 'aarch64-apple-darwin', 'darwin-x64': 'x86_64-apple-darwin', 'linux-arm64': 'aarch64-unknown-linux-musl', 'linux-x64': 'x86_64-unknown-linux-musl' };
+  const platformRoot = join(packageRoot, 'node_modules', '@openai', `codex-${target}`);
+  let f: Awaited<ReturnType<typeof setup>> | undefined;
+  try {
+    await mkdir(join(packageRoot, 'bin'), { recursive: true });
+    await writeFile(wrapper, 'throw new Error("Wrapper code must never be evaluated");');
+    const cli = { name: '@openai/codex', version: '0.160.0', bin: { codex: 'bin/codex.js' }, optionalDependencies: { [`@openai/codex-${target}`]: `npm:@openai/codex@0.160.0-${target}` } };
+    await writeFile(join(packageRoot, 'package.json'), JSON.stringify(cli));
+    const bin = join(platformRoot, 'vendor', triples[target], 'bin'); await mkdir(bin, { recursive: true });
+    await writeFile(join(platformRoot, 'package.json'), JSON.stringify({ name: '@openai/codex', version: `0.160.0-${target}`, os: [process.platform], cpu: [process.arch] }));
+    await symlink(process.execPath, join(bin, 'codex'));
+    let launched = '';
+    f = await setup('normal', { command: wrapper, prepareLaunch: async ({ command, args }) => { launched = command; return { command, args }; } });
+    const policy = await f.adapter.historyPolicy();
+    assert.deepEqual(policy, { engine: 'codex', runtimeVersion: '0.160.0', executablePath: await realpath(process.execPath) });
+    await f.adapter.start(f.options); assert.equal(launched, policy.executablePath);
+    const invalid = new CodexAdapter({ command: wrapper });
+    await writeFile(join(packageRoot, 'package.json'), JSON.stringify({ ...cli, version: '0.159.0' }));
+    await assert.rejects(invalid.historyPolicy(), { code: 'unsupported_codex_version' }); await invalid.dispose();
+  } finally { await f?.cleanup(); await rm(root, { recursive: true, force: true }); }
+});
 
 test('real subprocess handshake, native read-only plan, approved execution, streamed diff and usage', async () => {
   const { adapter, options, cleanup } = await setup();

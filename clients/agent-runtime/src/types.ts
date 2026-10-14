@@ -35,9 +35,12 @@ export type RuntimeRun = {
   onApproval: (request: ActionRequest) => Promise<ApprovalDecision>;
 };
 export type RunResult = { status: 'completed' | 'interrupted' | 'failed' | 'unknown'; plan?: string; threadId?: string };
+/** Trusted host metadata; never persisted as runtime authority or supplied by a renderer. */
+export type RuntimeHistoryPolicy = { engine: 'codex'; runtimeVersion: '0.160.0'; executablePath: string };
 export interface AgentSessionAdapter {
   readonly engine: Engine;
   readonly version: string;
+  historyPolicy?(): Promise<RuntimeHistoryPolicy>;
   start(options: RuntimeStart): Promise<{ threadId: string }>;
   run(options: RuntimeRun): Promise<RunResult>;
   interrupt(): Promise<void>;
