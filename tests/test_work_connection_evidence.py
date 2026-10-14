@@ -1,6 +1,7 @@
 """Bounded loopback API-response evidence; no provider/native grade is inferred."""
 import http.client
 import json
+import os
 import sqlite3
 import unittest
 from unittest.mock import patch
@@ -143,10 +144,17 @@ class WorkConnectionHTTPTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertIn(b"hormuz client config claude", rendered)
         self.assertNotIn(b"hormuz client config codex", rendered)
-        with patch.object(type(self.gateway), "upstream_credentials", property(lambda server: {"openai": "synthetic-configured"})):
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        self.thread.join(timeout=2)
+        self.config_value["listen"]["port"] = fixtures._free_port()
+        with patch.dict(os.environ, {"TEST_ANTHROPIC_KEY": ""}):
+            self.start()
             status, raw = self.get("/v1/work/jobs/" + work, fixtures.CLAUDE_ONLY_TOKEN)
+            self.assertEqual(200, status)
             self.assertEqual([], json.loads(raw)["agent_choices"])
             status, rendered = self.get("/work/jobs/" + work, fixtures.CLAUDE_ONLY_TOKEN)
+            self.assertEqual(200, status)
             self.assertIn(b"No configured provider route and application grant", rendered)
 
     def test_optional_funnel_storage_failure_preserves_response_charge_and_cache(self):
