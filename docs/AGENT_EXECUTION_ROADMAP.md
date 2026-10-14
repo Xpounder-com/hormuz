@@ -52,6 +52,7 @@ build the candidate that must supply that evidence.
 | Claude planning and approvals | [#515 — Claude: enforce read-only Plan mode and scoped action approvals](https://github.com/Xpounder-com/hormuz/issues/515) | Claude runtime and shared contracts. Enforced Plan, questions, explicit execution permission mode, every-tool hooks and scoped callback decisions. |
 | Claude diff and resume | [#516 — Claude: integrate diff review and explicit session resume](https://github.com/Xpounder-com/hormuz/issues/516) | Claude runtime/planning and accepted Codex review/resume outcomes. Actual changes/tests, isolated SDK session history, checkpoint limits and safe explicit continuation. |
 | Claude qualification | [#517 — Claude: qualify the installed plan-to-resume Agent journey](https://github.com/Xpounder-com/hormuz/issues/517) | All Claude slices and Codex qualification. Complete second-engine journey, permission/admission coverage and declared installed platform rows. |
+| Folder CLI | [#521 — CLI: add folder-based Agent planning, approvals, execution, review and resume](https://github.com/Xpounder-com/hormuz/issues/521) | Reuse the shared backend for `hormuz`, `hormuz agent` and `hormuz-agent`. macOS source preview, compiled local package, explicit cloud consent and model/rates, bounded terminal ownership, observed diff review and folder-scoped resume. [Setup and commands](AGENT_CLI.md); installers and other platform qualification remain separate. |
 
 The implementation work order authorizes a supervised backend candidate for
 both engines, beginning with Codex. Claude's SDK integration is available to
@@ -67,6 +68,13 @@ Windows/Linux stay unavailable or explicitly preview until separately proven.
 Release versions, dates and implementation owners remain unassigned.
 
 ## Backend source preview
+
+The [folder CLI](AGENT_CLI.md) provides the same host-owned flow directly in a
+terminal, without requiring the planned Electron interface. Each canonical
+folder has a stable named-project identity under private profile state outside
+the workspace. The local package ships compiled JavaScript and reuses the same
+authority, admission, persistence and sandbox rules. Its terminal and installed
+package fixtures do not complete desktop acceptance or paid-provider gates.
 
 [`clients/agent-runtime`](../clients/agent-runtime/README.md) implements the
 host-owned contracts for #506 and the backend slices of #508–#512 and #514–#516.

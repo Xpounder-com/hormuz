@@ -4,29 +4,34 @@ Hormuz is a model-neutral enterprise AI gateway and policy control plane for emp
 
 This roadmap is evidence-gated. A milestone is not complete because code exists or a narrow test passes. Every closure needs an explicit scope, executable checks, package or deployment proof where relevant, and a truthful statement of what remains unproven.
 
-## Current program map — 2026-10-14
+## Current program map — 2026-10-13
 
 The new desktop direction is a shared Electron/Svelte project workspace and
 minimal quick bar, managed llama.cpp setup and policy-bounded local/cloud Auto.
-The owner approved the core UI direction on 2026-10-14, moved specialised
-research/features to skills, and authorized Electron/llama.cpp work after the
-protected merge of #518. Follow [#479](https://github.com/Xpounder-com/hormuz/issues/479),
-the [delivery stages](ELECTRON_DESKTOP_ROADMAP.md), [UI checkpoint](DESKTOP_UI_IMPLEMENTATION.md)
-and [backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md). Direction approval is not
-installed-platform, scientific/model-quality or production acceptance.
+Complete and review the simulated UI before backend integration. It is **planning work**,
+not an implemented or qualified desktop release. Follow
+[epic #479](https://github.com/Xpounder-com/hormuz/issues/479), the
+[delivery stages](ELECTRON_DESKTOP_ROADMAP.md), and the
+[complete backlog reconciliation](DESKTOP_BACKLOG_RESET_2026-10-13.md).
+The scope is ready to start bounded UI simulation with
+[recorded UI-facing backend boundaries](DESKTOP_BACKEND_BOUNDARIES.md), #480 A.
+This defines product/mock defaults now without implementing a backend or
+closing #480. Actual backend work follows
+#492 approval and a named owner, selected finish, exact model/provider/protocol
+choices, storage/context/output/time limits and platform qualification rows.
 
 | Program | Current boundary |
 | --- | --- |
-| Electron desktop | #479; recorded #480 A boundaries feed UI #481/#487–#491 and approved #492 core direction first, then #480 B/#482–#485/#493 backend and retained #337/#338/#339/#340/#346/#347 qualification gates. Version and dates TBD. |
-| Skills | [#502 reusable instruction packs](https://github.com/Xpounder-com/hormuz/issues/502); [#503 optional generic skill execution](https://github.com/Xpounder-com/hormuz/issues/503) after qualified chat/admission. Specialised procedures use ordinary chats, not dedicated UI modes. [Scope and authority](RESEARCH_REVIEW_MODE.md). |
-| Project Agent execution | Planned optional extension: Codex app-server first, then Claude Agent SDK after Codex qualification. Separate shared contract/UI, read-only planning, plan/action/spend decisions, actual diff review and explicit named-project resume. [Ordered implementation backlog](AGENT_EXECUTION_ROADMAP.md); not a prerequisite for plain chat or #492. |
+| Electron desktop | #479; recorded #480 A boundaries feed UI #481/#487–#491/#502 and #492 first, then #480 B/#482–#485/#493 backend and retained #337/#338/#339/#340/#346/#347 qualification gates. Version and dates TBD. |
+| Research Review | [#502 UI/spec/mock](https://github.com/Xpounder-com/hormuz/issues/502) precedes #492; optional [#503 runtime](https://github.com/Xpounder-com/hormuz/issues/503) follows qualified single-response #493/#483/#485/#484 contracts. Required before exposing real Review, not a plain-chat prerequisite. [Bounded role/version/evidence contract](RESEARCH_REVIEW_MODE.md). |
+| Project Agent execution | Optional extension with a macOS [folder CLI source preview](AGENT_CLI.md): Codex app-server and Claude Agent SDK share read-only planning, plan/action/spend decisions, actual diff review and explicit named-project resume. Desktop UI and installed release qualification follow the [ordered implementation backlog](AGENT_EXECUTION_ROADMAP.md); not a prerequisite for plain chat or #492. |
 | Existing native clients | Preserve the v1.8.0 notarized Mac archive, CLI/agent paths and accepted shared contracts. The separate native-shell plan #329 is superseded; its [roadmap](NATIVE_CLIENT_ROADMAP.md) is historical. |
 | Optional Rust work | #341 existing agent-relay qualification and #342 measured optimizer migration. No blanket port prerequisite to first local chat. |
 | Portfolio intelligence | #226; #214/#219/#220/#225 remain open. Future release identity TBD; frozen evidence is retained. |
 | Enterprise qualification | Conditional #9/#10/#11/#13/#107 gates remain open; bounded reference proof is not general production certification. |
 | Hosted Pro | #437–#443 deferred; no Render/Okta/Stripe/Postgres requirement for local projects or direct BYOK. Its unresolved tenant/payment/production obligations remain separate from cleanup. |
 | Account cleanup | #494–#501, `track:cleanup`, milestone 16; independent inventory, bounded authorized operations and retained data/custody/payment holds. [Account ledger](DESKTOP_ACCOUNT_CLEANUP.md) and [infrastructure assessment](DESKTOP_INFRASTRUCTURE_AUDIT.md). Not a desktop UI prerequisite or Hosted Pro activation. |
-| Local cleanup | [#504](https://github.com/Xpounder-com/hormuz/issues/504) audited disposition complete: 699 generated folders removed, 113 old merged checkouts retired and 19 test/export folders archived and retired. Exact recovery, seven package assets, 100 retained content roots and all 31 protected checkouts are preserved. [Verified checkpoint](DESKTOP_LOCAL_CLEANUP.md). Cleanup itself authorizes no application/backend build. |
+| Local cleanup | [#504](https://github.com/Xpounder-com/hormuz/issues/504) audited disposition complete: 699 generated folders removed, 113 old merged checkouts retired and 19 test/export folders archived and retired. Exact recovery, seven package assets, 100 retained content roots and all 31 protected checkouts are preserved. [Verified checkpoint](DESKTOP_LOCAL_CLEANUP.md). No application build or backend work starts. |
 | Independent validation/tooling | #307 retains its exact v1.2 study; #369 retains unresolved independent review. New installed desktop evidence belongs to #340. |
 
 Current main contains the AI Work 1.9.0 source candidate; published v1.8.0

@@ -7,7 +7,7 @@ import { prepareSandbox } from './sandbox.ts';
 import type { WorkspaceDiff, WorkspaceSnapshot } from './workspace.ts';
 
 const sourceDirectory = dirname(fileURLToPath(import.meta.url));
-const worker = join(sourceDirectory, 'workspace-observer-worker.ts');
+const worker = join(sourceDirectory, 'workspace-observer-worker' + (import.meta.url.endsWith('.ts') ? '.ts' : '.js'));
 const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 let activeObservers = 0;
 type OwnedObserver = { stateRoot: string; config: string; rpc?: RpcProcess; ino?: number; dev?: number; released: boolean; cleanup?: Promise<void> };

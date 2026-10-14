@@ -7,16 +7,15 @@ chats, files, instructions and model preferences. A small glossy prompt bar give
 quick access to the active project. Choose a model yourself, or use Auto to
 suggest an eligible local or paid model for the task.
 
-**Status: core UI direction approved; Electron/local-runtime development authorized.** Explore the
-[simulated workspace and Auto prompt bar](docs/DESKTOP_UI_IMPLEMENTATION.md).
-The Electron host, managed llama.cpp setup and real project-aware local/cloud Auto are planned. This
+**Status: planning and simulated prototypes.** The new Electron desktop,
+managed llama.cpp setup and project-aware local/cloud Auto are planned. This
 repository already contains the Python gateway, CLI, Personal Optimizer and
 legacy clients; their release and qualification boundaries remain separate.
 
 [Desktop direction](#the-desktop-were-planning) ·
 [Roadmap](docs/ELECTRON_DESKTOP_ROADMAP.md) ·
 [Backend boundaries](docs/DESKTOP_BACKEND_BOUNDARIES.md) ·
-[UI simulation](docs/DESKTOP_UI_IMPLEMENTATION.md) ·
+[Try the folder CLI](docs/AGENT_CLI.md) ·
 [Try the existing gateway](#quickstart) ·
 [Contribute](#contributing-and-community)
 
@@ -32,8 +31,8 @@ legacy clients; their release and qualification boundaries remain separate.
 | Local model setup | Discover, download, verify, load and remove curated text models inside Hormuz through a managed llama.cpp engine. |
 | Auto with an override | While typing, preview the proposed model and a small Local/Cloud indicator. Selecting a model pins it; selecting Auto resumes routing. |
 | Optional paid models | Connect your own provider API account, enable cloud use explicitly and set an allowance. Provider usage is billed separately. |
-| Skills for specialised work | Paper roasts, rebuttals and other workflows are reusable skills in ordinary chats, rather than dedicated application modes. |
-| Agent execution — later phase | [Backend source preview](clients/agent-runtime/README.md): Codex first, then Claude Agent as replaceable skill execution adapters, with separate plan/tool/spend permissions, observed diff review and explicit session resume. Desktop integration and installed release qualification remain [roadmap gates](docs/AGENT_EXECUTION_ROADMAP.md). |
+| Research Review | Optional full-window review with distinct blind reviewers, visible findings/disagreement and human sign-off for a named revision. |
+| Agent execution — later phase | [Folder CLI source preview](docs/AGENT_CLI.md) and [shared backend](clients/agent-runtime/README.md): Codex first, then Claude Agent, with read-only planning, separate plan/tool/spend approvals, execution, observed diff review and explicit named-project session resume. Desktop integration and installed release qualification remain [roadmap gates](docs/AGENT_EXECUTION_ROADMAP.md). |
 
 The planned host is **Electron**, with a shared **Svelte/TypeScript** interface
 and **llama.cpp** for local inference. Windows, Linux and macOS are target
@@ -66,24 +65,28 @@ already downloaded local model. A blocked manual pin stays pinned; local-only
 work cannot silently become a cloud request. Estimates, actual costs and unknown
 outcomes are shown separately.
 
-Specialised procedures such as paper roasts and rebuttals are reusable skills
-inside ordinary chats. Enable a pack in Context → Skills and invoke its command.
-Instructions do not grant tools, file access, extra reviewers, cloud permission or
-spending. A drafted reply is not a verified refutation or publication approval.
+Research Review freezes an explicit draft/source packet and uses two distinct
+blind reviewers. Local roles swap sequentially under the first one-loaded-model
+plan. Edited or reconciled versions need fresh review; model agreement does not
+establish correctness or approve an entire project. A human decides the scope
+and revision to accept.
 
-The owner approved the glossy UI direction on 2026-10-14 and authorized the
-Electron shell and llama.cpp backend after #518 merges. Actual accessibility,
-installed platforms, persistence, model quality and production readiness need
-separate evidence in the [runtime boundaries](docs/DESKTOP_BACKEND_BOUNDARIES.md).
+These are [recorded planning boundaries](docs/DESKTOP_BACKEND_BOUNDARIES.md).
+The final glossy finish and integrated UI still need review.
 
 ## Delivery order
 
-1. Merge the reviewed core UI and skills simplification through normal CI.
-2. Start the isolated Electron host and one owned llama.cpp local-text path.
-3. Qualify durable projects, managed model setup, optional paid providers and real Auto.
+1. Define the shared visual system and project-window/prompt-bar handoff.
+2. Complete simulated projects, chats, context, local setup, connections,
+   preferences, Auto and Research Review; review the integrated UI in
+   [#492](https://github.com/Xpounder-com/hormuz/issues/492).
+3. Accept the runtime contract, then implement Electron hosting, local storage,
+   llama.cpp and one paid-provider baseline; integrate real Auto afterward.
 4. Qualify lifecycle, packages, updates, accessibility and each declared platform.
-5. Add optional bounded skill execution through qualified model/tool adapters;
-   Codex first, then Claude remains the separate later Agent engine roadmap.
+   Real Research Review follows a useful single-response baseline.
+5. Add optional project Agent mode through its own accepted UI/session contract:
+   Codex planning, approvals, execution, diff review and resume first; qualify
+   that journey before implementing Claude through the same host interface.
 
 Follow [desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479),
 the [UI plan](docs/DESKTOP_UI_PLAN.md) and
@@ -198,7 +201,7 @@ future saved project history has its own local content contract.
 | Topic | Guide |
 | --- | --- |
 | Desktop direction and delivery | [Roadmap](docs/ELECTRON_DESKTOP_ROADMAP.md), [UI plan](docs/DESKTOP_UI_PLAN.md), [backend boundaries](docs/DESKTOP_BACKEND_BOUNDARIES.md) |
-| Skills | [Instruction, provenance and authority contract](docs/RESEARCH_REVIEW_MODE.md) |
+| Research Review | [Role, revision and evidence contract](docs/RESEARCH_REVIEW_MODE.md) |
 | Cleanup and transition | [Backlog reconciliation](docs/DESKTOP_BACKLOG_RESET_2026-10-13.md), [account ledger](docs/DESKTOP_ACCOUNT_CLEANUP.md), [completed local cleanup](docs/DESKTOP_LOCAL_CLEANUP.md) |
 | Existing gateway architecture and runtime | [Architecture](docs/ARCHITECTURE.md), [AI Work guide](docs/AI_WORK_PRODUCT.md), [runtime](docs/AI_WORK_RUNTIME.md) |
 | Clients and context optimization | [Client setup](docs/CLIENTS.md), [Personal Optimizer](docs/PERSONAL_OPTIMIZER.md), [context optimization](docs/CONTEXT_OPTIMIZATION.md) |

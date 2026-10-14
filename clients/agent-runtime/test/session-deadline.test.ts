@@ -116,6 +116,47 @@ test('host disposal interrupts a pending authority callback immediately without 
   } finally { await f.cleanup(); }
 });
 
+test('successful planning closes a stalled approval decision after its request expires, before clearing the operation deadline', { timeout: 3000 }, async () => {
+  const f = await fixture(1000), authorizing = deferred<void>(), authorization = deferred<boolean>();
+  let calls = 0, signal: AbortSignal | undefined, deciding: Promise<string> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  f.options.approvalTimeoutMs = 75;
+  f.options.authorizeCloud = async (_project, currentSignal) => {
+    if (++calls !== 2) return true;
+    signal = currentSignal; authorizing.resolve(); return await authorization.promise;
+  };
+  class QuestionRuntime extends Runtime {
+    override async run(options: RuntimeRun): Promise<RunResult> {
+      this.runs++;
+      await options.onApproval({ id: 'question', turnId: 'turn', kind: 'question', operation: {} });
+      return { status: 'completed', plan: 'Write a result file.' };
+    }
+  }
+  try {
+    const session = await f.create(); f.state.factory = () => new QuestionRuntime();
+    f.manager.on('approval', request => {
+      deciding = f.manager.decide(session.id, 'project', request.approvalId, request.fingerprint, { decision: 'accept' })
+        .then(() => 'resolved', error => error.code ?? error.message);
+    });
+    const planning = f.manager.plan(session.id, 'project', 'Plan work.');
+    await authorizing.promise;
+    assert.equal(signal?.aborted, false);
+    const planned = await planning;
+    assert.equal(planned.phase, 'ready'); assert.equal(calls, 3);
+    // The operation completed before its 1000ms deadline. A cleared timer alone
+    // would leave decide pending until this independent 200ms regression bound.
+    const result = await Promise.race([deciding!, new Promise<string>(resolve => { timer = setTimeout(() => resolve('pending'), 200); })]);
+    clearTimeout(timer);
+    assert.equal(result, 'interrupted'); assert.equal(signal?.aborted, true);
+    assert.equal(f.scheduler.activeOwner, null); assert.equal(f.runtimes[1].disposed, true);
+    assert.equal((await f.store.load(session.id, 'profile', 'project')).acceptedPlanFingerprint, undefined);
+    await f.manager.dispose();
+    const release = await new SessionStore(f.store.root).acquireLease(); await release();
+    authorization.resolve(true); await deciding;
+    assert.equal((await f.store.load(session.id, 'profile', 'project')).acceptedPlanFingerprint, undefined);
+  } finally { clearTimeout(timer); authorization.resolve(false); await deciding; await f.cleanup(); }
+});
+
 for (const mode of ['accept', 'revise', 'resume'] as const) {
   test(mode + ' deadline cannot preserve previously accepted execution authority', { timeout: 3000 }, async () => {
     const f = await fixture();
