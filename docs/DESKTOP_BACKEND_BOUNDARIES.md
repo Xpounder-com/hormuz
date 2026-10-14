@@ -163,9 +163,12 @@ routing evidence. It makes no classifier/provider/network request, model
 download/load, allowance/exploration reservation, ledger write or prompt save.
 Snapshots carry profile/project/chat/context and generation identity so stale
 callbacks cannot update another draft. Filter policy/privacy/capability/context,
-readiness/connection and budget before ranking. The first Auto baseline ranks
-ready candidates; a downloaded-but-unloaded model has an explicit Load remedy.
-No eligible candidate means a visible blocked state, not cloud substitution.
+readiness/connection and budget before ranking. Auto may propose Ready or
+verified/downloaded/qualified loadable local candidates; disclose needed
+preparation as Local, loads on Send without adding a setup control to the bar.
+Send authorizes that exact bounded load/swap; only inference dispatch requires
+Ready and revalidation. Missing downloads, unsupported/unknown fit or no eligible
+candidate stay blocked with a setup remedy, never cloud substitution.
 
 Send is the only transition from prediction to a governed execution attempt:
 
@@ -179,6 +182,10 @@ Send is the only transition from prediction to a governed execution attempt:
    model/version/location, request/attempt identity and applicable authority.
    Local project IDs are UI/content identities, not trusted AI Work actors/jobs.
    B must bind them to legitimate local/direct or managed execution authority.
+   If the disclosed local plan needs a load/swap, enter cancelable Preparing,
+   make that exact owned model Ready, then revalidate the frozen packet and current
+   policy/fit/budget before inference. Loading does not change the chosen route
+   or authorize a download; preparation failure stays blocked/failed.
 3. Admit through the existing qualified policy/custody/reservation owner. A
    double click/repeated submission of the same command returns that attempt;
    it must not reserve twice or create two provider calls. Exact idempotency and
@@ -206,9 +213,11 @@ under this same scheduler; future concurrency needs a separate qualified limit.
 The library distinguishes Offered → Downloading → Verifying → Downloaded →
 Loading → Ready, plus canceled/interrupted/failed/unsupported/too-large states.
 Downloaded is not Ready. Explicit Download and Load are separate actions; the
-typing preview, project switch and Auto selection start neither. Only an exact
-verified, qualified ready model can dispatch in the first baseline. A missing
-model stays blocked until setup completes, preserving its pin.
+typing preview, project switch and Auto selection start neither. Load in Models
+is optional preparation; Send can authorize the disclosed load/swap of an
+already downloaded, verified and qualified model. Only a Ready model can dispatch
+inference. Missing downloads remain blocked until explicit setup completes,
+preserving their pin; a failed planned load never substitutes a cloud route.
 
 Unload/remove an active model is blocked until owned work stops. Remove deletes
 only app-owned weights and exposes affected pins/preferences; it does not change

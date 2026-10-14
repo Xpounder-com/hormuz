@@ -171,6 +171,10 @@ before real Review execution is offered.
   from enforced restrictions. Picker pins persist for the chat until Auto/reset;
   a labeled one-request override is consumed only on dispatch. A connection alone
   does not enable cloud use. Busy blocks a second attempt without a hidden queue.
+  Auto may propose a verified/downloaded/qualified loadable local model, showing
+  loads on Send when needed. Send authorizes bounded preparation; Ready and
+  revalidation precede inference. Explicit Load in Models remains optional;
+  missing downloads or unknown fit require setup, never hidden cloud fallback.
 - Preview is a pure bounded read of available simulated state: no classifier or
   provider call, model load/download, budget reservation, ledger write or prompt
   storage. Scoped draft persistence is a separate, debounced local-data operation
