@@ -79,7 +79,7 @@ jobs:
             --workflow-run-url "$HORMUZ_WORKFLOW_RUN_URL" \
             --output "$RUNNER_TEMP/hormuz-external-pilot-deployment/external-pilot-deployment-evidence.json"
       - name: Upload exact deployment evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-external-pilot-deployment-${{ github.run_number }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/hormuz-external-pilot-deployment
@@ -142,7 +142,7 @@ jobs:
             --workflow-run-url "$HORMUZ_WORKFLOW_RUN_URL" \
             --output "$RUNNER_TEMP/hormuz-external-pilot-qualification/external-pilot-qualification-evidence.json"
       - name: Upload exact qualification evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hormuz-external-pilot-qualification-${{ github.run_number }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/hormuz-external-pilot-qualification
