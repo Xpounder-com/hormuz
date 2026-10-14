@@ -8,6 +8,7 @@ import os
 import re
 import shlex
 import sys
+import subprocess
 from urllib.parse import urlparse
 
 from ..config import ConfigError, GatewayConfig
@@ -21,6 +22,14 @@ def add_client_commands(
     client_subparsers = client.add_subparsers(dest="client_command", required=True)
     connect = client_subparsers.add_parser("config", help="Print client configuration for this gateway")
     _client_config_arguments(connect)
+
+    for command in ("connect", "status", "disconnect"):
+        lifecycle = client_subparsers.add_parser(command, help="Manage persistent Codex CLI connection")
+        lifecycle.add_argument("client", choices=["codex"])
+        lifecycle.add_argument("--client-home", help="Isolated Codex home (default CODEX_HOME or ~/.codex)")
+        if command == "connect":
+            lifecycle.add_argument("--executable", default="codex", help="Codex CLI executable to qualify")
+            lifecycle.add_argument("--actor", help="Configured actor ID")
 
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
@@ -213,3 +222,22 @@ def _client_base_url(value: str) -> str:
     ):
         raise ConfigError("client gateway URL must be an HTTP(S) URL without credentials, query, or fragment")
     return result
+
+
+def run_lifetime(args: argparse.Namespace) -> int:
+    from pathlib import Path
+    from ..connected_client import ConnectedClientError, ConnectedClientLifetime
+    try:
+        lifetime = ConnectedClientLifetime(Path(args.client_home or os.environ.get("CODEX_HOME", "~/.codex")))
+        if args.client_command == "connect":
+            result = lifetime.connect(GatewayConfig.load(args.config), executable=args.executable, actor_id=args.actor)
+        elif args.client_command == "status":
+            result = lifetime.status()
+        else:
+            result = lifetime.disconnect()
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    except (ConnectedClientError, ConfigError, OSError, subprocess.SubprocessError) as error:
+        code = error.code if isinstance(error, ConnectedClientError) else "connected_client_setup_unavailable"
+        print(json.dumps({"schema_version": 1, "error": {"code": code}}), file=sys.stderr)
+        return 2

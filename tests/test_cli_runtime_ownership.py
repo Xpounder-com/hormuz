@@ -40,7 +40,7 @@ EXPECTED_COMMAND_TREE = {
         "export": None,
     },
     "auth": {"token": None, "session": None},
-    "client": {"config": None},
+    "client": {"config": None, "connect": None, "status": None, "disconnect": None},
     "contract": {"manifest": None},
     "context": {
         "compact": None,
