@@ -546,6 +546,9 @@ class GatewayServer(ThreadingHTTPServer):
             work_gateway.close(self)
             if self.impact_recorder is not None:
                 self.impact_recorder.close()
+            projection = getattr(self, "custody_runtime_projection", None)
+            if projection is not None:
+                projection.close()
             self._close_postgres_pool()
             raise
         self._accepting_requests.set()
