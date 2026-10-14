@@ -1407,12 +1407,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        self._provider_response_resources.callback(response.close)
+        response_closed = False
+        def close_response():
+            nonlocal response_closed
+            if not response_closed:
+                response_closed = True
+                response.close()
+        self._provider_response_resources.callback(close_response)
         response_headers_us = self._elapsed_us(started_ns)
         self._work_provider_ms = (time.monotonic_ns() - started_ns) / 1_000_000
         status = getattr(response, "status", response.getcode())
         if 300 <= status < 400:
-            response.close()
+            close_response()
             if account_usage and attempt is not None:
                 # A redirect can follow an accepted POST. Its status alone
                 # cannot establish whether provider work was billable, so
@@ -1447,7 +1453,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             and account_usage
             and attempt is not None
         ):
-            response.close()
+            close_response()
             request_status = "rate_limited" if status == HTTPStatus.TOO_MANY_REQUESTS else "failed"
             self.server.provider_reliability_store.finalize_request_attempt(
                 attempt=attempt,
@@ -1675,7 +1681,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 type(error).__name__,
             )
         finally:
-            response.close()
+            close_response()
 
         provider_metrics = self._provider_metrics(
             started_ns=started_ns,
