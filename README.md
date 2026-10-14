@@ -488,7 +488,7 @@ Public TLS remains a customer-controlled ingress responsibility. Read
 | Roadmap and maturity gates | [docs/ROADMAP.md](docs/ROADMAP.md) |
 | Planned Electron project workspace, minimal bar and Auto | [UI-first roadmap](docs/ELECTRON_DESKTOP_ROADMAP.md), [UI coverage](docs/DESKTOP_UI_PLAN.md), [Research Review](docs/RESEARCH_REVIEW_MODE.md) and [backlog reconciliation](docs/DESKTOP_BACKLOG_RESET_2026-10-13.md); planning only, no new desktop support claim |
 | Unused Hormuz account cleanup | [Account ledger](docs/DESKTOP_ACCOUNT_CLEANUP.md) and [infrastructure assessment](docs/DESKTOP_INFRASTRUCTURE_AUDIT.md); pilot compute/automation retirement verified, retained-data and other account dispositions still open |
-| Local workspace cleanup | [Verified generated-file cleanup](docs/DESKTOP_LOCAL_CLEANUP.md); source/history, configured environments, release evidence and required Docker/test contracts retained |
+| Local workspace cleanup | [Completed audited cleanup](docs/DESKTOP_LOCAL_CLEANUP.md); generated folders, old merged checkouts and test exports retired with verified recovery. Unique source/history, environments, release assets and required Docker/test contracts retained |
 
 Inspect the versioned public contracts before integrating an external report or
 audit consumer:

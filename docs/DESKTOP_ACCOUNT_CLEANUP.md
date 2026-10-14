@@ -28,9 +28,12 @@ local desktop needs no mandatory hosted runtime.
 Local build/dependency/test debris is a separate cleanup slice in
 [#504](https://github.com/Xpounder-com/hormuz/issues/504). Its
 [verified local checkpoint](DESKTOP_LOCAL_CLEANUP.md) records removal of 699
-approved generated folders, an observed 11.4 GiB free-space increase and the
-source/runtime/release holds. This is not Render/account savings or retirement
-of tracked Docker/test contracts.
+approved generated folders, retirement of 113 merged checkouts and archival/
+retirement of 19 test-export folders. All 31 protected checkouts and exact
+source/asset recovery remain. The earlier 11.4 GiB and later observed capacity
+change are local results, not Render/account savings or retirement of tracked
+Docker/test contracts. The audited #504 disposition is complete; the account
+cleanup program remains open.
 
 Record exact private locators only in the operator ledger. Public conclusions
 use names/resource classes and aggregate results; never credential values,

@@ -5,6 +5,10 @@ audit boundary, plus seven initial planning issues, eight follow-up UI,
 local-data/infrastructure issues, seven focused account-cleanup children and two
 Research Review issues created under
 [desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479).
+The subsequent local cleanup #504 is complete within its audited scope: 113
+old merged checkouts and 19 test-export folders retired with exact recovery,
+while unique work, retained state and release assets remain preserved. This
+extends cleanup coverage without beginning application implementation.
 Adjacent repositories, user-owned dirty checkouts, shipped products and
 implementation branches are not deleted or reset by this sweep.
 

@@ -64,21 +64,61 @@ task had already removed its local data disk; this checkpoint claims no new
 Docker image/container/volume reclamation. Docker itself was preserved and no
 daemon, network workload or VM was started.
 
-## Remaining local disposition
+## Completed checkout and test-export disposition
 
-The audit found old clean/merged worktree candidates, dirty/unique worktrees
-and packaging/test exports. They are recorded in #504. Whole-checkout removal
-must recheck current activity, owner, Git status, unique commits and ignored
-retained-state holds, with a recovery manifest/ref. A clean status alone is
-insufficient because ignored files can contain credentials or unique evidence.
+The owner then explicitly requested completion of #504, including old checkouts
+and test exports, while preserving unique work and release assets. The refreshed
+inventory used fetched main `46449d2a3f05de09d7d0a18c9688e189a6c3a68e`.
 
-Old sdists, wheels and source exports need byte/provenance and sole-copy/release
-evidence checks before removal. A standard test virtualenv layout alone does not
-prove every installed package disposable. Large Git snapshots and retained
-restore installers are outside the approved generated-folder deletion.
+| Completed disposition | Result |
+| --- | --- |
+| Clean merged Git checkouts retired | 113 of the 144 in-scope worktrees; all retired paths absent and Git registrations removed through normal, non-forced worktree removal. |
+| Checkouts retained in place | 31, with dirty/unique work, primary/previously active usage or private/runtime holds. Both outside-scope paths remained untouched. |
+| Ignored material consolidated | 100 content roots preserved through same-volume rename, with identical bytes, symlink targets, modes, owner/group, timestamps, inode/device and flags. Release outputs, configured environments and inert test state were retained. |
+| Old non-Git export/test folders retired | 19, after native archive creation and independent restore of every member. Nine installed test environments, four differing source exports and configuration were preserved rather than assumed reproducible. |
+| Distinct package/build assets retained | Seven files, kept outside the compressed export archives with their original bytes, hashes and same-volume file identity. |
+
+Every retired checkout's working-file bytes and executable/symlink modes matched
+its exact Git commit. Activity, ownership, clean status, ignored-state coverage,
+merge ancestry and hidden-index/sparse cases were checked before removal.
+Original branches were preserved. Dedicated exact-commit recovery refs and a
+self-contained source-history bundle were created before retirement; a separate
+mirror and restored checkout verified recovery without shared loose objects.
+
+All 31 retained checkouts' recorded source state remained unchanged. The primary
+dirty source, unique commits, active app, credentials/private records, retained
+SQLite data, release evidence and Apple restore installers remain protected.
+Two closed temporary test databases were preserved as inert retained assets;
+no database connection or historical application was activated.
+
+The test-export archives passed native restoration checks for the complete
+member set, content hashes, symlink targets, modes, owner/group and nanosecond
+timestamps. Native pax carries macOS ACLs and extended attributes; the recorded
+checks do not make a broader signing or release-qualification claim. Each
+archive and all seven retained package assets have verified SHA-256 records.
+
+The private recovery shelf lives outside the application repository and is
+excluded from local Git snapshots. It contains the source bundle, original
+path/branch/ref manifests, retained content, export archives, exact package
+assets and an opt-in restore helper. The helper's read-only preflight was checked
+against a checkout with preserved Mac assets. Restoration requires explicit
+intent, refuses an existing destination and never builds or activates old code.
+
+Local-only Git exclusions were extended for regenerable dependency/build/cache
+paths in the aggregate workspace and Hormuz repository. Existing exclusions
+and tracked source rules were preserved. No shared CI, package inventory or
+application source was deleted. Large Git snapshots and retained restore
+installers are deliberately outside this completed cleanup scope.
+
+The additional observed filesystem free-space increase after this second pass
+was approximately **4.4 GiB**, with approximately **147.7 GiB free** at read-back.
+This is separate from the earlier 11.4 GiB observation. Overlapping operation
+estimates are not added together as proof of capacity recovery.
 
 Future cleanup remains bounded and explicit: no broad Docker volume prune,
 forced dirty worktree removal, unrelated process termination or deletion of
 private/runtime records. Read back each selected path and report exact scope
-and measured results. The [account cleanup ledger](DESKTOP_ACCOUNT_CLEANUP.md)
-records the independent hosted-resource work.
+and measured results. #504's audited local disposition is complete; keeping
+the protected checkouts and recovery assets is intentional, not pending cleanup.
+The [account cleanup ledger](DESKTOP_ACCOUNT_CLEANUP.md) records the independent
+hosted-resource work, which remains open.

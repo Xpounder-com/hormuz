@@ -16,6 +16,12 @@ starts real implementation. Account cleanup has its own authorized operations
 and evidence below; it is not covered by a blanket claim of no service changes.
 Release identity, dates and implementation owners remain unassigned.
 
+Local cleanup [#504](https://github.com/Xpounder-com/hormuz/issues/504) is complete
+within its audited scope: old merged checkouts and test exports were retired
+with verified recovery, while unique work and release assets remain preserved.
+See the [local checkpoint](DESKTOP_LOCAL_CLEANUP.md). This does not start the UI
+implementation, host/backend, model setup or a release.
+
 ## Product outcome
 
 One shared Electron + Svelte/TypeScript interface for declared Windows, Linux
