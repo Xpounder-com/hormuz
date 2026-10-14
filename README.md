@@ -7,7 +7,7 @@ chats, files, instructions and model preferences. A small glossy prompt bar give
 quick access to the active project. Choose a model yourself, or use Auto to
 suggest an eligible local or paid model for the task.
 
-**Status: first desktop UI simulation in progress.** Explore the
+**Status: complete desktop UI simulation candidate, awaiting integrated review.** Explore the
 [simulated workspace and Auto prompt bar](docs/DESKTOP_UI_IMPLEMENTATION.md).
 The Electron host, managed llama.cpp setup and real project-aware local/cloud Auto are planned. This
 repository already contains the Python gateway, CLI, Personal Optimizer and

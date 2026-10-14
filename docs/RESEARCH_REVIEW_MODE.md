@@ -20,10 +20,11 @@ scientific validation, a truth guarantee or deployment authority.
 
 ## Research UI exploration
 
-The first source simulation in `clients/desktop` now includes **Roast my paper**
-and **Rebuttal** under Research. It supplies scripted sample-paper outcomes,
-not model analysis of arbitrary pasted text. The remaining #502 journeys and
-integrated #492 approval stay open; this starts no research engine.
+The source simulation in `clients/desktop` covers **Roast my paper**, **Rebuttal**,
+explicit selected/custom/whole-project manifests, per-role Auto/explicit choices,
+known authors/aliases, authoring, failed/disagreeing reviews and reconciliation.
+It supplies scripted sample-paper outcomes, not model analysis of arbitrary
+pasted text. Integrated #492 review remains open; no research engine starts.
 
 The existing roadmap is sufficient to begin a bounded UI work order. Start with
 the selected glossy visual language and project-window/quick-bar handoff, then
@@ -31,10 +32,14 @@ project/chat/context, model setup, connections and preferences. Research Review
 adds a review surface inside the project window; it does not add several model
 controls to the minimal bar or force research review on ordinary chat.
 
-The first mock slice reviews an existing draft, with synthetic sources and two
+The default mock path reviews an existing draft, with synthetic sources and two
 distinct reviewer identities. Show the selected scope, role plan, privacy,
-whole-round cap, progress, findings and version-specific human decision. Add
-optional authoring and reconciliation as explicit variants of that flow.
+whole-round cap, progress, findings and version-specific human decision. Optional authoring and reconciliation are explicit implemented variants. Author
+reconciliation uses the original author; all known model-author lineage remains
+excluded from later independent reviewer choices. Whole-round reservation covers
+the larger optional check/reconcile upper bound. An explicit Finish round
+releases unused allowance and closes the optional call, without replay. Late
+author/proposal output preserves changed working text separately.
 Use the recorded #480 A product/mock defaults without waiting for #480 closure.
 Complete the integrated simulation in #492 before #480 B final host/data contracts and
 real execution. Current simulations and papers do not satisfy this gate by

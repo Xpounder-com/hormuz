@@ -12,6 +12,9 @@
   let open = $state(false);
   let root: HTMLDivElement;
   let trigger: HTMLButtonElement;
+  const location = $derived(
+    plan.model ? (plan.model.place === 'cloud' ? 'Cloud' : 'Local') : 'Unavailable',
+  );
   async function showMenu() {
     open = true;
     await tick();
@@ -51,18 +54,18 @@
 <div class="model-picker" bind:this={root}>
   <button
     type="button"
-    class:chosen={chat.intent === 'auto'}
+    class:chosen={plan.intent === 'auto'}
     class="auto-button"
     title="Use Auto for this chat"
     aria-label="Use Auto for this chat"
-    aria-pressed={chat.intent === 'auto'}
+    aria-pressed={plan.intent === 'auto'}
     onclick={() => onchoose('auto')}><Sparkles size={15} /></button
   >
   <button
     type="button"
     class="picker-trigger"
     bind:this={trigger}
-    aria-label={`${plan.model?.name ?? 'Choose model'} ${plan.model?.place === 'cloud' ? 'Cloud' : 'Local'}`}
+    aria-label={`${plan.model?.name ?? 'No eligible model'} ${location}`}
     aria-haspopup="menu"
     aria-expanded={open}
     title={`${plan.model?.name ?? 'No eligible model'} · ${plan.reason}`}
@@ -76,9 +79,13 @@
   >
     {#if plan.model?.place === 'cloud'}<Cloud size={14} />{:else}<Monitor size={14} />{/if}
     <span class="model-name">{plan.model?.name ?? 'Choose model'}</span>
-    <span class:cloud={plan.model?.place === 'cloud'} class="location-dot"></span>
-    <span class="location-label">{plan.model?.place === 'cloud' ? 'Cloud' : 'Local'}</span>
-    {#if chat.intent !== 'auto'}<Pin size={12} class="pin-icon" />{/if}<ChevronDown size={13} />
+    <span
+      class:cloud={plan.model?.place === 'cloud'}
+      class:unavailable={!plan.model}
+      class="location-dot"
+    ></span>
+    <span class="location-label">{location}</span>
+    {#if plan.intent !== 'auto'}<Pin size={12} class="pin-icon" />{/if}<ChevronDown size={13} />
   </button>
   {#if open}
     <div
@@ -91,19 +98,19 @@
       <button
         type="button"
         role="menuitemradio"
-        aria-checked={chat.intent === 'auto'}
+        aria-checked={plan.intent === 'auto'}
         class="model-option"
         onclick={() => choose('auto')}
         ><Sparkles size={18} /><span
           ><strong>Auto</strong><small>Choose for this task · simulated</small></span
-        >{#if chat.intent === 'auto'}<Check size={16} />{/if}</button
+        >{#if plan.intent === 'auto'}<Check size={16} />{/if}</button
       >
       <div class="menu-label">LOCAL MODELS</div>
       {#each snapshot.models.filter((m) => m.place === 'local') as model}
         <button
           type="button"
           role="menuitemradio"
-          aria-checked={chat.intent === model.id}
+          aria-checked={plan.intent === model.id}
           class="model-option"
           onclick={() => choose(model.id)}
           ><Monitor size={17} /><span
@@ -114,7 +121,7 @@
                   : model.state
                 : 'Fit unavailable'}</small
             ></span
-          >{#if chat.intent === model.id}<Check size={16} />{/if}</button
+          >{#if plan.intent === model.id}<Check size={16} />{/if}</button
         >
       {/each}
       <div class="menu-label">PAID MODELS · DEMO</div>
@@ -122,7 +129,7 @@
         <button
           type="button"
           role="menuitemradio"
-          aria-checked={chat.intent === model.id}
+          aria-checked={plan.intent === model.id}
           class="model-option"
           onclick={() => choose(model.id)}
           ><Cloud size={17} /><span
@@ -131,7 +138,7 @@
                 ? 'Requires verified demo connection'
                 : 'Blocked by Local-only'}</small
             ></span
-          >{#if chat.intent === model.id}<Check size={16} />{/if}</button
+          >{#if plan.intent === model.id}<Check size={16} />{/if}</button
         >
       {/each}
       <p class="menu-footnote">A selection pins this chat. Auto resumes routing.</p>

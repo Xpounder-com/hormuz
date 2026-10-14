@@ -1,14 +1,24 @@
 <script lang="ts">
   import { Copy, Check, Monitor, Cloud, Sparkles } from '@lucide/svelte';
   import type { Chat } from '../lib/types.ts';
-  let { chat, ondraft }: { chat: Chat; ondraft: (text: string) => void } = $props();
+  import MessageBody from './MessageBody.svelte';
+  let {
+    chat,
+    ondraft,
+    onretry,
+  }: { chat: Chat; ondraft: (text: string) => void; onretry: (id: string) => void } = $props();
   let copied = $state('');
   let copyError = $state('');
   let end: HTMLDivElement;
   let follow = $state(true);
+  let previousChat = '';
   $effect(() => {
     chat.messages.at(-1)?.text;
     chat.id;
+    if (previousChat !== chat.id) {
+      previousChat = chat.id;
+      follow = true;
+    }
     if (follow) end?.scrollIntoView({ block: 'end' });
   });
   async function copy(id: string, text: string) {
@@ -59,13 +69,15 @@
               <span class="mini-brand">H</span><strong>Hormuz</strong><span>Simulated response</span
               >
             </div>{/if}
-          {#if message.text}<div class="message-body">{message.text}</div>
-          {:else if message.receipt?.status === 'canceled' || message.receipt?.status === 'blocked'}<p
+          {#if message.text}<MessageBody text={message.text} />
+          {:else if message.receipt && ['canceled', 'blocked', 'failed', 'unknown'].includes(message.receipt.status)}<p
               class="terminal-empty"
             >
               {message.receipt.status === 'canceled'
                 ? 'Stopped before output.'
-                : 'Nothing dispatched. Review the changed context and send again.'}
+                : message.receipt.status === 'blocked'
+                  ? 'Nothing dispatched. Review the changed context and send again.'
+                  : 'Simulated failure before output. Review recovery before a new attempt.'}
             </p>
           {:else}<div class="thinking">
               <span></span><span></span><span></span><span class="sr-only"
@@ -78,15 +90,21 @@
                 >{#if message.receipt.place === 'local'}<Monitor size={12} />{:else}<Cloud
                     size={12}
                   />{/if}{message.receipt.model}<span class="receipt-status"
-                  >{message.receipt.status === 'completed'
-                    ? message.receipt.place === 'cloud'
-                      ? '$0.02 · fictional actual'
-                      : 'Local · no external inference charge'
-                    : message.receipt.status === 'canceled'
-                      ? message.receipt.held
-                        ? 'Partial · fictional cost unknown'
-                        : 'Stopped · partial'
-                      : message.receipt.status}</span
+                  >{message.receipt.imported
+                    ? 'Imported history · unverified'
+                    : message.receipt.status === 'completed'
+                      ? message.receipt.place === 'cloud'
+                        ? '$0.02 · fictional actual'
+                        : 'Local · no external inference charge'
+                      : ['canceled', 'failed', 'unknown'].includes(message.receipt.status)
+                        ? message.receipt.held
+                          ? 'Partial · fictional cost unknown'
+                          : message.receipt.restored && message.receipt.actual !== undefined
+                            ? `Recovered partial · $${message.receipt.actual.toFixed(2)} fictional actual`
+                            : message.receipt.status === 'unknown'
+                              ? 'Outcome unknown · partial'
+                              : 'Stopped · partial'
+                        : message.receipt.status}</span
                 ></span
               ><button
                 class="icon-button"
@@ -106,19 +124,45 @@
                   ? `Included: ${message.receipt.context.join(', ')}.`
                   : 'No project files included.'}
               </p>
+              {#if message.receipt.restored}<p>
+                  Recovered partial journal snapshot. Retained content-free accounting supplies any
+                  known cost; no response resumed.
+                </p>{/if}
               <p>
                 Frozen instructions: {message.receipt.instructions || 'Sample opening response.'}
               </p>
               {#if message.receipt.held}<p>
-                  Fictional hold: ${message.receipt.held.toFixed(2)}. Discarding content does not
-                  refund it.
+                  {message.receipt.imported
+                    ? 'Claimed historical hold (not restored into this profile’s allowance)'
+                    : 'Fictional hold'}: ${message.receipt.held.toFixed(2)}. Discarding content does
+                  not refund it.
+                </p>{/if}
+              {#if message.receipt.actual !== undefined}<p>
+                  {message.receipt.imported
+                    ? 'Claimed historical actual · unverified'
+                    : 'Fictional actual'}: ${message.receipt.actual.toFixed(2)}.
+                </p>{/if}
+              {#if message.receipt.retryOf}<p>
+                  Explicit retry of {message.receipt.retryOf}; earlier partial or unknown work is
+                  retained.
                 </p>{/if}
             </details>
+            {#if ['canceled', 'failed', 'unknown', 'blocked'].includes(message.receipt.status)}<button
+                class="text-button"
+                onclick={() => onretry(message.id)}>Prepare an explicit retry</button
+              >{/if}
           {/if}
         </article>
       {/each}
     {/if}
     {#if copyError}<p role="status" class="muted">{copyError}</p>{/if}
+    {#if !follow}<button
+        class="secondary-button follow-button"
+        onclick={() => {
+          follow = true;
+          end?.scrollIntoView({ block: 'end' });
+        }}>Jump to latest</button
+      >{/if}
     <div bind:this={end}></div>
   </div>
 </div>

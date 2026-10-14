@@ -8,6 +8,7 @@ import {
   findingStatus,
   rebuttalLetter,
   newResearchSession,
+  reviewDecisionCurrent,
 } from './research.ts';
 import type { Timer } from './types.ts';
 
@@ -170,6 +171,7 @@ test('cancel keeps dispatched cloud cost unknown, releases unstarted work and cl
   f.research.stop();
   assert.ok(Math.abs(f.ws.state.profileUsed - 0.12) < 1e-8);
   assert.ok(Math.abs(f.session().rounds[0].unknownHold - 0.12) < 1e-8);
+  f.flush(); // Only the separate named-work journal may settle after Stop.
   assert.equal(f.jobs.size, 0);
   assert.equal(f.session().rounds[0].status, 'incomplete');
 });
@@ -200,6 +202,7 @@ test('response checks require replies, preserve original critiques and never clo
   const check = r.check;
   f.research.checkResponses(f.id, r.id);
   assert.equal(r.check, check);
+  f.flush();
   assert.equal(f.jobs.size, 0);
 });
 
@@ -271,6 +274,7 @@ test('the demo needs explicit round two and never repeats until agreement', () =
   f.research.start(f.id);
   assert.equal(f.research.state.totalRounds, 2);
   assert.equal(f.session().rounds.length, 2);
+  f.flush();
   assert.equal(f.jobs.size, 0);
 });
 
@@ -366,6 +370,266 @@ test('disposing research stops owned work and releases unstarted reservations', 
   f.research.start(f.id);
   assert.ok(f.jobs.size);
   f.research.dispose();
+  f.ws.dispose();
   assert.equal(f.jobs.size, 0);
   assert.equal(f.ws.state.reviewActivity, null);
+});
+
+test('known authors and same-version aliases do not count as independent reviewers', () => {
+  const f = fixture();
+  f.research.reviewer(f.id, 1, 'qwen-alias');
+  assert.match(researchPreview(f.ws.state, f.session(), 0).reason, /distinct/);
+  f.research.reviewer(f.id, 1, 'gemma');
+  f.research.configure(f.id, { paperAuthor: 'qwen-alias' });
+  assert.match(researchPreview(f.ws.state, f.session(), 0).reason, /known author/);
+  f.research.start(f.id);
+  assert.equal(f.session().rounds.length, 0);
+  assert.equal(f.ws.state.profileUsed, 0);
+});
+test('explicit whole-project scope includes visible copies/transcripts and blocks omitted or unavailable sources', () => {
+  const f = fixture();
+  f.ws.addSampleFile('paper');
+  f.research.scope(f.id, 'project');
+  const p = researchPreview(f.ws.state, f.session(), 0);
+  assert.ok(p.blocked);
+  assert.ok(p.sources.some((s) => s.startsWith('Chat:')));
+  assert.ok(f.session().fileIds.includes('paper'));
+  f.research.source(f.id, 'files', 'paper');
+  assert.equal(researchPreview(f.ws.state, f.session(), 0).blocked, false);
+  f.research.configure(f.id, { chatIds: ['chat-launch'] });
+  assert.match(researchPreview(f.ws.state, f.session(), 0).reason, /outside this project/);
+  f.research.scope(f.id, 'selected');
+  assert.deepEqual(f.session().chatIds, []);
+  assert.deepEqual(f.session().fileIds, []);
+});
+test('authoring freezes question/sources before target, then gives identical v1 to two blind distinct reviewers', () => {
+  const f = fixture();
+  f.ws.state.models.find((m) => m.id === 'mistral')!.state = 'downloaded';
+  f.research.configure(f.id, { mode: 'author', authorId: 'qwen', reviewerIds: ['auto', 'auto'] });
+  f.research.update(
+    f.id,
+    'question',
+    'Compare pilot evidence without claiming universal correctness.',
+  );
+  const p = researchPreview(f.ws.state, f.session(), 0);
+  assert.equal(p.blocked, false);
+  assert.equal(p.roles.length, 3);
+  assert.equal(p.roles[0].kind, 'author');
+  assert.equal(
+    new Set(p.roles.map((r) => f.ws.state.models.find((m) => m.id === r.id)?.identity ?? r.id))
+      .size,
+    3,
+  );
+  f.research.start(f.id);
+  const r = f.session().rounds[0];
+  assert.equal(r.author?.status, 'authoring');
+  assert.equal(r.reviewers[0].status, 'queued');
+  assert.equal(r.question, 'Compare pilot evidence without claiming universal correctness.');
+  f.ws.selectProject('launch');
+  f.flush();
+  assert.equal(r.author?.status, 'complete');
+  assert.equal(r.status, 'complete');
+  assert.equal(f.session().paperAuthor, 'qwen');
+  assert.equal(r.context, f.currentContext());
+  assert.equal(r.reviewers[0].input?.paper, r.paper);
+  assert.deepEqual(r.reviewers[0].input, r.reviewers[1].input);
+  assert.equal(r.reviewers[0].input?.peerVerdicts, false);
+  assert.equal(f.ws.state.activeChatId, 'chat-launch');
+  assert.equal(
+    f.ws.state.models.filter((m) => m.place === 'local' && m.state === 'ready').length,
+    1,
+  );
+});
+test('author plus three-call cloud envelope is reserved once and price changes never expand it silently', () => {
+  const f = fixture();
+  f.ws.setCloudAllowed(true);
+  f.ws.state.connection.status = 'verified';
+  f.research.configure(f.id, { mode: 'author', authorId: 'claude', reviewerIds: ['qwen', 'gpt'] });
+  const p = researchPreview(f.ws.state, f.session(), 0);
+  assert.ok(Math.abs(p.upper - 0.36) < 1e-8);
+  f.research.start(f.id);
+  assert.ok(Math.abs(f.ws.state.profileUsed - 0.36) < 1e-8);
+  f.ws.state.priceUpper = 0.24;
+  f.flush();
+  assert.equal(f.session().rounds[0].status, 'incomplete');
+  assert.equal(f.research.state.busy, null);
+  assert.ok(f.ws.state.profileUsed <= 0.24);
+});
+test('failed reviewer keeps completed findings and refuses human acceptance without reranking', () => {
+  const f = fixture();
+  f.research.configure(f.id, { scenario: 'reviewer-fails' });
+  f.research.start(f.id);
+  f.flush();
+  const r = f.session().rounds[0];
+  assert.equal(r.reviewers[0].status, 'complete');
+  assert.equal(r.reviewers[1].status, 'failed');
+  assert.equal(r.status, 'incomplete');
+  assert.equal(r.reviewers[0].findings.length, 2);
+  f.research.humanDecision(f.id, r.id, 'accept');
+  assert.equal(f.session().signoff, null);
+  assert.equal(f.research.state.totalRounds, 1);
+});
+test('failed planned load is incomplete and never substitutes a reviewer or cloud route', () => {
+  const f = fixture();
+  f.ws.setFixture('setupScenario', 'load-failed');
+  f.research.start(f.id);
+  f.flush();
+  const r = f.session().rounds[0];
+  assert.equal(r.status, 'incomplete');
+  assert.equal(r.reviewers[0].status, 'complete');
+  assert.equal(r.reviewers[1].status, 'failed');
+  assert.equal(r.reviewers[1].modelId, 'gemma');
+  assert.equal(f.ws.state.profileUsed, 0);
+  assert.equal(f.ws.state.models.find((m) => m.id === 'gemma')?.state, 'downloaded');
+});
+test('reconciliation uses the sole optional call, creates unreviewed v2 and retains v1 critics', () => {
+  const f = fixture();
+  f.research.start(f.id);
+  f.flush();
+  const r = f.session().rounds[0];
+  const original = structuredClone(r.reviewers);
+  f.research.reconcile(f.id, r.id);
+  f.flush();
+  assert.equal(r.reconciliation?.status, 'complete');
+  assert.equal(f.session().revision, 2);
+  assert.notEqual(f.session().paper, r.paper);
+  assert.deepEqual(r.reviewers, original);
+  assert.equal(f.session().paperAuthor, 'qwen');
+  assert.equal(f.session().signoff, null);
+  f.research.checkResponses(f.id, r.id);
+  assert.equal(r.check, null);
+  assert.match(researchPreview(f.ws.state, f.session(), 1).reason, /known author/);
+  f.research.humanDecision(f.id, r.id, 'accept');
+  assert.equal(f.session().signoff, null);
+});
+test('human acceptance requires resolved current findings and becomes stale after any reply/source edit', () => {
+  const f = fixture();
+  f.research.start(f.id);
+  f.flush();
+  const r = f.session().rounds[0];
+  f.research.humanDecision(f.id, r.id, 'accept');
+  assert.equal(f.session().signoff, null);
+  f.research.humanDecision(f.id, r.id, 'changes');
+  assert.equal(reviewDecisionCurrent(f.ws.state, f.session()), true);
+  draftResponses(f);
+  assert.equal(reviewDecisionCurrent(f.ws.state, f.session()), false);
+  f.research.checkResponses(f.id, r.id);
+  f.flush();
+  for (const finding of r.reviewers.flatMap((p) => p.findings))
+    f.research.closeFinding(f.id, r.id, finding.id);
+  f.research.humanDecision(f.id, r.id, 'accept');
+  assert.equal(f.session().signoff?.decision, 'accept');
+  assert.equal(reviewDecisionCurrent(f.ws.state, f.session()), true);
+  f.ws.setProjectInstructions('Changed scope');
+  assert.equal(reviewDecisionCurrent(f.ws.state, f.session()), false);
+});
+test('research journal restores named drafts/reviews but never Temporary bodies or an active pass', () => {
+  const f = fixture();
+  f.research.start(f.id);
+  f.flush();
+  f.research.update(f.id, 'paper', 'Saved named revision');
+  f.flush();
+  f.ws.newChat(null);
+  const temp = f.ws.state.activeChatId;
+  f.research.open(temp);
+  f.research.update(temp, 'paper', 'Temporary paper must not survive');
+  f.ws.restartMock(false, true);
+  assert.ok(!f.research.state.sessions[temp]);
+  assert.equal(f.research.state.sessions[f.id].paper, 'Saved named revision');
+  assert.equal(f.research.state.sessions[f.id].rounds.length, 1);
+  assert.equal(f.research.state.busy, null);
+});
+test('inactive-profile research stays isolated and deleted unused allowance refunds only its original profile', () => {
+  const f = fixture();
+  f.ws.setCloudAllowed(true);
+  f.ws.state.connection.status = 'verified';
+  f.research.reviewer(f.id, 0, 'claude');
+  f.research.reviewer(f.id, 1, 'gpt');
+  f.research.start(f.id);
+  f.flush();
+  assert.ok(f.ws.state.profileUsed > 0.15);
+  f.ws.switchProfile('sandbox');
+  assert.equal(f.ws.state.profileUsed, 0);
+  assert.ok(f.research.state.sessions[f.id]);
+  f.research.dispose();
+  assert.equal(f.ws.state.profileUsed, 0);
+  f.ws.switchProfile('personal');
+  assert.ok(Math.abs(f.ws.state.profileUsed - 0.04) < 1e-8);
+});
+
+test('closing the optional call releases unused allowance and cannot later spend or refund it again', () => {
+  const f = fixture();
+  f.ws.setCloudAllowed(true);
+  f.ws.state.connection.status = 'verified';
+  f.research.reviewer(f.id, 0, 'claude');
+  f.research.reviewer(f.id, 1, 'gpt');
+  f.research.start(f.id);
+  f.flush();
+  const r = f.session().rounds[0];
+  f.research.finishRound(f.id, r.id);
+  f.flush();
+  assert.equal(r.optionalClosed, true);
+  assert.equal(r.remaining, 0);
+  assert.ok(Math.abs(f.ws.state.profileUsed - 0.04) < 1e-8);
+  draftResponses(f);
+  f.research.checkResponses(f.id, r.id);
+  f.research.reconcile(f.id, r.id);
+  f.flush();
+  assert.equal(r.check, null);
+  assert.equal(r.reconciliation, null);
+  assert.ok(Math.abs(f.ws.state.profileUsed - 0.04) < 1e-8);
+});
+
+test('late author/reconciliation output never overwrites unique edits to the working target', () => {
+  const f = fixture();
+  f.research.start(f.id);
+  f.flush();
+  const r = f.session().rounds[0];
+  f.research.reconcile(f.id, r.id);
+  f.research.update(f.id, 'paper', 'Unique human edit while a proposal is being prepared');
+  f.flush();
+  assert.equal(f.session().paper, 'Unique human edit while a proposal is being prepared');
+  assert.ok(r.reconciliation?.paper);
+  assert.equal(f.session().revision, 2);
+  const a = fixture();
+  a.ws.state.models.find((m) => m.id === 'mistral')!.state = 'downloaded';
+  a.research.configure(a.id, {
+    mode: 'author',
+    authorId: 'qwen',
+    reviewerIds: ['gemma', 'mistral'],
+  });
+  a.research.start(a.id);
+  a.research.update(a.id, 'paper', 'Unique working draft');
+  a.flush();
+  assert.equal(a.session().paper, 'Unique working draft');
+  assert.ok(a.session().rounds[0].paper.includes('Authored sample fixture'));
+  assert.equal(a.session().rounds[0].status, 'complete');
+});
+
+test('author reconciliation uses the original author and preserves all known authors in later reviews', () => {
+  const f = fixture();
+  f.ws.state.models.find((m) => m.id === 'mistral')!.state = 'downloaded';
+  f.research.configure(f.id, {
+    mode: 'author',
+    authorId: 'qwen',
+    reviewerIds: ['gemma', 'mistral'],
+  });
+  f.research.start(f.id);
+  f.flush();
+  const r = f.session().rounds[0];
+  f.research.reconcile(f.id, r.id);
+  f.flush();
+  assert.equal(r.reconciliation?.model, 'Qwen 3 · 8B');
+  assert.deepEqual(f.session().paperAuthors, ['qwen']);
+  assert.equal(researchPreview(f.ws.state, f.session(), 1).blocked, false);
+  const other = fixture();
+  other.ws.state.models.find((m) => m.id === 'mistral')!.state = 'downloaded';
+  other.research.configure(other.id, { paperAuthor: 'qwen', reviewerIds: ['gemma', 'mistral'] });
+  other.research.start(other.id);
+  other.flush();
+  other.research.reconcile(other.id, other.session().rounds[0].id);
+  other.flush();
+  assert.deepEqual(other.session().paperAuthors, ['qwen', 'gemma']);
+  other.research.reviewer(other.id, 0, 'qwen-alias');
+  assert.match(researchPreview(other.ws.state, other.session(), 1).reason, /known author/);
 });

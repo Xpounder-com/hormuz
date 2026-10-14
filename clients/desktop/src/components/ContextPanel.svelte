@@ -13,6 +13,7 @@
     onimport,
     onmodels,
     onconnections,
+    onfile,
   }: {
     snapshot: WorkspaceState;
     chat: Chat;
@@ -24,6 +25,7 @@
     onimport: () => void;
     onmodels: () => void;
     onconnections: () => void;
+    onfile: (id: string) => void;
   } = $props();
   const project = $derived(snapshot.projects.find((p) => p.id === chat.projectId));
 </script>
@@ -39,6 +41,9 @@
   <div class="context-tabs" role="tablist" aria-label="Context tabs">
     {#each ['Files', 'Instructions', 'Preferences'] as label}<button
         role="tab"
+        id={`context-${label.toLowerCase()}`}
+        aria-controls="context-tabpanel"
+        tabindex={tab === label.toLowerCase() ? 0 : -1}
         aria-selected={tab === label.toLowerCase()}
         onclick={() => ontab(label.toLowerCase())}
         onkeydown={(event) => {
@@ -57,7 +62,12 @@
         }}>{label}</button
       >{/each}
   </div>
-  <div class="context-content">
+  <div
+    class="context-content"
+    role="tabpanel"
+    id="context-tabpanel"
+    aria-labelledby={`context-${tab}`}
+  >
     {#if tab === 'files'}
       <div class="panel-section-title">
         <h2>Included in this chat</h2>
@@ -74,7 +84,8 @@
                 ><input
                   type="checkbox"
                   checked={chat.selectedFiles.includes(file.id)}
-                  disabled={file.status !== 'available'}
+                  disabled={(file.status !== 'available' || file.ownership === 'unbound-link') &&
+                    !chat.selectedFiles.includes(file.id)}
                   onchange={() => service.toggleFile(file.id)}
                 /><FileText size={17} /><span
                   ><strong title={file.name}>{file.name}</strong><small
@@ -85,9 +96,9 @@
                 ></label
               ><button
                 class="icon-button"
-                aria-label={`Remove ${file.name} from project`}
-                title="Remove sample project copy"
-                onclick={() => service.removeFile(file.id)}><Trash2 size={13} /></button
+                aria-label={`Preview ${file.name}`}
+                title="Preview, replace or remove project entry"
+                onclick={() => onfile(file.id)}><ArrowUpRight size={13} /></button
               >
             </div>
           {/each}
@@ -149,6 +160,28 @@
       <div class="panel-section-title">
         <h2>{project ? 'Project defaults' : 'Temporary session'}</h2>
       </div>
+      {#if project}<label class="field-label"
+          >Project model default<select
+            aria-label="Project model default"
+            value={project.modelIntent ?? 'auto'}
+            onchange={(event) => service.setProjectIntent(event.currentTarget.value)}
+            ><option value="auto">Auto</option>{#if project.modelIntent === 'unbound'}<option
+                value="unbound">Unbound imported intent</option
+              >{/if}{#each snapshot.models as model}<option value={model.id}>{model.name}</option
+              >{/each}</select
+          ></label
+        ><label class="toggle-field"
+          ><span
+            ><strong>Enforce Local-only for this project</strong><small
+              >Chat and request choices cannot loosen this restriction.</small
+            ></span
+          ><input
+            type="checkbox"
+            role="switch"
+            checked={!!project.localOnly}
+            onchange={(event) => service.setProjectRestriction(event.currentTarget.checked)}
+          /></label
+        >{/if}
       <label class="toggle-field"
         ><span
           ><strong
@@ -224,14 +257,74 @@
         )} / $25 per UTC month. Request ceiling: $1. Fixture prices and token estimates are fictional.
       </p>
       <div class="effective-route">
-        <span>{chat.intent === 'auto' ? 'Auto preview' : 'Pinned model'}</span><strong
-          >{plan.model?.name ?? 'No eligible model'}</strong
-        >
+        <span
+          >{chat.requestIntent
+            ? 'One-request override'
+            : chat.inheritIntent
+              ? 'Inherited model intent'
+              : plan.intent === 'auto'
+                ? 'Auto preview'
+                : 'Pinned model'}</span
+        ><strong>{plan.model?.name ?? 'No eligible model'}</strong>
         <p>{plan.reason}</p>
         {#if chat.intent !== 'auto'}<button class="text-button" onclick={() => service.pin('auto')}
             >Resume Auto</button
           >{/if}
+        {#if !chat.inheritIntent}<button class="text-button" onclick={() => service.pin('inherit')}
+            >Reset chat model to inherit</button
+          >{/if}
       </div>
+      <details class="advanced-preferences">
+        <summary>Request and continuation settings</summary><label class="field-label"
+          >One-request model override<select
+            aria-label="One-request model override"
+            value={chat.requestIntent ?? ''}
+            onchange={(event) => service.setRequestIntent(event.currentTarget.value)}
+            ><option value="">None · use chat intent</option><option value="auto"
+              >Auto for one request</option
+            >{#each snapshot.models as model}<option value={model.id}>{model.name}</option
+              >{/each}</select
+          ></label
+        >
+        <p class="panel-description">
+          Retained through refusal or changed-plan review; consumed only on dispatch. A new picker
+          choice replaces this override.
+        </p>
+        <label class="field-label"
+          >Chat cloud ceiling · fictional USD<input
+            type="number"
+            min="0"
+            max="10"
+            step="0.1"
+            aria-label="Chat cloud ceiling"
+            value={chat.cap}
+            onchange={(event) => service.setChatCap(event.currentTarget.valueAsNumber)}
+          /></label
+        >
+        <p class="panel-description">
+          Effective ceiling is the lower of chat and project/session limits, under the $25 profile
+          allowance. Managed profile restriction: {snapshot.profileLocalOnly
+            ? 'Local-only'
+            : 'none'}.
+        </p>
+        <label class="toggle-field"
+          ><span
+            ><strong>Simulate opaque model continuation</strong><small
+              >Locks this conversation to {chat.continuationModel ??
+                plan.model?.name ??
+                'its model'}; no arbitrary state translation.</small
+            ></span
+          ><input
+            type="checkbox"
+            checked={!!chat.continuationModel}
+            onchange={(event) => service.setContinuation(event.currentTarget.checked)}
+          /></label
+        >{#if chat.continuationModel}<button
+            class="secondary-button"
+            disabled={!chat.projectId}
+            onclick={() => service.newConversation()}>Start a new chat without continuation</button
+          >{/if}
+      </details>
       <button class="panel-link" onclick={onmodels}
         >Manage local models<ArrowUpRight size={14} /></button
       ><button class="panel-link" onclick={onconnections}

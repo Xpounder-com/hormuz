@@ -13,9 +13,9 @@ active scope and the disposition of the original open issues.
 
 Planning PR #486 merged at `20b8ff04659e9b4ab40c67b429f1def37e115092`.
 The user authorized the first simulated UI implementation after that merge.
-The [first source slice](DESKTOP_UI_IMPLEMENTATION.md) starts U1–U3 with a glossy
-project workspace and minimal Auto bar; remaining journeys and #492 approval
-stay open. No host/backend, real project context, model download, provider call
+The [UI implementation candidate](DESKTOP_UI_IMPLEMENTATION.md) covers U1–U3/U3r
+mock journeys with the glossy workspace and minimal Auto bar. Final #481
+visual/accessibility and #492 integrated user acceptance stay open. No host/backend, real project context, model download, provider call
 or release is introduced. Runtime work requires a separate work order after
 the UI gate. Account cleanup has its own authorized operations
 and evidence below; it is not covered by a blanket claim of no service changes.
@@ -72,18 +72,24 @@ installed platform qualification. #481 selects the shared visual reference;
 #492 reviews the integrated simulation. Native desktop blur is optional; the
 shared surface needs a beautiful legible opaque fallback.
 
-## UI first: simulation implementation started
+## UI first: complete simulation candidate
 
-The research exploration now includes **Roast my paper** with selectable heat
-and distinct reviewer fixtures, plus **Rebuttal** for original findings or
-pasted external comments. It preserves critiques and evidence requirements,
-uses one optional disclosed third-call response check and records human
-resolutions for a named revision. Edited text invalidates earlier checks;
-another blind round needs explicit intent. See the
-[research contract](RESEARCH_REVIEW_MODE.md). This advances #502 without closing
-its full criteria, #492 or any runtime gate; the minimal Auto bar stays unchanged.
+The renderer in `clients/desktop` now covers project/chat pin/archive/move,
+scoped title/content search, bounded import/export, file preview/replacement and
+adverse states, onboarding/setup/connection failures, inherited/request intent,
+changed-plan confirmation, partial/unknown/retry and memory-journal recovery.
+Research includes **Roast my paper**, **Rebuttal**, explicit source coverage,
+known-author/alias lineage, authoring with two freeze points, distinct blind
+reviews, incomplete/disagreement and optional check OR reconciliation into an
+unreviewed revision. Two rounds and scoped human decisions stay bounded.
+The minimal Auto bar remains the single-response entry point.
 
-The scope is sufficient to start the bounded UI simulation with synthetic
+See the [implementation/gate evidence](DESKTOP_UI_IMPLEMENTATION.md) and
+[research contract](RESEARCH_REVIEW_MODE.md). This is the implementation
+candidate for #487–#491/#502 and #338's early ordered mock fixtures, with final
+#481/#492 review still pending. It is not acceptance of any runtime gate.
+
+The scope now has a runnable bounded UI simulation with synthetic
 projects, sources, models, costs and responses. #480 checkpoint A now records
 the [product/mock boundaries](DESKTOP_BACKEND_BOUNDARIES.md): saved/Temporary
 lifetime, imported text-copy ownership, explicit context, inherited restrictions,

@@ -36,17 +36,18 @@ function fixture() {
   return { service, jobs, step, flush };
 }
 
-test('typing preview is pure, proposes a downloaded writing model, and never schedules work', () => {
+test('preview is pure and schedules nothing; named draft saving is a separate operation', () => {
   const { service, jobs } = fixture();
   service.setDraft('Write a first draft');
   const before = structuredClone(service.state);
+  const draftSaveJobs = jobs.size;
   for (let i = 0; i < 100; i++) {
     const p = preview(service.state);
     assert.equal(p.model?.id, 'gemma');
     assert.equal(p.preparation, true);
   }
   assert.deepEqual(service.state, before);
-  assert.equal(jobs.size, 0);
+  assert.equal(jobs.size, draftSaveJobs);
 });
 
 test('connection does not grant cloud permission; explicit consent permits research Auto', () => {

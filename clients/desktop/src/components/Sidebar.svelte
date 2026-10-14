@@ -11,6 +11,7 @@
     Clock3,
     Archive,
     FlaskConical,
+    Pin,
   } from '@lucide/svelte';
   import type { WorkspaceState } from '../lib/types.ts';
   let {
@@ -37,13 +38,19 @@
   let query = $state('');
   let showArchive = $state(false);
   const chat = $derived(snapshot.chats.find((c) => c.id === snapshot.activeChatId)!);
-  const projects = $derived(snapshot.projects.filter((p) => p.archived === showArchive));
+  const projects = $derived(
+    snapshot.projects
+      .filter((p) => p.archived === showArchive)
+      .toSorted((a, b) => Number(!!b.pinned) - Number(!!a.pinned)),
+  );
   const chats = $derived(
     snapshot.chats
       .filter(
         (c) =>
           c.projectId === chat.projectId && c.title.toLowerCase().includes(query.toLowerCase()),
       )
+      .filter((c) => !c.archived)
+      .toSorted((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
       .slice(0, 50),
   );
 </script>
@@ -94,7 +101,7 @@
         }}
         ><Folder size={17} style={`color:${project.color}`} /><span>{project.name}</span><span
           class="row-count">{snapshot.chats.filter((c) => c.projectId === project.id).length}</span
-        ></button
+        >{#if project.pinned}<Pin size={11} />{/if}</button
       >{/each}
     {#if !projects.length}<p class="sidebar-empty">
         {showArchive ? 'No archived projects' : 'Create a project to get started'}
@@ -120,12 +127,20 @@
           onchat(item.id);
           onview('workspace');
         }}
-        ><MessageSquare size={15} /><span>{item.title}</span
-        >{#if snapshot.attempt?.chatId === item.id}<span class="busy-dot"></span>{/if}</button
+        ><MessageSquare size={15} /><span>{item.title}</span>{#if item.pinned}<Pin
+            size={11}
+          />{/if}{#if snapshot.attempt?.chatId === item.id}<span class="busy-dot"
+          ></span>{/if}</button
       >{/each}
     {#if !chats.length}<p class="sidebar-empty">No matching chat titles</p>{/if}
+    {#if chats.length === 50}<button class="text-button" onclick={() => onview('history')}
+        >First 50 · search all history</button
+      >{/if}
   </nav>
   <nav class="utility-nav" aria-label="App navigation">
+    <button class:active={view === 'history'} class="nav-row" onclick={() => onview('history')}
+      ><Search size={17} /><span>History</span></button
+    >
     <button class:active={view === 'research'} class="nav-row" onclick={() => onview('research')}
       ><FlaskConical size={17} /><span>Research</span></button
     >
@@ -145,6 +160,9 @@
   </nav>
   <div class="sidebar-footer">
     <span class="profile-avatar">M</span>
-    <div><strong>Personal workspace</strong><small>Simulation · resets on reload</small></div>
+    <div>
+      <strong>{snapshot.profileId === 'personal' ? 'Personal workspace' : 'Sandbox profile'}</strong
+      ><small>Simulation · resets on reload</small>
+    </div>
   </div>
 </aside>

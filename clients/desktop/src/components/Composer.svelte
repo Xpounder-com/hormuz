@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ArrowUp, Square, Paperclip, ArrowUpRight } from '@lucide/svelte';
   import ModelPicker from './ModelPicker.svelte';
+  import { sendsOnEnter } from '../lib/keyboard.ts';
   import type { Chat, RoutePlan, WorkspaceState } from '../lib/types.ts';
   let {
     snapshot,
@@ -33,7 +34,7 @@
       onsend();
   }
   function key(event: KeyboardEvent) {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !composing) {
+    if (sendsOnEnter(event, composing)) {
       event.preventDefault();
       submit();
     }
@@ -111,9 +112,13 @@
         ? snapshot.attempt?.phase === 'preparing'
           ? 'Preparing local model · simulated'
           : 'Responding · simulated'
-        : chat.intent === 'auto'
-          ? 'Auto previews as you type'
-          : 'Model pinned for this chat'}{plan.model?.place === 'cloud'
+        : chat.requestIntent
+          ? 'One-request model override · consumed on dispatch'
+          : plan.intent === 'auto'
+            ? 'Auto previews as you type'
+            : chat.inheritIntent
+              ? 'Inherited model preference'
+              : 'Model pinned for this chat'}{plan.model?.place === 'cloud'
         ? ' · estimate $0.02, upper allowance $0.12 · fictional'
         : ''}</span
     ><span>Enter to send <span class="hint-separator">·</span> Shift + Enter for a new line</span>

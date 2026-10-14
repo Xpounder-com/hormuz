@@ -10,8 +10,8 @@ option. Existing gateway, native-client and installed qualification evidence
 keeps its original boundary.
 
 Planning PR #486 is merged. The user authorized a first source UI slice in
-`clients/desktop`; see the [implementation checkpoint](DESKTOP_UI_IMPLEMENTATION.md)
-for delivered mock interactions and outstanding journeys. The new UI makes no
+`clients/desktop`; see the [implementation candidate](DESKTOP_UI_IMPLEMENTATION.md)
+for completed mock journeys and pending acceptance. The new UI makes no
 real backend/model/provider calls and saves only in browser memory; #492 still
 requires integrated review. Actual host/backend work follows UI
 approval and a named owner, exact model/provider/protocol choices, storage/context
@@ -25,7 +25,7 @@ Hormuz owns projects, chats, files, instructions and model/Auto preferences in
 one Electron + Svelte/TypeScript app. A normal project window supports continuing
 work; a minimal global prompt bar provides quick access to the active project.
 Both use the same cohesive glossy visual language: smooth curved edges, refined
-type, restrained highlights, depth and motion. The exact finish is unselected.
+type, restrained highlights, depth and motion. The working reference is the glossy #518 source at `9a0191b`, retained after the user called it a great start; final visual and accessibility acceptance remain open.
 Readable opaque, reduced-motion and high-contrast alternatives are required;
 native desktop blur is an optional platform enhancement.
 

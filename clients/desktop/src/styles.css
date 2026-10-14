@@ -705,6 +705,7 @@ kbd {
 }
 .location-label {
   font-size: 10px;
+  flex-shrink: 0;
 }
 .pin-icon {
   color: var(--accent);
@@ -713,6 +714,7 @@ kbd {
   color: var(--subtle);
   font-size: 10px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .picker-menu {
   position: absolute;
@@ -1832,12 +1834,6 @@ input[type='checkbox'] {
   }
   .model-picker {
     flex-shrink: 1;
-  }
-  .location-label {
-    display: none;
-  }
-  .load-hint {
-    display: none;
   }
   .attach {
     width: 25px;

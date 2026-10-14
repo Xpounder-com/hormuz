@@ -68,8 +68,30 @@ CSP allows its own assets and loopback HMR, with no arbitrary external fetch or
 model-output execution capability. This renderer mock is not an authoritative
 production policy, accounting or host contract.
 
-The first slice contributes to #481 and #487–#491. Integrated acceptance #492
-remains open: full adverse-state coverage, project move/import/export, persistence
-failure fixtures and remaining Research Review #502 journeys are follow-up UI work. Runtime
-contracts #480 B and Electron/storage/llama.cpp/providers/real Auto follow that
-gate under a separate work order.
+The renderer now covers the #487–#491 and #502 simulation journeys. Open History
+for title/content/project/archive search and import/export. Workspace actions
+include pin, archive, move, clear and delete. Files support preview/replacement
+and failure states; Preferences has inherited intent and a one-request override.
+Settings contains the fresh Sandbox profile, memory-journal quit/reopen,
+appearance/host/recovery scenarios and independent network controls. A failed
+Temporary save preserves its content; a changed Send plan asks for renewed
+intent; partial work can prepare an explicit retry without automatic replay.
+
+Research adds a selected/custom/whole-project source manifest, known-author
+and alias checks, optional Draft + review, failed/dissenting reviewers and
+reconciliation into unreviewed v2. Author output and proposals preserve unique
+working edits. Initial reviewers see the same frozen target without current-pass
+peer verdicts. Check or reconciliation uses one optional call, not both; Finish
+round can release unused allowance. Human decisions bind to version/sources and
+resolved findings and confer no execution or scientific authority.
+
+The export preview excludes research sessions, Temporary and live bindings;
+import is capped at 1 MiB and creates new identities/cloud-off/unbound model
+intent. The named-work/research journal survives only a simulated restart;
+browser reload resets everything. Profiles isolate content and consent, and
+profile change unloads the resident model. All prices and cost records are fake.
+
+See [implementation/gate evidence](../../docs/DESKTOP_UI_IMPLEMENTATION.md).
+Final #481/#492 visual/accessibility/user acceptance remains open. Runtime
+#480 B, Electron, durable storage, llama.cpp, providers and real Auto follow
+under a separate work order. No installed-platform claim follows from the UI.

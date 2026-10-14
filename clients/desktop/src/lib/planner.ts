@@ -9,11 +9,7 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
   const project = state.projects.find((p) => p.id === chat.projectId);
   const context = chat.selectedFiles.map((id) => project?.files.find((f) => f.id === id));
   const files = context.filter((f) => f !== undefined);
-  const instructions = [
-    'Answer clearly and say when evidence is missing.',
-    project?.instructions,
-    chat.instructions,
-  ]
+  const instructions = [state.appInstructions, project?.instructions, chat.instructions]
     .filter(Boolean)
     .join('\n\n');
   const complete = chat.messages.filter(
@@ -29,6 +25,8 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
   const tokens = Math.ceil(input.length / 4); // explicitly synthetic, not a tokenizer
   const cloudAllowed =
     (project?.cloudAllowed ?? chat.cloudAllowed) &&
+    !project?.localOnly &&
+    !state.profileLocalOnly &&
     !chat.localOnly &&
     !files.some((f) => f.localOnly);
   const objective =
@@ -36,7 +34,7 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
   let contextError = '';
   if (context.some((f) => f === undefined))
     contextError = 'A selected copy is missing. Remove it from context.';
-  else if (files.some((f) => f.status !== 'available'))
+  else if (files.some((f) => f.status !== 'available' || f.ownership === 'unbound-link'))
     contextError = 'Selected context is unsupported, missing or too large. Remove it before Send.';
   else if (
     files.length > 20 ||
@@ -48,12 +46,17 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
     contextError =
       'This packet exceeds the sample input window. Reduce context or start a new chat.';
   const key = chat.projectId ?? chat.id;
-  const cap = Math.min(project?.cap ?? chat.cap, 10);
-  const upper = 0.12;
+  const cap = Math.min(project?.cap ?? chat.cap, chat.cap, 10);
+  const upper = state.priceUpper;
+  const intent =
+    chat.requestIntent ??
+    (chat.inheritIntent ? (project?.modelIntent ?? state.appIntent) : chat.intent);
   function ineligible(m: Model): string {
     if (contextError) return contextError;
     if (!m.fit || tokens > m.inputLimit)
       return 'Model fit is unavailable for this context. Choose a qualified sample model.';
+    if (chat.continuationModel && m.id !== chat.continuationModel)
+      return 'This opaque continuation belongs to another model. Start a new chat to change it.';
     if (m.place === 'local') {
       if (m.state !== 'ready' && m.state !== 'downloaded')
         return 'Set up this local model in Models before Send.';
@@ -63,8 +66,17 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
       if (state.connection.status !== 'verified')
         return 'Verify a demo connection in Connections before Send.';
       if (
+        state.connection.provider &&
+        state.connection.provider !== 'demo' &&
+        m.id !== state.connection.provider
+      )
+        return 'This model needs its own demo provider binding. Review Connections.';
+      if (
         !Number.isFinite(cap) ||
         cap < 0 ||
+        !Number.isFinite(upper) ||
+        upper <= 0 ||
+        upper > 1 ||
         state.profileUsed + upper > 25 ||
         (state.usage[key] ?? 0) + upper > cap
       )
@@ -72,7 +84,7 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
     }
     return '';
   }
-  const pinned = chat.intent !== 'auto';
+  const pinned = intent !== 'auto';
   const eligible = state.models.filter((m) => !ineligible(m));
   const writing = /\b(write|rewrite|draft|edit|polish|poem)\b/i.test(chat.draft);
   const research =
@@ -88,9 +100,7 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
       (m.id === 'qwen' ? 1 : 0);
     return score(b) - score(a);
   });
-  const model = pinned
-    ? (state.models.find((m) => m.id === chat.intent) ?? null)
-    : (ranked[0] ?? null);
+  const model = pinned ? (state.models.find((m) => m.id === intent) ?? null) : (ranked[0] ?? null);
   const reason = model
     ? ineligible(model) ||
       (pinned
@@ -100,7 +110,12 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
           : writing && model.specialty === 'writing'
             ? 'A local writing match; already downloaded.'
             : 'Local baseline for the available sample evidence.')
-    : contextError || 'No eligible model. Set up a local model or review cloud preferences.';
+    : contextError ||
+      (intent === 'unbound'
+        ? 'Imported model intent is unbound. Choose Auto or explicitly match this profile’s inventory.'
+        : pinned
+          ? 'The selected model is unavailable. Keep the intent or explicitly choose Auto / another model.'
+          : 'No eligible model. Set up a local model or review cloud preferences.');
   const blocked = !model || Boolean(model && ineligible(model));
   return {
     model,
@@ -115,17 +130,21 @@ export function preview(state: WorkspaceState, chat: Chat = activeChat(state)): 
     objective,
     cloudAllowed,
     historyCount: Math.min(complete.length, 10),
+    intent,
     fingerprint: JSON.stringify([
       chat.id,
       chat.projectId,
       chat.draft,
-      chat.intent,
+      intent,
       instructions,
       files,
       history,
       objective,
       cloudAllowed,
       cap,
+      model?.place === 'cloud' ? upper : 0,
+      model?.identity,
+      chat.continuationModel,
       model?.id,
       model?.place,
       blocked,

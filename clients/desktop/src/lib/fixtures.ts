@@ -33,6 +33,15 @@ export const sampleFiles: ProjectFile[] = [
     localOnly: false,
     status: 'oversized',
   },
+  {
+    id: 'link',
+    name: 'Legacy linked notes.md',
+    text: '',
+    revision: 1,
+    localOnly: true,
+    status: 'unsupported',
+    ownership: 'unbound-link',
+  },
 ];
 
 export function emptyChat(id: string, projectId: string | null): Chat {
@@ -49,6 +58,7 @@ export function emptyChat(id: string, projectId: string | null): Chat {
     cloudAllowed: false,
     cap: 10,
     messages: [],
+    inheritIntent: true,
   };
 }
 
@@ -123,6 +133,7 @@ export function initialState(): WorkspaceState {
     models: [
       {
         id: 'qwen',
+        identity: 'qwen-3-8b-fixture-v1',
         name: 'Qwen 3 · 8B',
         detail: 'Everyday questions & code',
         place: 'local',
@@ -144,6 +155,19 @@ export function initialState(): WorkspaceState {
         inputLimit: 6144,
         size: '8.1 GB · sample',
         specialty: 'writing',
+      },
+      {
+        id: 'qwen-alias',
+        identity: 'qwen-3-8b-fixture-v1',
+        name: 'Qwen 3 · 8B · alias demo',
+        detail: 'Same model/version as Qwen; not an independent reviewer',
+        place: 'local',
+        state: 'downloaded',
+        progress: 100,
+        fit: true,
+        inputLimit: 6144,
+        size: 'Shared package · sample',
+        specialty: 'general',
       },
       {
         id: 'mistral',
@@ -204,6 +228,23 @@ export function initialState(): WorkspaceState {
     opaque: false,
     profileUsed: 0,
     usage: {},
+    accounting: {},
     appObjective: 'balanced',
+    appInstructions: 'Answer clearly and say when evidence is missing.',
+    appIntent: 'auto',
+    profileId: 'personal',
+    profileLocalOnly: false,
+    storage: { status: 'available', save: 'saved', error: '' },
+    reducedMotion: false,
+    highContrast: false,
+    catalog: 'available',
+    setupScenario: 'normal',
+    sendScenario: 'normal',
+    priceUpper: 0.12,
+    hostScenario: 'normal',
+    firstRun: false,
+    telemetry: false,
+    updateChecks: false,
+    sendConfirmation: null,
   };
 }
