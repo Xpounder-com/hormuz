@@ -38,6 +38,7 @@ from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from . import work_gateway
 from .work_http import handle_work_request
 from .work_runtime import WorkRuntimeError
+from .route_admission import RouteAdmission, RouteAdmissionError
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
@@ -511,6 +512,7 @@ class GatewayServer(ThreadingHTTPServer):
                 routes=config.model_routes,
             )
             work_gateway.initialize(self, environ=environ)
+            self.route_admission = RouteAdmission(config, self.destinations)
             protected_values = [
                 ("hormuz_identity_token", identity.token)
                 for identity in config.identities_by_token.values()
@@ -708,6 +710,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         self._attribution_result = None
         path = urlsplit(self.path).path
+        if path == "/v1/router/state":
+            identity = self._authenticate()
+            if identity is not None:
+                self._send_contract_json(HTTPStatus.OK, "hormuz.route-admission", self.server.route_admission.status(self, identity))
+            return
         if path == "/v1/work/billing/webhook":
             self._send_json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": {"code": "hormuz_ai_work_method_not_allowed"}})
             return
@@ -950,6 +957,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
         except AdmissionError as error:
             self._reject_attribution(identity, default_client, protocol, error)
+        except RouteAdmissionError as error:
+            self._send_protocol_error(protocol, "Route admission requires attention: " + error.reason,
+                error.status, code="hormuz_route_" + error.reason)
         except WorkRuntimeError as error:
             self.close_connection = True
             if getattr(self, "_response_started", False):
@@ -1156,9 +1166,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         # Route only the sanitized request, after the same governance checks
         # used by the configured baseline. Selection cannot widen its caps.
+        decision = self.server.route_admission.select(self, identity, decision, redaction.value,
+            client=client, protocol=protocol, output_field=output_field)
         decision = work_gateway.prepare(self, identity, decision, redaction.value,
             client=client, protocol=protocol, output=requested_output,
             output_field=output_field, account_usage=account_usage)
+        self.server.route_admission.receipt(self, decision.route)
         sanitized = dict(redaction.value, model=decision.route.upstream_model)
         if decision.max_output_tokens is not None:
             previous = sanitized.get(output_field)
@@ -1224,6 +1237,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             ),
             destinations=egress.destinations,
         )
+        self.server.route_admission.final_check(self, identity, decision, redaction.value,
+            client=client, protocol=protocol, output_field=output_field)
         if account_usage and work_gateway.cache_hit(self, identity, decision, redaction.value):
             return
         attempt: RequestAttempt | None = None
@@ -1255,6 +1270,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
         failover_decision = self.server.policy_engine.operational_failover(decision)
+        admitted_candidates = getattr(self, "_route_admission_candidates", None)
+        if failover_decision is not None and admitted_candidates is not None and failover_decision.resolved_alias not in admitted_candidates:
+            failover_decision = None
         if (
             not account_usage
             or self._request_precludes_failover(protocol, redaction.value)
@@ -1280,7 +1298,20 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             failover_applied_reason=None,
         )
 
-    def _forward(
+    def _forward(self, **options) -> None:
+        entered = False
+        try:
+            with self.server.route_admission.lease(self, options["decision"].route):
+                entered = True
+                self._forward_admitted(**options)
+        except RouteAdmissionError:
+            if not entered and options["attempt"] is not None:
+                self.server.store.finalize_request_attempt(attempt=options["attempt"],
+                    organization_id=options["identity"].organization_id, status="failed", cost_microusd=0)
+                work_gateway.settle(self, options["identity"], options["attempt"], cost=0, status="failed")
+            raise
+
+    def _forward_admitted(
         self,
         *,
         identity: Identity,
@@ -1313,6 +1344,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         started_ns = time.monotonic_ns()
         self._work_provider_ms = None
+        try:
+            self.server.route_admission.final_check(self, identity, decision, request_value,
+                client=client, protocol=protocol, output_field=output_field)
+        except RouteAdmissionError:
+            if attempt is not None:
+                self.server.store.finalize_request_attempt(attempt=attempt,
+                    organization_id=identity.organization_id, status="failed", cost_microusd=0)
+                work_gateway.settle(self, identity, attempt, cost=0, status="failed", started_ns=started_ns)
+            raise
         try:
             if (
                 getattr(self, "_failover_rehearsal_requested", False)
@@ -1501,11 +1541,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
-        self.send_header("X-Hormuz-Contract", selected_upstream.destinations.contract_header(route))
+        self.send_header("X-Hormuz-Contract", self.server.route_admission.contract_header(self, route))
         self.send_header("X-Hormuz-Policy-Decision", policy_action)
         self.send_header("X-Hormuz-Requested-Model", decision.requested_model)
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
-        for name, value in selected_upstream.destinations.response_headers(route).items():
+        for name, value in self.server.route_admission.response_headers(self, route).items():
             self.send_header(name, value)
         work_gateway.response_headers(self)
         self.send_header(

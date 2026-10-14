@@ -367,6 +367,9 @@ def prepare(handler, identity, decision, request_value, *, client, protocol, out
         if candidate.allowed and candidate.resolved_alias == alias:
             candidates[alias] = candidate
     candidates[decision.resolved_alias] = decision
+    admitted = getattr(handler, "_route_admission_candidates", None)
+    if admitted is not None:
+        candidates = {alias: candidate for alias, candidate in candidates.items() if alias in admitted}
     if len(candidates) > 100:
         raise WorkRuntimeError("too_many_route_candidates", 503)
     quotes = {}
@@ -510,14 +513,14 @@ def cache_hit(handler, identity, decision, request_value):
     handler._response_started = True
     handler.send_response(200)
     handler.send_header("Content-Type", entry["headers"].get("content-type", "application/json"))
-    handler.send_header("X-Hormuz-Contract", handler.server.destinations.contract_header(decision.route))
+    handler.send_header("X-Hormuz-Contract", handler.server.route_admission.contract_header(handler, decision.route))
     handler.send_header("Content-Length", str(len(entry["body"])))
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("X-Hormuz-Cache", "exact-answer-hit")
     handler.send_header("X-Hormuz-Provider-Cost-Microusd", "0")
     handler.send_header("X-Hormuz-Usage-Origin", "cached-original-response")
     handler.send_header("X-Hormuz-Routed-Model", decision.route.upstream_model)
-    for name, value in handler.server.destinations.response_headers(decision.route).items():
+    for name, value in handler.server.route_admission.response_headers(handler, decision.route).items():
         handler.send_header(name, value)
     response_headers(handler)
     handler.end_headers()

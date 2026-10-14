@@ -80,6 +80,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "attribution_control",
         "finance_account_bindings",
         "ai_work",
+        "route_admission",
     }
 )
 _LISTEN_FIELDS = frozenset({"host", "port"})
@@ -331,6 +332,7 @@ def _reject_deprecated_context_configuration(raw: dict[str, Any]) -> None:
 
 def _validate_configuration_schema(raw: dict[str, Any]) -> None:
     _schema_object(raw, _ROOT_CONFIGURATION_FIELDS)
+    _schema_optional_object(raw, "route_admission", frozenset({"mode", "local_routes"}))
     _schema_optional_object(raw, "ai_work", frozenset({
         "enabled", "database", "cache_enabled", "minimum_samples",
         "administrator_actor_ids", "require_paid", "billing_price_id", "billing_webhook_secret_env",

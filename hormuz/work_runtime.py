@@ -27,7 +27,7 @@ from typing import Callable, Mapping
 from uuid import uuid4
 
 from .config import Identity, ModelRoute
-from .work_learning import REQUEST_KINDS, request_characteristics, context_signature
+from .work_learning import REQUEST_KINDS, request_characteristics, context_signature, contains_provider_state
 from .work_accounting import forecast_view
 
 
@@ -1474,21 +1474,7 @@ class WorkRuntime:
 
     @staticmethod
     def _contains_provider_state(value, depth=0):
-        if depth > 40:
-            return True
-        if isinstance(value, dict):
-            if any(value.get(key) for key in ("previous_response_id", "conversation", "session_id")):
-                return True
-            if any(key in value and type(value[key]) is not str for key in ("role", "type")):
-                # Schemas can contain mapping/array tags. Keep continuation
-                # inference conservative without throwing on unhashable data.
-                return True
-            if value.get("role") in {"assistant", "tool"} or value.get("type") in {
-                "function_call", "function_call_output", "tool_use", "tool_result", "computer_call", "computer_call_output"
-            }:
-                return True
-            return any(WorkRuntime._contains_provider_state(item, depth + 1) for item in value.values())
-        return isinstance(value, list) and any(WorkRuntime._contains_provider_state(item, depth + 1) for item in value)
+        return contains_provider_state(value, depth)
 
     @staticmethod
     def _cache_safe(request_value):

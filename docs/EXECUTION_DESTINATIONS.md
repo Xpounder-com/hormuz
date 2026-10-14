@@ -2,9 +2,10 @@
 
 This is the first implementation slice of [router spec #523](https://github.com/Xpounder-com/hormuz/issues/523).
 It makes an explicitly selected model route reach its own origin with its own
-authentication. Task selection, a hard local-only admission policy, model/runtime
-acquisition, subscription authorization and persistent CLI/plugin setup are later
-slices. Existing coding apps remain the client; this adds no Hormuz UI.
+authentication. [Local route admission](LOCAL_ROUTE_ADMISSION.md) adds automatic
+selection and a hard local-only transport ceiling. Model/runtime acquisition,
+subscription authorization and persistent CLI/plugin setup are later slices.
+Existing coding apps remain the client; this adds no Hormuz UI.
 
 ## Configuration
 
