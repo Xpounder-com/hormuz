@@ -31,16 +31,19 @@ legacy clients; their release and qualification boundaries remain separate.
 | Auto with an override | While typing, preview the proposed model and a small Local/Cloud indicator. Selecting a model pins it; selecting Auto resumes routing. |
 | Optional paid models | Connect your own provider API account, enable cloud use explicitly and set an allowance. Provider usage is billed separately. |
 | Research Review | Optional full-window review with distinct blind reviewers, visible findings/disagreement and human sign-off for a named revision. |
+| Agent execution — later phase | Codex first, then Claude Agent: enforced read-only planning, separate plan/tool/spend approvals, execution, actual diff review and explicit named-project session resume. [Implementation roadmap](docs/AGENT_EXECUTION_ROADMAP.md). |
 
 The planned host is **Electron**, with a shared **Svelte/TypeScript** interface
 and **llama.cpp** for local inference. Windows, Linux and macOS are target
 platforms; exact supported OS, architecture and hardware rows require installed
 qualification. No new cross-platform release is available from this plan.
 
-First scope is text work. Arbitrary marketplace loaders, image/audio inference,
-agents/computer control, file editing, remote sync and collaborative cloud
-projects remain later decisions. Local projects and direct provider access need
-no hosted Hormuz login, Render service or Hormuz subscription.
+First scope is text work. Optional Agent execution and scoped workspace editing
+are now a planned later phase, with Codex qualified before Claude integration.
+Arbitrary marketplace loaders, image/audio inference, computer control, remote
+sync and collaborative cloud projects remain later decisions. Local projects
+and direct provider access need no hosted Hormuz login, Render service or Hormuz
+subscription.
 
 ## Projects, privacy and model choice
 
@@ -80,6 +83,9 @@ The final glossy finish and integrated UI still need review.
    llama.cpp and one paid-provider baseline; integrate real Auto afterward.
 4. Qualify lifecycle, packages, updates, accessibility and each declared platform.
    Real Research Review follows a useful single-response baseline.
+5. Add optional project Agent mode through its own accepted UI/session contract:
+   Codex planning, approvals, execution, diff review and resume first; qualify
+   that journey before implementing Claude through the same host interface.
 
 Follow [desktop epic #479](https://github.com/Xpounder-com/hormuz/issues/479),
 the [UI plan](docs/DESKTOP_UI_PLAN.md) and
