@@ -6,6 +6,7 @@ import { dirname, isAbsolute, relative, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RpcProcess } from './rpc.ts';
 import { prepareSandbox } from './sandbox.ts';
+import { RuntimePreparation } from './preparation.ts';
 import { AgentError } from './types.ts';
 import type { LaunchOptions } from './sandbox.ts';
 import type { AgentSessionAdapter, RuntimeStart, RuntimeRun, RunResult, ApprovalDecision, RuntimeEvent, ActionRequest } from './types.ts';
@@ -19,6 +20,7 @@ export type ClaudeAdapterOptions = {
   sdkFixture?: string;
   prepareLaunch?: (options: LaunchOptions) => Promise<{ command: string; args: string[] }>;
   requestTimeoutMs?: number; approvalTimeoutMs?: number; runTimeoutMs?: number; shutdownTimeoutMs?: number;
+  preparationTimeoutMs?: number;
 };
 type Active = { turnId: string; options: RuntimeRun; controller: AbortController; plan: string; resolve: (result: RunResult) => void };
 const record = (input: unknown): Record<string, unknown> => {
@@ -66,74 +68,89 @@ export class ClaudeAdapter implements AgentSessionAdapter {
   private disposed = false;
   private startCalled = false;
   private temporary?: { path: string; dev: number; ino: number };
+  private preparation = new RuntimePreparation();
   constructor(settings: ClaudeAdapterOptions = {}) { this.settings = settings; }
 
   async start(options: RuntimeStart): Promise<{ threadId: string }> {
     if (this.startCalled || this.disposed) throw new AgentError('runtime_already_started');
     this.startCalled = true;
-    const endpoint = new URL(options.endpoint);
-    if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || !endpoint.port || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new AgentError('invalid_gateway_endpoint');
-    if (!options.credential || options.credential.length > 4096 || /[\r\n\0]/.test(options.credential)) throw new AgentError('invalid_gateway_credential');
-    if (!options.model || options.model.length > 256 || /[\r\n\0]/.test(options.model)) throw new AgentError('invalid_runtime_model');
-    if (options.maxOutputTokens !== undefined && (!Number.isSafeInteger(options.maxOutputTokens) || options.maxOutputTokens < 1 || options.maxOutputTokens > 1_000_000)) throw new AgentError('invalid_runtime_output_limit');
-    if (!isAbsolute(options.workspace) || !isAbsolute(options.configDir)) throw new AgentError('invalid_runtime_path');
-    const workspace = await realpath(options.workspace);
-    await mkdir(options.configDir, { mode: 0o700, recursive: true });
-    if ((await lstat(options.configDir)).isSymbolicLink()) throw new AgentError('invalid_runtime_path');
-    const configDir = await realpath(options.configDir);
-    if (!(await lstat(workspace)).isDirectory() || within(workspace, configDir) || within(configDir, workspace)) throw new AgentError('runtime_home_not_isolated');
-    await mkdir(join(configDir, 'tmp'), { mode: 0o700, recursive: true });
-    await mkdir(join(configDir, 'Library', 'Preferences'), { mode: 0o700, recursive: true });
-    if (options.threadId && !uuid.test(options.threadId)) throw new AgentError('invalid_runtime_identity');
-    this.options = { ...options, workspace, configDir };
-    this.threadId = options.threadId ?? randomUUID();
-    this.resume = Boolean(options.threadId);
+    const finishPreparation = this.preparation.begin();
     try {
+      const endpoint = new URL(options.endpoint);
+      if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || !endpoint.port || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new AgentError('invalid_gateway_endpoint');
+      if (!options.credential || options.credential.length > 4096 || /[\r\n\0]/.test(options.credential)) throw new AgentError('invalid_gateway_credential');
+      if (!options.model || options.model.length > 256 || /[\r\n\0]/.test(options.model)) throw new AgentError('invalid_runtime_model');
+      if (options.maxOutputTokens !== undefined && (!Number.isSafeInteger(options.maxOutputTokens) || options.maxOutputTokens < 1 || options.maxOutputTokens > 1_000_000)) throw new AgentError('invalid_runtime_output_limit');
+      if (!isAbsolute(options.workspace) || !isAbsolute(options.configDir)) throw new AgentError('invalid_runtime_path');
+      const workspace = await realpath(options.workspace);
+      if (this.disposed) throw new AgentError('runtime_closed');
+      await mkdir(options.configDir, { mode: 0o700, recursive: true });
+      if ((await lstat(options.configDir)).isSymbolicLink()) throw new AgentError('invalid_runtime_path');
+      const configDir = await realpath(options.configDir);
+      if (!(await lstat(workspace)).isDirectory() || within(workspace, configDir) || within(configDir, workspace)) throw new AgentError('runtime_home_not_isolated');
+      if (this.disposed) throw new AgentError('runtime_closed');
+      await mkdir(join(configDir, 'tmp'), { mode: 0o700, recursive: true });
+      if (this.disposed) throw new AgentError('runtime_closed');
+      await mkdir(join(configDir, 'Library', 'Preferences'), { mode: 0o700, recursive: true });
+      if (this.disposed) throw new AgentError('runtime_closed');
+      if (options.threadId && !uuid.test(options.threadId)) throw new AgentError('invalid_runtime_identity');
+      this.options = { ...options, workspace, configDir };
+      this.threadId = options.threadId ?? randomUUID();
+      this.resume = Boolean(options.threadId);
+      finishPreparation();
       // Import/version handshake only. SDK query/session materialization begins with the first turn.
       await this.launch(false);
       await this.closeWorker();
       return { threadId: this.threadId };
-    } catch (error) { await this.dispose(); throw error instanceof AgentError ? error : new AgentError('runtime_start_failed'); }
+    } catch (error) {
+      finishPreparation();
+      await this.dispose(); throw error instanceof AgentError ? error : new AgentError('runtime_start_failed');
+    } finally { finishPreparation(); }
   }
 
   private async launch(workspaceWrite: boolean): Promise<void> {
     const options = this.options!;
-    if (!this.temporary) {
-      // Darwin Unix socket addresses need a short path. Portable injected
-      // fixtures use the host OS temp directory; production remains fail closed
-      // on platforms without a qualified sandbox launcher.
-      const parent = process.platform === 'darwin' ? '/private/tmp' : tmpdir();
-      const path = await realpath(await mkdtemp(join(parent, 'hm-c-')));
-      const info = await lstat(path);
-      this.temporary = { path, dev: info.dev, ino: info.ino };
-    }
-    const temporary = this.temporary;
-    const identity = await lstat(temporary.path);
-    if (!identity.isDirectory() || identity.isSymbolicLink() || identity.dev !== temporary.dev || identity.ino !== temporary.ino || (identity.mode & 0o777) !== 0o700 || identity.uid !== process.getuid?.()) throw new AgentError('runtime_temp_changed');
-    const env: NodeJS.ProcessEnv = {
-      PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', HOME: options.configDir,
-      CFFIXED_USER_HOME: options.configDir, OPENSSL_CONF: '/dev/null', TMPDIR: temporary.path,
-      CLAUDE_CODE_TMPDIR: temporary.path,
-      LANG: 'en_US.UTF-8', CLAUDE_CONFIG_DIR: options.configDir,
-      ANTHROPIC_API_KEY: options.credential, ANTHROPIC_BASE_URL: options.endpoint.replace(/\/$/, '').replace(/\/v1$/, ''),
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'false',
-      CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(options.maxOutputTokens ?? 1024), CLAUDE_CODE_STARTUP_FAILURE_RESULTS: '1',
-      CLAUDE_CODE_MAX_RETRIES: '2', API_TIMEOUT_MS: '60000',
-    };
-    const args = [workerPath, ...(this.settings.sdkFixture ? [this.settings.sdkFixture] : [])];
-    const trustedReadPaths = await runtimeReadPaths(this.settings.sdkFixture);
-    const launch = await (this.settings.prepareLaunch ?? prepareSandbox)({ command: this.settings.command ?? process.execPath, args,
-      workspace: options.workspace, configDir: options.configDir, endpoint: options.endpoint, env, workspaceWrite,
-      allowPrivateUnixSockets: true,
-      privateTempDir: temporary.path,
-      trustedReadPaths,
-    });
-    if (this.disposed) throw new AgentError('runtime_closed');
-    this.rpc = new RpcProcess({ ...launch, env, cwd: options.workspace, requestTimeoutMs: this.settings.requestTimeoutMs,
-      shutdownTimeoutMs: this.settings.shutdownTimeoutMs, onNotification: (method, params) => this.notification(method, params),
-      onRequest: (method, params, id) => this.approval(method, params, id), onFailure: () => this.finish('unknown'),
-    });
+    const finishPreparation = this.preparation.begin();
+    try {
+      if (!this.temporary) {
+        // Darwin Unix socket addresses need a short path. Portable injected
+        // fixtures use the host OS temp directory; production remains fail closed
+        // on platforms without a qualified sandbox launcher.
+        const parent = process.platform === 'darwin' ? '/private/tmp' : tmpdir();
+        const path = await realpath(await mkdtemp(join(parent, 'hm-c-')));
+        const info = await lstat(path);
+        this.temporary = { path, dev: info.dev, ino: info.ino };
+      }
+      const temporary = this.temporary;
+      const identity = await lstat(temporary.path);
+      if (!identity.isDirectory() || identity.isSymbolicLink() || identity.dev !== temporary.dev || identity.ino !== temporary.ino || (identity.mode & 0o777) !== 0o700 || identity.uid !== process.getuid?.()) throw new AgentError('runtime_temp_changed');
+      if (this.disposed) throw new AgentError('runtime_closed');
+      const env: NodeJS.ProcessEnv = {
+        PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', HOME: options.configDir,
+        CFFIXED_USER_HOME: options.configDir, OPENSSL_CONF: '/dev/null', TMPDIR: temporary.path,
+        CLAUDE_CODE_TMPDIR: temporary.path,
+        LANG: 'en_US.UTF-8', CLAUDE_CONFIG_DIR: options.configDir,
+        ANTHROPIC_API_KEY: options.credential, ANTHROPIC_BASE_URL: options.endpoint.replace(/\/$/, '').replace(/\/v1$/, ''),
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'false',
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(options.maxOutputTokens ?? 1024), CLAUDE_CODE_STARTUP_FAILURE_RESULTS: '1',
+        CLAUDE_CODE_MAX_RETRIES: '2', API_TIMEOUT_MS: '60000',
+      };
+      const args = [workerPath, ...(this.settings.sdkFixture ? [this.settings.sdkFixture] : [])];
+      const trustedReadPaths = await runtimeReadPaths(this.settings.sdkFixture);
+      if (this.disposed) throw new AgentError('runtime_closed');
+      const launch = await (this.settings.prepareLaunch ?? prepareSandbox)({ command: this.settings.command ?? process.execPath, args,
+        workspace: options.workspace, configDir: options.configDir, endpoint: options.endpoint, env, workspaceWrite,
+        allowPrivateUnixSockets: true,
+        privateTempDir: temporary.path,
+        trustedReadPaths,
+      });
+      if (this.disposed) throw new AgentError('runtime_closed');
+      this.rpc = new RpcProcess({ ...launch, env, cwd: options.workspace, requestTimeoutMs: this.settings.requestTimeoutMs,
+        shutdownTimeoutMs: this.settings.shutdownTimeoutMs, onNotification: (method, params) => this.notification(method, params),
+        onRequest: (method, params, id) => this.approval(method, params, id), onFailure: () => this.finish('unknown'),
+      });
+    } finally { finishPreparation(); }
     const initialized = record(await this.rpc.request('initialize', {}));
     if (initialized.version !== CLAUDE_SDK_VERSION || initialized.engine !== 'claude') throw new AgentError('unsupported_claude_version');
     const bound = record(await this.rpc.request('session/start', { threadId: this.threadId, resume: this.resume, workspace: options.workspace, model: options.model }));
@@ -231,5 +248,9 @@ export class ClaudeAdapter implements AgentSessionAdapter {
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     if (this.temporary === temporary) this.temporary = undefined;
   }
-  async dispose(): Promise<void> { this.disposed = true; this.finish('unknown'); await this.closeWorker(); await this.removeTemporary(); if (this.options) this.options.credential = ''; }
+  async dispose(): Promise<void> {
+    this.disposed = true; this.finish('unknown');
+    await this.preparation.drain(this.settings.preparationTimeoutMs);
+    await this.closeWorker(); await this.removeTemporary(); if (this.options) this.options.credential = '';
+  }
 }

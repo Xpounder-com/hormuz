@@ -100,6 +100,37 @@ test('Claude rejects unsupported SDK versions and foreign session output', async
   } finally { await foreign.cleanup(); }
 });
 
+test('Claude rejects missing, late, duplicate and incompatible native init before approval, output or writes', async () => {
+  for (const prompt of ['NO_INIT_END', 'NO_INIT_RESULT', 'NO_INIT_HOOK', 'NO_INIT_CALLBACK', 'LATE_INIT_ASSISTANT', 'LATE_INIT_STREAM', 'DUPLICATE_INIT',
+    'BAD_INIT_VERSION', 'BAD_INIT_CWD', 'BAD_INIT_MODE', 'BAD_INIT_MCP', 'BAD_INIT_MCP_SHAPE', 'BAD_INIT_MCP_MISSING', 'BAD_INIT_SESSION_MISSING']) {
+    const { adapter, options, cleanup } = await setup();
+    try {
+      await adapter.start(options);
+      const approvals: ActionRequest[] = [], events: RuntimeEvent[] = [];
+      assert.equal((await adapter.run(runOptions('execute', prompt, approvals, events))).status, 'failed', prompt);
+      assert.equal(approvals.length, 0, prompt);
+      assert.equal(events.some(event => ['message', 'plan', 'usage'].includes(event.type)), false, prompt);
+      assert.equal(JSON.stringify(events).includes('UNVALIDATED OUTPUT'), false, prompt);
+      await assert.rejects(access(join(options.workspace, 'claude.txt')), { code: 'ENOENT' }, prompt);
+    } finally { await cleanup(); }
+  }
+});
+
+test('Claude accepts harmless startup metadata and callbacks racing an already queued valid init', async () => {
+  for (const prompt of ['STARTUP_METADATA', 'QUEUED_INIT_HOOK', 'QUEUED_INIT_CALLBACK']) {
+    const { adapter, options, cleanup } = await setup();
+    try {
+      await adapter.start(options);
+      const approvals: ActionRequest[] = [], events: RuntimeEvent[] = [];
+      assert.equal((await adapter.run(runOptions('execute', prompt, approvals, events))).status, 'completed', prompt);
+      assert.equal(approvals.length, prompt === 'STARTUP_METADATA' ? 2 : 1, prompt);
+      assert.equal(await readFile(join(options.workspace, 'claude.txt'), 'utf8'), 'changed', prompt);
+      assert.equal(events[0].type, 'tool');
+      assert.equal((events[0].data as { runtime: { cliVersion: string } }).runtime.cliVersion, '2.1.299');
+    } finally { await cleanup(); }
+  }
+});
+
 test('Claude resume rejects a missing SDK transcript before an inference turn', async () => {
   const { adapter, options, cleanup } = await setup();
   try { await assert.rejects(adapter.start({ ...options, threadId: '11111111-1111-4111-8111-111111111111' }), { code: 'runtime_session_missing' }); }

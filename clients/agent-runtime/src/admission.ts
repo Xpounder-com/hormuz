@@ -320,7 +320,9 @@ export class InferenceProxy {
     if (!['openai', 'anthropic'].includes(options.provider) || typeof options.model !== 'string' || !options.model || options.model.length > 128 || typeof options.credential !== 'string' || !options.credential || options.credential.length > 4096 || /[\r\n\0]/.test(options.model + options.credential)) throw new Error('invalid_proxy_configuration');
     for (const field of ['allowanceMicrousd', 'inputMicrousdPerMillion', 'outputMicrousdPerMillion', 'maxInputTokens', 'maxOutputTokens', 'requestLimit', 'timeoutMs'] as const) {
       const value = this.options[field];
-      if (!integer(value) || (['maxInputTokens', 'maxOutputTokens', 'requestLimit', 'timeoutMs'].includes(field) && value === 0)) throw new Error('invalid_proxy_configuration');
+      // A zero allowance intentionally denies paid work. Rates must be positive:
+      // an unpriced input or output lane cannot establish a conservative bound.
+      if (!integer(value) || field !== 'allowanceMicrousd' && value === 0) throw new Error('invalid_proxy_configuration');
     }
     if (this.options.timeoutMs! > 300000) throw new Error('invalid_proxy_configuration');
     this.upstream = new URL(options.upstream);
