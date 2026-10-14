@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -50,7 +51,7 @@ finally:
 
 
 @contextmanager
-def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None):
+def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -85,7 +86,7 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                 data = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
             self.send_response(status(body) if callable(status) else status)
             self.send_header("Content-Type", "text/event-stream" if event_stream else "application/json")
-            if not cancel_stream or len(received) != 1:
+            if not ((cancel_stream or slow_stream) and len(received) == 1):
                 self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             if cancel_stream and len(received) == 1:
@@ -100,6 +101,15 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                     pass
                 finally:
                     cancel_stream[2].set()
+            elif slow_stream and len(received) == 1:
+                try:
+                    for _ in range(8):
+                        self.wfile.write(b"data: {\"type\":\"response.in_progress\"}\n\n")
+                        self.wfile.flush()
+                        time.sleep(0.2)
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
             else:
                 self.wfile.write(data)
 
@@ -329,6 +339,11 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual((before["body"]["schema_id"], before["body"]["schema_version"], before["body"]["mode"]),
                                  ("hormuz.route-admission", 1, "local_only"))
                 route = before["body"]["routes"][0]
+                frozen = json.loads((Path(__file__).parent / "fixtures/execution_destination/router-state-v1.json").read_text())
+                normalized = json.loads(json.dumps(before["body"]))
+                self.assertRegex(normalized["routes"][0]["generation"], r"^[0-9a-f]{64}$")
+                normalized["routes"][0]["generation"] = "LIVE_DESTINATION_GENERATION"
+                self.assertEqual(normalized, frozen)
                 self.assertEqual((route["qualification_id"], route["readiness"], route["evidence_basis"]),
                                  ("fixture-q1", "unchecked", "operator_declared"))
                 executed = submit(request={"input": "Summarize this fixture."})
@@ -404,6 +419,36 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual(second["headers"].get("x-hormuz-routing-reason"), "session_affinity")
                 self.assertEqual(second["headers"]["x-hormuz-destination-generation"], first["headers"]["x-hormuz-destination-generation"])
                 self.assertEqual(local_requests[1]["body"]["input"][0]["call_id"], "fixture-call")
+                self.assertEqual((len(local_requests), cloud_requests), (2, []))
+
+    def test_new_work_id_cannot_claim_successful_continuation_affinity(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud)
+            value["model_routes"]["local-code"]["capabilities"].append("tools")
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.connected_client(value) as submit:
+                job = submit(control=True, path="/work/jobs", request={"repository": "example/repository",
+                    "task_type": "implementation", "context_revision": "fixture-revision"})
+                result = submit(headers={"X-Hormuz-Work-Id": job["body"]["work_id"]}, request={"input": [
+                    {"type": "function_call_output", "call_id": "unowned-call", "output": "Unknown previous result."}]})
+                self.assertEqual((result["status"], result["body"].get("error", {}).get("code")),
+                                 (409, "hormuz_route_affinity_required"))
+                self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_periodic_local_stream_bytes_cannot_extend_the_request_deadline(self):
+        with provider("LOCAL_DESTINATION", event_stream=True, slow_stream=True) as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud)
+            value["upstream_timeout_seconds"] = 1
+            value["model_routes"]["local-code"]["capabilities"].append("streaming")
+            with self.connected_client(value) as submit:
+                result = submit(request={"input": "Summarize this fixture.", "stream": True})
+                self.assertEqual(result["status"], 200)
+                self.assertNotIn('"response.completed"', result["body"])
+                state = submit(method="GET", path="/router/state")
+                self.assertEqual(state["body"]["local_capacity"]["active"], 0)
+                self.assertEqual(submit(request={"input": "Summarize after deadline."})["status"], 200)
                 self.assertEqual((len(local_requests), cloud_requests), (2, []))
 
     def test_cancelled_local_stream_releases_capacity_and_never_replays_to_cloud(self):
@@ -608,6 +653,9 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 versions = {entry["schema_version"] for entry in entries
                             if entry["schema_id"] == "hormuz.relay-metadata"}
                 self.assertEqual(versions, {1, 2, 3})
+                frozen = json.loads((Path(__file__).parent / "fixtures/execution_destination/relay-v3.json").read_text())
+                self.assertEqual(next(entry for entry in entries if entry["schema_id"] == "hormuz.relay-metadata" and entry["schema_version"] == 3), frozen)
+                self.assertIn("hormuz_route_local_route_unavailable", json.loads(manifest.stdout)["error_codes"])
                 self.assertEqual(response["headers"]["x-hormuz-contract"], "hormuz.relay-metadata;v=2")
 
     def test_legacy_connection_preserves_version_one_metadata(self):

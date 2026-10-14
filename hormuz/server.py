@@ -39,6 +39,7 @@ from . import work_gateway
 from .work_http import handle_work_request
 from .work_runtime import WorkRuntimeError
 from .route_admission import RouteAdmission, RouteAdmissionError
+from .local_transport import open_local_upstream as _owned_local_upstream
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
@@ -175,15 +176,14 @@ class _NoUpstreamRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _UPSTREAM_OPENER = urllib.request.build_opener(_NoUpstreamRedirect())
-_LOCAL_UPSTREAM_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoUpstreamRedirect())
 
 
 def _open_upstream(request: urllib.request.Request, *, timeout: int):
     return _UPSTREAM_OPENER.open(request, timeout=timeout)
 
 
-def _open_local_upstream(request: urllib.request.Request, *, timeout: int):
-    return _LOCAL_UPSTREAM_OPENER.open(request, timeout=timeout)
+def _open_local_upstream(request: urllib.request.Request, *, timeout: int, absolute_timeout=None):
+    return _owned_local_upstream(request, timeout=timeout, absolute_timeout=absolute_timeout)
 
 
 class _ProviderRehearsalResponse:
@@ -1362,7 +1362,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 response = _ProviderRehearsalResponse()
             else:
                 open_upstream = _open_local_upstream if destination.locality == "local" else _open_upstream
-                response = open_upstream(request, timeout=self.server.config.upstream_timeout_seconds)
+                timeout = self.server.route_admission.remaining_timeout(self)
+                response = open_upstream(request, timeout=timeout,
+                    **({"absolute_timeout": timeout} if getattr(self, "_local_route_lease", False) else {}))
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
@@ -1585,6 +1587,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             read_chunk = response.read
         try:
             while True:
+                if getattr(self, "_local_route_lease", False):
+                    response.set_read_timeout(self.server.route_admission.remaining_timeout(self))
                 read_started_ns = time.monotonic_ns()
                 try:
                     chunk = read_chunk(_RELAY_CHUNK_BYTES)

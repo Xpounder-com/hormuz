@@ -1,0 +1,13 @@
+{
+  "schema_id": "hormuz.relay-metadata",
+  "schema_version": 3,
+  "delivery": "http-headers",
+  "ownership": "hormuz",
+  "fields": [
+    "X-Hormuz-Contract", "X-Hormuz-Policy-Decision", "X-Hormuz-Requested-Model",
+    "X-Hormuz-Routed-Model", "X-Hormuz-Redactions", "X-Hormuz-Error-Code",
+    "X-Hormuz-Destination", "X-Hormuz-Destination-Locality", "X-Hormuz-Destination-Generation",
+    "X-Hormuz-Routing-Mode", "X-Hormuz-Routing-Reason", "X-Hormuz-Routing-Qualification"
+  ],
+  "legacy": false
+}

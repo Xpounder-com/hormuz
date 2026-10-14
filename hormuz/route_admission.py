@@ -140,6 +140,12 @@ class RouteAdmission:
         self._capacity_lock = threading.Lock()
         self._active_local = 0
 
+    @staticmethod
+    def _within_envelope(handler, route, qualification, value, output_field):
+        limit = 0 if handler.path.split("?", 1)[0] == "/v1/messages/count_tokens" else value.get(output_field)
+        return (qualification is not None and type(limit) is int and limit <= qualification.max_output_tokens
+                and len(handler._provider_body(value, route)) <= qualification.max_request_bytes)
+
     @contextmanager
     def lease(self, handler, route):
         local = self.destinations.resolve(route).locality == "local"
@@ -149,15 +155,26 @@ class RouteAdmission:
         if not self._local_capacity.acquire(blocking=False):
             raise RouteAdmissionError("local_capacity_busy", 429)
         handler._local_route_lease = True
+        handler._local_route_deadline = time.monotonic() + self.config.upstream_timeout_seconds
         with self._capacity_lock:
             self._active_local = 1
         try:
             yield
         finally:
             handler._local_route_lease = False
+            handler._local_route_deadline = None
             with self._capacity_lock:
                 self._local_capacity.release()
                 self._active_local = 0
+
+    def remaining_timeout(self, handler):
+        deadline = getattr(handler, "_local_route_deadline", None)
+        if deadline is None:
+            return self.config.upstream_timeout_seconds
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("local_request_deadline")
+        return remaining
 
     def _ready(self, route):
         # llama.cpp /health is prompt-free. One bounded probe per destination
@@ -171,7 +188,7 @@ class RouteAdmission:
             ready = False
             request = urllib.request.Request(destination.upstream.base_url.rstrip("/") + "/health")
             try:
-                with _open_local_upstream(request, timeout=2) as response:
+                with _open_local_upstream(request, timeout=2, absolute_timeout=2) as response:
                     data = response.read(4097)
                     ready = response.status == 200 and len(data) <= 4096 and json.loads(data) == {"status": "ok"}
             except urllib.error.HTTPError as error:
@@ -218,8 +235,7 @@ class RouteAdmission:
             destination = self.destinations.resolve(route)
             if destination.upstream.authentication != "none" and not destination.credential:
                 continue
-            size = len(handler._provider_body(value, route))
-            if size > qualification.max_request_bytes or type(limit) is not int or limit > qualification.max_output_tokens:
+            if not self._within_envelope(handler, route, qualification, value, output_field):
                 continue
             if not continuation and hint not in qualification.task_types:
                 continue
@@ -271,8 +287,7 @@ class RouteAdmission:
             raise RouteAdmissionError("policy_changed")
         if destination.locality == "local":
             qualification = self.qualifications.get(decision.resolved_alias)
-            limit = 0 if handler.path.split("?", 1)[0] == "/v1/messages/count_tokens" else value.get(output_field)
-            if qualification is None or len(handler._provider_body(value, decision.route)) > qualification.max_request_bytes or type(limit) is not int or limit > qualification.max_output_tokens or not self._ready(decision.route):
+            if not self._within_envelope(handler, decision.route, qualification, value, output_field) or not self._ready(decision.route):
                 raise RouteAdmissionError("local_route_unavailable", 503)
         from .custody_runtime_projection import CustodyRuntimeProjectionError
         try:

@@ -1282,7 +1282,7 @@ class WorkRuntime:
             self._queue_profile_refresh(work, protocol)
         return profiles
 
-    def choose_route(self, identity, work_id, candidates, baseline, request_value, *, max_costs=None, request_kind="interactive"):
+    def choose_route(self, identity, work_id, candidates, baseline, request_value, *, max_costs=None, request_kind="interactive", require_affinity=False):
         owner, now = _identity(identity), self._now()
         candidate_values = list(candidates.values()) if isinstance(candidates, Mapping) else list(candidates)
         if not 1 <= len(candidate_values) <= 100 or any(not isinstance(route, ModelRoute) for route in candidate_values):
@@ -1325,6 +1325,8 @@ class WorkRuntime:
             continuation = self._contains_provider_state(request_value)
             if continuation:
                 pinned = work["pinned_model"]
+                if require_affinity and not pinned:
+                    raise WorkRuntimeError("session_affinity_required", 409)
                 if pinned and pinned not in eligible:
                     raise WorkRuntimeError("session_route_not_eligible", 409)
                 if pinned and self.destinations is not None:

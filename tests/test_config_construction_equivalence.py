@@ -11,7 +11,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from hormuz.config import AIWorkConfig, ConfigError, GatewayConfig
+from hormuz.config import AIWorkConfig, ConfigError, GatewayConfig, RouteAdmissionConfig
 from hormuz.custody_lifecycle import CustodyAssetCatalog
 
 
@@ -58,6 +58,11 @@ def _canonical(value: Any, *, config_directory: Path) -> object:
                     type(value).__name__ == "GatewayConfig"
                     and field.name == "ai_work"
                     and getattr(value, field.name) == AIWorkConfig()
+                ) and not (
+                    # Default admission preserves the same frozen legacy values.
+                    type(value).__name__ == "GatewayConfig"
+                    and field.name == "route_admission"
+                    and getattr(value, field.name) == RouteAdmissionConfig()
                 ) and not (
                     type(value).__name__ == "ModelRoute"
                     and field.name in {"failover_alias": None, "destination": None,

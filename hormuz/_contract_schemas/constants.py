@@ -157,7 +157,14 @@ PUBLIC_ERROR_CODES_V1 = frozenset(
 
 PUBLIC_ERROR_CODES_V2 = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unavailable"})
 
-PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restricted"})
+ROUTE_ADMISSION_ERROR_CODES = frozenset({
+    "hormuz_route_invalid_routing_mode", "hormuz_route_affinity_required",
+    "hormuz_route_local_route_unavailable", "hormuz_route_local_capacity_busy",
+    "hormuz_route_destination_not_admitted", "hormuz_route_policy_changed",
+    "hormuz_route_custody_restricted", "hormuz_route_custody_unavailable",
+})
+
+PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restricted", *ROUTE_ADMISSION_ERROR_CODES})
 
 _CURRENT_SCHEMA_VERSIONS = {
     ROUTE_ADMISSION_SCHEMA_ID: ROUTE_ADMISSION_SCHEMA_VERSION,

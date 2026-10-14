@@ -390,9 +390,16 @@ def prepare(handler, identity, decision, request_value, *, client, protocol, out
                     input_bytes = base_bytes - baseline_model_bytes + len(json.dumps(candidate.route.upstream_model).encode()) + len(str(limit)) - 1
                     quotes[alias] = candidate.route.estimate_reservation_cost_microusd(
                         input_tokens=input_bytes, output_tokens=limit)
-    selection = runtime.choose_route(identity, handler._work_id,
-        [value.route for value in candidates.values()], decision.route, _cache_request(handler, request_value),
-        max_costs=quotes, request_kind=handler._work_request_kind)
+    try:
+        selection = runtime.choose_route(identity, handler._work_id,
+            [value.route for value in candidates.values()], decision.route, _cache_request(handler, request_value),
+            max_costs=quotes, request_kind=handler._work_request_kind,
+            **({"require_affinity": True} if admitted is not None else {}))
+    except WorkRuntimeError as error:
+        if admitted is not None and error.reason == "session_affinity_required":
+            from .route_admission import RouteAdmissionError
+            raise RouteAdmissionError("affinity_required", 409) from None
+        raise
     selected = candidates[selection["alias"]]
     handler._work_route = selection
     handler._work_logical_id = uuid4().hex

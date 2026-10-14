@@ -81,7 +81,9 @@ One local request may be active per router in admission mode. A second receives
 HTTP 429 `hormuz_route_local_capacity_busy`; there is no unbounded local queue.
 The lease covers the entire response/stream and existing same-destination retry,
 and releases in `finally` after completion, failure or disconnect cleanup. A
-silent provider remains bounded by the configured upstream timeout; a disconnect
+local request has an absolute elapsed-time deadline using the configured upstream
+timeout, covering headers and body even when the provider sends periodic bytes.
+The owned transport cancels and joins its single deadline timer on close. A disconnect
 is observed by the existing relay when it next reads/writes, not by a separate
 background cancellation worker.
 
