@@ -41,6 +41,12 @@ this slice does not invent a paid provider fallback.
 helper request. Other values and duplicate headers are rejected. A caller cannot
 relax an operator's local-only mode. This header is consumed by Hormuz.
 
+A fresh request that explicitly names an eligible local alias retains that
+model and destination. Only that alias reaches optional AI Work ranking. In
+automatic mode, a requested cloud alias remains the permitted baseline from
+which eligible local work can be selected. Continuations retain their existing
+successful destination/model affinity.
+
 Qualification is an **operator declaration**, not a benchmark result. Before
 adding it, qualify the exact runtime, model weights, client/protocol, request
 features, byte/output envelope, tool and streaming behavior, and runtime egress.
@@ -73,7 +79,9 @@ do not need a generation output limit.
 A prompt-free llama.cpp-compatible `/health` probe requires HTTP 200 with
 `{"status":"ok"}`. The probe has a two-second timeout, a 4 KiB bound, no retries,
 no proxies or redirects, and a five-second observation lifetime. Probes are
-serialized. They establish recent reachability/readiness, not model identity or
+serialized. An optional trailing `/v1` in the destination base URL is removed
+before appending `/health`, matching inference URL prefix handling. Probes
+establish recent reachability/readiness, not model identity or
 quality. A ready model can fail after admission; that failure never enables a
 cloud retry. See the [llama.cpp server contract](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#api-endpoints).
 

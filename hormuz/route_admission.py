@@ -186,7 +186,9 @@ class RouteAdmission:
             if previous and time.monotonic() - previous[0] < 5:
                 return previous[1]
             ready = False
-            request = urllib.request.Request(destination.upstream.base_url.rstrip("/") + "/health")
+            # The optional /v1 inference prefix does not scope runtime health.
+            base = destination.upstream.base_url.rstrip("/").removesuffix("/v1")
+            request = urllib.request.Request(base + "/health")
             try:
                 with _open_local_upstream(request, timeout=2, absolute_timeout=2) as response:
                     data = response.read(4097)
@@ -244,6 +246,9 @@ class RouteAdmission:
             if candidate.allowed and candidate.resolved_alias == alias:
                 if self._ready(route):
                     candidates[alias] = candidate
+        if not continuation and decision.requested_model in candidates:
+            # A qualified explicit local choice also constrains optional ranking.
+            candidates = {decision.requested_model: candidates[decision.requested_model]}
         if continuation and mode == "auto" and self.destinations.resolve(decision.route).locality == "cloud":
             candidates[decision.resolved_alias] = decision
         if candidates:
