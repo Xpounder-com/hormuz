@@ -16,11 +16,11 @@ The active user configuration and native authentication caches are untouched.
 python -m unittest tests.test_connected_client_lifetime_workflow -v
 ```
 
-17 workflows pass on Python3.12.12. They cover restored defaults and pre-existing
+18 workflows pass on Python3.12.12. They cover restored defaults and pre-existing
 settings, concurrent setup/reuse, added provider preferences, copied and multiline
 instruction text, version drift, changed setup intent, read-only preview,
 interrupted setup and delayed old-host fencing, corrupt/future journals, managed
-configuration, policy denial, stale receipts, invalid post-setup configuration,
+configuration, policy denial, stale receipts, invalid post-setup configuration and provider-table shape,
 idle/in-flight disconnect and external-provider preservation. RED preceded each
 new behavior; later cases also qualify shared restoration/cancellation behavior.
 The installed-wheel run and source fingerprint record are recorded after final

@@ -509,6 +509,8 @@ class ConnectedClientLifetime:
         current = _read(self.config_path)
         text = current or ""
         document = _document(text)
+        if not isinstance(document.get("model_providers", {}), dict):
+            raise ConnectedClientError("configuration_shape_unsupported")
         retained = []
         for key, installed in record["installed"].items():
             if document.get(key) == installed:
@@ -538,8 +540,10 @@ class ConnectedClientLifetime:
             restoration_error = None
             try:
                 self._restore(record)
-            except (ConnectedClientError, OSError) as error:
-                restoration_error = error
+            except Exception as error:
+                # Restoration must never bypass process cleanup, including an
+                # unexpected semantic document shape. Keep output content-free.
+                restoration_error = error if isinstance(error, (ConnectedClientError, OSError)) else ConnectedClientError("restoration_unavailable")
             _control(record, "stop")
             deadline = time.monotonic() + 7
             while self._runtime_active():

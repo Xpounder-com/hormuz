@@ -421,3 +421,19 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             status = json.loads(self.command("status").stdout)
             self.assertEqual({key: status[key] for key in expected}, expected)
             self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
+
+    def test_disconnect_stops_owned_router_when_provider_table_has_invalid_shape(self):
+        with self.configured():
+            self.command("connect")
+            self.assertEqual(self.client()["status"], 200)
+            (self.home / "config.toml").write_text('model_providers = []\n')
+            try:
+                result = self.command("disconnect", check=False)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(json.loads(result.stderr)["error"]["code"], "connected_client_configuration_shape_unsupported")
+                status = json.loads(self.command("status").stdout)
+                self.assertEqual((status["phase"], status["router"]), ("restore_required", "stopped"))
+            finally:
+                (self.home / "config.toml").write_text('model = "user-repaired"\n')
+                self.command("disconnect")
+            self.assertEqual(self.client("inspect")["model"], "user-repaired")
