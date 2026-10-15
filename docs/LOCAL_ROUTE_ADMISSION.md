@@ -74,6 +74,19 @@ Local candidates require the endpoint capability (`responses`, `chat_completions
 `tools`, `streaming` and `structured_output` when used. Unknown parameters,
 multimodal content, remote/provider references, hosted tools, beta headers,
 query options and unqualified provider features exclude a local candidate.
+The opt-in `codex_http` capability additionally admits the observed Codex CLI
+0.147.0 HTTP envelope: bounded printable client/session tags, a bounded prompt
+cache key, empty `reasoning` controls and `include=["reasoning.encrypted_content"]`.
+Those tags describe a caller, not provider-owned conversation history. The
+include marker requests optional output; it does not supply encrypted state or
+qualify reasoning execution. Nonempty reasoning controls, actual reasoning
+items, namespace/freeform tools, unknown client tags and other include values
+remain blocked. Function tools and streaming still require their separate
+capabilities. Declare this capability only for an independently qualified
+client/runtime/model profile; it does not qualify a runtime by itself.
+The [pinned Codex/llama.cpp profile](qualifications/codex-0147-llama-b11617-qwen3-4b.md)
+records real supplied-script, streaming and cancellation evidence, along with
+the model's failed autonomous repair and strict formatting cases.
 The final serialized body must fit the operator's byte envelope, and generation
 must fit the output envelope. Byte bounds describe qualified request sizes;
 they do not calculate a model's tokenizer context window. Token-count helpers

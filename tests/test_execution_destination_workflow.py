@@ -342,6 +342,43 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual(len(local_requests), 1)
                 self.assertEqual(cloud_requests, [])
 
+    def test_qualified_codex_http_metadata_is_fresh_local_work(self):
+        request = json.loads((Path(__file__).parent / "fixtures/codex-http-request-0.147.json").read_text())
+        with provider("LOCAL_DESTINATION", event_stream=True) as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud)
+            value["model_routes"]["local-code"]["capabilities"].extend(["tools", "streaming", "codex_http"])
+            with self.connected_client(value) as submit:
+                result = submit(control=True, request=request)
+                self.assertEqual(result["status"], 200, result)
+                self.assertIn("LOCAL_DESTINATION", result["body"])
+                self.assertEqual(result["headers"].get("x-hormuz-routing-reason"), "qualified_local")
+            self.assertEqual(local_requests[0]["body"]["max_output_tokens"], 8)
+            self.assertEqual(cloud_requests, [])
+
+    def test_codex_http_profile_keeps_unqualified_controls_and_opaque_state_blocked(self):
+        request = json.loads((Path(__file__).parent / "fixtures/codex-http-request-0.147.json").read_text())
+        with provider("LOCAL_DESTINATION", event_stream=True) as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud)
+            value["model_routes"]["local-code"]["capabilities"].extend(["tools", "streaming"])
+            with self.connected_client(value) as submit:
+                self.assertEqual(submit(control=True, request=request)["status"], 503)
+            value["model_routes"]["local-code"]["capabilities"].append("codex_http")
+            unsupported = [
+                {**request, "reasoning": {"effort": "high"}},
+                {**request, "include": ["web_search_call.action.sources"]},
+                {**request, "client_metadata": {"session_id": {"encrypted_content": "opaque"}}},
+                {**request, "tools": [{"type": "namespace", "name": "multi_agent_v1", "tools": []}]},
+                {**request, "input": [{"type": "reasoning", "encrypted_content": "opaque"}]},
+            ]
+            with self.connected_client(value) as submit:
+                for body in unsupported:
+                    with self.subTest(body_keys=sorted(body)):
+                        result = submit(control=True, request=body)
+                        self.assertEqual(result["status"], 503, result)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_local_only_uses_root_health_for_v1_destination_base(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \
              provider("CLOUD_DESTINATION") as (cloud, cloud_requests):

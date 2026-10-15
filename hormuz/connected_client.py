@@ -278,8 +278,13 @@ def _remove_provider_table(text, record):
         if label != header:
             continue
         end = tables[index + 1][0] if index + 1 < len(tables) else len(text)
-        if text[start:end] != record["provider_block"][1:]:
+        block = record["provider_block"][1:]
+        section = text[start:end]
+        if not section.startswith(block) or section[len(block):].strip():
             return text, False
+        # Native Codex can append a blank separator and a project trust table.
+        # Remove exactly our bytes, preserving the caller's appended document.
+        end = start + len(block)
         if start and text[start - 1] == "\n":
             start -= 1
         return text[:start] + text[end:], True

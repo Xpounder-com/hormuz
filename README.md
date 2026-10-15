@@ -17,11 +17,15 @@ distribution remain separate qualification work. The plugin bundles setup,
 status, troubleshooting and disconnect instructions over the CLI. MCP is
 optional if a concrete integration needs it.
 
+A [pinned Codex → llama.cpp profile](docs/qualifications/codex-0147-llama-b11617-qwen3-4b.md)
+now records real local tool execution, incremental streaming, cancellation and
+restoration. Its supplied-script case passed; autonomous repair and strict
+answer formatting failed. It requires explicit per-conversation work binding.
+
 ## Install in your agent
 
-**Preview:** the plugin manifests are currently on [PR #527](https://github.com/Xpounder-com/hormuz/pull/527).
-The default-branch commands below become available after merge. For installation
-before merge, use the [preview commands](docs/AGENT_INSTALLATION.md#preview-this-branch).
+The plugin manifests and shared CLI implementation are included in this source.
+Installation remains subject to each coding client's plugin support and review.
 
 ### Codex
 

@@ -13,7 +13,7 @@ def contains_provider_state(value, depth=0):
         # Tool/format schemas and caller tags describe a fresh request. A
         # schema property named type or role is not provider-owned history.
         value = {key: item for key, item in value.items()
-                 if key not in {"tools", "tool_choice", "text", "response_format", "metadata"}}
+                 if key not in {"tools", "tool_choice", "text", "response_format", "metadata", "client_metadata"}}
     if depth > 40:
         return True
     if isinstance(value, dict):

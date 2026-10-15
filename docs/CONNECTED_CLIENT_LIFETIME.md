@@ -47,6 +47,10 @@ A mismatched generation cannot remove a newer connection. Repeated connect with 
 
 Disconnect restores each owned setting only when its current value still equals the value Hormuz installed. Later user edits remain intact and appear in `retained_settings`. An edited provider table is retained rather than overwritten or deleted. Unrelated preferences and provider tables remain in place. This is value restoration, not a whole-document backup replay or a promise to reproduce every original byte.
 
+Native Codex may append a project trust table after connecting. A blank separator
+before that table does not make the unchanged Hormuz provider user-owned:
+disconnect removes its exact installed bytes and preserves the appended settings.
+
 Disconnect also requests shutdown over the generation-owned private control socket and waits for the kernel-held runtime lease to release. Cleanup drains the router, cancels owned client sockets and closes owned resources. A bounded shutdown watchdog may exit only that owned host after five seconds; it does not search for or terminate unrelated processes. Existing conservative accounting and recovery for ambiguous provider work remain authoritative.
 
 ## Recovery and restrictions
