@@ -57,6 +57,8 @@ from ._contract_schemas.connected_client import (
     _validate_status as _validate_connected_client_status,
     _validate_preview as _validate_connected_client_preview,
     _validate_error as _validate_connected_client_error,
+    _validate_status_v2 as _validate_connected_client_status_v2,
+    _validate_preview_v2 as _validate_connected_client_preview_v2,
 )
 from ._contract_schemas.manifest import (
     custody_evidence_schema_entries as _custody_evidence_schema_entries,
@@ -496,6 +498,12 @@ def contract_manifest() -> dict[str, object]:
             _manifest_schema(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID, CONNECTED_CLIENT_PREVIEW_SCHEMA_VERSION,
                 "cli-output", "hormuz", ["schema_id", "schema_version", "phase", "router", "scope",
                 "client_version", "settings", "changes"]),
+            _manifest_schema(CONNECTED_CLIENT_STATUS_SCHEMA_ID, 2,
+                "cli-output", "hormuz", ["schema_id", "schema_version", "phase", "router", "scope",
+                "configuration", "retained_settings", "generation", "client_version", "owned_settings", "local_runtime"]),
+            _manifest_schema(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID, 2,
+                "cli-output", "hormuz", ["schema_id", "schema_version", "phase", "router", "scope",
+                "client_version", "settings", "changes", "local_runtime"]),
             _manifest_schema(CONNECTED_CLIENT_ERROR_SCHEMA_ID, CONNECTED_CLIENT_ERROR_SCHEMA_VERSION,
                 "cli-output", "hormuz", ["schema_id", "schema_version", "error"]),
         ],
@@ -536,6 +544,8 @@ def validate_contract(value: Mapping[str, Any]) -> None:
     validator = {
         (CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_STATUS_SCHEMA_VERSION): _validate_connected_client_status,
         (CONNECTED_CLIENT_PREVIEW_SCHEMA_ID, CONNECTED_CLIENT_PREVIEW_SCHEMA_VERSION): _validate_connected_client_preview,
+        (CONNECTED_CLIENT_STATUS_SCHEMA_ID, 2): _validate_connected_client_status_v2,
+        (CONNECTED_CLIENT_PREVIEW_SCHEMA_ID, 2): _validate_connected_client_preview_v2,
         (CONNECTED_CLIENT_ERROR_SCHEMA_ID, CONNECTED_CLIENT_ERROR_SCHEMA_VERSION): _validate_connected_client_error,
         (ROUTE_ADMISSION_SCHEMA_ID, ROUTE_ADMISSION_SCHEMA_VERSION): _validate_route_admission,
         (HEALTH_SCHEMA_ID, 1): _validate_health,

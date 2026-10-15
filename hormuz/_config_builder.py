@@ -94,6 +94,8 @@ def _build_gateway_config(
 ) -> GatewayConfig:
     """Construct and validate configuration, optionally resolving credential values."""
 
+    from .managed_llama import build_managed_llama
+
     source_path = Path(path).expanduser().resolve()
     try:
         raw = load_configuration_input(source_path)
@@ -106,6 +108,7 @@ def _build_gateway_config(
     upstreams = build_upstream_domain(raw, source_path=source_path, key_custody=None)
     identities = build_identity_domain(raw).static_identities
     routes = build_model_route_domain(raw, upstreams=upstreams)
+    admission = build_route_admission(raw, routes, upstreams)
     policy = build_policy_domain(raw, policy_control_mode="local")
     config = config_type(
         source_path=source_path, listen=ingress.listen, ingress=ingress.ingress,
@@ -117,7 +120,8 @@ def _build_gateway_config(
         max_request_bytes=_integer(raw.get("max_request_bytes", 25 * 1024 * 1024), "max_request_bytes", minimum=1024),
         upstream_timeout_seconds=_integer(raw.get("upstream_timeout_seconds", 600), "upstream_timeout_seconds", minimum=1),
         ai_work=build_ai_work(raw, source_path=source_path),
-        route_admission=build_route_admission(raw, routes, upstreams),
+        route_admission=admission,
+        managed_llama=build_managed_llama(raw, routes, upstreams, admission),
     )
     config.validate_references()
     if not resolve_credentials:

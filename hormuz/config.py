@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Context, Decimal, ROUND_CEILING, ROUND_HALF_EVEN, localcontext
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ._config_input import (
     MAX_CONFIGURATION_BYTES,
@@ -19,6 +20,9 @@ from .outcome_connector_config import OutcomeConnectorConfig
 from .attribution_config import AttributionConfig
 from .finance_account_binding import FinanceAccountBindings, FinanceIdentity, UnavailableFinance
 from .route_admission import RouteAdmissionConfig
+
+if TYPE_CHECKING:
+    from .managed_llama import ManagedLlamaProfile
 
 
 class ConfigError(ValueError):
@@ -492,6 +496,7 @@ class GatewayConfig:
     finance_account_bindings: FinanceAccountBindings | None = None
     ai_work: AIWorkConfig = field(default_factory=AIWorkConfig)
     route_admission: "RouteAdmissionConfig" = field(default_factory=lambda: RouteAdmissionConfig())
+    managed_llama: "ManagedLlamaProfile | None" = None
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":

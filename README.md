@@ -24,6 +24,12 @@ answer formatting failed. That historical run used manual work binding; the
 router now supports [automatic conversation binding](docs/CONVERSATION_WORK_BINDING.md)
 for the recognized native HTTP envelope.
 
+An optional [managed llama.cpp profile](docs/MANAGED_LLAMA_LIFETIME.md) now
+starts and stops one engine from existing verified runtime/model files through
+the same connection commands. It verifies bundled libraries as well as the
+launcher, preserves external engines, and keeps cleanup pending until its owned
+lease is released. Downloads and model selection remain separate work.
+
 ## Install in your agent
 
 The plugin manifests and shared CLI implementation are included in this source.

@@ -83,3 +83,23 @@ def _validate_error(value: Mapping[str, Any]) -> None:
     code = _value_string(error, "code")
     if code not in CONNECTED_CLIENT_ERROR_ACTIONS or _value_string(error, "action") != CONNECTED_CLIENT_ERROR_ACTIONS[code]:
         raise ContractValidationError("invalid connected-client error or recovery action")
+
+
+def _validate_status_v2(value: Mapping[str, Any]) -> None:
+    runtime = _value_mapping(value, "local_runtime")
+    _exact_keys(runtime, {"ownership", "state"}, path="local_runtime")
+    if _value_string(runtime, "ownership") != "owned":
+        raise ContractValidationError("invalid connected-client runtime ownership")
+    state = _value_string(runtime, "state")
+    if state not in {"ready", "stopping", "unavailable", "stopped"} or state != value.get("router"):
+        raise ContractValidationError("invalid connected-client runtime state")
+    _validate_status({key: item for key, item in value.items() if key != "local_runtime"})
+
+
+def _validate_preview_v2(value: Mapping[str, Any]) -> None:
+    runtime = _value_mapping(value, "local_runtime")
+    _exact_keys(runtime, {"ownership", "state"}, path="local_runtime")
+    pair = (_value_string(runtime, "ownership"), _value_string(runtime, "state"))
+    if pair not in {("planned", "not_started"), ("owned", "ready")} or pair[1] != value.get("router"):
+        raise ContractValidationError("invalid connected-client proposed runtime")
+    _validate_preview({key: item for key, item in value.items() if key != "local_runtime"})

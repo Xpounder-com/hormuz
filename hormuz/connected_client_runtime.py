@@ -9,10 +9,12 @@ import signal
 import socket
 import sys
 import threading
+import subprocess
 
 from .connected_client import _read, _parse_record, _lock_descriptor
 from .config import GatewayConfig
 from .server import GatewayServer
+from .managed_llama import OwnedLlama
 
 
 class _OwnedGatewayServer(GatewayServer):
@@ -69,7 +71,7 @@ def main(record_path, generation):
     if record["generation"] != generation or record["phase"] not in {"prepared", "connected"}:
         return
     lock = _lock_descriptor(str(record_path) + ".runtime-lock")
-    server = control = timer = None
+    server = control = timer = engine = None
     thread = None
     stopping = threading.Event()
     try:
@@ -83,6 +85,8 @@ def main(record_path, generation):
         config = GatewayConfig.load(record["gateway_config"])
         if _read(Path(record["gateway_config"])) != source:
             return
+        if config.managed_llama is not None:
+            engine = OwnedLlama(config.managed_llama, lock)
         server = _OwnedGatewayServer(config)
         current = _parse_record(_read(Path(record_path), private=True))
         if current["generation"] != record["generation"] or current["phase"] not in {"prepared", "connected"}:
@@ -103,6 +107,9 @@ def main(record_path, generation):
             return
         signal.signal(signal.SIGTERM, lambda *_: stopping.set())
         while not stopping.is_set():
+            if engine is not None and engine.process.poll() is not None:
+                server.begin_drain()
+                break
             try:
                 client, _ = control.accept()
             except socket.timeout:
@@ -119,10 +126,18 @@ def main(record_path, generation):
                         server.begin_drain()
                         stopping.set()
                     client.sendall(json.dumps({"generation": record["generation"],
-                        "router": "stopping" if stopping.is_set() else "ready" if server.readiness_reason() is None else "unavailable"}).encode() + b"\n")
+                        "router": "stopping" if stopping.is_set() else "ready" if server.readiness_reason() is None
+                        and (engine is None or engine.ready()) else "unavailable"}).encode() + b"\n")
                 except (OSError, ValueError):
                     continue
     finally:
+        if engine is not None:
+            try:
+                engine.close()
+            except subprocess.TimeoutExpired:
+                # The guardian retains the inherited runtime lease until its
+                # engine cleanup completes, even if this host must exit.
+                pass
         if server is not None:
             def force_stop():
                 # Only this owned host exits; the kernel releases all its sockets
