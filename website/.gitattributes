@@ -1,3 +1,0 @@
-# Review the editable generators; preserve the exact bytes of document exports.
-public/downloads/*.pdf binary
-public/downloads/*.pptx binary

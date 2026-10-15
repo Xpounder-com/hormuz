@@ -53,9 +53,8 @@ from .contracts import (
     contract_envelope,
     relay_contract_header,
 )
-from .custody_runtime import resolve_upstream_credentials
+from .credentials import resolve_upstream_credentials
 from .execution_destination import ExecutionDestination, ExecutionDestinations
-from .custody_runtime_projection import CustodyRuntimeProjection, CustodyRuntimeProjectionError
 from .evidence import EvidenceStorageError
 from .finance_attempts import (
     ConfiguredRateCardBinding,
@@ -68,24 +67,9 @@ from .finance_account_binding import (
     UnavailableFinance,
     select_finance_account,
 )
-from .github_connector import GitHubOutcomeReceiver
-from .github_http import GITHUB_EVENTS_PATH, handle_github_webhook
-from .linear_connector import LinearOutcomeReceiver
-from .linear_http import (
-    LINEAR_EVENTS_PATH,
-    LINEAR_SNAPSHOTS_PATH,
-    handle_linear_snapshot,
-    handle_linear_webhook,
-)
-from .linear_snapshot import LinearSnapshotReceiver
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
-from .portfolio_http import handle_registry
-from .portfolio_repository import create_portfolio_repository
-from .portfolio_service import PortfolioService
-from .portfolio_wire import PREFIX as PORTFOLIO_PREFIX
-from .postgres import PostgresStorageError
 from .provider_reliability import (
     ProviderAttemptMetrics,
     ProviderFailoverContext,
@@ -94,24 +78,15 @@ from .provider_reliability import (
 from .redaction import RedactionError, SecretRedactor
 from .store import RequestAttempt, ReservationDenied, StorageSchemaError, UsageRepository, WorkBudgetContext
 from .store_router import (
-    create_postgres_runtime_pool,
     create_provider_reliability_repository,
-    create_repository_bundle,
     create_usage_store,
     create_work_budget_request_repository,
 )
-from .session import SessionBroker
-from .session_http import SessionRequestLimit, handle_session_request
-from .session_store import SQLiteSessionStore, SessionStoreError
-from .console import ConsoleService
-from .console_http import handle_console_request
-from .workspace import WorkspaceService
-from .workspace_http import handle_workspace_request, is_workspace_path
 from .usage import ResponseUsageParser
 
 
 LOGGER = logging.getLogger("hormuz")
-_STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, PostgresStorageError, StorageSchemaError)
+_STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, StorageSchemaError)
 _INGRESS_CREDENTIAL_HEADER = "X-Hormuz-Ingress-Credential"
 _RELAY_CHUNK_BYTES = 16 * 1024
 _OPENAI_PROVIDER_STATE_FIELDS = frozenset({
@@ -393,100 +368,16 @@ class GatewayServer(ThreadingHTTPServer):
         egress_config = replace(config, upstreams=dict(config.upstreams))
         self._accepting_requests = threading.Event()
         self.authenticator = Authenticator(config)
-        self.session_broker: SessionBroker | None = None
-        self.session_request_limit = SessionRequestLimit()
-        self.console_request_limit = SessionRequestLimit()
-        self.console: ConsoleService | None = None
-        self.workspace: WorkspaceService | None = None
         self.work_runtime = None
-        self.work_billing = None
         self.impact_recorder = None
-        # Keep injected-process tests and the hosted child's reviewed secret
-        # inventory authoritative. Falling back to ``os.environ`` here would
-        # let storage silently use a credential that the caller deliberately
-        # omitted from its bounded environment.
-        self.postgres_pool = create_postgres_runtime_pool(config, environ=environ)
+        self.attribution_repository = None
         try:
-            if config.session_broker.enabled:
-                settings = config.session_broker
-                self.session_broker = SessionBroker(config, self.authenticator, SQLiteSessionStore(
-                    settings.database_path,
-                    master_key=settings.master_key,
-                    audience=settings.public_base_url,
-                    access_ttl_seconds=settings.access_ttl_seconds,
-                    absolute_ttl_seconds=settings.absolute_ttl_seconds,
-                    enrollment_ttl_seconds=settings.enrollment_ttl_seconds,
-                    trusted_parent_path=settings.trusted_parent_path,
-                ))
-            storage_organizations: tuple[str, ...] | None = None
-            if (
-                self.session_broker is not None
-                and config.session_broker.onboarding_enabled
-            ):
-                usage_organization_ids = set(config.organization_ids)
-                usage_organization_ids.update(
-                    self.session_broker.directory.managed_organization_ids()
-                )
-                storage_organizations = tuple(sorted(usage_organization_ids))
-            self.store: UsageRepository
-            if config.portfolio_control is None:
-                if storage_organizations is None:
-                    self.store = create_usage_store(
-                        config,
-                        environ=environ,
-                        connection_pool=self.postgres_pool,
-                    )
-                else:
-                    self.store = create_usage_store(
-                        config,
-                        environ=environ,
-                        connection_pool=self.postgres_pool,
-                        organization_ids=storage_organizations,
-                    )
-                portfolio = create_portfolio_repository(config, connection_pool=self.postgres_pool, environ=environ)
-            else:
-                repositories = create_repository_bundle(
-                    config,
-                    portfolio_factory=create_portfolio_repository,
-                    environ=environ,
-                    connection_pool=self.postgres_pool,
-                    usage_organization_ids=storage_organizations,
-                )
-                self.store, portfolio = repositories.usage, repositories.portfolio
-            if self.session_broker is not None and config.session_broker.console_enabled:
-                self.console = ConsoleService(self.session_broker, self.store)
-            if self.session_broker is not None and config.session_broker.workspace_enabled:
-                self.workspace = WorkspaceService(self.session_broker)
-            self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
-            self.github_outcome_receiver = (
-                GitHubOutcomeReceiver(config, portfolio.outcomes)
-                if config.outcome_connectors is not None and config.outcome_connectors.github
-                else None
-            )
-            self.linear_outcome_receiver = (
-                LinearOutcomeReceiver(config, portfolio.linear)
-                if config.outcome_connectors is not None and config.outcome_connectors.linear
-                else None
-            )
-            self.linear_snapshot_receiver = (
-                LinearSnapshotReceiver(config, portfolio.linear)
-                if config.outcome_connectors is not None
-                and any(
-                    channel.active_snapshot_secret is not None
-                    for channel in config.outcome_connectors.linear
-                )
-                else None
-            )
-            self.attribution_repository = portfolio.attributions
-            self.budget_repository = portfolio.budgets
+            self.store = create_usage_store(config)
             provider_reliability_store = create_provider_reliability_repository(self.store)
             if provider_reliability_store is None:
                 raise StorageSchemaError("storage_schema_partial_upgrade")
             self.provider_reliability_store = provider_reliability_store
-            policy_runtime = PolicyRuntime(config, environ=environ, connection_pool=self.postgres_pool,
-                                           organization_ids=storage_organizations)
-            if self.session_broker is not None:
-                self.session_broker.policy_runtime = policy_runtime
+            policy_runtime = PolicyRuntime(config)
             self.policy_engine = PolicyEngine(
                 config,
                 self.store,
@@ -498,17 +389,12 @@ class GatewayServer(ThreadingHTTPServer):
             recovered_attempts = self.store.sweep_stale_request_attempts()
             if recovered_attempts:
                 LOGGER.warning("request_attempts_marked_outcome_unknown count=%d", recovered_attempts)
-            self.custody_runtime_projection = CustodyRuntimeProjection(
-                config,
-                connection_pool=self.postgres_pool,
-            )
             self._egress_configuration = _EgressConfiguration(
                 upstreams=egress_config.upstreams,
                 finance_account_bindings=egress_config.finance_account_bindings,
                 credentials=resolve_upstream_credentials(
                     egress_config,
                     environ=environ,
-                    selection_allowed=self._upstream_credential_selection_allowed,
                 ),
                 routes=config.model_routes,
             )
@@ -524,49 +410,14 @@ class GatewayServer(ThreadingHTTPServer):
                 for value in self.upstream_credentials.values()
                 if len(value) >= 8
             )
-            protected_values.extend(
-                ("oidc_login_secret", issuer.login.client_secret)
-                for issuer in config.oidc_issuers.values()
-                if issuer.login is not None and len(issuer.login.client_secret) >= 8
-            )
-            if config.session_broker.workspace_domain_api_key:
-                protected_values.append(("workspace_domain_api_key", config.session_broker.workspace_domain_api_key))
-            if config.outcome_connectors is not None:
-                protected_values.extend(config.outcome_connectors.protected_values())
-            if self.work_billing is not None:
-                protected_values.extend(self.work_billing.protected_values())
             self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
-            if config.session_broker.policy_impact_enabled:
-                from .policy_impact import ImpactRecorder, ImpactStore, impact_path
-                self.impact_recorder = ImpactRecorder(ImpactStore(
-                    impact_path(config.session_broker.database_path),
-                    trusted_parent_path=config.session_broker.trusted_parent_path,
-                ))
             super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
         except Exception:
             if self.work_runtime is not None:
                 self.work_runtime.close()
             work_gateway.close(self)
-            if self.impact_recorder is not None:
-                self.impact_recorder.close()
-            projection = getattr(self, "custody_runtime_projection", None)
-            if projection is not None:
-                projection.close()
-            self._close_postgres_pool()
             raise
         self._accepting_requests.set()
-        if self.workspace is not None:
-            self.workspace.domains.start()
-        if self.postgres_pool is not None:
-            settings = self.postgres_pool.settings
-            LOGGER.info(
-                "postgres_pool_started min_connections=%d max_connections=%d max_waiting=%d "
-                "acquire_timeout_seconds=%d",
-                settings.min_connections,
-                settings.max_connections,
-                settings.max_waiting,
-                settings.acquire_timeout_seconds,
-            )
 
     @property
     def destinations(self) -> ExecutionDestinations:
@@ -577,32 +428,6 @@ class GatewayServer(ThreadingHTTPServer):
         """Read-only compatibility view for existing startup diagnostics."""
 
         return self._egress_configuration.credentials
-
-    def _upstream_credential_selection_allowed(self, protocol: str) -> bool:
-        """Avoid loading a credential generation already restricted by custody.
-
-        A normal request repeats this check immediately before egress. This
-        startup guard is narrower: it prevents a freshly retired encrypted
-        envelope from being decrypted into a newly started gateway process,
-        while still allowing the gateway to start and return the stable 403
-        custody result for that protocol.
-        """
-
-        if not self.custody_runtime_projection.enabled:
-            return True
-        organization_ids = self.config.organization_ids
-        if len(organization_ids) != 1:
-            raise CustodyRuntimeProjectionError("custody_runtime_projection_configuration_invalid")
-        try:
-            self.custody_runtime_projection.require_provider_usable(
-                organization_id=organization_ids[0],
-                protocol=protocol,
-            )
-        except CustodyRuntimeProjectionError as error:
-            if error.code in {"custody_provider_credential_disabled", "custody_envelope_retired"}:
-                return False
-            raise
-        return True
 
     def shutdown(self) -> None:
         """Stop advertising readiness before the listener begins draining."""
@@ -623,11 +448,6 @@ class GatewayServer(ThreadingHTTPServer):
             if self.work_runtime is not None:
                 self.work_runtime.close()
             work_gateway.close(self)
-            if self.workspace is not None:
-                self.workspace.domains.close()
-            if self.impact_recorder is not None:
-                self.impact_recorder.close()
-            self._close_postgres_pool()
 
     def readiness_reason(self) -> str | None:
         """Return a content-free reason when this process must not receive traffic."""
@@ -636,17 +456,10 @@ class GatewayServer(ThreadingHTTPServer):
             return "draining"
         try:
             self.store.verify_ready()
-            if self.session_broker is not None:
-                self.session_broker.store.check_available()
             self.policy_engine.policy_runtime.verify_active_policies()
             if self.work_runtime is not None:
                 self.work_runtime.verify_ready()
-            if self.work_billing is not None:
-                self.work_billing.verify_ready()
-            if not self.custody_runtime_projection.readiness_healthy():
-                LOGGER.warning("readiness_custody_projection_stale")
-                return "dependency_unavailable"
-        except (*_STORAGE_FAILURES, SessionStoreError, WorkRuntimeError, OSError):
+        except (*_STORAGE_FAILURES, WorkRuntimeError, OSError):
             LOGGER.warning("readiness_dependency_unavailable")
             return "dependency_unavailable"
         # A shutdown may have started while the read-only checks ran. Never
@@ -655,16 +468,6 @@ class GatewayServer(ThreadingHTTPServer):
             return "draining"
         return None
 
-    def _close_postgres_pool(self) -> None:
-        projection = getattr(self, "custody_runtime_projection", None)
-        if projection is not None:
-            projection.close()
-        if self.postgres_pool is None:
-            return
-        try:
-            self.postgres_pool.close()
-        except PostgresStorageError:
-            LOGGER.error("postgres_pool_close_failed")
 
 
 class GatewayRequestHandler(BaseHTTPRequestHandler):
@@ -716,22 +519,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if identity is not None:
                 self._send_contract_json(HTTPStatus.OK, "hormuz.route-admission", self.server.route_admission.status(self, identity))
             return
-        if path == "/v1/work/billing/webhook":
-            self._send_json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": {"code": "hormuz_ai_work_method_not_allowed"}})
-            return
         if handle_work_request(self):
-            return
-        if is_workspace_path(path):
-            handle_workspace_request(self)
-            return
-        if path.startswith(PORTFOLIO_PREFIX + "/"):
-            handle_registry(self)
-            return
-        if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
-            handle_console_request(self)
-            return
-        if path.startswith("/v1/auth/"):
-            handle_session_request(self)
             return
         if path == "/health":
             self._send_contract_json(
@@ -802,61 +590,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 },
             )
             return
-        if path == "/v1/gateway/reliability":
-            operational_stats = getattr(self.server, "operational_stats", None)
-            if not callable(operational_stats):
-                self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
-                return
-            try:
-                totals = self.server.provider_reliability_store.totals(
-                    actor_id=identity.actor_id,
-                    organization_id=identity.organization_id,
-                )
-                operations = operational_stats()
-            except _STORAGE_FAILURES as error:
-                self._send_storage_failure(None, error)
-                return
-            provider = operations["provider"]
-            pool = operations["postgresql_pool"]
-            self._send_json(
-                HTTPStatus.OK,
-                {
-                    "schema_id": "hormuz.provider-reliability-summary",
-                    "schema_version": 1,
-                    "scope": "current_actor",
-                    "live_provider_request_count": totals.live_provider_request_count,
-                    "provider_attempt_record_count": totals.provider_attempt_record_count,
-                    "latency_header_sample_count": totals.latency_header_sample_count,
-                    "latency_first_body_byte_sample_count": (
-                        totals.latency_first_body_byte_sample_count
-                    ),
-                    "latency_total_sample_count": totals.latency_total_sample_count,
-                    "failover_link_record_count": totals.failover_link_record_count,
-                    "outcome_unknown_count": totals.outcome_unknown_count,
-                    "cancellation_outcome_unknown_count": (
-                        totals.cancellation_outcome_unknown_count
-                    ),
-                    "provider_capacity": provider["capacity"],
-                    "provider_inflight": provider["inflight"],
-                    "provider_peak_inflight": provider["peak_inflight"],
-                    "provider_saturated_total": provider["saturated_total"],
-                    "connection_capacity": provider["connection_capacity"],
-                    "connection_saturated_total": provider[
-                        "connection_saturated_total"
-                    ],
-                    "postgresql_pool_max_connections": pool["max_connections"],
-                    "postgresql_pool_requests_waiting": pool["requests_waiting"],
-                    "postgresql_pool_requests_queued_total": pool[
-                        "requests_queued_total"
-                    ],
-                    "postgresql_pool_wait_milliseconds_total": pool[
-                        "requests_wait_milliseconds_total"
-                    ],
-                    "postgresql_pool_error_total": pool["requests_error_total"],
-                    "deployment": operations["deployment"],
-                },
-            )
-            return
         if path == "/v1/gateway/usage":
             try:
                 totals = self.server.store.monthly_totals(
@@ -903,32 +636,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._response_started = False
         self._attribution_result = None
         path = urlsplit(self.path).path
-        if path == "/v1/work/billing/webhook":
-            from .work_billing import handle_webhook
-            handle_webhook(self)
-            return
         if handle_work_request(self):
-            return
-        if is_workspace_path(path):
-            handle_workspace_request(self)
-            return
-        if path.startswith(PORTFOLIO_PREFIX + "/"):
-            handle_registry(self)
-            return
-        if path == GITHUB_EVENTS_PATH:
-            handle_github_webhook(self)
-            return
-        if path == LINEAR_EVENTS_PATH:
-            handle_linear_webhook(self)
-            return
-        if path == LINEAR_SNAPSHOTS_PATH:
-            handle_linear_snapshot(self)
-            return
-        if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
-            handle_console_request(self)
-            return
-        if path.startswith("/v1/auth/"):
-            handle_session_request(self)
             return
         routes = {
             # v1 enrollment calls its OpenAI API capability "codex". The
@@ -941,6 +649,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         }
         route = routes.get(path)
         if route is None:
+            self.close_connection = True
             self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
             return
         identity = self._authenticate()
@@ -1195,27 +904,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if is_responses_create and not destination.upstream.allow_response_storage:
             redaction = replace(redaction, value={**redaction.value, "store": False})
         body = self._provider_body(redaction.value, decision.route)
-        try:
-            self.server.custody_runtime_projection.require_provider_usable(
-                organization_id=identity.organization_id,
-                protocol=destination.name,
-            )
-        except CustodyRuntimeProjectionError as error:
-            if error.code in {"custody_provider_credential_disabled", "custody_envelope_retired"}:
-                self._send_protocol_error(
-                    protocol,
-                    "Organization custody policy does not permit this provider credential.",
-                    HTTPStatus.FORBIDDEN,
-                    code="hormuz_custody_restricted",
-                )
-                return
-            self._send_protocol_error(
-                protocol,
-                "Hormuz custody projection is temporarily unavailable.",
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                code="hormuz_storage_unavailable",
-            )
-            return
         egress = self.server._egress_configuration
         upstream_key = destination.credential
         if destination.upstream.authentication != "none" and not upstream_key:
@@ -1945,19 +1633,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self.server.store.finalize_request_attempt(attempt=attempt,
                 organization_id=identity.organization_id, status="failed", cost_microusd=0)
             raise
-        recorder = getattr(self.server, "impact_recorder", None)
-        if recorder is not None:
-            from .policy_impact import Observation, iso, utcnow, routing_fingerprint
-            observation = Observation(
-                request_id=attempt.attempt_id, organization_id=identity.organization_id,
-                team_id=identity.team_id, actor_id=identity.actor_id,
-                model_alias=decision.resolved_alias, policy_version=decision.policy_version,
-                requested_limit=getattr(self, "_impact_requested_limit", None),
-                routing_fingerprint=routing_fingerprint(self.server.config),
-                effective_limit=request_value.get(output_field), started_at=iso(utcnow()),
-            )
-            self._impact_observations[attempt.attempt_id] = observation
-            recorder.submit(observation)
         return attempt
 
     def _deny_budget_reservation(
@@ -2053,20 +1728,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             candidates.append(api_key)
         for candidate in candidates:
             try:
-                if candidate.startswith("hox_a_") and self.server.session_broker is not None:
-                    return self.server.session_broker.authenticate(candidate)
                 identity = self.server.authenticator.authenticate(candidate)
-                if self.server.session_broker is not None and self.server.session_broker.directory.manages_organization(identity.organization_id):
-                    raise AuthenticationError("managed_organization_session_required")
                 return identity
             except AuthenticationError as error:
                 if error.code.startswith("session_store_"):
                     self._send_error("hormuz_storage_unavailable", "Session authentication is unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                     return None
                 LOGGER.info("authentication_denied reason=%s", error.code)
-            except SessionStoreError:
-                self._send_error("hormuz_storage_unavailable", "Session authentication is unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
-                return None
         self._send_error("unauthorized", "Missing or invalid Hormuz identity credential", HTTPStatus.UNAUTHORIZED)
         return None
 

@@ -53,4 +53,4 @@ requests, automatic provider replay, dashboard aggregation, a customer SLA, or
 regional availability.
 
 The exact operational and evidence boundary is documented in
-[provider reliability](../PROVIDER_RELIABILITY.md).
+[provider reliability](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/PROVIDER_RELIABILITY.md).

@@ -1,3 +1,5 @@
+> Dated operational evidence. Current resource state must be reverified; the active product is the [local router](ROUTER_SCOPE.md). The operational cleanup issues remain open.
+
 # Hormuz account cleanup
 
 Scope confirmed 2026-10-13: evaluate **all Hormuz-related accounts and resources**

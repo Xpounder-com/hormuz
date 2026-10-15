@@ -1,6 +1,6 @@
 {
   "name": "Installation or first-run failure",
-  "description": "Report a clean-checkout, package-installation, Docker, or first-run problem.",
+  "description": "Report a local-router source, package, setup or first-run problem.",
   "title": "[Install]: ",
   "labels": [
     "bug"
@@ -20,8 +20,7 @@
         "options": [
           "Clean source checkout",
           "Python package or wheel",
-          "Official OCI image by digest",
-          "Local Docker build",
+          "Coding-client connection",
           "Other"
         ]
       },
@@ -34,7 +33,7 @@
       "id": "version",
       "attributes": {
         "label": "Hormuz version",
-        "description": "Commit SHA, tag, package version, or OCI digest.",
+        "description": "Commit SHA, tag, package version.",
         "placeholder": "commit abc1234 or sha256:..."
       },
       "validations": {
@@ -76,8 +75,8 @@
       "id": "environment",
       "attributes": {
         "label": "Environment",
-        "description": "Operating system, architecture, Python version, Docker/OCI runtime version if used, and shell.",
-        "placeholder": "Linux amd64; Python 3.12; Docker 27; bash"
+        "description": "Operating system, architecture, Python version, and shell.",
+        "placeholder": "OS/architecture; Python/client version; shell"
       },
       "validations": {
         "required": true

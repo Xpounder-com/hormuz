@@ -1,37 +1,9 @@
-"""Quiescent AI Work owner locking, integrity verification and closed recovery."""
-from contextlib import contextmanager, closing
+"""Single-owner lifetime for the customer-local request ledger."""
+from contextlib import contextmanager
 import os
 from pathlib import Path
-import secrets
-import sqlite3
 import stat
-import time
-
-from ._hosted_config import HostedError
-
-WORK_DATABASE = "hormuz-work.sqlite3"
-BILLING_DATABASE = "hormuz-work.billing.sqlite3"
-
-
-def load_profile(path):
-    """Explicit offline full configuration; never starts a listener or provider.
-
-    The existing session owner validates parents, key binding and marker for
-    every operation. Keep exact filenames rather than following arbitrary
-    SQLite paths into a multi-file restore.
-    """
-    from .config import GatewayConfig, ConfigError
-    from ._hosted_provider import _safe_configuration_file
-    _safe_configuration_file(path)
-    try:
-        config = GatewayConfig.load(path)
-    except (ConfigError, OSError, ValueError):
-        raise HostedError("hosted_work_recovery_configuration_invalid") from None
-    settings = config.session_broker
-    directory = config.database_path.parent
-    if not config.ai_work.enabled or config.usage_storage.backend != "sqlite" or not settings.enabled or config.database_path != directory / "usage.sqlite3" or settings.database_path != directory / "sessions.sqlite3" or config.ai_work.database_path != directory / WORK_DATABASE:
-        raise HostedError("hosted_work_recovery_configuration_invalid")
-    return config
+from .work_runtime import WorkRuntimeError
 
 
 @contextmanager
@@ -44,122 +16,11 @@ def owner_lock(path, *, exclusive=True):
     try:
         info = os.fstat(descriptor)
         if info.st_uid != os.getuid() or info.st_nlink != 1 or not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
-            raise HostedError("hosted_work_owner_lock_unsafe")
+            raise WorkRuntimeError("work_owner_lock_unsafe", 503)
         try:
             fcntl.flock(descriptor, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise HostedError("hosted_work_owner_active") from None
+            raise WorkRuntimeError("work_owner_active", 503) from None
         yield
     finally:
         os.close(descriptor)
-
-
-def owned_databases(config):
-    if not config.ai_work.enabled:
-        return ()
-    if config.usage_storage.backend != "sqlite":
-        raise HostedError("hosted_work_consistent_recovery_requires_sqlite")
-    if config.ai_work.database_path != config.database_path.parent / WORK_DATABASE:
-        raise HostedError("hosted_work_state_binding_mismatch")
-    return (WORK_DATABASE, BILLING_DATABASE) if config.ai_work.billing_price_id else (WORK_DATABASE,)
-
-
-def _validate_store(connection, *, billing=False):
-    if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok" or connection.execute("PRAGMA foreign_key_check").fetchone():
-        raise HostedError("hosted_work_recovery_integrity_invalid")
-    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    expected = {"work_entitlements", "work_billing_events", "work_activation", "work_checkouts", "work_payment_facts"} if billing else {"ai_work_schema", "ai_work_plans", "ai_work_jobs", "ai_work_attempts", "ai_work_observations"}
-    if not expected <= tables or not billing and [row[0] for row in connection.execute("SELECT version FROM ai_work_schema")] != [1]:
-        raise HostedError("hosted_work_recovery_schema_invalid")
-    return tables
-
-
-def validate_store(path, *, billing=False):
-    with closing(sqlite3.connect(Path(path).as_uri() + "?mode=ro", uri=True, timeout=5)) as connection:
-        _validate_store(connection, billing=billing)
-
-
-def recovery_authority_counts(config):
-    """Read closed Work/payment invariants under the quiescent owner lock.
-
-    Hosted callers hold their state lock first, matching snapshot lock order.
-    No runtime/billing constructor is used: missing stores and schema are never
-    initialized, and unknown spend reservations are only read.
-    """
-    from ._hosted_state import _private
-    directory = config.database_path.parent
-    names = owned_databases(config)
-    if not names:
-        return {}
-    with owner_lock(config.ai_work.database_path):
-        try:
-            before = {name: _private(directory / name) for name in names}
-            counts = {}
-            for name in names:
-                path = directory / name
-                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5)) as connection:
-                    connection.execute("PRAGMA query_only=ON")
-                    connection.execute("BEGIN")
-                    tables = _validate_store(connection, billing=name == BILLING_DATABASE)
-                    if name == WORK_DATABASE:
-                        counts.update({
-                            "pending_work_attempts": int(connection.execute(
-                                "SELECT count(*) FROM ai_work_attempts WHERE state='pending'"
-                            ).fetchone()[0]),
-                            "unclosed_work_jobs": int(connection.execute(
-                                "SELECT count(*) FROM ai_work_jobs "
-                                "WHERE state IS NOT 'stopped' AND state IS NOT 'completed' "
-                                "AND (state IS NOT 'paused' OR pause_reason IS NOT 'recovery_required')"
-                            ).fetchone()[0]),
-                            "pending_work_bridge_events": int(connection.execute(
-                                "SELECT count(*) FROM ai_work_bridge_events WHERE status='pending'"
-                            ).fetchone()[0]) if "ai_work_bridge_events" in tables else 0,
-                        })
-                    else:
-                        queries = {
-                            "unclosed_work_entitlements": (
-                                "SELECT count(*) FROM work_entitlements "
-                                "WHERE subscription_state IS NOT 'recovery_required' "
-                                "OR paid_until IS NOT 0 OR subscription_until IS NOT 0"
-                            ),
-                            "unclosed_work_activation": "SELECT count(*) FROM work_activation WHERE state IS NOT 'recovery_required'",
-                            "unclosed_work_checkouts": "SELECT count(*) FROM work_checkouts WHERE state IS NOT 'blocked' OR url IS NOT NULL",
-                            "retained_work_payment_facts": "SELECT count(*) FROM work_payment_facts",
-                        }
-                        counts.update({key: int(connection.execute(query).fetchone()[0]) for key, query in queries.items()})
-                # Check all identities again below too, so replacing an earlier
-                # store while a later one is inspected also fails closed.
-                after = _private(path)
-                if (after.st_dev, after.st_ino) != (before[name].st_dev, before[name].st_ino):
-                    raise HostedError("hosted_work_recovery_store_changed")
-            for name, info in before.items():
-                after = _private(directory / name)
-                if (after.st_dev, after.st_ino) != (info.st_dev, info.st_ino):
-                    raise HostedError("hosted_work_recovery_store_changed")
-            return counts
-        except OSError:
-            raise HostedError("hosted_work_recovery_store_unavailable") from None
-        except sqlite3.Error:
-            raise HostedError("hosted_work_recovery_database_invalid") from None
-
-
-def close_restored(directory, names):
-    now = int(time.time())
-    for name in names:
-        path = Path(directory) / name
-        validate_store(path, billing=name == BILLING_DATABASE)
-        with closing(sqlite3.connect(path)) as connection, connection:
-            if name == WORK_DATABASE:
-                # Unknown/pending spend remains reserved after recovery.
-                connection.execute("UPDATE ai_work_attempts SET state='unknown' WHERE state='pending'")
-                connection.execute("UPDATE ai_work_jobs SET state='paused',pause_reason='recovery_required',cache_generation=cache_generation+1,version=version+1 WHERE state NOT IN ('stopped','completed')")
-                tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                if "ai_work_bridge_events" in tables:
-                    connection.execute("UPDATE ai_work_bridge_events SET status='processed',reason='recovery_closed' WHERE status='pending'")
-                if "ai_work_bindings" in tables:
-                    connection.execute("UPDATE ai_work_bindings SET latest_event_at=MAX(COALESCE(latest_event_at,0),?)", (now,))
-            else:
-                connection.execute("UPDATE work_entitlements SET subscription_state='recovery_required',subscription_at=?,paid_at=?,recovery_after=?,paid_until=0,subscription_until=0", (now, now, now))
-                connection.execute("UPDATE work_activation SET state='recovery_required',generation=?,updated_at=?,version=version+1", (secrets.token_urlsafe(24), now))
-                connection.execute("UPDATE work_checkouts SET state='blocked',url=NULL")
-                connection.execute("DELETE FROM work_payment_facts")

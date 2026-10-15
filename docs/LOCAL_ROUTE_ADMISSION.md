@@ -134,7 +134,8 @@ Provider bodies remain unchanged. Destination fields retain version 2 meanings;
 `qualified_local`, `permitted_baseline` or `session_affinity`, and
 `X-Hormuz-Routing-Qualification` appears only for the actual qualified alias.
 Protocol-shaped admission errors carry `X-Hormuz-Error-Code: hormuz_route_*`.
-Legacy configurations keep their prior version 1/2 response shapes. The canonical
+Legacy provider relay metadata keeps its prior version 1/2 shapes. The separate
+AI Work state envelope is v3 in the 2.0 line; see [migration](MIGRATION_2.md). The canonical
 manifest retains both historical relay versions and adds version 3 plus router
 status version 1. No ledger schema, transcript store or credential format changes.
 

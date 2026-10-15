@@ -36,7 +36,8 @@ try:
     if value.get("stall_after_headers"):
         connection.connect()
         connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
-    connection.request(value.get("method", "POST"), origin.path.rstrip("/") + value.get("path", "/responses"),
+    target = value["path"] if value.get("absolute_path") else origin.path.rstrip("/") + value.get("path", "/responses")
+    connection.request(value.get("method", "POST"), target,
         None if value.get("method") == "GET" else json.dumps(value["request"] if value.get("control") else
                    {"model": config["model"], "input": "Reply with the fixture answer.",
                     "max_output_tokens": 8, **value.get("request", {})}),
@@ -60,7 +61,7 @@ try:
     data = response.readline() if value.get("cancel_after_event") else response.read()
     print(json.dumps({"status": response.status,
                       "headers": dict((k.lower(), v) for k, v in response.getheaders()),
-                      "body": data.decode() if "text/event-stream" in response.getheader("Content-Type", "") else json.loads(data)}))
+                      "body": json.loads(data) if "application/json" in response.getheader("Content-Type", "") else data.decode()}))
 finally:
     connection.close()
 '''
@@ -206,6 +207,57 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 gateway.shutdown()
                 gateway.server_close()
                 thread.join(timeout=2)
+
+    def test_connected_client_has_no_retired_browser_or_billing_frontdoor(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.connected_client(value) as submit:
+                for path in ("/work", "/console", "/v1/admin/workspaces", "/v1/auth/login",
+                             "/v1/work/billing/checkout"):
+                    with self.subTest(path=path):
+                        response = submit(method="GET", path=path, absolute_path=True)
+                        self.assertEqual(response["status"], 404, response)
+                self.assertEqual(submit()["status"], 200)
+                state = submit(method="GET", path="/work/state")
+                self.assertEqual(state["status"], 200)
+                contract = json.loads((Path(__file__).parent / "fixtures/router-work-state-v3.json").read_text())
+                self.assertEqual((state["body"]["schema_id"], state["body"]["schema_version"]),
+                                 (contract["schema_id"], contract["schema_version"]))
+                for field in contract["required_fields"]:
+                    self.assertIn(field, state["body"])
+                for field in contract["retired_fields"]:
+                    self.assertNotIn(field, state["body"])
+            self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
+
+    def test_retired_control_post_closes_its_unread_body_without_dispatching_work(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            with self.connected_client(self.configuration(local, cloud)) as submit:
+                response = submit(control=True, path="/work/billing/checkout", request={})
+                self.assertEqual(response["status"], 404)
+                self.assertEqual(response["headers"].get("connection"), "close")
+                self.assertEqual((local_requests, cloud_requests), ([], []))
+                self.assertEqual(submit()["status"], 200)
+            self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
+
+    def test_connected_client_preserves_secret_redaction_and_denial_before_local_egress(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            secret_input = "fixture-coding-client-credential and fixture-cloud-destination-credential"
+            with self.connected_client(value) as submit:
+                response = submit(request={"input": secret_input})
+                self.assertEqual(response["status"], 200)
+                self.assertEqual(local_requests[0]["body"]["input"],
+                    "[REDACTED:HORMUZ_SECRET] and [REDACTED:HORMUZ_SECRET]")
+            value["egress_controls"] = {"secrets": {"mode": "deny"}}
+            with self.connected_client(value) as submit:
+                response = submit(request={"input": secret_input})
+                self.assertEqual((response["status"], response["body"]["error"]["code"]),
+                                 (403, "hormuz_secret_detected"))
+            self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
 
     def test_connected_client_uses_local_destination_without_cloud_credentials(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \
@@ -690,7 +742,7 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 result = submit()
                 status = submit(method="GET", path="/work/state")
                 self.assertEqual(status["status"], 200, status)
-                self.assertEqual(status["body"]["schema_version"], 2)
+                self.assertEqual(status["body"]["schema_version"], 3)
                 self.assertEqual(result["headers"]["x-hormuz-contract"], "hormuz.relay-metadata;v=2")
                 route = status["body"]["connection"]["routes"][0]
                 self.assertEqual((route["destination"], route["locality"], route["authentication"],
@@ -819,7 +871,7 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertIn("hormuz_route_local_route_unavailable", json.loads(manifest.stdout)["error_codes"])
                 self.assertEqual(response["headers"]["x-hormuz-contract"], "hormuz.relay-metadata;v=2")
 
-    def test_legacy_connection_preserves_version_one_metadata(self):
+    def test_legacy_connection_preserves_version_one_relay_metadata(self):
         with provider("LEGACY_DESTINATION") as (origin, _requests):
             value = self.configuration("http://127.0.0.1:1", origin)
             del value["upstreams"]["local-llama"]
@@ -831,7 +883,7 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 state = submit(method="GET", path="/work/state")
                 self.assertEqual(response["headers"]["x-hormuz-contract"], "hormuz.relay-metadata;v=1")
                 self.assertNotIn("x-hormuz-destination", response["headers"])
-                self.assertEqual(state["body"]["schema_version"], 1)
+                self.assertEqual(state["body"]["schema_version"], 3)
                 self.assertEqual(set(state["body"]["connection"]["routes"][0]),
                                  {"model", "protocol", "credential_configured", "eligible"})
             with self.assertRaises(OSError):

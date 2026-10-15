@@ -85,14 +85,15 @@ and policy selection. Transport ambiguity, partial streams, cancellation and
 unaccounted helpers remain ineligible for replay. Helper dispatch uses the same
 destination resolution as accounted requests.
 
-`/v1/work/state` and `/v1/work/connect` use schema version **2** when destination
-metadata is explicitly configured. Route records retain `model`, `protocol`,
-`credential_configured` and `eligible`, and add `destination`, `locality`,
-`authentication`, `generation`, `upstream_model`, `model_revision` and
-`capabilities`. `eligible` remains configuration/authentication availability,
-not runtime readiness or model quality. A local `none` destination can be
-available while `credential_configured` is false. Onboarding and job choices
-consume the same availability. Legacy configurations keep the version 1 shape.
+`/v1/work/state` uses schema version **3** in the 2.0 local-router line;
+`/v1/work/connect` is retired. Explicit destination route records retain `model`,
+`protocol`, `credential_configured` and `eligible`, and add `destination`,
+`locality`, `authentication`, `generation`, `upstream_model`, `model_revision`
+and `capabilities`. `eligible` describes configuration/authentication availability,
+not observed readiness or model quality. Local `none` authentication can be
+available while `credential_configured` is false. Legacy route descriptions keep
+their four fields inside the v3 state envelope. See [migration](MIGRATION_2.md).
+
 
 Opt-in destination responses declare `X-Hormuz-Contract:
 hormuz.relay-metadata;v=2` and add:

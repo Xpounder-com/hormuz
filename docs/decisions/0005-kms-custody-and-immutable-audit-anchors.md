@@ -1,3 +1,5 @@
+> Historical product decision. Its enterprise/UI product scope is superseded for new development by [ADR 0018](0018-customer-local-router-scope.md).
+
 # ADR 0005: Generic key custody with optional AWS and self-hosted Object Lock profiles
 
 - Status: **Accepted**

@@ -1023,10 +1023,7 @@ class WorkRuntime:
         if type(administrator) is not bool:
             raise WorkRuntimeError("invalid_report_scope")
         owner, now = _identity(identity), self._now()
-        provider_costs = {"status": "unavailable", "reason": "organization_admin_report_required", "accounts": []}
-        if administrator:
-            from .work_provider_costs import account_cost_view
-            provider_costs = account_cost_view(self.config, identity, now)
+        provider_costs = {"status": "unavailable", "reason": "external_account_collection_retired", "accounts": []}
         with self._transaction() as connection:
             where = "organization_id=?" if administrator else "organization_id=? AND actor_id=?"
             parameters = (owner[0],) if administrator else owner

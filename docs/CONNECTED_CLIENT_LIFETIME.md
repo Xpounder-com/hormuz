@@ -59,7 +59,7 @@ Files are bounded, private and owned by the invoking user. The connection journa
 
 ## Compatibility, migration and rollback
 
-The new lifecycle commands are additive. `client config`, existing transient Personal launch adapters and their relay contracts retain their separate behavior. Persistent setup authority belongs to the connected-client lifetime module; existing launch adapters do not gain general permission to edit client configuration.
+The lifecycle commands retain their version-1 contracts. `client config` remains a separate printed configuration path. The 2.0 source line retires transient Personal/desktop app entry points; see [migration](MIGRATION_2.md). Persistent setup authority belongs to the connected-client lifetime module, shared by CLI and future plugin callers.
 
 The connection journal and public lifecycle output begin at schema version 1.
 This unreleased-v1 completion adds explicit schema identifiers. An exact earlier
@@ -150,7 +150,7 @@ External providers, model runtimes and coding clients are not terminated.
 Codex's [documented configuration precedence](https://developers.openai.com/codex/config-basic#configuration-precedence)
 and [managed configuration](https://developers.openai.com/codex/enterprise/managed-configuration)
 explain why this user-default scope cannot promise control over every app or
-project request. See the [qualification evidence](evidence/connected-client-lifetime/README.md)
+project request. See the [qualification evidence](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/evidence/connected-client-lifetime/README.md)
 for the exact synthetic checks and remaining support work.
 
 The version probe reads only its seven named process-context variables; gateway

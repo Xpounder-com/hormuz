@@ -2,7 +2,7 @@
   "schema_version": 1,
   "repository": "Xpounder-com/hormuz",
   "metadata": {
-    "description": "Open-source AI gateway for work budgets, customer-local model routing, secret controls, and usage evidence across OpenAI and Anthropic APIs.",
+    "description": "Customer-local model routing for existing coding clients, with CLI and shared plugin setup.",
     "topics": [
       "ai-gateway",
       "ai-governance",
@@ -49,14 +49,6 @@
   "required_checks": [
     {
       "context": "CI / required",
-      "integration_id": 15368
-    },
-    {
-      "context": "Native Mac client and loopback contract",
-      "integration_id": 15368
-    },
-    {
-      "context": "Website checks",
       "integration_id": 15368
     }
   ],

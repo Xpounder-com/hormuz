@@ -34,5 +34,5 @@ A high answer-cache hit rate cannot establish a successful job. Exact recurrence
 is a possible rework signal with explicit exclusions and unknown quality.
 
 This does not revive the archived experimental context-pack cache. See
-[AI_WORK_RUNTIME.md](../AI_WORK_RUNTIME.md) for the supported configuration,
+[AI_WORK_RUNTIME.md](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/AI_WORK_RUNTIME.md) for the supported configuration,
 limits, interfaces and recovery boundary.

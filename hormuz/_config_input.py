@@ -60,25 +60,12 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "database",
         "upstreams",
         "identities",
-        "authentication",
         "model_routes",
         "egress_controls",
         "policies",
         "max_request_bytes",
         "upstream_timeout_seconds",
         "usage_storage",
-        "policy_control",
-        "custody_control",
-        "custody_executor",
-        "custody_retention",
-        "custody_lifecycle",
-        "key_custody",
-        "audit_anchor",
-        "audit_chain",
-        "portfolio_control",
-        "outcome_connectors",
-        "attribution_control",
-        "finance_account_bindings",
         "ai_work",
         "route_admission",
     }
@@ -86,7 +73,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
 _LISTEN_FIELDS = frozenset({"host", "port"})
 _INGRESS_FIELDS = frozenset({"mode", "trusted_proxy_cidrs", "credential_env"})
 _UPSTREAM_FIELDS = frozenset(
-    {"base_url", "api_key_env", "api_key_envelope", "allow_response_storage", "allow_background", "finance_identity",
+    {"base_url", "api_key_env", "allow_response_storage", "allow_background",
      "protocol", "locality", "authentication"}
 )
 _IDENTITY_FIELDS = frozenset(

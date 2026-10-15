@@ -1,3 +1,5 @@
+> Dated operational evidence. Current resource state must be reverified; the active product is the [local router](ROUTER_SCOPE.md). The operational cleanup issues remain open.
+
 # Local Hormuz workspace cleanup
 
 Checkpoint: 2026-10-13. Parent [#494](https://github.com/Xpounder-com/hormuz/issues/494)

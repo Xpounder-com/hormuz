@@ -1,3 +1,5 @@
+> Dated operational evidence. Current resource state must be reverified; the active product is the [local router](ROUTER_SCOPE.md). The operational cleanup issues remain open.
+
 # Desktop infrastructure audit
 
 Audit date: 2026-10-13. Source baseline:
@@ -7,7 +9,7 @@ Track verified retirement and remaining inventory in
 The [account cleanup ledger](DESKTOP_ACCOUNT_CLEANUP.md) covers #495–#501
 in the separate `track:cleanup` milestone.
 The product sequence is recorded in the
-[Electron desktop roadmap](ELECTRON_DESKTOP_ROADMAP.md).
+[Electron desktop roadmap](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/ELECTRON_DESKTOP_ROADMAP.md).
 
 ## Decision for the first desktop
 
@@ -56,7 +58,7 @@ service and its disk incur no charge.
 
 ## Existing hosted topology and evidence limits
 
-[The Render gateway guide](../deploy/render/gateway/README.md) separates
+[The Render gateway guide](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/deploy/render/gateway/README.md) separates
 maintenance, login/admin staging, workspace UI, provider-pilot and integrated
 AI Work modes. `active` refuses model inference. The fixed provider-pilot
 profile combines hosted identity with a bounded provider gateway, PostgreSQL
@@ -65,12 +67,12 @@ usage/evidence and encrypted session state on an attached disk. The separate
 optional billing/connector state. A mode's source implementation does not
 prove that a live service runs that mode or is commercially qualified.
 
-[The provider-pilot guide](RENDER_PROVIDER_PILOT.md) declares eight generation
+[The provider-pilot guide](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/RENDER_PROVIDER_PILOT.md) declares eight generation
 slots and a bounded 1–4 PostgreSQL pool in its reference envelope. Render is a
 remote identity/gateway host here, not a declared GPU/local-model host. This
 profile makes no availability SLA or broad customer-production claim.
 
-[One-click Mac sign-in history](MACOS_ONE_CLICK_SIGNIN.md) records that the
+[One-click Mac sign-in history](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/MACOS_ONE_CLICK_SIGNIN.md) records that the
 preflight service and the existing PostgreSQL instance supported an internal
 pilot on 2026-10-01. It also records a second logical database inside that same
 instance while the original remained intact. Those dated records help identify
@@ -96,7 +98,7 @@ the dated hosted pilot login proof is historical after this suspension.
 | Hugging Face or other model catalog/download host | Needed for online discovery/download only | Direct bounded metadata/download operations with provenance, license and integrity checks. No Render proxy required. Gated/private sources and marketplace loaders are separate later scope. No prompt upload is implied by downloading a model. |
 | Direct paid-provider APIs | Optional cloud path | User-owned provider account/credential and qualified protocol/stream/cancel behavior. Provider costs are separate from Hormuz service subscriptions. No paid call or model load on typing. |
 | Render services/disks | Not required | All three observed web services suspended; hold activation/expansion. Retained disks, archives, remaining authority and cost disposition are tracked in #495. |
-| PostgreSQL | Not required | Optional shared gateway storage. [Core storage](STORAGE.md) already makes PostgreSQL opt-in; [Personal Optimizer](PERSONAL_OPTIMIZER.md) direct mode needs no organization, PostgreSQL or Hormuz gateway. Preserve legacy stores and recovery authority. |
+| PostgreSQL | Not required | Optional shared gateway storage. [Core storage](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/STORAGE.md) already makes PostgreSQL opt-in; [Personal Optimizer](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/PERSONAL_OPTIMIZER.md) direct mode needs no organization, PostgreSQL or Hormuz gateway. Preserve legacy stores and recovery authority. |
 | Okta/OIDC/hosted sessions | Not required | Keep generic identity and credential contracts; local setup needs no hosted enrollment. #497 retires proved-obsolete dedicated apps/callbacks/sessions while preserving shared identity. |
 | Hosted workspace/team administration | Not required | Deferred optional managed-service experience. Tenant authority and invitations belong to that path, not ordinary local first-run. |
 | Stripe and hosted entitlements | Not required | Deferred optional service billing; retain existing payment/refund/subscription obligations. Public checkout buttons are neither payment proof nor proof that no customers exist. No new desktop billing model is approved here. |
@@ -129,7 +131,7 @@ contract cancellation.
 
 The historical $99/workspace and request-overage proposal in these issues is
 obsolete commercial scope. The current
-[approved catalog and terms](../marketing/COMMERCIAL_SETUP.md) describe Cloud
+[approved catalog and terms](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/marketing/COMMERCIAL_SETUP.md) describe Cloud
 at $49.99/workspace/month and managed site at $499/month including its workspace,
 with no additional Hormuz usage/seat/software-edition/support tier charge.
 [Live pricing](https://usehormuz.github.io/plans/) matched those amounts at the

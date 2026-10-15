@@ -1,3 +1,5 @@
+> Historical product decision. Its enterprise/UI product scope is superseded for new development by [ADR 0018](0018-customer-local-router-scope.md).
+
 # ADR 0002: Enterprise tenancy, authorization, and persistence
 
 - Status: **Accepted**
