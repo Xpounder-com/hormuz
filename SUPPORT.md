@@ -12,7 +12,7 @@ No uptime, support, security certification or broad compatibility SLA is offered
 | Client/platform support | Synthetic success does not qualify an installed Codex desktop engine, every client version or operating system |
 | Local engine/model | Real llama.cpp/model/task quality and exact capabilities still require qualification |
 | Subscription | No synthetic fixture establishes plan consent, account entitlement or zero API spend |
-| Plugin | Skills-only setup is planned over the shared CLI; this cleanup does not ship a plugin |
+| Plugin | Skills-only package shares CLI setup; [agent installation](docs/AGENT_INSTALLATION.md) is separate from each target's routing qualification |
 | Claude | Transport prior art does not establish supported non-Claude main-model substitution or Claude GUI integration |
 | Storage | Customer-local SQLite; no hosted/PostgreSQL deployment product in the 2.0 line |
 

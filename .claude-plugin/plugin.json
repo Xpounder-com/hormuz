@@ -1,0 +1,8 @@
+{
+  "name": "hormuz",
+  "version": "0.1.0",
+  "description": "Set up, inspect and disconnect a customer-local Hormuz router using its shared CLI.",
+  "author": {"name": "Xpounder-com"},
+  "repository": "https://github.com/Xpounder-com/hormuz",
+  "license": "Apache-2.0"
+}

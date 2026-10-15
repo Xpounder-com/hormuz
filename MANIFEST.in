@@ -1,5 +1,9 @@
 include README.md CONTRIBUTING.md SUPPORT.md SECURITY.md CODE_OF_CONDUCT.md GLOSSARY.md LICENSE
 include config.example.json
+include plugin.json gemini-extension.json
+recursive-include .agents/plugins *.json
+recursive-include .claude-plugin *.json
+recursive-include skills *.md
 recursive-include docs *.md *.json
 recursive-include tests *.py *.json *.sql
 recursive-include tools *.py

@@ -36,10 +36,12 @@ The public plugin should call shared CLI operations, not embed another installer
 4. Qualify one documented cloud/authentication path. Plan use requires actual
    consent and eligibility; login is not subscription entitlement. Never
    silently fall back to paid API usage.
-5. Add skills-only setup, status, troubleshooting and disconnect over the shared
-   connection implementation. Qualify installation/platform behavior and
-   distribution separately. Claude integrations need their own qualification;
-   non-Claude main-model substitution is not promised.
+5. The [skills-only package](AGENT_INSTALLATION.md) now exposes setup, status,
+   troubleshooting and disconnect over the shared connection implementation.
+   Qualify runtime setup, installation/platform behavior and distribution
+   separately. Its manifests do not complete the real qualification steps
+   above. Additional client adapters require their own work; non-Claude
+   main-model substitution is not promised.
 
 The cleanup does not finish #523. Synthetic tests establish routing/lifetime
 behavior, not real model quality, subscription eligibility, OS support or plugin

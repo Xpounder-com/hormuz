@@ -1,7 +1,7 @@
 # Hormuz
 
 Hormuz is a customer-local model router for existing coding clients. Its entry
-points are a terminal CLI and a skills-only plugin that will call the same
+points are a terminal CLI and a skills-only plugin that calls the same
 setup, status and disconnect implementation. Coding clients retain their editor,
 tools, permissions and agent loop.
 
@@ -13,8 +13,69 @@ The current source implements destination ownership, automatic route admission,
 hard local-only enforcement and recoverable Codex CLI connection lifetime.
 Routine tests use disposable clients and model endpoints. Real llama.cpp/model
 quality, subscription eligibility, installed-platform support and plugin
-distribution remain separate qualification work. The skills-only plugin is not
-shipped by this cleanup. MCP is optional if a concrete integration needs it.
+distribution remain separate qualification work. The plugin bundles setup,
+status, troubleshooting and disconnect instructions over the CLI. MCP is
+optional if a concrete integration needs it.
+
+## Install in your agent
+
+**Preview:** the plugin manifests are currently on [PR #527](https://github.com/Xpounder-com/hormuz/pull/527).
+The default-branch commands below become available after merge. For installation
+before merge, use the [preview commands](docs/AGENT_INSTALLATION.md#preview-this-branch).
+
+### Codex
+
+```sh
+codex plugin marketplace add Xpounder-com/hormuz
+codex plugin add hormuz@hormuz
+```
+
+Use a CLI with `codex plugin add` (checked on 0.160.0). Alternatively, after adding
+the marketplace, select Hormuz in your client's plugin browser and install it.
+
+### Gemini CLI
+
+```sh
+gemini extensions install https://github.com/Xpounder-com/hormuz
+```
+
+Restart the Gemini CLI session after installation.
+
+### GitHub Copilot CLI
+
+```sh
+copilot plugin marketplace add Xpounder-com/hormuz
+copilot plugin install hormuz@hormuz
+```
+
+### Claude Code
+
+```sh
+claude plugin marketplace add Xpounder-com/hormuz
+claude plugin install hormuz@hormuz
+```
+
+Inside Claude Code, the equivalent commands start with `/plugin` instead of
+`claude plugin`. Start a new session or reload plugins after installation.
+
+### Cursor, OpenCode and other skill-capable agents
+
+Use the [open Agent Skills installer](https://github.com/vercel-labs/skills)
+(requires Node.js/npm). Choose your agent when prompted:
+
+```sh
+npx skills add Xpounder-com/hormuz --skill hormuz
+```
+
+Or select it explicitly with `--agent cursor` or `--agent opencode`.
+
+After installation, ask: **“Use Hormuz to set up local-only routing for Codex.”**
+The skill checks the installed router, client version and route qualification
+before using shared setup. Plugin installation installs instructions; the
+router runtime and a qualified local model are separate prerequisites. The
+implemented persistent connection targets Codex CLI 0.147.0. Other agents can
+use the skill to manage that connection; their own inference-routing adapters
+are not implemented. See [installation, updates, removal and compatibility](docs/AGENT_INSTALLATION.md).
 
 ## Source evaluation
 
