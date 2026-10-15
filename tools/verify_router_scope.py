@@ -47,9 +47,10 @@ def verify_agent_package():
         if (ROOT / name).exists():
             raise SystemExit('Unexpected agent activation content: ' + name)
     skill_paths = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / 'skills').rglob('SKILL.md'))
-    if skill_paths != ['skills/hormuz/SKILL.md']:
-        raise SystemExit('Expected one shared Hormuz skill')
-    skill = (ROOT / skill_paths[0]).read_text()
+    expected = ['hormuz', 'hormuz-diagnose', 'hormuz-explain', 'hormuz-insights', 'hormuz-maintain', 'hormuz-model', 'hormuz-policy', 'hormuz-qualify']
+    if skill_paths != sorted('skills/' + name + '/SKILL.md' for name in expected):
+        raise SystemExit('Expected onboarding and focused shared CLI skills')
+    skill = (ROOT / 'skills/hormuz/SKILL.md').read_text()
     if not skill.startswith('---\nname: hormuz\ndescription: ') or '\n---\n' not in skill[4:]:
         raise SystemExit('Skill frontmatter must identify its invocation')
 

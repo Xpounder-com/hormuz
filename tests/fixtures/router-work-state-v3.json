@@ -2,5 +2,9 @@
   "schema_id": "hormuz.ai-work-state",
   "schema_version": 3,
   "required_fields": ["schema_id", "schema_version", "works", "totals", "connection", "onboarding"],
+  "connection_required_fields": ["endpoint", "routes", "shadow_router_enabled", "credential_location", "coverage"],
+  "shadow_router_enabled_type": "boolean",
+  "migration": "Additive authenticated connection metadata in v3. Older readers may ignore shadow_router_enabled; bounded qualification requires an explicit false value from the active router.",
+  "rollback": "Older routers omit shadow_router_enabled, so new qualification fails closed until the router is upgraded. No stored state is rewritten.",
   "retired_fields": ["principal", "billing", "funnel", "support"]
 }
