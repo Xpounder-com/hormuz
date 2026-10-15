@@ -205,6 +205,20 @@ class ShadowRoutingWorkflowTests(unittest.TestCase):
                     self.assertNotIn("Traceback", result.stderr)
             self.assertEqual((classifier_requests, local_requests, cloud_requests), ([], [], []))
 
+    def test_incomplete_or_malformed_classifier_results_remain_unknown(self):
+        for response_fields in ({"status": "incomplete"}, {"usage": None}, {"error": {"code": "fixture_error"}}):
+            with self.subTest(response_fields=response_fields), \
+                 provider("LOCAL_DESTINATION") as (local, _), \
+                 provider("CLOUD_DESTINATION") as (cloud, cloud_requests), \
+                 provider("LOCAL", response_fields=response_fields) as (classifier, _):
+                with self.connected_client(self.shadow_configuration(local, cloud, classifier)) as submit:
+                    response = submit(request={"input": "Summarize this fixture."})
+                    self.assertEqual(response["status"], 200)
+                    work = response["headers"]["x-hormuz-work-id"]
+                    advice = submit(method="GET", path=f"/work/jobs/{work}/attempts")["body"]["attempts"][0]["shadow_routing"]
+                    self.assertEqual((advice["status"], advice["recommendation"]), ("invalid_response", "unknown"))
+                    validate_contract(advice)
+                self.assertEqual(cloud_requests, [])
 
 if __name__ == "__main__":
     unittest.main()

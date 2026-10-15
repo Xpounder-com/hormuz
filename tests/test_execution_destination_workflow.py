@@ -68,7 +68,7 @@ finally:
 
 
 @contextmanager
-def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None):
+def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -95,6 +95,8 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                       "model": body["model"], "output": [{"type": "message", "role": "assistant",
                       "content": [{"type": "output_text", "text": answer}]}],
                       "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}}
+            if response_fields is not None:
+                result.update(response_fields)
             data = json.dumps(result).encode()
             if event_stream:
                 tool = {"type": "function_call", "call_id": "fixture-call", "name": "fixture_tool", "arguments": "{}"}

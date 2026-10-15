@@ -10,6 +10,7 @@ import urllib.request
 
 from .local_transport import open_local_upstream
 from .work_learning import contains_provider_state
+from .compaction_formats import strict_json_loads
 
 
 class ShadowClientCanceled(Exception):
@@ -20,7 +21,7 @@ def _client_canceled(handler):
     try:
         ready, _, _ = select.select([handler.connection], [], [], 0)
         return bool(ready) and handler.connection.recv(1, socket.MSG_PEEK) == b""
-    except OSError:
+    except (OSError, ValueError):
         return True
 
 
@@ -123,7 +124,7 @@ class ShadowRouter:
             advice["status"] = "policy_denied"
             return
         text = _task_text(value)
-        if not text or len(text.encode()) > self.settings.max_input_bytes:
+        if not text or len(text.encode("utf-8")) > self.settings.max_input_bytes:
             advice["status"] = "input_unqualified"
             return
         body = {"model": route.upstream_model, "max_output_tokens": 8, "temperature": 0,
@@ -145,18 +146,29 @@ class ShadowRouter:
                 if response.status != 200 or len(data) > 16384:
                     advice["status"] = "invalid_response"
                     return
-                result = json.loads(data)
+                result = strict_json_loads(data.decode("utf-8"))
+                if (type(result) is not dict or result.get("object") != "response"
+                        or result.get("status") != "completed" or result.get("error") is not None
+                        or result.get("incomplete_details") is not None or result.get("model") != route.upstream_model
+                        or type(result.get("output")) is not list or type(result.get("usage", {})) is not dict):
+                    advice["status"] = "invalid_response"
+                    return
+                output = result["output"]
+                if (len(output) != 1 or type(output[0]) is not dict or output[0].get("type") != "message"
+                        or output[0].get("role") != "assistant" or output[0].get("status", "completed") != "completed"):
+                    advice["status"] = "invalid_response"
+                    return
                 parts = [part["text"] for item in result.get("output", []) if item.get("type") == "message"
                          for part in item.get("content", []) if part.get("type") == "output_text"]
                 answer = "".join(parts).strip()
                 if answer not in {"LOCAL", "CLOUD", "UNKNOWN"}:
                     advice["status"] = "invalid_response"
                     return
-                advice.update(status="classified", recommendation=answer.lower())
                 usage = result.get("usage", {})
                 for field in ("input_tokens", "output_tokens"):
                     if type(usage.get(field)) is int and 0 <= usage[field] <= 1_000_000:
                         advice[field] = usage[field]
+                advice.update(status="classified", recommendation=answer.lower())
         except RouteAdmissionError:
             advice["status"] = "capacity_busy"
         except TimeoutError:
