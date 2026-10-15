@@ -45,7 +45,9 @@ A fresh request that explicitly names an eligible local alias retains that
 model and destination. Only that alias reaches optional AI Work ranking. In
 automatic mode, a requested cloud alias remains the permitted baseline from
 which eligible local work can be selected. Continuations retain their existing
-successful destination/model affinity.
+successful destination/model affinity. An explicit local choice retains the
+configured, qualified same-destination capacity alternate after HTTP 429/529;
+initial ranking does not remove that governed fallback.
 
 Qualification is an **operator declaration**, not a benchmark result. Before
 adding it, qualify the exact runtime, model weights, client/protocol, request
