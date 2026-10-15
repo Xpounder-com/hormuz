@@ -169,7 +169,7 @@ qualification of this new association path.
 ## Bounded native protocol qualification — October 15, 2026
 
 One real `codex-cli 0.147.0` episode exercised automatic association against
-source `e5b51f8dbbaed72bdf4372412aec39e5aab982a2`, using the actual persistent
+source `35f24ed851723f43999c96308a6ac11b35dd00c1`, using the actual persistent
 connection workflow and a deterministic loopback Responses fixture. No work job
 was pre-created and no work-ID header was supplied in native arguments or
 configuration. The client executed its real sandboxed `exec_command` tool to
@@ -177,7 +177,7 @@ read `fixture.txt`, sent its result back, and returned the fixture's literal.
 
 | Observation | Result |
 | --- | --- |
-| Native client exit / elapsed | 0 / 0.468 seconds |
+| Native client exit / elapsed | 0 / 0.586 seconds |
 | Fixture provider requests | Exactly 2; 31,402 and 31,840 bytes |
 | Thread/session body copies | Same hashed identities on both requests |
 | Public owned work | 1 automatically created job; 2 succeeded attempts |
@@ -195,16 +195,26 @@ request bodies, 1 MiB public/native outputs, and native/CLI/HTTP/provider deadli
 of 60/20/8/5 seconds. No project trust entry was added; its absence was preserved.
 
 Private synthetic evidence is retained as case
-`hormuz-native-auto-binding-v2-20261015-hx3it_c0`. The durable hashes identify the
+`hormuz-native-auto-binding-v3-20261015-jul003eu`. The durable hashes identify the
 exact evidence; the private receipt files are not distributed assets:
 
 | Evidence | SHA-256 |
 | --- | --- |
-| Driver `hormuz-conversation-binding-native-qualification-v2-20261015.py` | `906809c00b713569f48f87654ad40ada1fe24e3857f22ec33685802cc704beee` |
-| Frozen manifest | `3816c3588145253bf36da69071bd7b9655c4ed3604dcbb2be9434855b5c5387f` |
-| Frozen acceptance | `486bd36752e62aa93a68429639c824b292c07e8fda708ffdf4183d196cc06293` |
-| `summary.json` | `f238fa94a6e06a8a00c5c8a357b7f062353eb01aaef671008bdc3ea06cf358ca` |
-| `native-events.jsonl` | `bd738b9bedf7a0f4959234d22947e5d1eb55c94a32bb5c5dd79566f6852d03f2` |
+| Driver `hormuz-conversation-binding-native-qualification-v3-20261015.py` | `426c2693af1548fe5f93e5fda39f508c94f5b8323547ac233a75ee473d8b0306` |
+| Frozen manifest | `99d665635c6e07e02fc74a1767532f73f630fa09b76a27dcac5163eefd55004e` |
+| Frozen acceptance | `ccfd6fd76b133f4b44100481b2ecda2889514f213e6492de7dca0db17c13b0f4` |
+| `summary.json` | `5d3e36644da06b8769bffb8051f670b84569bd7bfd2e4480db7a0c8fb66cfe57` |
+| `native-events.jsonl` | `ff2830416ab26da3d58925375f0768243ea7e3968719f08a48ff8e589b227ac2` |
+
+The same protocol case passed earlier at source
+`e5b51f8dbbaed72bdf4372412aec39e5aab982a2`; its unchanged summary SHA-256 is
+`f238fa94a6e06a8a00c5c8a357b7f062353eb01aaef671008bdc3ea06cf358ca`.
+Subsequent review found that a matching explicit work header could bypass the
+successful-response gate for a known automatic association in configured mode.
+A public workflow regression reproduced HTTP 200 instead of the required 409.
+Source `35f24ed` fixes that edge and passes the regression; the final native case
+above was then run once against that fixed source. These distinct records are
+retained rather than treating the earlier protocol pass as proof of every gate.
 
 The initial case remains a failed qualification record:
 `hormuz-native-auto-binding-20261015-f13l8mlh/summary.json`, SHA-256
