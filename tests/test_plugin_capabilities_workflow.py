@@ -21,12 +21,27 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
                             'HORMUZ_HISTORY_HOME': str(self.root / 'history'),
                             'CODEX_HOME': str(self.root / 'codex')}
 
-    def command(self, *arguments, expected=0):
-        result = subprocess.run([sys.executable, '-m', 'hormuz', '--config', str(self.config), *arguments],
+    def command(self, *arguments, expected=0, tiny_memory=False, memory_timeout=False):
+        prefix = [sys.executable, '-m', 'hormuz']
+        if tiny_memory:
+            prefix = [sys.executable, '-c',
+                      'import os,sys; os.sysconf=lambda name:1; from hormuz.cli import main; raise SystemExit(main(sys.argv[1:]))']
+        if memory_timeout:
+            prefix = [sys.executable, '-c',
+                      'import os,sys,subprocess; from unittest.mock import patch; from hormuz.cli import main; '
+                      'os.sysconf=lambda name:(_ for _ in ()).throw(ValueError()); '
+                      'patcher=patch("subprocess.run",side_effect=subprocess.TimeoutExpired("sysctl",2)); '
+                      'patcher.start(); raise SystemExit(main(sys.argv[1:]))']
+        result = subprocess.run([*prefix, '--config', str(self.config), *arguments],
                                 env=self.environment, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, expected, result.stderr or result.stdout)
         value = json.loads(result.stdout)
         self.assertNotIn('fixture-coding-client-credential', result.stdout)
+        compatibility = json.loads((Path(__file__).parent / 'fixtures/plugin-capabilities-v1.json').read_text())
+        fields = compatibility['required_fields'].get(value.get('schema_id'))
+        if fields and 'error' not in value:
+            self.assertEqual(value['schema_version'], compatibility['schema_version'])
+            self.assertTrue(set(fields) <= set(value), value)
         return value
 
     def test_diagnose_reports_disconnected_and_invalid_configuration_without_mutation(self):
@@ -141,8 +156,7 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
                 self.assertEqual(self.config.read_bytes(), original)
                 self.assertLessEqual(len(received), 4)
 
-    def test_successful_probes_recommend_only_current_tested_assets(self):
-        from contextlib import contextmanager
+    def probe_scenario(self, failure=None):
         from http.server import BaseHTTPRequestHandler, HTTPServer
         import threading
 
@@ -162,12 +176,12 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
                 received.append(request)
                 tool_result = any(isinstance(item, dict) and item.get('type') == 'function_call_output'
                                   for item in request.get('input', []) if isinstance(request.get('input'), list))
-                if request.get('tools') and not tool_result:
+                if request.get('tools') and not tool_result and failure != 'tool_call':
                     output = [{'type': 'function_call', 'call_id': 'probe-call', 'name': 'lookup_count',
                                'arguments': '{"item":"boxes"}'}]
                 else:
                     output = [{'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text',
-                               'text': '{"count":7}' if 'text' in request else '7'}]}]
+                               'text': ('invalid JSON' if failure == 'structured_output' else '{"count":7}') if 'text' in request else ('WRONG' if failure == ('tool_result' if tool_result else 'task_quality') else '7')}]}]
                 data = json.dumps({'id': 'probe-reply', 'object': 'response', 'status': 'completed',
                                    'model': request['model'], 'output': output,
                                    'usage': {'input_tokens': 8, 'output_tokens': 4, 'total_tokens': 12}}).encode()
@@ -189,7 +203,15 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
             with self.fixture.connected_client(value):
                 assets = self.model_arguments()
                 report = self.root / 'qualified.json'
-                qualified = self.command('model', 'qualify', '--model', 'local-code', *assets, '--output', str(report))
+                qualified = self.command('model', 'qualify', '--model', 'local-code', *assets, '--output', str(report), expected=2 if failure else 0)
+                if failure:
+                    self.assertEqual(qualified['result'], 'failed')
+                    outcomes = {check['name']: check['passed'] for check in qualified['checks']}
+                    self.assertFalse(outcomes[failure])
+                    for name in ('task_quality', 'structured_output', 'tool_call', 'tool_result'):
+                        if name != failure and not (failure == 'tool_call' and name == 'tool_result'):
+                            self.assertTrue(outcomes[name], qualified)
+                    return
                 self.assertEqual(qualified['result'], 'passed')
                 self.assertEqual(len(received), 4)
                 self.assertFalse(qualified['route_authorized'])
@@ -197,6 +219,19 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
                 recommendation = self.command('model', 'recommend', '--model', 'local-code', *assets, '--qualification', str(report))
                 self.assertEqual(recommendation['recommendation'], 'consider_for_tested_envelope')
                 self.assertEqual(recommendation['inference_memory_fit'], 'unverified')
+                insufficient = self.command('model', 'recommend', '--model', 'local-code', *assets,
+                                            '--qualification', str(report), tiny_memory=True)
+                self.assertEqual(insufficient['recommendation'], 'model_exceeds_system_memory')
+                unknown_memory = self.command('model', 'recommend', '--model', 'local-code', *assets,
+                                              '--qualification', str(report), memory_timeout=True)
+                self.assertIsNone(unknown_memory['system_memory_bytes'])
+                original_report = report.read_bytes()
+                expired = json.loads(original_report)
+                expired['expires_at'] = 0
+                report.write_text(json.dumps(expired))
+                self.assertEqual(self.command('model', 'recommend', '--model', 'local-code', *assets,
+                                             '--qualification', str(report))['recommendation'], 'requalify')
+                report.write_bytes(original_report)
                 (self.root / 'runtime').write_bytes(b'changed-runtime')
                 stale = self.command('model', 'recommend', '--model', 'local-code', *assets, '--qualification', str(report))
                 self.assertEqual(stale['recommendation'], 'requalify')
@@ -205,6 +240,20 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_successful_probes_recommend_only_current_tested_assets(self):
+        self.probe_scenario()
+
+    def test_each_probe_capability_can_fail_independently(self):
+        for failure in ('task_quality', 'structured_output', 'tool_call', 'tool_result'):
+            with self.subTest(failure=failure):
+                # Each scenario owns fresh temporary files and server resources.
+                scenario = PluginCapabilitiesWorkflowTests()
+                scenario.setUp()
+                try:
+                    scenario.probe_scenario(failure)
+                finally:
+                    scenario.doCleanups()
 
     def test_usage_insights_are_metadata_only_and_do_not_enable_history(self):
         with workflow.provider('PRIVATE_USAGE_REPLY') as (endpoint, received):
@@ -234,8 +283,7 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
             with self.fixture.connected_client(value):
                 result = self.command('model', 'qualify', '--model', 'local-code', *self.model_arguments(),
                                       '--output', str(self.root / 'denied-probes.json'), expected=2)
-                self.assertEqual(result['result'], 'failed')
-                self.assertEqual(result['checks'][-1]['code'], 'router_request_rejected')
+                self.assertEqual(result['error']['code'], 'model_not_allowed')
                 self.assertEqual(received, [])
 
     def test_legacy_history_stays_readable_with_unobserved_routing_evidence(self):
@@ -278,6 +326,17 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
             self.assertEqual(diagnosis['client_compatibility'], 'supported')
             self.assertEqual(diagnosis['action'], 'none')
             self.assertEqual(diagnosis['connection']['router'], 'ready')
+            other = fixture.root / 'other.json'
+            settings = json.loads(fixture.path.read_text())
+            settings['route_admission'] = {'mode': 'local_only', 'local_routes': {}}
+            other.write_text(json.dumps(settings))
+            unrelated = subprocess.run([sys.executable, '-m', 'hormuz', '--config', str(other),
+                                        'client', 'diagnose', 'codex', '--client-home', str(fixture.home)],
+                                       env=fixture.environment, capture_output=True, text=True, timeout=10)
+            self.assertEqual(unrelated.returncode, 0, unrelated.stderr)
+            mismatch = json.loads(unrelated.stdout)
+            self.assertEqual(mismatch['routing_mode'], 'unobserved')
+            self.assertEqual(mismatch['action'], 'select_owned_configuration')
             fixture.client('edit-model')
             diagnosis = json.loads(fixture.command('diagnose').stdout)
             self.assertEqual(diagnosis['action'], 'inspect_configuration_changes')

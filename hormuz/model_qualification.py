@@ -10,7 +10,11 @@ import os
 from pathlib import Path
 import platform
 import stat
+import subprocess
 import time
+from urllib.request import Request
+
+from .local_transport import open_local_upstream
 
 from .config import GatewayConfig
 from .connected_client import _qualify_client
@@ -62,18 +66,44 @@ def _text(value):
                    and block.get('type') == 'output_text' and isinstance(block.get('text'), str))
 
 
-def qualify(args):
-    config = GatewayConfig.load(args.config)
-    setup = _setup(args, config)
-    output = local_path(Path(args.output))
-    if output.exists() or output.is_symlink():
-        raise CapabilityError('output_exists')
+def _identity(args, config):
     actors = list(config.identities_by_actor.values())
     if args.actor:
         actors = [item for item in actors if item.actor_id == args.actor]
     if len(actors) != 1:
         raise CapabilityError('actor_required')
     identity = actors[0]
+    policy = config.resolved_policy(identity)
+    if (identity.allowed_clients and 'codex' not in identity.allowed_clients
+            or policy.allowed_clients is not None and 'codex' not in policy.allowed_clients
+            or policy.allowed_models is not None and args.model not in policy.allowed_models):
+        raise CapabilityError('model_not_allowed')
+    return identity
+
+
+def _memory_bytes():
+    try:
+        return os.sysconf('SC_PHYS_PAGES') * os.sysconf('SC_PAGE_SIZE')
+    except (ValueError, OSError):
+        if platform.system() == 'Darwin':
+            try:
+                result = subprocess.run(['/usr/sbin/sysctl', '-n', 'hw.memsize'],
+                                        capture_output=True, text=True, timeout=2,
+                                        env={'PATH': '/usr/bin:/bin'})
+            except (OSError, subprocess.SubprocessError):
+                return None
+            if result.returncode == 0 and result.stdout.strip().isdigit():
+                return int(result.stdout.strip())
+        return None
+
+
+def qualify(args):
+    config = GatewayConfig.load(args.config)
+    setup = _setup(args, config)
+    output = local_path(Path(args.output))
+    if output.exists() or output.is_symlink():
+        raise CapabilityError('output_exists')
+    identity = _identity(args, config)
     token = next((token for token, owner in config.identities_by_token.items() if owner.actor_id == identity.actor_id), None)
     if token is None or config.ingress.mode != 'local':
         raise CapabilityError('direct_static_router_auth_required')
@@ -81,7 +111,6 @@ def qualify(args):
         raise CapabilityError('loopback_router_required')
     checks = []
     # One request at a time; at most four requests, no retries or redirects.
-    connection = http.client.HTTPConnection(config.listen.host, config.listen.port, timeout=3)
     deadline = time.monotonic() + 12
     last_work_id = None
     def submit(payload, *, work_id=None):
@@ -89,24 +118,21 @@ def qualify(args):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise CapabilityError('qualification_timeout')
-        connection.timeout = min(3, remaining)
-        if connection.sock:
-            connection.sock.settimeout(connection.timeout)
-        connection.request('POST', '/v1/responses', json.dumps({'model': args.model, 'stream': False,
-                           'store': False, 'max_output_tokens': 128, **payload}),
-                           {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
-                            'User-Agent': 'codex_cli_rs/0.147.0', 'X-Hormuz-Routing-Mode': 'local_only',
-                            **({'X-Hormuz-Work-Id': work_id} if work_id else {})})
-        transport_socket = connection.sock
-        with connection.getresponse() as response:
+        host = '[' + config.listen.host + ']' if ':' in config.listen.host else config.listen.host
+        request = Request(f'http://{host}:{config.listen.port}/v1/responses',
+                          data=json.dumps({'model': args.model, 'stream': False, 'store': False,
+                                           'max_output_tokens': 128, **payload}).encode(),
+                          headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
+                                   'User-Agent': 'codex_cli_rs/0.147.0', 'X-Hormuz-Routing-Mode': 'local_only',
+                                   **({'X-Hormuz-Work-Id': work_id} if work_id else {})})
+        with open_local_upstream(request, timeout=min(3, remaining), absolute_timeout=remaining) as response:
             # Bounded total read time even if a peer drip-feeds bytes.
             data = bytearray()
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise CapabilityError('qualification_timeout')
-                if transport_socket:
-                    transport_socket.settimeout(min(3, remaining))
+                response.set_read_timeout(min(3, remaining))
                 block = response.read1(min(65536, MAX_RESPONSE + 1 - len(data)))
                 if not block:
                     break
@@ -115,11 +141,11 @@ def qualify(args):
                     raise CapabilityError('response_limit')
             if response.status != 200:
                 raise CapabilityError('router_request_rejected')
-            if response.getheader('X-Hormuz-Destination-Locality') != 'local':
+            if response.headers.get('X-Hormuz-Destination-Locality') != 'local':
                 raise CapabilityError('local_execution_unverified')
-            if response.getheader('X-Hormuz-Routed-Model') != config.model_routes[args.model].upstream_model:
+            if response.headers.get('X-Hormuz-Routed-Model') != config.model_routes[args.model].upstream_model:
                 raise CapabilityError('model_selection_changed')
-            last_work_id = response.getheader('X-Hormuz-Work-Id')
+            last_work_id = response.headers.get('X-Hormuz-Work-Id')
             value = json.loads(data)
             if not isinstance(value, dict) or value.get('status') != 'completed':
                 raise CapabilityError('response_incomplete')
@@ -162,8 +188,6 @@ def qualify(args):
     except (OSError, http.client.HTTPException, ValueError, TypeError, KeyError) as error:
         checks.append({'name': 'transport', 'passed': False,
                        'code': error.code if isinstance(error, CapabilityError) else 'probe_unavailable'})
-    finally:
-        connection.close()
     # Any setup mutation during the probes invalidates the result.
     if setup != _setup(args, config):
         checks.append({'name': 'setup_unchanged', 'passed': False})
@@ -182,6 +206,7 @@ def qualify(args):
 def recommend(args):
     config = GatewayConfig.load(args.config)
     setup = _setup(args, config)
+    _identity(args, config)
     raw = read_private(local_path(Path(args.qualification)))
     if raw is None:
         raise CapabilityError('qualification_unavailable')
@@ -190,14 +215,12 @@ def recommend(args):
         raise CapabilityError('qualification_invalid')
     current = (report.get('setup') == setup and type(report.get('expires_at')) is int
                and report['expires_at'] > time.time() and report.get('result') == 'passed')
-    try:
-        memory = os.sysconf('SC_PHYS_PAGES') * os.sysconf('SC_PAGE_SIZE')
-    except (ValueError, OSError):
-        memory = None
+    memory = _memory_bytes()
+    exceeds_memory = memory is not None and setup["model_bytes"] > memory
     # File-size fit is only a lower bound; do not claim inference memory fit.
     return {'schema_id': 'hormuz.model-recommendation', 'schema_version': 1,
-            'model_alias': args.model, 'recommendation': 'consider_for_tested_envelope' if current else 'requalify',
+            'model_alias': args.model, 'recommendation': 'model_exceeds_system_memory' if exceeds_memory else 'consider_for_tested_envelope' if current else 'requalify',
             'evidence_current': current, 'scope': 'synthetic_box_count_envelope_only',
             'system_memory_bytes': memory, 'model_file_bytes': setup['model_bytes'],
-            'inference_memory_fit': 'unverified', 'route_authorized': False,
+            'inference_memory_fit': 'file_exceeds_physical_memory' if exceeds_memory else 'unverified', 'route_authorized': False,
             'downloads_started': False, 'evidence_trust': 'user_owned_local_report'}

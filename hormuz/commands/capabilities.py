@@ -28,8 +28,8 @@ def add_commands(commands):
         command.add_argument("--client-executable", required=True)
         command.add_argument("--runtime-executable", required=True)
         command.add_argument("--model-file", required=True)
+        command.add_argument("--actor")
         if operation == "qualify":
-            command.add_argument("--actor")
             command.add_argument("--output", required=True, help="New private local report; never overwritten")
         else:
             command.add_argument("--qualification", required=True, help="Existing private user-owned report")

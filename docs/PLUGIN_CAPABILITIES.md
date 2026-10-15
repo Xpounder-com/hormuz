@@ -26,7 +26,7 @@ New CLI JSON receipts have a schema identifier and integer version 1:
   period, metadata-only observations and no measured savings.
 - `hormuz.capability-error`: content-free fixed error code, exit 2.
 
-Compatibility examples live in the plugin-capabilities fixture. New receipt
+Required-field compatibility fixtures live in the plugin-capabilities fixture. New receipt
 versions must be handled explicitly; the commands do not consume arbitrary
 future qualification-report versions. Unknown/missing evidence is not success.
 

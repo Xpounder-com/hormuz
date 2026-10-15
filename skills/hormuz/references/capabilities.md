@@ -54,8 +54,8 @@ hormuz --config CONFIG model recommend --model ALIAS \
 ```
 
 Recommendation makes no model requests. It reports current versus stale local
-user-owned evidence, available system memory and model file size. Inference
-memory fit remains unverified. Reports are not signed and are not admission
+user-owned evidence, available system memory and model file size. A model file larger than physical memory is flagged before recommendation. Inference
+memory fit otherwise remains unverified. Reports are not signed and are not admission
 credentials. Requalification is required after relevant setup changes or expiry.
 
 ## Policy preview and activation

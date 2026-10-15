@@ -17,5 +17,73 @@
     "route_authorized": false
   },
   "migration": "Additive CLI commands. History entries v1 remain readable; v2 carries versioned routing evidence.",
-  "rollback": "Disconnect before removing plugin. Export/delete v2 history before downgrade. Staged policy configs never replace originals."
+  "rollback": "Disconnect before removing plugin. Export/delete v2 history before downgrade. Staged policy configs never replace originals.",
+  "required_fields": {
+    "hormuz.client-diagnosis": [
+      "connection",
+      "client_compatibility",
+      "supported_client_version",
+      "routing_mode",
+      "qualified_local_routes",
+      "model_readiness",
+      "task_completion",
+      "scope",
+      "project_overrides",
+      "action"
+    ],
+    "hormuz.request-explanation": [
+      "coverage",
+      "observation",
+      "policy_decision",
+      "fallback",
+      "optimization",
+      "scope"
+    ],
+    "hormuz.policy-proposal": [
+      "changes",
+      "activation",
+      "scope",
+      "budget_basis",
+      "source_preserved",
+      "history_consent_transferred",
+      "next_action"
+    ],
+    "hormuz.model-qualification": [
+      "result",
+      "checks",
+      "setup",
+      "recorded_at",
+      "expires_at",
+      "scope",
+      "route_authorized",
+      "runtime_binding",
+      "limits"
+    ],
+    "hormuz.model-recommendation": [
+      "model_alias",
+      "recommendation",
+      "evidence_current",
+      "scope",
+      "system_memory_bytes",
+      "model_file_bytes",
+      "inference_memory_fit",
+      "route_authorized",
+      "downloads_started",
+      "evidence_trust"
+    ],
+    "hormuz.usage-insights": [
+      "enabled",
+      "totals",
+      "coverage",
+      "observed_tokens",
+      "observations",
+      "savings_measured",
+      "observed_period",
+      "by_model",
+      "by_day"
+    ],
+    "hormuz.capability-error": [
+      "error"
+    ]
+  }
 }
