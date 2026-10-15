@@ -60,7 +60,8 @@ from ._contract_schemas.connected_client import (
     _validate_status_v2 as _validate_connected_client_status_v2,
     _validate_preview_v2 as _validate_connected_client_preview_v2,
 )
-from ._contract_schemas.local_setup import validate_profile as _validate_local_setup_profile, validate_setup as _validate_local_setup
+from ._contract_schemas.local_setup import (validate_profile as _validate_local_setup_profile,
+    validate_setup as _validate_local_setup, validate_setup_v2 as _validate_local_setup_v2)
 from ._contract_schemas.manifest import (
     custody_evidence_schema_entries as _custody_evidence_schema_entries,
     validate_contract_manifest as _validate_contract_manifest_contract,
@@ -509,6 +510,8 @@ def contract_manifest() -> dict[str, object]:
                 "cli-output", "hormuz", ["schema_id", "schema_version", "error"]),
             _manifest_schema(LOCAL_SETUP_SCHEMA_ID, 1, "cli-output", "hormuz",
                 ["schema_id", "schema_version", "configuration", "connection"]),
+            _manifest_schema(LOCAL_SETUP_SCHEMA_ID, 2, "cli-output", "hormuz",
+                ["schema_id", "schema_version", "configuration", "connection"]),
             _manifest_schema(LOCAL_SETUP_PROFILE_SCHEMA_ID, 1, "durable-evidence", "hormuz",
                 ["schema_id", "schema_version", "qualification_id", "client_version", "system", "machine",
                  "runtime_sha256", "model_sha256", "model", "capabilities", "max_request_bytes",
@@ -550,6 +553,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
     schema_version = _value_integer(value, "schema_version")
     validator = {
         (LOCAL_SETUP_SCHEMA_ID, 1): _validate_local_setup,
+        (LOCAL_SETUP_SCHEMA_ID, 2): _validate_local_setup_v2,
         (LOCAL_SETUP_PROFILE_SCHEMA_ID, 1): _validate_local_setup_profile,
         (CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_STATUS_SCHEMA_VERSION): _validate_connected_client_status,
         (CONNECTED_CLIENT_PREVIEW_SCHEMA_ID, CONNECTED_CLIENT_PREVIEW_SCHEMA_VERSION): _validate_connected_client_preview,

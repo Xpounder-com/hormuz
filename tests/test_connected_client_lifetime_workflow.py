@@ -27,7 +27,7 @@ provider = destination_workflow.provider
 
 
 CODEX = r'''#!PYTHON
-import http.client, json, os, pathlib, sys, tomllib
+import http.client, json, os, pathlib, subprocess, sys, tomllib
 from urllib.parse import urlsplit
 if "--version" in sys.argv:
     if "DESTINATION_CLOUD_KEY" in os.environ or "DESTINATION_WORKFLOW_TOKEN" in os.environ:
@@ -63,6 +63,15 @@ view = {"model": config.get("model", "default-model"),
 if any(option in sys.argv for option in ("inspect", "edit-provider", "edit-model", "copy-provider-example")):
     print(json.dumps(view)); sys.exit(0)
 provider = config["model_providers"][view["provider"]]
+if "auth" in provider:
+    auth = provider["auth"]
+    credential = subprocess.run([auth["command"], *auth.get("args", [])],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True,
+        cwd=auth.get("cwd"), timeout=auth.get("timeout_ms", 5000) / 1000).stdout.strip()
+    if not credential: sys.exit(7)
+else:
+    credential = os.environ[provider["env_key"]]
+view["credential_in_configuration"] = credential in text
 origin = urlsplit(provider["base_url"])
 connection = http.client.HTTPConnection(origin.hostname, origin.port, timeout=6)
 if "idle" in sys.argv:
@@ -82,7 +91,7 @@ try:
         json.dumps({"model": view["model"],
                     "input": "Consider this fixture." if "unknown-task" in sys.argv else "Summarize this fixture.",
                     "max_output_tokens": 8}),
-        {"Content-Type": "application/json", "Authorization": "Bearer " + os.environ[provider["env_key"]],
+        {"Content-Type": "application/json", "Authorization": "Bearer " + credential,
          **({"X-Hormuz-Routing-Mode": "local_only"} if "local-only" in sys.argv else {})})
     response = connection.getresponse()
     view.update(status=response.status, body=json.loads(response.read()),
@@ -163,9 +172,9 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
         return result
 
-    def client(self, *options):
+    def client(self, *options, cwd=None):
         result = subprocess.run([str(self.executable), *options], env=self.environment,
-                                capture_output=True, text=True, timeout=10)
+                                cwd=cwd, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
@@ -233,6 +242,120 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             with socket.socket() as probe:
                 self.assertNotEqual(probe.connect_ex(("127.0.0.1", port)), 0)
             self.assertFalse((engine / "stopped").exists())
+            self.assertEqual(requests, [])
+
+    def test_local_setup_connects_without_manual_router_token_exports(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)[:-2]
+            self.environment.pop("DESTINATION_WORKFLOW_TOKEN", None)
+            self.environment.pop("HORMUZ_GATEWAY_TOKEN", None)
+            self.addCleanup(lambda: self.command("disconnect", check=False))
+            connected = json.loads(self.command("setup", *options).stdout)
+            validate_contract(connected)
+            self.assertEqual(connected["connection"]["phase"], "connected")
+            result = self.client()
+            self.assertEqual(result["body"]["output"][0]["content"][0]["text"], "MANAGED_LOCAL")
+            self.assertFalse(result["credential_in_configuration"])
+            self.assertEqual(json.loads(self.command("status").stdout)["router"], "ready")
+            stopped = json.loads(self.command("disconnect").stdout)
+            self.assertEqual(stopped["local_runtime"], {"ownership": "owned", "state": "stopped"})
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+            self.assertTrue((engine / "stopped").exists())
+            self.assertEqual(requests, [])
+
+    def test_local_credential_preview_leaves_no_persistent_credential_or_connection(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)[:-2]
+            self.environment.pop("DESTINATION_WORKFLOW_TOKEN", None)
+            self.environment.pop("HORMUZ_GATEWAY_TOKEN", None)
+            self.addCleanup(lambda: self.command("disconnect", check=False))
+            preview = json.loads(self.command("setup", *options, "--dry-run").stdout)
+            validate_contract(preview)
+            frozen = json.loads((Path(__file__).parent / "fixtures/local-setup-v2.json").read_text())
+            validate_contract(frozen)
+            self.assertEqual((preview["schema_id"], preview["schema_version"]),
+                             (frozen["schema_id"], frozen["schema_version"]))
+            for key in ("operation", "mode", "qualification_id", "authentication", "model"):
+                self.assertEqual(preview["configuration"][key], frozen["configuration"][key])
+            credential = self.path.with_name(self.path.name + ".state") / "router-credential-v1.json"
+            self.assertFalse(credential.exists())
+            self.assertFalse(self.path.exists())
+            self.assertFalse((engine / "stopped").exists())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+            self.assertEqual(json.loads(self.command("status").stdout)["phase"], "disconnected")
+            self.assertEqual(requests, [])
+
+    def test_repeated_local_setup_rejects_a_replaced_credential_without_overwriting_it(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, _ = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)[:-2]
+            self.environment.pop("DESTINATION_WORKFLOW_TOKEN", None)
+            self.environment.pop("HORMUZ_GATEWAY_TOKEN", None)
+            self.addCleanup(lambda: self.command("disconnect", check=False))
+            self.command("setup", *options)
+            self.assertEqual(self.client()["status"], 200)
+            source = Path(json.loads(self.path.read_text())["identities"][0]["token_file"])
+            replacement = json.dumps({"schema_id": "hormuz.local-router-credential", "schema_version": 1,
+                                      "token": "e" * 64})
+            source.write_text(replacement)
+            result = self.command("setup", *options, check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(json.loads(result.stderr)["error"]["code"], "connected_client_authentication_unsupported")
+            self.assertEqual(source.read_text(), replacement)
+            self.assertEqual(json.loads(self.command("disconnect").stdout)["phase"], "disconnected")
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+            self.assertEqual(requests, [])
+
+    def test_local_setup_reuses_its_credential_and_restores_the_auth_provider(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, _ = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)[:-2]
+            self.environment.pop("DESTINATION_WORKFLOW_TOKEN", None)
+            self.environment.pop("HORMUZ_GATEWAY_TOKEN", None)
+            self.addCleanup(lambda: self.command("disconnect", check=False))
+            first = json.loads(self.command("setup", *options).stdout)
+            source = Path(json.loads(self.path.read_text())["identities"][0]["token_file"])
+            credential_inode = source.stat().st_ino
+            self.assertEqual(source.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(source.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(self.client("trust-project")["status"], 200)
+            repeated = json.loads(self.command("setup", *options).stdout)
+            self.assertEqual(repeated["connection"]["generation"], first["connection"]["generation"])
+            stopped = json.loads(self.command("disconnect").stdout)
+            self.assertEqual(stopped["retained_settings"], [])
+            self.assertEqual(self.client("inspect")["providers"], [])
+            self.assertIn('trust_level = "trusted"', (self.home / "config.toml").read_text())
+            reconnected = json.loads(self.command("setup", *options).stdout)
+            self.assertNotEqual(reconnected["connection"]["generation"], first["connection"]["generation"])
+            self.assertEqual(source.stat().st_ino, credential_inode)
+            self.assertEqual(self.client()["status"], 200)
+            self.client("edit-model")
+            stopped = json.loads(self.command("disconnect").stdout)
+            self.assertEqual(stopped["retained_settings"], ["model"])
+            self.assertEqual(self.client("inspect")["model"], "user-model")
+            self.assertEqual(self.client("inspect")["providers"], [])
+            self.assertEqual(requests, [])
+
+    def test_local_authentication_uses_the_installed_helper_from_an_unrelated_project(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, _ = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)[:-2]
+            self.environment.pop("DESTINATION_WORKFLOW_TOKEN", None)
+            self.environment.pop("HORMUZ_GATEWAY_TOKEN", None)
+            self.addCleanup(lambda: self.command("disconnect", check=False))
+            project = self.root / "project"
+            project.mkdir()
+            marker = project / "shadow-imported"
+            (project / "hormuz.py").write_text(
+                'from pathlib import Path\nPath("shadow-imported").write_text("unexpected")\nprint("UNTRUSTED_HELPER")\n')
+            self.command("setup", *options)
+            result = self.client(cwd=project)
+            self.assertEqual(result["status"], 200)
+            self.assertEqual(result["body"]["output"][0]["content"][0]["text"], "MANAGED_LOCAL")
+            self.assertFalse(marker.exists())
+            self.assertEqual(json.loads(self.command("disconnect").stdout)["retained_settings"], [])
             self.assertEqual(requests, [])
 
     def test_local_setup_generates_configuration_and_reuses_assets_through_disconnect(self):

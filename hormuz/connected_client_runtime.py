@@ -83,6 +83,11 @@ def main(record_path, generation):
         if source is None or hashlib.sha256(source.encode()).hexdigest() != record["gateway_digest"]:
             return
         config = GatewayConfig.load(record["gateway_config"])
+        if record.get("credential_helper"):
+            identity = config.identities_by_actor.get(record["actor_id"])
+            if (identity is None or identity.token_file is None
+                    or hashlib.sha256(identity.token.encode()).hexdigest() != record["credential_helper"]["credential_sha256"]):
+                return
         if _read(Path(record["gateway_config"])) != source:
             return
         if config.managed_llama is not None:

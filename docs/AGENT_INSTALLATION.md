@@ -57,8 +57,9 @@ review the host's normal trust prompt.
 
 For a new local-only connection, the skill now calls
 [`client setup codex`](SHARED_LOCAL_SETUP.md) to generate configuration from
-existing verified runtime/model files. An installed router and local token
-remain prerequisites. User invocation, actual skill activation and supported
+existing verified runtime/model files. An installed router remains a
+prerequisite; shared setup manages its local caller credential without manual
+exports. User invocation, actual skill activation and supported
 target versions remain separate from package installation.
 
 Start a fresh agent session if the host has not loaded the new skill. Ask
