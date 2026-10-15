@@ -246,6 +246,7 @@ class WorkRuntime:
                     ("cost_confirmed_at", "REAL"),
                     ("response_succeeded", "INTEGER NOT NULL DEFAULT 0"),
                     ("cache_generation", "INTEGER NOT NULL DEFAULT -1"),
+                    ("shadow_routing", "TEXT"),
                 ):
                     if name not in columns:
                         connection.execute("ALTER TABLE ai_work_attempts ADD COLUMN " + name + " " + declaration)
@@ -556,7 +557,8 @@ class WorkRuntime:
                 (*parameters, limit + 1),
             ).fetchall()
             attempts = [self._attempt_view(dict(row)) for row in rows[:limit]]
-        return {"schema_id": "hormuz.ai-work-attempt-history", "schema_version": 1,
+        return {"schema_id": "hormuz.ai-work-attempt-history", "schema_version": 2 if any(
+                    attempt.get("shadow_routing") is not None for attempt in attempts) else 1,
                 "scope": "owned_job", "work_id": work_id, "attempts": attempts,
                 "page_limit": limit, "order": "reverse_admission",
                 "next_before": attempts[-1]["request_id"] if len(rows) > limit else None}
@@ -918,7 +920,18 @@ class WorkRuntime:
         result["response_succeeded"] = bool(result["response_succeeded"])
         result["timing_stages"] = json.loads(result.get("timing_stages") or "{}")
         result["cost_confirmed_at"] = _timestamp(result.get("cost_confirmed_at"))
+        shadow = result.pop("shadow_routing", None)
+        if shadow is not None:
+            result["shadow_routing"] = json.loads(shadow)
         return result
+
+    def record_shadow(self, identity, request_id, advice):
+        owner = _identity(identity)
+        encoded = json.dumps(advice, separators=(",", ":"), allow_nan=False)
+        with self._transaction(write=True) as connection:
+            connection.execute("UPDATE ai_work_attempts SET shadow_routing=? "
+                "WHERE organization_id=? AND actor_id=? AND request_id=? AND shadow_routing IS NULL",
+                (encoded, *owner, request_id))
 
     def settle(self, identity, request_id, cost_microusd=None, status="succeeded", latency_ms=None):
         """Record charge evidence and completed-response affinity separately.

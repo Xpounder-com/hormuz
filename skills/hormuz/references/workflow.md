@@ -87,6 +87,14 @@ For missing, changed or unsafe managed credentials, follow
 error action. Preserve the credential file and journal; a helper failure is not
 permission to remove authentication or read a native login cache.
 
+When the user requests shadow routing, read [shadow routing](../../../docs/SHADOW_ROUTING.md)
+and check setup help for `--shadow-router`. Add the option to both preview and
+apply using a new configuration path. Require version-3 setup to report
+`configuration.shadow_router: shadow`, then inspect the work attempt's versioned
+advice. Preserve the actual route, hard local-only policy and continuing destination.
+Keep classification advice separate from real coding outcomes; the option provides
+no live learned routing or cloud/subscription permission.
+
 ## Connect an existing configuration
 
 1. Use the user-selected mode. For local-only, verify `route_admission.mode` is

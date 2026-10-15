@@ -69,6 +69,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "ai_work",
         "route_admission",
         "managed_llama",
+        "shadow_router",
     }
 )
 _LISTEN_FIELDS = frozenset({"host", "port"})
@@ -326,6 +327,8 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
         "model_file", "model_sha256", "startup_timeout_seconds",
     }))
     _schema_optional_object(raw, "route_admission", frozenset({"mode", "local_routes"}))
+    _schema_optional_object(raw, "shadow_router", frozenset({
+        "schema_version", "mode", "model", "local_model", "timeout_seconds", "max_input_bytes"}))
     _schema_optional_object(raw, "ai_work", frozenset({
         "enabled", "database", "cache_enabled", "minimum_samples",
         "administrator_actor_ids", "require_paid", "billing_price_id", "billing_webhook_secret_env",

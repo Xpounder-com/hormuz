@@ -39,6 +39,7 @@ def add_client_commands(
             lifecycle.add_argument("--model-file", required=True, help="Existing verified GGUF model")
             lifecycle.add_argument("--qualification", help="Reviewed local setup profile (default bundled pinned experiment)")
             lifecycle.add_argument("--credential-env", help="Use an existing token environment variable instead of managed local authentication")
+            lifecycle.add_argument("--shadow-router", action="store_true", help="Record bounded local model routing advice without changing routes")
 
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
