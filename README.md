@@ -158,3 +158,10 @@ resources are not deleted by this repository cleanup.
 
 Use [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md),
 [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## Plugin capabilities
+
+The skills-only plugin now offers focused diagnosis, observed request explanations,
+bounded local model probes, advisory recommendations, privacy/budget staging,
+usage insights and safe restoration. See the [capability contract](docs/PLUGIN_CAPABILITIES.md)
+and [command workflow](skills/hormuz/references/capabilities.md) for coverage and limits.

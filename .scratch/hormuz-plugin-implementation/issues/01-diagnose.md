@@ -1,0 +1,19 @@
+# 01: Diagnose a connected coding client
+
+**What to build:** Read-only diagnosis with actionable recovery and explicit coverage.
+
+**Blocked by:** None (can start immediately).
+
+**Status:** resolved
+
+- [x] Read-only diagnosis reports phase, configuration ownership, compatibility scope and one recovery action.
+- [x] An unrelated or changed router configuration cannot be reported as the owned generation’s active routing policy.
+- [x] Missing model/task evidence is unobserved and invalid configuration does not expose private text.
+
+## Scope
+
+User approved this breakdown and requested implementation. Conservative first-release choices are documented in the implementation handoff; pending Wayfinder questions must not be presented as previously resolved decisions.
+
+## Verification
+
+Implemented within the documented conservative scope. The source and installed-wheel suites each passed 144 workflow tests; standards and spec review findings were addressed. See the [qualification report](../../../docs/qualifications/plugin-capabilities-20261015.md) for evidence and remaining product limits.

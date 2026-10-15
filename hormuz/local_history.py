@@ -40,7 +40,7 @@ _ENTRY_FIELDS = frozenset({
 
 
 def _result(kind: str, **values) -> dict:
-    return {"schema_id": "hormuz.local-history-" + kind, "schema_version": 1, **values}
+    return {"schema_id": "hormuz.local-history-" + kind, "schema_version": 2 if kind == "entry" and "routing_evidence" in values else 1, **values}
 
 
 def _id(value) -> str:
@@ -58,8 +58,15 @@ def _number(value, *, nullable=False, maximum=2**63 - 1) -> bool:
 
 
 def _validate_entry(entry: dict) -> dict:
-    if not isinstance(entry, dict) or set(entry) != _ENTRY_FIELDS:
+    if not isinstance(entry, dict) or set(entry) not in (_ENTRY_FIELDS, _ENTRY_FIELDS | {"routing_evidence"}):
         raise LocalHistoryError("local_history_entry_invalid")
+    if "routing_evidence" in entry:
+        evidence = entry["routing_evidence"]
+        if (type(evidence) is not dict or set(evidence) != {"schema_version", "policy_action", "routing_mode", "routing_reason", "fallback"}
+                or type(evidence["schema_version"]) is not int or evidence["schema_version"] != 1
+                or type(evidence["fallback"]) is not bool
+                or any(not _text(evidence[key], 128) for key in ("policy_action", "routing_mode", "routing_reason"))):
+            raise LocalHistoryError("local_history_entry_invalid")
     _id(entry["id"])
     if (type(entry["recorded_at"]) not in {int, float} or not math.isfinite(entry["recorded_at"])
             or not 0 <= entry["recorded_at"] <= 253402300799):
@@ -202,7 +209,8 @@ class LocalHistory:
         for path, data in self._files():
             entry = self._decode(data, purpose=path.stem)
             if (entry.get("schema_id") != "hormuz.local-history-entry"
-                    or type(entry.get("schema_version")) is not int or entry["schema_version"] != 1):
+                    or type(entry.get("schema_version")) is not int or entry["schema_version"] not in (1, 2)
+                    or (entry["schema_version"] == 2) != ("routing_evidence" in entry)):
                 raise LocalHistoryError("local_history_data_invalid")
             record = _validate_entry({name: value for name, value in entry.items() if name not in {"schema_id", "schema_version"}})
             if record["id"] != path.stem:
@@ -350,7 +358,7 @@ class LocalHistory:
             export_private(path, json.dumps(artifact, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8") + b"\n")
             return _result("export-result", exported=len(records), output_path=str(path))
 
-    def insights(self):
+    def insights(self, *, detailed=False):
         with locked(self.directory) as exists:
             state = self._state() if exists else self._default_state()
             records = [item[1] for item in self._entries(state)] if exists else []
@@ -366,8 +374,26 @@ class LocalHistory:
                 models.setdefault(record["routed_model"], []).append(record)
                 day = datetime.fromtimestamp(record["recorded_at"], timezone.utc).date().isoformat()
                 days.setdefault(day, []).append(record)
-            return _result("insights", enabled=state["enabled"], currency="USD", cost_basis="configured_rate_card_estimate",
+            result = _result("insights", enabled=state["enabled"], currency="USD", cost_basis="configured_rate_card_estimate",
                            provider_confirmed_cost_available=False, local_infrastructure_cost="unknown",
                            coverage="retained_opt_in_history_only", totals=aggregate(records),
                            by_model=[{"model": name, **aggregate(values)} for name, values in sorted(models.items())],
                            by_day=[{"day_utc": name, **aggregate(values)} for name, values in sorted(days.items())])
+
+            if not detailed:
+                return result
+            known = [entry for entry in records if entry["input_tokens"] is not None and entry["output_tokens"] is not None]
+            observations = []
+            if result["totals"]["local_requests"]:
+                observations.append("local_compute_cost_unknown")
+            if any(entry["locality"] == "cloud" and entry["estimated_cost_microusd"] is None for entry in records):
+                observations.append("inspect_unknown_cloud_pricing")
+            if any(entry["outcome"] != "succeeded" for entry in records):
+                observations.append("inspect_failed_or_unknown_requests")
+            return {**result, "schema_id": "hormuz.usage-insights", "schema_version": 1,
+                    "observed_tokens": {"input": sum(entry["input_tokens"] for entry in known),
+                                        "output": sum(entry["output_tokens"] for entry in known),
+                                        "unknown_usage_requests": len(records) - len(known)},
+                    "observations": observations, "savings_measured": False,
+                    "observed_period": {"start": min((entry["recorded_at"] for entry in records), default=None),
+                                        "end": max((entry["recorded_at"] for entry in records), default=None)}}
