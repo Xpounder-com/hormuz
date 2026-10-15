@@ -52,6 +52,11 @@ a blocked unqualified route remains blocked. Explicit actor selection with
 `--actor ACTOR` is required when the profile has multiple actors. Only a direct
 local router with static authentication is supported. No cloud route is selected
 by this operation; stricter local-only scope is checked before any probe.
+Configurations with shadow routing enabled return
+`qualification_shadow_router_unsupported` before any model request or report
+publication because classification would exceed the fixed request envelope.
+Qualification never disables that feature; select an independently reviewed
+configuration without shadow routing when qualification is required.
 
 There are at most four serial model requests plus two authenticated router-state
 reads, zero retries, 128 output tokens per model request and one 12-second probe

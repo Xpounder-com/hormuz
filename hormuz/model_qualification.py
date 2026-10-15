@@ -263,6 +263,10 @@ def _memory_bytes():
 
 def qualify(args):
     config = GatewayConfig.load(args.config)
+    # Shadow classification adds provider calls outside this suite's fixed
+    # request envelope. Qualification cannot suppress a selected configuration.
+    if config.shadow_router is not None:
+        raise CapabilityError('qualification_shadow_router_unsupported')
     setup = _setup(args, config)
     output = local_path(Path(args.output))
     if output.exists() or output.is_symlink():

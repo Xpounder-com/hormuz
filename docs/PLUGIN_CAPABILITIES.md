@@ -29,6 +29,9 @@ use version 1 unless stated otherwise:
   results, narrow task scope, expiry, explicit absence of route authorization
   and authenticated execution identity (requested alias, destination, generation,
   upstream model and revision). Each probe and the final state must match.
+  Shadow-enabled configurations are rejected before model requests or report
+  publication with `qualification_shadow_router_unsupported`, preserving the
+  fixed four-request model envelope without disabling configured classification.
 - `hormuz.model-recommendation`: current/stale evidence, advisory recommendation,
   hardware facts, unverified inference fit, report trust and no downloads.
 - `hormuz.usage-insights`: existing spending coverage plus observed tokens,

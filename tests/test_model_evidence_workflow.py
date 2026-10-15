@@ -110,6 +110,46 @@ class ModelEvidenceWorkflowTests(unittest.TestCase):
                                               *assets, '--output', str(output))
                 yield assets, output, report, received
 
+    def test_shadow_enabled_qualification_rejects_before_any_model_request(self):
+        with self.probe_provider() as (endpoint, received), self.probe_provider() as (classifier, classified):
+            value = self.probe_configuration(endpoint)
+            value['upstreams']['local-classifier'] = {'protocol': 'openai', 'base_url': classifier,
+                                                       'locality': 'local', 'authentication': 'none'}
+            value['model_routes']['local-router'] = {'protocol': 'openai', 'destination': 'local-classifier',
+                'upstream_model': 'fixture-router', 'model_revision': 'fixture-router-v1',
+                'capabilities': ['responses', 'text']}
+            value['policies']['organization']['allowed_models'].append('local-router')
+            value['shadow_router'] = {'schema_version': 1, 'mode': 'shadow', 'model': 'local-router',
+                                      'local_model': 'local-code'}
+            assets = self.harness.model_arguments()
+            output = self.root / 'shadow-qualification.json'
+            with self.fixture.connected_client(value):
+                before = self.config.read_bytes()
+                result = subprocess.run([sys.executable, '-m', 'hormuz', '--config', str(self.config),
+                    'model', 'qualify', '--model', 'local-code', *assets, '--output', str(output)],
+                    env=self.harness.environment, capture_output=True, text=True, timeout=20)
+                self.assertEqual(classified, [], 'qualification must not start extra classifier requests')
+                self.assertEqual(received, [])
+                self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+                self.assertEqual(json.loads(result.stdout), {'schema_id': 'hormuz.capability-error',
+                    'schema_version': 1, 'error': {'code': 'qualification_shadow_router_unsupported'}})
+                self.assertEqual(result.stderr, '')
+                self.assertFalse(output.exists())
+                self.assertEqual(self.config.read_bytes(), before)
+
+            # A separately selected configuration without the shadow feature
+            # retains the established four-request qualification workflow.
+            standalone = copy.deepcopy(value)
+            standalone.pop('shadow_router')
+            with self.fixture.connected_client(standalone):
+                before = self.config.read_bytes()
+                report = self.harness.command('model', 'qualify', '--model', 'local-code',
+                                             *assets, '--output', str(output))
+                self.assertEqual(report['result'], 'passed')
+                self.assertEqual(self.config.read_bytes(), before)
+                self.assertEqual(classified, [])
+                self.assertEqual(len(received), 4)
+
     def test_incomplete_qualification_cannot_recommend_a_model(self):
         with self.qualified_report() as (assets, output, report, received):
             del report['checks']
