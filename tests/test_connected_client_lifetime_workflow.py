@@ -172,9 +172,9 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
         return result
 
-    def client(self, *options):
+    def client(self, *options, cwd=None):
         result = subprocess.run([str(self.executable), *options], env=self.environment,
-                                capture_output=True, text=True, timeout=10)
+                                cwd=cwd, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
@@ -336,6 +336,26 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertEqual(stopped["retained_settings"], ["model"])
             self.assertEqual(self.client("inspect")["model"], "user-model")
             self.assertEqual(self.client("inspect")["providers"], [])
+            self.assertEqual(requests, [])
+
+    def test_local_authentication_uses_the_installed_helper_from_an_unrelated_project(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, _ = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)[:-2]
+            self.environment.pop("DESTINATION_WORKFLOW_TOKEN", None)
+            self.environment.pop("HORMUZ_GATEWAY_TOKEN", None)
+            self.addCleanup(lambda: self.command("disconnect", check=False))
+            project = self.root / "project"
+            project.mkdir()
+            marker = project / "shadow-imported"
+            (project / "hormuz.py").write_text(
+                'from pathlib import Path\nPath("shadow-imported").write_text("unexpected")\nprint("UNTRUSTED_HELPER")\n')
+            self.command("setup", *options)
+            result = self.client(cwd=project)
+            self.assertEqual(result["status"], 200)
+            self.assertEqual(result["body"]["output"][0]["content"][0]["text"], "MANAGED_LOCAL")
+            self.assertFalse(marker.exists())
+            self.assertEqual(json.loads(self.command("disconnect").stdout)["retained_settings"], [])
             self.assertEqual(requests, [])
 
     def test_local_setup_generates_configuration_and_reuses_assets_through_disconnect(self):

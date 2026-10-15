@@ -42,7 +42,8 @@ the same operating-system user, as do that user's other private files.
 
 The pinned Codex 0.147.0 schema supports `model_providers.<id>.auth` with a
 command, arguments, timeout and refresh interval. Setup uses an absolute Python
-interpreter from its installed package, a five-second helper deadline and
+interpreter and helper script from its installed package, isolated Python
+imports, a five-second helper deadline and
 refresh only on authentication retry. It combines this with neither `env_key`
 nor native OpenAI authentication. See [official command-backed authentication](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers)
 and the [pinned schema](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/core/config.schema.json).

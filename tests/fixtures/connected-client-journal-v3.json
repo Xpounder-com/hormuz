@@ -15,7 +15,7 @@
     "model_provider": null,
     "web_search": null
   },
-  "provider_block": "\n[model_providers.hormuz_11111111111111111111111111111111]\nname = \"Hormuz\"\nbase_url = \"http://127.0.0.1:8787/v1\"\nwire_api = \"responses\"\n\n[model_providers.hormuz_11111111111111111111111111111111.auth]\ncommand = \"/absolute/synthetic/python\"\nargs = [\"-m\", \"hormuz\", \"auth\", \"local-token\", \"--client-home\", \"/absolute/synthetic/codex\", \"--generation\", \"11111111111111111111111111111111\"]\ntimeout_ms = 5000\nrefresh_interval_ms = 0\n",
+  "provider_block": "\n[model_providers.hormuz_11111111111111111111111111111111]\nname = \"Hormuz\"\nbase_url = \"http://127.0.0.1:8787/v1\"\nwire_api = \"responses\"\n\n[model_providers.hormuz_11111111111111111111111111111111.auth]\ncommand = \"/absolute/synthetic/python\"\nargs = [\"-I\", \"/absolute/synthetic/hormuz/_local_auth_helper.py\", \"--client-home\", \"/absolute/synthetic/codex\", \"--generation\", \"11111111111111111111111111111111\"]\ntimeout_ms = 5000\nrefresh_interval_ms = 0\n",
   "gateway_config": "/absolute/synthetic/gateway.json",
   "gateway_digest": "0000000000000000000000000000000000000000000000000000000000000000",
   "actor_id": "developer",
@@ -24,6 +24,7 @@
   "credential_helper": {
     "command": "/absolute/synthetic/python",
     "home": "/absolute/synthetic/codex",
-    "credential_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    "credential_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "entrypoint": "/absolute/synthetic/hormuz/_local_auth_helper.py"
   }
 }

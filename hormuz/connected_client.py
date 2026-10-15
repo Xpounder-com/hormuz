@@ -72,7 +72,7 @@ def _provider_block(provider, origin, credential_env=None, *, helper=None, gener
         return block + 'requires_openai_auth = false\n' + 'env_key = ' + json.dumps(credential_env) + '\n'
     return (block + '\n[model_providers.' + provider + '.auth]\n'
             + 'command = ' + json.dumps(helper["command"]) + '\n'
-            + 'args = ' + json.dumps(["-m", "hormuz", "auth", "local-token", "--client-home", helper["home"],
+            + 'args = ' + json.dumps(["-I", helper["entrypoint"], "--client-home", helper["home"],
                                      "--generation", generation]) + '\n'
             + 'timeout_ms = 5000\nrefresh_interval_ms = 0\n')
 
@@ -113,9 +113,9 @@ def _parse_record(text):
         table = _document(record["provider_block"])["model_providers"][record["installed"]["model_provider"]]
         helper = record.get("credential_helper")
         if "credential_helper" in record:
-            if (type(helper) is not dict or set(helper) != {"command", "home", "credential_sha256"}
+            if (type(helper) is not dict or set(helper) != {"command", "home", "entrypoint", "credential_sha256"}
                     or any(type(helper[key]) is not str or not 1 <= len(helper[key]) <= 4096 or "\x00" in helper[key]
-                           or not Path(helper[key]).is_absolute() for key in ("command", "home"))
+                           or not Path(helper[key]).is_absolute() for key in ("command", "home", "entrypoint"))
                     or type(helper["credential_sha256"]) is not str
                     or re.fullmatch(r"[a-f0-9]{64}", helper["credential_sha256"]) is None):
                 raise ValueError()
@@ -563,6 +563,7 @@ class ConnectedClientLifetime:
             if any(value is not None and not isinstance(value, str) for value in original.values()):
                 raise ConnectedClientError("configuration_shape_unsupported")
             helper = {"command": sys.executable, "home": str(self.home),
+                      "entrypoint": str(Path(__file__).with_name("_local_auth_helper.py").resolve()),
                       "credential_sha256": hashlib.sha256(identity.token.encode()).hexdigest()} if identity.token_file is not None else None
             block = _provider_block(provider, f"http://127.0.0.1:{config.listen.port}", identity.token_env,
                                     helper=helper, generation=generation)
