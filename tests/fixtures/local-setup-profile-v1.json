@@ -1,0 +1,17 @@
+{
+  "schema_id": "hormuz.local-setup-profile",
+  "schema_version": 1,
+  "qualification_id": "synthetic-managed-v1",
+  "client_version": "0.147.0",
+  "system": "Darwin",
+  "machine": "arm64",
+  "runtime_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "model_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "model": "local-code",
+  "capabilities": ["responses", "text"],
+  "max_request_bytes": 4096,
+  "max_output_tokens": 8,
+  "task_types": ["summarization"],
+  "upstream_timeout_seconds": 6,
+  "startup_timeout_seconds": 3
+}

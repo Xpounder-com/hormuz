@@ -108,7 +108,12 @@ class ManagedLlamaProfile:
     def require_free_endpoint(self):
         try:
             with socket.socket() as listener:
+                # A completed owner's health connections may leave TIME_WAIT.
+                # Reuse that closed socket state, while listen still excludes
+                # any live external listener on the selected endpoint.
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 listener.bind(("127.0.0.1", self.port))
+                listener.listen(1)
         except OSError:
             raise ManagedLlamaError("runtime_occupied") from None
 
