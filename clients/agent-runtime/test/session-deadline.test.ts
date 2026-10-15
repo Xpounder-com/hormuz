@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,7 +30,9 @@ class Runtime implements AgentSessionAdapter {
   async dispose() { this.disposed = true; }
 }
 type Authority = 'cloud' | 'allowance' | 'workspace' | 'connection';
-async function fixture(timeout = 250) {
+async function fixture(timeout = 250, context?: TestContext) {
+  // Real filesystem work must reach the named stage before its deadline fires.
+  context?.mock.timers.enable({ apis: ['setTimeout'] });
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'hormuz-deadline-')));
   const workspace = join(dir, 'workspace'); await mkdir(workspace);
   const store = new SessionStore(join(dir, 'state')), scheduler = new ApplicationScheduler();
@@ -54,17 +57,18 @@ async function fixture(timeout = 250) {
   const create = () => manager.create({ projectId: 'project', workspace, engine: 'codex', model: 'fixture',
     connectionId: 'connection', cloudAllowed: true, allowanceMicrousd: 1_000_000 });
   return { dir, workspace, store, scheduler, manager, options, create, state, entered, blocked, runtimes,
-    cleanup: async () => { blocked.resolve(false); await manager.dispose(); await rm(dir, { recursive: true, force: true }); } };
+    expireDeadline: () => { assert.ok(context); context.mock.timers.tick(options.runTimeoutMs ?? timeout); },
+    cleanup: async () => { context?.mock.timers.reset(); blocked.resolve(false); await manager.dispose(); await rm(dir, { recursive: true, force: true }); } };
 }
 
 for (const kind of ['cloud', 'allowance', 'workspace', 'connection'] as const) {
-  test('planning deadline bounds a never-resolving ' + kind + ' callback and ignores its late authorization', { timeout: 3000 }, async () => {
-    const f = await fixture();
+  test('planning deadline bounds a never-resolving ' + kind + ' callback and ignores its late authorization', { timeout: 3000 }, async t => {
+    const f = await fixture(250, t);
     try {
       const session = await f.create(); f.state.block = kind;
       const planning = f.manager.plan(session.id, 'project', 'Work.');
       const rejected = assert.rejects(planning, { code: 'interrupted' });
-      await f.entered.promise; await rejected;
+      await f.entered.promise; f.expireDeadline(); await rejected;
       assert.equal(f.state.signal?.aborted, true); assert.equal(f.scheduler.activeOwner, null);
       assert.equal(f.runtimes.length, 1); assert.equal(f.runtimes[0].starts, 0);
       const saved = await f.store.load(session.id, 'profile', 'project');
@@ -75,13 +79,14 @@ for (const kind of ['cloud', 'allowance', 'workspace', 'connection'] as const) {
       await f.manager.dispose(); const release = await new SessionStore(f.store.root).acquireLease(); await release();
     } finally { await f.cleanup(); }
   });
-  test('execution deadline revokes the accepted plan while ' + kind + ' authorization remains pending', { timeout: 3000 }, async () => {
-    const f = await fixture();
+  test('execution deadline revokes the accepted plan while ' + kind + ' authorization remains pending', { timeout: 3000 }, async t => {
+    const f = await fixture(250, t);
     try {
       const session = await f.create(), planned = await f.manager.plan(session.id, 'project', 'Work.');
       await f.manager.acceptPlan(session.id, 'project', planned.plan!.revision);
       f.state.block = kind;
-      await assert.rejects(f.manager.execute(session.id, 'project', planned.plan!.revision), { code: 'interrupted' });
+      const rejected = assert.rejects(f.manager.execute(session.id, 'project', planned.plan!.revision), { code: 'interrupted' });
+      await f.entered.promise; f.expireDeadline(); await rejected;
       const saved = await f.store.load(session.id, 'profile', 'project');
       assert.equal(saved.acceptedPlanFingerprint, undefined); assert.equal(saved.runtimeAttempts, 1);
       assert.equal(saved.phase, 'interrupted'); assert.equal(f.scheduler.activeOwner, null);
@@ -92,10 +97,11 @@ for (const kind of ['cloud', 'allowance', 'workspace', 'connection'] as const) {
 }
 
 for (const kind of ['workspace', 'allowance'] as const) {
-  test('create deadline bounds ' + kind + ' authorization without creating a late session', { timeout: 3000 }, async () => {
-    const f = await fixture();
+  test('create deadline bounds ' + kind + ' authorization without creating a late session', { timeout: 3000 }, async t => {
+    const f = await fixture(250, t);
     try {
-      f.state.block = kind; await assert.rejects(f.create(), { code: 'interrupted' });
+      f.state.block = kind; const rejected = assert.rejects(f.create(), { code: 'interrupted' });
+      await f.entered.promise; f.expireDeadline(); await rejected;
       f.blocked.resolve(true); await new Promise<void>(resolve => setImmediate(resolve));
       assert.deepEqual(await f.store.list('profile', 'project'), []); assert.equal(f.runtimes.length, 0);
       await f.manager.dispose(); const release = await new SessionStore(f.store.root).acquireLease(); await release();
@@ -158,8 +164,8 @@ test('successful planning closes a stalled approval decision after its request e
 });
 
 for (const mode of ['accept', 'revise', 'resume'] as const) {
-  test(mode + ' deadline cannot preserve previously accepted execution authority', { timeout: 3000 }, async () => {
-    const f = await fixture();
+  test(mode + ' deadline cannot preserve previously accepted execution authority', { timeout: 3000 }, async t => {
+    const f = await fixture(250, t);
     try {
       const session = await f.create(), planned = await f.manager.plan(session.id, 'project', 'Work.');
       const revision = planned.plan!.revision; await f.manager.acceptPlan(session.id, 'project', revision);
@@ -167,7 +173,8 @@ for (const mode of ['accept', 'revise', 'resume'] as const) {
       const operation = mode === 'accept' ? f.manager.acceptPlan(session.id, 'project', revision)
         : mode === 'revise' ? f.manager.revisePlan(session.id, 'project', revision, 'Changed plan.')
           : f.manager.resume(session.id, 'project');
-      await assert.rejects(operation, { code: 'interrupted' });
+      const rejected = assert.rejects(operation, { code: 'interrupted' });
+      await f.entered.promise; f.expireDeadline(); await rejected;
       assert.equal((await f.store.load(session.id, 'profile', 'project')).acceptedPlanFingerprint, undefined);
       assert.equal(f.scheduler.activeOwner, null);
       f.blocked.reject(new Error('late rejected host callback'));
@@ -177,35 +184,34 @@ for (const mode of ['accept', 'revise', 'resume'] as const) {
 }
 
 test('the operation deadline also bounds authority revalidation after the adapter has completed its plan', { timeout: 3000 }, async t => {
-  const f = await fixture(), validated = deferred<Connection>(), revalidating = deferred<void>(); let calls = 0;
+  const f = await fixture(250, t), validated = deferred<Connection>(), revalidating = deferred<void>(); let calls = 0;
   f.options.resolveConnection = async () => {
     if (++calls === 1) return connection;
     revalidating.resolve(); return await validated.promise;
   };
   // Advance the operation deadline at the post-run authority barrier. Real
   // filesystem setup must not expire it before the adapter under test exists.
-  t.mock.timers.enable({ apis: ['setTimeout'] });
   try {
     const session = await f.create();
     const planning = f.manager.plan(session.id, 'project', 'Work.');
     const rejected = assert.rejects(planning, { code: 'interrupted' });
     await revalidating.promise;
     assert.equal(calls, 2); assert.equal(f.runtimes[1].runs, 1);
-    t.mock.timers.tick(250);
+    f.expireDeadline();
     await rejected;
     const saved = await f.store.load(session.id, 'profile', 'project');
     assert.equal(saved.phase, 'interrupted'); assert.equal(saved.plan, undefined);
     assert.equal(f.scheduler.activeOwner, null); assert.equal(f.runtimes[1].disposed, true);
     validated.resolve(connection); await new Promise<void>(resolve => setImmediate(resolve));
     assert.equal((await f.store.load(session.id, 'profile', 'project')).plan, undefined);
-  } finally { t.mock.timers.reset(); validated.resolve(connection); await f.cleanup(); }
+  } finally { validated.resolve(connection); await f.cleanup(); }
 });
 
 for (const stage of ['snapshot', 'grant_write'] as const) {
-  test('acceptance cancellation during an owned ' + stage + ' cannot persist a grant or release its lease early', { timeout: 5000 }, async () => {
+  test('acceptance cancellation during an owned ' + stage + ' cannot persist a grant or release its lease early', { timeout: 5000 }, async t => {
     // Setup must succeed independently of CI filesystem latency. Keep the short
     // deadline on the deliberately blocked acceptance operation under test.
-    const f = await fixture(2000), started = deferred<void>(), finish = deferred<void>();
+    const f = await fixture(2000, t), started = deferred<void>(), finish = deferred<void>();
     const save = f.store.save.bind(f.store); let signal: AbortSignal | undefined;
     try {
       const session = await f.create(), planned = await f.manager.plan(session.id, 'project', 'Work.');
@@ -217,6 +223,7 @@ for (const stage of ['snapshot', 'grant_write'] as const) {
       const accepting = f.manager.acceptPlan(session.id, 'project', planned.plan!.revision);
       const rejected = assert.rejects(accepting, { code: 'interrupted' });
       await started.promise;
+      f.expireDeadline();
       if (!signal!.aborted) await new Promise<void>(resolve => signal!.addEventListener('abort', () => resolve(), { once: true }));
       await assert.rejects(new SessionStore(f.store.root).acquireLease(), /SESSION_STORE_IN_USE/);
       finish.resolve(); await rejected;
@@ -225,16 +232,17 @@ for (const stage of ['snapshot', 'grant_write'] as const) {
   });
 }
 
-test('startup deadline bounds pending adapter history metadata and retains failed cleanup until retry', { timeout: 3000 }, async () => {
-  const f = await fixture();
-  const history = deferred<undefined>(); let disposals = 0;
+test('startup deadline bounds pending adapter history metadata and retains failed cleanup until retry', { timeout: 3000 }, async t => {
+  const f = await fixture(250, t);
+  const history = deferred<undefined>(), readingHistory = deferred<void>(); let disposals = 0;
   class WaitingHistory extends Runtime {
-    async historyPolicy() { return await history.promise; }
+    async historyPolicy() { readingHistory.resolve(); return await history.promise; }
     override async dispose() { disposals++; if (disposals === 1) throw new Error('uncertain-process-cleanup'); this.disposed = true; }
   }
   try {
     const session = await f.create(); f.state.factory = () => new WaitingHistory();
-    await assert.rejects(f.manager.plan(session.id, 'project', 'Work.'), { code: 'cleanup_required' });
+    const rejected = assert.rejects(f.manager.plan(session.id, 'project', 'Work.'), { code: 'cleanup_required' });
+    await readingHistory.promise; f.expireDeadline(); await rejected;
     assert.equal(f.scheduler.activeOwner, session.id);
     await assert.rejects(new SessionStore(f.store.root).acquireLease(), /SESSION_STORE_IN_USE/);
     await f.manager.dispose(); assert.equal(f.scheduler.activeOwner, null);
@@ -244,12 +252,12 @@ test('startup deadline bounds pending adapter history metadata and retains faile
   } finally { history.resolve(undefined); await f.cleanup(); }
 });
 
-test('startup timeout holds scheduler and state lease until owned adapter cleanup finishes, then prevents late startup', { timeout: 3000 }, async () => {
-  const f = await fixture(), startup = deferred<void>(), cleaning = deferred<void>(), cleaned = deferred<void>();
+test('startup timeout holds scheduler and state lease until owned adapter cleanup finishes, then prevents late startup', { timeout: 3000 }, async t => {
+  const f = await fixture(250, t), starting = deferred<void>(), startup = deferred<void>(), cleaning = deferred<void>(), cleaned = deferred<void>();
   let ownedProcesses = 0;
   class WaitingStart extends Runtime {
     override async start(options: RuntimeStart) {
-      this.starts++; this.options = options; ownedProcesses++;
+      this.starts++; this.options = options; ownedProcesses++; starting.resolve();
       await startup.promise;
       if (this.disposed) throw new Error('runtime_closed');
       return { threadId: 'late-thread' };
@@ -259,6 +267,7 @@ test('startup timeout holds scheduler and state lease until owned adapter cleanu
   try {
     const session = await f.create(); f.state.factory = () => new WaitingStart();
     const planning = f.manager.plan(session.id, 'project', 'Work.'), rejected = assert.rejects(planning, { code: 'interrupted' });
+    await starting.promise; f.expireDeadline();
     await cleaning.promise; assert.equal(ownedProcesses, 1); assert.equal(f.scheduler.activeOwner, session.id);
     await assert.rejects(new SessionStore(f.store.root).acquireLease(), /SESSION_STORE_IN_USE/);
     cleaned.resolve(); await rejected; assert.equal(ownedProcesses, 0); assert.equal(f.scheduler.activeOwner, null);
@@ -270,11 +279,11 @@ test('startup timeout holds scheduler and state lease until owned adapter cleanu
   } finally { cleaned.resolve(); startup.resolve(); await f.cleanup(); }
 });
 
-test('run deadline bounds a noncooperative adapter and refunds an admitted request blocked in dispatch authorization', { timeout: 3000 }, async () => {
-  const f = await fixture(), dispatch = deferred<boolean>(); let calls = 0, signal: AbortSignal | undefined;
+test('run deadline bounds a noncooperative adapter and refunds an admitted request blocked in dispatch authorization', { timeout: 3000 }, async t => {
+  const f = await fixture(250, t), dispatch = deferred<boolean>(), dispatching = deferred<void>(); let calls = 0, signal: AbortSignal | undefined;
   f.options.authorizeCloud = async (_project, currentSignal) => {
     if (++calls === 1) return true;
-    signal = currentSignal; return await dispatch.promise;
+    signal = currentSignal; dispatching.resolve(); return await dispatch.promise;
   };
   const requestFinished = deferred<void>();
   class RequestingRuntime extends Runtime {
@@ -289,7 +298,11 @@ test('run deadline bounds a noncooperative adapter and refunds an admitted reque
   }
   try {
     const session = await f.create(); f.state.factory = () => new RequestingRuntime();
-    assert.equal((await f.manager.plan(session.id, 'project', 'Work.')).phase, 'interrupted');
+    const planning = f.manager.plan(session.id, 'project', 'Work.');
+    await dispatching.promise;
+    assert.equal(calls, 2); assert.equal(f.runtimes[1].runs, 1);
+    f.expireDeadline();
+    assert.equal((await planning).phase, 'interrupted');
     assert.equal(signal?.aborted, true); assert.equal(f.scheduler.activeOwner, null);
     const saved = await f.store.load(session.id, 'profile', 'project');
     assert.deepEqual(saved.accounting, { spentMicrousd: 0, heldMicrousd: 0, unknownMicrousd: 0, requestCount: 1, coverage: 'enforced' });
@@ -299,14 +312,16 @@ test('run deadline bounds a noncooperative adapter and refunds an admitted reque
   } finally { dispatch.resolve(false); await f.cleanup(); }
 });
 
-test('late events and results from a timed-out adapter cannot enter a later run of the same session', { timeout: 3000 }, async () => {
-  const f = await fixture(), late = deferred<RunResult>(); let staleRun: RuntimeRun | undefined;
+test('late events and results from a timed-out adapter cannot enter a later run of the same session', { timeout: 3000 }, async t => {
+  const f = await fixture(250, t), running = deferred<void>(), late = deferred<RunResult>(); let staleRun: RuntimeRun | undefined;
   class LateRuntime extends Runtime {
-    override async run(options: RuntimeRun) { this.runs++; staleRun = options; return await late.promise; }
+    override async run(options: RuntimeRun) { this.runs++; staleRun = options; running.resolve(); return await late.promise; }
   }
   try {
     const session = await f.create(); f.state.factory = () => new LateRuntime();
-    assert.equal((await f.manager.plan(session.id, 'project', 'First plan.')).phase, 'interrupted');
+    const planning = f.manager.plan(session.id, 'project', 'First plan.');
+    await running.promise; f.expireDeadline();
+    assert.equal((await planning).phase, 'interrupted');
     f.state.factory = () => new Runtime();
     const planned = await f.manager.plan(session.id, 'project', 'Second plan.');
     const events: unknown[] = []; f.manager.on('event', event => events.push(event));
@@ -318,8 +333,8 @@ test('late events and results from a timed-out adapter cannot enter a later run 
   } finally { late.resolve({ status: 'interrupted' }); await f.cleanup(); }
 });
 
-test('zero or invalid configured token rates fail before native startup', { timeout: 3000 }, async () => {
-  const f = await fixture();
+test('zero or invalid configured token rates fail before native startup', { timeout: 3000 }, async t => {
+  const f = await fixture(250, t);
   try {
     const session = await f.create();
     for (const [key, value] of [['inputMicrousdPerMillion', 0], ['outputMicrousdPerMillion', 0], ['inputMicrousdPerMillion', -1], ['outputMicrousdPerMillion', 1.5]] as const) {

@@ -64,7 +64,14 @@ test('installed pinned Claude SDK plans, approves a Write, reviews its diff and 
     listen(); await manager.initialize();
     const created = await manager.create({ projectId: 'synthetic-project', workspace, engine: 'claude', model: connection.model, connectionId: 'fake-provider', cloudAllowed: true, allowanceMicrousd: connection.allowanceMicrousd });
     const planned = await manager.plan(created.id, 'synthetic-project', 'Plan one synthetic approved file change.');
-    assert.equal(planned.phase, 'ready'); assert.ok(planned.plan); assert.equal(approvals.length, 0);
+    assert.equal(planned.phase, 'ready', JSON.stringify({
+      phase: planned.phase, providerRequests: totalRequests, providerGenerations: generations,
+      runtimeInitializations: events.filter(event => event.type === 'tool' && event.data && typeof event.data === 'object' && 'runtime' in event.data).length,
+      messageEvents: events.filter(event => event.type === 'message').length,
+      usageEvents: events.filter(event => event.type === 'usage').length,
+      admittedRequests: planned.accounting.requestCount, unknownMicrousd: planned.accounting.unknownMicrousd,
+    }));
+    assert.ok(planned.plan); assert.equal(approvals.length, 0);
     await assert.rejects(readFile(path), /ENOENT/);
     await manager.acceptPlan(created.id, 'synthetic-project', planned.plan.revision);
     const pending = once(manager, 'approval', { signal: deadline.signal });
