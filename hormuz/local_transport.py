@@ -20,17 +20,21 @@ class LocalResponse:
     def getcode(self):
         return self.status
 
-    def read(self, size=-1):
+    def _read(self, method, size):
         self._check_deadline()
-        data = self.response.read(size)
+        try:
+            data = method(size)
+        except (OSError, http.client.HTTPException):
+            self._check_deadline()
+            raise
         self._check_deadline()
         return data
 
+    def read(self, size=-1):
+        return self._read(self.response.read, size)
+
     def read1(self, size=-1):
-        self._check_deadline()
-        data = self.response.read1(size)
-        self._check_deadline()
-        return data
+        return self._read(self.response.read1, size)
 
     def set_read_timeout(self, seconds):
         if not self.response.isclosed():
@@ -91,11 +95,13 @@ def open_local_upstream(request, *, timeout, absolute_timeout=None, cancel_check
                            headers=dict(request.header_items()))
         response = connection.getresponse()
         return LocalResponse(connection, response, transport_socket, timer, expired, stopped)
-    except BaseException:
+    except BaseException as error:
         stopped.set()
         if timer is not None:
             timer.cancel()
         connection.close()
         if timer is not None:
             timer.join(timeout=1)
+        if expired.is_set() and isinstance(error, (OSError, http.client.HTTPException)):
+            raise TimeoutError("local_request_deadline") from None
         raise

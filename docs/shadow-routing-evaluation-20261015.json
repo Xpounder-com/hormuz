@@ -169,5 +169,12 @@
     "Only one pinned local combination was executed; no cloud quality, cost or subscription comparison.",
     "Loopback fixtures establish workflow guards; native cases establish only their observed coding outcomes.",
     "The read-only grading sandbox network probe does not establish whole-client network egress isolation."
+  ],
+  "later_runtime_changes": [
+    {
+      "path": "hormuz/local_transport.py",
+      "change": "Normalize deadline-owned socket interruptions to timeout across header and body reads; preserve ordinary network errors.",
+      "native_quality_episodes_repeated": false
+    }
   ]
 }

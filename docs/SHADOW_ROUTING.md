@@ -148,3 +148,9 @@ Keep this classifier **shadow-only**. This run supplies no evidence for promotin
 its recommendations into execution decisions. The content-free
 [evaluation receipt](shadow-routing-evaluation-20261015.json) records pins,
 fixture and private evidence digests, latency, coverage, outcomes and cleanup.
+
+Linux CI subsequently exposed a deadline-reporting difference: the owned
+watchdog's socket shutdown could surface as a disconnect. Transport now reports
+that interruption as a timeout when its own deadline marker is set, including
+reads interrupted after headers. The frozen coding outcomes above remain tied
+to runtime `8c0d6a0`; no quality episode was repeated for this portability fix.
