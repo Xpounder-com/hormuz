@@ -1,8 +1,10 @@
 {
   "name": "hormuz",
-  "version": "0.1.0",
-  "description": "Set up, inspect and disconnect a customer-local Hormuz router using its shared CLI.",
-  "author": {"name": "Xpounder-com"},
+  "version": "0.2.0",
+  "description": "Diagnose, explain and qualify local model routing with explicit privacy, budget and history controls.",
+  "author": {
+    "name": "Xpounder-com"
+  },
   "repository": "https://github.com/Xpounder-com/hormuz",
   "license": "Apache-2.0"
 }

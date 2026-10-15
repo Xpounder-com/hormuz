@@ -35,10 +35,14 @@ def add_client_commands(
     acquire.add_argument("--timeout-seconds", type=int, default=1800, choices=range(1, 3601), metavar="1..3600",
                          help="Absolute deadline for each artifact download (default 1800 seconds)")
 
-    for command in ("setup", "connect", "status", "disconnect"):
+    for command in ("setup", "connect", "status", "diagnose", "disconnect"):
         lifecycle = client_subparsers.add_parser(command, help="Manage persistent Codex CLI connection")
         lifecycle.add_argument("client", choices=["codex"])
         lifecycle.add_argument("--client-home", help="Isolated Codex home (default CODEX_HOME or ~/.codex)")
+        if command == "diagnose":
+            lifecycle.add_argument("--executable", help="Optional target executable for a bounded version check")
+            lifecycle.add_argument("--project", help="Project working directory to inspect (default current directory)")
+            lifecycle.add_argument("--launch-arg", action="append", help="One supplied Codex launch argument; repeat with =--flag syntax; never executed")
         if command == "disconnect":
             lifecycle.add_argument("--generation", help="Disconnect only the receipt generation that you own")
         if command in {"connect", "setup"}:
@@ -217,6 +221,9 @@ def run_lifetime(args: argparse.Namespace) -> int:
             result = setup_local(lifetime, args)
         elif args.client_command == "connect":
             result = lifetime.connect(Path(args.config), executable=args.executable, actor_id=args.actor, preview=args.dry_run)
+        elif args.client_command == "diagnose":
+            from ..plugin_diagnostics import diagnose
+            result = diagnose(lifetime, Path(args.config), args.executable, args.project, args.launch_arg)
         elif args.client_command == "status":
             result = lifetime.status()
         else:
@@ -224,6 +231,11 @@ def run_lifetime(args: argparse.Namespace) -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ConnectedClientError, ConfigError, OSError, subprocess.SubprocessError) as error:
+        if args.client_command == "diagnose":
+            print(json.dumps({"schema_id": "hormuz.client-diagnosis", "schema_version": 1,
+                              "error": {"code": "configuration_invalid" if isinstance(error, ConfigError)
+                                        else "diagnosis_unavailable"}}))
+            return 2
         print(json.dumps(lifetime_error(error)), file=sys.stderr)
         return 2
 

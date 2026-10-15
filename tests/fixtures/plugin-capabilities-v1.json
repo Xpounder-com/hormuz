@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "schemas": [
+    "hormuz.client-diagnosis",
+    "hormuz.request-explanation",
+    "hormuz.policy-proposal",
+    "hormuz.model-qualification",
+    "hormuz.model-recommendation",
+    "hormuz.usage-insights",
+    "hormuz.capability-error"
+  ],
+  "qualification": {
+    "suite": "responses-local-smoke-v1",
+    "maximum_requests": 4,
+    "maximum_output_tokens_per_request": 128,
+    "probe_deadline_seconds": 12,
+    "route_authorized": false
+  },
+  "migration": "Additive CLI commands and nested override receipt. History entry v1 remains readable; v2 carries routing evidence. Complete qualification report v1 requires requalification; malformed reports reject. Qualification v2 binds execution generation.",
+  "rollback": "Disconnect before removing plugin. Export/delete v2 history before downgrade. Older readers reject qualification v2; requalify with the older version. Staged policy configs never replace originals.",
+  "nested_receipts": {
+    "override_diagnosis": {
+      "schema_id": "hormuz.client-overrides",
+      "schema_version": 1,
+      "required_fields": [
+        "supported_client_version", "scope", "project_state", "layers", "conflicts",
+        "launch_state", "effective_routing", "running_session"
+      ]
+    }
+  },
+  "required_fields": {
+    "hormuz.client-diagnosis": [
+      "connection",
+      "client_compatibility",
+      "supported_client_version",
+      "routing_mode",
+      "qualified_local_routes",
+      "model_readiness",
+      "task_completion",
+      "scope",
+      "project_overrides",
+      "override_diagnosis",
+      "action"
+    ],
+    "hormuz.request-explanation": [
+      "coverage",
+      "observation",
+      "policy_decision",
+      "fallback",
+      "optimization",
+      "scope"
+    ],
+    "hormuz.policy-proposal": [
+      "changes",
+      "activation",
+      "scope",
+      "budget_basis",
+      "source_preserved",
+      "history_consent_transferred",
+      "next_action"
+    ],
+    "hormuz.model-qualification": [
+      "result",
+      "checks",
+      "setup",
+      "recorded_at",
+      "expires_at",
+      "scope",
+      "route_authorized",
+      "runtime_binding",
+      "limits",
+      "execution"
+    ],
+    "hormuz.model-recommendation": [
+      "model_alias",
+      "recommendation",
+      "evidence_current",
+      "scope",
+      "system_memory_bytes",
+      "model_file_bytes",
+      "inference_memory_fit",
+      "route_authorized",
+      "downloads_started",
+      "evidence_trust"
+    ],
+    "hormuz.usage-insights": [
+      "enabled",
+      "totals",
+      "coverage",
+      "observed_tokens",
+      "observations",
+      "savings_measured",
+      "observed_period",
+      "by_model",
+      "by_day"
+    ],
+    "hormuz.capability-error": [
+      "error"
+    ]
+  },
+  "schema_versions": {
+    "hormuz.model-qualification": 2
+  }
+}

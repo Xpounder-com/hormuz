@@ -1029,6 +1029,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         destination=options["selected_upstream"].destinations.resolve(options["decision"].route),
                         request_value=options["request_value"], redactor=self.server.history_redactor,
                         generation=self._history_generation)
+                    if history_capture is not None:
+                        headers = self.server.route_admission.response_headers(self, options["decision"].route)
+                        history_capture.entry["routing_evidence"] = {
+                            "schema_version": 1, "policy_action": options["policy_action"],
+                            "routing_mode": getattr(self, "_route_admission_mode", "configured"),
+                            "routing_reason": headers.get("X-Hormuz-Routing-Reason", "configured_route"),
+                            "fallback": (options["failover_applied_reason"] is not None
+                                         or "fallback" in options["policy_action"].split("+")),
+                        }
                     self._forward_admitted(**options, history_capture=history_capture)
         except RouteAdmissionError:
             if not entered and options["attempt"] is not None:

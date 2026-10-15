@@ -14,14 +14,42 @@
     "hormuz.local-history-error"
   ],
   "entry_fields": [
-    "id", "recorded_at", "actor_id", "client", "protocol", "requested_model",
-    "routed_model", "destination", "locality", "outcome", "http_status",
-    "input_tokens", "output_tokens", "estimated_cost_microusd", "cost_reason",
-    "latency_ms", "request_text", "response_text", "request_content_status",
-    "response_content_status", "schema_id", "schema_version"
+    "id",
+    "recorded_at",
+    "actor_id",
+    "client",
+    "protocol",
+    "requested_model",
+    "routed_model",
+    "destination",
+    "locality",
+    "outcome",
+    "http_status",
+    "input_tokens",
+    "output_tokens",
+    "estimated_cost_microusd",
+    "cost_reason",
+    "latency_ms",
+    "request_text",
+    "response_text",
+    "request_content_status",
+    "response_content_status",
+    "schema_id",
+    "schema_version",
+    "routing_evidence"
   ],
-  "content_statuses": ["captured", "unsupported", "omitted_limit", "partial"],
-  "outcomes": ["succeeded", "failed", "outcome_unknown", "rate_limited"],
+  "content_statuses": [
+    "captured",
+    "unsupported",
+    "omitted_limit",
+    "partial"
+  ],
+  "outcomes": [
+    "succeeded",
+    "failed",
+    "outcome_unknown",
+    "rate_limited"
+  ],
   "limits": {
     "default_retention_days": 30,
     "maximum_retention_days": 365,
@@ -48,6 +76,7 @@
   "retention_cleanup": "on_use",
   "cost_basis": "configured_rate_card_estimate",
   "coverage": "retained_opt_in_history_only",
-  "migration": "No implicit migration from accounting, app histories or older configurations.",
-  "rollback": "Disable and optionally export/delete first. Older routers ignore the separate store."
+  "migration": "Readers accept legacy v1 entries without routing evidence and v2 entries with versioned routing metadata. No rewrite of retained v1 records.",
+  "rollback": "Export/delete v2 records before downgrading. Older readers reject v2 without rewriting retained records.",
+  "entry_schema_version": 2
 }
