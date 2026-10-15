@@ -23,11 +23,11 @@ The public plugin should call shared CLI operations, not embed another installer
 
 ## Implementation order
 
-1. Destination ownership [#524](https://github.com/Xpounder-com/hormuz/pull/524)
-   is merged. Complete admission [#525](https://github.com/Xpounder-com/hormuz/pull/525)
-   and lifetime [#526](https://github.com/Xpounder-com/hormuz/pull/526). Rebase the
-   isolated retirement branch after their final fixes are published; do not
-   publish or overwrite another active checkout's unpublished work.
+1. Destination ownership [#524](https://github.com/Xpounder-com/hormuz/pull/524),
+   admission [#525](https://github.com/Xpounder-com/hormuz/pull/525) and lifetime
+   [#526](https://github.com/Xpounder-com/hormuz/pull/526) are merged at
+   `8489d9d3a467442dca4b91d196928e325dd01a18`. The retirement branch is rebased
+   onto that checkpoint and retains their final routing and lifetime fixes.
 2. Retire unrelated source, packaging, documentation and CI. Preserve shared
    local accounting, privacy controls and historical SQLite evidence readers.
 3. Qualify one real llama.cpp/runtime/model/client combination: task results,
@@ -51,4 +51,4 @@ acceptance. The executable pin is in [connection lifetime](CONNECTED_CLIENT_LIFE
 [Operational cleanup](OPERATIONS_CLEANUP.md) remains open. Cloud resources,
 bills, credentials, user data and published releases were not changed. Removed
 source and historical acceptance evidence remain recoverable from Git commit
-`2e5011f8e1064976c33c5694e74fd0bb17539c14`.
+`8489d9d3a467442dca4b91d196928e325dd01a18`.

@@ -49,14 +49,25 @@ CI runs the workflow on Python 3.11–3.14, source checks and an installed-wheel
 round trip. `CI / required` requires them all. PostgreSQL/HA, hosted deployment,
 native-app and website publishing workflows are retired with their source.
 
-The declarative main ruleset keeps `CI / required` and removes the retired
-`Native Mac client and loopback contract` and `Website checks` requirements.
-Live GitHub protections were **not changed** while #524–526 are active. An
-administrator must synchronize just these obsolete required contexts when this
-retirement lands, keeping strict checks and PR protection. The cleanup PR stays
-draft until that cutover is ready. Do not add fake passing legacy jobs.
+The declarative main ruleset requires strict `CI / required`. That aggregate
+requires all four Python workflow jobs and the installed-wheel job to pass.
+At landing, synchronize the live status-check requirement with that aggregate
+only after exact-head review and all six new checks pass. The October 15 live
+ruleset still required 16 old contexts: package installation, Codex/Claude
+compatibility, four Python versions, OCI runtime/reproducibility/supply chain,
+PostgreSQL compatibility/recovery/HA, Compose, Kubernetes, disaster recovery
+and the native Mac client. The new workflow replaces the retained package and
+Python checks and retires the other products' jobs. The checked-in old rules
+also named `Website checks`, which was absent from the live ruleset.
 
-The retirement draft starts at the published lifetime tip
-`2e5011f8e1064976c33c5694e74fd0bb17539c14`. Parent CI work may advance separately;
-rebase and resolve retained routing/lifecycle contracts before landing retirement.
-Do not publish another checkout's unpublished fixes to work around this ordering.
+Change only the required-status-check list. Preserve strict/up-to-date checks,
+PR and review-thread protection, all other rule parameters and bypass settings.
+Save the live ruleset before the cutover and verify the resulting rules after
+the update. Keep the cleanup PR draft until that transition is ready; merge
+through normal protection and verify the exact merged commit's own CI. Do not
+add fake passing legacy jobs or bypass a missing gate.
+
+The retirement branch is rebased onto final destination/admission/lifetime main
+checkpoint `8489d9d3a467442dca4b91d196928e325dd01a18`. Historical source and the
+final synthetic qualification records remain available at that Git revision.
+No other checkout's unpublished work is part of the rebase.

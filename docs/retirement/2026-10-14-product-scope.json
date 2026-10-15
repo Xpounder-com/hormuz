@@ -1,6 +1,6 @@
 {
   "decision_date": "2026-10-14",
-  "source_commit": "2e5011f8e1064976c33c5694e74fd0bb17539c14",
+  "source_commit": "8489d9d3a467442dca4b91d196928e325dd01a18",
   "spec_issue": 523,
   "approved_seam": "connect -> coding-client request through router -> result/status -> disconnect",
   "retired_product_issues": [
