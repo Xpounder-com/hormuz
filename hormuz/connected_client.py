@@ -471,6 +471,20 @@ class ConnectedClientLifetime:
                 raise ConnectedClientError("router_unavailable")
             return admission
 
+    def diagnosis_context(self, config_path: Path):
+        """Bind diagnostic configuration facts to the owned generation."""
+        with self._transaction():
+            record = self._record()
+            status = self._status(record)
+            binding = "unowned"
+            if record is not None and record["phase"] != "disconnected":
+                selected = config_path.expanduser().resolve()
+                text = _read(selected)
+                matches = (str(selected) == record["gateway_config"] and text is not None
+                           and hashlib.sha256(text.encode()).hexdigest() == record["gateway_digest"])
+                binding = "matching" if matches else "different"
+            return status, binding
+
     def local_token(self, generation):
         with self._transaction():
             record = self._record()

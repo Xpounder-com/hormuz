@@ -22,6 +22,8 @@ commands. These instructions travel with this skill across agent hosts.
    existing configuration. Use status/troubleshooting or disconnect as requested.
    Preserve the user's chosen client home, local-only policy and setup owner.
    For history, follow its separate consent/review branch in the shared workflow.
+   For diagnosis, explanations, bounded probes, recommendations, policy staging
+   or usage insights, read [capability workflows](references/capabilities.md).
 4. Report the operation's public result, the connection/routing scope, any
    prerequisite still missing and the next safe action. A plugin being loaded
    or a router being ready does not establish a completed model task.

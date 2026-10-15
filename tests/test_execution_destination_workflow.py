@@ -238,6 +238,9 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                                  (contract["schema_id"], contract["schema_version"]))
                 for field in contract["required_fields"]:
                     self.assertIn(field, state["body"])
+                for field in contract["connection_required_fields"]:
+                    self.assertIn(field, state["body"]["connection"])
+                self.assertIs(state["body"]["connection"]["shadow_router_enabled"], False)
                 for field in contract["retired_fields"]:
                     self.assertNotIn(field, state["body"])
             self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
