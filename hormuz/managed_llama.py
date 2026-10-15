@@ -43,13 +43,13 @@ class ManagedLlamaProfile:
     alias: str
     output_tokens: int
 
-    def verify(self):
+    def verify(self, *, runtime_root=None):
         try:
-            self._verify_files()
+            self._verify_files(runtime_root=runtime_root)
         except (OSError, ValueError, EOFError, tarfile.TarError, zlib.error):
             raise ManagedLlamaError("runtime_invalid") from None
 
-    def _verify_files(self):
+    def _verify_files(self, *, runtime_root=None):
         deadline = time.monotonic() + 30
         if _digest(self.runtime_archive, 256 * 1024**2, deadline) != self.runtime_sha256:
             raise ManagedLlamaError("runtime_invalid")
@@ -104,6 +104,22 @@ class ManagedLlamaProfile:
                         raise ManagedLlamaError("runtime_invalid")
                 else:
                     raise ManagedLlamaError("runtime_invalid")
+            if runtime_root is not None:
+                runtime_root = Path(runtime_root)
+                expected_paths = set()
+                for member, _ in members:
+                    name = PurePosixPath(member.name)
+                    if name.is_absolute() or ".." in name.parts or len(name.parts) > 16:
+                        raise ManagedLlamaError("runtime_invalid")
+                    expected_paths.update(part for part in (name, *name.parents) if part.parts)
+                observed_paths = set()
+                for parent, directories, files in os.walk(runtime_root, followlinks=False):
+                    for name in (*directories, *files):
+                        observed_paths.add(PurePosixPath((Path(parent) / name).relative_to(runtime_root).as_posix()))
+                        if len(observed_paths) > 256:
+                            raise ManagedLlamaError("runtime_invalid")
+                if observed_paths != expected_paths:
+                    raise ManagedLlamaError("runtime_invalid")
         if not os.access(self.executable, os.X_OK):
             raise ManagedLlamaError("runtime_invalid")
 
@@ -147,7 +163,7 @@ def extract_runtime(archive_path, destination):
                 fileobj=_ArchiveBudget(expanded, deadline), mode="r|") as archive:
             for member in archive:
                 name = PurePosixPath(member.name)
-                if (name.is_absolute() or ".." in name.parts or not name.parts
+                if (name.is_absolute() or ".." in name.parts or not name.parts or len(name.parts) > 16
                         or len(member.name) > 4096 or any(ord(c) < 32 for c in member.name)
                         or name in seen or len(seen) >= 256 or member.size < 0
                         or time.monotonic() > deadline):

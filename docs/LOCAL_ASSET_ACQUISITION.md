@@ -40,7 +40,7 @@ hormuz client acquire codex --directory /absolute/private/hormuz-assets --offlin
 ```
 
 Completed installations are reverified on every reuse, including archive/model
-digests, archived runtime files and internal symbolic links. `--download` on a
+digests, the complete runtime inventory and internal symbolic links. `--download` on a
 completed, unchanged generation also reuses it without any network request.
 Missing offline assets fail explicitly. Damaged assets, unexpected files, unsafe
 links or changed metadata are preserved and block reuse; select a new directory
@@ -77,13 +77,16 @@ deterministic tests; ordinary sources and redirects use HTTPS.
 
 ## Bounds, recovery and ownership
 
-Only one artifact request is active at a time. The two artifacts download
-sequentially, with a shared client pool, at most four redirects per artifact,
-declared host restrictions, ten-second connection timeouts, bounded read waits
-and a per-artifact absolute deadline. The default deadline is 1,800 seconds;
-`--timeout-seconds` accepts 1–3,600. A finite watchdog interrupts owned transport
-even while response headers or data are incomplete. Connections and the watchdog
-are closed when the operation exits. No ambient bearer credentials, cookies or
+Only one artifact request and one owned download worker are active at a time.
+The two artifacts download sequentially; each worker reuses its connections,
+allows at most four redirects and enforces declared host restrictions,
+ten-second connection timeouts and bounded read waits. The parent enforces a
+per-artifact absolute deadline that includes DNS, address attempts, TLS, headers
+and data. The default is 1,800 seconds; `--timeout-seconds` accepts 1–3,600.
+On timeout or cancellation, the parent terminates its owned worker, allows
+250 ms for graceful cleanup, then kills and reaps it within another bounded
+250 ms. Workers close their connections and flush retained progress on graceful
+exit. Isolated Python receives an allowlisted environment. No ambient bearer credentials, cookies or
 proxy authentication are imported or forwarded. Redirect query strings and
 server error bodies never enter receipts.
 
@@ -103,7 +106,7 @@ claiming it is already verified.
 Archive extraction allows at most 256 entries and 1 GiB of expanded data within
 30 seconds, including a separate decompression bound. It rejects traversal,
 duplicate entries, hard links, special files, escaping or cyclic symlinks and
-unsafe path layouts. Links are created after file writes. The existing managed
+unsafe path layouts, including paths deeper than sixteen components. Links are created after file writes. The existing managed
 runtime verifier checks the result before a ready receipt is atomically published.
 No downloaded executable runs during acquisition.
 

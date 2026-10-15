@@ -137,7 +137,7 @@ def _verify(catalog, generation):
         with os.fdopen(os.open(generation / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:
             if _file_info(stream, catalog[role]["size_bytes"]).st_size != catalog[role]["size_bytes"]:
                 raise LocalAcquisitionError("installation_changed")
-    _managed(catalog, generation, executable[0]).verify()
+    _managed(catalog, generation, executable[0]).verify(runtime_root=runtime)
     if _safe_file(generation / "qualification.json", 65536) != _bytes(catalog["profile"]):
         raise LocalAcquisitionError("installation_changed")
     return ["--qualification", str(generation / "qualification.json"),

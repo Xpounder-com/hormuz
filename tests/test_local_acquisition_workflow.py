@@ -333,3 +333,29 @@ class LocalAcquisitionWorkflowTests(unittest.TestCase):
             self.assertEqual(sentinel.read_text(), "keep unrelated files")
             self.assertEqual(observed, [])
             self.assertFalse(self.client.path.exists())
+
+    def test_unlisted_runtime_files_and_escaping_links_block_offline_reuse(self):
+        value, payloads = self.prepare()
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            ready = json.loads(self.acquire("--download").stdout)
+            runtime = Path(ready["setup_arguments"][5]).parent
+            extra = runtime / "user-library.dylib"
+            external = self.root / "external-library.dylib"
+            external.write_bytes(b"preserve external library")
+            for linked in (False, True):
+                with self.subTest(linked=linked):
+                    if linked:
+                        extra.symlink_to(external)
+                    else:
+                        extra.write_bytes(b"preserve added library")
+                    try:
+                        failed = self.acquire("--offline", check=False)
+                        self.assertEqual(failed.returncode, 2, failed.stdout)
+                        self.assertEqual(json.loads(failed.stderr)["error"]["code"], "runtime_invalid")
+                        self.assertTrue(extra.exists())
+                        self.assertEqual(external.read_bytes(), b"preserve external library")
+                        self.assertEqual([path for path, _ in observed], ["/runtime", "/model"])
+                    finally:
+                        extra.unlink()
+            self.assertEqual(self.client.client("inspect")["model"], "original-model")

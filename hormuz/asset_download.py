@@ -1,8 +1,12 @@
 """Sequential pinned downloads; no ambient credentials, proxies or automatic retries."""
 import http.client
+import json
+import os
+from pathlib import Path
 import re
-import socket
-import threading
+import signal
+import subprocess
+import sys
 import time
 from urllib.parse import urljoin, urlsplit
 
@@ -15,8 +19,6 @@ class AssetDownloader:
     def __init__(self, timeout_seconds):
         self.timeout_seconds = timeout_seconds
         self.connections = {}
-        self.active_connection = None
-        self.active_socket = None
 
     def close(self):
         for connection in self.connections.values():
@@ -24,32 +26,32 @@ class AssetDownloader:
         self.connections.clear()
 
     def fetch(self, artifact, stream):
-        expired = threading.Event()
-
-        def expire():
-            expired.set()
-            owned = self.active_socket
-            if owned is None and self.active_connection is not None:
-                owned = self.active_connection.sock
-            if owned is not None:
-                try:
-                    owned.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-
-        watchdog = threading.Timer(self.timeout_seconds, expire)
-        watchdog.daemon = True
-        watchdog.start()
+        # A single owned process makes DNS, address attempts and TLS cancellable.
+        # Isolated Python and an allowlisted environment exclude ambient auth.
+        environment = {key: value for key in ("PATH", "SYSTEMROOT", "LANG", "LC_ALL")
+                       if (value := os.environ.get(key)) is not None}
+        stream.flush()
+        process = subprocess.Popen([sys.executable, "-I", str(Path(__file__).resolve()),
+                                    str(stream.fileno()), str(self.timeout_seconds)],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env=environment, pass_fds=(stream.fileno(),))
         try:
-            self._fetch(artifact, stream)
-        except AssetDownloadError:
-            if expired.is_set():
+            try:
+                process.communicate(_request_bytes(artifact), timeout=self.timeout_seconds)
+            except subprocess.TimeoutExpired:
                 raise AssetDownloadError("download_unavailable") from None
-            raise
+            if process.returncode:
+                raise AssetDownloadError("download_invalid" if process.returncode == 2 else "download_unavailable")
         finally:
-            watchdog.cancel()
-            watchdog.join(timeout=1)
-            self.active_connection = self.active_socket = None
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.communicate(timeout=0.25)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate(timeout=0.25)
+            if process.stdin is not None:
+                process.stdin.close()
 
     def _fetch(self, artifact, stream):
         deadline = time.monotonic() + self.timeout_seconds
@@ -71,7 +73,6 @@ class AssetDownloader:
                     connection = connection_type(parsed.hostname, parsed.port, timeout=min(10, self._remaining(deadline)))
                     self.connections[key] = connection
                 connection.timeout = min(10, self._remaining(deadline))
-                self.active_connection, self.active_socket = connection, None
                 if connection.sock is not None:
                     connection.sock.settimeout(min(15, self._remaining(deadline)))
                 headers = {"Accept-Encoding": "identity", "User-Agent": "Hormuz-local-acquisition/1"}
@@ -81,7 +82,6 @@ class AssetDownloader:
                 if parsed.query:
                     target += "?" + parsed.query
                 connection.request("GET", target, headers=headers)
-                self.active_socket = connection.sock
                 response = connection.getresponse()
                 try:
                     if response.status in {301, 302, 303, 307, 308}:
@@ -136,3 +136,34 @@ class AssetDownloader:
         if remaining <= 0:
             raise AssetDownloadError("download_unavailable")
         return remaining
+
+
+def _request_bytes(artifact):
+    return json.dumps(artifact, separators=(",", ":")).encode()
+
+
+def _worker():
+    def interrupt(_signum, _frame):
+        raise AssetDownloadError("download_unavailable")
+
+    signal.signal(signal.SIGTERM, interrupt)
+    downloader = AssetDownloader(int(sys.argv[2]))
+    try:
+        artifact = json.loads(sys.stdin.buffer.read(65537))
+        with os.fdopen(int(sys.argv[1]), "r+b") as stream:
+            try:
+                downloader._fetch(artifact, stream)
+            finally:
+                stream.flush()
+                os.fsync(stream.fileno())
+        return 0
+    except AssetDownloadError as error:
+        return 2 if str(error) == "download_invalid" else 3
+    except (OSError, ValueError, KeyError, TypeError):
+        return 3
+    finally:
+        downloader.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(_worker())
