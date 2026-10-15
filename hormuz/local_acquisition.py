@@ -201,8 +201,13 @@ def acquire_local(args):
     catalog = _catalog(args.catalog)
     if (catalog["profile"]["system"], catalog["profile"]["machine"]) != (platform.system(), platform.machine()):
         raise LocalAcquisitionError("platform_unsupported")
-    directory = Path(args.directory).expanduser().absolute()
-    directory = directory.parent.resolve(strict=True) / directory.name
+    if not 1 <= len(args.directory) <= 4096 or any(ord(c) < 32 or ord(c) == 127 for c in args.directory):
+        raise LocalAcquisitionError("directory_unsafe")
+    try:
+        directory = Path(args.directory).expanduser().absolute()
+        directory = directory.parent.resolve(strict=True) / directory.name
+    except (OSError, RuntimeError, ValueError):
+        raise LocalAcquisitionError("directory_unsafe") from None
     digest = hashlib.sha256(_bytes(catalog)).hexdigest()
     generation = directory / digest
     if directory.exists() or directory.is_symlink():

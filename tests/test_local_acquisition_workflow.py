@@ -345,6 +345,20 @@ class LocalAcquisitionWorkflowTests(unittest.TestCase):
             self.assertEqual(observed, [])
             self.assertFalse(self.client.path.exists())
 
+    def test_directory_parent_loop_fails_with_a_fixed_error_before_network_or_settings_changes(self):
+        value, payloads = self.prepare()
+        loop = self.root / "private-parent-loop"
+        loop.symlink_to(loop.name)
+        self.directory = loop / "assets"
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            failed = self.acquire("--download", check=False)
+            self.assertEqual(failed.returncode, 2)
+            self.assertEqual(json.loads(failed.stderr)["error"]["code"], "directory_unsafe")
+            self.assertEqual(observed, [])
+            self.assertTrue(loop.is_symlink())
+            self.assertFalse(self.client.path.exists())
+
     def test_unlisted_runtime_files_and_escaping_links_block_offline_reuse(self):
         value, payloads = self.prepare()
         with artifacts(payloads) as (origin, observed, _):
