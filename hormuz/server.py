@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from contextlib import ExitStack
 import hmac
 import http.client
 import ipaddress
@@ -38,6 +39,8 @@ from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from . import work_gateway
 from .work_http import handle_work_request
 from .work_runtime import WorkRuntimeError
+from .route_admission import RouteAdmission, RouteAdmissionError
+from .local_transport import open_local_upstream as _owned_local_upstream
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
@@ -174,15 +177,14 @@ class _NoUpstreamRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _UPSTREAM_OPENER = urllib.request.build_opener(_NoUpstreamRedirect())
-_LOCAL_UPSTREAM_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoUpstreamRedirect())
 
 
 def _open_upstream(request: urllib.request.Request, *, timeout: int):
     return _UPSTREAM_OPENER.open(request, timeout=timeout)
 
 
-def _open_local_upstream(request: urllib.request.Request, *, timeout: int):
-    return _LOCAL_UPSTREAM_OPENER.open(request, timeout=timeout)
+def _open_local_upstream(request: urllib.request.Request, *, timeout: int, absolute_timeout=None):
+    return _owned_local_upstream(request, timeout=timeout, absolute_timeout=absolute_timeout)
 
 
 class _ProviderRehearsalResponse:
@@ -511,6 +513,7 @@ class GatewayServer(ThreadingHTTPServer):
                 routes=config.model_routes,
             )
             work_gateway.initialize(self, environ=environ)
+            self.route_admission = RouteAdmission(config, self.destinations)
             protected_values = [
                 ("hormuz_identity_token", identity.token)
                 for identity in config.identities_by_token.values()
@@ -708,6 +711,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         self._attribution_result = None
         path = urlsplit(self.path).path
+        if path == "/v1/router/state":
+            identity = self._authenticate()
+            if identity is not None:
+                self._send_contract_json(HTTPStatus.OK, "hormuz.route-admission", self.server.route_admission.status(self, identity))
+            return
         if path == "/v1/work/billing/webhook":
             self._send_json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": {"code": "hormuz_ai_work_method_not_allowed"}})
             return
@@ -950,6 +958,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
         except AdmissionError as error:
             self._reject_attribution(identity, default_client, protocol, error)
+        except RouteAdmissionError as error:
+            self._send_protocol_error(protocol, "Route admission requires attention: " + error.reason,
+                error.status, code="hormuz_route_" + error.reason)
         except WorkRuntimeError as error:
             self.close_connection = True
             if getattr(self, "_response_started", False):
@@ -1156,9 +1167,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         # Route only the sanitized request, after the same governance checks
         # used by the configured baseline. Selection cannot widen its caps.
+        decision = self.server.route_admission.select(self, identity, decision, redaction.value,
+            client=client, protocol=protocol, output_field=output_field)
         decision = work_gateway.prepare(self, identity, decision, redaction.value,
             client=client, protocol=protocol, output=requested_output,
             output_field=output_field, account_usage=account_usage)
+        self.server.route_admission.receipt(self, decision.route)
         sanitized = dict(redaction.value, model=decision.route.upstream_model)
         if decision.max_output_tokens is not None:
             previous = sanitized.get(output_field)
@@ -1224,6 +1238,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             ),
             destinations=egress.destinations,
         )
+        self.server.route_admission.final_check(self, identity, decision, redaction.value,
+            client=client, protocol=protocol, output_field=output_field)
         if account_usage and work_gateway.cache_hit(self, identity, decision, redaction.value):
             return
         attempt: RequestAttempt | None = None
@@ -1255,6 +1271,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
         failover_decision = self.server.policy_engine.operational_failover(decision)
+        admitted_candidates = getattr(self, "_route_admission_candidates", None)
+        if failover_decision is not None and admitted_candidates is not None and failover_decision.resolved_alias not in admitted_candidates:
+            failover_decision = None
         if (
             not account_usage
             or self._request_precludes_failover(protocol, redaction.value)
@@ -1280,7 +1299,35 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             failover_applied_reason=None,
         )
 
-    def _forward(
+    def _forward(self, **options) -> None:
+        entered = False
+        previous_resources = getattr(self, "_provider_response_resources", None)
+        previous_headers_pending = getattr(self, "_provider_headers_pending", False)
+        self._provider_headers_pending = False
+        try:
+            with self.server.route_admission.lease(self, options["decision"].route):
+                entered = True
+                with ExitStack() as resources:
+                    self._provider_response_resources = resources
+                    self._forward_admitted(**options)
+        except RouteAdmissionError:
+            if not entered and options["attempt"] is not None:
+                self.server.store.finalize_request_attempt(attempt=options["attempt"],
+                    organization_id=options["identity"].organization_id, status="failed", cost_microusd=0)
+                work_gateway.settle(self, options["identity"], options["attempt"], cost=0, status="failed")
+            raise
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            if self._provider_headers_pending and options["attempt"] is not None:
+                self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
+                    attempt=options["attempt"], organization_id=options["identity"].organization_id,
+                    reason_code="provider_stream_interrupted", provider_metrics=self._pending_header_metrics)
+                work_gateway.settle(self, options["identity"], options["attempt"])
+            self.close_connection = True
+        finally:
+            self._provider_response_resources = previous_resources
+            self._provider_headers_pending = previous_headers_pending
+
+    def _forward_admitted(
         self,
         *,
         identity: Identity,
@@ -1314,6 +1361,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         started_ns = time.monotonic_ns()
         self._work_provider_ms = None
         try:
+            self.server.route_admission.final_check(self, identity, decision, request_value,
+                client=client, protocol=protocol, output_field=output_field)
+        except RouteAdmissionError:
+            if attempt is not None:
+                self.server.store.finalize_request_attempt(attempt=attempt,
+                    organization_id=identity.organization_id, status="failed", cost_microusd=0)
+                work_gateway.settle(self, identity, attempt, cost=0, status="failed", started_ns=started_ns)
+            raise
+        try:
             if (
                 getattr(self, "_failover_rehearsal_requested", False)
                 and failover_decision is not None
@@ -1322,7 +1378,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 response = _ProviderRehearsalResponse()
             else:
                 open_upstream = _open_local_upstream if destination.locality == "local" else _open_upstream
-                response = open_upstream(request, timeout=self.server.config.upstream_timeout_seconds)
+                timeout = self.server.route_admission.remaining_timeout(self)
+                response = open_upstream(request, timeout=timeout,
+                    **({"absolute_timeout": timeout} if getattr(self, "_local_route_lease", False) else {}))
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
@@ -1349,11 +1407,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        response_closed = False
+        def close_response():
+            nonlocal response_closed
+            if not response_closed:
+                response_closed = True
+                response.close()
+        self._provider_response_resources.callback(close_response)
         response_headers_us = self._elapsed_us(started_ns)
         self._work_provider_ms = (time.monotonic_ns() - started_ns) / 1_000_000
         status = getattr(response, "status", response.getcode())
         if 300 <= status < 400:
-            response.close()
+            close_response()
             if account_usage and attempt is not None:
                 # A redirect can follow an accepted POST. Its status alone
                 # cannot establish whether provider work was billable, so
@@ -1388,7 +1453,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             and account_usage
             and attempt is not None
         ):
-            response.close()
+            close_response()
             request_status = "rate_limited" if status == HTTPStatus.TOO_MANY_REQUESTS else "failed"
             self.server.provider_reliability_store.finalize_request_attempt(
                 attempt=attempt,
@@ -1497,15 +1562,21 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         cache_capture = not is_event_stream and bool(getattr(self, "_work_id", None)) and self.server.config.ai_work.cache_enabled
 
         self._response_started = True
+        self._provider_headers_pending = True
+        self._pending_header_metrics = self._provider_metrics(started_ns=started_ns,
+            provider_status=status, response_headers_us=response_headers_us, first_body_byte_us=None,
+            provider_bytes_read=0, downstream_bytes_sent=0)
+        if getattr(self, "_local_route_lease", False):
+            self.connection.settimeout(self.server.route_admission.remaining_timeout(self))
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
-        self.send_header("X-Hormuz-Contract", selected_upstream.destinations.contract_header(route))
+        self.send_header("X-Hormuz-Contract", self.server.route_admission.contract_header(self, route))
         self.send_header("X-Hormuz-Policy-Decision", policy_action)
         self.send_header("X-Hormuz-Requested-Model", decision.requested_model)
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
-        for name, value in selected_upstream.destinations.response_headers(route).items():
+        for name, value in self.server.route_admission.response_headers(self, route).items():
             self.send_header(name, value)
         work_gateway.response_headers(self)
         self.send_header(
@@ -1528,6 +1599,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             ):
                 self.send_header(name, value)
         self.end_headers()
+        self._provider_headers_pending = False
         self.close_connection = True
 
         downstream_ok = True
@@ -1545,6 +1617,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             read_chunk = response.read
         try:
             while True:
+                if getattr(self, "_local_route_lease", False):
+                    response.set_read_timeout(self.server.route_admission.remaining_timeout(self))
                 read_started_ns = time.monotonic_ns()
                 try:
                     chunk = read_chunk(_RELAY_CHUNK_BYTES)
@@ -1572,6 +1646,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     else:
                         cache_capture = False
                         cache_body.clear()
+                if getattr(self, "_local_route_lease", False):
+                    self.connection.settimeout(self.server.route_admission.remaining_timeout(self))
                 self._write_downstream_chunk(chunk)
                 downstream_bytes_sent += len(chunk)
         except (BrokenPipeError, ConnectionResetError):
@@ -1605,7 +1681,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 type(error).__name__,
             )
         finally:
-            response.close()
+            close_response()
 
         provider_metrics = self._provider_metrics(
             started_ns=started_ns,

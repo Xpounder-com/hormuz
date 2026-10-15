@@ -51,6 +51,7 @@ from ._contract_schemas.health import (
     _validate_health,
     _validate_identity,
     _validate_readiness,
+    _validate_route_admission,
 )
 from ._contract_schemas.manifest import (
     custody_evidence_schema_entries as _custody_evidence_schema_entries,
@@ -477,6 +478,13 @@ def contract_manifest() -> dict[str, object]:
                  "X-Hormuz-Routed-Model", "X-Hormuz-Redactions", "X-Hormuz-Error-Code",
                  "X-Hormuz-Destination", "X-Hormuz-Destination-Locality", "X-Hormuz-Destination-Generation"],
             ),
+            _manifest_schema(RELAY_METADATA_SCHEMA_ID, 3, "http-headers", "hormuz",
+                ["X-Hormuz-Contract", "X-Hormuz-Policy-Decision", "X-Hormuz-Requested-Model",
+                 "X-Hormuz-Routed-Model", "X-Hormuz-Redactions", "X-Hormuz-Error-Code",
+                 "X-Hormuz-Destination", "X-Hormuz-Destination-Locality", "X-Hormuz-Destination-Generation",
+                 "X-Hormuz-Routing-Mode", "X-Hormuz-Routing-Reason", "X-Hormuz-Routing-Qualification"]),
+            _manifest_schema(ROUTE_ADMISSION_SCHEMA_ID, ROUTE_ADMISSION_SCHEMA_VERSION, "response", "hormuz",
+                ["schema_id", "schema_version", "mode", "task_classifier", "local_capacity", "routes"]),
         ],
         "policy_action_semantics": {
             "allowed": "The requested route was allowed without a route substitution or output cap.",
@@ -513,6 +521,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
     schema_id = _value_string(value, "schema_id")
     schema_version = _value_integer(value, "schema_version")
     validator = {
+        (ROUTE_ADMISSION_SCHEMA_ID, ROUTE_ADMISSION_SCHEMA_VERSION): _validate_route_admission,
         (HEALTH_SCHEMA_ID, 1): _validate_health,
         (READINESS_SCHEMA_ID, READINESS_SCHEMA_VERSION): _validate_readiness,
         (IDENTITY_SCHEMA_ID, 1): _validate_identity,

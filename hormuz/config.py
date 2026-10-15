@@ -18,6 +18,7 @@ from .portfolio_config import PortfolioConfig
 from .outcome_connector_config import OutcomeConnectorConfig
 from .attribution_config import AttributionConfig
 from .finance_account_binding import FinanceAccountBindings, FinanceIdentity, UnavailableFinance
+from .route_admission import RouteAdmissionConfig
 
 
 class ConfigError(ValueError):
@@ -496,6 +497,7 @@ class GatewayConfig:
     attribution_control: AttributionConfig | None = None
     finance_account_bindings: FinanceAccountBindings | None = None
     ai_work: AIWorkConfig = field(default_factory=AIWorkConfig)
+    route_admission: "RouteAdmissionConfig" = field(default_factory=lambda: RouteAdmissionConfig())
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":

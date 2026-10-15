@@ -16,6 +16,12 @@ state/connect responses use version 2; legacy configurations retain version 1.
 The destination guide defines their fields, opaque generation, versioned
 fingerprint payload, legacy-ledger migration and rollback boundary.
 
+[Local route admission](LOCAL_ROUTE_ADMISSION.md) adds opt-in relay metadata
+version 3 and authenticated `hormuz.route-admission` status version 1. Versions
+1/2 retain their fields. Qualification is operator-declared; readiness and local
+capacity are process-local observations. The guide defines errors, helper and
+continuation enforcement, migration and explicit privacy-ceiling rollback.
+
 ## Accepted portfolio additive contract
 
 The portfolio-intelligence surface was originally frozen for the unreleased

@@ -8,6 +8,27 @@ import re
 REQUEST_KINDS = frozenset({"interactive", "retry", "automatic_retry", "poll", "polling", "scheduled", "history", "continuation", "legitimate_iteration"})
 
 
+def contains_provider_state(value, depth=0):
+    if depth == 0 and isinstance(value, dict):
+        # Tool/format schemas and caller tags describe a fresh request. A
+        # schema property named type or role is not provider-owned history.
+        value = {key: item for key, item in value.items()
+                 if key not in {"tools", "tool_choice", "text", "response_format", "metadata"}}
+    if depth > 40:
+        return True
+    if isinstance(value, dict):
+        if any(value.get(key) for key in ("previous_response_id", "conversation", "session_id")):
+            return True
+        if any(key in value and type(value[key]) is not str for key in ("role", "type")):
+            return True
+        if value.get("role") in {"assistant", "tool"} or value.get("type") in {
+            "function_call", "function_call_output", "tool_use", "tool_result", "computer_call", "computer_call_output"
+        }:
+            return True
+        return any(contains_provider_state(item, depth + 1) for item in value.values())
+    return isinstance(value, list) and any(contains_provider_state(item, depth + 1) for item in value)
+
+
 def request_characteristics(value):
     """Conservative, deterministic hints from the latest sanitized user input.
 
