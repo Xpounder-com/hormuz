@@ -421,6 +421,31 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             finally:
                 self.command("disconnect", check=False)
 
+    def test_cyclic_runtime_link_is_denied_without_private_traceback(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            value, _, engine = self.managed_configuration(external)
+            link = engine / "libfixture.dylib"
+            link.unlink()
+            link.symlink_to("libfixture.dylib")
+            archive = Path(value["managed_llama"]["runtime_archive"])
+            with tarfile.open(archive, "w:gz") as bundle:
+                for path in engine.iterdir():
+                    bundle.add(path, arcname=path.name)
+            value["managed_llama"]["runtime_sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+            self.path.write_text(json.dumps(value))
+            original_settings = (self.home / "config.toml").read_text()
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual(failure.returncode, 2, failure.stderr)
+                self.assertEqual(json.loads(failure.stderr)["error"]["code"], "connected_client_runtime_invalid")
+                self.assertEqual((self.home / "config.toml").read_text(), original_settings)
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertEqual(json.loads(self.command("status").stdout)["phase"], "disconnected")
+                self.assertFalse((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
     @contextmanager
     def configured(self, *, hold_first=None):
         with provider("LOCAL_DESTINATION", hold_first=hold_first) as (local, local_requests), \

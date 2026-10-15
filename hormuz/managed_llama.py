@@ -87,7 +87,12 @@ class ManagedLlamaProfile:
                     continue
                 relative = name.relative_to(prefix)
                 target = root.joinpath(*relative.parts)
-                if not target.resolve().is_relative_to(root.resolve()):
+                try:
+                    resolved_target, resolved_root = target.resolve(strict=True), root.resolve(strict=True)
+                except RuntimeError:
+                    # Python 3.11/3.12 report a symlink cycle as RuntimeError.
+                    raise ManagedLlamaError("runtime_invalid") from None
+                if not resolved_target.is_relative_to(resolved_root):
                     raise ManagedLlamaError("runtime_invalid")
                 if member.issym():
                     if not target.is_symlink() or os.readlink(target) != member.linkname:
