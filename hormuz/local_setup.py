@@ -21,7 +21,7 @@ from .managed_llama import ManagedLlamaError, ManagedLlamaProfile
 from .local_credentials import LocalCredentialError, read_local_credential
 
 
-DEFAULT_PROFILE = "local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json"
+DEFAULT_PROFILE = "local-setup-codex-0147-llama-b11617-qwen3-4b-v2.json"
 
 
 def _profile(path):
@@ -156,6 +156,8 @@ def _configuration(path, profile, managed, credential_env, listen_port, *, crede
         "ai_work": {"enabled": True, "database": str(state / "work.sqlite3"),
                     "tool_capable_aliases": [profile["model"]] if "tools" in profile["capabilities"] else []},
     }
+    if profile["schema_version"] == 2:
+        value["route_admission"]["local_routes"][profile["model"]]["coding_evidence"] = profile["coding_evidence"]
     if shadow_router:
         value["shadow_router"] = {"schema_version": 1, "mode": "shadow", "model": profile["model"],
                                   "local_model": profile["model"]}

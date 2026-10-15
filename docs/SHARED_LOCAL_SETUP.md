@@ -50,12 +50,16 @@ matching staging-link cleanup described below.
 
 ## Qualification and files
 
-The bundled [version-1 profile](../hormuz/local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json)
+The bundled [version-2 profile](../hormuz/local-setup-codex-0147-llama-b11617-qwen3-4b-v2.json)
 contains the exact digests, client/platform row and bounded request envelope
 from the [Codex 0.147.0 / llama.cpp b11617 / Qwen3-4B macOS arm64 experiment](qualifications/codex-0147-llama-b11617-qwen3-4b.md).
 It retains that record's limitations: supplied-script execution passed;
 autonomous repair and strict final formatting failed. Matching artifact hashes
 does not establish general coding quality or another client/platform row.
+Its nullable `coding_evidence` is empty, so automatic coding remains blocked even
+when the engine is healthy. [Coding qualification](LOCAL_CODING_QUALIFICATION.md)
+defines the outcome gate, status, explicit trust and migration rules. Version-1
+profiles remain readable with unknown coding readiness.
 
 The existing [managed lifetime verifier](MANAGED_LLAMA_LIFETIME.md) checks the
 archive and GGUF digests and every archived runtime file and symbolic link,
@@ -72,7 +76,7 @@ in an operator-selected document, equivalent to configuring a local
 qualification manually. It is not a new certificate or a way to infer task
 quality from filenames. Use existing evidence and independently trusted
 digests; agents must preserve the declared capabilities and limits. The
-[synthetic fixture](../tests/fixtures/local-setup-profile-v1.json) documents
+[version-2 synthetic fixture](../tests/fixtures/local-setup-profile-v2.json) documents
 the exact input shape; it does not identify a real runtime or model.
 
 ## Creation, reuse and recovery

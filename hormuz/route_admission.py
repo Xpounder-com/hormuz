@@ -9,6 +9,7 @@ import urllib.request
 from types import MappingProxyType
 
 from .work_learning import contains_provider_state, request_characteristics
+from .coding_qualification import assess_coding_evidence, request_profile_digest
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,12 @@ class LocalQualification:
     max_request_bytes: int
     max_output_tokens: int
     task_types: tuple[str, ...]
+
+    coding_evidence: str | None = None
+
+    def automatic_task_types(self, coding):
+        return tuple(kind for kind in self.task_types if kind not in {"code_change", "code_review"}
+                     or kind == "code_change" and coding.readiness == "qualified")
 
 
 @dataclass(frozen=True)
@@ -50,7 +57,7 @@ def build_route_admission(raw, routes, upstreams):
         route = routes.get(alias)
         if route is None or upstreams[route.destination_id].locality != "local":
             raise ConfigError("route_admission must reference local model routes")
-        if type(record) is not dict or set(record) != fields:
+        if type(record) is not dict or set(record) - {"coding_evidence"} != fields:
             raise ConfigError("local qualification fields are invalid")
         for key in ("qualification_id", "model_revision"):
             text = record[key]
@@ -65,8 +72,18 @@ def build_route_admission(raw, routes, upstreams):
         kinds = record["task_types"]
         if type(kinds) is not list or not kinds or any(type(k) is not str or k not in tasks for k in kinds) or len(kinds) != len(set(kinds)):
             raise ConfigError("local qualification task types are invalid")
+        evidence = record.get("coding_evidence")
+        if evidence is not None:
+            from .contracts import ContractValidationError, validate_contract
+            try:
+                validate_contract(evidence)
+                if evidence["schema_id"] != "hormuz.local-coding-evidence":
+                    raise ValueError()
+            except (ContractValidationError, ValueError, KeyError, TypeError, RecursionError):
+                raise ConfigError("local coding evidence is invalid") from None
         result.append((alias, LocalQualification(record["qualification_id"], record["model_revision"],
-            record["max_request_bytes"], record["max_output_tokens"], tuple(kinds))))
+            record["max_request_bytes"], record["max_output_tokens"], tuple(kinds),
+            None if evidence is None else json.dumps(evidence, sort_keys=True, separators=(",", ":")))))
     return RouteAdmissionConfig(mode, tuple(result))
 
 
@@ -156,6 +173,8 @@ class RouteAdmission:
         self.config, self.destinations = config, destinations
         self.settings = config.route_admission
         self.qualifications = MappingProxyType(dict(self.settings.local_routes))
+        self.coding = MappingProxyType({alias: assess_coding_evidence(qualification.coding_evidence, config,
+            config.model_routes[alias], qualification) for alias, qualification in self.qualifications.items()})
         self._health_lock = threading.Lock()
         self._health = {}
         self._local_capacity = threading.BoundedSemaphore(1)
@@ -222,6 +241,12 @@ class RouteAdmission:
             self._health[destination.generation] = (time.monotonic(), ready)
             return ready
 
+    def _coding_request_matches(self, handler, alias, value, client):
+        coding = self.coding[alias]
+        return (coding.readiness == "qualified" and client == "codex"
+                and handler.path == "/v1/responses"
+                and request_profile_digest(value) == coding.request_profile_sha256)
+
     def select(self, handler, identity, decision, value, *, client, protocol, output_field):
         handler._route_admission_candidates = None
         handler._route_admission_selection_candidates = None
@@ -263,7 +288,10 @@ class RouteAdmission:
                 continue
             if not self._within_envelope(handler, route, qualification, value, output_field):
                 continue
-            if not continuation and hint not in qualification.task_types:
+            automatic_tasks = qualification.automatic_task_types(self.coding[alias])
+            if not automatic_tasks or not continuation and hint not in automatic_tasks:
+                continue
+            if "code_change" in automatic_tasks and not self._coding_request_matches(handler, alias, value, client):
                 continue
             candidate = engine.evaluate(identity=identity, client=client, protocol=protocol,
                 requested_model=alias, requested_output_tokens=limit, snapshot=decision.snapshot)
@@ -320,7 +348,10 @@ class RouteAdmission:
             raise RouteAdmissionError("policy_changed")
         if destination.locality == "local":
             qualification = self.qualifications.get(decision.resolved_alias)
-            if not self._within_envelope(handler, decision.route, qualification, value, output_field) or not self._ready(decision.route):
+            if (not self._within_envelope(handler, decision.route, qualification, value, output_field)
+                    or "code_change" in qualification.automatic_task_types(self.coding[decision.resolved_alias])
+                    and not self._coding_request_matches(handler, decision.resolved_alias, value, client)
+                    or not self._ready(decision.route)):
                 raise RouteAdmissionError("local_route_unavailable", 503)
         self.receipt(handler, decision.route)
 
@@ -339,12 +370,12 @@ class RouteAdmission:
                         "X-Hormuz-Destination-Generation": destination.generation})
         return headers
 
-    def status(self, handler, identity):
+    def status(self, identity, policy_engine):
         routes = []
         for alias, qualification in self.qualifications.items():
             route = self.config.model_routes[alias]
             client = "codex" if route.protocol == "openai" else "claude-code"
-            decision = handler.server.policy_engine.evaluate(identity=identity, client=client, protocol=route.protocol,
+            decision = policy_engine.evaluate(identity=identity, client=client, protocol=route.protocol,
                 requested_model=alias, requested_output_tokens=None)
             if not decision.allowed or decision.resolved_alias != alias:
                 continue
@@ -352,12 +383,15 @@ class RouteAdmission:
             with self._health_lock:
                 health = self._health.get(destination.generation)
             readiness = "unchecked" if health is None else "stale" if time.monotonic() - health[0] >= 5 else "ready" if health[1] else "unavailable"
+            coding = self.coding[alias]
             routes.append({"model": alias, "destination": destination.name, "generation": destination.generation,
                 "model_revision": qualification.model_revision, "qualification_id": qualification.qualification_id,
                 "evidence_basis": "operator_declared", "capabilities": list(route.capabilities),
                 "max_request_bytes": qualification.max_request_bytes, "max_output_tokens": qualification.max_output_tokens,
-                "task_types": list(qualification.task_types), "readiness": readiness})
+                "task_types": list(qualification.task_types), "readiness": readiness,
+                "coding_readiness": coding.readiness, "coding_evidence": coding.describe(),
+                "automatic_task_types": list(qualification.automatic_task_types(coding))})
         with self._capacity_lock:
             capacity = {"limit": 1, "active": self._active_local}
-        return {"schema_id": "hormuz.route-admission", "schema_version": 1, "mode": self.settings.mode,
+        return {"schema_id": "hormuz.route-admission", "schema_version": 2, "mode": self.settings.mode,
                 "task_classifier": "bounded_local_heuristic", "local_capacity": capacity, "routes": routes}

@@ -529,7 +529,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/router/state":
             identity = self._authenticate()
             if identity is not None:
-                self._send_contract_json(HTTPStatus.OK, "hormuz.route-admission", self.server.route_admission.status(self, identity))
+                self._send_contract_json(HTTPStatus.OK, "hormuz.route-admission", self.server.route_admission.status(identity, self.server.policy_engine))
             return
         if handle_work_request(self):
             return

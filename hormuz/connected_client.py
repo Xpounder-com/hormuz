@@ -351,14 +351,23 @@ def _control(record, command):
         connection.connect(record["control"])
         connection.sendall(json.dumps({"generation": record["generation"], "command": command}).encode() + b"\n")
         with connection.makefile("rb") as stream:
-            data = stream.readline(4097)
-        if len(data) > 4096:
+            data = stream.readline(32769)
+        if len(data) > 32768:
             raise ValueError()
         value = json.loads(data)
-        if not isinstance(value, dict) or value.get("generation") != record["generation"] or value.get("router") not in {"ready", "stopping", "unavailable"}:
+        if not isinstance(value, dict) or value.get("generation") != record["generation"]:
+            raise ValueError()
+        if command == "routing":
+            admission = value.get("admission")
+            if (not isinstance(admission, dict) or admission.get("schema_id") != "hormuz.route-admission"
+                    or admission.get("schema_version") != 2):
+                raise ValueError()
+            validate_contract(admission)
+            return admission
+        if value.get("router") not in {"ready", "stopping", "unavailable"}:
             raise ValueError()
         return value["router"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
         return "unavailable"
     finally:
         connection.close()
@@ -448,9 +457,19 @@ class ConnectedClientLifetime:
                 "retained_settings": record.get("retained_settings", []),
                 **({"local_runtime": {"ownership": "owned", "state": router}} if managed else {})}, managed)
 
-    def status(self):
+    def status(self, *, routing=False):
         with self._transaction():
-            return self._status(self._record())
+            record = self._record()
+            if not routing:
+                return self._status(record)
+            if record is None or record["phase"] != "connected":
+                raise ConnectedClientError("router_unavailable")
+            if self._configuration_state(record) != "installed":
+                raise ConnectedClientError("configuration_changed")
+            admission = _control(record, "routing")
+            if not isinstance(admission, dict):
+                raise ConnectedClientError("router_unavailable")
+            return admission
 
     def local_token(self, generation):
         with self._transaction():

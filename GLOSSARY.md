@@ -8,6 +8,9 @@
   locality and model-qualification facts bound to one generation.
 - **Qualified local route:** Destination/model with evidence for its permitted
   request envelope and capabilities. A running process is not qualification.
+- **Coding qualification:** Reviewed outcome evidence that an exact local
+  execution envelope completed autonomous edits and independent checks under
+  predeclared criteria. Transport health and task-fit advice cannot establish it.
 - **Local-only:** Hard permission forbidding cloud execution for all intercepted
   model requests, including helpers. Unsupported work blocks.
 - **Automatic routing:** Selection among policy-eligible qualified destinations

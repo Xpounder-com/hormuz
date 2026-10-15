@@ -42,6 +42,11 @@ Opt-in [shadow routing](docs/SHADOW_ROUTING.md) records a local model's routing
 recommendation alongside the actual attempt. Shared setup accepts `--shadow-router`;
 recommendations preserve existing routing, local-only policy and conversation affinity.
 
+[Local coding qualification](docs/LOCAL_CODING_QUALIFICATION.md) now gates automatic
+coding admission on a pinned, predeclared campaign of actual edits, independent
+checks and normal completion. The bundled experiment remains unqualified for
+automatic coding. Engine health and shadow advice do not grant that qualification.
+
 ## Install in your agent
 
 The plugin manifests and shared CLI implementation are included in this source.

@@ -164,6 +164,24 @@ class ShadowRoutingWorkflowTests(unittest.TestCase):
                                  ("local", "cloud", "none"))
             self.assertEqual((len(classifier_requests), len(local_requests), len(cloud_requests)), (1, 0, 1))
 
+    def test_local_shadow_advice_cannot_qualify_declared_only_coding_or_relax_local_only(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests), \
+             provider("LOCAL") as (classifier, classifier_requests):
+            value = self.shadow_configuration(local, cloud, classifier, mode="auto")
+            value["route_admission"]["local_routes"]["local-code"]["task_types"] = ["code_change"]
+            with self.connected_client(value) as submit:
+                request = {"model": "cloud-code", "input": "Fix the arithmetic function in this Python code."}
+                result = submit(request=request)
+                self.assertEqual((result["status"], result["headers"].get("x-hormuz-destination-locality")), (200, "cloud"))
+                history = self.settled_attempt_history(submit, result["headers"]["x-hormuz-work-id"])
+                advice = history["body"]["attempts"][0]["shadow_routing"]
+                self.assertEqual((advice["recommendation"], advice["actual_locality"], advice["routing_effect"]),
+                                 ("local", "cloud", "none"))
+                denied = submit(request=request, headers={"X-Hormuz-Routing-Mode": "local_only"})
+                self.assertEqual(denied["status"], 503, denied)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(classifier_requests)), (0, 1, 1))
+
     def test_local_only_denial_precedes_shadow_classification(self):
         with provider("LOCAL_DESTINATION", health_status=503) as (local, local_requests), \
              provider("CLOUD_DESTINATION") as (cloud, cloud_requests), \

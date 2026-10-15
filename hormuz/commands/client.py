@@ -27,6 +27,8 @@ def add_client_commands(
         lifecycle = client_subparsers.add_parser(command, help="Manage persistent Codex CLI connection")
         lifecycle.add_argument("client", choices=["codex"])
         lifecycle.add_argument("--client-home", help="Isolated Codex home (default CODEX_HOME or ~/.codex)")
+        if command == "status":
+            lifecycle.add_argument("--routing", action="store_true", help="Show live policy-filtered qualification and admission readiness")
         if command == "disconnect":
             lifecycle.add_argument("--generation", help="Disconnect only the receipt generation that you own")
         if command in {"connect", "setup"}:
@@ -204,7 +206,7 @@ def run_lifetime(args: argparse.Namespace) -> int:
         elif args.client_command == "connect":
             result = lifetime.connect(Path(args.config), executable=args.executable, actor_id=args.actor, preview=args.dry_run)
         elif args.client_command == "status":
-            result = lifetime.status()
+            result = lifetime.status(routing=args.routing)
         else:
             result = lifetime.disconnect(generation=args.generation)
         print(json.dumps(result, sort_keys=True))

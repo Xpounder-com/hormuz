@@ -125,7 +125,12 @@ def main(record_path, generation):
                     with client.makefile("rb") as stream:
                         data = stream.readline(4097)
                     request = json.loads(data) if len(data) <= 4096 else {}
-                    if not isinstance(request, dict) or request.get("command") not in {"stop", "status"} or request.get("generation") != record["generation"]:
+                    if not isinstance(request, dict) or request.get("command") not in {"stop", "status", "routing"} or request.get("generation") != record["generation"]:
+                        continue
+                    if request.get("command") == "routing":
+                        identity = config.identities_by_actor[record["actor_id"]]
+                        admission = server.route_admission.status(identity, server.policy_engine)
+                        client.sendall(json.dumps({"generation": record["generation"], "admission": admission}).encode() + b"\n")
                         continue
                     if request.get("command") == "stop":
                         server.begin_drain()

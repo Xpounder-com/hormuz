@@ -1,0 +1,35 @@
+{
+  "schema_id": "hormuz.route-admission",
+  "schema_version": 2,
+  "mode": "local_only",
+  "task_classifier": "bounded_local_heuristic",
+  "local_capacity": {
+    "limit": 1,
+    "active": 0
+  },
+  "routes": [
+    {
+      "model": "local-code",
+      "destination": "local-llama",
+      "generation": "LIVE_DESTINATION_GENERATION",
+      "model_revision": "fixture-weights-v1",
+      "qualification_id": "fixture-q1",
+      "evidence_basis": "operator_declared",
+      "capabilities": [
+        "responses",
+        "text"
+      ],
+      "max_request_bytes": 4096,
+      "max_output_tokens": 8,
+      "task_types": [
+        "summarization"
+      ],
+      "readiness": "unchecked",
+      "coding_readiness": "unknown",
+      "coding_evidence": null,
+      "automatic_task_types": [
+        "summarization"
+      ]
+    }
+  ]
+}
