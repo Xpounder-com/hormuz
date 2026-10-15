@@ -19,6 +19,7 @@ class ShadowRoutingWorkflowTests(unittest.TestCase):
     configuration = workflow.ExecutionDestinationWorkflowTests.configuration
     admission_configuration = workflow.ExecutionDestinationWorkflowTests.admission_configuration
     connected_client = workflow.ExecutionDestinationWorkflowTests.connected_client
+    settled_attempt_history = workflow.ExecutionDestinationWorkflowTests.settled_attempt_history
 
     def shadow_configuration(self, local, cloud, classifier, *, mode="local_only"):
         value = self.admission_configuration(local, cloud, mode=mode)
@@ -67,14 +68,19 @@ class ShadowRoutingWorkflowTests(unittest.TestCase):
             with self.connected_client(self.shadow_configuration(local, cloud, classifier)) as submit:
                 try:
                     with ThreadPoolExecutor(max_workers=1) as pool:
-                        response = pool.submit(submit, cancel_before_headers=True,
+                        signal = self.root / "cancel-after-classifier-entry"
+                        response = pool.submit(submit, cancel_before_headers=True, cancel_signal=str(signal),
                             request={"input": "Summarize this fixture."})
-                        self.assertTrue(entered.wait(timeout=3))
-                        self.assertEqual(response.result(timeout=4)["status"], "cancelled")
-                        release.set()
+                        try:
+                            self.assertTrue(entered.wait(timeout=3))
+                            signal.touch()
+                            self.assertEqual(response.result(timeout=4)["status"], "cancelled")
+                        finally:
+                            signal.touch()
+                            release.set()
                     state = submit(method="GET", path="/work/state")["body"]
                     work = state["works"][0]["work_id"]
-                    history = submit(method="GET", path=f"/work/jobs/{work}/attempts")["body"]
+                    history = self.settled_attempt_history(submit, work)["body"]
                     self.assertEqual(history["attempts"][0]["shadow_routing"]["status"], "client_canceled")
                     self.assertEqual(history["attempts"][0]["state"], "failed")
                 finally:
