@@ -22,9 +22,10 @@ not run a terminal binary or treat its version as desktop qualification.
 | `native_codex_gateway` | `not_implemented`; `chatgpt_plan` billing | Native gateway adapter, a supported build, workspace-managed setup, actual consent and eligibility |
 | `chatgpt_app` | `not_implemented`; `chatgpt_plan` billing | App-specific authorization, registration, stable host ID, plan request profile, actual consent and eligibility |
 
-The API result describes declarations only. `unverified` means the pinned
-CLI and current user-default setup are compatible and an effective identity,
-team, actor and organization policy permits a configured OpenAI cloud route.
+The API result describes declarations only. `unverified` means the CLI version
+matches the connection pin, no managed configuration was detected, and the
+effective identity, team, actor and organization policy permits a configured
+OpenAI cloud route. Existing Codex user settings are not read or validated.
 Credentials, provider health, actual request eligibility, budgets, host
 overrides and subscription allowance remain unverified. It is never an
 authorization grant. A stored API key is not ChatGPT plan authorization; the

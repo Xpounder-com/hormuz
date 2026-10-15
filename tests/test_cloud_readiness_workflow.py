@@ -240,7 +240,8 @@ class CloudReadinessWorkflowTests(unittest.TestCase):
         false_eligibility["paths"][0]["status"] = "unverified"
         with self.assertRaises(ContractValidationError):
             validate_contract(false_eligibility)
-        for case in ("consent", "billing", "counts", "version", "desktop", "shape", "effects", "content"):
+        for case in ("consent", "billing", "counts", "version", "desktop", "shape", "effects", "content",
+                     "missing_cli_action", "unsupported_cli_action", "missing_route_action"):
             with self.subTest(case=case):
                 invalid = json.loads(json.dumps(receipt))
                 if case == "consent":
@@ -258,6 +259,12 @@ class CloudReadinessWorkflowTests(unittest.TestCase):
                     invalid["client"]["surface"] = []
                 elif case == "effects":
                     invalid["effects"]["provider_requests"] = True
+                elif case == "missing_cli_action":
+                    invalid["client"]["version_check"] = "unavailable"
+                elif case == "unsupported_cli_action":
+                    invalid["client"]["version_check"] = "unsupported"
+                elif case == "missing_route_action":
+                    invalid["configuration"].update(cloud_routes=0, allowed_cloud_routes=0)
                 else:
                     invalid["private_content"] = "PRIVATE_CONTENT"
                 with self.assertRaises(ContractValidationError):

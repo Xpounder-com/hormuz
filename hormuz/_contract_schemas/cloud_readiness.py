@@ -95,6 +95,13 @@ def validate_readiness(value):
             required.add("desktop_unqualified")
         if identifier == "api_key":
             required.add("credentials_unverified")
+            if surface == "cli" and version != "pinned":
+                required.add("client_unavailable" if version == "unavailable" else "client_version_unsupported")
+            if status == "available" and configuration["codex_allowed"] is not None:
+                if configuration["cloud_routes"] == 0:
+                    required.add("cloud_route_missing")
+                elif configuration["codex_allowed"] and configuration["allowed_cloud_routes"] == 0:
+                    required.add("cloud_models_not_allowed")
             if (path_status == "unverified") != (seen == {"credentials_unverified", "provider_unqualified"}):
                 raise ContractValidationError("inconsistent API readiness blockers")
             if path_status == "unverified" and (surface != "cli" or version != "pinned"
