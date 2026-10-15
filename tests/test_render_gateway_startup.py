@@ -7,6 +7,7 @@ import sys
 import unittest
 from unittest.mock import Mock, call, patch
 
+from tools import verify_render_gateway as verifier
 from tools.verify_render_gateway import await_work_health, await_work_supervisor
 
 
@@ -16,6 +17,115 @@ STARTED = json.dumps({
 
 
 class RenderGatewayStartupTests(unittest.TestCase):
+    def maintenance_shutdown_failure(self, *, elapsed=1, exit_code="1", oom_killed="false", logs=None):
+        # Reach the real verifier's maintenance stop with disposable external
+        # Docker/HTTP results; no daemon, provider or account is contacted.
+        clock = [0.0]
+        current_path = [None]
+        private = "synthetic_private_log_not_for_diagnostics"
+        metadata = {"uid": 65532, "gid": 1000, "mode": 0o700, "directory": True}
+        account = {"name": "hormuz", "uid": 65532, "gid": 1000,
+                   "home": "/home/hormuz", "shell": "/bin/sh", "environment_home": "/home/hormuz",
+                   "sshd_present": False, "home_metadata": metadata, "ssh_metadata": metadata}
+
+        def docker(*arguments, input_text=None, **options):
+            if options.get("failure_context") == "postgres_application_role_boundary":
+                return "1"
+            if arguments[0] == "inspect":
+                if arguments[2] == "{{.State.Health.Status}}":
+                    return "healthy"
+                if arguments[2] == "{{.State.ExitCode}}":
+                    self.assertEqual(options["timeout"], 3)
+                    if isinstance(exit_code, Exception):
+                        raise exit_code
+                    return exit_code
+                if arguments[2] == "{{.State.OOMKilled}}":
+                    if isinstance(oom_killed, Exception):
+                        raise oom_killed
+                    self.assertEqual(options["timeout"], 3)
+                    return oom_killed
+            if input_text == verifier.IMAGE_SOURCES:
+                return "{}"
+            if input_text == verifier.SSH_ACCOUNT_BOUNDARY:
+                return json.dumps(account)
+            if input_text == verifier.PROCESS_BOUNDARY:
+                return json.dumps({"backend_present": False,
+                    "caddy_names": ["PORT", "XDG_CONFIG_HOME", "XDG_DATA_HOME"]})
+            if arguments[0] == "wait":
+                return "1"
+            if arguments[0] == "port":
+                return "127.0.0.1:10000"
+            if arguments[0] == "stop":
+                self.assertEqual(arguments[1:3], ("--time", "25"))
+                self.assertEqual(options["timeout"], 30)
+                clock[0] += elapsed
+            if arguments[0] == "logs":
+                self.assertEqual(arguments[1:3], ("--tail", "8"))
+                self.assertEqual(options["timeout"], 3)
+                if isinstance(logs, Exception):
+                    raise logs
+                return logs if logs is not None else private + '\n{"event":"hosted_stopped","clean":false}\n'
+            return ""
+
+        connection = Mock()
+        connection.putrequest.side_effect = lambda _method, path, **_: current_path.__setitem__(0, path)
+        def response():
+            value = Mock(status=200 if current_path[0] == "/health" else 503)
+            value.getheaders.return_value = []
+            value.read.return_value = b'{"status":"maintenance"}'
+            return value
+        connection.getresponse.side_effect = response
+        with patch.object(verifier, "docker", side_effect=docker) as external, \
+             patch.object(verifier.subprocess, "run"), \
+             patch.object(verifier.time, "monotonic", side_effect=lambda: clock[0]), \
+             patch.object(verifier.http.client, "HTTPConnection", return_value=connection):
+            with self.assertRaises(RuntimeError) as caught:
+                verifier.verify("synthetic-image")
+        self.assertNotIn(private, str(caught.exception))
+        self.assertEqual(sum(item.args[0] == "stop" for item in external.call_args_list), 1)
+        return str(caught.exception), external.call_args_list
+
+    def test_failed_maintenance_shutdown_reports_safe_operands_without_relaxing_gate(self):
+        error, _ = self.maintenance_shutdown_failure()
+        self.assertEqual(error,
+            "staging_check_failed:clean_shutdown_maintenance:elapsed_ms=1000:exit_code=1:oom_killed=false:supervisor_clean=false")
+
+    def test_slow_clean_container_still_fails_and_collects_exit_code_after_deadline(self):
+        error, calls = self.maintenance_shutdown_failure(elapsed=25, exit_code="0",
+            logs='{"event":"hosted_stopped","clean":true}')
+        self.assertEqual(error,
+            "staging_check_failed:clean_shutdown_maintenance:elapsed_ms=25000:exit_code=0:oom_killed=false:supervisor_clean=true")
+        self.assertEqual(sum(item.args[0] == "inspect" and item.args[2] == "{{.State.ExitCode}}" for item in calls), 1)
+
+    def test_oom_exit_has_scalar_evidence_without_requiring_a_stop_event(self):
+        error, _ = self.maintenance_shutdown_failure(exit_code="137", oom_killed="true", logs="")
+        self.assertEqual(error,
+            "staging_check_failed:clean_shutdown_maintenance:elapsed_ms=1000:exit_code=137:oom_killed=true:supervisor_clean=unavailable")
+
+    def test_unavailable_exit_inspection_preserves_known_slow_shutdown_failure(self):
+        error, _ = self.maintenance_shutdown_failure(elapsed=25,
+            exit_code=subprocess.TimeoutExpired("docker inspect", 3))
+        self.assertEqual(error,
+            "staging_check_failed:clean_shutdown_maintenance:elapsed_ms=25000:exit_code=unavailable:oom_killed=false:supervisor_clean=false")
+
+    def test_unavailable_secondary_evidence_cannot_hide_the_original_stop_failure(self):
+        error, _ = self.maintenance_shutdown_failure(
+            oom_killed=RuntimeError("synthetic_private_inspect_failure"),
+            logs=subprocess.TimeoutExpired("docker logs", 3))
+        self.assertEqual(error,
+            "staging_check_failed:clean_shutdown_maintenance:elapsed_ms=1000:exit_code=1:oom_killed=unavailable:supervisor_clean=unavailable")
+
+    def test_shutdown_logs_are_size_bounded_and_arbitrary_values_are_not_returned(self):
+        cases = [
+            ('{"event":"hosted_stopped","clean":"synthetic_private_value"}', "synthetic_private_exit", "synthetic_private_oom"),
+            ('x' * 16_385 + '\n{"event":"hosted_stopped","clean":true}', "99999999999999999", "synthetic_private_oom"),
+        ]
+        for logs, exit_code, oom in cases:
+            with self.subTest(size=len(logs)):
+                error, _ = self.maintenance_shutdown_failure(logs=logs, exit_code=exit_code, oom_killed=oom)
+                self.assertEqual(error,
+                    "staging_check_failed:clean_shutdown_maintenance:elapsed_ms=1000:exit_code=unavailable:oom_killed=unavailable:supervisor_clean=unavailable")
+
     def startup_mocks(self, stack, *, chunks, times=(0, 0), events=None):
         process = Mock()
         process.poll.return_value = None
