@@ -77,7 +77,8 @@ def _parse_record(text):
         # The unreleased first v1 journal omitted its identifier. Preserve its
         # owned generation and recovery intent; the next normal save completes
         # the envelope rather than discarding or replacing the installation.
-        if isinstance(record, dict) and "schema_id" not in record:
+        if (isinstance(record, dict) and "schema_id" not in record
+                and record.get("schema_version") == 1):
             record = {"schema_id": JOURNAL_SCHEMA_ID, **record}
         required = {"schema_id", "schema_version", "generation", "phase", "client_version", "installed", "original",
                     "provider_block", "gateway_config", "gateway_digest", "actor_id", "control"}

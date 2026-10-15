@@ -1,0 +1,24 @@
+{
+  "schema_id": "hormuz.connected-client-journal",
+  "schema_version": 2,
+  "managed_llama": true,
+  "generation": "11111111111111111111111111111111",
+  "phase": "prepared",
+  "client_version": "0.147.0",
+  "installed": {
+    "model": "local-code",
+    "model_provider": "hormuz_11111111111111111111111111111111",
+    "web_search": "disabled"
+  },
+  "original": {
+    "model": "original-model",
+    "model_provider": null,
+    "web_search": null
+  },
+  "provider_block": "\n[model_providers.hormuz_11111111111111111111111111111111]\nname = \"Hormuz\"\nbase_url = \"http://127.0.0.1:8787/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = false\nenv_key = \"DESTINATION_WORKFLOW_TOKEN\"\n",
+  "gateway_config": "/absolute/synthetic/gateway.json",
+  "gateway_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "actor_id": "developer",
+  "control": "/tmp/hormuz-connected-0/11111111111111111111111111111111.sock",
+  "retained_settings": []
+}

@@ -681,6 +681,57 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 self.assertEqual((result["phase"], result["router"]), ("disconnected", "stopped"))
                 self.assertEqual(self.client()["provider"], "original")
 
+    def test_managed_version_two_journal_requires_identifier_and_recovers_owned_setup(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            value, _, engine = self.managed_configuration(external)
+            record = json.loads((Path(__file__).parent / "fixtures/connected-client-journal-v2.json").read_text())
+            record["gateway_config"] = str(self.path.resolve())
+            record["gateway_digest"] = hashlib.sha256(self.path.read_bytes()).hexdigest()
+            record["provider_block"] = record["provider_block"].replace("http://127.0.0.1:8787",
+                "http://127.0.0.1:" + str(value["listen"]["port"]))
+            record["control"] = str(Path("/tmp").resolve() / ("hormuz-connected-" + str(os.getuid()))
+                                    / (record["generation"] + ".sock"))
+            directory = self.home / ".hormuz-router"
+            directory.mkdir(mode=0o700)
+            journal = directory / "connection.json"
+            original_text = (self.home / "config.toml").read_text()
+            staged_invalid = False
+            try:
+                malformed = ({key: item for key, item in record.items() if key != "schema_id"},
+                             {key: item for key, item in record.items() if key != "managed_llama"},
+                             {**record, "managed_llama": False}, {**record, "schema_version": 1},
+                             {**record, "schema_version": 77}, {**record, "schema_id": "hormuz.unrelated-journal"})
+                for unsupported in malformed:
+                    staged_invalid = True
+                    journal.write_text(json.dumps(unsupported))
+                    journal.chmod(0o600)
+                    rejected = self.command("status", check=False)
+                    self.assertEqual(rejected.returncode, 2, rejected.stdout)
+                    self.assertEqual((rejected.returncode, json.loads(rejected.stderr)["error"]["code"]),
+                                     (2, "connected_client_state_invalid"))
+                    self.assertEqual((self.home / "config.toml").read_text(), original_text)
+                    self.assertFalse((engine / "stopped").exists())
+                journal.write_text(json.dumps(record))
+                staged_invalid = False
+                (self.home / "config.toml").write_text('personality = "none"\nmodel = "local-code"\n'
+                    + 'model_provider = "' + record["installed"]["model_provider"] + '"\n'
+                    + 'web_search = "disabled"\n' + record["provider_block"])
+                connected = json.loads(self.command("connect").stdout)
+                self.assertNotEqual(connected["generation"], record["generation"])
+                self.assertEqual(connected["local_runtime"], {"ownership": "owned", "state": "ready"})
+                result = self.client("local-only")
+                self.assertEqual((result["status"], result["body"]["output"][0]["content"][0]["text"]),
+                                 (200, "MANAGED_LOCAL"))
+                restored = json.loads(self.command("disconnect").stdout)
+                self.assertEqual((restored["phase"], restored["local_runtime"]["state"]), ("disconnected", "stopped"))
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertTrue((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                if staged_invalid:
+                    journal.write_text(json.dumps(record))
+                self.command("disconnect", check=False)
+
     def test_disconnect_preserves_provider_preferences_added_after_setup(self):
         with self.configured():
             connection = json.loads(self.command("connect").stdout)

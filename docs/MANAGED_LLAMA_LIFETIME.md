@@ -175,7 +175,10 @@ version-1 connected-client error envelope, including `runtime_invalid`,
 
 Unmanaged connections retain their public status/preview version 1 and private
 journal version 1. Exact earlier identifier-less v1 journals remain readable
-under the existing normalization rule. Managed connections use the same private
+under the existing normalization rule. Identifier-less v2 journals are rejected.
+The frozen [managed journal v2 fixture](../tests/fixtures/connected-client-journal-v2.json)
+exercises interrupted setup recovery through the public workflow, alongside
+malformed identifier/version/marker rejection. Managed connections use the same private
 `hormuz.connected-client-journal` identifier at version 2, with exactly the
 existing fields plus `managed_llama: true`. No PID, credential, transcript or
 second runtime journal is added. Version 2 without that true marker, a v1 record
