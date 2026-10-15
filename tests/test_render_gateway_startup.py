@@ -35,6 +35,9 @@ class RenderGatewayStartupTests(unittest.TestCase):
                 if arguments[2] == "{{.State.Health.Status}}":
                     return "healthy"
                 if arguments[2] == "{{.State.ExitCode}}":
+                    self.assertEqual(options["timeout"], 3)
+                    if isinstance(exit_code, Exception):
+                        raise exit_code
                     return exit_code
                 if arguments[2] == "{{.State.OOMKilled}}":
                     if isinstance(oom_killed, Exception):
@@ -98,6 +101,12 @@ class RenderGatewayStartupTests(unittest.TestCase):
         error, _ = self.maintenance_shutdown_failure(exit_code="137", oom_killed="true", logs="")
         self.assertEqual(error,
             "staging_check_failed:clean_shutdown_maintenance:elapsed_ms=1000:exit_code=137:oom_killed=true:supervisor_clean=unavailable")
+
+    def test_unavailable_exit_inspection_preserves_known_slow_shutdown_failure(self):
+        error, _ = self.maintenance_shutdown_failure(elapsed=25,
+            exit_code=subprocess.TimeoutExpired("docker inspect", 3))
+        self.assertEqual(error,
+            "staging_check_failed:clean_shutdown_maintenance:elapsed_ms=25000:exit_code=unavailable:oom_killed=false:supervisor_clean=false")
 
     def test_unavailable_secondary_evidence_cannot_hide_the_original_stop_failure(self):
         error, _ = self.maintenance_shutdown_failure(

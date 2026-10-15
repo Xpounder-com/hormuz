@@ -480,7 +480,10 @@ def verify(image: str) -> dict:
         started = time.monotonic()
         docker("stop", "--time", "25", name, timeout=30)
         elapsed = time.monotonic() - started
-        exit_code = docker("inspect", "--format", "{{.State.ExitCode}}", name)
+        try:
+            exit_code = docker("inspect", "--format", "{{.State.ExitCode}}", name, timeout=3)
+        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
+            exit_code = "unavailable"
         check = "clean_shutdown_" + name.rsplit("-", 1)[1]
         if not (elapsed < 25 and exit_code == "0"):
             raise RuntimeError("staging_check_failed:" + check
