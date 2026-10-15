@@ -150,7 +150,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":
                 "LOCAL" if body.get("instructions", "").startswith("You assess coding task fit.") else "MANAGED_LOCAL"}]}],
             "usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}
-        if body.get("tools") and isinstance(body.get("input"),str):
+        items=body.get("input", [])
+        continuation=isinstance(items,list) and any(isinstance(item,dict) and item.get("type")=="function_call_output" for item in items)
+        if body.get("tools") and not continuation:
             result["output"]=[{"type":"function_call","call_id":"fixture-call","name":"fixture_tool","arguments":"{}"}]
         data=json.dumps(result).encode()
         self.send_response(200);self.send_header("Content-Type","application/json")
@@ -317,6 +319,7 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 self.command("connect")
                 first = self.client("code-change", "coding-tools", "bound-conversation", "input-developer-pinned")
                 self.assertEqual(first["status"], 200, first)
+                self.assertEqual(first["body"]["output"][0]["type"], "function_call")
                 second = self.client("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned")
                 self.assertEqual(second["status"], 200, second)
                 self.assertEqual(second["headers"]["x-hormuz-routing-reason"], "session_affinity")
