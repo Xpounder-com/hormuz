@@ -1,6 +1,6 @@
 # ADR 0019: Bind native Codex conversations to owned work
 
-- Status: Implementation slice; native qualification remains separate
+- Status: Implementation slice; one bounded native protocol case qualified
 - Date: 2026-10-15
 - Decision owner: Product owner
 - Approval: The owner requested automatic conversation work-ID binding with TDD
@@ -15,7 +15,7 @@ work runtime rather than adding a client launcher, agent loop or second ledger.
 
 The HTTP boundary compares canonical UUID `thread-id` and `session-id` headers
 with their flat `client_metadata` copies. Thread and session may differ. The
-the thread/session copies inside optional bounded turn metadata must also agree;
+thread/session copies inside optional bounded turn metadata must also agree;
 duplicate JSON object names are rejected for recognized native requests. Only
 the thread identifies the conversation; turn, cache, window and installation
 identities cannot create alternate bindings. Caller-supplied identifiers are
@@ -57,3 +57,6 @@ remains the historical manual-binding baseline. This decision removes that
 manual requirement for the recognized envelope; it does not retroactively
 qualify automatic binding, other Codex releases, desktop clients, model quality,
 subscription authentication or plugin activation.
+The new [bounded native protocol case](../CONVERSATION_WORK_BINDING.md#bounded-native-protocol-qualification--october-15-2026)
+records its own exact source, frozen acceptance, two fixture requests, one owned
+work item and cleanup evidence; it does not perform model inference.

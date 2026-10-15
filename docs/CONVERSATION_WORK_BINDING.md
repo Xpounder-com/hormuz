@@ -163,5 +163,61 @@ The [PR #529 qualification record](qualifications/codex-0147-llama-b11617-qwen3-
 records the earlier manual-binding baseline with its original pins, hashes,
 outcomes and limitations. This slice supersedes its manual-binding requirement
 for recognized traffic. That historical experiment does not establish native
-qualification of this new association path; any new qualification must record
-its own exact source, wire envelope and public workflow evidence.
+qualification of this new association path.
+
+## Bounded native protocol qualification — October 15, 2026
+
+One real `codex-cli 0.147.0` episode exercised automatic association against
+source `e5b51f8dbbaed72bdf4372412aec39e5aab982a2`, using the actual persistent
+connection workflow and a deterministic loopback Responses fixture. No work job
+was pre-created and no work-ID header was supplied in native arguments or
+configuration. The client executed its real sandboxed `exec_command` tool to
+read `fixture.txt`, sent its result back, and returned the fixture's literal.
+
+| Observation | Result |
+| --- | --- |
+| Native client exit / elapsed | 0 / 0.468 seconds |
+| Fixture provider requests | Exactly 2; 31,402 and 31,840 bytes |
+| Thread/session body copies | Same hashed identities on both requests |
+| Public owned work | 1 automatically created job; 2 succeeded attempts |
+| Destination / continuation | One fingerprint; second attempt `session_affinity` |
+| Coding outcome | Job stays `active`; outcome evidence stays `unknown` |
+| Cloud trap / remaining local capacity | 0 calls / 0 active requests |
+| Disconnect | Original preferences restored; generated provider removed; no retained settings |
+| Cleanup | Native child reaped; owned router, fixture servers and handlers stopped |
+
+The client binary SHA-256 was
+`19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37`.
+The corrected case froze acceptance before its single native episode, with no
+automatic native retries. Resource limits were 2 fixture handlers, 65,536-byte
+request bodies, 1 MiB public/native outputs, and native/CLI/HTTP/provider deadlines
+of 60/20/8/5 seconds. No project trust entry was added; its absence was preserved.
+
+Private synthetic evidence is retained under
+`/private/tmp/hormuz-native-auto-binding-v2-20261015-hx3it_c0`. The durable hashes
+identify the exact evidence; these temporary paths are not distributed assets:
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Driver `hormuz-conversation-binding-native-qualification-v2-20261015.py` | `906809c00b713569f48f87654ad40ada1fe24e3857f22ec33685802cc704beee` |
+| Frozen manifest | `3816c3588145253bf36da69071bd7b9655c4ed3604dcbb2be9434855b5c5387f` |
+| Frozen acceptance | `486bd36752e62aa93a68429639c824b292c07e8fda708ffdf4183d196cc06293` |
+| `summary.json` | `f238fa94a6e06a8a00c5c8a357b7f062353eb01aaef671008bdc3ea06cf358ca` |
+| `native-events.jsonl` | `bd738b9bedf7a0f4959234d22947e5d1eb55c94a32bb5c5dd79566f6852d03f2` |
+
+The initial case remains a failed qualification record:
+`/private/tmp/hormuz-native-auto-binding-20261015-f13l8mlh/summary.json`, SHA-256
+`1ed74e592f5f17ba63ba5d08aaab5fd498d2417d85c6dc052d8615eada7e89e8`.
+Its prompt omitted a recognized coding-review keyword and received
+`hormuz_route_local_route_unavailable` before admission, with zero provider POSTs,
+zero jobs and zero cloud calls. The corrected case explicitly changed the prompt
+to begin “Review the code fixture”; production classification remained unchanged.
+This was a fixture precondition failure, not an established association failure;
+the original driver and evidence were not overwritten or relabeled as passing.
+
+This qualifies one native tool round trip through the protocol fixture. There
+was no model inference. New turns, resume, fork, other releases and desktop
+clients remain unqualified. Body identities were observed after Hormuz; raw
+incoming identity headers were not retained. Zero cloud-trap calls are not an
+operating-system egress audit. The earlier real-model quality limitations remain
+in the historical qualification record.
