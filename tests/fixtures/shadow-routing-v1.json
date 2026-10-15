@@ -1,0 +1,21 @@
+{
+  "schema_id": "hormuz.shadow-routing",
+  "schema_version": 1,
+  "mode": "shadow",
+  "prompt_version": "local-fit.v1",
+  "status": "classified",
+  "recommendation": "cloud",
+  "routing_effect": "none",
+  "classifier_model": "local-router",
+  "classifier_revision": "fixture-router-v1",
+  "classifier_generation": "1111111111111111111111111111111111111111111111111111111111111111",
+  "local_model": "local-code",
+  "local_model_revision": "fixture-weights-v1",
+  "actual_model": "local-code",
+  "actual_destination": "local-llama",
+  "actual_locality": "local",
+  "elapsed_ms": 12.5,
+  "input_tokens": 4,
+  "output_tokens": 2,
+  "cost_microusd": null
+}

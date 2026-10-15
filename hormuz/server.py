@@ -40,6 +40,7 @@ from . import work_gateway
 from .work_http import handle_work_request
 from .work_runtime import WorkRuntimeError
 from .route_admission import RouteAdmission, RouteAdmissionError
+from .shadow_routing import ShadowRouter, ShadowClientCanceled
 from .local_transport import open_local_upstream as _owned_local_upstream
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -402,6 +403,7 @@ class GatewayServer(ThreadingHTTPServer):
             )
             work_gateway.initialize(self, environ=environ)
             self.route_admission = RouteAdmission(config, self.destinations)
+            self.shadow_router = ShadowRouter(config, self.destinations, self.route_admission, self.work_runtime)
             protected_values = [
                 ("hormuz_identity_token", identity.token)
                 for identity in config.identities_by_token.values()
@@ -1011,6 +1013,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 entered = True
                 with ExitStack() as resources:
                     self._provider_response_resources = resources
+                    if options["failover_applied_reason"] is None:
+                        try:
+                            self.server.shadow_router.observe(self, options["identity"], options["decision"],
+                                options["request_value"], options["attempt"], client=options["client"])
+                        except ShadowClientCanceled:
+                            self.server.store.finalize_request_attempt(attempt=options["attempt"],
+                                organization_id=options["identity"].organization_id, status="failed", cost_microusd=0)
+                            work_gateway.settle(self, options["identity"], options["attempt"], cost=0, status="failed")
+                            self.close_connection = True
+                            return
                     history_capture = HistoryCapture.begin(self.server.local_history,
                         identity=options["identity"], client=options["client"], protocol=options["protocol"],
                         decision=options["decision"],

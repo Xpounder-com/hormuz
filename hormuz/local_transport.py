@@ -7,10 +7,11 @@ from urllib.parse import urlsplit
 
 
 class LocalResponse:
-    def __init__(self, connection, response, transport_socket, timer, expired):
+    def __init__(self, connection, response, transport_socket, timer, expired, stopped):
         self.connection, self.response, self.transport_socket = connection, response, transport_socket
         self.status, self.headers = response.status, response.headers
         self.timer, self.expired = timer, expired
+        self.stopped = stopped
 
     def _check_deadline(self):
         if self.expired.is_set():
@@ -36,6 +37,7 @@ class LocalResponse:
             self.transport_socket.settimeout(seconds)
 
     def close(self):
+        self.stopped.set()
         if self.timer is not None:
             self.timer.cancel()
         try:
@@ -52,12 +54,13 @@ class LocalResponse:
         self.close()
 
 
-def open_local_upstream(request, *, timeout, absolute_timeout=None):
+def open_local_upstream(request, *, timeout, absolute_timeout=None, cancel_check=None):
     origin = urlsplit(request.full_url)
     connection_type = http.client.HTTPSConnection if origin.scheme == "https" else http.client.HTTPConnection
     connection = connection_type(origin.hostname, origin.port, timeout=timeout)
     timer = None
     expired = threading.Event()
+    stopped = threading.Event()
     deadline = time.monotonic() + absolute_timeout if absolute_timeout is not None else None
     try:
         connection.connect()
@@ -67,20 +70,29 @@ def open_local_upstream(request, *, timeout, absolute_timeout=None):
             if remaining <= 0:
                 raise TimeoutError("local_request_deadline")
             def expire():
+                if cancel_check is not None:
+                    while not stopped.is_set():
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or cancel_check():
+                            break
+                        stopped.wait(min(0.05, remaining))
+                    if stopped.is_set():
+                        return
                 expired.set()
                 try:
                     transport_socket.shutdown(socket.SHUT_RDWR)
                 except OSError:
                     pass
-            timer = threading.Timer(remaining, expire)
+            timer = threading.Timer(remaining if cancel_check is None else 0, expire)
             timer.daemon = True
             timer.start()
         path = (origin.path or "/") + ("?" + origin.query if origin.query else "")
         connection.request(request.get_method(), path, body=request.data,
                            headers=dict(request.header_items()))
         response = connection.getresponse()
-        return LocalResponse(connection, response, transport_socket, timer, expired)
+        return LocalResponse(connection, response, transport_socket, timer, expired, stopped)
     except BaseException:
+        stopped.set()
         if timer is not None:
             timer.cancel()
         connection.close()

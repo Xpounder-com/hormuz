@@ -87,8 +87,9 @@ if "idle" in sys.argv:
     print(json.dumps({"closed": closed}), flush=True)
     sys.exit(0)
 try:
-    connection.request("POST", origin.path.rstrip("/") + "/responses",
-        json.dumps({"model": view["model"],
+    control = "work-state" in sys.argv
+    connection.request("GET" if control else "POST", origin.path.rstrip("/") + ("/work/state" if control else "/responses"),
+        None if control else json.dumps({"model": view["model"],
                     "input": "Consider this fixture." if "unknown-task" in sys.argv else "Summarize this fixture.",
                     "max_output_tokens": 8}),
         {"Content-Type": "application/json", "Authorization": "Bearer " + credential,
@@ -122,7 +123,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         data=json.dumps({"id":"managed-fixture","object":"response","status":"completed","model":model,
-            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"MANAGED_LOCAL"}]}],
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":
+                "LOCAL" if body.get("instructions", "").startswith("You assess coding task fit.") else "MANAGED_LOCAL"}]}],
             "usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}).encode()
         self.send_response(200);self.send_header("Content-Type","application/json")
         self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
@@ -260,6 +262,32 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertEqual(json.loads(self.command("status").stdout)["router"], "ready")
             stopped = json.loads(self.command("disconnect").stdout)
             self.assertEqual(stopped["local_runtime"], {"ownership": "owned", "state": "stopped"})
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+            self.assertTrue((engine / "stopped").exists())
+            self.assertEqual(requests, [])
+
+    def test_local_setup_enables_shadow_routing_without_manual_configuration_or_tokens(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)[:-2]
+            self.environment.pop("DESTINATION_WORKFLOW_TOKEN", None)
+            self.environment.pop("HORMUZ_GATEWAY_TOKEN", None)
+            self.addCleanup(lambda: self.command("disconnect", check=False))
+            preview = json.loads(self.command("setup", *options, "--shadow-router", "--dry-run").stdout)
+            self.assertEqual((preview["schema_version"], preview["configuration"]["shadow_router"]), (3, "shadow"))
+            self.assertFalse(self.path.exists())
+            connected = json.loads(self.command("setup", *options, "--shadow-router").stdout)
+            validate_contract(connected)
+            validate_contract(json.loads((Path(__file__).parent / "fixtures/local-setup-v3.json").read_text()))
+            result = self.client()
+            self.assertEqual(result["body"]["output"][0]["content"][0]["text"], "MANAGED_LOCAL")
+            work = self.client("work-state")["body"]["works"][0]
+            advice = work["attempts"][0]["shadow_routing"]
+            self.assertEqual((advice["status"], advice["recommendation"], advice["actual_locality"]),
+                             ("classified", "local", "local"))
+            repeated = json.loads(self.command("setup", *options, "--shadow-router").stdout)
+            self.assertEqual(repeated["connection"]["generation"], connected["connection"]["generation"])
+            self.command("disconnect")
             self.assertEqual(self.client("inspect")["model"], "original-model")
             self.assertTrue((engine / "stopped").exists())
             self.assertEqual(requests, [])

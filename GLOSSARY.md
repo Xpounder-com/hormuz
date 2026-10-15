@@ -13,6 +13,8 @@
 - **Automatic routing:** Selection among policy-eligible qualified destinations
   at a safe fresh request point. Unknown evidence uses an approved baseline or
   blocks; opaque continuation is not migrated.
+- **Shadow recommendation:** Recorded advice about a local model's task fit,
+  compared with actual execution and coding outcomes without selecting a route.
 - **Connected-client lifetime:** Shared owner of setup, status, process control,
   recovery, disconnect and conditional configuration restoration.
 - **Plugin:** Skills-only entry point calling the same connection implementation

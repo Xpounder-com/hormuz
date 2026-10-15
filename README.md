@@ -38,6 +38,10 @@ The installed router remains a prerequisite. Setup now creates a private local
 caller credential and configures Codex's command-backed authentication without
 manual token exports. See [local credential setup](docs/LOCAL_CREDENTIAL_SETUP.md).
 
+Opt-in [shadow routing](docs/SHADOW_ROUTING.md) records a local model's routing
+recommendation alongside the actual attempt. Shared setup accepts `--shadow-router`;
+recommendations preserve existing routing, local-only policy and conversation affinity.
+
 ## Install in your agent
 
 The plugin manifests and shared CLI implementation are included in this source.
