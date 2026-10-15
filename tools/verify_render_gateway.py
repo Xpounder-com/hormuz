@@ -348,6 +348,35 @@ def await_work_health(name: str, request):
     raise RuntimeError("integrated_work_startup_timeout")
 
 
+def shutdown_failure_detail(name: str, elapsed: float, exit_code: str) -> str:
+    """Retain only bounded shutdown scalars; never publish container logs."""
+    code = "unavailable"
+    if exit_code.isascii() and exit_code.isdecimal() and len(exit_code) <= 3 and int(exit_code) <= 255:
+        code = str(int(exit_code))
+    oom = clean = "unavailable"
+    try:
+        value = docker("inspect", "--format", "{{.State.OOMKilled}}", name, timeout=3)
+        if value in {"true", "false"}:
+            oom = value
+    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
+        pass
+    try:
+        logs = docker("logs", "--tail", "8", name, timeout=3)
+        if len(logs.encode("utf-8")) <= 16_384:
+            for line in logs.splitlines()[-8:]:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if (isinstance(event, dict) and event.get("event") == "hosted_stopped"
+                        and type(event.get("clean")) is bool):
+                    clean = "true" if event["clean"] else "false"
+    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
+        pass
+    return (":elapsed_ms=" + str(int(elapsed * 1000)) + ":exit_code=" + code
+            + ":oom_killed=" + oom + ":supervisor_clean=" + clean)
+
+
 def verify(image: str) -> dict:
     prefix = "hormuz-staging-check-" + uuid.uuid4().hex[:12]
     volume = prefix + "-state"
@@ -450,8 +479,13 @@ def verify(image: str) -> dict:
     def stop(name):
         started = time.monotonic()
         docker("stop", "--time", "25", name, timeout=30)
-        passed("clean_shutdown_" + name.rsplit("-", 1)[1],
-               time.monotonic() - started < 25 and docker("inspect", "--format", "{{.State.ExitCode}}", name) == "0")
+        elapsed = time.monotonic() - started
+        exit_code = docker("inspect", "--format", "{{.State.ExitCode}}", name)
+        check = "clean_shutdown_" + name.rsplit("-", 1)[1]
+        if not (elapsed < 25 and exit_code == "0"):
+            raise RuntimeError("staging_check_failed:" + check
+                               + shutdown_failure_detail(name, elapsed, exit_code))
+        passed(check)
 
     try:
         docker("volume", "create", volume)
