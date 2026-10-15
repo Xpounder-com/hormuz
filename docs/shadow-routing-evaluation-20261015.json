@@ -1,0 +1,173 @@
+{
+  "experiment_version": 1,
+  "date": "2026-10-15",
+  "runtime_commit": "8c0d6a0cf1a470fa725bf6b1164b9dd9ab879ed8",
+  "client": "Codex CLI 0.147.0, Darwin arm64",
+  "runtime": "llama.cpp b11617, macOS arm64",
+  "model": "Qwen3-4B-Q4_K_M.gguf",
+  "model_sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+  "engine_archive_sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9",
+  "client_sha256": "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+  "classifier": "Same pinned model and managed engine as coding; zero-shot LOCAL/CLOUD/UNKNOWN; no calibrated confidence",
+  "classifier_deadline_seconds": 2,
+  "classifier_max_output_tokens": 8,
+  "case_fixture": "tests/fixtures/shadow-coding-cases-v1.json",
+  "case_fixture_sha256": "80e714e7094ccc2969041ce8a2ae9935aa664698dd2d39a38bf94a8300391bc9",
+  "manifest_sha256": "7af858e7b0511431e2acaa46780cb13051ac58ac4b11a139bb71dff95bf303d7",
+  "driver_sha256": "dac317e35b6b28a974c9615687868c458ed421406f37ec72e46d548717113c91",
+  "private_summary_sha256": "e8f13d29a693b4f7154be9e70934fd8f453414967a43df5bb8e2263ce107fec9",
+  "episodes_per_case": 1,
+  "deadline_seconds_each": 90,
+  "quality_retries": 0,
+  "routing_effect": "none",
+  "promotion": "shadow_only",
+  "cloud_comparison": "not_observed",
+  "oracle": "Independent frozen Python checks under pinned Codex :read-only sandbox, fresh bytecode cache per check",
+  "oracle_preflight": [
+    {
+      "case_id": "ceil-division",
+      "baseline_exit": 1,
+      "reference_exit": 0,
+      "reference_marker": true
+    },
+    {
+      "case_id": "quoted-csv",
+      "baseline_exit": 1,
+      "reference_exit": 0,
+      "reference_marker": true
+    },
+    {
+      "case_id": "atomic-transfer",
+      "baseline_exit": 1,
+      "reference_exit": 0,
+      "reference_marker": true
+    }
+  ],
+  "oracle_network_probe": {
+    "profile": ":read-only",
+    "controlled_loopback_connection": "denied"
+  },
+  "counts": {
+    "cases": 3,
+    "coding_checks_passed": 0,
+    "classified_cases": 3,
+    "local_recommendations": 3,
+    "missing_advice_cases": 0,
+    "unknown_advice_cases": 0,
+    "incomplete_client_episodes": 0,
+    "unevaluable_local_fit_cases": 0,
+    "false_local_recommendations": 3,
+    "cloud_recommendation_local_pass": 0
+  },
+  "episodes": [
+    {
+      "case_id": "ceil-division",
+      "native": {
+        "exit": 0,
+        "termination": "finished",
+        "elapsed_seconds": 47.424
+      },
+      "coding_check_exit": 1,
+      "coding_check_passed": false,
+      "oracle_sha256": "2d047de10eaa09b8bcca4e535f5d2b79bdec9e54a5822a39bbde8097765d3b15",
+      "oracle_unchanged": true,
+      "fresh_work_count": 1,
+      "attempt_count": 7,
+      "attempts_truncated": false,
+      "all_actual_models_local": true,
+      "affinity_preserved": true,
+      "shadow": {
+        "status": "classified",
+        "recommendation": "local",
+        "routing_effect": "none",
+        "elapsed_ms": 478.482,
+        "input_tokens": 393,
+        "output_tokens": 2
+      },
+      "outcome_evidence": "observed",
+      "implementation_files_changed": []
+    },
+    {
+      "case_id": "quoted-csv",
+      "native": {
+        "exit": 0,
+        "termination": "finished",
+        "elapsed_seconds": 82.393
+      },
+      "coding_check_exit": 1,
+      "coding_check_passed": false,
+      "oracle_sha256": "54f7e05d27060ad6f2fce7555fa17b1671269f85c6f558cd5c17d78a6765e473",
+      "oracle_unchanged": true,
+      "fresh_work_count": 1,
+      "attempt_count": 8,
+      "attempts_truncated": false,
+      "all_actual_models_local": true,
+      "affinity_preserved": true,
+      "shadow": {
+        "status": "classified",
+        "recommendation": "local",
+        "routing_effect": "none",
+        "elapsed_ms": 473.83,
+        "input_tokens": 393,
+        "output_tokens": 2
+      },
+      "outcome_evidence": "observed",
+      "implementation_files_changed": []
+    },
+    {
+      "case_id": "atomic-transfer",
+      "native": {
+        "exit": 0,
+        "termination": "finished",
+        "elapsed_seconds": 21.525
+      },
+      "coding_check_exit": 1,
+      "coding_check_passed": false,
+      "oracle_sha256": "5cd6029b726fac1fd9b6a73022f1ab2b9796da32650ae89e04012be21c9ed546",
+      "oracle_unchanged": true,
+      "fresh_work_count": 1,
+      "attempt_count": 1,
+      "attempts_truncated": false,
+      "all_actual_models_local": true,
+      "affinity_preserved": true,
+      "shadow": {
+        "status": "classified",
+        "recommendation": "local",
+        "routing_effect": "none",
+        "elapsed_ms": 536.572,
+        "input_tokens": 440,
+        "output_tokens": 2
+      },
+      "outcome_evidence": "observed",
+      "implementation_files_changed": []
+    }
+  ],
+  "cleanup": {
+    "disconnected": true,
+    "owned_engine_stopped": true,
+    "provider_removed": true
+  },
+  "validation": {
+    "source": {
+      "head": "8c0d6a0cf1a470fa725bf6b1164b9dd9ab879ed8",
+      "exit": 0,
+      "elapsed_seconds": 219.414
+    },
+    "installed_wheel": {
+      "head": "8c0d6a0cf1a470fa725bf6b1164b9dd9ab879ed8",
+      "exit": 0,
+      "elapsed_seconds": 224.968
+    },
+    "tests_each": 147,
+    "skips": 0,
+    "qualified_wheel_sha256": "03fd8c2f8eb8baf59ed720be2c02de2834d47578153354362d98372573f0a71e",
+    "runtime_files": 113,
+    "record_hashes": 118
+  },
+  "limits": [
+    "Three hand-authored coding repairs do not establish general model quality or router calibration.",
+    "Only one pinned local combination was executed; no cloud quality, cost or subscription comparison.",
+    "Loopback fixtures establish workflow guards; native cases establish only their observed coding outcomes.",
+    "The read-only grading sandbox network probe does not establish whole-client network egress isolation."
+  ]
+}
