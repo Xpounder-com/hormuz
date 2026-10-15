@@ -159,7 +159,7 @@ class CloudReadinessWorkflowTests(unittest.TestCase):
                               [blocker["code"] for blocker in api["blockers"]])
 
     def test_missing_and_unsafe_configuration_returns_actionable_content_free_receipt(self):
-        for case in ("missing", "invalid", "duplicate", "fifo", "symlink"):
+        for case in ("missing", "invalid", "duplicate", "fifo", "symlink", "storage_symlink_loop"):
             with self.subTest(case=case):
                 if self.path.exists() or self.path.is_symlink():
                     self.path.unlink()
@@ -171,11 +171,23 @@ class CloudReadinessWorkflowTests(unittest.TestCase):
                     os.mkfifo(self.path, mode=0o600)
                 elif case == "symlink":
                     self.path.symlink_to(self.settings)
+                elif case == "storage_symlink_loop":
+                    storage = self.root / "storage-loop"
+                    storage.symlink_to(storage.name)
+                    value = self.configuration("http://127.0.0.1:1", "https://cloud.example.invalid/v1")
+                    value["database"] = storage.name
+                    self.write_configuration(value)
                 before = self.settings.read_bytes(), set(self.home.iterdir())
                 receipt = self.inspect()
-                self.assertEqual(receipt["configuration"]["status"], "unavailable" if case == "missing" else "invalid")
+                if case == "storage_symlink_loop":
+                    # Resolution differs across Python versions; neither outcome
+                    # validates storage readiness or grants execution authority.
+                    self.assertIn(receipt["configuration"]["status"], {"available", "invalid"})
+                    self.assertIn(receipt["paths"][0]["status"], {"blocked", "unverified"})
+                else:
+                    self.assertEqual(receipt["configuration"]["status"], "unavailable" if case == "missing" else "invalid")
+                    self.assertEqual(receipt["paths"][0]["status"], "blocked")
                 self.assertNotIn("PRIVATE_INPUT_SENTINEL", json.dumps(receipt))
-                self.assertEqual(receipt["paths"][0]["status"], "blocked")
                 self.assertEqual(before, (self.settings.read_bytes(), set(self.home.iterdir())))
 
     def test_desktop_does_not_run_or_get_qualified_by_the_terminal_executable(self):

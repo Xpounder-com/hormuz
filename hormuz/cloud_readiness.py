@@ -40,7 +40,8 @@ def _configuration(path, actor_id):
         elif not allowed:
             blockers.append("cloud_models_not_allowed")
         return facts, blockers
-    except (ConnectedClientError, ConfigError, OSError, ValueError, RecursionError):
+    except (ConnectedClientError, ConfigError, OSError, ValueError, RuntimeError):
+        # Older Python versions raise RuntimeError for path-resolution loops.
         return {**facts, "status": "invalid", "routing_mode": "unknown", "codex_allowed": None,
                 "cloud_routes": 0, "allowed_cloud_routes": 0}, ["configuration_invalid"]
 
