@@ -45,14 +45,15 @@ class ModelEvidenceWorkflowTests(unittest.TestCase):
             os.kill(int(pid.read_text()), 0)
 
     @contextmanager
-    def probe_provider(self, *, after_request=None):
+    def probe_provider(self, *, after_request=None, work_state=None):
         received = []
         class Handler(BaseHTTPRequestHandler):
             timeout = 3
             def log_message(self, *_args):
                 pass
             def do_GET(self):
-                data = b'{"status":"ok"}'
+                data = (json.dumps(work_state).encode() if self.path == '/v1/work/state' and work_state is not None
+                        else b'{"status":"ok"}')
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
@@ -149,6 +150,64 @@ class ModelEvidenceWorkflowTests(unittest.TestCase):
                 self.assertEqual(self.config.read_bytes(), before)
                 self.assertEqual(classified, [])
                 self.assertEqual(len(received), 4)
+
+    def test_copied_configuration_cannot_hide_live_shadow_classification(self):
+        with self.probe_provider() as (endpoint, received), self.probe_provider() as (classifier, classified):
+            value = self.probe_configuration(endpoint)
+            value['upstreams']['local-classifier'] = {'protocol': 'openai', 'base_url': classifier,
+                                                       'locality': 'local', 'authentication': 'none'}
+            value['model_routes']['local-router'] = {'protocol': 'openai', 'destination': 'local-classifier',
+                'upstream_model': 'fixture-router', 'model_revision': 'fixture-router-v1',
+                'capabilities': ['responses', 'text']}
+            value['policies']['organization']['allowed_models'].append('local-router')
+            value['shadow_router'] = {'schema_version': 1, 'mode': 'shadow', 'model': 'local-router',
+                                      'local_model': 'local-code'}
+            selected = copy.deepcopy(value)
+            selected.pop('shadow_router')
+            alternate = self.root / 'selected-qualification.json'
+            alternate.write_text(json.dumps(selected))
+            assets = self.harness.model_arguments()
+            output = self.root / 'copied-qualification.json'
+            with self.fixture.connected_client(value):
+                live_before = self.config.read_bytes()
+                selected_before = alternate.read_bytes()
+                result = subprocess.run([sys.executable, '-m', 'hormuz', '--config', str(alternate),
+                    'model', 'qualify', '--model', 'local-code', *assets, '--output', str(output)],
+                    env=self.harness.environment, capture_output=True, text=True, timeout=20)
+                self.assertEqual(classified, [], 'live shadow classification must be checked before model probes')
+                self.assertEqual(received, [])
+                self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+                report = json.loads(result.stdout)
+                self.assertEqual(report['result'], 'failed')
+                self.assertEqual(report['checks'], [{'name': 'transport', 'passed': False,
+                    'code': 'qualification_shadow_router_unsupported'}])
+                self.assertIsNone(report['execution'])
+                self.assertEqual(json.loads(output.read_bytes()), report)
+                self.assertEqual(result.stderr, '')
+                self.assertEqual(self.config.read_bytes(), live_before)
+                self.assertEqual(alternate.read_bytes(), selected_before)
+
+    def test_unverified_execution_features_cannot_start_model_probes(self):
+        state = {'schema_id': 'hormuz.ai-work-state', 'schema_version': 3, 'connection': {'routes': []}}
+        with self.probe_provider(work_state=state) as (endpoint, received):
+            value = self.probe_configuration(endpoint)
+            value['listen']['port'] = int(endpoint.rsplit(':', 1)[1])
+            self.config.write_text(json.dumps(value))
+            before = self.config.read_bytes()
+            assets = self.harness.model_arguments()
+            variants = [{}, *[{'shadow_router_enabled': item} for item in (None, 0, 1, 'false', {}, [])]]
+            for index, metadata in enumerate(variants):
+                with self.subTest(metadata=metadata):
+                    state['connection'] = {'routes': [], **metadata}
+                    output = self.root / ('unverified-features-' + str(index) + '.json')
+                    result = self.harness.command('model', 'qualify', '--model', 'local-code',
+                        *assets, '--output', str(output), expected=2)
+                    self.assertEqual(result['result'], 'failed')
+                    self.assertEqual(result['checks'], [{'name': 'transport', 'passed': False,
+                        'code': 'execution_features_unverified'}])
+                    self.assertIsNone(result['execution'])
+                    self.assertEqual(received, [])
+                    self.assertEqual(self.config.read_bytes(), before)
 
     def test_incomplete_qualification_cannot_recommend_a_model(self):
         with self.qualified_report() as (assets, output, report, received):

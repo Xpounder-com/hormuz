@@ -32,6 +32,14 @@ use version 1 unless stated otherwise:
   Shadow-enabled configurations are rejected before model requests or report
   publication with `qualification_shadow_router_unsupported`, preserving the
   fixed four-request model envelope without disabling configured classification.
+  Authenticated work-state v3 adds the boolean
+  `connection.shadow_router_enabled`. Qualification checks the active router
+  before probes and after the suite; copying or editing the supplied file cannot
+  hide an active classifier. A live-state rejection records a failed report with
+  zero model probes. Older state readers may ignore this additive metadata;
+  missing/nonboolean metadata fails closed for qualification. Upgrade the router
+  before using the new qualifier against an older running server. No stored
+  work state is rewritten; the work-state compatibility fixture covers rollback.
 - `hormuz.model-recommendation`: current/stale evidence, advisory recommendation,
   hardware facts, unverified inference fit, report trust and no downloads.
 - `hormuz.usage-insights`: existing spending coverage plus observed tokens,

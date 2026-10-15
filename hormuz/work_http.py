@@ -121,6 +121,7 @@ def _state(handler, identity):
             key: destination[key] for key in ("protocol", "credential_configured", "eligible")})})
     host, port = handler.server.server_address[:2]
     state["connection"] = {"endpoint": f"http://{host}:{port}", "routes": routes,
+        "shadow_router_enabled": handler.server.config.shadow_router is not None,
         "credential_location": "router", "coverage": "only_authenticated_intercepted_model_requests"}
     # Existing receipt readers use these choices. Eligibility describes configured
     # destinations; it is not a claim of real model or subscription qualification.

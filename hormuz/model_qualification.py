@@ -227,6 +227,11 @@ def _router_execution(args, config, token, deadline):
             or not isinstance(value.get('connection'), dict)
             or not isinstance(value['connection'].get('routes'), list)):
         raise CapabilityError('execution_unverified')
+    shadow = value['connection'].get('shadow_router_enabled')
+    if shadow is True:
+        raise CapabilityError('qualification_shadow_router_unsupported')
+    if shadow is not False:
+        raise CapabilityError('execution_features_unverified')
     routes = [route for route in value['connection']['routes']
               if isinstance(route, dict) and route.get('model') == args.model]
     configured = config.model_routes[args.model]

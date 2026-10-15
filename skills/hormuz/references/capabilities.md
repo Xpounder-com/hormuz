@@ -57,6 +57,10 @@ Configurations with shadow routing enabled return
 publication because classification would exceed the fixed request envelope.
 Qualification never disables that feature; select an independently reviewed
 configuration without shadow routing when qualification is required.
+The authenticated running router must also explicitly report shadow routing
+disabled. A copied configuration cannot substitute for this live check. Missing
+feature metadata requires a router upgrade; unavailable state never establishes
+a qualification pass.
 
 There are at most four serial model requests plus two authenticated router-state
 reads, zero retries, 128 output tokens per model request and one 12-second probe
