@@ -3,8 +3,9 @@
 This implements the admission slice of [router spec #523](https://github.com/Xpounder-com/hormuz/issues/523)
 on top of [execution destinations](EXECUTION_DESTINATIONS.md). Existing coding
 apps submit requests to one router. No additional Hormuz UI is introduced.
-Runtime/model installation, subscription adapters and persistent CLI/plugin setup
-remain separate work.
+Runtime/model installation, subscription adapters and plugin publication
+remain separate work. [Persistent CLI setup](CONNECTED_CLIENT_LIFETIME.md) now owns
+connection and restoration.
 
 ## Configure an already qualified local runtime
 

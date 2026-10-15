@@ -27,9 +27,12 @@ def add_client_commands(
         lifecycle = client_subparsers.add_parser(command, help="Manage persistent Codex CLI connection")
         lifecycle.add_argument("client", choices=["codex"])
         lifecycle.add_argument("--client-home", help="Isolated Codex home (default CODEX_HOME or ~/.codex)")
+        if command == "disconnect":
+            lifecycle.add_argument("--generation", help="Disconnect only the receipt generation that you own")
         if command == "connect":
             lifecycle.add_argument("--executable", default="codex", help="Codex CLI executable to qualify")
             lifecycle.add_argument("--actor", help="Configured actor ID")
+            lifecycle.add_argument("--dry-run", action="store_true", help="Preview precise changes without activating routing")
 
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
@@ -230,14 +233,15 @@ def run_lifetime(args: argparse.Namespace) -> int:
     try:
         lifetime = ConnectedClientLifetime(Path(args.client_home or os.environ.get("CODEX_HOME", "~/.codex")))
         if args.client_command == "connect":
-            result = lifetime.connect(GatewayConfig.load(args.config), executable=args.executable, actor_id=args.actor)
+            result = lifetime.connect(Path(args.config), executable=args.executable, actor_id=args.actor, preview=args.dry_run)
         elif args.client_command == "status":
             result = lifetime.status()
         else:
-            result = lifetime.disconnect()
+            result = lifetime.disconnect(generation=args.generation)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ConnectedClientError, ConfigError, OSError, subprocess.SubprocessError) as error:
         code = error.code if isinstance(error, ConnectedClientError) else "connected_client_setup_unavailable"
-        print(json.dumps({"schema_version": 1, "error": {"code": code}}), file=sys.stderr)
+        action = error.action if isinstance(error, ConnectedClientError) else "inspect_status_and_configuration"
+        print(json.dumps({"schema_version": 1, "error": {"code": code, "action": action}}), file=sys.stderr)
         return 2

@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import selectors
 import shutil
 import socket
 import stat
@@ -20,9 +21,11 @@ import sys
 import tempfile
 import time
 import tomllib
+from urllib.parse import urlsplit
 
 from .client_versions import SUPPORTED_CODEX_VERSION
 from .config import GatewayConfig
+from .compaction_formats import strict_json_loads
 from .policy_runtime import PolicyRuntime
 
 LIMIT = 128 * 1024
@@ -31,7 +34,113 @@ LIMIT = 128 * 1024
 class ConnectedClientError(RuntimeError):
     def __init__(self, code: str):
         self.code = "connected_client_" + code
+        self.action = {
+            "version_unsupported": "use_pinned_client_or_disconnect",
+            "recovery_required": "disconnect_then_connect",
+            "setup_changed": "disconnect_then_connect",
+            "router_unavailable": "disconnect_then_connect",
+            "configuration_changed": "inspect_settings_then_disconnect",
+            "configuration_invalid": "repair_configuration_then_disconnect",
+            "state_invalid": "preserve_journal_and_restore_manually",
+            "generation_mismatch": "inspect_current_generation",
+            "managed_configuration": "use_managed_setup",
+        }.get(code, "inspect_status_and_configuration")
         super().__init__(self.code)
+
+
+def _control_directory():
+    return Path("/tmp").resolve() / ("hormuz-connected-" + str(os.getuid()))
+
+
+def _provider_block(provider, origin, credential_env):
+    return ('\n[model_providers.' + provider + ']\nname = "Hormuz"\n'
+            + 'base_url = ' + json.dumps(origin + '/v1') + '\n'
+            + 'wire_api = "responses"\nrequires_openai_auth = false\n'
+            + 'env_key = ' + json.dumps(credential_env) + '\n')
+
+
+def _parse_record(text):
+    try:
+        record = strict_json_loads(text)
+        required = {"schema_version", "generation", "phase", "client_version", "installed", "original",
+                    "provider_block", "gateway_config", "gateway_digest", "actor_id", "control"}
+        if (not isinstance(record, dict) or not required <= record.keys()
+                or record.keys() - required - {"retained_settings"}
+                or type(record["schema_version"]) is not int or record["schema_version"] != 1
+                or not isinstance(record["generation"], str) or not re.fullmatch("[a-f0-9]{32}", record["generation"])
+                or record["phase"] not in {"prepared", "connected", "disconnecting", "restore_required", "disconnected"}
+                or not isinstance(record["client_version"], str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", record["client_version"])
+                or not isinstance(record["gateway_config"], str) or not Path(record["gateway_config"]).is_absolute()
+                or not isinstance(record["gateway_digest"], str) or not re.fullmatch("[a-f0-9]{64}", record["gateway_digest"])
+                or not isinstance(record["actor_id"], str) or not 1 <= len(record["actor_id"]) <= 256
+                or record["control"] != str(_control_directory() / (record["generation"] + ".sock"))):
+            raise ValueError()
+        fields = {"model", "model_provider", "web_search"}
+        if (not isinstance(record["installed"], dict) or record["installed"].keys() != fields
+                or not isinstance(record["original"], dict) or record["original"].keys() != fields
+                or any(not isinstance(value, str) or not 1 <= len(value) <= 2048 for value in record["installed"].values())
+                or any(value is not None and (not isinstance(value, str) or len(value) > 2048) for value in record["original"].values())
+                or record["installed"]["model_provider"] != "hormuz_" + record["generation"]
+                or record["installed"]["web_search"] != "disabled"):
+            raise ValueError()
+        table = _document(record["provider_block"])["model_providers"][record["installed"]["model_provider"]]
+        endpoint = urlsplit(table["base_url"])
+        if (endpoint.scheme != "http" or endpoint.hostname != "127.0.0.1" or endpoint.port is None
+                or not 1 <= endpoint.port <= 65535 or endpoint.path != "/v1" or endpoint.query or endpoint.fragment
+                or endpoint.username is not None or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table["env_key"])
+                or record["provider_block"] != _provider_block(record["installed"]["model_provider"],
+                                                              f"http://127.0.0.1:{endpoint.port}", table["env_key"])):
+            raise ValueError()
+        retained = record.get("retained_settings", [])
+        if (not isinstance(retained, list) or len(retained) > 4 or len(set(retained)) != len(retained)
+                or any(value not in fields | {"model_providers." + record["installed"]["model_provider"]} for value in retained)):
+            raise ValueError()
+        return record
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError, ConnectedClientError) as error:
+        raise ConnectedClientError("state_invalid") from error
+
+
+def _lock_descriptor(path):
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    info = os.fstat(descriptor)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o077:
+        os.close(descriptor)
+        raise ConnectedClientError("file_unsafe")
+    return descriptor
+
+
+def _qualify_client(program):
+    environment = {key: value for key, value in os.environ.items()
+                   if key in {"PATH", "HOME", "USER", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT"}}
+    process = subprocess.Popen([program, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                               stdin=subprocess.DEVNULL, env=environment)
+    deadline = time.monotonic() + 3
+    output = bytearray()
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(timeout=remaining):
+                    raise ConnectedClientError("version_unsupported")
+                data = os.read(process.stdout.fileno(), 4097 - len(output))
+                if not data:
+                    break
+                output.extend(data)
+                if len(output) > 4096:
+                    raise ConnectedClientError("version_unsupported")
+        if (process.wait(timeout=max(0.01, deadline - time.monotonic()))
+                or bytes(output).strip() != ("codex-cli " + SUPPORTED_CODEX_VERSION).encode("ascii")):
+            raise ConnectedClientError("version_unsupported")
+    finally:
+        process.stdout.close()
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=1)
 
 
 def _read(path: Path, *, private=False) -> str | None:
@@ -47,7 +156,10 @@ def _read(path: Path, *, private=False) -> str | None:
                 or info.st_mode & (0o077 if private else 0o022) or info.st_size > LIMIT):
             raise ConnectedClientError("file_unsafe")
         try:
-            return stream.read(LIMIT + 1).decode("utf-8")
+            data = stream.read(LIMIT + 1)
+            if len(data) > LIMIT:
+                raise ConnectedClientError("file_unsafe")
+            return data.decode("utf-8")
         except UnicodeError as error:
             raise ConnectedClientError("configuration_invalid") from error
 
@@ -60,6 +172,8 @@ def _directory(path: Path):
 
 
 def _write(path: Path, text: str, *, expected: str | None = None, compare=False):
+    if len(text.encode("utf-8")) > LIMIT:
+        raise ConnectedClientError("file_unsafe")
     descriptor, temporary = tempfile.mkstemp(prefix=".hormuz-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "wb") as stream:
@@ -80,6 +194,22 @@ def _write(path: Path, text: str, *, expected: str | None = None, compare=False)
             os.unlink(temporary)
 
 
+def _require_unmanaged(home):
+    candidates = [home / "requirements.toml", home / "managed_config.toml",
+                  Path("/etc/codex/requirements.toml"), Path("/etc/codex/managed_config.toml")]
+    if sys.platform == "darwin":
+        candidates.extend([Path("/Library/Managed Preferences/com.openai.codex.plist"),
+                           Path("/Library/Managed Preferences") / home.owner() / "com.openai.codex.plist"])
+    for path in candidates:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise ConnectedClientError("managed_configuration_unknown") from error
+        raise ConnectedClientError("managed_configuration")
+
+
 def _document(text):
     try:
         return tomllib.loads(text)
@@ -87,13 +217,69 @@ def _document(text):
         raise ConnectedClientError("configuration_invalid") from error
 
 
+def _document_lines(lines):
+    quote = None
+    for index, line in enumerate(lines):
+        if quote is None:
+            yield index, line
+        offset = 0
+        while offset < len(line):
+            if quote is None:
+                if line[offset] == "#":
+                    break
+                if line[offset] in ("'", '"'):
+                    quote = line[offset] * (3 if line.startswith(line[offset] * 3, offset) else 1)
+                    offset += len(quote)
+                    continue
+            elif quote[0] == '"' and line[offset] == "\\":
+                offset += 2
+                continue
+            elif line.startswith(quote, offset):
+                # Four/five closing quotes include a literal quote or two.
+                size = len(quote)
+                if size == 3:
+                    while offset + size < len(line) and line[offset + size] == quote[0]:
+                        size += 1
+                offset += size
+                quote = None
+                continue
+            offset += 1
+
+
+def _top_level_lines(lines):
+    for index, line in _document_lines(lines):
+        if line.lstrip().startswith("["):
+            return
+        yield index, line
+
+
+def _remove_provider_table(text, record):
+    lines = text.splitlines(keepends=True)
+    positions = []
+    offset = 0
+    for line in lines:
+        positions.append(offset)
+        offset += len(line)
+    tables = [(positions[index], line.strip()) for index, line in _document_lines(lines)
+              if line.lstrip().startswith("[")]
+    header = "[model_providers." + record["installed"]["model_provider"] + "]"
+    for index, (start, label) in enumerate(tables):
+        if label != header:
+            continue
+        end = tables[index + 1][0] if index + 1 < len(tables) else len(text)
+        if text[start:end] != record["provider_block"][1:]:
+            return text, False
+        if start and text[start - 1] == "\n":
+            start -= 1
+        return text[:start] + text[end:], True
+    return text, False
+
+
 def _setting(text, key, value):
     """Edit a simple top-level string token, keeping adjacent comments/bytes."""
     document = _document(text)
     lines = text.splitlines(keepends=True)
-    for index, line in enumerate(lines):
-        if line.lstrip().startswith("["):
-            break
+    for index, line in _top_level_lines(lines):
         match = re.match(r"(\s*" + re.escape(key) + r"\s*=\s*)(\"(?:[^\"\\\n]|\\.)*\"|'[^'\n]*')(.*)$", line.rstrip("\r\n"))
         if match:
             if value is None:
@@ -123,10 +309,10 @@ def _control(record, command):
         if len(data) > 4096:
             raise ValueError()
         value = json.loads(data)
-        if value.get("generation") != record["generation"]:
+        if not isinstance(value, dict) or value.get("generation") != record["generation"] or value.get("router") not in {"ready", "stopping", "unavailable"}:
             raise ValueError()
         return value["router"]
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):
         return "unavailable"
     finally:
         connection.close()
@@ -136,9 +322,10 @@ class ConnectedClientLifetime:
     def __init__(self, home: Path):
         if os.name != "posix":
             raise ConnectedClientError("platform_unsupported")
+        home = home.expanduser().absolute()
         if home.is_symlink():
             raise ConnectedClientError("directory_unsafe")
-        self.home = home.expanduser().absolute().resolve()
+        self.home = home.resolve()
         self.directory = self.home / ".hormuz-router"
         self.record_path = self.directory / "connection.json"
         self.config_path = self.home / "config.toml"
@@ -148,11 +335,8 @@ class ConnectedClientLifetime:
         import fcntl
         _directory(self.home)
         _directory(self.directory)
-        descriptor = os.open(self.directory / "lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        descriptor = _lock_descriptor(self.directory / "lock")
         try:
-            info = os.fstat(descriptor)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o077:
-                raise ConnectedClientError("file_unsafe")
             deadline = time.monotonic() + 12
             while True:
                 try:
@@ -170,23 +354,45 @@ class ConnectedClientLifetime:
         text = _read(self.record_path, private=True)
         if text is None:
             return None
+        return _parse_record(text)
+
+    def _runtime_active(self):
+        import fcntl
+        descriptor = _lock_descriptor(str(self.record_path) + ".runtime-lock")
         try:
-            record = json.loads(text)
-            if record["schema_version"] != 1 or not re.fullmatch("[a-f0-9]{32}", record["generation"]):
-                raise ValueError()
-            return record
-        except (ValueError, KeyError, TypeError) as error:
-            raise ConnectedClientError("state_invalid") from error
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return False
+            except BlockingIOError:
+                return True
+        finally:
+            os.close(descriptor)
 
     def _save(self, record):
-        _write(self.record_path, json.dumps(record, sort_keys=True))
+        text = json.dumps(record, sort_keys=True)
+        _parse_record(text)
+        _write(self.record_path, text)
+
+    def _configuration_state(self, record):
+        if record["phase"] == "disconnected":
+            return "not_owned"
+        try:
+            document = _document(_read(self.config_path) or "")
+            table = _document(record["provider_block"])["model_providers"][record["installed"]["model_provider"]]
+            matches = (all(document.get(key) == value for key, value in record["installed"].items())
+                       and document.get("model_providers", {}).get(record["installed"]["model_provider"]) == table)
+            return "installed" if matches else "changed"
+        except (ConnectedClientError, OSError, AttributeError):
+            return "unavailable"
 
     def _status(self, record):
         if record is None:
-            return {"schema_version": 1, "phase": "disconnected", "router": "stopped", "retained_settings": []}
-        router = _control(record, "status") if record["phase"] != "disconnected" else "stopped"
+            return {"schema_version": 1, "phase": "disconnected", "router": "stopped", "retained_settings": [],
+                    "scope": "codex_user_defaults", "configuration": "not_owned"}
+        router = _control(record, "status") if record["phase"] not in {"disconnected", "restore_required"} else "stopped"
         return {"schema_version": 1, "generation": record["generation"], "phase": record["phase"],
                 "router": router, "client_version": record["client_version"],
+                "scope": "codex_user_defaults", "configuration": self._configuration_state(record),
                 "owned_settings": list(record["installed"]),
                 "retained_settings": record.get("retained_settings", [])}
 
@@ -194,29 +400,62 @@ class ConnectedClientLifetime:
         with self._transaction():
             return self._status(self._record())
 
-    def connect(self, config: GatewayConfig, *, executable: str, actor_id=None):
+    def connect(self, config_path: Path, *, executable: str, actor_id=None, preview=False):
         with self._transaction():
+            _require_unmanaged(self.home)
+            config_path = config_path.expanduser().absolute().resolve()
+            gateway_text = _read(config_path)
+            if gateway_text is None:
+                raise ConnectedClientError("router_configuration_unavailable")
+            config = GatewayConfig.load(config_path)
+            if _read(config_path) != gateway_text:
+                raise ConnectedClientError("setup_changed")
+            digest = hashlib.sha256(gateway_text.encode()).hexdigest()
+            intent = {"gateway_config": str(config_path), "gateway_digest": digest,
+                      "actor_id": actor_id or next(iter(config.identities_by_actor.values())).actor_id}
             existing = self._record()
-            if existing and existing["phase"] == "connected":
-                if _control(existing, "status") != "ready":
-                    raise ConnectedClientError("router_unavailable")
-                return self._status(existing)
-            if existing and existing["phase"] != "disconnected":
-                raise ConnectedClientError("recovery_required")
             program = shutil.which(executable)
             if program is None:
                 raise ConnectedClientError("client_unavailable")
-            probe = subprocess.run([program, "--version"], capture_output=True, text=True, timeout=3,
-                env={key: value for key, value in os.environ.items()
-                     if key in {"PATH", "HOME", "USER", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT"}})
-            if probe.returncode or probe.stdout.strip() != "codex-cli " + SUPPORTED_CODEX_VERSION:
-                raise ConnectedClientError("version_unsupported")
+            _qualify_client(program)
+            if _read(config_path) != gateway_text:
+                raise ConnectedClientError("setup_changed")
+            if existing and existing["phase"] != "disconnected" and any(existing[key] != value for key, value in intent.items()):
+                raise ConnectedClientError("setup_changed")
+            if preview and existing and existing["phase"] in {"prepared", "disconnecting", "restore_required"}:
+                raise ConnectedClientError("recovery_required")
+            if existing and existing["phase"] in {"prepared", "disconnecting"}:
+                if (existing["phase"] == "prepared" and self._configuration_state(existing) == "installed"
+                        and _control(existing, "status") == "ready"):
+                    existing["phase"] = "connected"
+                    self._save(existing)
+                elif self._runtime_active():
+                    raise ConnectedClientError("recovery_required")
+                else:
+                    self._restore(existing)
+                    existing["phase"] = "disconnected"
+                    self._save(existing)
+            if existing and existing["phase"] == "connected":
+                if self._configuration_state(existing) != "installed":
+                    raise ConnectedClientError("configuration_changed")
+                if _control(existing, "status") != "ready":
+                    raise ConnectedClientError("router_unavailable")
+                if preview:
+                    return {"schema_version": 1, "phase": "preview", "scope": "codex_user_defaults",
+                            "client_version": SUPPORTED_CODEX_VERSION, "settings": existing["installed"],
+                            "changes": {}, "router": "ready"}
+                return self._status(existing)
+            if (existing and existing["phase"] != "disconnected") or self._runtime_active():
+                raise ConnectedClientError("recovery_required")
             if config.listen.host != "127.0.0.1" or config.ingress.mode != "local":
                 raise ConnectedClientError("router_configuration_unsupported")
             identity = config.identities_by_actor.get(actor_id) if actor_id else next(iter(config.identities_by_actor.values()))
             if identity is None or not identity.token_env:
                 raise ConnectedClientError("authentication_unsupported")
             policy = PolicyRuntime(config).snapshot_for(identity).effective_policy
+            if ((identity.allowed_clients and "codex" not in identity.allowed_clients)
+                    or (policy.allowed_clients is not None and "codex" not in policy.allowed_clients)):
+                raise ConnectedClientError("client_not_allowed")
             model = next((alias for alias, route in config.model_routes.items() if route.protocol == "openai"
                           and (policy.allowed_models is None or alias in policy.allowed_models)), None)
             if model is None:
@@ -230,24 +469,25 @@ class ConnectedClientLifetime:
             original = {key: document.get(key) for key in installed}
             for key, value in installed.items():
                 text = _setting(text, key, value)
-            block = ('\n[model_providers.' + provider + ']\nname = "Hormuz"\n'
-                     + 'base_url = ' + json.dumps(f'http://127.0.0.1:{config.listen.port}/v1') + '\n'
-                     + 'wire_api = "responses"\nrequires_openai_auth = false\n'
-                     + 'env_key = ' + json.dumps(identity.token_env) + '\n')
+            if any(value is not None and not isinstance(value, str) for value in original.values()):
+                raise ConnectedClientError("configuration_shape_unsupported")
+            block = _provider_block(provider, f"http://127.0.0.1:{config.listen.port}", identity.token_env)
             text += block
             _document(text)
-            control_directory = Path(tempfile.gettempdir()).resolve() / ("hormuz-connected-" + str(os.getuid()))
-            # macOS's user temporary directory may exceed sockaddr_un's limit.
-            if len(str(control_directory)) > 50:
-                control_directory = Path("/tmp").resolve() / ("hormuz-connected-" + str(os.getuid()))
+            control_directory = _control_directory()
             _directory(control_directory)
             record = {"schema_version": 1, "generation": generation, "phase": "prepared",
                       "client_version": SUPPORTED_CODEX_VERSION, "installed": installed, "original": original,
-                      "provider_block": block, "gateway_config": str(config.source_path.resolve()),
+                      "provider_block": block, **intent,
                       "control": str(control_directory / (generation + ".sock"))}
+            if preview:
+                return {"schema_version": 1, "phase": "preview", "scope": "codex_user_defaults",
+                        "client_version": SUPPORTED_CODEX_VERSION, "settings": installed,
+                        "changes": {**{key: "replace" if key in document else "add" for key in installed},
+                                    "provider_table": "add"}, "router": "not_started"}
             self._save(record)
             _write(self.config_path, text, expected=original_text, compare=True)
-            process = subprocess.Popen([sys.executable, "-m", "hormuz.connected_client_runtime", str(self.record_path)],
+            process = subprocess.Popen([sys.executable, "-m", "hormuz.connected_client_runtime", str(self.record_path), generation],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True)
             deadline = time.monotonic() + 5
@@ -275,29 +515,49 @@ class ConnectedClientLifetime:
                 text = _setting(text, key, record["original"][key])
             elif document.get(key) != record["original"][key]:
                 retained.append(key)
-        if record["provider_block"] in text:
-            text = text.replace(record["provider_block"], "", 1)
-        elif record["installed"]["model_provider"] in document.get("model_providers", {}):
+        installed_table = _document(record["provider_block"])["model_providers"][record["installed"]["model_provider"]]
+        current_table = document.get("model_providers", {}).get(record["installed"]["model_provider"])
+        removed = False
+        if current_table == installed_table:
+            text, removed = _remove_provider_table(text, record)
+        if not removed and record["installed"]["model_provider"] in document.get("model_providers", {}):
             retained.append("model_providers." + record["installed"]["model_provider"])
         _document(text)
         _write(self.config_path, text, expected=current, compare=True)
         record["retained_settings"] = retained
 
-    def disconnect(self):
+    def disconnect(self, *, generation=None):
         with self._transaction():
             record = self._record()
+            if generation is not None and (record is None or generation != record["generation"]):
+                raise ConnectedClientError("generation_mismatch")
             if record is None or record["phase"] == "disconnected":
                 return self._status(record)
             record["phase"] = "disconnecting"
             self._save(record)
-            self._restore(record)
+            restoration_error = None
+            try:
+                self._restore(record)
+            except (ConnectedClientError, OSError) as error:
+                restoration_error = error
             _control(record, "stop")
-            deadline = time.monotonic() + 5
-            while _control(record, "status") != "unavailable":
+            deadline = time.monotonic() + 7
+            while self._runtime_active():
                 if time.monotonic() >= deadline:
                     self._save(record)
+                    if restoration_error is not None:
+                        raise restoration_error
                     return self._status(record)
                 time.sleep(0.05)
-            record["phase"] = "disconnected"
+            try:
+                info = Path(record["control"]).lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if stat.S_ISSOCK(info.st_mode) and info.st_uid == os.getuid():
+                    Path(record["control"]).unlink()
+            record["phase"] = "restore_required" if restoration_error is not None else "disconnected"
             self._save(record)
+            if restoration_error is not None:
+                raise restoration_error
             return self._status(record)

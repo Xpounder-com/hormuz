@@ -1,7 +1,7 @@
 """Private generation-authenticated process host for connected-client lifetime."""
 from __future__ import annotations
 
-import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,20 +10,83 @@ import socket
 import sys
 import threading
 
-from .connected_client import _read
+from .connected_client import _read, _parse_record, _lock_descriptor
 from .config import GatewayConfig
 from .server import GatewayServer
 
 
-def main(record_path):
-    record = json.loads(_read(Path(record_path), private=True))
-    lock = os.open(str(record_path) + ".runtime-lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    server = control = None
+class _OwnedGatewayServer(GatewayServer):
+    def __init__(self, config):
+        self._capacity = threading.BoundedSemaphore(8)
+        self._clients = set()
+        self._clients_lock = threading.Lock()
+        super().__init__(config)
+
+    def process_request(self, request, client_address):
+        if not self._capacity.acquire(blocking=False):
+            self.close_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._capacity.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._capacity.release()
+
+    def get_request(self):
+        connection, address = super().get_request()
+        connection.settimeout(10)
+        with self._clients_lock:
+            self._clients.add(connection)
+        return connection, address
+
+    def close_request(self, connection):
+        try:
+            super().close_request(connection)
+        finally:
+            with self._clients_lock:
+                self._clients.discard(connection)
+
+    def cancel_clients(self):
+        with self._clients_lock:
+            connections = tuple(self._clients)
+        for connection in connections:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            connection.close()
+
+
+def main(record_path, generation):
+    import fcntl
+    record = _parse_record(_read(Path(record_path), private=True))
+    if record["generation"] != generation or record["phase"] not in {"prepared", "connected"}:
+        return
+    lock = _lock_descriptor(str(record_path) + ".runtime-lock")
+    server = control = timer = None
     thread = None
     stopping = threading.Event()
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        server = GatewayServer(GatewayConfig.load(record["gateway_config"]))
+        current = _parse_record(_read(Path(record_path), private=True))
+        if current["generation"] != record["generation"] or current["phase"] not in {"prepared", "connected"}:
+            return
+        source = _read(Path(record["gateway_config"]))
+        if source is None or hashlib.sha256(source.encode()).hexdigest() != record["gateway_digest"]:
+            return
+        config = GatewayConfig.load(record["gateway_config"])
+        if _read(Path(record["gateway_config"])) != source:
+            return
+        server = _OwnedGatewayServer(config)
+        current = _parse_record(_read(Path(record_path), private=True))
+        if current["generation"] != record["generation"] or current["phase"] not in {"prepared", "connected"}:
+            return
         control = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         # The lock proves no prior generation host is using this endpoint.
         path = Path(record["control"])
@@ -35,6 +98,9 @@ def main(record_path):
         control.settimeout(0.2)
         thread = threading.Thread(target=server.serve_forever, daemon=False)
         thread.start()
+        current = _parse_record(_read(Path(record_path), private=True))
+        if current["generation"] != generation or current["phase"] not in {"prepared", "connected"}:
+            return
         signal.signal(signal.SIGTERM, lambda *_: stopping.set())
         while not stopping.is_set():
             try:
@@ -47,26 +113,37 @@ def main(record_path):
                     with client.makefile("rb") as stream:
                         data = stream.readline(4097)
                     request = json.loads(data) if len(data) <= 4096 else {}
-                    if request.get("generation") != record["generation"]:
+                    if not isinstance(request, dict) or request.get("command") not in {"stop", "status"} or request.get("generation") != record["generation"]:
                         continue
                     if request.get("command") == "stop":
                         server.begin_drain()
                         stopping.set()
                     client.sendall(json.dumps({"generation": record["generation"],
-                        "router": "stopping" if stopping.is_set() else "ready"}).encode() + b"\n")
+                        "router": "stopping" if stopping.is_set() else "ready" if server.readiness_reason() is None else "unavailable"}).encode() + b"\n")
                 except (OSError, ValueError):
                     continue
     finally:
         if server is not None:
+            def force_stop():
+                # Only this owned host exits; the kernel releases all its sockets
+                # and lease. Existing unknown-work recovery remains authoritative.
+                os._exit(75)
+            timer = threading.Timer(5, force_stop)
+            timer.daemon = True
+            timer.start()
             if thread is not None:
                 server.shutdown()
                 thread.join(timeout=2)
+            server.cancel_clients()
             server.server_close()
         if control is not None:
             control.close()
             Path(record["control"]).unlink(missing_ok=True)
+        if timer is not None:
+            timer.cancel()
+            timer.join(timeout=1)
         os.close(lock)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2])

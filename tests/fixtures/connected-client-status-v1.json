@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "scope": "codex_user_defaults",
+  "phase": "disconnected",
+  "router": "stopped",
+  "configuration": "not_owned",
+  "owned_settings": ["model", "model_provider", "web_search"],
+  "retained_settings": []
+}
