@@ -16,8 +16,18 @@
     "probe_deadline_seconds": 12,
     "route_authorized": false
   },
-  "migration": "Additive CLI commands. History entries v1 remain readable; v2 carries versioned routing evidence.",
-  "rollback": "Disconnect before removing plugin. Export/delete v2 history before downgrade. Staged policy configs never replace originals.",
+  "migration": "Additive CLI commands and nested override receipt. History entry v1 remains readable; v2 carries routing evidence. Complete qualification report v1 requires requalification; malformed reports reject. Qualification v2 binds execution generation.",
+  "rollback": "Disconnect before removing plugin. Export/delete v2 history before downgrade. Older readers reject qualification v2; requalify with the older version. Staged policy configs never replace originals.",
+  "nested_receipts": {
+    "override_diagnosis": {
+      "schema_id": "hormuz.client-overrides",
+      "schema_version": 1,
+      "required_fields": [
+        "supported_client_version", "scope", "project_state", "layers", "conflicts",
+        "launch_state", "effective_routing", "running_session"
+      ]
+    }
+  },
   "required_fields": {
     "hormuz.client-diagnosis": [
       "connection",
@@ -29,6 +39,7 @@
       "task_completion",
       "scope",
       "project_overrides",
+      "override_diagnosis",
       "action"
     ],
     "hormuz.request-explanation": [
@@ -57,7 +68,8 @@
       "scope",
       "route_authorized",
       "runtime_binding",
-      "limits"
+      "limits",
+      "execution"
     ],
     "hormuz.model-recommendation": [
       "model_alias",
@@ -85,5 +97,8 @@
     "hormuz.capability-error": [
       "error"
     ]
+  },
+  "schema_versions": {
+    "hormuz.model-qualification": 2
   }
 }

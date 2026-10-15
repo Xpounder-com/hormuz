@@ -4,7 +4,9 @@
 
 Implementation branch: `mehrdad/plugin-capabilities-20261015`.
 Runtime implementation reviewed and tested at `7e05486ca8892bded89d0107a0cf8637a0304d3c`,
-against baseline `bf0e6c8`. Later tracker/report-only commits do not alter runtime behavior.
+against baseline `bf0e6c8`. This is historical evidence for that revision.
+The subsequent [review-fix qualification](plugin-review-fixes-20261015.md)
+records corrected evidence validation, failover receipts and override diagnosis.
 The plugin bundle is version 0.2.0; the development router package remains
 2.0.0a1, so callers must check command availability rather than version alone.
 

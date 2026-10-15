@@ -12,6 +12,25 @@ routing. An optional `--executable PATH` performs the existing bounded version
 check. Compatibility without that check and model/task readiness are explicitly
 unobserved. The public action is the next recovery step, not permission to edit.
 
+Select the project with `--project DIRECTORY` (default current directory). For
+known launch settings, supply each argument separately, for example:
+
+```sh
+hormuz --config CONFIG client diagnose codex --client-home HOME \
+  --project PROJECT --launch-arg=--profile --launch-arg=review \
+  --launch-arg=--model --launch-arg=ALIAS
+```
+
+Inspection follows the pinned client's profile files (`HOME/NAME.config.toml`),
+project-root markers, per-layer trust, nested project settings, generic `-c`
+values and dedicated flags. Ignored project provider settings are identified.
+`-C`, `--search`, OSS provider selection and remote launch mode are accounted
+for; unknown flags or unsafe/malformed files produce a bounded inspection error.
+Use routing flags only, without prompts or credentials. Supplied arguments are
+never executed or echoed. Source/key names and comparisons explain conflicts;
+actual running-session routing remains unobserved. Diagnosis preserves settings
+and project trust.
+
 Use `history list` to identify a retained opted-in attempt, then
 `hormuz --config CONFIG request explain ENTRY_ID`. New entries expose policy,
 fallback and routing evidence, destination/locality, latency and available usage.
@@ -34,13 +53,17 @@ a blocked unqualified route remains blocked. Explicit actor selection with
 local router with static authentication is supported. No cloud route is selected
 by this operation; stricter local-only scope is checked before any probe.
 
-There are at most four serial requests, zero retries, 128 output tokens per
-request and a 12-second probe deadline. The fixed suite checks a box-count fact,
+There are at most four serial model requests plus two authenticated router-state
+reads, zero retries, 128 output tokens per model request and one 12-second probe
+deadline. The fixed suite checks a box-count fact,
 JSON extraction, an inline function call, and replay of a synthetic tool result.
 These checks are a minimal diagnostic envelope, not a coding benchmark. No tool
 is executed. The report does not authorize new routes or claim endpoint binary
 attestation. User-supplied client/runtime/model files are fingerprinted, not
 assumed to be the running server's assets. Hashing is streamed and bounded.
+The v2 report records the requested alias, destination, generation, upstream
+model and revision. Responses and state before/after the suite must match;
+another local destination serving the same model name cannot establish a pass.
 
 The new report is private and never overwrites a file. A failed report exits 2.
 Passes require all four checks; transport errors, policy denials and incomplete
@@ -56,7 +79,11 @@ hormuz --config CONFIG model recommend --model ALIAS \
 Recommendation makes no model requests. It reports current versus stale local
 user-owned evidence, available system memory and model file size. A model file larger than physical memory is flagged before recommendation. Inference
 memory fit otherwise remains unverified. Reports are not signed and are not admission
-credentials. Requalification is required after relevant setup changes or expiry.
+credentials. Otherwise-current evidence uses at most one authenticated state
+read with a three-second deadline. Requalification is required after relevant
+setup or router-generation changes, expiry, or unavailable state. Complete v1
+reports require requalification; malformed/inconsistent evidence returns a
+fixed error rather than a recommendation.
 
 ## Policy preview and activation
 

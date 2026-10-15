@@ -40,8 +40,13 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
         compatibility = json.loads((Path(__file__).parent / 'fixtures/plugin-capabilities-v1.json').read_text())
         fields = compatibility['required_fields'].get(value.get('schema_id'))
         if fields and 'error' not in value:
-            self.assertEqual(value['schema_version'], compatibility['schema_version'])
+            self.assertEqual(value['schema_version'], compatibility.get('schema_versions', {}).get(value['schema_id'], compatibility['schema_version']))
             self.assertTrue(set(fields) <= set(value), value)
+            for name, contract in compatibility.get('nested_receipts', {}).items():
+                if name in value:
+                    self.assertEqual(value[name]['schema_id'], contract['schema_id'])
+                    self.assertEqual(value[name]['schema_version'], contract['schema_version'])
+                    self.assertTrue(set(contract['required_fields']) <= set(value[name]))
         return value
 
     def test_diagnose_reports_disconnected_and_invalid_configuration_without_mutation(self):
@@ -227,7 +232,8 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
                 self.assertIsNone(unknown_memory['system_memory_bytes'])
                 original_report = report.read_bytes()
                 expired = json.loads(original_report)
-                expired['expires_at'] = 0
+                expired['recorded_at'] -= 8 * 86400
+                expired['expires_at'] = expired['recorded_at'] + 7 * 86400
                 report.write_text(json.dumps(expired))
                 self.assertEqual(self.command('model', 'recommend', '--model', 'local-code', *assets,
                                              '--qualification', str(report))['recommendation'], 'requalify')

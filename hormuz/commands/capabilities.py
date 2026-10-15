@@ -1,6 +1,7 @@
 """Public, content-free plugin operations shared by all skill hosts."""
 import json
 from pathlib import Path
+import subprocess
 
 from ..config import ConfigError
 from ..local_history import LocalHistory, LocalHistoryError
@@ -57,7 +58,8 @@ def run(args):
                   "optimization": "unobserved", "scope": "intercepted_requests_only"}
         print(json.dumps(result, sort_keys=True))
         return 2 if result.get("result") == "failed" else 0
-    except (LocalHistoryError, ConnectedClientError, ConfigError, OSError, ValueError) as error:
+    except (LocalHistoryError, ConnectedClientError, ConfigError, OSError, ValueError,
+            subprocess.SubprocessError) as error:
         code = error.code if isinstance(error, CapabilityError) else "capability_unavailable"
         print(json.dumps({"schema_id": "hormuz.capability-error", "schema_version": 1,
                           "error": {"code": code}}))

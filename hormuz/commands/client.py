@@ -29,6 +29,8 @@ def add_client_commands(
         lifecycle.add_argument("--client-home", help="Isolated Codex home (default CODEX_HOME or ~/.codex)")
         if command == "diagnose":
             lifecycle.add_argument("--executable", help="Optional target executable for a bounded version check")
+            lifecycle.add_argument("--project", help="Project working directory to inspect (default current directory)")
+            lifecycle.add_argument("--launch-arg", action="append", help="One supplied Codex launch argument; repeat with =--flag syntax; never executed")
         if command == "disconnect":
             lifecycle.add_argument("--generation", help="Disconnect only the receipt generation that you own")
         if command in {"connect", "setup"}:
@@ -192,7 +194,7 @@ def run_lifetime(args: argparse.Namespace) -> int:
             result = lifetime.connect(Path(args.config), executable=args.executable, actor_id=args.actor, preview=args.dry_run)
         elif args.client_command == "diagnose":
             from ..plugin_diagnostics import diagnose
-            result = diagnose(lifetime, Path(args.config), args.executable)
+            result = diagnose(lifetime, Path(args.config), args.executable, args.project, args.launch_arg)
         elif args.client_command == "status":
             result = lifetime.status()
         else:

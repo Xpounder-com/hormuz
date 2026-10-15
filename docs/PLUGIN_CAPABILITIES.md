@@ -10,16 +10,25 @@ commands, bounds, activation, output privacy and unsupported scope.
 
 ## Public receipts
 
-New CLI JSON receipts have a schema identifier and integer version 1:
+CLI JSON receipts have a schema identifier and integer version. These receipts
+use version 1 unless stated otherwise:
 
 - `hormuz.client-diagnosis`: connection receipt, compatibility, scope, routing
   mode, qualification count, unobserved model/task state and recovery action.
+  Its additive `override_diagnosis` contains `hormuz.client-overrides` v1:
+  pinned client version, selected-context scope, applied/inactive/ignored layers,
+  conflict source/key names, effective-routing comparisons and explicit
+  unobserved running-session state. Inspection failures retain connection state
+  and return unknown routing with a fixed error code. Values, prompts and
+  credentials are omitted. Existing readers may ignore this nested receipt.
 - `hormuz.request-explanation`: retained metadata, observed policy/fallback,
   explicitly unobserved optimization and retained-opt-in coverage.
 - `hormuz.policy-proposal`: changed public fields, inactive/reconnect state,
   original-source preservation, consent separation and activation next action.
-- `hormuz.model-qualification`: setup fingerprints, suite, bounded check results,
-  narrow task scope, expiry and explicit absence of route authorization.
+- `hormuz.model-qualification` **v2**: setup fingerprints, suite, bounded check
+  results, narrow task scope, expiry, explicit absence of route authorization
+  and authenticated execution identity (requested alias, destination, generation,
+  upstream model and revision). Each probe and the final state must match.
 - `hormuz.model-recommendation`: current/stale evidence, advisory recommendation,
   hardware facts, unverified inference fit, report trust and no downloads.
 - `hormuz.usage-insights`: existing spending coverage plus observed tokens,
@@ -29,12 +38,21 @@ New CLI JSON receipts have a schema identifier and integer version 1:
 Required-field compatibility fixtures live in the plugin-capabilities fixture. New receipt
 versions must be handled explicitly; the commands do not consume arbitrary
 future qualification-report versions. Unknown/missing evidence is not success.
+Qualification readers validate required fields, exact types, check consistency,
+limits, scope, expiry and execution identity. Complete legacy v1 reports remain
+readable but require requalification because they lack execution binding;
+malformed reports return `qualification_invalid`. Router generation changes
+also require requalification. Older readers reject v2 reports, so downgrade
+requires fresh qualification with the older version; reports grant no routing
+authority and are never rewritten automatically.
 
 ## History compatibility
 
 Consent/settings and outer management receipts remain version 1. Newly captured
 history entries use entry version 2, adding `routing_evidence` with its own version
-1: policy action, routing mode/reason and observed policy fallback. The cipher
+1: policy action, routing mode/reason and observed policy or provider-capacity
+fallback. The first failed attempt remains separate from the fallback attempt.
+The cipher
 and key layout are unchanged. Readers accept retained entry v1 without that
 field and entry v2 with it, without rewriting legacy records. Unknown versions
 and mismatched version/field combinations fail closed. Deletion, retention and
@@ -56,3 +74,12 @@ and richer interaction designs remain future product decisions.
 Verification uses the agreed public CLI/connection seam and synthetic client and
 provider boundaries. Live macOS/model quality is not established by synthetic
 workflow tests. A separately scoped smoke test is required for a live claim.
+
+Override inspection follows the supported Codex 0.147.0 configuration loader:
+user defaults, selected profile file, trusted project layers, generic `-c`
+overrides, then dedicated launch flags. Project provider/profile settings are
+ignored by that client. Selected files are bounded and checked for safe local
+ownership; missing profiles, malformed files and unsupported supplied flags
+remain explicit inspection failures. See the pinned
+[loader](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/config/src/loader/mod.rs)
+and [CLI precedence](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/tui/src/lib.rs).

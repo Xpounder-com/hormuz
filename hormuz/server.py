@@ -1023,7 +1023,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                             "schema_version": 1, "policy_action": options["policy_action"],
                             "routing_mode": getattr(self, "_route_admission_mode", "configured"),
                             "routing_reason": headers.get("X-Hormuz-Routing-Reason", "configured_route"),
-                            "fallback": "fallback" in options["policy_action"],
+                            "fallback": (options["failover_applied_reason"] is not None
+                                         or "fallback" in options["policy_action"].split("+")),
                         }
                     self._forward_admitted(**options, history_capture=history_capture)
         except RouteAdmissionError:
