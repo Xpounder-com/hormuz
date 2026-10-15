@@ -334,5 +334,28 @@ two succeeded local attempts, continuation affinity, active/unknown work outcome
 released capacity and zero cloud calls. First disconnect restored settings,
 preserved project trust and completed owned engine/router cleanup. Processes
 were reaped, endpoints closed and frozen inputs remained unchanged. There were
-no inference retries or further episodes. All qualification limits and historical
+no inference retries within that confirmation manifest. All qualification limits and historical
 quality failures above still apply.
+
+### Merge-review journal compatibility confirmation
+
+Final review found that the legacy missing-identifier normalization also accepted
+v2 records. Source `9edd1baebf546b62209692dec4438463c9cb185c` restricts that exception
+to v1 and adds the frozen v2 recovery fixture above. A new manifest bound one
+confirmation episode to that corrected source before execution. Acceptance
+remained unchanged (`a68e717b3cc8ae755d6ba8394e18a12fe13af7a155541cbed5aec9308b28550a`);
+only the driver's manifest path and temporary directory prefix changed.
+
+| Merge-review confirmation input or result | SHA-256 |
+| --- | --- |
+| Separate confirmation driver | `bfe4d34b9e98c9dd53eba00ce2cd9c520c9321c21f2517ad19b1f8d8fe255631` |
+| Frozen corrected-source manifest | `ea1e5884f7643ff73365d8c4bad2ec52358b753b7a51d06f8f7969db049cfcc3` |
+| Assessed corrected-source summary | `e5b31d92767edfb8ba065d75589895970a91effc159b8e84c6b830da959a35ff` |
+
+The single episode passed in **19.200 seconds** with all twelve unchanged
+behavioral predicates, owned cleanup and frozen-input checks passing. It retained
+automatic work binding, two successful local attempts with continuation affinity,
+unknown semantic outcome and zero cloud calls. First disconnect restored settings,
+preserved project trust, closed both endpoints and reaped the owned processes.
+Each frozen manifest ran once without inference retries. Earlier records and all
+qualification limitations remain unchanged.
