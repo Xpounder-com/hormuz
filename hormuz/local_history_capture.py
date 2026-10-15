@@ -12,7 +12,7 @@ import time
 import uuid
 
 from .config import SecretControls
-from .redaction import RedactionError, SecretRedactor
+from .redaction import SecretRedactor
 
 
 LOGGER = logging.getLogger("hormuz")
@@ -22,6 +22,15 @@ MAX_RESPONSE_BYTES = 256 * 1024
 
 def history_redactor(controls: SecretControls, protected_values) -> SecretRedactor:
     return SecretRedactor(replace(controls, mode="redact", builtins=True), tuple(protected_values))
+
+
+def history_consent(history, actor_id):
+    """Snapshot once at authenticated request ingress, including opted-out None."""
+    try:
+        return history.begin(actor_id)
+    except (OSError, ValueError):
+        LOGGER.warning("local_history_capture_unavailable")
+        return None
 
 
 def _texts(content):
@@ -96,9 +105,8 @@ class HistoryCapture:
 
     @classmethod
     def begin(cls, history, *, identity, client, protocol, decision, destination,
-              request_value, redactor):
+              request_value, redactor, generation):
         try:
-            generation = history.begin(identity.actor_id)
             if generation is None:
                 return None
             return cls(history, generation, identity, client, protocol, decision,
@@ -181,7 +189,9 @@ class HistoryCapture:
             reason = "local_compute_unpriced"
         elif not required <= fields:
             reason = "rates_not_configured"
-        elif usage.provider_reported_model is not None and usage.provider_reported_model != self.route.upstream_model:
+        elif not usage.provider_reported_model:
+            reason = "provider_model_unknown"
+        elif usage.provider_reported_model != self.route.upstream_model:
             reason = "provider_model_mismatch"
         elif self.provider_tools or parsed.finance.server_tool_request_count:
             reason = "additional_provider_charges_unknown"

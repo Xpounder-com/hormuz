@@ -31,6 +31,9 @@ retained entries by default; repeat `--id` to select individual entries. It
 requires an explicit new output path, uses owner-only permissions and refuses
 overwrite. The export is decrypted and can contain confidential content. Choose
 a destination on your device that is not synced or shared. Nothing is uploaded.
+The plugin uses metadata for reports and provides local-terminal instructions
+for content review. Reading retained text into another agent's tool results or
+chat can send it to that agent's model; keep that separate from local review.
 
 Disabling stops future entries and invalidates captures already in progress.
 Existing entries remain reviewable. Deleting one or all entries also invalidates

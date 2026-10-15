@@ -12,9 +12,12 @@ import unittest
 from tests import test_execution_destination_workflow as destination_workflow
 
 
+_REQUESTED_MODEL = object()
+
+
 @contextmanager
-def streaming_provider(parts, *, terminal=True, gate=None, protocol="openai", reported_model=None,
-                       server_tool_usage=None):
+def streaming_provider(parts, *, terminal=True, gate=None, protocol="openai", reported_model=_REQUESTED_MODEL,
+                       server_tool_usage=None, status=200):
     """One finite synthetic provider; no external requests or background polling."""
     received = []
 
@@ -35,10 +38,13 @@ def streaming_provider(parts, *, terminal=True, gate=None, protocol="openai", re
             if terminal:
                 events.append({"type": "response.completed", "response": {
                     "id": "history-fixture", "object": "response", "status": "completed",
-                    "model": reported_model or body["model"], "output": [{"type": "message", "role": "assistant",
+                    "model": body["model"] if reported_model is _REQUESTED_MODEL else reported_model,
+                    "output": [{"type": "message", "role": "assistant",
                         "content": [{"type": "output_text", "text": answer}]}],
                     "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
                 }})
+                if reported_model is None:
+                    events[-1]["response"].pop("model")
             if protocol == "anthropic":
                 events = [{"type": "message_start", "message": {
                     "id": "history-anthropic-fixture", "type": "message", "role": "assistant",
@@ -55,7 +61,7 @@ def streaming_provider(parts, *, terminal=True, gate=None, protocol="openai", re
                                              if server_tool_usage is not None else {})}},
                                {"type": "message_stop"}])
             data = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
-            self.send_response(200)
+            self.send_response(status(body) if callable(status) else status)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -162,6 +168,24 @@ class LocalHistoryCaptureWorkflowTests(unittest.TestCase):
                 self.assertEqual(entry["cost_reason"], "provider_model_mismatch")
             self.assertEqual(len(received), 1)
 
+    def test_missing_provider_model_cannot_certify_the_configured_route_price(self):
+        with streaming_provider(["A model identity is missing."], reported_model=None) as (endpoint, received):
+            value = self.cloud_configuration(endpoint)
+            value["model_routes"]["cloud-code"].update(
+                input_cost_per_million=2, output_cost_per_million=3)
+            self.path.write_text(json.dumps(value))
+            self.history("enable")
+            with self.fixture.connected_client(value) as submit:
+                self.assertEqual(submit(request={"model": "cloud-code", "stream": True})["status"], 200)
+                entries = self.history("list")["entries"]
+                self.assertEqual(len(entries), 1)
+                entry = self.history("show", entries[0]["id"])["entry"]
+                self.assertEqual(entry["outcome"], "succeeded")
+                self.assertEqual((entry["input_tokens"], entry["output_tokens"]), (4, 2))
+                self.assertIsNone(entry["estimated_cost_microusd"])
+                self.assertEqual(entry["cost_reason"], "provider_model_unknown")
+            self.assertEqual(len(received), 1)
+
     def test_unfinished_stream_preserves_partial_content_and_unknown_outcome(self):
         with streaming_provider(["A partial answer."], terminal=False) as (endpoint, received):
             value = self.cloud_configuration(endpoint)
@@ -235,6 +259,63 @@ class LocalHistoryCaptureWorkflowTests(unittest.TestCase):
                 self.assertEqual(submit(request={"model": "cloud-code", "stream": True})["status"], 200)
                 self.assertEqual(len(self.history("list")["entries"]), 1)
             self.assertEqual(len(received), 3)
+
+    def test_delete_all_invalidates_the_whole_in_flight_request_including_its_failover(self):
+        gate = threading.Event(), threading.Event()
+        with streaming_provider(["A successful fallback answer."], gate=gate,
+                                status=lambda body: 429 if body["model"] == "cloud-model" else 200) as (endpoint, received):
+            value = self.cloud_configuration(endpoint)
+            value["model_routes"]["cloud-code"].update(
+                input_cost_per_million=2, output_cost_per_million=3,
+                failover_alias="cloud-alternate")
+            value["model_routes"]["cloud-alternate"] = {
+                "protocol": "openai", "upstream_model": "cloud-fallback-model",
+                "input_cost_per_million": 2, "output_cost_per_million": 3}
+            value["policies"]["organization"]["allowed_models"].append("cloud-alternate")
+            self.path.write_text(json.dumps(value))
+            self.history("enable")
+            with self.fixture.connected_client(value) as submit:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    pending = executor.submit(submit, request={"model": "cloud-code", "stream": True})
+                    try:
+                        self.assertTrue(gate[0].wait(timeout=3), "The provider did not receive the initial request")
+                        self.history("delete", "--all")
+                    finally:
+                        gate[1].set()
+                    response = pending.result(timeout=10)
+                    self.assertEqual(response["status"], 200, response)
+                    self.assertIn("x-hormuz-failover", response["headers"])
+                self.assertEqual([body["model"] for body in received],
+                                 ["cloud-model", "cloud-fallback-model"])
+                self.assertEqual(self.history("list")["entries"], [])
+                self.assertTrue(self.history("status")["enabled"])
+
+    def test_enabling_history_during_a_request_does_not_capture_its_later_failover(self):
+        gate = threading.Event(), threading.Event()
+        with streaming_provider(["An answer begun before consent."], gate=gate,
+                                status=lambda body: 429 if body["model"] == "cloud-model" else 200) as (endpoint, received):
+            value = self.cloud_configuration(endpoint)
+            value["model_routes"]["cloud-code"]["failover_alias"] = "cloud-alternate"
+            value["model_routes"]["cloud-alternate"] = {
+                "protocol": "openai", "upstream_model": "cloud-fallback-model"}
+            value["policies"]["organization"]["allowed_models"].append("cloud-alternate")
+            self.path.write_text(json.dumps(value))
+            self.assertFalse(self.history("status")["enabled"])
+            with self.fixture.connected_client(value) as submit:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    pending = executor.submit(submit, request={"model": "cloud-code", "stream": True})
+                    try:
+                        self.assertTrue(gate[0].wait(timeout=3), "The provider did not receive the initial request")
+                        self.history("enable")
+                    finally:
+                        gate[1].set()
+                    response = pending.result(timeout=10)
+                    self.assertEqual(response["status"], 200, response)
+                    self.assertIn("x-hormuz-failover", response["headers"])
+                self.assertEqual([body["model"] for body in received],
+                                 ["cloud-model", "cloud-fallback-model"])
+                self.assertEqual(self.history("list")["entries"], [])
+                self.assertTrue(self.history("status")["enabled"])
 
     def test_anthropic_stream_assembles_text_and_redacts_across_delta_boundaries(self):
         secret = self.fixture.environment["DESTINATION_CLOUD_KEY"]

@@ -119,13 +119,15 @@ inspection. Report configured-price estimates and unknown costs separately,
 with coverage limited to retained opt-in attempts. Local infrastructure cost
 and provider invoices are outside those estimates.
 
-Use `history show ENTRY_ID` only for requested content review. Keep private
-content out of chat reports unless the user asks to include it. For a requested
-export, use `history export --id ENTRY_ID --output /explicit/local/file.json`
+For content review, give the user `history show ENTRY_ID` to run directly in
+their local terminal. Retained text stays out of agent tool results and chat;
+those may be sent to a remote model by the host. For a requested export, use
+`history export --id ENTRY_ID --output /explicit/local/file.json`
 (repeat `--id`, or omit it for all retained entries). Export writes decrypted
 content with owner-only permissions and refuses overwrite. Obtain a destination
 from the user if none is specified; choose a private local path they control.
-No upload, sync or fine-tuning is part of history management.
+Keep exported content out of agent context. No upload, sync or fine-tuning is
+part of history management.
 
 Honor requested deletion using `history delete ENTRY_ID` or
 `history delete --all`; `history disable` stops collection and retains existing

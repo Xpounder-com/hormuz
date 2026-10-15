@@ -84,7 +84,7 @@ from .store_router import (
 )
 from .usage import ResponseUsageParser
 from .local_history import LocalHistory
-from .local_history_capture import HistoryCapture, history_redactor
+from .local_history_capture import HistoryCapture, history_consent, history_redactor
 
 
 LOGGER = logging.getLogger("hormuz")
@@ -665,6 +665,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if identity is None:
             return
         protocol, default_client, account_usage = route
+        self._history_generation = history_consent(self.server.local_history, identity.actor_id)
         try:
             self._proxy_generation(
                 identity=identity,
@@ -1013,7 +1014,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         identity=options["identity"], client=options["client"], protocol=options["protocol"],
                         decision=options["decision"],
                         destination=options["selected_upstream"].destinations.resolve(options["decision"].route),
-                        request_value=options["request_value"], redactor=self.server.history_redactor)
+                        request_value=options["request_value"], redactor=self.server.history_redactor,
+                        generation=self._history_generation)
                     self._forward_admitted(**options, history_capture=history_capture)
         except RouteAdmissionError:
             if not entered and options["attempt"] is not None:
