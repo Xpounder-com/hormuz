@@ -23,16 +23,22 @@ def add_client_commands(
     connect = client_subparsers.add_parser("config", help="Print client configuration for this gateway")
     _client_config_arguments(connect)
 
-    for command in ("connect", "status", "disconnect"):
+    for command in ("setup", "connect", "status", "disconnect"):
         lifecycle = client_subparsers.add_parser(command, help="Manage persistent Codex CLI connection")
         lifecycle.add_argument("client", choices=["codex"])
         lifecycle.add_argument("--client-home", help="Isolated Codex home (default CODEX_HOME or ~/.codex)")
         if command == "disconnect":
             lifecycle.add_argument("--generation", help="Disconnect only the receipt generation that you own")
-        if command == "connect":
+        if command in {"connect", "setup"}:
             lifecycle.add_argument("--executable", default="codex", help="Codex CLI executable to qualify")
             lifecycle.add_argument("--actor", help="Configured actor ID")
             lifecycle.add_argument("--dry-run", action="store_true", help="Preview precise changes without activating routing")
+        if command == "setup":
+            lifecycle.add_argument("--runtime-archive", required=True, help="Existing verified llama.cpp archive")
+            lifecycle.add_argument("--llama-executable", required=True, help="Existing extracted llama-server executable")
+            lifecycle.add_argument("--model-file", required=True, help="Existing verified GGUF model")
+            lifecycle.add_argument("--qualification", help="Reviewed local setup profile (default bundled pinned experiment)")
+            lifecycle.add_argument("--credential-env", default="HORMUZ_GATEWAY_TOKEN", help="Existing local router token environment variable")
 
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
@@ -177,7 +183,10 @@ def run_lifetime(args: argparse.Namespace) -> int:
     from ..connected_client import ConnectedClientError, ConnectedClientLifetime, lifetime_error
     try:
         lifetime = ConnectedClientLifetime(Path(args.client_home or os.environ.get("CODEX_HOME", "~/.codex")))
-        if args.client_command == "connect":
+        if args.client_command == "setup":
+            from ..local_setup import setup_local
+            result = setup_local(lifetime, args)
+        elif args.client_command == "connect":
             result = lifetime.connect(Path(args.config), executable=args.executable, actor_id=args.actor, preview=args.dry_run)
         elif args.client_command == "status":
             result = lifetime.status()

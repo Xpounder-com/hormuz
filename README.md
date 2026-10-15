@@ -30,6 +30,12 @@ the same connection commands. It verifies bundled libraries as well as the
 launcher, preserves external engines, and keeps cleanup pending until its owned
 lease is released. Downloads and model selection remain separate work.
 
+[Shared local setup](docs/SHARED_LOCAL_SETUP.md) now generates the local-only
+configuration from existing verified engine/model files and connects through
+that same owner. The CLI and plugin use `client setup codex`; repeated setup
+reuses the configuration and active generation, and preserves edited files.
+The installed router and existing local token remain prerequisites.
+
 ## Install in your agent
 
 The plugin manifests and shared CLI implementation are included in this source.

@@ -55,6 +55,12 @@ review the host's normal trust prompt.
 
 ## Use and compatibility
 
+For a new local-only connection, the skill now calls
+[`client setup codex`](SHARED_LOCAL_SETUP.md) to generate configuration from
+existing verified runtime/model files. An installed router and local token
+remain prerequisites. User invocation, actual skill activation and supported
+target versions remain separate from package installation.
+
 Start a fresh agent session if the host has not loaded the new skill. Ask
 **“Use Hormuz to check my Codex connection”**, **“Use Hormuz to set up local-only
 routing for Codex”**, or **“Use Hormuz to disconnect Codex and restore settings.”**
