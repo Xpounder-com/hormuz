@@ -235,7 +235,8 @@ class RouteAdmission:
             return decision
         continuation = contains_provider_state(value)
         work_headers = handler.headers.get_all("X-Hormuz-Work-Id", [])
-        if continuation and (handler.server.work_runtime is None or len(work_headers) != 1
+        if continuation and (handler.server.work_runtime is None
+                             or not (len(work_headers) == 1 or getattr(handler, "_work_id", None))
                              or handler.path.split("?", 1)[0] == "/v1/messages/count_tokens"):
             raise RouteAdmissionError("affinity_required", 409)
         from .policy import PolicyEngine

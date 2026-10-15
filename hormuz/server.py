@@ -876,6 +876,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         # Route only the sanitized request, after the same governance checks
         # used by the configured baseline. Selection cannot widen its caps.
+        work_gateway.identify(self, identity, redaction.value,
+            client=client, protocol=protocol, account_usage=account_usage)
         decision = self.server.route_admission.select(self, identity, decision, redaction.value,
             client=client, protocol=protocol, output_field=output_field)
         decision = work_gateway.prepare(self, identity, decision, redaction.value,
