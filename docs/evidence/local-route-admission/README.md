@@ -1,9 +1,8 @@
 # Local route admission validation
 
-Executed source: `95488df72972678f19fea55a76e21e88f28a6888`.
-Parent destination slice: `93eb480518a7f7545545a684e1613b2951864990`.
-The parent test-only fixture correction was merged after execution; all 35
-executed runtime/proof source fingerprints remain unchanged.
+Final reviewed source: `976060881d9caa6e6aee4d52547268b7352998c6`.
+Merged destination prerequisite: `1b433e9e80a5efa9176b80cbc877907e1c946780`.
+The final review fixes and genuine shared proof regeneration are qualified below.
 This is a partial implementation of issue #523. The
 [admission guide](../../LOCAL_ROUTE_ADMISSION.md) states configuration, contracts,
 privacy scope, qualification and rollback.
@@ -34,40 +33,43 @@ system's send buffer. It measures functional deadline/cleanup behavior, not load
 or throughput. Other cases use small batches, at most two concurrent requests,
 finite waits, explicit timeouts and owned-resource cleanup.
 
-## Validation results
+## Final review validation
 
-- Source workflow plus the existing redirect ownership regression: **36 passed**.
-  Command: `python -m unittest tests.test_gateway.GatewayIntegrationTests.test_finance_candidate_redirect_keeps_unknown_outcome_and_budget_hold tests.test_execution_destination_workflow -v`.
-- Final installed wheel, isolated from the source checkout: **35 workflow cases passed**.
-  Command: `python -I -m unittest discover -s tests -p test_execution_destination_workflow.py -v`.
-  All 12 changed runtime module fingerprints matched the source checkout.
-- Final affected gateway/work/client/contract/construction regression set:
-  **157 tests passed with 3 skips**, including every added workflow case.
-  Command: `python -m unittest tests.test_execution_destination_workflow tests.test_work_gateway tests.test_gateway tests.test_client_relay tests.test_cli_runtime_ownership tests.test_contracts tests.test_config_construction_equivalence -v`.
-- Earlier broader work/client/configuration/policy regression run:
-  **364 tests passed with 3 skips**. This preceded the final delivery fixes;
-  it is supporting evidence rather than an exact-final-source result.
-- State-detector repair plus work-runtime regressions: **50 passed**.
-- Parent connection-evidence fixture under the admission source: **17 passed**.
-  Its credential-unavailability case now uses an actual missing startup credential
-  instead of mocking the immutable owner's compatibility property.
-- Isolated wheel build using pinned `setuptools==83.0.0`: passed.
-- Secret inventory and deployment contract: passed. The existing secret inventory
-  remains unchanged: `4a5e1ab3145b89366a2d9b8b7b88736a45cde26157229093edbe44b51d1febcf`.
+Review reproduced and corrected three interactions through the approved workflow:
+
+| Case | Before | After |
+| --- | --- | --- |
+| Local destination base ends in `/v1` | Health requested `/v1/health`, blocking ready inference | Root `/health`; local response; zero cloud calls |
+| Explicit eligible second local model, accounting on/off | First local model replaced the explicit choice | Requested model and destination retained in auto/local-only |
+| Explicit local model receives 429/529 | Narrowed ranking set also removed its capacity alternate | One qualified same-destination alternate; zero cloud calls |
+
+Initial selection and optional AI Work ranking respect the explicit local alias.
+The full admitted set remains authoritative for final dispatch and governed
+operational fallback; an unqualified alternate remains blocked.
+
+- Final source regression: **52 passed**.
+  `python -m unittest -v tests.test_execution_destination_workflow tests.test_work_gateway tests.test_config_construction_equivalence`.
+- Final installed wheel outside the checkout: **38 workflows passed**.
+  `python -I -m unittest discover -s tests -t . -p test_execution_destination_workflow.py -v`.
+- Isolated wheel with repository-pinned `setuptools==83.0.0`: **253 packaged files match source**.
+  SHA-256: `c4410eeefb7f476ba33775b5b58e496116fe783e8bb13f6300f3d4eb90b4ce52`.
+  This is a local validation artifact, not a published release.
+- Secret inventory and deployment contract: passed; the inventory remains
+  `4a5e1ab3145b89366a2d9b8b7b88736a45cde26157229093edbe44b51d1febcf`.
+- Genuine shared evidence: **35 mechanics checks**, 13 synthetic calls;
+  **12 browser checks**, 3 synthetic calls. Both receipts match all **35 source
+  fingerprints**, with zero real provider/payment/external browser calls.
+- Website: **81 tests passed**, default production build and export passed;
+  four public/export artifact pairs match the genuine originals byte for byte.
+  Turbopack requires physical project-local dependencies; a temporary dependency
+  symlink was replaced with a filesystem clone before the passing default build.
 - `git diff --check`: passed.
 
-Wheel SHA-256:
-`87f6e898f0f2c96b795dfa8ef4a619c1b901816e34fb146138647f52e66efa81`.
-It is a local validation artifact, not a published release.
-
-The existing [AI Work mechanics/browser evidence](../ai-work-functional/README.md)
-is regenerated against the same executed source to keep its published source
-fingerprints current. That journey validates existing behavior; the local route
-and privacy evidence is the workflow suite above.
-Regeneration passed 35 mechanics checks, 12 browser checks, 81 website tests and
-the default production build. Both receipts match all 35 executed source hashes;
-four public copies also match the genuine generated artifacts and exported assets
-byte for byte.
+Earlier 157-test affected and 364-test broader runs remain supporting evidence
+from before the final review fixes; they are not exact-final-source results.
+The installed workflows above qualify the final local admission behavior, while
+[shared browser evidence](../ai-work-functional/README.md) qualifies its existing
+journey. It does not establish a new user interface or local model quality.
 
 ## Standards
 
@@ -81,7 +83,8 @@ initial findings.
 Final independent static review found no remaining actionable admission findings.
 Successful continuation evidence, absolute upstream/downstream deadlines,
 header-phase cleanup and fresh-schema recognition resolved the initial findings.
-Standards: **0 remaining**. Spec: **0 remaining**.
+Final review on the source above: Standards **0 remaining**, Spec **0 remaining**.
+The readiness, explicit-selection and governed-fallback findings are resolved.
 
 ## Unproven scope
 
