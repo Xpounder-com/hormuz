@@ -367,7 +367,7 @@ def prepare(handler, identity, decision, request_value, *, client, protocol, out
         if candidate.allowed and candidate.resolved_alias == alias:
             candidates[alias] = candidate
     candidates[decision.resolved_alias] = decision
-    admitted = getattr(handler, "_route_admission_candidates", None)
+    admitted = getattr(handler, "_route_admission_selection_candidates", None)
     if admitted is not None:
         candidates = {alias: candidate for alias, candidate in candidates.items() if alias in admitted}
     if len(candidates) > 100:

@@ -77,7 +77,7 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
 
         def do_GET(self):
             data = json.dumps({"status": "ok" if health_status == 200 else "loading model"}).encode()
-            self.send_response(health_status)
+            self.send_response(health_status if self.path == "/health" else 404)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -255,6 +255,61 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual(len(local_requests), 1)
                 self.assertEqual(cloud_requests, [])
 
+    def test_local_only_uses_root_health_for_v1_destination_base(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local + "/v1", cloud)
+            with self.connected_client(value) as submit:
+                result = submit(request={"input": "Summarize this fixture."})
+                self.assertEqual(result["status"], 200, result)
+                self.assertEqual((result["body"]["output"][0]["content"][0]["text"],
+                                  result["headers"].get("x-hormuz-destination")),
+                                 ("LOCAL_DESTINATION", "local-llama"))
+                self.assertEqual([item["path"] for item in local_requests], ["/v1/responses"])
+                self.assertEqual(cloud_requests, [])
+
+    def test_explicit_eligible_local_model_is_preserved_with_and_without_ai_work(self):
+        with provider("FIRST_LOCAL_DESTINATION") as (local, local_requests), \
+             provider("SECOND_LOCAL_DESTINATION") as (second, second_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            for mode in ("auto", "local_only"):
+                for accounting in (False, True):
+                    with self.subTest(mode=mode, accounting=accounting):
+                        value = self.admission_configuration(local, cloud, mode=mode)
+                        value["upstreams"]["local-second"] = {"protocol": "openai", "base_url": second,
+                            "locality": "local", "authentication": "none"}
+                        value["model_routes"]["second-code"] = {"protocol": "openai", "destination": "local-second",
+                            "upstream_model": "fixture-second-model", "model_revision": "fixture-second-v1",
+                            "capabilities": ["responses", "text"]}
+                        value["policies"]["organization"]["allowed_models"].append("second-code")
+                        value["route_admission"]["local_routes"]["second-code"] = {
+                            "qualification_id": "fixture-q2", "model_revision": "fixture-second-v1",
+                            "max_request_bytes": 4096, "max_output_tokens": 8, "task_types": ["summarization"]}
+                        if accounting:
+                            value["ai_work"] = {"enabled": True, "minimum_samples": 3,
+                                "database": str(self.root / ("work-" + mode + ".sqlite3"))}
+                        with self.connected_client(value) as submit:
+                            headers = {}
+                            if accounting:
+                                job = submit(control=True, path="/work/jobs", request={
+                                    "repository": "example/repository", "task_type": "summarization"})
+                                self.assertEqual(job["status"], 201, job)
+                                headers["X-Hormuz-Work-Id"] = job["body"]["work_id"]
+                            result = submit(headers=headers, request={
+                                "model": "second-code", "input": "Summarize this fixture."})
+                            self.assertEqual(result["status"], 200, result)
+                            self.assertEqual((result["body"]["output"][0]["content"][0]["text"],
+                                              result["headers"].get("x-hormuz-destination"),
+                                              result["headers"].get("x-hormuz-routed-model")),
+                                             ("SECOND_LOCAL_DESTINATION", "local-second", "fixture-second-model"))
+                            if accounting:
+                                status = submit(method="GET", path="/work/jobs/" + job["body"]["work_id"])
+                                self.assertEqual(status["status"], 200, status)
+                                self.assertEqual([candidate["model"] for candidate in status["body"]["routing"]["candidates"]],
+                                                 ["second-code"])
+            self.assertEqual([item["body"]["model"] for item in second_requests], ["fixture-second-model"] * 4)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_auto_routes_qualified_fresh_work_and_keeps_unknown_work_on_baseline(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \
              provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
@@ -395,6 +450,32 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual(result["status"], 429, result)
                 self.assertEqual([item["body"]["model"] for item in local_requests], ["fixture-local-model"])
                 self.assertEqual(cloud_requests, [])
+
+    def test_explicit_local_model_keeps_qualified_same_destination_capacity_alternate(self):
+        for rejection in (429, 529):
+            with self.subTest(rejection=rejection), \
+                 provider("LOCAL_DESTINATION", status=lambda body: rejection if body["model"] == "fixture-local-model" else 200) as (local, local_requests), \
+                 provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+                value = self.admission_configuration(local, cloud)
+                value["ai_work"] = {"enabled": True, "minimum_samples": 3,
+                    "database": str(self.root / ("work-" + str(rejection) + ".sqlite3"))}
+                value["model_routes"]["local-code"]["failover_alias"] = "local-alternate"
+                value["model_routes"]["local-alternate"] = {"protocol": "openai", "destination": "local-llama",
+                    "upstream_model": "fixture-alternate-model", "model_revision": "fixture-weights-v1",
+                    "capabilities": ["responses", "text"]}
+                value["policies"]["organization"]["allowed_models"].append("local-alternate")
+                value["route_admission"]["local_routes"]["local-alternate"] = dict(
+                    value["route_admission"]["local_routes"]["local-code"])
+                with self.connected_client(value) as submit:
+                    result = submit(request={"model": "local-code", "input": "Summarize this fixture."})
+                    self.assertEqual(result["status"], 200, result)
+                    self.assertEqual((result["headers"].get("x-hormuz-destination"),
+                                      result["headers"].get("x-hormuz-routed-model")),
+                                     ("local-llama", "fixture-alternate-model"))
+                    self.assertIn("x-hormuz-failover", result["headers"])
+                    self.assertEqual([item["body"]["model"] for item in local_requests],
+                                     ["fixture-local-model", "fixture-alternate-model"])
+                    self.assertEqual(cloud_requests, [])
 
     def test_final_admission_bounds_the_body_after_work_preparation(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \

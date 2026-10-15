@@ -186,7 +186,9 @@ class RouteAdmission:
             if previous and time.monotonic() - previous[0] < 5:
                 return previous[1]
             ready = False
-            request = urllib.request.Request(destination.upstream.base_url.rstrip("/") + "/health")
+            # The optional /v1 inference prefix does not scope runtime health.
+            base = destination.upstream.base_url.rstrip("/").removesuffix("/v1")
+            request = urllib.request.Request(base + "/health")
             try:
                 with _open_local_upstream(request, timeout=2, absolute_timeout=2) as response:
                     data = response.read(4097)
@@ -200,6 +202,7 @@ class RouteAdmission:
 
     def select(self, handler, identity, decision, value, *, client, protocol, output_field):
         handler._route_admission_candidates = None
+        handler._route_admission_selection_candidates = None
         handler._route_admission_headers = {}
         requested = handler.headers.get_all("X-Hormuz-Routing-Mode", [])
         if len(requested) > 1 or requested and requested[0] != "local_only":
@@ -247,13 +250,20 @@ class RouteAdmission:
         if continuation and mode == "auto" and self.destinations.resolve(decision.route).locality == "cloud":
             candidates[decision.resolved_alias] = decision
         if candidates:
-            selected = next(iter(candidates.values()))
+            selection_candidates = candidates
+            if not continuation and decision.requested_model in candidates:
+                # Initial ranking respects an explicit qualified local choice;
+                # dispatch retains admitted operational capacity alternates.
+                selection_candidates = {decision.requested_model: candidates[decision.requested_model]}
+            selected = next(iter(selection_candidates.values()))
             reason = "qualified_local"
         elif mode == "local_only" or self.destinations.resolve(decision.route).locality == "local":
             raise RouteAdmissionError("local_route_unavailable", 503)
         else:
             selected, candidates, reason = decision, {decision.resolved_alias: decision}, "permitted_baseline"
+            selection_candidates = candidates
         handler._route_admission_candidates = candidates
+        handler._route_admission_selection_candidates = selection_candidates
         handler._route_admission_headers = {"X-Hormuz-Routing-Mode": mode,
                                             "X-Hormuz-Routing-Reason": reason}
         if selected.resolved_alias in self.qualifications:
