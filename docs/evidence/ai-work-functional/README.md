@@ -7,9 +7,9 @@ savings, model quality, live payments, a signed distribution or production
 deployment readiness.
 
 The bounded gateway proof and browser journey were regenerated from source
-`95488df72972678f19fea55a76e21e88f28a6888` after adding automatic routing and
+`976060881d9caa6e6aee4d52547268b7352998c6` after adding automatic routing and
 hard local-only admission and tracking their executed source in the proof manifests. The encoded
-recording lasts 27.24 seconds,
+recording lasts 27.12 seconds,
 including 24 seconds of presentation holds across 15 verified visible states.
 These holds are not latency measurements. Their 35 source hashes identify the
 executed runtime. The package and installed SDK receipts retain their earlier
