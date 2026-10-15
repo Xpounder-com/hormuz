@@ -202,7 +202,14 @@ def inspect_overrides(home, project, arguments=None):
         raise ValueError('trust_invalid')
     for index, directory in enumerate(directories):
         path = directory / '.codex/config.toml'
-        if path.parent.resolve() == home.resolve() or not path.exists() and not path.is_symlink():
+        if not path.parent.exists() and not path.parent.is_symlink():
+            continue
+        # Optional files may be absent, but a present directory alias must
+        # resolve. Non-strict resolution hides symlink loops on Python 3.13+.
+        parent = path.parent.resolve(strict=True)
+        if not parent.is_dir():
+            raise ValueError('project_configuration_directory_invalid')
+        if parent == home.resolve() or not path.exists() and not path.is_symlink():
             continue
         lookup = [key for candidate in (directory, root, repository)
                   for key in (str(candidate.resolve()), str(candidate))]

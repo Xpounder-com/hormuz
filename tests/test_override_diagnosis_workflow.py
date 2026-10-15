@@ -289,6 +289,32 @@ class OverrideDiagnosisWorkflowTests(unittest.TestCase):
             self.assertEqual(result['project_overrides'], 'invalid')
             self.assertEqual(result['action'], 'inspect_project_configuration')
 
+    def test_dangling_configuration_directory_alias_is_not_clean_routing(self):
+        with self.fixture.configured():
+            self.trust()
+            self.fixture.command('connect')
+            (self.project / '.codex').rmdir()
+            (self.project / '.codex').symlink_to('PRIVATE_MISSING_DIRECTORY', target_is_directory=True)
+            result = self.diagnose()
+            self.assertEqual(result['connection']['phase'], 'connected')
+            self.assertEqual(result['project_overrides'], 'invalid')
+            self.assertEqual(result['action'], 'inspect_project_configuration')
+
+    def test_safe_configuration_directory_alias_is_inspected(self):
+        with self.fixture.configured():
+            self.trust()
+            self.fixture.command('connect')
+            directory = self.project / 'PRIVATE_CONFIGURATION_DIRECTORY'
+            directory.mkdir(mode=0o700)
+            (directory / 'config.toml').write_text('model = "PRIVATE_ALIASED_MODEL"\n')
+            (self.project / '.codex').rmdir()
+            (self.project / '.codex').symlink_to(directory, target_is_directory=True)
+            result = self.diagnose()
+            self.assertEqual(result['connection']['phase'], 'connected')
+            self.assertEqual(result['project_overrides'], 'detected')
+            self.assertEqual(result['override_diagnosis']['effective_routing']['model'], 'overridden')
+            self.assertEqual(result['action'], 'inspect_project_overrides')
+
     def test_invalid_typed_project_trust_preserves_connection_diagnosis(self):
         with self.fixture.configured():
             self.fixture.command('connect')
