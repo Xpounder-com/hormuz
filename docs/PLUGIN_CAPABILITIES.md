@@ -40,7 +40,7 @@ field and entry v2 with it, without rewriting legacy records. Unknown versions
 and mismatched version/field combinations fail closed. Deletion, retention and
 exports apply to both formats. Exported entries retain their entry version.
 
-Before downgrade, export/delete version 2 entries using this version. Older
+Before downgrade, disconnect or disable capture, then export/delete version 2 entries using this version. Older
 readers reject them without rewriting or misinterpreting them. Disabling capture
 alone does not remove v2 entries. No migration from external histories occurs.
 
