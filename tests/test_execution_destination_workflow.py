@@ -231,6 +231,41 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                     self.assertNotIn(field, state["body"])
             self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
 
+    def test_connected_client_status_only_offers_clients_permitted_to_its_identity(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            value["upstreams"]["anthropic"] = {"base_url": cloud, "api_key_env": "DESTINATION_CLOUD_KEY"}
+            value["model_routes"]["cloud-claude"] = {"protocol": "anthropic", "upstream_model": "fixture-cloud-model"}
+            value["policies"]["organization"].update(allowed_clients=["codex", "claude-code"],
+                                                       allowed_models=["local-code", "cloud-claude"])
+            with self.connected_client(value) as submit:
+                self.assertEqual(submit()["status"], 200)
+                state = submit(method="GET", path="/work/state")
+                self.assertEqual(state["status"], 200)
+                self.assertEqual([(choice["client"], choice["model"])
+                                  for choice in state["body"]["onboarding"]["choices"]],
+                                 [("codex", "local-code")])
+            self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
+
+    def test_connected_client_status_reports_routes_when_models_are_unrestricted(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            del value["policies"]["organization"]["allowed_models"]
+            with self.connected_client(value) as submit:
+                self.assertEqual(submit()["status"], 200)
+                state = submit(method="GET", path="/work/state")
+                self.assertEqual(state["status"], 200)
+                self.assertEqual([route["model"] for route in state["body"]["connection"]["routes"]],
+                                 ["local-code"])
+                self.assertEqual([(choice["client"], choice["model"])
+                                  for choice in state["body"]["onboarding"]["choices"]],
+                                 [("codex", "local-code")])
+            self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
+
     def test_retired_control_post_closes_its_unread_body_without_dispatching_work(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \
              provider("CLOUD_DESTINATION") as (cloud, cloud_requests):

@@ -76,8 +76,8 @@ The integration tests assert both sides of the boundary:
 
 ```bash
 python3 -m unittest -v \
-  tests.test_gateway.GatewayIntegrationTests.test_secret_is_redacted_before_provider_and_audited \
-  tests.test_gateway.GatewayIntegrationTests.test_secret_deny_mode_blocks_provider_and_records_metadata
+  tests.test_execution_destination_workflow.ExecutionDestinationWorkflowTests.test_connected_client_preserves_secret_redaction_and_denial_before_local_egress
 ```
 
-The first test proves the original credential does not reach the upstream request. The second proves deny mode makes no upstream call.
+The workflow proves that redaction keeps the original credential out of the
+upstream request and that deny mode makes no upstream call.

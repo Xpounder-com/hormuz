@@ -113,9 +113,8 @@ def _state(handler, identity):
     extended = handler.server.destinations.metadata_enabled
     state["schema_version"] = 3
     routes = []
-    for alias in policy.allowed_models or ():
-        route = handler.server.config.model_routes.get(alias)
-        if route is None:
+    for alias, route in handler.server.config.model_routes.items():
+        if policy.allowed_models is not None and alias not in policy.allowed_models:
             continue
         destination = handler.server.destinations.describe(route)
         routes.append({"model": alias, **(destination if extended else {
@@ -125,10 +124,13 @@ def _state(handler, identity):
         "credential_location": "router", "coverage": "only_authenticated_intercepted_model_requests"}
     # Existing receipt readers use these choices. Eligibility describes configured
     # destinations; it is not a claim of real model or subscription qualification.
-    state["onboarding"] = {"choices": [{**route,
-        "client": "codex" if route["protocol"] == "openai" else "claude-code"}
-        for route in routes if route["eligible"] and (policy.allowed_clients is None or
-        ("codex" if route["protocol"] == "openai" else "claude-code") in policy.allowed_clients)]}
+    choices = []
+    for route in routes:
+        client = "codex" if route["protocol"] == "openai" else "claude-code"
+        if (route["eligible"] and (not identity.allowed_clients or client in identity.allowed_clients)
+                and (policy.allowed_clients is None or client in policy.allowed_clients)):
+            choices.append({**route, "client": client})
+    state["onboarding"] = {"choices": choices}
     return state
 
 
