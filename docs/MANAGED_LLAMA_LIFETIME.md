@@ -220,3 +220,86 @@ The historical real-model cases and the automatic-binding deterministic native
 case remain distinct evidence. Their retained quality failures are unchanged.
 This slice does not qualify Codex desktop, Claude, another operating system or
 model, plugin installation, subscription authentication or paid cloud fallback.
+
+## Bounded real managed-lifetime qualification — October 15, 2026
+
+One real Codex → Hormuz → llama.cpp supplied-script case passed on clean source
+`d41eac453dbab7d1cc49f13409d9be62937a22f4`. Acceptance, the driver and a manifest
+pinning every runtime Python file were frozen before execution. The driver
+required that explicit clean commit and an exclusive started marker permitted
+only one episode. The frozen inputs remained unchanged afterward. This case
+combines product-owned engine lifetime with automatic conversation binding; it
+does not replace the earlier manual-lifetime or deterministic protocol records.
+
+The existing llama.cpp archive and Qwen model pins in the table above were used
+without downloads. Shared `client connect` verified the archive, extracted
+runtime and model, and its guardian verified them again before execution.
+The driver started neither the engine nor a separate router directly: both
+belonged to the shared connected-client implementation. The selected engine
+endpoint was initially closed. No work was pre-created, no manual work-ID
+header was configured, and native request/stream retry counts were zero.
+
+| Frozen input or result | SHA-256 |
+| --- | --- |
+| Codex CLI 0.147.0 executable, Darwin arm64 | `19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37` |
+| Original Codex 0.147.0 archive | `75984b81f92a71b0c0f4b3b5cad80e5c57177e4d8c8b4b1e13db703b20dc4358` |
+| llama.cpp b11617 extracted launcher, verified with its complete archive | `1bf5602a2be50097c44282a6ecc63234d94ee8f96d39fd45fed6eff4e74b6b41` |
+| Qualification driver | `02fbfc68f7a2ea6b020d65bc033699cc564bf8538cfa2fc0b95304f162744464` |
+| Frozen acceptance | `a68e717b3cc8ae755d6ba8394e18a12fe13af7a155541cbed5aec9308b28550a` |
+| Frozen source/input manifest | `9ff9b07579884ef7e217965a9171e1906d7b8617d2ebb2625d95668bea763493` |
+| Assessed result summary | `7622ccd6a0ef61aae507ee3804ff5a3ebd54be27db95618f29412867b959b81d` |
+
+The Codex release source pin is
+`be6e8eac029b183056b7e4402879f15d2c85f61b`. The archive hash records the existing
+acquisition pin; this episode checked the executable hash and exact CLI version
+rather than acquiring or extracting Codex again. The engine/model pins identify
+the same b11617 / Qwen3-4B-Q4_K_M combination as the historical qualification.
+Raw events, generated identifiers, private homes and temporary configuration
+remain outside the repository; the table publishes only immutable identifiers
+and content hashes.
+
+The disposable project began with `multiply(a, b)` returning `a + b`. The exact
+prior supplied-script prompt asked Codex to execute this command once through
+`exec_command`, then report the result without other commands:
+
+```sh
+python3 -c "from pathlib import Path; fixture = Path('fixture.py'); fixture.write_text(fixture.read_text().replace('return a + b', 'return a * b')); from fixture import multiply; assert multiply(7,5)==35; assert multiply(-2,3)==-6; print('HORMUZ_SCRIPT_PASSED')"
+```
+
+The one native episode took **19.998 seconds**, excluding managed startup and
+disconnect. It exited zero and emitted exactly one completed sandboxed command
+with exit zero, both prescribed assertions and `HORMUZ_SCRIPT_PASSED` on an
+output line. The project persisted the exact expected multiplication fix.
+The final answer's prose or format was not an acceptance criterion.
+
+Public receipts showed exactly one automatically bound work item and exactly
+two succeeded local attempts for the pinned Qwen alias, sharing one destination
+fingerprint. The second chronological attempt used `session_affinity`. Work
+remained `active` with `outcome_evidence: unknown`; successful inference did not
+invent semantic completion. Local capacity returned to zero and the configured
+cloud trap received zero requests. Managed connect and later status both
+reported version 2 with `local_runtime` owned/ready. The installed provider
+configuration remained unchanged during native execution.
+
+The first disconnect completed without cleanup retries. Its version-2 receipt
+reported `disconnected`, router `stopped`, configuration `not_owned`,
+`local_runtime` owned/stopped and no retained settings. Original preferences
+were restored, the generated provider was removed, and native project trust
+was both observed and preserved. Engine and router endpoints were closed;
+the native child and bounded cloud-trap server were reaped. The driver did not
+discover or terminate an engine by PID or port, delete an ownership journal, or
+modify the acceptance to obtain a pass.
+
+The case retained the 180-second native deadline, 120-second lifecycle command
+deadline, eight-second public HTTP timeout, 1 MiB public/native output bounds,
+two-handler cloud trap, 65,536-byte admission limit and 512-token output cap.
+All twelve behavioral predicates, cleanup predicates and frozen-input checks
+passed in that single episode.
+
+This demonstrates supplied-script execution and managed process ownership on
+one pinned macOS arm64 combination. The earlier literal-only final-format failure
+and autonomous arithmetic-repair failure remain unchanged historical results;
+neither is converted into a quality pass. Autonomous coding quality, subsequent
+turns, resume, fork, desktop clients, an operating-system matrix, subscription
+access, plugin activation and automated engine/model acquisition remain outside
+this qualification.
