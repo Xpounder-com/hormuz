@@ -126,3 +126,8 @@ and [managed configuration](https://developers.openai.com/codex/enterprise/manag
 explain why this user-default scope cannot promise control over every app or
 project request. See the [qualification evidence](evidence/connected-client-lifetime/README.md)
 for the exact synthetic checks and remaining support work.
+
+The version probe reads only its seven named process-context variables; gateway
+and provider credentials are excluded. The schema1 secret inventory adds only
+non-secret client-home/probe-context reads, with no new secret purpose or custody
+mode. Installed-package and source inventory validation must both pass.

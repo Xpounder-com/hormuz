@@ -110,8 +110,11 @@ def _lock_descriptor(path):
 
 
 def _qualify_client(program):
-    environment = {key: value for key, value in os.environ.items()
-                   if key in {"PATH", "HOME", "USER", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT"}}
+    environment = {}
+    for variable in ("PATH", "HOME", "USER", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT"):
+        value = os.environ.get(variable)
+        if value is not None:
+            environment[variable] = value
     process = subprocess.Popen([program, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                stdin=subprocess.DEVNULL, env=environment)
     deadline = time.monotonic() + 3

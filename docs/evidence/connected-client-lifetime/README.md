@@ -32,8 +32,8 @@ Affected regression command:
 python -m unittest tests.test_connected_client_lifetime_workflow tests.test_cli tests.test_cli_client_ownership tests.test_cli_runtime_ownership tests.test_client_relay tests.test_personal_optimizer tests.test_execution_destination_workflow tests.test_work_transport tests.test_portfolio_intelligence_contract tests.test_deployment_contract -v
 ```
 
-256 tests passed,3 skipped: the inherited optional OS-keyring/real-client checks
-remain unqualified. The preceding admission CI fixture corrections change no
+256 tests passed,3 skipped: the opt-in real-client checks (context Codex0.147.0, Personal Codex0.148.0 and
+Aider0.86.2) remain unqualified. The preceding admission CI fixture corrections change no
 production source: current-manifest negative cases, schema declaration affinity
 expectation and the intentionally stalled client's bounded close behavior.
 
