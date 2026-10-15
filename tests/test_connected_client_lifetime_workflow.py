@@ -17,6 +17,7 @@ import selectors
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import unittest
+import zlib
 
 from tests import test_execution_destination_workflow as destination_workflow
 from hormuz.contracts import ContractValidationError, validate_contract
@@ -284,6 +285,45 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 failure = self.command("connect", check=False)
                 self.assertEqual((failure.returncode, json.loads(failure.stderr)["error"]["code"]),
                                  (2, "connected_client_runtime_invalid"))
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertFalse((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
+    def test_truncated_compressed_archive_is_denied_without_private_traceback(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            value, _, engine = self.managed_configuration(external)
+            archive = Path(value["managed_llama"]["runtime_archive"])
+            archive.write_bytes(gzip.compress(b"synthetic truncated archive")[:10])
+            value["managed_llama"]["runtime_sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+            self.path.write_text(json.dumps(value))
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual(failure.returncode, 2, failure.stderr)
+                self.assertEqual(json.loads(failure.stderr)["error"]["code"], "connected_client_runtime_invalid")
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertFalse((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
+    def test_corrupt_deflate_archive_is_denied_without_private_traceback(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            value, _, engine = self.managed_configuration(external)
+            archive = Path(value["managed_llama"]["runtime_archive"])
+            member = tarfile.TarInfo("llama-server")
+            member.size = 131072
+            compressor = zlib.compressobj(wbits=31)
+            compressed = compressor.compress(member.tobuf(format=tarfile.USTAR_FORMAT) + b"x" * 65536)
+            # Header parsing succeeds; corruption occurs during member reading.
+            archive.write_bytes(compressed + compressor.flush(zlib.Z_SYNC_FLUSH) + b"\x07" + b"\0" * 8)
+            value["managed_llama"]["runtime_sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+            self.path.write_text(json.dumps(value))
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual(failure.returncode, 2, failure.stderr)
+                self.assertEqual(json.loads(failure.stderr)["error"]["code"], "connected_client_runtime_invalid")
                 self.assertEqual(self.client("inspect")["model"], "original-model")
                 self.assertFalse((engine / "stopped").exists())
                 self.assertEqual(requests, [])

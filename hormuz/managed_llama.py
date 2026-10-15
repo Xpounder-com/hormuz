@@ -19,6 +19,7 @@ import sys
 import tarfile
 import time
 from urllib.parse import urlsplit
+import zlib
 
 
 class ManagedLlamaError(RuntimeError):
@@ -43,7 +44,7 @@ class ManagedLlamaProfile:
     def verify(self):
         try:
             self._verify_files()
-        except (OSError, ValueError, tarfile.TarError):
+        except (OSError, ValueError, EOFError, tarfile.TarError, zlib.error):
             raise ManagedLlamaError("runtime_invalid") from None
 
     def _verify_files(self):
