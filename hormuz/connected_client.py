@@ -396,6 +396,13 @@ class ConnectedClientLifetime:
         finally:
             os.close(descriptor)
 
+    def cloud_readiness(self, config_path: Path, *, executable="codex", actor_id=None, surface="cli"):
+        """Inspect the same setup boundary without entering a write transaction."""
+        from .cloud_readiness import inspect_cloud_readiness
+
+        return inspect_cloud_readiness(self.home, config_path, executable=executable,
+                                       actor_id=actor_id, surface=surface)
+
     def _record(self):
         text = _read(self.record_path, private=True)
         if text is None:
