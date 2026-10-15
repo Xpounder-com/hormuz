@@ -26,26 +26,28 @@ from urllib.parse import urlsplit
 from .client_versions import SUPPORTED_CODEX_VERSION
 from .config import GatewayConfig
 from .compaction_formats import strict_json_loads
+from .contracts import (
+    CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
+    CONNECTED_CLIENT_ERROR_SCHEMA_ID, CONNECTED_CLIENT_ERROR_ACTIONS, contract_envelope,
+)
 from .policy_runtime import PolicyRuntime
 
 LIMIT = 128 * 1024
+JOURNAL_SCHEMA_ID = "hormuz.connected-client-journal"
+JOURNAL_SCHEMA_VERSION = 1
 
 
 class ConnectedClientError(RuntimeError):
     def __init__(self, code: str):
         self.code = "connected_client_" + code
-        self.action = {
-            "version_unsupported": "use_pinned_client_or_disconnect",
-            "recovery_required": "disconnect_then_connect",
-            "setup_changed": "disconnect_then_connect",
-            "router_unavailable": "disconnect_then_connect",
-            "configuration_changed": "inspect_settings_then_disconnect",
-            "configuration_invalid": "repair_configuration_then_disconnect",
-            "state_invalid": "preserve_journal_and_restore_manually",
-            "generation_mismatch": "inspect_current_generation",
-            "managed_configuration": "use_managed_setup",
-        }.get(code, "inspect_status_and_configuration")
+        self.action = CONNECTED_CLIENT_ERROR_ACTIONS[self.code]
         super().__init__(self.code)
+
+
+def lifetime_error(error):
+    code = error.code if isinstance(error, ConnectedClientError) else "connected_client_setup_unavailable"
+    return contract_envelope(CONNECTED_CLIENT_ERROR_SCHEMA_ID,
+        {"error": {"code": code, "action": CONNECTED_CLIENT_ERROR_ACTIONS[code]}})
 
 
 def _control_directory():
@@ -62,11 +64,17 @@ def _provider_block(provider, origin, credential_env):
 def _parse_record(text):
     try:
         record = strict_json_loads(text)
-        required = {"schema_version", "generation", "phase", "client_version", "installed", "original",
+        # The unreleased first v1 journal omitted its identifier. Preserve its
+        # owned generation and recovery intent; the next normal save completes
+        # the envelope rather than discarding or replacing the installation.
+        if isinstance(record, dict) and "schema_id" not in record:
+            record = {"schema_id": JOURNAL_SCHEMA_ID, **record}
+        required = {"schema_id", "schema_version", "generation", "phase", "client_version", "installed", "original",
                     "provider_block", "gateway_config", "gateway_digest", "actor_id", "control"}
         if (not isinstance(record, dict) or not required <= record.keys()
                 or record.keys() - required - {"retained_settings"}
-                or type(record["schema_version"]) is not int or record["schema_version"] != 1
+                or record["schema_id"] != JOURNAL_SCHEMA_ID
+                or type(record["schema_version"]) is not int or record["schema_version"] != JOURNAL_SCHEMA_VERSION
                 or not isinstance(record["generation"], str) or not re.fullmatch("[a-f0-9]{32}", record["generation"])
                 or record["phase"] not in {"prepared", "connected", "disconnecting", "restore_required", "disconnected"}
                 or not isinstance(record["client_version"], str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", record["client_version"])
@@ -372,8 +380,7 @@ class ConnectedClientLifetime:
             os.close(descriptor)
 
     def _save(self, record):
-        text = json.dumps(record, sort_keys=True)
-        _parse_record(text)
+        text = json.dumps(_parse_record(json.dumps(record)), sort_keys=True)
         _write(self.record_path, text)
 
     def _configuration_state(self, record):
@@ -390,14 +397,16 @@ class ConnectedClientLifetime:
 
     def _status(self, record):
         if record is None:
-            return {"schema_version": 1, "phase": "disconnected", "router": "stopped", "retained_settings": [],
-                    "scope": "codex_user_defaults", "configuration": "not_owned"}
+            return contract_envelope(CONNECTED_CLIENT_STATUS_SCHEMA_ID,
+                {"phase": "disconnected", "router": "stopped", "retained_settings": [],
+                 "scope": "codex_user_defaults", "configuration": "not_owned"})
         router = _control(record, "status") if record["phase"] not in {"disconnected", "restore_required"} else "stopped"
-        return {"schema_version": 1, "generation": record["generation"], "phase": record["phase"],
+        return contract_envelope(CONNECTED_CLIENT_STATUS_SCHEMA_ID,
+                {"generation": record["generation"], "phase": record["phase"],
                 "router": router, "client_version": record["client_version"],
                 "scope": "codex_user_defaults", "configuration": self._configuration_state(record),
                 "owned_settings": list(record["installed"]),
-                "retained_settings": record.get("retained_settings", [])}
+                "retained_settings": record.get("retained_settings", [])})
 
     def status(self):
         with self._transaction():
@@ -444,9 +453,10 @@ class ConnectedClientLifetime:
                 if _control(existing, "status") != "ready":
                     raise ConnectedClientError("router_unavailable")
                 if preview:
-                    return {"schema_version": 1, "phase": "preview", "scope": "codex_user_defaults",
+                    return contract_envelope(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
+                           {"phase": "preview", "scope": "codex_user_defaults",
                             "client_version": SUPPORTED_CODEX_VERSION, "settings": existing["installed"],
-                            "changes": {}, "router": "ready"}
+                            "changes": {}, "router": "ready"})
                 return self._status(existing)
             if (existing and existing["phase"] != "disconnected") or self._runtime_active():
                 raise ConnectedClientError("recovery_required")
@@ -479,15 +489,17 @@ class ConnectedClientLifetime:
             _document(text)
             control_directory = _control_directory()
             _directory(control_directory)
-            record = {"schema_version": 1, "generation": generation, "phase": "prepared",
+            record = {"schema_id": JOURNAL_SCHEMA_ID, "schema_version": JOURNAL_SCHEMA_VERSION,
+                      "generation": generation, "phase": "prepared",
                       "client_version": SUPPORTED_CODEX_VERSION, "installed": installed, "original": original,
                       "provider_block": block, **intent,
                       "control": str(control_directory / (generation + ".sock"))}
             if preview:
-                return {"schema_version": 1, "phase": "preview", "scope": "codex_user_defaults",
+                return contract_envelope(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
+                       {"phase": "preview", "scope": "codex_user_defaults",
                         "client_version": SUPPORTED_CODEX_VERSION, "settings": installed,
                         "changes": {**{key: "replace" if key in document else "add" for key in installed},
-                                    "provider_table": "add"}, "router": "not_started"}
+                                    "provider_table": "add"}, "router": "not_started"})
             self._save(record)
             _write(self.config_path, text, expected=original_text, compare=True)
             process = subprocess.Popen([sys.executable, "-m", "hormuz.connected_client_runtime", str(self.record_path), generation],

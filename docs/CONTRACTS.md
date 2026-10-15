@@ -8,7 +8,7 @@ Print the machine-readable manifest from any installed core package:
 hormuz contract manifest
 ```
 
-The manifest is the canonical inventory of current schema IDs, versions, error codes, enforcement meanings, and compatibility rules. The fixtures in `tests/fixtures/contracts/` are the executable examples for those contracts.
+The manifest is the canonical inventory of current public policy/evidence schema IDs, versions, error codes, enforcement meanings, and compatibility rules. The fixtures in `tests/fixtures/contracts/` are the executable examples for those contracts.
 
 Opt-in [execution destinations](EXECUTION_DESTINATIONS.md) add relay metadata
 version 2 alongside the unchanged version 1 entry. Destination-aware work
@@ -21,6 +21,15 @@ version 3 and authenticated `hormuz.route-admission` status version 1. Versions
 1/2 retain their fields. Qualification is operator-declared; readiness and local
 capacity are process-local observations. The guide defines errors, helper and
 continuation enforcement, migration and explicit privacy-ceiling rollback.
+
+[Connected-client lifetime](CONNECTED_CLIENT_LIFETIME.md) adds version-1 public
+status, preview and error contracts. Each is registered here and strictly
+validated before CLI emission. Its separately owned private installation journal
+also carries a schema identifier and version, validated by the lifetime owner
+before persistence. Like Personal Profile recovery records, it is local setup
+state rather than a public policy/evidence format and is not listed in this
+manifest. The guide documents the exact earlier-v1 journal compatibility read
+and disconnect-before-downgrade boundary.
 
 ## Accepted portfolio additive contract
 
@@ -117,6 +126,9 @@ The current Hormuz-owned JSON schemas are:
 | `hormuz policy evaluate --json` | `hormuz.policy-evaluation` v1 |
 | `hormuz custody status --json` | `hormuz.custody-control-status` v3 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
+| `hormuz client connect/status/disconnect codex` | `hormuz.connected-client-status` v1 |
+| `hormuz client connect codex --dry-run` | `hormuz.connected-client-preview` v1 |
+| lifecycle command errors on stderr | `hormuz.connected-client-error` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
 | immutable audit-anchor artifact | `hormuz.audit-anchor` v1 |
 | commit-time audit-chain entry | `hormuz.commit-audit-chain-entry` v1 (legacy gateway evidence) / v2 (strict custody source evidence) |

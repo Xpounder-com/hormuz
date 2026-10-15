@@ -35,7 +35,7 @@ hormuz client status codex
 hormuz client disconnect codex
 ```
 
-Lifecycle commands emit JSON with `schema_version: 1`. Status separates the durable setup phase from the owned router's current response. A `connected` journal phase alone does not prove that the router is reachable, that a local model is ready or that a task completed. Inspect [router state](LOCAL_ROUTE_ADMISSION.md#status-compatibility-and-rollback) and request receipts for admission, destination and request outcomes.
+Lifecycle commands emit strictly validated JSON with `schema_id` and `schema_version: 1`. Status separates the durable setup phase from the owned router's current response. A `connected` journal phase alone does not prove that the router is reachable, that a local model is ready or that a task completed. Inspect [router state](LOCAL_ROUTE_ADMISSION.md#status-compatibility-and-rollback) and request receipts for admission, destination and request outcomes.
 
 The connection receipt includes its opaque `generation`. Automation retaining a receipt can guard cleanup:
 
@@ -61,14 +61,28 @@ Files are bounded, private and owned by the invoking user. The connection journa
 
 The new lifecycle commands are additive. `client config`, existing transient Personal launch adapters and their relay contracts retain their separate behavior. Persistent setup authority belongs to the connected-client lifetime module; existing launch adapters do not gain general permission to edit client configuration.
 
-The connection journal and public lifecycle output begin at schema version 1. Unknown journal versions fail explicitly instead of being interpreted as current state. No AI Work ledger schema, credential format or historical relay version is changed. A router restart creates a new destination generation; existing continuation/evidence rules still require fresh compatible state.
+The connection journal and public lifecycle output begin at schema version 1.
+This unreleased-v1 completion adds explicit schema identifiers. An exact earlier
+v1 journal without `schema_id` remains readable: the owner supplies the journal
+identifier in memory, preserves its generation and recovery intent, and includes
+the identifier on its next normal save. Reading status does not rewrite it.
+Unknown identifiers, unknown versions and otherwise malformed records still
+fail explicitly. No AI Work ledger schema, credential format or historical relay
+version is changed. A router restart creates a new destination generation;
+existing continuation/evidence rules still require fresh compatible state.
 
 Before downgrading to a binary without these lifecycle commands, disconnect with the current binary and verify restoration and router shutdown. Preserve reported user edits. If restoration is incomplete, resolve the specific conflict and rerun disconnect before removing ownership records or replacing the binary. Disconnect does not remove models, unrelated processes, gateway data or the CLI installation. Restart or reconnect is required to apply changed gateway configuration; reconnect is not an automatic substitute for consent to remove a local-only ceiling.
+
+Earlier development snapshots reject the completed journal envelope. Keep the
+current binary available for recovery and do not resume an owned lifetime with
+an earlier draft. Public consumers should use the named v1 contracts rather than
+the earlier identifier-less draft outputs.
 
 
 ## Version 1 fields and limits
 
-A successful status/connection/disconnection receipt has `schema_version: 1`,
+A successful status/connection/disconnection receipt has
+`schema_id: "hormuz.connected-client-status"`, `schema_version: 1`,
 `scope: "codex_user_defaults"`, `phase`, `router`, `configuration` and
 `retained_settings`. Once a journal exists it also has `generation`,
 `client_version` (last qualified pin) and `owned_settings` (top-level setting
@@ -82,15 +96,22 @@ provider's destination generation.
 | `configuration` | `installed` means owned values match; `changed` means newer values differ; `unavailable` means the document cannot be safely inspected; `not_owned` applies after disconnection. |
 | `retained_settings` | Names of edited top-level values or an edited provider table left for the user; no private original values are returned. |
 
-Preview output instead has `phase: "preview"`, `settings` (proposed values) and
+Preview output instead has `schema_id: "hormuz.connected-client-preview"`,
+`schema_version: 1`, `phase: "preview"`, `settings` (proposed values) and
 `changes` (add/replace operations). An active identical owner previews empty
 changes. Preview rejects pending recovery without performing it. An error exits
-2 and emits `{"schema_version":1,"error":{"code":"connected_client_...","action":"..."}}`
+2 and emits `{"schema_id":"hormuz.connected-client-error","schema_version":1,"error":{"code":"connected_client_...","action":"..."}}`
 on stderr. `action` describes the next safe operation; no credential or private
-source path is returned. The workflow's [status v1 fixture](../tests/fixtures/connected-client-status-v1.json)
-freezes the completed-cleanup shape.
+source path is returned. `hormuz contract manifest` discovers all three public
+contracts and the finite lifecycle error codes. Validators reject unknown fields,
+unsupported versions, invalid states and mismatched error recovery actions.
+The workflow's [status](../tests/fixtures/connected-client-status-v1.json),
+[preview](../tests/fixtures/connected-client-preview-v1.json) and
+[error](../tests/fixtures/connected-client-error-v1.json) v1 fixtures freeze the
+public shapes.
 
-The private journal has exactly `schema_version`, `generation`, `phase`,
+The private journal has `schema_id: "hormuz.connected-client-journal"` and exactly
+`schema_version`, `generation`, `phase`,
 `client_version`, `installed`, `original`, `provider_block`, `gateway_config`,
 `gateway_digest`, `actor_id`, `control`, and optional `retained_settings`.
 `original` records only the previous three owned string values or absence;
@@ -99,7 +120,11 @@ The private journal has exactly `schema_version`, `generation`, `phase`,
 requires disconnect/reconnect. Environment credential rotation also requires
 restarting the owned router. The record's phase is recovery intent, never proof
 of a successful coding task. Invalid fields, duplicate JSON members and unknown
-versions are rejected; records are not silently upgraded or discarded.
+versions are rejected. The explicitly defined earlier-v1 identifier completion
+does not discard or replace owned state. This installation record uses the
+lifetime owner's strict parser, following the separately versioned private
+Personal Profile/recovery-state boundary; it is not a public policy/evidence
+manifest entry. No second journal or general migration framework is introduced.
 
 The selected client home and lifetime directory must be owned private directories
 (mode 0700); journals/locks use 0600. Symlinked client homes, linked or unsafe

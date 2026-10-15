@@ -1,0 +1,19 @@
+{
+  "schema_id": "hormuz.connected-client-preview",
+  "schema_version": 1,
+  "phase": "preview",
+  "scope": "codex_user_defaults",
+  "client_version": "0.147.0",
+  "settings": {
+    "model": "local-code",
+    "model_provider": "hormuz_11111111111111111111111111111111",
+    "web_search": "disabled"
+  },
+  "changes": {
+    "model": "replace",
+    "model_provider": "replace",
+    "web_search": "add",
+    "provider_table": "add"
+  },
+  "router": "not_started"
+}

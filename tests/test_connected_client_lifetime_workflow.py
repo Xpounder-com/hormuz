@@ -1,5 +1,6 @@
 """Persistent setup exercised only through the approved coding-client workflow."""
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 import unittest
 
 from tests import test_execution_destination_workflow as destination_workflow
+from hormuz.contracts import ContractValidationError, validate_contract
 
 provider = destination_workflow.provider
 
@@ -67,8 +69,11 @@ if "idle" in sys.argv:
     sys.exit(0)
 try:
     connection.request("POST", origin.path.rstrip("/") + "/responses",
-        json.dumps({"model": view["model"], "input": "Summarize this fixture.", "max_output_tokens": 8}),
-        {"Content-Type": "application/json", "Authorization": "Bearer " + os.environ[provider["env_key"]]})
+        json.dumps({"model": view["model"],
+                    "input": "Consider this fixture." if "unknown-task" in sys.argv else "Summarize this fixture.",
+                    "max_output_tokens": 8}),
+        {"Content-Type": "application/json", "Authorization": "Bearer " + os.environ[provider["env_key"]],
+         **({"X-Hormuz-Routing-Mode": "local_only"} if "local-only" in sys.argv else {})})
     response = connection.getresponse()
     view.update(status=response.status, body=json.loads(response.read()),
                 headers={k.lower():v for k,v in response.getheaders()})
@@ -147,6 +152,167 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                               restored["body"]["output"][0]["content"][0]["text"]),
                              ("original-model", "original", "none", ["original"], True, "ORIGINAL_DESTINATION"))
             self.assertEqual((len(local_requests), len(cloud_requests)), (1, 1))
+
+    def test_persistent_connection_composes_with_auto_and_request_local_only(self):
+        with self.configured() as (local_requests, cloud_requests):
+            value = json.loads(self.path.read_text())
+            local_route = {**value["model_routes"]["local-code"],
+                           "model_revision": "fixture-weights-v1", "capabilities": ["responses", "text"]}
+            value["model_routes"] = {"cloud-code": {"protocol": "openai", "upstream_model": "cloud-model"},
+                                     "local-code": local_route}
+            value["policies"]["organization"]["allowed_models"] = ["cloud-code", "local-code"]
+            value["route_admission"] = {"mode": "auto", "local_routes": {"local-code": {
+                "qualification_id": "fixture-q1", "model_revision": "fixture-weights-v1",
+                "max_request_bytes": 4096, "max_output_tokens": 8, "task_types": ["summarization"]}}}
+            self.path.write_text(json.dumps(value))
+            connected = json.loads(self.command("connect").stdout)
+            validate_contract(connected)
+            selected = self.client()
+            self.assertEqual((selected["status"], selected["model"],
+                selected["body"]["output"][0]["content"][0]["text"],
+                selected["headers"].get("x-hormuz-destination"),
+                selected["headers"].get("x-hormuz-routing-mode"),
+                selected["headers"].get("x-hormuz-routing-reason")),
+                (200, "cloud-code", "LOCAL_DESTINATION", "local-llama", "auto", "qualified_local"))
+            blocked = self.client("unknown-task", "local-only")
+            self.assertEqual((blocked["status"], blocked["body"]["error"]["code"]),
+                             (503, "hormuz_route_local_route_unavailable"))
+            self.assertEqual((len(local_requests), cloud_requests), (1, []))
+            disconnected = json.loads(self.command("disconnect").stdout)
+            validate_contract(disconnected)
+            restored = self.client()
+            self.assertEqual((disconnected["phase"], disconnected["router"], restored["provider"],
+                restored["body"]["output"][0]["content"][0]["text"]),
+                ("disconnected", "stopped", "original", "ORIGINAL_DESTINATION"))
+            self.assertEqual((len(local_requests), len(cloud_requests)), (1, 1))
+
+    def test_lifecycle_receipts_are_discoverable_strict_versioned_contracts(self):
+        with self.configured():
+            manifest = subprocess.run([sys.executable, "-m", "hormuz", "contract", "manifest"],
+                env=self.environment, capture_output=True, text=True, timeout=10)
+            self.assertEqual(manifest.returncode, 0, manifest.stderr)
+            schemas = {(item["schema_id"], item["schema_version"]) for item in json.loads(manifest.stdout)["schemas"]}
+            self.assertIn(("hormuz.connected-client-status", 1), schemas)
+            before = json.loads(self.command("status").stdout)
+            connected = json.loads(self.command("connect").stdout)
+            self.assertEqual(self.client()["status"], 200)
+            current = json.loads(self.command("status").stdout)
+            disconnected = json.loads(self.command("disconnect").stdout)
+            for receipt in (before, connected, current, disconnected):
+                self.assertEqual((receipt["schema_id"], receipt["schema_version"]),
+                                 ("hormuz.connected-client-status", 1))
+                validate_contract(receipt)
+                for malformed in ({**receipt, "schema_version": 2}, {**receipt, "unexpected": "field"},
+                                  {**receipt, "router": "invented"},
+                                  {**receipt, "router": "stopped" if receipt["router"] != "stopped" else "ready"}):
+                    with self.assertRaises(ContractValidationError):
+                        validate_contract(malformed)
+
+    def test_preview_is_a_discoverable_contract_without_activating_routing(self):
+        with self.configured():
+            manifest = subprocess.run([sys.executable, "-m", "hormuz", "contract", "manifest"],
+                env=self.environment, capture_output=True, text=True, timeout=10)
+            self.assertEqual(manifest.returncode, 0, manifest.stderr)
+            self.assertIn(("hormuz.connected-client-preview", 1),
+                {(item["schema_id"], item["schema_version"]) for item in json.loads(manifest.stdout)["schemas"]})
+            preview = json.loads(self.command("connect", "--dry-run").stdout)
+            frozen = json.loads((Path(__file__).parent / "fixtures/connected-client-preview-v1.json").read_text())
+            self.assertEqual({**preview, "settings": {**preview["settings"],
+                "model_provider": "hormuz_11111111111111111111111111111111"}}, frozen)
+            self.assertEqual(self.client()["provider"], "original")
+            self.command("connect")
+            self.assertEqual(self.client()["status"], 200)
+            active = json.loads(self.command("connect", "--dry-run").stdout)
+            self.command("disconnect")
+            for receipt in (preview, active):
+                self.assertEqual((receipt["schema_id"], receipt["schema_version"]),
+                                 ("hormuz.connected-client-preview", 1))
+                validate_contract(receipt)
+                for malformed in ({**receipt, "schema_version": 2}, {**receipt, "unexpected": "field"},
+                                  {**receipt, "settings": {**receipt["settings"], "web_search": "enabled"}}):
+                    with self.assertRaises(ContractValidationError):
+                        validate_contract(malformed)
+
+    def test_setup_error_is_a_discoverable_content_free_contract(self):
+        with self.configured():
+            self.command("connect")
+            self.assertEqual(self.client()["status"], 200)
+            (self.root / "client-version.txt").write_text("0.0.0")
+            failed = self.command("connect", check=False)
+            self.assertEqual(failed.returncode, 2)
+            receipt = json.loads(failed.stderr)
+            self.assertEqual(receipt, json.loads((Path(__file__).parent / "fixtures/connected-client-error-v1.json").read_text()))
+            self.command("disconnect")
+            self.assertEqual(self.client()["provider"], "original")
+            self.assertEqual((receipt.get("schema_id"), receipt["schema_version"], receipt["error"]),
+                ("hormuz.connected-client-error", 1, {"code": "connected_client_version_unsupported",
+                "action": "use_pinned_client_or_disconnect"}))
+            validate_contract(receipt)
+            for malformed in ({**receipt, "schema_version": 2}, {**receipt, "unexpected": "field"},
+                              {**receipt, "error": {**receipt["error"], "code": "connected_client_invented"}},
+                              {**receipt, "error": {**receipt["error"], "action": "invented"}}):
+                with self.assertRaises(ContractValidationError):
+                    validate_contract(malformed)
+            manifest = subprocess.run([sys.executable, "-m", "hormuz", "contract", "manifest"],
+                env=self.environment, capture_output=True, text=True, timeout=10)
+            self.assertEqual(manifest.returncode, 0, manifest.stderr)
+            discovery = json.loads(manifest.stdout)
+            self.assertIn(("hormuz.connected-client-error", 1),
+                {(item["schema_id"], item["schema_version"]) for item in discovery["schemas"]})
+            self.assertIn("connected_client_version_unsupported", discovery["error_codes"])
+
+    def test_setup_recovers_both_named_and_earlier_version_one_journals(self):
+        for schema_id, recover_with in (("hormuz.connected-client-journal", "connect"),
+                                       (None, "connect"), (None, "disconnect")):
+            with self.subTest(schema_id=schema_id, recover_with=recover_with), self.configured():
+                # A pre-activation journal is an external interrupted-write fixture.
+                # Observe recovery only through the ordinary client and receipts.
+                generation = "1" * 32
+                origin = "http://127.0.0.1:" + str(json.loads(self.path.read_text())["listen"]["port"])
+                record = {"schema_version": 1, "generation": generation, "phase": "prepared",
+                    "client_version": "0.147.0",
+                    "installed": {"model": "local-code", "model_provider": "hormuz_" + generation,
+                                  "web_search": "disabled"},
+                    "original": {"model": "original-model", "model_provider": "original", "web_search": None},
+                    "provider_block": '\n[model_providers.hormuz_' + generation + ']\nname = "Hormuz"\n'
+                        + 'base_url = ' + json.dumps(origin + '/v1') + '\nwire_api = "responses"\n'
+                        + 'requires_openai_auth = false\nenv_key = "DESTINATION_WORKFLOW_TOKEN"\n',
+                    "gateway_config": str(self.path.resolve()),
+                    "gateway_digest": hashlib.sha256(self.path.read_bytes()).hexdigest(),
+                    "actor_id": "developer",
+                    "control": str(Path("/tmp").resolve() / ("hormuz-connected-" + str(os.getuid())) / (generation + ".sock"))}
+                if schema_id is not None:
+                    record["schema_id"] = schema_id
+                directory = self.home / ".hormuz-router"
+                directory.mkdir(mode=0o700, exist_ok=True)
+                journal = directory / "connection.json"
+                for unsupported in ({**record, "schema_id": "hormuz.unrelated-journal"},
+                                    {**record, "schema_version": 77}):
+                    journal.write_text(json.dumps(unsupported))
+                    journal.chmod(0o600)
+                    rejected = self.command("status", check=False)
+                    self.assertEqual((rejected.returncode, json.loads(rejected.stderr)["error"]["code"]),
+                                     (2, "connected_client_state_invalid"))
+                journal.write_text(json.dumps(record))
+                journal.chmod(0o600)
+                if recover_with == "disconnect":
+                    # Simulate the external settings write completing before
+                    # the earlier owner was interrupted during activation.
+                    config_path = self.home / "config.toml"
+                    installed_text = config_path.read_text().replace('model = "original-model"',
+                        'model = "local-code"').replace('model_provider = "original"',
+                        'model_provider = "hormuz_' + generation + '"')
+                    config_path.write_text('web_search = "disabled"\n' + installed_text + record["provider_block"])
+                    recovered = json.loads(self.command("disconnect").stdout)
+                    self.assertEqual((recovered["phase"], recovered["router"]), ("disconnected", "stopped"))
+                    self.assertEqual((self.client("inspect")["model"], self.client("inspect")["provider"]),
+                                     ("original-model", "original"))
+                connected = json.loads(self.command("connect").stdout)
+                self.assertEqual((connected["phase"], connected["router"]), ("connected", "ready"))
+                self.assertEqual(self.client()["status"], 200)
+                result = json.loads(self.command("disconnect").stdout)
+                self.assertEqual((result["phase"], result["router"]), ("disconnected", "stopped"))
+                self.assertEqual(self.client()["provider"], "original")
 
     def test_disconnect_preserves_provider_preferences_added_after_setup(self):
         with self.configured():
@@ -419,7 +585,7 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                              ("default-model", "openai", []))
             expected = json.loads((Path(__file__).parent / "fixtures" / "connected-client-status-v1.json").read_text())
             status = json.loads(self.command("status").stdout)
-            self.assertEqual({key: status[key] for key in expected}, expected)
+            self.assertEqual({**status, "generation": "11111111111111111111111111111111"}, expected)
             self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
 
     def test_disconnect_stops_owned_router_when_provider_table_has_invalid_shape(self):

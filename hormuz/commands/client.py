@@ -229,7 +229,7 @@ def _client_base_url(value: str) -> str:
 
 def run_lifetime(args: argparse.Namespace) -> int:
     from pathlib import Path
-    from ..connected_client import ConnectedClientError, ConnectedClientLifetime
+    from ..connected_client import ConnectedClientError, ConnectedClientLifetime, lifetime_error
     try:
         lifetime = ConnectedClientLifetime(Path(args.client_home or os.environ.get("CODEX_HOME", "~/.codex")))
         if args.client_command == "connect":
@@ -241,7 +241,5 @@ def run_lifetime(args: argparse.Namespace) -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ConnectedClientError, ConfigError, OSError, subprocess.SubprocessError) as error:
-        code = error.code if isinstance(error, ConnectedClientError) else "connected_client_setup_unavailable"
-        action = error.action if isinstance(error, ConnectedClientError) else "inspect_status_and_configuration"
-        print(json.dumps({"schema_version": 1, "error": {"code": code, "action": action}}), file=sys.stderr)
+        print(json.dumps(lifetime_error(error)), file=sys.stderr)
         return 2

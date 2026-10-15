@@ -14,6 +14,37 @@ ROUTE_ADMISSION_SCHEMA_ID = "hormuz.route-admission"
 
 ROUTE_ADMISSION_SCHEMA_VERSION = 1
 
+CONNECTED_CLIENT_STATUS_SCHEMA_ID = "hormuz.connected-client-status"
+
+CONNECTED_CLIENT_STATUS_SCHEMA_VERSION = 1
+
+CONNECTED_CLIENT_PREVIEW_SCHEMA_ID = "hormuz.connected-client-preview"
+
+CONNECTED_CLIENT_PREVIEW_SCHEMA_VERSION = 1
+
+CONNECTED_CLIENT_ERROR_SCHEMA_ID = "hormuz.connected-client-error"
+
+CONNECTED_CLIENT_ERROR_SCHEMA_VERSION = 1
+
+CONNECTED_CLIENT_ERROR_ACTIONS = {
+    "connected_client_version_unsupported": "use_pinned_client_or_disconnect",
+    "connected_client_recovery_required": "disconnect_then_connect",
+    "connected_client_setup_changed": "disconnect_then_connect",
+    "connected_client_router_unavailable": "disconnect_then_connect",
+    "connected_client_configuration_changed": "inspect_settings_then_disconnect",
+    "connected_client_configuration_invalid": "repair_configuration_then_disconnect",
+    "connected_client_state_invalid": "preserve_journal_and_restore_manually",
+    "connected_client_generation_mismatch": "inspect_current_generation",
+    "connected_client_managed_configuration": "use_managed_setup",
+    **{("connected_client_" + code): "inspect_status_and_configuration" for code in (
+        "authentication_unsupported", "busy", "client_not_allowed", "client_unavailable",
+        "configuration_shape_unsupported", "directory_unsafe", "file_unsafe",
+        "managed_configuration_unknown", "model_unavailable", "platform_unsupported",
+        "restoration_unavailable", "router_configuration_unavailable",
+        "router_configuration_unsupported", "router_start_failed", "setup_unavailable",
+    )},
+}
+
 AUDIT_EVENT_SCHEMA_ID = "hormuz.audit-event"
 
 AUDIT_EVENT_SCHEMA_VERSION = 2
@@ -164,9 +195,13 @@ ROUTE_ADMISSION_ERROR_CODES = frozenset({
     "hormuz_route_custody_restricted", "hormuz_route_custody_unavailable",
 })
 
-PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restricted", *ROUTE_ADMISSION_ERROR_CODES})
+PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restricted",
+                              *ROUTE_ADMISSION_ERROR_CODES, *CONNECTED_CLIENT_ERROR_ACTIONS})
 
 _CURRENT_SCHEMA_VERSIONS = {
+    CONNECTED_CLIENT_STATUS_SCHEMA_ID: CONNECTED_CLIENT_STATUS_SCHEMA_VERSION,
+    CONNECTED_CLIENT_PREVIEW_SCHEMA_ID: CONNECTED_CLIENT_PREVIEW_SCHEMA_VERSION,
+    CONNECTED_CLIENT_ERROR_SCHEMA_ID: CONNECTED_CLIENT_ERROR_SCHEMA_VERSION,
     ROUTE_ADMISSION_SCHEMA_ID: ROUTE_ADMISSION_SCHEMA_VERSION,
     HEALTH_SCHEMA_ID: 1,
     READINESS_SCHEMA_ID: READINESS_SCHEMA_VERSION,
