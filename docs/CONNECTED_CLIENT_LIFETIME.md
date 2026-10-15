@@ -128,6 +128,6 @@ project request. See the [qualification evidence](evidence/connected-client-life
 for the exact synthetic checks and remaining support work.
 
 The version probe reads only its seven named process-context variables; gateway
-and provider credentials are excluded. The schema1 secret inventory adds only
+and provider credentials are excluded. The schema 1 secret inventory adds only
 non-secret client-home/probe-context reads, with no new secret purpose or custody
 mode. Installed-package and source inventory validation must both pass.
