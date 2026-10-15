@@ -1,0 +1,397 @@
+{
+  "evidence_version": 2,
+  "purpose": "diagnosis and held-out shadow calibration; no execution authority",
+  "runtime_source_commit": "b7aa34791bd3112ae03bf45a38b1aabfba4a193a",
+  "runtime_files_matching_source": 113,
+  "installed_native_wheel_sha256": "950ca7203d0d456f2170c780ec9ace2e973a6886f2993769594a5730470a5522",
+  "pins": {
+    "codex_version": "0.147.0",
+    "codex_sha256": "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+    "runtime": "llama.cpp b11617 macOS arm64",
+    "runtime_archive_sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9",
+    "model": "Qwen3-4B-Q4_K_M",
+    "model_sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+  },
+  "limits": {
+    "native_deadline_seconds": 90,
+    "max_output_tokens_per_generation": 512,
+    "request_bytes": 65536,
+    "heldout_episodes_each": 1,
+    "heldout_quality_retries": 0,
+    "native_inference_concurrency": 1,
+    "model_seed": "not fixed",
+    "sampling_temperature": 0.7
+  },
+  "original_v1": {
+    "receipt_path": "shadow-routing-evaluation-20261015.json",
+    "receipt_sha256": "01c18b40c25b170a0cf4f14c5dcd67eed03aca3be1300e2b93347aded697e0a2",
+    "result": "0/3 independent repair checks; 3 false-local recommendations; unchanged implementation files",
+    "preserved": true
+  },
+  "diagnosis": {
+    "cases": [
+      {
+        "declared_probe": "diagnostic-probes-v2",
+        "case_id": "ceil-division",
+        "variant": "baseline",
+        "native": {
+          "exit": 0,
+          "termination": "finished",
+          "elapsed_seconds": 37.303
+        },
+        "implementation_files_changed": [],
+        "independent_check_passed": false,
+        "full_native_acceptance": false,
+        "oracle_unchanged": true,
+        "driver_sha256": "0eec5b071fddfd570ef7088d39aab362ad91f6f5f46154bb21ab95ffb4dfaaee",
+        "manifest_sha256": "2184f1d28f0f9faea2358ea7c79b9f991b3497bca103fbdc55b5a3b13d72a75a",
+        "catalog_treatment_verified": null
+      },
+      {
+        "declared_probe": "diagnostic-probes-v2",
+        "case_id": "ceil-division",
+        "variant": "file-list",
+        "native": {
+          "exit": 0,
+          "termination": "finished",
+          "elapsed_seconds": 31.832
+        },
+        "implementation_files_changed": [],
+        "independent_check_passed": false,
+        "full_native_acceptance": false,
+        "oracle_unchanged": true,
+        "driver_sha256": "0eec5b071fddfd570ef7088d39aab362ad91f6f5f46154bb21ab95ffb4dfaaee",
+        "manifest_sha256": "2184f1d28f0f9faea2358ea7c79b9f991b3497bca103fbdc55b5a3b13d72a75a",
+        "catalog_treatment_verified": null
+      },
+      {
+        "declared_probe": "diagnostic-catalog-v2",
+        "case_id": "ceil-division",
+        "variant": "file-list",
+        "native": {
+          "exit": 0,
+          "termination": "finished",
+          "elapsed_seconds": 41.289
+        },
+        "implementation_files_changed": [],
+        "independent_check_passed": false,
+        "full_native_acceptance": false,
+        "oracle_unchanged": true,
+        "driver_sha256": "fe3939085a2238d6c5401d65b14e536823581515e52149d01305fea81607fb06",
+        "manifest_sha256": "7c89cf11e71737d0565c345850606307f72e288d963dd60f862f558296b1f6dd",
+        "catalog_treatment_verified": false
+      },
+      {
+        "declared_probe": "diagnostic-execute-v2",
+        "case_id": "ceil-division",
+        "variant": "execute-first",
+        "native": {
+          "exit": 0,
+          "termination": "finished",
+          "elapsed_seconds": 34.113
+        },
+        "implementation_files_changed": [],
+        "independent_check_passed": false,
+        "full_native_acceptance": false,
+        "oracle_unchanged": true,
+        "driver_sha256": "a045522b1bbf66e7542412c6d6f41c5af80c58511068549e923a069fb3817d76",
+        "manifest_sha256": "aae509c0dbe8702440cf58c748a7528a9dad286770c4e0242d2987f88cc0c6b7",
+        "catalog_treatment_verified": null
+      },
+      {
+        "declared_probe": "diagnostic-concise-v2",
+        "case_id": "ceil-division",
+        "variant": "file-list",
+        "native": {
+          "exit": -15,
+          "termination": "deadline",
+          "elapsed_seconds": 90.203
+        },
+        "implementation_files_changed": [
+          "solution.py"
+        ],
+        "independent_check_passed": true,
+        "full_native_acceptance": false,
+        "oracle_unchanged": true,
+        "driver_sha256": "be1432fa0b0c9bfe294a22d1036778d40a7b5d51ff8e5aba969f702368cf7456",
+        "manifest_sha256": "26a48fb9fda0e39fefeca90c7d047d6b7414dbc5306f8c100a73c5c73dc33f87",
+        "catalog_treatment_verified": false
+      },
+      {
+        "declared_probe": "diagnostic-catalog-active-v2",
+        "case_id": "ceil-division",
+        "variant": "file-list",
+        "native": {
+          "exit": 1,
+          "termination": "finished",
+          "elapsed_seconds": 0.161
+        },
+        "implementation_files_changed": [],
+        "independent_check_passed": false,
+        "full_native_acceptance": false,
+        "oracle_unchanged": true,
+        "driver_sha256": "9c016b7c863dc57ae1f8f6a26ab053c62ae57622605778b3ca6520030a4b7800",
+        "manifest_sha256": "e136a8b29abf132534cee8c1e3db1024a182c1f845dd4ebed1bec14511afc02f",
+        "catalog_treatment_verified": true,
+        "model_catalog_decode_errors": 0,
+        "advice": {},
+        "cleanup": {
+          "disconnected": true,
+          "owned_engine_stopped": true,
+          "provider_removed": true
+        }
+      },
+      {
+        "declared_probe": "diagnostic-catalog-text-only-v2",
+        "case_id": "ceil-division",
+        "variant": "file-list",
+        "native": {
+          "exit": 0,
+          "termination": "finished",
+          "elapsed_seconds": 37.776
+        },
+        "implementation_files_changed": [],
+        "independent_check_passed": false,
+        "full_native_acceptance": false,
+        "oracle_unchanged": true,
+        "driver_sha256": "e4489a030663da966bebcea2288ac59084d65d15ecbcf040655d9729d0dab16d",
+        "manifest_sha256": "3193b0cd5f99f4ece1e31480c23ca918c2f24d212a1e4cb442e7aa85e8590c8c",
+        "catalog_treatment_verified": true,
+        "model_catalog_decode_errors": 0,
+        "advice": {
+          "schema_id": "hormuz.shadow-routing",
+          "schema_version": 1,
+          "mode": "shadow",
+          "prompt_version": "local-fit.v1",
+          "status": "classified",
+          "recommendation": "local",
+          "routing_effect": "none",
+          "classifier_model": "Qwen3-4B-Q4_K_M",
+          "classifier_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+          "classifier_generation": "5a4d45323b9dcf56ea613b14081f1bcd9e5a9d60fde66b2be86b3012f55ed3d7",
+          "local_model": "Qwen3-4B-Q4_K_M",
+          "local_model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+          "actual_model": "Qwen3-4B-Q4_K_M",
+          "actual_destination": "local-llama",
+          "actual_locality": "local",
+          "elapsed_ms": 376.558,
+          "input_tokens": 351,
+          "output_tokens": 2,
+          "cost_microusd": null
+        },
+        "cleanup": {
+          "disconnected": true,
+          "owned_engine_stopped": true,
+          "provider_removed": true
+        }
+      }
+    ],
+    "budget_2048_probe": "setup denied before inference; budget hypothesis untested outside the existing envelope",
+    "catalog_scope_correction": "Top-level -c override before exec was ignored when exec had its own -c flags. Invalid path after exec failed at configuration load. The two earlier catalog variants did not establish a treatment.",
+    "causality": "The model emitted inspection/check commands but no writes in the original failure. One later effective-generic-metadata run made a real repair passing the frozen oracle; it timed out. Instruction causality and general competence are not established.",
+    "catalog_wire_preflight": {
+      "unsupported_inherited_directives": {
+        "reasoning": {
+          "effort": "none"
+        },
+        "text": {
+          "verbosity": "medium"
+        }
+      },
+      "no_reasoning_variant": {
+        "reasoning": {},
+        "text": {
+          "verbosity": "medium"
+        }
+      },
+      "text_only_variant": {
+        "reasoning": {},
+        "text": null,
+        "instructions_chars": 466
+      },
+      "production_configuration_changed": false
+    },
+    "finding": "Original failures contained no write tool call. Real file writes are possible and one generic-metadata run produced a correct repair before timing out. The properly activated text-only catalog eliminated the catalog parse errors but still finished without an edit. Catalog parsing therefore does not explain the original no-edit failure by itself. General coding completion and the effect of the constrained output budget remain unqualified."
+  },
+  "heldout": {
+    "case_fixture_path": "../tests/fixtures/shadow-coding-cases-v2.json",
+    "case_fixture_sha256": "26dbfe67992cb9c110681199f0ead4c54d1f5f4c45f0f55b60eea2b8505700d5",
+    "manifest_sha256": "864dbda4cac9d7cde5ddace96e894cbbb36063885cb5074457e559c55185eb96",
+    "driver_sha256": "acf406e2537d1c93ce82819aee98a6fec63cf9cf7e0f66a39b6d507b94a6087b",
+    "effective_metadata": "generic fallback; intended catalog override did not activate",
+    "catalog_decode_errors_each": 2,
+    "cases_frozen_before_model_exposure": true,
+    "no_retuning_after_exposure": true,
+    "cases": [
+      {
+        "case_id": "normalize-newlines",
+        "native": {
+          "exit": 0,
+          "termination": "finished",
+          "elapsed_seconds": 34.872
+        },
+        "coding_check_passed": false,
+        "implementation_repair_passed": false,
+        "actual_edit_passed": false,
+        "implementation_files_changed": [],
+        "oracle_sha256": "160c50212de34e1483253053610af977d58a45d0a82128390b78cfc349b2feb7",
+        "oracle_unchanged": true,
+        "baseline_check_exit": 1,
+        "attempt_count": 4,
+        "all_actual_models_local": true,
+        "affinity_preserved": true,
+        "advice": {
+          "status": "classified",
+          "recommendation": "local",
+          "routing_effect": "none",
+          "elapsed_ms": 422.422,
+          "input_tokens": 345,
+          "output_tokens": 2
+        }
+      },
+      {
+        "case_id": "stable-unique",
+        "native": {
+          "exit": 0,
+          "termination": "finished",
+          "elapsed_seconds": 53.295
+        },
+        "coding_check_passed": false,
+        "implementation_repair_passed": false,
+        "actual_edit_passed": false,
+        "implementation_files_changed": [],
+        "oracle_sha256": "32b280484b71aca3ae468e5400f81ca03c95538c57b748f3c6dc772a431c02f3",
+        "oracle_unchanged": true,
+        "baseline_check_exit": 1,
+        "attempt_count": 6,
+        "all_actual_models_local": true,
+        "affinity_preserved": true,
+        "advice": {
+          "status": "classified",
+          "recommendation": "local",
+          "routing_effect": "none",
+          "elapsed_ms": 471.491,
+          "input_tokens": 355,
+          "output_tokens": 2
+        }
+      },
+      {
+        "case_id": "strict-port",
+        "native": {
+          "exit": -15,
+          "termination": "deadline",
+          "elapsed_seconds": 90.083
+        },
+        "coding_check_passed": false,
+        "implementation_repair_passed": false,
+        "actual_edit_passed": false,
+        "implementation_files_changed": [
+          "ports.py"
+        ],
+        "oracle_sha256": "0319e12dc9e84ad383350840ddaa4b873f21526ce6fb5a87980e920b374edb0d",
+        "oracle_unchanged": true,
+        "baseline_check_exit": 1,
+        "attempt_count": 8,
+        "all_actual_models_local": true,
+        "affinity_preserved": true,
+        "advice": {
+          "status": "classified",
+          "recommendation": "local",
+          "routing_effect": "none",
+          "elapsed_ms": 435.121,
+          "input_tokens": 376,
+          "output_tokens": 2
+        }
+      },
+      {
+        "case_id": "ttl-cache",
+        "native": {
+          "exit": 0,
+          "termination": "finished",
+          "elapsed_seconds": 80.862
+        },
+        "coding_check_passed": false,
+        "implementation_repair_passed": false,
+        "actual_edit_passed": false,
+        "implementation_files_changed": [
+          "cache.py"
+        ],
+        "oracle_sha256": "306ac8ed3e06da60dab0495f5bb77e20ba377fabf5064b730b1a362f32b82af4",
+        "oracle_unchanged": true,
+        "baseline_check_exit": 1,
+        "attempt_count": 7,
+        "all_actual_models_local": true,
+        "affinity_preserved": true,
+        "advice": {
+          "status": "classified",
+          "recommendation": "local",
+          "routing_effect": "none",
+          "elapsed_ms": 390.103,
+          "input_tokens": 389,
+          "output_tokens": 2
+        }
+      }
+    ],
+    "metrics": {
+      "episodes": 4,
+      "implementation_repairs_passing": 0,
+      "full_native_acceptances": 0,
+      "evaluable_completed_episodes": 3,
+      "false_local": {
+        "count": 3,
+        "evaluable_local_recommendations": 3,
+        "conditional_rate": 1.0
+      },
+      "unevaluable_native_episodes": 1,
+      "native_timeouts": 1,
+      "advice_unknown": 0,
+      "advice_missing": 0,
+      "local_recommendations": 4,
+      "helper_ms": {
+        "mean": 429.78425,
+        "median": 428.7715,
+        "min": 390.103,
+        "max": 471.491,
+        "p95_nearest_rank": 471.491
+      },
+      "classifier_input_tokens": 1465,
+      "classifier_output_tokens": 8,
+      "coding_attempts": 25,
+      "affinity_continuations": 21,
+      "all_models_local": true,
+      "all_affinity_preserved": true,
+      "cleanup": {
+        "disconnected": true,
+        "owned_engine_stopped": true,
+        "provider_removed": true
+      },
+      "catalog_parse_errors_per_case": {
+        "normalize-newlines": 2,
+        "stable-unique": 2,
+        "strict-port": 2,
+        "ttl-cache": 2
+      },
+      "authority": "shadow_only"
+    }
+  },
+  "interpretation": {
+    "false_local_denominator": "native exit 0 with finished termination and local advice; timeout is not scored as a false-local failure",
+    "unknown_coverage": "advice unknown/missing over all four tasks; native timeout reported separately",
+    "overhead": "classifier helper elapsed_ms only; no causal whole-episode comparison",
+    "decision": "keep shadow-only; no execution promotion",
+    "nonclaims": [
+      "general coding qualification",
+      "well-calibrated local recommendations",
+      "savings",
+      "cloud or subscription eligibility",
+      "additional platforms",
+      "marketplace acceptance"
+    ]
+  },
+  "cleanup": {
+    "disconnected": true,
+    "owned_engine_stopped": true,
+    "provider_removed": true
+  },
+  "cloud_comparison": "not_observed"
+}

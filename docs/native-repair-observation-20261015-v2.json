@@ -1,0 +1,24 @@
+{
+  "evidence_version": 2,
+  "qualification": "not_established",
+  "original_v1_result": "unchanged: 0 of 3 repairs",
+  "observation": {
+    "case_id": "ceil-division",
+    "implementation_changed": [
+      "solution.py"
+    ],
+    "implementation_sha256": "56d4c536ddc9e37bebff2ba527f8789ade17271cf998117e9ae5d40ec92b576d",
+    "independent_check_passed": true,
+    "oracle_unchanged": true,
+    "oracle_sha256": "2d047de10eaa09b8bcca4e535f5d2b79bdec9e54a5822a39bbde8097765d3b15",
+    "native": {
+      "exit": -15,
+      "termination": "deadline",
+      "elapsed_seconds": 90.203
+    },
+    "full_native_completion": false,
+    "solution_supplied": false,
+    "catalog_treatment_verified": false,
+    "instruction_attribution": "not established: before-exec catalog override was ignored"
+  }
+}
