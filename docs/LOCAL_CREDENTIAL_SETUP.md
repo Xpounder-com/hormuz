@@ -97,3 +97,44 @@ not stop a connection.
 The workflow tests prove setup, authenticated local requests, status and owned
 cleanup using synthetic clients and providers. Real model quality, subscription
 eligibility and additional client/platform combinations remain separate.
+
+## Pinned native confirmation — October 15, 2026
+
+One frozen episode used clean runtime source
+`0dec498c186baabc4efc8f07efa2974f356725c8` and its verified wheel, with all
+111 runtime Python/JSON file hashes matching. It reused the existing pinned
+Codex CLI 0.147.0 macOS arm64 binary, llama.cpp b11617 bundle and Qwen3-4B
+Q4_K_M GGUF. There were no downloads, cloud credentials, token exports or
+model-quality retries. Source and installed-wheel checks each passed all
+136 workflow tests without skips.
+
+In a disposable private home, preview left no credential or final configuration.
+Apply generated the private credential and local-only configuration. Codex used
+the installed isolated helper; repeated setup retained the active generation.
+The credential was absent from router/client settings and the ownership
+journal. After disconnect, the cached helper returned no credential. All six
+frozen credential checks passed.
+
+The supplied-script episode exited zero in **18.165 seconds**, executed the
+requested command and assertions, and persisted the expected fix. All twelve
+existing behavioral predicates passed: one automatically bound work item, two
+successful attempts at one local destination, retained session affinity and
+released local capacity. Public work remained `active` with outcome `unknown`.
+This is supplied-script execution; the earlier autonomous repair and answer
+formatting failures in the [model qualification](qualifications/codex-0147-llama-b11617-qwen3-4b.md)
+remain recorded.
+
+Disconnect restored owned preferences/provider tables and preserved the native
+project-trust addition. The owned engine/router endpoints closed, native client
+was reaped and the bounded independent cloud trap stopped with zero calls.
+That trap was not a configured destination; this case does not qualify hybrid
+routing. Frozen inputs and cleanup predicates remained valid.
+
+| Private evidence receipt | SHA-256 |
+| --- | --- |
+| Frozen driver | `831695d47e9659edb9d640868e19b0e3e80108d46fe10dae72a944214253f39c` |
+| Frozen manifest | `887e44932ff90357c0019dec4a8a3a457876fbf1398da13dbe9ee4bbb981ea38` |
+| Final summary | `f6db28de6af467b6a2d957092c8c6c00097aa98b44b71b56766813d904b75fc0` |
+
+Raw evidence remains private. Plugin activation, desktop routing, later
+turns/resume/fork, other platforms and subscription eligibility remain separate.
