@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import socket
+import signal
 import sys
 import threading
 import tarfile
@@ -34,6 +35,16 @@ def artifacts(payloads):
             observed.append((self.path, dict(self.headers)))
             payload = payloads[self.path]
             offset = int(self.headers.get("Range", "bytes=0-").split("=")[1].split("-")[0])
+            if controls.get("hold_connection"):
+                controls["entered"].set()
+                self.connection.settimeout(4)
+                try:
+                    if self.connection.recv(1) == b"":
+                        controls["closed"].set()
+                except OSError:
+                    pass
+                self.close_connection = True
+                return
             if controls.get("trickle_headers") and self.path == "/runtime":
                 try:
                     self.connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: ")
@@ -359,3 +370,71 @@ class LocalAcquisitionWorkflowTests(unittest.TestCase):
                     finally:
                         extra.unlink()
             self.assertEqual(self.client.client("inspect")["model"], "original-model")
+
+    def test_archived_empty_directory_cannot_be_replaced_by_a_file_or_escaping_link(self):
+        value, payloads = self.prepare()
+        managed = value["managed_llama"]
+        engine = Path(managed["executable"]).parent
+        (engine / "optional-assets").mkdir()
+        with tarfile.open(managed["runtime_archive"], "w:gz") as archive:
+            for path in engine.iterdir():
+                archive.add(path, arcname=path.name)
+        payloads["/runtime"] = Path(managed["runtime_archive"]).read_bytes()
+        managed["runtime_sha256"] = hashlib.sha256(payloads["/runtime"]).hexdigest()
+        profile = json.loads((self.root / "qualification.json").read_text())
+        profile["runtime_sha256"] = managed["runtime_sha256"]
+        (self.root / "qualification.json").write_text(json.dumps(profile))
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            ready = json.loads(self.acquire("--download").stdout)
+            target = Path(ready["setup_arguments"][5]).parent / "optional-assets"
+            external = self.root / "external"
+            external.mkdir()
+            for linked in (False, True):
+                with self.subTest(linked=linked):
+                    target.rmdir()
+                    if linked:
+                        target.symlink_to(external, target_is_directory=True)
+                    else:
+                        target.write_text("keep changed object")
+                    try:
+                        failed = self.acquire("--offline", check=False)
+                        self.assertEqual(failed.returncode, 2, failed.stdout)
+                        self.assertEqual(json.loads(failed.stderr)["error"]["code"], "runtime_invalid")
+                        self.assertTrue(target.exists())
+                        self.assertEqual(list(external.iterdir()), [])
+                    finally:
+                        target.unlink()
+                        target.mkdir()
+            self.assertEqual([path for path, _ in observed], ["/runtime", "/model"])
+
+    def test_termination_or_parent_death_closes_the_owned_download_and_releases_its_lock(self):
+        value, payloads = self.prepare()
+        for termination in (signal.SIGTERM, signal.SIGKILL):
+            with self.subTest(signal=termination):
+                self.directory = self.root / ("assets-" + str(termination))
+                with artifacts(payloads) as (origin, observed, controls):
+                    self.catalog(value, origin)
+                    entered, closed = threading.Event(), threading.Event()
+                    controls.update(hold_connection=True, entered=entered, closed=closed)
+                    process = subprocess.Popen([sys.executable, "-m", "hormuz", "client", "acquire", "codex",
+                        "--directory", str(self.directory), "--catalog", str(self.root / "catalog.json"),
+                        "--download", "--timeout-seconds", "5"],
+                        env=self.client.environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    try:
+                        self.assertTrue(entered.wait(3), "fixture download must start")
+                        process.send_signal(termination)
+                        output, errors = process.communicate(timeout=3)
+                        self.assertTrue(closed.wait(2), "owned transfer must end when its parent exits")
+                        if termination == signal.SIGTERM:
+                            self.assertEqual(process.returncode, 130, errors)
+                            self.assertEqual(json.loads(errors)["error"]["code"], "interrupted")
+                        controls.clear()
+                        ready = json.loads(self.acquire("--download").stdout)
+                        self.assertEqual(ready["state"], "ready")
+                        self.assertEqual([path for path, _ in observed], ["/runtime", "/runtime", "/model"])
+                    finally:
+                        if process.poll() is None:
+                            process.kill()
+                            process.communicate(timeout=2)
+                    self.assertFalse(self.client.path.exists())

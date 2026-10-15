@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 from urllib.parse import urljoin, urlsplit
 
@@ -16,8 +17,9 @@ class AssetDownloadError(RuntimeError):
 
 
 class AssetDownloader:
-    def __init__(self, timeout_seconds):
+    def __init__(self, timeout_seconds, *, lock_descriptor=None):
         self.timeout_seconds = timeout_seconds
+        self.lock_descriptor = lock_descriptor
         self.connections = {}
 
     def close(self):
@@ -31,11 +33,14 @@ class AssetDownloader:
         environment = {key: value for key in ("PATH", "SYSTEMROOT", "LANG", "LC_ALL")
                        if (value := os.environ.get(key)) is not None}
         stream.flush()
-        process = subprocess.Popen([sys.executable, "-I", str(Path(__file__).resolve()),
-                                    str(stream.fileno()), str(self.timeout_seconds)],
-            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            env=environment, pass_fds=(stream.fileno(),))
+        owner_read, owner_write = os.pipe()
+        process = None
         try:
+            descriptors = (stream.fileno(), owner_read, *(() if self.lock_descriptor is None else (self.lock_descriptor,)))
+            process = subprocess.Popen([sys.executable, "-I", str(Path(__file__).resolve()),
+                                        str(stream.fileno()), str(self.timeout_seconds), str(owner_read)],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=environment, pass_fds=descriptors)
             try:
                 process.communicate(_request_bytes(artifact), timeout=self.timeout_seconds)
             except subprocess.TimeoutExpired:
@@ -43,15 +48,20 @@ class AssetDownloader:
             if process.returncode:
                 raise AssetDownloadError("download_invalid" if process.returncode == 2 else "download_unavailable")
         finally:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.communicate(timeout=0.25)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.communicate(timeout=0.25)
-            if process.stdin is not None:
-                process.stdin.close()
+            try:
+                if process is not None:
+                    if process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.communicate(timeout=0.25)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.communicate(timeout=0.25)
+                    if process.stdin is not None:
+                        process.stdin.close()
+            finally:
+                os.close(owner_read)
+                os.close(owner_write)
 
     def _fetch(self, artifact, stream):
         deadline = time.monotonic() + self.timeout_seconds
@@ -147,6 +157,21 @@ def _worker():
         raise AssetDownloadError("download_unavailable")
 
     signal.signal(signal.SIGTERM, interrupt)
+    owner = int(sys.argv[3])
+    complete = threading.Event()
+
+    def parent_lifetime():
+        try:
+            os.read(owner, 1)
+        except OSError:
+            pass
+        # Parent death cannot run Python finally; exit closes transport and
+        # releases the inherited generation lock before another owner proceeds.
+        if not complete.is_set():
+            os._exit(3)
+
+    guardian = threading.Thread(target=parent_lifetime, name="acquisition-parent", daemon=True)
+    guardian.start()
     downloader = AssetDownloader(int(sys.argv[2]))
     try:
         artifact = json.loads(sys.stdin.buffer.read(65537))
@@ -163,6 +188,8 @@ def _worker():
         return 3
     finally:
         downloader.close()
+        complete.set()
+        os.close(owner)
 
 
 if __name__ == "__main__":

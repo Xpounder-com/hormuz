@@ -108,7 +108,7 @@ def _lock(directory, digest):
                 fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise LocalAcquisitionError("busy") from None
-            yield
+            yield stream.fileno()
     except OSError:
         raise LocalAcquisitionError("directory_unsafe") from None
 
@@ -242,7 +242,7 @@ def acquire_local(args):
     if available < required:
         raise LocalAcquisitionError("space_unavailable")
     _directory(directory, create=True)
-    with _lock(directory, digest):
+    with _lock(directory, digest) as lock_descriptor:
         if not generation.exists():
             generation.mkdir(mode=0o700)
             _write_new(generation / "catalog.json", _bytes(catalog))
@@ -250,7 +250,7 @@ def acquire_local(args):
         _layout(generation)
         if _safe_file(generation / "catalog.json", 65536) != _bytes(catalog):
             raise LocalAcquisitionError("installation_changed")
-        downloader = AssetDownloader(args.timeout_seconds)
+        downloader = AssetDownloader(args.timeout_seconds, lock_descriptor=lock_descriptor)
         try:
             for role, name in (("runtime", "runtime.tar.gz"), ("model", "model.gguf")):
                 _download(downloader, catalog[role], generation / name)

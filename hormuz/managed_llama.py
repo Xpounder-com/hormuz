@@ -106,16 +106,28 @@ class ManagedLlamaProfile:
                     raise ManagedLlamaError("runtime_invalid")
             if runtime_root is not None:
                 runtime_root = Path(runtime_root)
-                expected_paths = set()
+                expected_paths = {}
                 for member, _ in members:
                     name = PurePosixPath(member.name)
                     if name.is_absolute() or ".." in name.parts or len(name.parts) > 16:
                         raise ManagedLlamaError("runtime_invalid")
-                    expected_paths.update(part for part in (name, *name.parents) if part.parts)
-                observed_paths = set()
+                    for parent in name.parents:
+                        if parent.parts:
+                            expected_paths[parent] = ("directory", 0o700)
+                    expected_paths[name] = (("directory", 0o700) if member.isdir() else
+                                            ("symlink", None) if member.issym() else
+                                            ("file", 0o700 if member.mode & 0o111 else 0o600))
+                observed_paths = {}
                 for parent, directories, files in os.walk(runtime_root, followlinks=False):
                     for name in (*directories, *files):
-                        observed_paths.add(PurePosixPath((Path(parent) / name).relative_to(runtime_root).as_posix()))
+                        path = Path(parent) / name
+                        info = path.lstat()
+                        kind = ("directory" if stat.S_ISDIR(info.st_mode) else "symlink" if stat.S_ISLNK(info.st_mode)
+                                else "file" if stat.S_ISREG(info.st_mode) else "unsafe")
+                        if info.st_uid != os.getuid() or (kind != "directory" and info.st_nlink != 1):
+                            raise ManagedLlamaError("runtime_invalid")
+                        observed_paths[PurePosixPath(path.relative_to(runtime_root).as_posix())] = (
+                            kind, None if kind == "symlink" else stat.S_IMODE(info.st_mode))
                         if len(observed_paths) > 256:
                             raise ManagedLlamaError("runtime_invalid")
                 if observed_paths != expected_paths:
@@ -199,6 +211,8 @@ def extract_runtime(archive_path, destination):
                     links.append((target, member.linkname))
                 else:
                     raise ManagedLlamaError("runtime_invalid")
+        for parent, _, _ in os.walk(staged, followlinks=False):
+            os.chmod(parent, 0o700)
         # Create links only after all writes so no archive path can redirect a write.
         for target, link in links:
             target.symlink_to(link)

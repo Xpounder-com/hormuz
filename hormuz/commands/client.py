@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import sys
 import subprocess
 from urllib.parse import urlparse
@@ -233,6 +234,11 @@ def _acquire(args):
     from ..managed_llama import ManagedLlamaError
     from ..contracts import ContractValidationError, validate_contract
     from .._contract_schemas.local_acquisition import ERROR_ACTIONS
+
+    def interrupt(_signum, _frame):
+        raise KeyboardInterrupt()
+
+    previous_term = signal.signal(signal.SIGTERM, interrupt)
     try:
         print(json.dumps(acquire_local(args), sort_keys=True))
         return 0
@@ -246,3 +252,5 @@ def _acquire(args):
         validate_contract(result)
         print(json.dumps(result), file=sys.stderr)
         return 130 if isinstance(error, KeyboardInterrupt) else 2
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)

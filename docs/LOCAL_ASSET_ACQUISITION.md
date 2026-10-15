@@ -90,6 +90,12 @@ exit. Isolated Python receives an allowlisted environment. No ambient bearer cre
 proxy authentication are imported or forwarded. Redirect query strings and
 server error bodies never enter receipts.
 
+SIGTERM follows the CLI's interruption cleanup and returns the fixed
+`interrupted` error. A private ownership pipe also stops the download worker if
+its parent dies without cleanup, including SIGKILL. The worker inherits the
+generation lock, keeping another acquisition out until its transport and file
+descriptor close. No worker is adopted by PID or detached into a background job.
+
 There are no automatic retries. A 429 or unavailable source stops the operation;
 respect its availability/Retry-After guidance before a new explicit request.
 No source failure starts another model, a paid provider or a background job.
@@ -109,6 +115,9 @@ duplicate entries, hard links, special files, escaping or cyclic symlinks and
 unsafe path layouts, including paths deeper than sixteen components. Links are created after file writes. The existing managed
 runtime verifier checks the result before a ready receipt is atomically published.
 No downloaded executable runs during acquisition.
+The strict acquired-runtime inventory includes object types, owner, link counts
+and normalized permissions, including implicit parent directories. Replacing an
+expected empty directory with a file or escaping symlink blocks offline reuse.
 
 An interrupted transfer with a valid catalog marker is resumable. Unknown state
 or interruption around local publication can instead fail closed for inspection;
