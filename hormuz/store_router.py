@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
-from typing import Generic, Mapping, Protocol, TypeVar
+from typing import Protocol
 
 from ._persistence import (
     ProviderReliabilityRepository,
@@ -22,27 +21,8 @@ from .finance_attempts import (
     NativeUsageObservation,
 )
 from .finance_account_binding import FinanceAccountCandidate, UnavailableFinance
-from .postgres import PostgresConnectionPool, PostgresStorageError
-from .postgres_usage_store import PostgresUsageStore
 from .provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
 from .store import UsageStore
-
-
-RepositoryT = TypeVar("RepositoryT")
-RepositoryT_co = TypeVar("RepositoryT_co", covariant=True)
-
-
-class RepositoryFactory(Protocol[RepositoryT_co]):
-    """Construct one repository with explicit configuration and a borrowed pool."""
-
-    def __call__(
-        self,
-        config: GatewayConfig,
-        *,
-        environ: Mapping[str, str] | None = None,
-        connection_pool: PostgresConnectionPool | None = None,
-        read_only: bool = False,
-    ) -> RepositoryT_co: ...
 
 
 class _WorkBudgetRequestBegin(Protocol):
@@ -294,22 +274,12 @@ class ProviderReliabilityAdapter:
         )
 
 
-@dataclass(frozen=True, repr=False)
-class RepositoryBundle(Generic[RepositoryT]):
-    """Separate typed owners; no cross-repository transaction or lifecycle."""
-
-    usage: UsageRepository
-    portfolio: RepositoryT
-
-
 def create_work_budget_request_repository(
     usage: UsageRepository,
 ) -> WorkBudgetRequestRepository | None:
     """Compose only the built-in adapters' typed atomic budget capability."""
 
     if type(usage) is UsageStore:
-        return WorkBudgetRequestAdapter(usage._begin_request_attempt_with_work_budget)
-    if type(usage) is PostgresUsageStore:
         return WorkBudgetRequestAdapter(usage._begin_request_attempt_with_work_budget)
     return None
 
@@ -326,135 +296,12 @@ def create_provider_reliability_repository(
             usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
             usage._provider_reliability_totals,
         )
-    if type(usage) is PostgresUsageStore:
-        return ProviderReliabilityAdapter(
-            usage._begin_request_attempt_with_work_budget,
-            usage._finalize_request_attempt_with_provider_metrics,
-            usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
-            usage._provider_reliability_totals,
-        )
     return None
 
 
-def create_usage_store(
-    config: GatewayConfig,
-    *,
-    environ: Mapping[str, str] | None = None,
-    connection_pool: PostgresConnectionPool | None = None,
-    read_only: bool = False,
-    organization_ids: tuple[str, ...] | None = None,
-) -> UsageRepository:
-    """Return the configured store, never placing a PostgreSQL DSN in config.
-
-    ``organization_ids`` lets an authenticated server-local directory provide
-    the PostgreSQL tenant allowlist when identities are enrolled dynamically.
-    Omitting it preserves the immutable configuration-owned allowlist.
-    """
-
-    storage = config.usage_storage
-    audit_chain_maximum_anchor_age_seconds = (
-        config.audit_chain.maximum_anchor_age_seconds if config.audit_chain is not None else None
-    )
-    if storage.backend == "sqlite":
-        return UsageStore(
-            config.database_path,
-            audit_chain_maximum_anchor_age_seconds=audit_chain_maximum_anchor_age_seconds,
-            audit_chain_organization_ids=config.organization_ids,
-            read_only=read_only,
-        )
-    if storage.backend != "postgresql":  # Configuration parsing prevents this path.
-        raise PostgresStorageError("storage_backend_unsupported")
-    environment = os.environ if environ is None else environ
-    dsn = environment.get(storage.postgres_dsn_env, "")
-    if not dsn:
-        raise PostgresStorageError("postgres_dsn_unavailable")
-    return PostgresUsageStore(
-        dsn,
-        organization_ids=(
-            config.organization_ids if organization_ids is None else organization_ids
-        ),
-        schema=storage.postgres_schema,
-        runtime_role=storage.postgres_runtime_role,
-        connection_pool=connection_pool,
-        audit_chain_maximum_anchor_age_seconds=audit_chain_maximum_anchor_age_seconds,
-    )
-
-
-def create_repository_bundle(
-    config: GatewayConfig,
-    *,
-    portfolio_factory: RepositoryFactory[RepositoryT],
-    environ: Mapping[str, str] | None = None,
-    connection_pool: PostgresConnectionPool | None = None,
-    read_only: bool = False,
-    usage_organization_ids: tuple[str, ...] | None = None,
-) -> RepositoryBundle[RepositoryT]:
-    """Compose an explicitly supplied owner beside the unchanged v1 usage ledger.
-
-    This helper registers no default portfolio implementation; the feature
-    entry point supplies its separately gated factory explicitly. Each
-    repository owns its SQL and transactions. A shared pool is caller-owned,
-    including when either factory fails. Only the factories acquire their
-    repository connections; this helper owns no transaction or pool lifecycle
-    and promises no cross-repository atomicity.
-    The legacy create_usage_store path does not call this composition helper.
-    """
-
-    if usage_organization_ids is None:
-        usage = create_usage_store(
-            config,
-            environ=environ,
-            connection_pool=connection_pool,
-            read_only=read_only,
-        )
-    else:
-        usage = create_usage_store(
-            config,
-            environ=environ,
-            connection_pool=connection_pool,
-            read_only=read_only,
-            organization_ids=usage_organization_ids,
-        )
-    portfolio = portfolio_factory(
-        config, environ=environ, connection_pool=connection_pool, read_only=read_only,
-    )
-    return RepositoryBundle(usage=usage, portfolio=portfolio)
-
-
-def create_postgres_runtime_pool(
-    config: GatewayConfig,
-    *,
-    environ: Mapping[str, str] | None = None,
-) -> PostgresConnectionPool | None:
-    """Build the long-running gateway pool only for the runtime credential.
-
-    Operators use a separate direct migration credential, and policy-control
-    commands retain their independently authenticated service boundary.
-    """
-
-    storage = config.usage_storage
-    if storage.backend == "sqlite":
-        return None
-    if storage.backend != "postgresql":  # Configuration parsing prevents this path.
-        raise PostgresStorageError("storage_backend_unsupported")
-    environment = os.environ if environ is None else environ
-    dsn = environment.get(storage.postgres_dsn_env, "")
-    if not dsn:
-        raise PostgresStorageError("postgres_dsn_unavailable")
-    return PostgresConnectionPool(dsn, settings=storage.postgres_pool)
-
-
-def postgres_migration_dsn(
-    config: GatewayConfig,
-    *,
-    environ: Mapping[str, str] | None = None,
-) -> str:
-    """Return only the separately configured operator migration DSN."""
-
-    if config.usage_storage.backend != "postgresql":
-        raise PostgresStorageError("storage_backend_unsupported")
-    environment = os.environ if environ is None else environ
-    dsn = environment.get(config.usage_storage.postgres_migration_dsn_env, "")
-    if not dsn:
-        raise PostgresStorageError("postgres_migration_dsn_unavailable")
-    return dsn
+def create_usage_store(config: GatewayConfig, *, read_only: bool = False) -> UsageRepository:
+    """Open only the customer-local SQLite evidence store."""
+    if config.usage_storage.backend != "sqlite":
+        raise ValueError("router_scope_retired_configuration")
+    return UsageStore(config.database_path, audit_chain_organization_ids=config.organization_ids,
+                      read_only=read_only)

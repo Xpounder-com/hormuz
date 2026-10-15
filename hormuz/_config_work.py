@@ -8,10 +8,11 @@ from .config import AIWorkConfig, ConfigError
 
 def build_ai_work(raw, *, source_path):
     value = raw.get("ai_work", {})
+    if any(key.startswith("billing_") or key == "require_paid" for key in value):
+        raise ConfigError("router_scope_retired_configuration")
     enabled = value.get("enabled", False)
     cache = value.get("cache_enabled", False)
-    paid = value.get("require_paid", False)
-    if any(type(item) is not bool for item in (enabled, cache, paid)):
+    if any(type(item) is not bool for item in (enabled, cache)):
         raise ConfigError("ai_work flags must be boolean")
     samples = value.get("minimum_samples", 5)
     if type(samples) is not int or not 3 <= samples <= 1000:
@@ -28,38 +29,11 @@ def build_ai_work(raw, *, source_path):
     path = Path(database).expanduser()
     if not path.is_absolute():
         path = source_path.parent / path
-    price = value.get("billing_price_id")
-    if price is not None and (type(price) is not str or not re.fullmatch(r"price_[A-Za-z0-9]{1,128}", price)):
-        raise ConfigError("ai_work.billing_price_id is invalid")
-    portal_configuration = value.get("billing_portal_configuration_id")
-    if portal_configuration is not None and (type(portal_configuration) is not str or not re.fullmatch(r"bpc_[A-Za-z0-9]{1,128}", portal_configuration)):
-        raise ConfigError("ai_work.billing_portal_configuration_id is invalid")
-    secret_env = value.get("billing_webhook_secret_env", "HORMUZ_WORK_BILLING_WEBHOOK_SECRET")
-    if type(secret_env) is not str or not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", secret_env):
-        raise ConfigError("ai_work.billing_webhook_secret_env is invalid")
-    if paid and not price:
-        raise ConfigError("ai_work.require_paid requires billing_price_id")
-    api_env = value.get("billing_api_key_env", "HORMUZ_WORK_BILLING_API_KEY")
-    if type(api_env) is not str or not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", api_env):
-        raise ConfigError("ai_work.billing_api_key_env is invalid")
-    bindings = value.get("billing_bindings", [])
-    if type(bindings) is not list or len(bindings) > 1000:
-        raise ConfigError("ai_work.billing_bindings is invalid")
-    approved = []
-    for binding in bindings:
-        if type(binding) is not dict or set(binding) != {"organization_id", "customer_id", "subscription_id"}:
-            raise ConfigError("ai_work.billing_bindings is invalid")
-        organization, customer, subscription = (binding[key] for key in ("organization_id", "customer_id", "subscription_id"))
-        if any(type(item) is not str for item in (organization, customer, subscription)) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", organization) or not re.fullmatch(r"cus_[A-Za-z0-9]{1,128}", customer) or not re.fullmatch(r"sub_[A-Za-z0-9]{1,128}", subscription):
-            raise ConfigError("ai_work.billing_bindings is invalid")
-        if any(organization == row[0] or customer == row[1] or subscription == row[2] for row in approved):
-            raise ConfigError("ai_work.billing_bindings must have unique ownership")
-        approved.append((organization, customer, subscription))
     tool_aliases = value.get("tool_capable_aliases", [])
     if type(tool_aliases) is not list or len(tool_aliases) > 100 or any(type(alias) is not str or alias not in raw.get("model_routes", {}) for alias in tool_aliases) or len(set(tool_aliases)) != len(tool_aliases):
         raise ConfigError("ai_work.tool_capable_aliases must reference unique configured models")
-    if not enabled and (cache or paid):
-        raise ConfigError("ai_work must be enabled for caching or paid entitlements")
+    if not enabled and cache:
+        raise ConfigError("ai_work must be enabled for caching")
     exploration = value.get("exploration_enabled", False)
     aliases = value.get("exploration_aliases", [])
     rate = value.get("exploration_rate_percent", 5)
@@ -70,5 +44,7 @@ def build_ai_work(raw, *, source_path):
         raise ConfigError("ai_work exploration sampling or monthly allowance is invalid")
     if exploration and (not enabled or not aliases or ceiling == 0):
         raise ConfigError("ai_work exploration requires enabled work, approved models and a monthly allowance")
-    return AIWorkConfig(enabled, path.resolve() if enabled or "database" in value else None, cache, samples, tuple(actors), paid, price, secret_env, api_env, tuple(approved), tuple(tool_aliases), exploration, tuple(aliases), rate, ceiling,
-        billing_portal_configuration_id=portal_configuration)
+    return AIWorkConfig(enabled=enabled, database_path=path.resolve() if enabled or "database" in value else None,
+        cache_enabled=cache, minimum_samples=samples, administrator_actor_ids=tuple(actors),
+        tool_capable_aliases=tuple(tool_aliases), exploration_enabled=exploration,
+        exploration_aliases=tuple(aliases), exploration_rate_percent=rate, exploration_max_cost_microusd=ceiling)

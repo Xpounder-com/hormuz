@@ -1,10 +1,12 @@
+> Historical product decision. Its enterprise/UI product scope is superseded for new development by [ADR 0018](0018-customer-local-router-scope.md).
+
 # ADR 0009: v1 deployment profiles and reference recovery objectives
 
 - **Status:** Accepted
 - **Decision date:** August 25, 2026
 - **Decision record:** [issue #100 comment](https://github.com/Xpounder-com/hormuz/issues/100#issuecomment-5414302641)
 - **Implementation gate:** [issue #100](https://github.com/Xpounder-com/hormuz/issues/100)
-- **Machine-readable contract:** [deployment-contract-v1.json](../deployment-contract-v1.json)
+- **Machine-readable contract:** [deployment-contract-v1.json](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/deployment-contract-v1.json)
 
 ## Context
 

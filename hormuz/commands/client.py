@@ -37,10 +37,7 @@ def add_client_commands(
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
     auth_token = auth_subparsers.add_parser("token", help="Print a credential from an environment variable")
-    auth_token.add_argument("--env", default="HORMUZ_OIDC_ACCESS_TOKEN", help="Credential environment variable")
-    from .session import add_session_token_arguments
-    session_token = auth_subparsers.add_parser("session", help="Print a short-lived credential from an OS-secured session")
-    add_session_token_arguments(session_token)
+    auth_token.add_argument("--env", default="HORMUZ_GATEWAY_TOKEN", help="Credential environment variable")
 
 
 def _client_config_arguments(parser: argparse.ArgumentParser) -> None:
@@ -49,18 +46,15 @@ def _client_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--actor", help="Configured actor ID; defaults to the first configured actor")
     parser.add_argument(
         "--auth-mode",
-        choices=["auto", "static", "oidc", "session"],
+        choices=["auto", "static"],
         default="auto",
-        help="Credential source to configure (default: static when available, otherwise OIDC)",
+        help="Local router credential source",
     )
     parser.add_argument(
         "--credential-env",
-        help="Environment variable containing the credential (OIDC default: HORMUZ_OIDC_ACCESS_TOKEN)",
+        help="Environment variable containing the local router credential",
     )
-    parser.add_argument("--profile", default="default", help="Session secure-store profile")
-    parser.add_argument("--model", help="Configured Codex model alias when using session authentication")
     parser.add_argument("--work-id", help="Attach an existing owned AI Work job to every request in this configuration")
-    parser.add_argument("--allow-insecure-http", action="store_true", help="Allow loopback HTTP for local session development")
 
 
 def _client(config: GatewayConfig, args: argparse.Namespace) -> int:
@@ -99,31 +93,10 @@ def _client_config(
         (item for item in config.identities_by_token.values() if item.actor_id == identity.actor_id),
         None,
     )
-    oidc_identity = next(
-        (item for item in config.identities_by_subject.values() if item.actor_id == identity.actor_id),
-        None,
-    )
-    if auth_mode == "static":
-        if static_identity is None:
-            raise ConfigError(f"Actor {identity.actor_id} has no static identity")
-        selected_identity = static_identity
-        uses_oidc = False
-    elif auth_mode == "oidc":
-        if oidc_identity is None:
-            raise ConfigError(f"Actor {identity.actor_id} has no OIDC subject mapping")
-        selected_identity = oidc_identity
-        uses_oidc = True
-    elif static_identity is not None:
-        selected_identity = static_identity
-        uses_oidc = False
-    elif oidc_identity is not None:
-        selected_identity = oidc_identity
-        uses_oidc = True
-    else:  # pragma: no cover - configuration requires at least one source
-        raise ConfigError(f"Actor {identity.actor_id} has no authentication source")
-    env_name = credential_env or (
-        "HORMUZ_OIDC_ACCESS_TOKEN" if uses_oidc else selected_identity.token_env
-    )
+    if auth_mode not in {"auto", "static"} or static_identity is None:
+        raise ConfigError("router_authentication_unsupported")
+    selected_identity = static_identity
+    env_name = credential_env or selected_identity.token_env
     if not env_name or not env_name.replace("_", "A").isalnum() or env_name[0].isdigit():
         raise ConfigError("credential environment variable must contain only letters, digits, and underscores")
     if client == "codex":
@@ -152,41 +125,13 @@ def _client_config(
         ]
         if work_headers:
             lines.append('http_headers = { "X-Hormuz-Work-Id" = ' + json.dumps(work_id) + ' }')
-        if uses_oidc:
-            lines.extend(
-                [
-                    "",
-                    "[model_providers.hormuz.auth]",
-                    'command = "hormuz"',
-                    f'args = ["auth", "token", "--env", "{env_name}"]',
-                    "refresh_interval_ms = 300000",
-                ]
-            )
-        else:
-            lines.insert(-1, f'env_key = "{env_name}"')
+        lines.insert(-1, f'env_key = "{env_name}"')
         print("\n".join(lines))
     else:
-        if uses_oidc:
-            print("# Put this JSON in the managed or user Claude Code settings file:")
-            print(
-                json.dumps(
-                    {
-                        "apiKeyHelper": f"hormuz auth token --env {env_name}",
-                        "env": {
-                            "ANTHROPIC_BASE_URL": base_url,
-                            "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
-                            **({"ANTHROPIC_CUSTOM_HEADERS": "X-Hormuz-Work-Id: " + work_id} if work_headers else {}),
-                        },
-                    },
-                    indent=2,
-                )
-            )
-            print(f"# Ensure {env_name} contains a current OIDC JWT access token.")
-        else:
-            print(f"export ANTHROPIC_BASE_URL={shlex.quote(base_url)}")
-            print(f'export ANTHROPIC_AUTH_TOKEN="${{{env_name}}}"')
-            if work_headers:
-                print("export ANTHROPIC_CUSTOM_HEADERS=" + shlex.quote("X-Hormuz-Work-Id: " + work_id))
+        print(f"export ANTHROPIC_BASE_URL={shlex.quote(base_url)}")
+        print(f'export ANTHROPIC_AUTH_TOKEN="${{{env_name}}}"')
+        if work_headers:
+            print("export ANTHROPIC_CUSTOM_HEADERS=" + shlex.quote("X-Hormuz-Work-Id: " + work_id))
         print("claude")
     return 0
 

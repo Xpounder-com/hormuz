@@ -1,0 +1,21 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hormuz",
+  "version": "0.1.0",
+  "description": "Set up, inspect and disconnect a customer-local Hormuz router using its shared CLI.",
+  "author": {"name": "Xpounder-com"},
+  "repository": "https://github.com/Xpounder-com/hormuz",
+  "license": "Apache-2.0",
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/hormuz/SKILL.md",
+      "interface": {
+        "displayName": "Hormuz",
+        "shortDescription": "Manage your local model router",
+        "developerName": "Xpounder-com",
+        "category": "Developer Tools",
+        "defaultPrompt": ["Use Hormuz to set up local-only routing for Codex."]
+      }
+    }
+  }
+}

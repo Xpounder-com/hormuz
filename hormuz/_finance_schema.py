@@ -63,34 +63,3 @@ def verify_sqlite_finance(connection, error_factory) -> None:
     ).fetchall()}
     if any(" ".join(statement.split()) not in observed for statement in sqlite_statements()):
         raise error_factory("storage_schema_partial_upgrade")
-
-
-def postgres_statements(schema: str, runtime_role: str) -> str:
-    """Generate the checked-in migration; runtime inspection never repairs it."""
-    prefix = schema + "."
-    statements = [f"CREATE TABLE {prefix}{name} ({ddl.format(prefix=prefix)});" for name, ddl in TABLE_DDL.items()]
-    for table in TABLE_DDL:
-        statements.extend((
-            f"ALTER TABLE {prefix}{table} ENABLE ROW LEVEL SECURITY;",
-            f"ALTER TABLE {prefix}{table} FORCE ROW LEVEL SECURITY;",
-            f"CREATE POLICY {table}_tenant ON {prefix}{table} "
-            "USING (organization_id = current_setting('hormuz.organization_id', true)) "
-            "WITH CHECK (organization_id = current_setting('hormuz.organization_id', true));",
-            f"CREATE TRIGGER {table}_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON {prefix}{table} "
-            f"FOR EACH STATEMENT EXECUTE FUNCTION {prefix}portfolio_reject_mutation();",
-            f"REVOKE ALL ON {prefix}{table} FROM PUBLIC;",
-            f"GRANT SELECT, INSERT ON {prefix}{table} TO {runtime_role};",
-        ))
-    return "\n\n".join(statements) + "\n"
-
-
-def verify_postgres_finance(cursor, schema: str, error_factory) -> None:
-    from ._portfolio_schema import verify_postgres_owned_tables
-
-    expected = {
-        table: {kind: ddl.count(marker) for kind, marker in (
-            ("p", "PRIMARY KEY"), ("u", "UNIQUE ("), ("f", "FOREIGN KEY"), ("c", "CHECK ("),
-        ) if marker in ddl}
-        for table, ddl in TABLE_DDL.items()
-    }
-    verify_postgres_owned_tables(cursor, schema, error_factory, TABLE_DDL, {}, expected, trigger_type=58)

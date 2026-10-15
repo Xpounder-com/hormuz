@@ -112,39 +112,3 @@ def verify_sqlite_attribution(connection, error_factory) -> None:
     ).fetchall()}
     if any(" ".join(statement.split()) not in observed for statement in sqlite_statements()):
         raise error_factory("storage_schema_partial_upgrade")
-
-
-def postgres_statements(schema: str, runtime_role: str) -> str:
-    """Source generator for the immutable migration, not a runtime migrator."""
-    prefix = schema + "."
-    result = [f"CREATE TABLE {prefix}{name} ({ddl.format(prefix=prefix)});" for name, ddl in TABLE_DDL.items()]
-    # PostgreSQL indexes inherit the table schema; index names are unqualified.
-    for name, ddl in INDEX_DDL.items():
-        result.append("CREATE " + ddl.format(prefix=prefix).replace(prefix + name + " ON", name + " ON") + ";")
-    result.append(f"ALTER TABLE {prefix}portfolio_attribution_events ADD CONSTRAINT portfolio_attribution_attempt_fk "
-                  f"FOREIGN KEY (organization_id, request_attempt_id) REFERENCES {prefix}gateway_request_attempts (organization_id, attempt_id);")
-    for table in TABLE_DDL:
-        result.extend((
-            f"ALTER TABLE {prefix}{table} ENABLE ROW LEVEL SECURITY;",
-            f"ALTER TABLE {prefix}{table} FORCE ROW LEVEL SECURITY;",
-            f"CREATE POLICY {table}_tenant ON {prefix}{table} "
-            "USING (organization_id = current_setting('hormuz.organization_id', true)) "
-            "WITH CHECK (organization_id = current_setting('hormuz.organization_id', true));",
-            f"CREATE TRIGGER {table}_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON {prefix}{table} "
-            f"FOR EACH STATEMENT EXECUTE FUNCTION {prefix}portfolio_reject_mutation();",
-            f"REVOKE ALL ON {prefix}{table} FROM PUBLIC;",
-            f"GRANT SELECT, INSERT ON {prefix}{table} TO {runtime_role};",
-        ))
-    return "\n\n".join(result) + "\n"
-
-
-def verify_postgres_attribution(cursor, schema: str, error_factory) -> None:
-    from ._portfolio_schema import verify_postgres_owned_tables
-
-    verify_postgres_owned_tables(cursor, schema, error_factory, TABLE_DDL, INDEX_DDL, {
-        "portfolio_attribution_audit_events": {"p": 1, "u": 1, "c": 3},
-        "portfolio_attribution_events": {"p": 1, "u": 3, "f": 4, "c": 6},
-        "portfolio_attribution_rejections": {"p": 1, "u": 1, "f": 1, "c": 4},
-        "portfolio_attribution_idempotency": {"p": 1, "f": 1, "c": 1},
-        "portfolio_attribution_cursors": {"p": 1, "c": 1},
-    }, trigger_type=58)

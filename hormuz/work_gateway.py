@@ -300,18 +300,6 @@ def initialize(server, environ=None):
             minimum_samples=settings.minimum_samples,
             destinations=getattr(server, "destinations", None),
         )
-        if settings.billing_price_id:
-            from .work_billing import WorkBilling
-            environment = os.environ if environ is None else environ
-            server.work_billing = WorkBilling(
-                server.work_runtime.path.with_suffix(".billing.sqlite3"), settings.billing_price_id,
-                settings.billing_bindings, environment.get(settings.billing_webhook_secret_env, ""),
-                api_key=environment.get(settings.billing_api_key_env, ""),
-                portal_configuration_id=settings.billing_portal_configuration_id)
-            if settings.require_paid and not server.work_billing.webhook_configured:
-                raise WorkRuntimeError("billing_webhook_not_configured", 503)
-        from .work_workflow import attach
-        attach(server)
 
 
 def close(server):
@@ -338,10 +326,6 @@ def prepare(handler, identity, decision, request_value, *, client, protocol, out
     if not account_usage:
         return decision
     _prepare_pricing(protocol, request_value)
-    billing = getattr(handler.server, "work_billing", None)
-    if handler.server.config.ai_work.require_paid:
-        if billing is None or not billing.entitled(identity.organization_id):
-            raise WorkRuntimeError("paid_workspace_required", 402)
     work = runtime.get_work(identity, headers[0]) if headers else runtime.create_work(
         identity, "unattributed", task_type="unattributed")
     handler._work_id = work["work_id"]

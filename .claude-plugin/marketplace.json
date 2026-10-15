@@ -1,0 +1,11 @@
+{
+  "name": "hormuz",
+  "owner": {"name": "Xpounder-com"},
+  "plugins": [
+    {
+      "name": "hormuz",
+      "description": "Manage a customer-local Hormuz router through its shared CLI.",
+      "source": "./"
+    }
+  ]
+}

@@ -299,13 +299,6 @@ class RouteAdmission:
             qualification = self.qualifications.get(decision.resolved_alias)
             if not self._within_envelope(handler, decision.route, qualification, value, output_field) or not self._ready(decision.route):
                 raise RouteAdmissionError("local_route_unavailable", 503)
-        from .custody_runtime_projection import CustodyRuntimeProjectionError
-        try:
-            handler.server.custody_runtime_projection.require_provider_usable(
-                organization_id=identity.organization_id, protocol=destination.name)
-        except CustodyRuntimeProjectionError as error:
-            reason = "custody_restricted" if error.code in {"custody_provider_credential_disabled", "custody_envelope_retired"} else "custody_unavailable"
-            raise RouteAdmissionError(reason, 403 if reason == "custody_restricted" else 503) from None
         self.receipt(handler, decision.route)
 
     def contract_header(self, handler, route):

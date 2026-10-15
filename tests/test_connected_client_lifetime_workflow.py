@@ -409,6 +409,42 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertEqual(json.loads(self.command("status").stdout)["phase"], "disconnected")
             self.assertEqual((len(local_requests), len(cloud_requests)), (0, 1))
 
+    def test_setup_rejects_remote_usage_storage_without_changing_client_settings(self):
+        with self.configured() as (local_requests, cloud_requests):
+            value = json.loads(self.path.read_text())
+            value["usage_storage"] = {"backend": "postgresql"}
+            self.path.write_text(json.dumps(value))
+            result = self.command("connect", "--dry-run", check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(json.loads(result.stderr)["error"]["code"], "connected_client_setup_unavailable")
+            self.assertEqual(self.client("inspect")["provider"], "original")
+            self.assertEqual(json.loads(self.command("status").stdout)["phase"], "disconnected")
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_setup_rejects_retired_account_configuration_without_changing_client_settings(self):
+        with self.configured() as (local_requests, cloud_requests):
+            value = json.loads(self.path.read_text())
+            value["authentication"] = {"session_broker": {"enabled": False}}
+            self.path.write_text(json.dumps(value))
+            result = self.command("connect", "--dry-run", check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(json.loads(result.stderr)["error"]["code"], "connected_client_setup_unavailable")
+            self.assertEqual(self.client("inspect")["provider"], "original")
+            self.assertEqual(json.loads(self.command("status").stdout)["phase"], "disconnected")
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_setup_rejects_retired_hosted_billing_without_changing_client_settings(self):
+        with self.configured() as (local_requests, cloud_requests):
+            value = json.loads(self.path.read_text())
+            value["ai_work"] = {"enabled": True, "billing_price_id": "price_retired"}
+            self.path.write_text(json.dumps(value))
+            result = self.command("connect", "--dry-run", check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(json.loads(result.stderr)["error"]["code"], "connected_client_setup_unavailable")
+            self.assertEqual(self.client("inspect")["provider"], "original")
+            self.assertEqual(json.loads(self.command("status").stdout)["phase"], "disconnected")
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_repeated_setup_detects_client_version_drift_without_overwriting_settings(self):
         with self.configured():
             first = json.loads(self.command("connect").stdout)
@@ -458,7 +494,8 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 + "        deadline = time.monotonic() + 5\n"
                 + f"        while not pathlib.Path({str(release)!r}).exists() and time.monotonic() < deadline:\n"
                 + "            time.sleep(0.05)\n")
-            self.environment["PYTHONPATH"] = str(fault)
+            self.environment["PYTHONPATH"] = os.pathsep.join(
+                item for item in (str(fault), self.environment.get("PYTHONPATH")) if item)
             interrupted = subprocess.Popen([sys.executable, "-m", "hormuz", "--config", str(self.path),
                 "client", "connect", "codex", "--client-home", str(self.home),
                 "--executable", str(self.executable)], env=self.environment,

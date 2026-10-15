@@ -1,3 +1,5 @@
+> Historical product decision. Its enterprise/UI product scope is superseded for new development by [ADR 0018](0018-customer-local-router-scope.md).
+
 # ADR 0001: OIDC login and Hormuz session architecture
 
 - Status: **Accepted; local implementation resumed, production gates open**
@@ -20,7 +22,7 @@ An earlier implementation lived in the closed, unmerged PR #19 alongside the
 retired context experiment. That implementation is not a shipped-core claim.
 The 2026-08-30 hosted-login slice reuses reviewed session components and adapts
 them to the current gateway without restoring directory/context functionality.
-See [local implementation and remaining gates](../HOSTED_LOGIN_LOCAL.md).
+See [local implementation and remaining gates](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/docs/HOSTED_LOGIN_LOCAL.md).
 
 ## Background
 

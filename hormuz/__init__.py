@@ -1,4 +1,4 @@
-"""Hormuz enterprise AI gateway policy and control plane."""
+"""Customer-local model routing for existing coding clients."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from importlib import import_module
 from typing import Any
 
 
-__version__ = "1.9.0"
+__version__ = "2.0.0a1"
 
 __all__ = [
     "__version__",

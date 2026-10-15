@@ -1,0 +1,6 @@
+{
+  "schema_id": "hormuz.ai-work-state",
+  "schema_version": 3,
+  "required_fields": ["schema_id", "schema_version", "works", "totals", "connection", "onboarding"],
+  "retired_fields": ["principal", "billing", "funnel", "support"]
+}

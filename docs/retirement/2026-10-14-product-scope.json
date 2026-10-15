@@ -1,0 +1,308 @@
+{
+  "decision_date": "2026-10-14",
+  "source_commit": "8489d9d3a467442dca4b91d196928e325dd01a18",
+  "spec_issue": 523,
+  "approved_seam": "connect -> coding-client request through router -> result/status -> disconnect",
+  "retired_product_issues": [
+    {
+      "number": 10,
+      "title": "Add structured DLP, PII policy, and untrusted-context defenses",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/10"
+    },
+    {
+      "number": 9,
+      "title": "Pass the operational and independent security production-readiness gate",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/9"
+    },
+    {
+      "number": 13,
+      "title": "Complete browser SSO and rotating Hormuz-session qualification",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/13"
+    },
+    {
+      "number": 11,
+      "title": "Complete enterprise HA/recovery and production evidence",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/11"
+    },
+    {
+      "number": 107,
+      "title": "Deferred: Prove release-to-release upgrade and rollback",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/107"
+    },
+    {
+      "number": 214,
+      "title": "Portfolio: qualify compatibility, migration and the final candidate",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/214"
+    },
+    {
+      "number": 219,
+      "title": "Portfolio: qualify trusted GitHub lifecycle and quality ingress",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/219"
+    },
+    {
+      "number": 220,
+      "title": "Portfolio: qualify trusted Linear initiative and issue ingress",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/220"
+    },
+    {
+      "number": 225,
+      "title": "P0 pilot gate: Validate portfolio intelligence with an external organization",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/225"
+    },
+    {
+      "number": 226,
+      "title": "[Epic] Complete and validate Hormuz Portfolio Intelligence",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/226"
+    },
+    {
+      "number": 307,
+      "title": "P1: Validate v1.2.0 external Apple Silicon onboarding and first governed request",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/307"
+    },
+    {
+      "number": 337,
+      "title": "Desktop: coordinate refresh scheduling, suspension and power behavior",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/337"
+    },
+    {
+      "number": 338,
+      "title": "Desktop: share project, quick-bar and Auto interaction fixtures",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/338"
+    },
+    {
+      "number": 339,
+      "title": "Desktop: coordinate single instance, reopen and owned local runtimes",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/339"
+    },
+    {
+      "number": 340,
+      "title": "Desktop: qualify installed Electron journeys across Windows, Linux and macOS",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/340"
+    },
+    {
+      "number": 341,
+      "title": "Runtime: finish governed Rust agent launch and relay qualification",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/341"
+    },
+    {
+      "number": 342,
+      "title": "Deferred: qualify the Rust optimizer with measured parity",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/342"
+    },
+    {
+      "number": 346,
+      "title": "Desktop: qualify packages, updates and project-data migration",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/346"
+    },
+    {
+      "number": 347,
+      "title": "Desktop: enforce responsiveness, bounded process ownership and footprint gates",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/347"
+    },
+    {
+      "number": 369,
+      "title": "Qualify the local synthetic optimizer reference workload",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/369"
+    },
+    {
+      "number": 437,
+      "title": "[Epic] Launch hosted Pro for production API workloads",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/437"
+    },
+    {
+      "number": 438,
+      "title": "Hosted Pro: provision customer workspaces and administration",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/438"
+    },
+    {
+      "number": 439,
+      "title": "Hosted Pro: isolate customer provider credentials and routing",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/439"
+    },
+    {
+      "number": 440,
+      "title": "Hosted Pro: add application access and production API compatibility",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/440"
+    },
+    {
+      "number": 441,
+      "title": "Hosted Pro: implement subscriptions and workspace entitlements",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/441"
+    },
+    {
+      "number": 442,
+      "title": "Hosted Pro: meter requests, enforce allowances, and bill approved overages",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/442"
+    },
+    {
+      "number": 443,
+      "title": "Hosted Pro: qualify Render capacity, recovery, and operating support",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/443"
+    },
+    {
+      "number": 479,
+      "title": "[Epic] Deliver the UI-first Hormuz project workspace and local/paid AI desktop",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/479"
+    },
+    {
+      "number": 480,
+      "title": "Desktop: define UI-facing boundaries, then freeze runtime after UI approval",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/480"
+    },
+    {
+      "number": 481,
+      "title": "UI: define the glossy project-window and quick-bar visual system",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/481"
+    },
+    {
+      "number": 482,
+      "title": "Desktop: integrate the approved project UI with the Electron host",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/482"
+    },
+    {
+      "number": 483,
+      "title": "Desktop: integrate managed llama.cpp and curated local model setup",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/483"
+    },
+    {
+      "number": 484,
+      "title": "Desktop: integrate pure Auto and explicit model intent after UI approval",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/484"
+    },
+    {
+      "number": 485,
+      "title": "Desktop: qualify paid connections and governed local/cloud streaming",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/485"
+    },
+    {
+      "number": 487,
+      "title": "UI: define the project window and minimal quick-bar handoff",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/487"
+    },
+    {
+      "number": 488,
+      "title": "UI: manage projects, saved chats, history and local search",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/488"
+    },
+    {
+      "number": 489,
+      "title": "UI: manage project files, instructions and visible request context",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/489"
+    },
+    {
+      "number": 490,
+      "title": "UI: design onboarding, the local model library and cloud connections",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/490"
+    },
+    {
+      "number": 491,
+      "title": "UI: define project preferences, live Auto and model overrides",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/491"
+    },
+    {
+      "number": 492,
+      "title": "UI: approve the complete simulated project workspace before backend work",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/492"
+    },
+    {
+      "number": 493,
+      "title": "Desktop: implement isolated local projects, history and bounded file context",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/493"
+    },
+    {
+      "number": 502,
+      "title": "Skills: reusable paper roast, rebuttal and evidence-review instruction packs",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/502"
+    },
+    {
+      "number": 503,
+      "title": "Skills: qualify bounded model and tool execution through shared host adapters",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/503"
+    },
+    {
+      "number": 505,
+      "title": "[Epic] Add project agent execution: Codex first, then Claude",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/505"
+    },
+    {
+      "number": 506,
+      "title": "Agents: define session, workspace, permission and cost contracts",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/506"
+    },
+    {
+      "number": 507,
+      "title": "UI: simulate Agent planning, approvals, execution, diff and resume",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/507"
+    },
+    {
+      "number": 508,
+      "title": "Codex: integrate supervised app-server sessions and execution",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/508"
+    },
+    {
+      "number": 509,
+      "title": "Codex: implement read-only planning and revision-bound plan acceptance",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/509"
+    },
+    {
+      "number": 510,
+      "title": "Codex: bridge command, file and permission approvals to the host",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/510"
+    },
+    {
+      "number": 511,
+      "title": "Codex: review session diffs, test results and dirty workspace provenance",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/511"
+    },
+    {
+      "number": 512,
+      "title": "Codex: persist, interrupt and explicitly resume named-project sessions",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/512"
+    },
+    {
+      "number": 513,
+      "title": "Codex: qualify the installed plan-to-resume Agent journey",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/513"
+    },
+    {
+      "number": 514,
+      "title": "Claude: integrate the supervised Agent SDK execution engine",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/514"
+    },
+    {
+      "number": 515,
+      "title": "Claude: enforce read-only Plan mode and scoped action approvals",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/515"
+    },
+    {
+      "number": 516,
+      "title": "Claude: integrate diff review and explicit session resume",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/516"
+    },
+    {
+      "number": 517,
+      "title": "Claude: qualify the installed plan-to-resume Agent journey",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/517"
+    }
+  ],
+  "retained_operational_issues": [
+    494,
+    495,
+    496,
+    497,
+    498,
+    499,
+    500,
+    501
+  ],
+  "resource_retirement_verified": false,
+  "retired_source_groups": [
+    "standalone native and Electron clients",
+    "Hormuz-owned agent app",
+    "hosted/enterprise front doors and billing",
+    "PostgreSQL backend, migrations and deployment profiles",
+    "unrelated product/marketing tooling and tests",
+    "retired delivery and publishing workflows"
+  ],
+  "retired_tracked_files": 1708
+}

@@ -124,30 +124,3 @@ def verify_sqlite_scorecards(connection, error_factory) -> None:
         for statement in sqlite_statements()
     ):
         raise error_factory("storage_schema_partial_upgrade")
-
-
-def verify_postgres_scorecards(cursor, schema: str, error_factory) -> None:
-    from ._portfolio_schema import verify_postgres_owned_tables
-
-    expected_constraints = {
-        table: {
-            kind: ddl.count(marker)
-            for kind, marker in (
-                ("p", "PRIMARY KEY"),
-                ("u", "UNIQUE ("),
-                ("f", "FOREIGN KEY"),
-                ("c", "CHECK ("),
-            )
-            if marker in ddl
-        }
-        for table, ddl in TABLE_DDL.items()
-    }
-    verify_postgres_owned_tables(
-        cursor,
-        schema,
-        error_factory,
-        TABLE_DDL,
-        INDEX_DDL,
-        expected_constraints,
-        trigger_type=58,
-    )
