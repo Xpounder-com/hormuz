@@ -153,7 +153,12 @@ capacity limit remains authoritative for admitted local requests. Disconnect
 allows a bounded grace interval, closes owned client sockets and waits up to
 seven seconds for lease release; its own five-second watchdog bounds a stuck
 host. A still-held lease remains `disconnecting`, never reported stopped.
-External providers, model runtimes and coding clients are not terminated.
+External providers, externally started model runtimes and coding clients are not
+terminated. An explicit [managed llama.cpp profile](MANAGED_LLAMA_LIFETIME.md)
+adds verified owned-engine startup and cleanup through these same commands.
+Managed status/preview and its private journal use version 2; legacy connections
+retain version 1. The inherited runtime lease covers engine cleanup after host
+loss, so a pending shutdown remains `disconnecting`.
 
 Codex's [documented configuration precedence](https://developers.openai.com/codex/config-basic#configuration-precedence)
 and [managed configuration](https://developers.openai.com/codex/enterprise/managed-configuration)

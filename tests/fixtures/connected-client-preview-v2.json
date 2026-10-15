@@ -1,0 +1,11 @@
+{
+  "schema_id": "hormuz.connected-client-preview",
+  "schema_version": 2,
+  "phase": "preview",
+  "scope": "codex_user_defaults",
+  "router": "not_started",
+  "client_version": "0.147.0",
+  "settings": {"model": "local-code", "model_provider": "hormuz_11111111111111111111111111111111", "web_search": "disabled"},
+  "changes": {"model": "replace", "model_provider": "add", "web_search": "add", "provider_table": "add"},
+  "local_runtime": {"ownership": "planned", "state": "not_started"}
+}

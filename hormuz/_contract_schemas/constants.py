@@ -42,6 +42,7 @@ CONNECTED_CLIENT_ERROR_ACTIONS = {
         "managed_configuration_unknown", "model_unavailable", "platform_unsupported",
         "restoration_unavailable", "router_configuration_unavailable",
         "router_configuration_unsupported", "router_start_failed", "setup_unavailable",
+        "runtime_invalid", "runtime_start_failed", "runtime_occupied",
     )},
 }
 

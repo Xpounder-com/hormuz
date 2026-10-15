@@ -28,9 +28,14 @@ existing client settings behind the CLI's validation and restoration journal;
 do not bypass its version checks or hand-edit those settings.
 
 Before connecting, identify the selected config, actor, target executable and
-client home. An existing qualified local route and its running local engine
-are required for local inference. The example config intentionally has no
-qualified routes. Real qualification, model downloads and cloud/authentication
+client home. An existing qualified local route is required for local inference.
+If the selected configuration declares a verified `managed_llama` profile,
+the shared connect command verifies its existing runtime bundle/model files and
+starts the owned engine. Use `auto` or `local_only` admission for that profile;
+an occupied endpoint requires inspection, never process adoption or termination.
+Without a managed profile, the local engine must already be running externally.
+The example config intentionally has no qualified routes. Real qualification,
+model downloads and cloud/authentication
 eligibility are separate work: never invent qualification records, use native
 login caches as entitlement, or introduce billable fallback.
 
@@ -92,7 +97,10 @@ Use `--generation GENERATION` on disconnect when acting for a specific receipt.
 Completed cleanup requires `phase: disconnected`, `router: stopped` and
 `configuration: not_owned`. Report any retained setting names: newer user
 edits are intentionally preserved. Pending recovery or shutdown is not
-completed cleanup. Model engines and unrelated clients remain user-owned.
+completed cleanup. A managed receipt uses schema version 2 and reports
+`local_runtime.ownership: owned`. Require its state to be `stopped` before
+reporting completed engine cleanup; `disconnecting` remains pending.
+Externally started engines and unrelated clients remain user-owned.
 
 Disconnect before removing the skill/plugin or router binary. Uninstalling
 instructions alone does not restore a connected client's configuration.

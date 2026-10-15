@@ -8,6 +8,10 @@ import subprocess
 import sys
 import time
 import tempfile
+import tarfile
+import socket
+import http.client
+from urllib.parse import urlsplit
 import selectors
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -85,6 +89,52 @@ finally:
     connection.close()
 '''
 
+LLAMA = r'''#!PYTHON
+import http.server,json,os,pathlib,signal,sys,time,subprocess
+if any("TOKEN" in k or "CLOUD_KEY" in k for k in os.environ): sys.exit(9)
+if pathlib.Path(__file__).with_name("fail-start").exists(): sys.exit(3)
+args=sys.argv[1:]
+port=int(args[args.index("--port")+1])
+model=args[args.index("--alias")+1]
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self,*args): pass
+    def do_GET(self):
+        if pathlib.Path(__file__).with_name("lose-owner-on-health").exists():
+            parent=int(subprocess.check_output(["ps","-o","ppid=","-p",str(os.getppid())],text=True,timeout=1).strip())
+            command=subprocess.check_output(["ps","-o","command=","-p",str(parent)],text=True,timeout=1)
+            if "hormuz.connected_client_runtime" not in command or str(pathlib.Path(__file__).parent.parent) not in command:
+                raise RuntimeError("Not the fixture-owned ancestor")
+            os.kill(parent,signal.SIGKILL)
+        data=b'{"status":"ok"}'
+        self.send_response(200);self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
+    def do_POST(self):
+        body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        data=json.dumps({"id":"managed-fixture","object":"response","status":"completed","model":model,
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"MANAGED_LOCAL"}]}],
+            "usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}).encode()
+        self.send_response(200);self.send_header("Content-Type","application/json")
+        self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
+server=http.server.HTTPServer(("127.0.0.1",port),Handler)
+marker="I srv  llama_server: listening on http://127.0.0.1:"+str(port)+"\n"
+if pathlib.Path(__file__).with_name("split-output").exists():
+    os.write(2,marker[:20].encode());time.sleep(0.4)
+    os.write(2,marker[20:].encode().ljust(4096,b" "))
+else:
+    print(marker,file=sys.stderr,flush=True)
+server.timeout=0.2
+stopping=False
+def stop(*_):
+    global stopping
+    if pathlib.Path(__file__).with_name("slow-stop").exists(): time.sleep(1)
+    stopping=True
+signal.signal(signal.SIGTERM,stop)
+try:
+    while not stopping: server.handle_request()
+finally:
+    server.server_close()
+    pathlib.Path(__file__).with_name("stopped").write_text("stopped")
+'''
+
 
 class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
     def setUp(self):
@@ -115,6 +165,200 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
+
+    def managed_configuration(self, cloud):
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        engine = self.root / "engine"
+        engine.mkdir()
+        executable = engine / "llama-server"
+        executable.write_text(LLAMA.replace("#!PYTHON", "#!" + sys.executable, 1))
+        executable.chmod(0o700)
+        archive = self.root / "runtime.tar.gz"
+        (engine / "libfixture.1.dylib").write_bytes(b"synthetic runtime dependency")
+        (engine / "libfixture.dylib").symlink_to("libfixture.1.dylib")
+        with tarfile.open(archive, "w:gz") as bundle:
+            for path in engine.iterdir():
+                bundle.add(path, arcname=path.name)
+        model = self.root / "fixture.gguf"
+        model.write_bytes(b"GGUF synthetic external runtime fixture")
+        digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        value = destination_workflow.ExecutionDestinationWorkflowTests.configuration(self, f"http://127.0.0.1:{port}", cloud)
+        value["model_routes"]["local-code"].update(model_revision="sha256:" + digest, capabilities=["responses", "text"])
+        value["route_admission"] = {"mode": "local_only", "local_routes": {"local-code": {
+            "qualification_id": "synthetic-managed-v1", "model_revision": "sha256:" + digest,
+            "max_request_bytes": 4096, "max_output_tokens": 8, "task_types": ["summarization"]}}}
+        frozen = json.loads((Path(__file__).parent / "fixtures/managed-llama-profile-v1.json").read_text())
+        value["managed_llama"] = {**frozen, "executable": str(executable),
+            "runtime_archive": str(archive), "runtime_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+            "model_file": str(model), "model_sha256": digest, "startup_timeout_seconds": 3}
+        self.path.write_text(json.dumps(value))
+        (self.home / "config.toml").write_text('personality = "none"\nmodel = "original-model"\n')
+        return value, port, engine
+
+    def test_connect_starts_verified_local_engine_and_disconnect_stops_only_its_engine(self):
+        with provider("EXTERNAL_ENGINE") as (external, external_requests):
+            value, port, engine = self.managed_configuration(external)
+            try:
+                preview = json.loads(self.command("connect", "--dry-run").stdout)
+                expected_preview = json.loads((Path(__file__).parent / "fixtures/connected-client-preview-v2.json").read_text())
+                self.assertEqual(preview["local_runtime"], expected_preview["local_runtime"])
+                self.assertEqual(preview["schema_version"], 2)
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertFalse((engine / "stopped").exists())
+                connected = json.loads(self.command("connect").stdout)
+                repeated = json.loads(self.command("connect").stdout)
+                self.assertEqual(repeated["generation"], connected["generation"])
+                result = self.client("local-only")
+                self.assertEqual((result["status"], result["body"]["output"][0]["content"][0]["text"]), (200, "MANAGED_LOCAL"))
+                expected_status = json.loads((Path(__file__).parent / "fixtures/connected-client-status-v2.json").read_text())
+                self.assertEqual(connected["local_runtime"], expected_status["local_runtime"])
+                self.assertEqual(connected["schema_version"], expected_status["schema_version"])
+                validate_contract(connected)
+                status = json.loads(self.command("status").stdout)
+                self.assertEqual(status["local_runtime"], connected["local_runtime"])
+                disconnected = json.loads(self.command("disconnect").stdout)
+                self.assertEqual(disconnected["local_runtime"], {"ownership": "owned", "state": "stopped"})
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertTrue((engine / "stopped").exists())
+                with socket.socket() as probe:
+                    self.assertNotEqual(probe.connect_ex(("127.0.0.1", port)), 0)
+                origin = urlsplit(external)
+                connection = http.client.HTTPConnection(origin.hostname, origin.port, timeout=2)
+                try:
+                    connection.request("GET", "/health")
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    response.read(4096)
+                finally:
+                    connection.close()
+                self.assertEqual(external_requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
+    def test_invalid_runtime_archive_fails_without_activation_or_private_traceback(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            value, _, engine = self.managed_configuration(external)
+            archive = Path(value["managed_llama"]["runtime_archive"])
+            archive.write_bytes(b"not a gzip archive")
+            value["managed_llama"]["runtime_sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+            self.path.write_text(json.dumps(value))
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual(failure.returncode, 2, failure.stderr)
+                self.assertEqual(json.loads(failure.stderr)["error"]["code"], "connected_client_runtime_invalid")
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertEqual(json.loads(self.command("status").stdout)["phase"], "disconnected")
+                self.assertFalse((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
+    def test_owned_runtime_becomes_ready_when_native_output_is_fragmented(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            _, _, engine = self.managed_configuration(external)
+            (engine / "split-output").touch()
+            try:
+                connected = json.loads(self.command("connect").stdout)
+                self.assertEqual(connected["local_runtime"]["state"], "ready")
+                result = self.client("local-only")
+                self.assertEqual((result["status"], result["body"]["output"][0]["content"][0]["text"]), (200, "MANAGED_LOCAL"))
+                self.assertEqual(json.loads(self.command("disconnect").stdout)["local_runtime"]["state"], "stopped")
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
+    def test_managed_engine_cannot_activate_with_an_unrelated_configured_cloud_baseline(self):
+        with provider("CLOUD_DESTINATION") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["model_routes"] = {"cloud-code": {"protocol": "openai", "upstream_model": "cloud-model"}, **value["model_routes"]}
+            value["policies"]["organization"]["allowed_models"] = ["cloud-code", "local-code"]
+            value["route_admission"]["mode"] = "configured"
+            self.path.write_text(json.dumps(value))
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual(failure.returncode, 2, failure.stdout)
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertFalse((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
+    def test_managed_setup_refuses_an_occupied_endpoint_and_preserves_its_external_engine(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            value, _, engine = self.managed_configuration(external)
+            value["upstreams"]["local-llama"]["base_url"] = external
+            self.path.write_text(json.dumps(value))
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual((failure.returncode, json.loads(failure.stderr)["error"]["code"]),
+                                 (2, "connected_client_runtime_occupied"))
+                self.command("disconnect")
+                connection = http.client.HTTPConnection(urlsplit(external).hostname, urlsplit(external).port, timeout=2)
+                try:
+                    connection.request("GET", "/health")
+                    response = connection.getresponse()
+                    self.assertEqual((response.status, json.loads(response.read(4096))), (200, {"status": "ok"}))
+                finally:
+                    connection.close()
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertFalse((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
+    def test_interrupted_managed_startup_waits_for_owned_engine_cleanup_before_reporting_stopped(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            _, port, engine = self.managed_configuration(external)
+            (engine / "lose-owner-on-health").touch()
+            (engine / "slow-stop").touch()
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual(failure.returncode, 2, failure.stdout)
+                status = json.loads(self.command("status").stdout)
+                self.assertEqual((status["phase"], status["local_runtime"]["state"]), ("disconnected", "stopped"))
+                self.assertTrue((engine / "stopped").exists())
+                with socket.socket() as probe:
+                    self.assertNotEqual(probe.connect_ex(("127.0.0.1", port)), 0)
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+                deadline = time.monotonic() + 4
+                while not (engine / "stopped").exists() and time.monotonic() < deadline:
+                    time.sleep(0.1)
+
+    def test_failed_owned_engine_startup_restores_settings_without_cloud_dispatch(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            _, port, engine = self.managed_configuration(external)
+            (engine / "fail-start").touch()
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual((failure.returncode, json.loads(failure.stderr)["error"]["code"]),
+                                 (2, "connected_client_runtime_start_failed"))
+                status = json.loads(self.command("status").stdout)
+                self.assertEqual((status["phase"], status["local_runtime"]["state"]), ("disconnected", "stopped"))
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                with socket.socket() as probe:
+                    self.assertNotEqual(probe.connect_ex(("127.0.0.1", port)), 0)
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
+    def test_changed_runtime_dependency_cannot_activate_an_engine(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            _, _, engine = self.managed_configuration(external)
+            (engine / "libfixture.1.dylib").write_bytes(b"modified dependency")
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual((failure.returncode, json.loads(failure.stderr)["error"]["code"]),
+                                 (2, "connected_client_runtime_invalid"))
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertFalse((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
 
     @contextmanager
     def configured(self, *, hold_first=None):

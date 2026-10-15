@@ -1,0 +1,13 @@
+{
+  "schema_id": "hormuz.connected-client-status",
+  "schema_version": 2,
+  "scope": "codex_user_defaults",
+  "generation": "11111111111111111111111111111111",
+  "client_version": "0.147.0",
+  "phase": "connected",
+  "router": "ready",
+  "configuration": "installed",
+  "owned_settings": ["model", "model_provider", "web_search"],
+  "retained_settings": [],
+  "local_runtime": {"ownership": "owned", "state": "ready"}
+}

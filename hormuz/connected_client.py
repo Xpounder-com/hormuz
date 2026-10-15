@@ -29,8 +29,10 @@ from .compaction_formats import strict_json_loads
 from .contracts import (
     CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
     CONNECTED_CLIENT_ERROR_SCHEMA_ID, CONNECTED_CLIENT_ERROR_ACTIONS, contract_envelope,
+    validate_contract,
 )
 from .policy_runtime import PolicyRuntime
+from .managed_llama import ManagedLlamaError
 
 LIMIT = 128 * 1024
 JOURNAL_SCHEMA_ID = "hormuz.connected-client-journal"
@@ -48,6 +50,14 @@ def lifetime_error(error):
     code = error.code if isinstance(error, ConnectedClientError) else "connected_client_setup_unavailable"
     return contract_envelope(CONNECTED_CLIENT_ERROR_SCHEMA_ID,
         {"error": {"code": code, "action": CONNECTED_CLIENT_ERROR_ACTIONS[code]}})
+
+
+def _lifetime_envelope(schema_id, value, managed=False):
+    if not managed:
+        return contract_envelope(schema_id, value)
+    result = {**value, "schema_id": schema_id, "schema_version": 2}
+    validate_contract(result)
+    return result
 
 
 def _control_directory():
@@ -72,9 +82,11 @@ def _parse_record(text):
         required = {"schema_id", "schema_version", "generation", "phase", "client_version", "installed", "original",
                     "provider_block", "gateway_config", "gateway_digest", "actor_id", "control"}
         if (not isinstance(record, dict) or not required <= record.keys()
-                or record.keys() - required - {"retained_settings"}
+                or record.keys() - required - {"retained_settings", "managed_llama"}
                 or record["schema_id"] != JOURNAL_SCHEMA_ID
-                or type(record["schema_version"]) is not int or record["schema_version"] != JOURNAL_SCHEMA_VERSION
+                or type(record["schema_version"]) is not int or record["schema_version"] not in {1, 2}
+                or ((record["schema_version"] == 2) != (record.get("managed_llama") is True))
+                or (record["schema_version"] == 1 and "managed_llama" in record)
                 or not isinstance(record["generation"], str) or not re.fullmatch("[a-f0-9]{32}", record["generation"])
                 or record["phase"] not in {"prepared", "connected", "disconnecting", "restore_required", "disconnected"}
                 or not isinstance(record["client_version"], str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", record["client_version"])
@@ -406,12 +418,14 @@ class ConnectedClientLifetime:
                 {"phase": "disconnected", "router": "stopped", "retained_settings": [],
                  "scope": "codex_user_defaults", "configuration": "not_owned"})
         router = _control(record, "status") if record["phase"] not in {"disconnected", "restore_required"} else "stopped"
-        return contract_envelope(CONNECTED_CLIENT_STATUS_SCHEMA_ID,
+        managed = record.get("managed_llama", False)
+        return _lifetime_envelope(CONNECTED_CLIENT_STATUS_SCHEMA_ID,
                 {"generation": record["generation"], "phase": record["phase"],
                 "router": router, "client_version": record["client_version"],
                 "scope": "codex_user_defaults", "configuration": self._configuration_state(record),
                 "owned_settings": list(record["installed"]),
-                "retained_settings": record.get("retained_settings", [])})
+                "retained_settings": record.get("retained_settings", []),
+                **({"local_runtime": {"ownership": "owned", "state": router}} if managed else {})}, managed)
 
     def status(self):
         with self._transaction():
@@ -458,10 +472,12 @@ class ConnectedClientLifetime:
                 if _control(existing, "status") != "ready":
                     raise ConnectedClientError("router_unavailable")
                 if preview:
-                    return contract_envelope(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
+                    return _lifetime_envelope(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
                            {"phase": "preview", "scope": "codex_user_defaults",
                             "client_version": SUPPORTED_CODEX_VERSION, "settings": existing["installed"],
-                            "changes": {}, "router": "ready"})
+                            "changes": {}, "router": "ready",
+                            **({"local_runtime": {"ownership": "owned", "state": "ready"}}
+                               if existing.get("managed_llama") else {})}, existing.get("managed_llama", False))
                 return self._status(existing)
             if (existing and existing["phase"] != "disconnected") or self._runtime_active():
                 raise ConnectedClientError("recovery_required")
@@ -480,6 +496,15 @@ class ConnectedClientLifetime:
                 raise ConnectedClientError("model_unavailable")
             if len(model) > 2048:
                 raise ConnectedClientError("configuration_shape_unsupported")
+            managed = config.managed_llama
+            if managed is not None:
+                if policy.allowed_models is not None and managed.route not in policy.allowed_models:
+                    raise ConnectedClientError("model_unavailable")
+                try:
+                    managed.verify()
+                    managed.require_free_endpoint()
+                except (ManagedLlamaError, OSError, ValueError) as error:
+                    raise ConnectedClientError(error.reason if isinstance(error, ManagedLlamaError) else "runtime_invalid") from None
             original_text = _read(self.config_path)
             text = original_text or ""
             document = _document(text)
@@ -501,27 +526,34 @@ class ConnectedClientLifetime:
                       "client_version": SUPPORTED_CODEX_VERSION, "installed": installed, "original": original,
                       "provider_block": block, **intent,
                       "control": str(control_directory / (generation + ".sock"))}
+            if managed is not None:
+                record.update(schema_version=2, managed_llama=True)
             if preview:
-                return contract_envelope(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
+                return _lifetime_envelope(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
                        {"phase": "preview", "scope": "codex_user_defaults",
                         "client_version": SUPPORTED_CODEX_VERSION, "settings": installed,
                         "changes": {**{key: "replace" if key in document else "add" for key in installed},
-                                    "provider_table": "add"}, "router": "not_started"})
+                                    "provider_table": "add"}, "router": "not_started",
+                        **({"local_runtime": {"ownership": "planned", "state": "not_started"}}
+                           if managed is not None else {})}, managed is not None)
             self._save(record)
             _write(self.config_path, text, expected=original_text, compare=True)
             process = subprocess.Popen([sys.executable, "-m", "hormuz.connected_client_runtime", str(self.record_path), generation],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True)
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + (managed.startup_timeout_seconds + 35 if managed is not None else 5)
             while _control(record, "status") != "ready":
                 if process.poll() is not None or time.monotonic() >= deadline:
                     if process.poll() is None:
                         process.terminate()
                         process.wait(timeout=5)
+                    cleanup_deadline = time.monotonic() + 7
+                    while managed is not None and self._runtime_active() and time.monotonic() < cleanup_deadline:
+                        time.sleep(0.05)
                     self._restore(record)
-                    record["phase"] = "disconnected"
+                    record["phase"] = "disconnecting" if self._runtime_active() else "disconnected"
                     self._save(record)
-                    raise ConnectedClientError("router_start_failed")
+                    raise ConnectedClientError("runtime_start_failed" if managed is not None else "router_start_failed")
                 time.sleep(0.05)
             record["phase"] = "connected"
             self._save(record)
@@ -567,7 +599,7 @@ class ConnectedClientLifetime:
                 # unexpected semantic document shape. Keep output content-free.
                 restoration_error = error if isinstance(error, (ConnectedClientError, OSError)) else ConnectedClientError("restoration_unavailable")
             _control(record, "stop")
-            deadline = time.monotonic() + 7
+            deadline = time.monotonic() + (12 if record.get("managed_llama") else 7)
             while self._runtime_active():
                 if time.monotonic() >= deadline:
                     self._save(record)
