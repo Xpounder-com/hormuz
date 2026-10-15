@@ -359,6 +359,7 @@ def identify(handler, identity, request_value, *, client, protocol, account_usag
                     from .route_admission import RouteAdmissionError
                     raise RouteAdmissionError("affinity_required", 409)
                 work = known
+            if not headers or known is not None:
                 handler._work_conversation = threads[0]
     if work is not None:
         handler._work_id = work["work_id"]

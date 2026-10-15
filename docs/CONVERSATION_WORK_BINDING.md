@@ -87,7 +87,8 @@ An explicit `X-Hormuz-Work-ID` retains the existing manual path:
   does not establish a new automatic association.
 - With a known association, the same explicit work ID is accepted. A different
   owned ID receives HTTP 409 `hormuz_ai_work_conversation_work_conflict` before
-  provider dispatch.
+  provider dispatch. A matching header keeps the association's successful-response
+  affinity requirement, including in configured routing mode.
 - An inaccessible work ID keeps HTTP 404 `hormuz_ai_work_work_not_found`; thread
   metadata cannot confer another actor's authority.
 
@@ -193,9 +194,9 @@ automatic native retries. Resource limits were 2 fixture handlers, 65,536-byte
 request bodies, 1 MiB public/native outputs, and native/CLI/HTTP/provider deadlines
 of 60/20/8/5 seconds. No project trust entry was added; its absence was preserved.
 
-Private synthetic evidence is retained under
-`/private/tmp/hormuz-native-auto-binding-v2-20261015-hx3it_c0`. The durable hashes
-identify the exact evidence; these temporary paths are not distributed assets:
+Private synthetic evidence is retained as case
+`hormuz-native-auto-binding-v2-20261015-hx3it_c0`. The durable hashes identify the
+exact evidence; the private receipt files are not distributed assets:
 
 | Evidence | SHA-256 |
 | --- | --- |
@@ -206,7 +207,7 @@ identify the exact evidence; these temporary paths are not distributed assets:
 | `native-events.jsonl` | `bd738b9bedf7a0f4959234d22947e5d1eb55c94a32bb5c5dd79566f6852d03f2` |
 
 The initial case remains a failed qualification record:
-`/private/tmp/hormuz-native-auto-binding-20261015-f13l8mlh/summary.json`, SHA-256
+`hormuz-native-auto-binding-20261015-f13l8mlh/summary.json`, SHA-256
 `1ed74e592f5f17ba63ba5d08aaab5fd498d2417d85c6dc052d8615eada7e89e8`.
 Its prompt omitted a recognized coding-review keyword and received
 `hormuz_route_local_route_unavailable` before admission, with zero provider POSTs,

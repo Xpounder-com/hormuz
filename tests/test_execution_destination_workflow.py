@@ -725,6 +725,14 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                     "input": [{"type": "function_call_output", "call_id": "unknown-call", "output": "Unowned result"}]})
                 self.assertEqual((history["status"], history["body"].get("error", {}).get("code")),
                                  (409, "hormuz_route_affinity_required"))
+                jobs = submit(method="GET", path="/work/jobs")
+                self.assertEqual(jobs["status"], 200, jobs)
+                self.assertEqual(len(jobs["body"]["works"]), 1)
+                work_id = jobs["body"]["works"][0]["work_id"]
+                explicit = submit(headers={**headers, "X-Hormuz-Work-ID": work_id}, request={"client_metadata": tags,
+                    "input": [{"type": "function_call_output", "call_id": "unknown-call", "output": "Unowned result"}]})
+                self.assertEqual((explicit["status"], explicit["body"].get("error", {}).get("code")),
+                                 (409, "hormuz_route_affinity_required"))
             self.assertEqual((local_requests, cloud_requests), ([], []))
 
     def test_ambiguous_codex_identity_is_rejected_before_dispatch(self):
