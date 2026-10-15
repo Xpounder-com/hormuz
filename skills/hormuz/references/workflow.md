@@ -5,8 +5,7 @@ permissions and conversation. Hormuz owns only its connected-client lifetime.
 
 ## Prerequisites
 
-Use an installed Hormuz 2.0 development CLI and an existing, user-selected
-router configuration. If the binary is missing, install a user-selected,
+Use an installed Hormuz 2.0 development CLI. If the binary is missing, install a user-selected,
 reviewed Hormuz 2.0 source checkout in a dedicated Python 3.11+ virtual
 environment. Select unused absolute paths and use the installed executable
 for subsequent commands:
@@ -27,8 +26,11 @@ Ask for a target executable only if it cannot be determined safely. Keep
 existing client settings behind the CLI's validation and restoration journal;
 do not bypass its version checks or hand-edit those settings.
 
-Before connecting, identify the selected config, actor, target executable and
-client home. An existing qualified local route is required for local inference.
+Before connecting, identify the target executable, client home, local router
+token variable and configuration path. For a new local-only setup, select a
+new configuration path plus the existing verified runtime archive, extracted
+llama-server and GGUF. Shared setup generates the route and configuration.
+For an existing user-selected configuration, preserve its actor and policy.
 If the selected configuration declares a verified `managed_llama` profile,
 the shared connect command verifies its existing runtime bundle/model files and
 starts the owned engine. Use `auto` or `local_only` admission for that profile;
@@ -43,7 +45,42 @@ Keep credentials in their configured environment variables. Check presence
 without printing values. Do not run `hormuz auth token` into the conversation,
 read authentication caches, or include private config/prompt content in reports.
 
-## Setup
+## Generate local setup from existing files
+
+Use the shared operation when the user requests local-only setup and has
+existing verified assets. Check `hormuz client setup --help` first: development
+builds share a version number, so a version string alone cannot establish this
+command. If it is missing, use the reviewed source-install path above and
+check again before proceeding. The bundled profile pins the documented Codex
+0.147.0 / llama.cpp b11617 / Qwen3-4B macOS arm64 experiment. Preserve its limits
+and historical quality failures. An explicitly selected reviewed qualification
+file may be passed with `--qualification`; use existing evidence and trusted
+digests rather than manufacturing qualification declarations.
+
+```sh
+hormuz --config /path/to/new-hormuz.json client setup codex \
+  --executable /path/to/codex --client-home /path/to/codex-home \
+  --runtime-archive /path/to/existing-runtime.tar.gz \
+  --llama-executable /path/to/extracted/llama-server \
+  --model-file /path/to/existing-model.gguf --dry-run
+```
+
+Keep the existing local router token in `HORMUZ_GATEWAY_TOKEN`, or pass its
+actual variable name with `--credential-env`. The target Codex process must
+inherit it too. Report a missing credential as a prerequisite; setup does not
+bootstrap tokens. Review the version-1 setup receipt's `configuration` and
+nested `connection` preview. A matching setup request authorizes the shown
+creation and connection; run the identical command without `--dry-run`.
+
+Require the nested receipt to report `connected`, `ready`, `installed` and
+`local_runtime: {ownership: owned, state: ready}`. Then follow status and task
+inspection below. Missing/corrupt files, unsupported rows, changed configuration
+or an occupied endpoint block. Follow the public recovery action. Setup reuses
+existing assets and identical configuration; no file discovery, extraction or
+downloads occur. Startup failure keeps the generated configuration for retry
+and restores owned client settings through the existing lifetime.
+
+## Connect an existing configuration
 
 1. Use the user-selected mode. For local-only, verify `route_admission.mode` is
    `local_only`; for automatic routing, verify it is `auto` and inspect

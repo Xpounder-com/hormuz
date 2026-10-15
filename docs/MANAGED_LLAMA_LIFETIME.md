@@ -13,7 +13,9 @@ external; Hormuz neither adopts it nor stops it.
 
 ## Profile and activation
 
-Add a `managed_llama` object to the existing gateway configuration:
+For automatic configuration generation from these existing verified files,
+use [shared local setup](SHARED_LOCAL_SETUP.md). For a manually maintained
+gateway configuration, add a `managed_llama` object:
 
 ```json
 {
