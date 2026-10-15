@@ -48,7 +48,10 @@ read authentication caches, or include private config/prompt content in reports.
 ## Generate local setup from existing files
 
 Use the shared operation when the user requests local-only setup and has
-existing verified assets. The bundled profile pins the documented Codex
+existing verified assets. Check `hormuz client setup --help` first: development
+builds share a version number, so a version string alone cannot establish this
+command. If it is missing, use the reviewed source-install path above and
+check again before proceeding. The bundled profile pins the documented Codex
 0.147.0 / llama.cpp b11617 / Qwen3-4B macOS arm64 experiment. Preserve its limits
 and historical quality failures. An explicitly selected reviewed qualification
 file may be passed with `--qualification`; use existing evidence and trusted

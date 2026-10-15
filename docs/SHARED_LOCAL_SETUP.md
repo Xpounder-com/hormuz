@@ -14,6 +14,9 @@ process must inherit that variable too. Setup stores its name, never its value;
 it does not bootstrap credentials or use a cloud account. Select a new output
 configuration path and the existing archive, extracted launcher and GGUF:
 
+Check `hormuz client setup --help` when updating a development installation;
+the development version string alone does not establish command availability.
+
 ```sh
 hormuz --config /absolute/private/hormuz.json client setup codex \
   --client-home /absolute/codex-home --executable /absolute/codex \
@@ -129,3 +132,43 @@ Routine tests use external synthetic runtime/client fixtures through the
 approved connect → request → result/status → disconnect seam. They do not prove
 real plugin activation, desktop routing, subscription access, other platforms
 or autonomous model quality. See [the setup decision](decisions/0021-shared-local-setup.md).
+
+## Native setup confirmation — October 15, 2026
+
+One frozen episode ran against clean runtime source
+`4042819304048ab81997c618f43f7fba51053a1f`, using the existing pinned
+Codex 0.147.0 executable, llama.cpp b11617 bundle and Qwen3-4B GGUF. Inputs,
+driver, runtime Python/JSON hashes and supplied-script acceptance were frozen
+before execution. There were no model-quality retries or downloads.
+
+In a disposable private home, the shared command's preview left final router
+configuration and client settings unchanged. Its apply command generated the
+mode-0600 configuration with only a local destination, verified and reused the
+existing artifacts, then reported the owned engine ready. The driver wrote no
+router JSON and never started or signalled an engine itself.
+
+The real Codex supplied-script episode exited zero in **19.679 seconds**,
+executed exactly one requested Python command, persisted the expected fix and
+passed both assertions. It created one automatically bound work item with two
+successful attempts on the same local destination; the second retained session
+affinity. Public work outcome remained `unknown`, and local capacity returned
+to zero. All twelve existing behavioral predicates passed.
+
+Disconnect restored owned preferences and removed its provider while preserving
+the native client's observed project-trust addition. Engine/router endpoints
+closed, the native process was reaped and the independent loopback cloud trap
+stopped with zero calls. That trap was not a configured destination: this case
+qualifies generated local setup, not hybrid cloud routing. Frozen inputs and
+all cleanup predicates passed. Subsequent documentation-only changes preserve
+the qualified runtime bytes.
+
+| Private evidence receipt | SHA-256 |
+| --- | --- |
+| Frozen driver | `3b2e3ee8d63bfcca205a37fcdf9f0a41addea4831d5e69845f0f98de091528f4` |
+| Supplied-script acceptance | `a68e717b3cc8ae755d6ba8394e18a12fe13af7a155541cbed5aec9308b28550a` |
+| Frozen input manifest | `7b6c4ac2d0a9bb056561394eb8602fd811b41f7391b4e92db2fd458e319219ee` |
+| Final summary | `d779b6a3a81dea7fedb082e24e4773a78ece3c058dfa2fbc6bdd91ba4e40f5de` |
+
+Raw evidence remains private. This pass preserves the earlier model-quality
+failures and leaves plugin activation, desktop routing, later turns/resume/fork,
+other client/platform rows and subscription eligibility unqualified.
