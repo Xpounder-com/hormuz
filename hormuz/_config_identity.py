@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -33,9 +34,15 @@ def build_identity_domain(raw: dict[str, Any]) -> IdentityConstruction:
     for index, value in enumerate(identities_raw):
         item = _object(value, f"identities[{index}]")
         prefix = f"identities[{index}]"
-        token_env = _environment_name(item.get("token_env"), f"{prefix}.token_env")
+        if ("token_env" in item) == ("token_file" in item):
+            raise ConfigError("identity requires exactly one token source")
+        token_env = _environment_name(item["token_env"], f"{prefix}.token_env") if "token_env" in item else ""
+        token_file = Path(_string(item["token_file"], f"{prefix}.token_file")) if "token_file" in item else None
+        if token_file is not None and not token_file.is_absolute():
+            raise ConfigError("identity credential file must be absolute")
         identity = Identity(
             token_env=token_env,
+            token_file=token_file,
             token="",
             actor_id=_string(item.get("actor_id"), f"{prefix}.actor_id"),
             actor_name=_string(item.get("actor_name"), f"{prefix}.actor_name"),
@@ -62,7 +69,14 @@ def resolve_static_identity_tokens(
 
     resolved: dict[str, Identity] = {}
     for identity in identities:
-        token = env.get(identity.token_env, "")
+        if identity.token_file is not None:
+            from .local_credentials import LocalCredentialError, read_local_credential
+            try:
+                token = read_local_credential(identity.token_file)
+            except LocalCredentialError:
+                raise ConfigError("local_credential_unavailable") from None
+        else:
+            token = env.get(identity.token_env, "")
         if not token:
             raise ConfigError(f"Required identity token environment variable is not set: {identity.token_env}")
         if len(token) < 16:

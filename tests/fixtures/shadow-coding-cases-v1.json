@@ -1,0 +1,34 @@
+{
+  "schema_id": "hormuz.shadow-coding-cases",
+  "schema_version": 1,
+  "acceptance": "independent_frozen_python_checks",
+  "episodes_per_case": 1,
+  "case_deadline_seconds": 90,
+  "cases": [
+    {
+      "case_id": "ceil-division",
+      "goal": "Fix ceil_div(a, b) so it returns the mathematical ceiling of integer division for positive and negative integer operands. Division by zero must raise ZeroDivisionError.",
+      "files": {
+        "solution.py": "def ceil_div(a, b):\n    return a // b\n"
+      },
+      "checks": "from solution import ceil_div\nfor a,b,expected in [(5,2,3),(-5,2,-2),(5,-2,-2),(-5,-2,3),(0,3,0),(6,3,2)]:\n    assert ceil_div(a,b)==expected,(a,b)\ntry:\n    ceil_div(1,0)\nexcept ZeroDivisionError:\n    pass\nelse:\n    raise AssertionError(\"zero divisor\")\n"
+    },
+    {
+      "case_id": "quoted-csv",
+      "goal": "Fix parse_row(line) to parse exactly one CSV record using standard comma delimiters and double-quote escaping. Preserve whitespace inside unquoted fields and trailing empty fields.",
+      "files": {
+        "solution.py": "def parse_row(line):\n    return line.strip().split(\",\")\n"
+      },
+      "checks": "from solution import parse_row\nfor line,expected in [('a,\"b,c\",d',[\"a\",\"b,c\",\"d\"]),('\"a\"\"b\",,c',['a\"b',\"\",\"c\"]),(\" x ,y\",[\" x \",\"y\"]),(\"a,\",[\"a\",\"\"]),(\"α,β\",[\"α\",\"β\"])]:\n    assert parse_row(line)==expected,line\n"
+    },
+    {
+      "case_id": "atomic-transfer",
+      "goal": "Repair Ledger.transfer and apply_transfer across both Python files. Transfers require distinct known accounts and a strictly positive int amount (bool is invalid), sufficient funds, and atomic balances on any rejection. Unknown accounts raise KeyError; other invalid transfers raise ValueError. Remember a request ID only after success. A repeated successful request returns False with no changes; a rejected request ID can be retried after its cause is repaired.",
+      "files": {
+        "ledger.py": "from operations import apply_transfer\n\nclass Ledger:\n    def __init__(self, balances):\n        self.balances = dict(balances)\n        self.seen = set()\n\n    def transfer(self, request_id, source, target, amount):\n        if request_id in self.seen:\n            return False\n        self.seen.add(request_id)\n        apply_transfer(self.balances, source, target, amount)\n        return True\n",
+        "operations.py": "def apply_transfer(balances, source, target, amount):\n    balances[source] -= amount\n    balances[target] += amount\n"
+      },
+      "checks": "from ledger import Ledger\nx=Ledger({\"a\":10,\"b\":3})\nassert x.transfer(\"ok\",\"a\",\"b\",4) is True\nassert x.balances=={\"a\":6,\"b\":7}\nassert x.transfer(\"ok\",\"a\",\"b\",4) is False\nassert x.balances=={\"a\":6,\"b\":7}\nfor index,(source,target,amount,error) in enumerate([(\"a\",\"b\",0,ValueError),(\"a\",\"b\",-1,ValueError),(\"a\",\"b\",True,ValueError),(\"a\",\"b\",1.5,ValueError),(\"a\",\"missing\",1,KeyError),(\"missing\",\"b\",1,KeyError),(\"a\",\"a\",1,ValueError),(\"a\",\"b\",99,ValueError)]):\n    before=dict(x.balances);request=\"bad-\"+str(index)\n    try:\n        x.transfer(request,source,target,amount)\n    except error:\n        pass\n    else:\n        raise AssertionError((source,target,amount))\n    assert x.balances==before\n    assert request not in x.seen\nassert x.transfer(\"bad-7\",\"a\",\"b\",2) is True\nassert x.balances=={\"a\":4,\"b\":9}\n"
+    }
+  ]
+}

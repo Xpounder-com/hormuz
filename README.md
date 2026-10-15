@@ -34,7 +34,13 @@ lease is released. Downloads and model selection remain separate work.
 configuration from existing verified engine/model files and connects through
 that same owner. The CLI and plugin use `client setup codex`; repeated setup
 reuses the configuration and active generation, and preserves edited files.
-The installed router and existing local token remain prerequisites.
+The installed router remains a prerequisite. Setup now creates a private local
+caller credential and configures Codex's command-backed authentication without
+manual token exports. See [local credential setup](docs/LOCAL_CREDENTIAL_SETUP.md).
+
+Opt-in [shadow routing](docs/SHADOW_ROUTING.md) records a local model's routing
+recommendation alongside the actual attempt. Shared setup accepts `--shadow-router`;
+recommendations preserve existing routing, local-only policy and conversation affinity.
 
 ## Install in your agent
 

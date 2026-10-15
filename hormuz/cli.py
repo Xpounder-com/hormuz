@@ -53,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"request", "policy", "model", "usage"}:
         return capability_commands.run(args)
     if args.command == "auth":
+        if args.auth_command == "local-token":
+            return client_commands.local_token(args)
         return client_commands._auth_token(args.env)
     if args.command == "client" and args.client_command != "config":
         return client_commands.run_lifetime(args)

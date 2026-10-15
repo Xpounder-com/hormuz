@@ -273,6 +273,7 @@ class Identity:
     clearance: str = "internal"
     identity_type: str = "human"
     authentication_source: str = "static"
+    token_file: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -499,6 +500,7 @@ class GatewayConfig:
     ai_work: AIWorkConfig = field(default_factory=AIWorkConfig)
     route_admission: "RouteAdmissionConfig" = field(default_factory=lambda: RouteAdmissionConfig())
     managed_llama: "ManagedLlamaProfile | None" = None
+    shadow_router: "ShadowRouterConfig | None" = None
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":

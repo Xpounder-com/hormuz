@@ -61,3 +61,20 @@ def validate_setup(value):
             or connection.get("schema_version") != 2):
         raise ContractValidationError("invalid local setup connection")
     validate_contract(connection)
+
+
+def validate_setup_v2(value):
+    configuration = _value_mapping(value, "configuration")
+    _exact_keys(configuration, {"operation", "mode", "qualification_id", "authentication", "model", "listen_port", "runtime_port"})
+    if configuration["authentication"] != "managed_local":
+        raise ContractValidationError("invalid managed local authentication")
+    legacy = {key: item for key, item in configuration.items() if key != "authentication"}
+    validate_setup({**value, "configuration": {**legacy, "credential_env": "MANAGED_LOCAL"}})
+
+
+def validate_setup_v3(value):
+    configuration = dict(_value_mapping(value, "configuration"))
+    if configuration.pop("shadow_router", None) != "shadow":
+        raise ContractValidationError("invalid shadow routing setup")
+    validator = validate_setup_v2 if "authentication" in configuration else validate_setup
+    validator({**value, "configuration": configuration})

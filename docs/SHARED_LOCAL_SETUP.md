@@ -8,11 +8,12 @@ This implements the next setup slice of [#523](https://github.com/Xpounder-com/h
 
 ## Use
 
-Use an installed Hormuz development CLI, a supported Codex CLI executable and
-the existing local router token environment variable. The selected Codex
-process must inherit that variable too. Setup stores its name, never its value;
-it does not bootstrap credentials or use a cloud account. Select a new output
-configuration path and the existing archive, extracted launcher and GGUF:
+Use an installed Hormuz development CLI and a supported Codex CLI executable.
+Setup creates or reuses a private local caller credential and configures a
+generation-bound Codex auth helper. No manual token export or cloud account is
+needed. See [credential ownership and recovery](LOCAL_CREDENTIAL_SETUP.md).
+Select a new output configuration path and the existing archive, extracted
+launcher and GGUF:
 
 Check `hormuz client setup --help` when updating a development installation;
 the development version string alone does not establish command availability.
@@ -26,9 +27,12 @@ hormuz --config /absolute/private/hormuz.json client setup codex \
 ```
 
 Review the configuration's operation, local-only mode, model, qualification,
-credential variable and proposed loopback ports, plus the nested connection
+managed authentication and proposed loopback ports, plus the nested connection
 preview. Run the identical command without `--dry-run` to create and connect.
-Use `--credential-env NAME` if the existing local token has another name.
+Use `--credential-env NAME` to explicitly retain environment-backed authentication.
+That mode still requires the variable in both Hormuz and Codex. Existing
+environment-backed configurations are preserved; reconnect with `client connect`
+or use their original `--credential-env` rather than implicitly migrating them.
 Generated configurations use actor `local-user`; other configured identities
 remain available through the existing `client connect` workflow.
 
@@ -115,7 +119,7 @@ reuse. Removal of the plugin removes instructions; disconnect first.
 - `hormuz.local-setup-profile` version 1 is the strict, bounded input declaration.
   It includes exact digests, client/platform, model, capabilities, task types
   and request/output/startup/upstream limits. Unknown fields/versions fail.
-- `hormuz.local-setup` version 1 is a content-free receipt containing
+- `hormuz.local-setup` version 1 is the environment-backed, content-free receipt containing
   `configuration` and `connection`. Configuration has operation `create` or
   `reuse`, mode `local_only`, qualification/model identifiers, credential
   variable name and two distinct loopback ports. The connection is the existing
@@ -123,10 +127,16 @@ reuse. Removal of the plugin removes instructions; disconnect first.
   connected-client error envelope and fixed recovery vocabulary.
   Its [version-1 receipt fixture](../tests/fixtures/local-setup-v1.json) freezes
   the shape independently of generated ports and connection generations.
-- Existing gateway configuration, managed profile version 1, connection journal
-  versions 1/2, work storage and connect/status/disconnect contracts are
-  unchanged. Older binaries can read the generated configuration; complete
-  disconnect with a binary supporting the current managed journal first.
+- Version 2 replaces `configuration.credential_env` with
+  `configuration.authentication: managed_local`. Its
+  [fixture](../tests/fixtures/local-setup-v2.json) retains the nested version-2
+  connection contract. Managed local authentication uses private journal
+  version 3 and a separate private credential file version 1; complete
+  disconnect before downgrading to a binary that cannot read those formats.
+- Existing environment-backed gateway configuration, managed profile version 1,
+  journal versions 1/2, work storage and connect/status/disconnect contracts
+  remain supported. The new `token_file` configuration reference and journal
+  version 3 require the current binary. Complete disconnect before downgrade.
 
 Routine tests use external synthetic runtime/client fixtures through the
 approved connect → request → result/status → disconnect seam. They do not prove

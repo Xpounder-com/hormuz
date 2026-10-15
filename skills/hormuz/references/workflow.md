@@ -26,8 +26,8 @@ Ask for a target executable only if it cannot be determined safely. Keep
 existing client settings behind the CLI's validation and restoration journal;
 do not bypass its version checks or hand-edit those settings.
 
-Before connecting, identify the target executable, client home, local router
-token variable and configuration path. For a new local-only setup, select a
+Before connecting, identify the target executable, client home and configuration
+path. For a new local-only setup, select a
 new configuration path plus the existing verified runtime archive, extracted
 llama-server and GGUF. Shared setup generates the route and configuration.
 For an existing user-selected configuration, preserve its actor and policy.
@@ -41,8 +41,9 @@ model downloads and cloud/authentication
 eligibility are separate work: never invent qualification records, use native
 login caches as entitlement, or introduce billable fallback.
 
-Keep credentials in their configured environment variables. Check presence
-without printing values. Do not run `hormuz auth token` into the conversation,
+Let shared setup manage its local caller credential. For an existing
+environment-backed configuration, check variable presence without printing
+values. Do not run `hormuz auth token` or `hormuz auth local-token` into the conversation,
 read authentication caches, or include private config/prompt content in reports.
 
 ## Generate local setup from existing files
@@ -65,11 +66,10 @@ hormuz --config /path/to/new-hormuz.json client setup codex \
   --model-file /path/to/existing-model.gguf --dry-run
 ```
 
-Keep the existing local router token in `HORMUZ_GATEWAY_TOKEN`, or pass its
-actual variable name with `--credential-env`. The target Codex process must
-inherit it too. Report a missing credential as a prerequisite; setup does not
-bootstrap tokens. Review the version-1 setup receipt's `configuration` and
-nested `connection` preview. A matching setup request authorizes the shown
+Default setup creates/reuses a private local credential and installs a
+generation-bound command-backed auth helper. Review the version-2 setup
+receipt's `configuration.authentication: managed_local` and nested
+`connection` preview. Preview leaves no persistent new credential. A matching setup request authorizes the shown
 creation and connection; run the identical command without `--dry-run`.
 
 Require the nested receipt to report `connected`, `ready`, `installed` and
@@ -79,6 +79,21 @@ or an occupied endpoint block. Follow the public recovery action. Setup reuses
 existing assets and identical configuration; no file discovery, extraction or
 downloads occur. Startup failure keeps the generated configuration for retry
 and restores owned client settings through the existing lifetime.
+An explicitly selected `--credential-env NAME` retains the older environment
+mode and version-1 setup receipt; only that mode requires the variable in both
+Hormuz and Codex. Preserve existing configurations instead of converting them.
+For missing, changed or unsafe managed credentials, follow
+[credential recovery](../../../docs/LOCAL_CREDENTIAL_SETUP.md) and the public
+error action. Preserve the credential file and journal; a helper failure is not
+permission to remove authentication or read a native login cache.
+
+When the user requests shadow routing, read [shadow routing](../../../docs/SHADOW_ROUTING.md)
+and check setup help for `--shadow-router`. Add the option to both preview and
+apply using a new configuration path. Require version-3 setup to report
+`configuration.shadow_router: shadow`, then inspect the work attempt's versioned
+advice. Preserve the actual route, hard local-only policy and continuing destination.
+Keep classification advice separate from real coding outcomes; the option provides
+no live learned routing or cloud/subscription permission.
 
 ## Connect an existing configuration
 

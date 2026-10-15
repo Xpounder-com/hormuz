@@ -20,6 +20,7 @@ from ._config_policy import (
 from ._config_routing import build_model_route_domain, build_upstream_domain
 from ._config_work import build_ai_work
 from .route_admission import build_route_admission
+from .shadow_routing import build_shadow_router
 from ._config_values import _integer
 from .config import (
     ConfigError,
@@ -122,6 +123,7 @@ def _build_gateway_config(
         ai_work=build_ai_work(raw, source_path=source_path),
         route_admission=admission,
         managed_llama=build_managed_llama(raw, routes, upstreams, admission),
+        shadow_router=build_shadow_router(raw, routes, upstreams, admission),
     )
     config.validate_references()
     if not resolve_credentials:

@@ -45,7 +45,14 @@ try:
          "Authorization": "Bearer " + os.environ[provider["env_key"]],
          **provider.get("http_headers", {}), **value.get("headers", {})})
     if value.get("cancel_before_headers"):
-        time.sleep(0.2)
+        if value.get("cancel_signal"):
+            deadline = time.monotonic() + 5
+            while not os.path.exists(value["cancel_signal"]):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Fixture cancellation signal was not released")
+                time.sleep(0.01)
+        else:
+            time.sleep(0.2)
         connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
         connection.close()
         print(json.dumps({"status": "cancelled", "body": None, "headers": {}}))
@@ -68,7 +75,7 @@ finally:
 
 
 @contextmanager
-def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None):
+def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -95,6 +102,8 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                       "model": body["model"], "output": [{"type": "message", "role": "assistant",
                       "content": [{"type": "output_text", "text": answer}]}],
                       "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}}
+            if response_fields is not None:
+                result.update(response_fields)
             data = json.dumps(result).encode()
             if event_stream:
                 tool = {"type": "function_call", "call_id": "fixture-call", "name": "fixture_tool", "arguments": "{}"}
@@ -960,6 +969,19 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual(submit(request={"input": "Summarize after deadline."})["status"], 200)
                 self.assertEqual((len(local_requests), cloud_requests), (2, []))
 
+    def settled_attempt_history(self, submit, work_id):
+        # Public settlement is asynchronous. Four observations are bounded;
+        # the caller still asserts the precise terminal state it requires.
+        for delay in (0, 0.1, 0.2, 0.4):
+            if delay:
+                time.sleep(delay)
+            history = submit(method="GET", path=f"/work/jobs/{work_id}/attempts")
+            self.assertEqual(history["status"], 200)
+            attempts = history["body"]["attempts"]
+            if attempts and all(attempt["state"] != "pending" for attempt in attempts):
+                return history
+        return history
+
     def test_client_reset_before_headers_closes_the_owned_local_response(self):
         entered, release, closed = threading.Event(), threading.Event(), threading.Event()
         with provider("LOCAL_DESTINATION", hold_first=(entered, release), observe_close=closed) as (local, local_requests), \
@@ -969,15 +991,20 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
             with self.connected_client(value) as submit:
                 job = submit(control=True, path="/work/jobs", request={"repository": "example/repository",
                     "task_type": "implementation", "context_revision": "fixture-revision"})
-                try:
-                    cancelled = submit(cancel_before_headers=True, headers={"X-Hormuz-Work-Id": job["body"]["work_id"]},
+                signal = self.root / "cancel-after-provider-entry"
+                with ThreadPoolExecutor(max_workers=1) as worker:
+                    response = worker.submit(submit, cancel_before_headers=True, cancel_signal=str(signal),
+                        headers={"X-Hormuz-Work-Id": job["body"]["work_id"]},
                         request={"input": "Summarize this fixture."})
-                    self.assertEqual(cancelled["status"], "cancelled")
-                    self.assertTrue(entered.wait(timeout=2))
-                finally:
-                    release.set()
+                    try:
+                        self.assertTrue(entered.wait(timeout=3))
+                        signal.touch()
+                        self.assertEqual(response.result(timeout=4)["status"], "cancelled")
+                    finally:
+                        signal.touch()
+                        release.set()
                 self.assertTrue(closed.wait(timeout=2))
-                history = submit(method="GET", path="/work/jobs/" + job["body"]["work_id"] + "/attempts")
+                history = self.settled_attempt_history(submit, job["body"]["work_id"])
                 self.assertEqual(history["body"]["attempts"][0]["state"], "unknown")
                 self.assertEqual((len(local_requests), cloud_requests), (1, []))
 
