@@ -15,6 +15,11 @@ needed. See [credential ownership and recovery](LOCAL_CREDENTIAL_SETUP.md).
 Select a new output configuration path and the existing archive, extracted
 launcher and GGUF:
 
+If those files are missing, first use [verified asset acquisition](LOCAL_ASSET_ACQUISITION.md).
+Its read-only preview shows the pinned sources, licenses, sizes and storage
+requirement. Explicit `--download` obtains the assets and returns the arguments
+for this existing setup command; it does not connect the client itself.
+
 Check `hormuz client setup --help` when updating a development installation;
 the development version string alone does not establish command availability.
 

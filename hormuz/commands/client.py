@@ -23,6 +23,17 @@ def add_client_commands(
     connect = client_subparsers.add_parser("config", help="Print client configuration for this gateway")
     _client_config_arguments(connect)
 
+    acquire = client_subparsers.add_parser("acquire", help="Preview or explicitly download pinned local runtime/model assets")
+    acquire.add_argument("client", choices=["codex"])
+    acquire.add_argument("--directory", required=True, help="Private parent directory for digest-bound asset generations")
+    acquire.add_argument("--catalog", help="Explicitly reviewed catalog (default bundled experimental profile)")
+    mode = acquire.add_mutually_exclusive_group()
+    mode.add_argument("--download", action="store_true", help="Authorize the displayed pinned downloads; resume owned partial files")
+    mode.add_argument("--offline", action="store_true", help="Require verified existing assets without network access")
+    mode.add_argument("--dry-run", action="store_true", help="Read-only offline preview (the default)")
+    acquire.add_argument("--timeout-seconds", type=int, default=1800, choices=range(1, 3601), metavar="1..3600",
+                         help="Absolute deadline for each artifact download (default 1800 seconds)")
+
     for command in ("setup", "connect", "status", "disconnect"):
         lifecycle = client_subparsers.add_parser(command, help="Manage persistent Codex CLI connection")
         lifecycle.add_argument("client", choices=["codex"])
@@ -194,6 +205,8 @@ def _client_base_url(value: str) -> str:
 
 
 def run_lifetime(args: argparse.Namespace) -> int:
+    if args.client_command == "acquire":
+        return _acquire(args)
     from pathlib import Path
     from ..connected_client import ConnectedClientError, ConnectedClientLifetime, lifetime_error
     try:
@@ -212,3 +225,24 @@ def run_lifetime(args: argparse.Namespace) -> int:
     except (ConnectedClientError, ConfigError, OSError, subprocess.SubprocessError) as error:
         print(json.dumps(lifetime_error(error)), file=sys.stderr)
         return 2
+
+
+def _acquire(args):
+    from ..asset_download import AssetDownloadError
+    from ..local_acquisition import LocalAcquisitionError, acquire_local
+    from ..managed_llama import ManagedLlamaError
+    from ..contracts import ContractValidationError, validate_contract
+    from .._contract_schemas.local_acquisition import ERROR_ACTIONS
+    try:
+        print(json.dumps(acquire_local(args), sort_keys=True))
+        return 0
+    except (LocalAcquisitionError, AssetDownloadError, ManagedLlamaError, ContractValidationError,
+            OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt) as error:
+        code = (error.code if isinstance(error, LocalAcquisitionError) else str(error) if isinstance(error, AssetDownloadError)
+                else "runtime_invalid" if isinstance(error, ManagedLlamaError)
+                else "interrupted" if isinstance(error, KeyboardInterrupt) else "installation_changed")
+        result = {"schema_id": "hormuz.local-acquisition-error", "schema_version": 1,
+                  "error": {"code": code, "action": ERROR_ACTIONS[code]}}
+        validate_contract(result)
+        print(json.dumps(result), file=sys.stderr)
+        return 130 if isinstance(error, KeyboardInterrupt) else 2

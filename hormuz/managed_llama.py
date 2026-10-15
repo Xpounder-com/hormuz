@@ -18,6 +18,8 @@ import subprocess
 import sys
 import tarfile
 import time
+import shutil
+import tempfile
 from urllib.parse import urlsplit
 import zlib
 
@@ -132,6 +134,70 @@ class _ArchiveBudget:
         if self.expanded > 1024**3 + 1024**2:
             raise ManagedLlamaError("runtime_invalid")
         return data
+
+
+def extract_runtime(archive_path, destination):
+    """Extract a bounded verified archive into a new private runtime directory."""
+    destination = Path(destination)
+    staged = Path(tempfile.mkdtemp(prefix=".runtime-", dir=destination.parent))
+    try:
+        deadline = time.monotonic() + 30
+        total, seen, links = 0, set(), []
+        with gzip.open(archive_path, "rb") as expanded, tarfile.open(
+                fileobj=_ArchiveBudget(expanded, deadline), mode="r|") as archive:
+            for member in archive:
+                name = PurePosixPath(member.name)
+                if (name.is_absolute() or ".." in name.parts or not name.parts
+                        or len(member.name) > 4096 or any(ord(c) < 32 for c in member.name)
+                        or name in seen or len(seen) >= 256 or member.size < 0
+                        or time.monotonic() > deadline):
+                    raise ManagedLlamaError("runtime_invalid")
+                seen.add(name)
+                total += member.size
+                if total > 1024**3:
+                    raise ManagedLlamaError("runtime_invalid")
+                target = staged.joinpath(*name.parts)
+                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                if member.isdir():
+                    target.mkdir(mode=0o700, exist_ok=True)
+                elif member.isfile():
+                    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                         0o700 if member.mode & 0o111 else 0o600)
+                    with os.fdopen(descriptor, "wb") as stream, archive.extractfile(member) as source:
+                        remaining = member.size
+                        while remaining:
+                            if time.monotonic() > deadline:
+                                raise ManagedLlamaError("runtime_invalid")
+                            chunk = source.read(min(1024**2, remaining))
+                            if not chunk:
+                                raise ManagedLlamaError("runtime_invalid")
+                            stream.write(chunk)
+                            remaining -= len(chunk)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                elif member.issym():
+                    if (not member.linkname or len(member.linkname) > 4096
+                            or PurePosixPath(member.linkname).is_absolute()
+                            or any(ord(c) < 32 for c in member.linkname)):
+                        raise ManagedLlamaError("runtime_invalid")
+                    links.append((target, member.linkname))
+                else:
+                    raise ManagedLlamaError("runtime_invalid")
+        # Create links only after all writes so no archive path can redirect a write.
+        for target, link in links:
+            target.symlink_to(link)
+        root = staged.resolve(strict=True)
+        for target, _ in links:
+            if not target.resolve(strict=True).is_relative_to(root):
+                raise ManagedLlamaError("runtime_invalid")
+        if destination.exists() or destination.is_symlink():
+            raise ManagedLlamaError("runtime_invalid")
+        staged.rename(destination)
+    except (OSError, ValueError, RuntimeError, EOFError, tarfile.TarError, zlib.error):
+        raise ManagedLlamaError("runtime_invalid") from None
+    finally:
+        if staged.exists():
+            shutil.rmtree(staged)
 
 
 def _digest(path, limit, deadline):
