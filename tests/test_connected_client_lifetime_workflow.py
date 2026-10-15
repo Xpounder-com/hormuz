@@ -42,6 +42,9 @@ if "edit-provider" in sys.argv:
 if "edit-model" in sys.argv:
     path.write_text(text.replace('model = "local-code"', 'model = "user-model"'))
     config = tomllib.loads(path.read_text())
+if "trust-project" in sys.argv:
+    path.write_text(text + '\n[projects."/synthetic/project"]\ntrust_level = "trusted"\n')
+    config = tomllib.loads(path.read_text())
 view = {"model": config.get("model", "default-model"),
         "provider": config.get("model_provider", "openai"),
         "preference": config.get("personality"),
@@ -363,6 +366,22 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertEqual(set(result["retained_settings"]),
                              {"model", "model_providers." + installed_provider})
             self.assertEqual(result["generation"], connection["generation"])
+
+    def test_disconnect_removes_owned_provider_when_client_appends_project_trust(self):
+        with self.configured() as (local_requests, cloud_requests):
+            path = self.home / "config.toml"
+            original = path.read_text()
+            appended = '\n[projects."/synthetic/project"]\ntrust_level = "trusted"\n'
+            self.command("connect")
+            self.assertEqual(self.client("trust-project")["status"], 200)
+            status = json.loads(self.command("status").stdout)
+            self.assertEqual((status["phase"], status["configuration"]), ("connected", "installed"))
+            disconnected = json.loads(self.command("disconnect").stdout)
+            self.assertEqual((disconnected["phase"], disconnected["router"], disconnected["retained_settings"]),
+                             ("disconnected", "stopped", []))
+            self.assertEqual(path.read_text(), original + appended)
+            self.assertEqual(self.client("inspect")["providers"], ["original"])
+            self.assertEqual((len(local_requests), cloud_requests), (1, []))
 
     def test_setup_preserves_multiline_instructions_that_resemble_settings(self):
         with self.configured():
