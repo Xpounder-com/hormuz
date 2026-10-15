@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+import gzip
 import hashlib
 import http.client
 import json
@@ -53,17 +54,31 @@ class ManagedLlamaProfile:
             raise ManagedLlamaError("runtime_invalid")
         root = Path(self.executable).parent
         total = 0
-        with tarfile.open(self.runtime_archive, "r:gz") as archive:
+        with gzip.open(self.runtime_archive, "rb") as expanded, tarfile.open(
+                fileobj=_ArchiveBudget(expanded, deadline), mode="r|") as archive:
             members = []
             for member in archive:
-                if len(members) >= 256:
+                total += member.size
+                if (len(members) >= 256 or member.size < 0 or total > 1024**3
+                        or time.monotonic() > deadline):
                     raise ManagedLlamaError("runtime_invalid")
-                members.append(member)
-            launchers = [m for m in members if m.isfile() and PurePosixPath(m.name).name == Path(self.executable).name]
+                expected = None
+                if member.isfile():
+                    digest = hashlib.sha256()
+                    with archive.extractfile(member) as source:
+                        while chunk := source.read(1024**2):
+                            if time.monotonic() > deadline:
+                                raise ManagedLlamaError("runtime_invalid")
+                            digest.update(chunk)
+                    expected = digest.hexdigest()
+                elif not (member.isdir() or member.issym()):
+                    raise ManagedLlamaError("runtime_invalid")
+                members.append((member, expected))
+            launchers = [m for m, _ in members if m.isfile() and PurePosixPath(m.name).name == Path(self.executable).name]
             if len(launchers) != 1:
                 raise ManagedLlamaError("runtime_invalid")
             prefix = PurePosixPath(launchers[0].name).parent
-            for member in members:
+            for member, expected in members:
                 name = PurePosixPath(member.name)
                 if name.is_absolute() or ".." in name.parts:
                     raise ManagedLlamaError("runtime_invalid")
@@ -77,11 +92,6 @@ class ManagedLlamaProfile:
                     if not target.is_symlink() or os.readlink(target) != member.linkname:
                         raise ManagedLlamaError("runtime_invalid")
                 elif member.isfile():
-                    total += member.size
-                    if total > 1024**3:
-                        raise ManagedLlamaError("runtime_invalid")
-                    with archive.extractfile(member) as source:
-                        expected = hashlib.file_digest(source, "sha256").hexdigest()
                     if _digest(str(target), 1024**3, deadline) != expected:
                         raise ManagedLlamaError("runtime_invalid")
                 else:
@@ -95,6 +105,22 @@ class ManagedLlamaProfile:
                 listener.bind(("127.0.0.1", self.port))
         except OSError:
             raise ManagedLlamaError("runtime_occupied") from None
+
+
+class _ArchiveBudget:
+    """Bound decompression, including metadata consumed before TarInfo yields."""
+    def __init__(self, source, deadline):
+        self.source, self.deadline, self.expanded = source, deadline, 0
+
+    def read(self, size):
+        if not 0 <= size <= 1024**2 or time.monotonic() > self.deadline:
+            raise ManagedLlamaError("runtime_invalid")
+        data = self.source.read(size)
+        self.expanded += len(data)
+        # File content plus bounded tar headers, padding and metadata.
+        if self.expanded > 1024**3 + 1024**2:
+            raise ManagedLlamaError("runtime_invalid")
+        return data
 
 
 def _digest(path, limit, deadline):

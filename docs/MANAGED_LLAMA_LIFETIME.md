@@ -86,7 +86,11 @@ modification time and inode must remain stable while hashing.
 
 Verification has a 30-second budget, at most 256 archive members, a 256 MiB
 archive limit, 1 GiB total archived regular-file content and a 32 GiB model-file
-limit. The guardian verifies the same inputs again immediately before execution.
+limit. Declared member sizes are checked before the parser advances. A streaming
+reader checks elapsed time on each bounded decompression read, including metadata
+processed before a member is returned, and caps all expanded bytes at 1 GiB plus
+1 MiB for headers, padding and metadata. Archive-file digests also use bounded
+reads with elapsed-time checks. The guardian verifies the same inputs again immediately before execution.
 Validation or verification errors fail before successful activation, using
 content-free errors rather than returning private paths or file contents.
 

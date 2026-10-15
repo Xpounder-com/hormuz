@@ -1,5 +1,6 @@
 """Persistent setup exercised only through the approved coding-client workflow."""
 from contextlib import contextmanager
+import gzip
 import hashlib
 import json
 import os
@@ -265,6 +266,26 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 result = self.client("local-only")
                 self.assertEqual((result["status"], result["body"]["output"][0]["content"][0]["text"]), (200, "MANAGED_LOCAL"))
                 self.assertEqual(json.loads(self.command("disconnect").stdout)["local_runtime"]["state"], "stopped")
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect", check=False)
+
+    def test_oversized_archive_member_cannot_activate_an_engine(self):
+        with provider("EXTERNAL_ENGINE") as (external, requests):
+            value, _, engine = self.managed_configuration(external)
+            member = tarfile.TarInfo("llama-server")
+            member.size = 1024**3 + 1
+            archive = Path(value["managed_llama"]["runtime_archive"])
+            # A header only; routine tests never expand a gigabyte payload.
+            archive.write_bytes(gzip.compress(member.tobuf(format=tarfile.USTAR_FORMAT)))
+            value["managed_llama"]["runtime_sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+            self.path.write_text(json.dumps(value))
+            try:
+                failure = self.command("connect", check=False)
+                self.assertEqual((failure.returncode, json.loads(failure.stderr)["error"]["code"]),
+                                 (2, "connected_client_runtime_invalid"))
+                self.assertEqual(self.client("inspect")["model"], "original-model")
+                self.assertFalse((engine / "stopped").exists())
                 self.assertEqual(requests, [])
             finally:
                 self.command("disconnect", check=False)
