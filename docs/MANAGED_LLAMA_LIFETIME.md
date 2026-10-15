@@ -303,3 +303,33 @@ neither is converted into a quality pass. Autonomous coding quality, subsequent
 turns, resume, fork, desktop clients, an operating-system matrix, subscription
 access, plugin activation and automated engine/model acquisition remain outside
 this qualification.
+
+### Final-source confirmation after strict link validation
+
+A later workflow regression reproduced a private traceback for a cyclic runtime
+link. Strict resolution now rejects cyclic and dangling dependencies before
+activation, including Python's different cycle errors across versions. Because
+that correction changed runtime bytes, a second, separately frozen case checked
+clean source `2a4af42478629aed46c66e9c0619214ca2fac8d2`. The first successful
+record above remains unchanged; this was source confirmation after a product
+fix, not a retry of failed model-quality acceptance.
+
+The driver differed only in its new manifest path and temporary directory
+prefix. The same immutable acceptance (`a68e717b3cc8ae755d6ba8394e18a12fe13af7a155541cbed5aec9308b28550a`),
+client/runtime/model pins, supplied script, deadlines and twelve predicates
+applied without changes.
+
+| Final-source input or result | SHA-256 |
+| --- | --- |
+| Separate confirmation driver | `9723f86e9efe8d928841a2020303d458a60e19e6ca77592a7a307e4bc648a1f9` |
+| Frozen final-source manifest | `1da10ce0457fcee97fb91f5eb39981796e8afce39a0f19a71a13ecc769c161a3` |
+| Assessed final-source summary | `eb37ee537ecf581a74a37985477079abf1f97ed05109867344ed55f67dd312ee` |
+
+That single confirmation episode passed in **17.918 seconds**, with one completed
+supplied-script command, the persisted fix, one automatically bound work item,
+two succeeded local attempts, continuation affinity, active/unknown work outcome,
+released capacity and zero cloud calls. First disconnect restored settings,
+preserved project trust and completed owned engine/router cleanup. Processes
+were reaped, endpoints closed and frozen inputs remained unchanged. There were
+no inference retries or further episodes. All qualification limits and historical
+quality failures above still apply.
