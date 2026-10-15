@@ -64,11 +64,17 @@ def _control_directory():
     return Path("/tmp").resolve() / ("hormuz-connected-" + str(os.getuid()))
 
 
-def _provider_block(provider, origin, credential_env):
-    return ('\n[model_providers.' + provider + ']\nname = "Hormuz"\n'
+def _provider_block(provider, origin, credential_env=None, *, helper=None, generation=None):
+    block = ('\n[model_providers.' + provider + ']\nname = "Hormuz"\n'
             + 'base_url = ' + json.dumps(origin + '/v1') + '\n'
-            + 'wire_api = "responses"\nrequires_openai_auth = false\n'
-            + 'env_key = ' + json.dumps(credential_env) + '\n')
+            + 'wire_api = "responses"\n')
+    if helper is None:
+        return block + 'requires_openai_auth = false\n' + 'env_key = ' + json.dumps(credential_env) + '\n'
+    return (block + '\n[model_providers.' + provider + '.auth]\n'
+            + 'command = ' + json.dumps(helper["command"]) + '\n'
+            + 'args = ' + json.dumps(["-m", "hormuz", "auth", "local-token", "--client-home", helper["home"],
+                                     "--generation", generation]) + '\n'
+            + 'timeout_ms = 5000\nrefresh_interval_ms = 0\n')
 
 
 def _parse_record(text):
@@ -83,11 +89,11 @@ def _parse_record(text):
         required = {"schema_id", "schema_version", "generation", "phase", "client_version", "installed", "original",
                     "provider_block", "gateway_config", "gateway_digest", "actor_id", "control"}
         if (not isinstance(record, dict) or not required <= record.keys()
-                or record.keys() - required - {"retained_settings", "managed_llama"}
+                or record.keys() - required - {"retained_settings", "managed_llama", "credential_helper"}
                 or record["schema_id"] != JOURNAL_SCHEMA_ID
-                or type(record["schema_version"]) is not int or record["schema_version"] not in {1, 2}
-                or ((record["schema_version"] == 2) != (record.get("managed_llama") is True))
-                or (record["schema_version"] == 1 and "managed_llama" in record)
+                or type(record["schema_version"]) is not int
+                or record["schema_version"] != (3 if "credential_helper" in record else 2 if "managed_llama" in record else 1)
+                or ("managed_llama" in record and record["managed_llama"] is not True)
                 or not isinstance(record["generation"], str) or not re.fullmatch("[a-f0-9]{32}", record["generation"])
                 or record["phase"] not in {"prepared", "connected", "disconnecting", "restore_required", "disconnected"}
                 or not isinstance(record["client_version"], str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", record["client_version"])
@@ -105,12 +111,22 @@ def _parse_record(text):
                 or record["installed"]["web_search"] != "disabled"):
             raise ValueError()
         table = _document(record["provider_block"])["model_providers"][record["installed"]["model_provider"]]
+        helper = record.get("credential_helper")
+        if "credential_helper" in record:
+            if (type(helper) is not dict or set(helper) != {"command", "home", "credential_sha256"}
+                    or any(type(helper[key]) is not str or not 1 <= len(helper[key]) <= 4096 or "\x00" in helper[key]
+                           or not Path(helper[key]).is_absolute() for key in ("command", "home"))
+                    or type(helper["credential_sha256"]) is not str
+                    or re.fullmatch(r"[a-f0-9]{64}", helper["credential_sha256"]) is None):
+                raise ValueError()
         endpoint = urlsplit(table["base_url"])
         if (endpoint.scheme != "http" or endpoint.hostname != "127.0.0.1" or endpoint.port is None
                 or not 1 <= endpoint.port <= 65535 or endpoint.path != "/v1" or endpoint.query or endpoint.fragment
-                or endpoint.username is not None or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table["env_key"])
+                or endpoint.username is not None
+                or (helper is None and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table["env_key"]))
                 or record["provider_block"] != _provider_block(record["installed"]["model_provider"],
-                                                              f"http://127.0.0.1:{endpoint.port}", table["env_key"])):
+                    f"http://127.0.0.1:{endpoint.port}", table.get("env_key"), helper=helper,
+                    generation=record["generation"])):
             raise ValueError()
         retained = record.get("retained_settings", [])
         if (not isinstance(retained, list) or len(retained) > 4 or len(set(retained)) != len(retained)
@@ -290,7 +306,8 @@ def _remove_provider_table(text, record):
     for index, (start, label) in enumerate(tables):
         if label != header:
             continue
-        end = tables[index + 1][0] if index + 1 < len(tables) else len(text)
+        end = next((position for position, following in tables[index + 1:]
+                    if not following.startswith(header[:-1] + ".")), len(text))
         block = record["provider_block"][1:]
         section = text[start:end]
         if not section.startswith(block) or section[len(block):].strip():
@@ -383,7 +400,10 @@ class ConnectedClientLifetime:
         text = _read(self.record_path, private=True)
         if text is None:
             return None
-        return _parse_record(text)
+        record = _parse_record(text)
+        if record.get("credential_helper", {}).get("home", str(self.home)) != str(self.home):
+            raise ConnectedClientError("state_invalid")
+        return record
 
     def _runtime_active(self):
         import fcntl
@@ -432,6 +452,25 @@ class ConnectedClientLifetime:
         with self._transaction():
             return self._status(self._record())
 
+    def local_token(self, generation):
+        with self._transaction():
+            record = self._record()
+            if (record is None or record.get("credential_helper") is None
+                    or record["generation"] != generation or record["phase"] != "connected"
+                    or self._configuration_state(record) != "installed" or _control(record, "status") != "ready"):
+                raise ConnectedClientError("authentication_unsupported")
+            path = Path(record["gateway_config"])
+            text = _read(path)
+            if text is None or hashlib.sha256(text.encode()).hexdigest() != record["gateway_digest"]:
+                raise ConnectedClientError("setup_changed")
+            config = GatewayConfig.load(path)
+            identity = config.identities_by_actor.get(record["actor_id"])
+            if (identity is None or identity.token_file is None or _read(path) != text
+                    or not secrets.compare_digest(hashlib.sha256(identity.token.encode()).hexdigest(),
+                                                  record["credential_helper"]["credential_sha256"])):
+                raise ConnectedClientError("authentication_unsupported")
+            return identity.token
+
     def connect(self, config_path: Path, *, executable: str, actor_id=None, preview=False):
         with self._transaction():
             _require_unmanaged(self.home)
@@ -446,6 +485,12 @@ class ConnectedClientLifetime:
             intent = {"gateway_config": str(config_path), "gateway_digest": digest,
                       "actor_id": actor_id or next(iter(config.identities_by_actor.values())).actor_id}
             existing = self._record()
+            if existing and existing["phase"] != "disconnected" and existing.get("credential_helper"):
+                identity = config.identities_by_actor.get(existing["actor_id"])
+                if (identity is None or identity.token_file is None
+                        or not secrets.compare_digest(hashlib.sha256(identity.token.encode()).hexdigest(),
+                                                      existing["credential_helper"]["credential_sha256"])):
+                    raise ConnectedClientError("authentication_unsupported")
             program = shutil.which(executable)
             if program is None:
                 raise ConnectedClientError("client_unavailable")
@@ -485,7 +530,7 @@ class ConnectedClientLifetime:
             if config.listen.host != "127.0.0.1" or config.ingress.mode != "local":
                 raise ConnectedClientError("router_configuration_unsupported")
             identity = config.identities_by_actor.get(actor_id) if actor_id else next(iter(config.identities_by_actor.values()))
-            if identity is None or not identity.token_env:
+            if identity is None or (not identity.token_env and identity.token_file is None):
                 raise ConnectedClientError("authentication_unsupported")
             policy = PolicyRuntime(config).snapshot_for(identity).effective_policy
             if ((identity.allowed_clients and "codex" not in identity.allowed_clients)
@@ -517,7 +562,10 @@ class ConnectedClientLifetime:
                 text = _setting(text, key, value)
             if any(value is not None and not isinstance(value, str) for value in original.values()):
                 raise ConnectedClientError("configuration_shape_unsupported")
-            block = _provider_block(provider, f"http://127.0.0.1:{config.listen.port}", identity.token_env)
+            helper = {"command": sys.executable, "home": str(self.home),
+                      "credential_sha256": hashlib.sha256(identity.token.encode()).hexdigest()} if identity.token_file is not None else None
+            block = _provider_block(provider, f"http://127.0.0.1:{config.listen.port}", identity.token_env,
+                                    helper=helper, generation=generation)
             text += block
             _document(text)
             control_directory = _control_directory()
@@ -529,6 +577,8 @@ class ConnectedClientLifetime:
                       "control": str(control_directory / (generation + ".sock"))}
             if managed is not None:
                 record.update(schema_version=2, managed_llama=True)
+            if helper is not None:
+                record.update(schema_version=3, credential_helper=helper)
             if preview:
                 return _lifetime_envelope(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
                        {"phase": "preview", "scope": "codex_user_defaults",

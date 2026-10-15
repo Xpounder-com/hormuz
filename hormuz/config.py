@@ -273,6 +273,7 @@ class Identity:
     clearance: str = "internal"
     identity_type: str = "human"
     authentication_source: str = "static"
+    token_file: Path | None = None
 
 
 @dataclass(frozen=True)

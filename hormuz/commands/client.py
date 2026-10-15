@@ -38,12 +38,26 @@ def add_client_commands(
             lifecycle.add_argument("--llama-executable", required=True, help="Existing extracted llama-server executable")
             lifecycle.add_argument("--model-file", required=True, help="Existing verified GGUF model")
             lifecycle.add_argument("--qualification", help="Reviewed local setup profile (default bundled pinned experiment)")
-            lifecycle.add_argument("--credential-env", default="HORMUZ_GATEWAY_TOKEN", help="Existing local router token environment variable")
+            lifecycle.add_argument("--credential-env", help="Use an existing token environment variable instead of managed local authentication")
 
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
     auth_token = auth_subparsers.add_parser("token", help="Print a credential from an environment variable")
     auth_token.add_argument("--env", default="HORMUZ_GATEWAY_TOKEN", help="Credential environment variable")
+    local_token = auth_subparsers.add_parser("local-token", help="Generation-bound credential helper for Codex")
+    local_token.add_argument("--client-home", required=True)
+    local_token.add_argument("--generation", required=True)
+
+
+def local_token(args):
+    from pathlib import Path
+    from ..connected_client import ConnectedClientLifetime, ConnectedClientError, lifetime_error
+    try:
+        print(ConnectedClientLifetime(Path(args.client_home)).local_token(args.generation))
+        return 0
+    except (ConnectedClientError, ConfigError, OSError) as error:
+        print(json.dumps(lifetime_error(error)), file=sys.stderr)
+        return 2
 
 
 def _client_config_arguments(parser: argparse.ArgumentParser) -> None:

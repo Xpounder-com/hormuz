@@ -80,6 +80,7 @@ _UPSTREAM_FIELDS = frozenset(
 _IDENTITY_FIELDS = frozenset(
     {
         "token_env",
+        "token_file",
         "actor_id",
         "actor_name",
         "team_id",
