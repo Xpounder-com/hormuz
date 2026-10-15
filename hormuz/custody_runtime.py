@@ -129,6 +129,9 @@ def resolve_upstream_credentials(
     result: dict[str, str] = {}
     cipher: EnvelopeCipher | None = None
     for protocol, upstream in config.upstreams.items():
+        if upstream.authentication == "none":
+            result[protocol] = ""
+            continue
         if selection_allowed is not None and not selection_allowed(protocol):
             result[protocol] = ""
             continue

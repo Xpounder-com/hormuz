@@ -10,6 +10,12 @@ hormuz contract manifest
 
 The manifest is the canonical inventory of current schema IDs, versions, error codes, enforcement meanings, and compatibility rules. The fixtures in `tests/fixtures/contracts/` are the executable examples for those contracts.
 
+Opt-in [execution destinations](EXECUTION_DESTINATIONS.md) add relay metadata
+version 2 alongside the unchanged version 1 entry. Destination-aware work
+state/connect responses use version 2; legacy configurations retain version 1.
+The destination guide defines their fields, opaque generation, versioned
+fingerprint payload, legacy-ledger migration and rollback boundary.
+
 ## Accepted portfolio additive contract
 
 The portfolio-intelligence surface was originally frozen for the unreleased

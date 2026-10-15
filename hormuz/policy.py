@@ -238,7 +238,8 @@ class PolicyEngine:
         if route is None or route.failover_alias is None:
             return None
         failover_route = self.config.model_routes.get(route.failover_alias)
-        if failover_route is None or failover_route.protocol != route.protocol:
+        if (failover_route is None or failover_route.protocol != route.protocol
+                or failover_route.destination_id != route.destination_id):
             # GatewayConfig rejects this, while the analysis projection keeps
             # this guard so hand-constructed contexts still fail closed.
             return None

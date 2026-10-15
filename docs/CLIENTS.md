@@ -4,6 +4,11 @@ Hormuz sits between an employee's existing AI client and the provider API. The e
 
 Use TLS and an organization-controlled hostname outside local development. The examples below use `https://hormuz.example.com` as that deployment URL.
 
+Explicit local and cloud origins can be selected through
+[execution destinations](EXECUTION_DESTINATIONS.md). That first router slice
+preserves legacy setup, adds named origins and isolates their credentials.
+Automatic local-only admission and plugin setup remain separate qualification work.
+
 The v1 compatibility baseline is Codex CLI `0.147.0` and Claude Code
 `2.1.233`. Blocking CI installs those exact releases; a separate weekly canary
 checks the latest releases without provider credentials. A newer client is not

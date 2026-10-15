@@ -60,8 +60,15 @@ def _canonical(value: Any, *, config_directory: Path) -> object:
                     and getattr(value, field.name) == AIWorkConfig()
                 ) and not (
                     type(value).__name__ == "ModelRoute"
-                    and field.name == "failover_alias"
-                    and getattr(value, field.name) is None
+                    and field.name in {"failover_alias": None, "destination": None,
+                                       "model_revision": None, "capabilities": ()}
+                    and getattr(value, field.name) == {"failover_alias": None, "destination": None,
+                                                      "model_revision": None, "capabilities": ()}[field.name]
+                ) and not (
+                    # Default destination facts preserve every preceding v1 field.
+                    type(value).__name__ == "UpstreamConfig"
+                    and field.name in {"protocol": None, "locality": "cloud", "authentication": "api_key"}
+                    and getattr(value, field.name) == {"protocol": None, "locality": "cloud", "authentication": "api_key"}[field.name]
                 ) and not (
                     # Preserve the original disabled-feature snapshot rather than re-pin it.
                     type(value).__name__ == "SessionBrokerConfig"

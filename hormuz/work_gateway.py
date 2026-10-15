@@ -298,6 +298,7 @@ def initialize(server, environ=None):
             settings.database_path or server.config.source_path.parent / "hormuz-work.sqlite3",
             config=server.config, cache_enabled=settings.cache_enabled,
             minimum_samples=settings.minimum_samples,
+            destinations=getattr(server, "destinations", None),
         )
         if settings.billing_price_id:
             from .work_billing import WorkBilling
@@ -476,10 +477,9 @@ def _cache_request(handler, request_value):
 def _cache_policy(handler, decision):
     # Bound reuse to provider origin, credential generation and actual policy
     # content as well as its public version; this digest is never exported.
-    upstream = handler.server._egress_configuration
+    destination = handler.server.destinations.resolve(decision.route)
     values = [decision.policy_version, decision.snapshot.content_sha256,
-        upstream.upstreams[decision.route.protocol].base_url,
-        hashlib.sha256(upstream.credentials[decision.route.protocol].encode()).hexdigest(),
+        destination.generation,
         decision.max_output_tokens]
     return hashlib.sha256(json.dumps(values, separators=(",", ":")).encode()).hexdigest()
 
@@ -510,12 +510,15 @@ def cache_hit(handler, identity, decision, request_value):
     handler._response_started = True
     handler.send_response(200)
     handler.send_header("Content-Type", entry["headers"].get("content-type", "application/json"))
+    handler.send_header("X-Hormuz-Contract", handler.server.destinations.contract_header(decision.route))
     handler.send_header("Content-Length", str(len(entry["body"])))
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("X-Hormuz-Cache", "exact-answer-hit")
     handler.send_header("X-Hormuz-Provider-Cost-Microusd", "0")
     handler.send_header("X-Hormuz-Usage-Origin", "cached-original-response")
     handler.send_header("X-Hormuz-Routed-Model", decision.route.upstream_model)
+    for name, value in handler.server.destinations.response_headers(decision.route).items():
+        handler.send_header(name, value)
     response_headers(handler)
     handler.end_headers()
     handler.wfile.write(entry["body"])

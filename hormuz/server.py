@@ -51,6 +51,7 @@ from .contracts import (
     relay_contract_header,
 )
 from .custody_runtime import resolve_upstream_credentials
+from .execution_destination import ExecutionDestination, ExecutionDestinations
 from .custody_runtime_projection import CustodyRuntimeProjection, CustodyRuntimeProjectionError
 from .evidence import EvidenceStorageError
 from .finance_attempts import (
@@ -131,22 +132,31 @@ class _EgressConfiguration:
     upstreams: Mapping[str, UpstreamConfig]
     finance_account_bindings: FinanceAccountBindings | None
     credentials: Mapping[str, str] = field(repr=False)
+    routes: Mapping[str, ModelRoute]
+    destinations: ExecutionDestinations = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "upstreams", MappingProxyType(dict(self.upstreams)))
         object.__setattr__(self, "credentials", MappingProxyType(dict(self.credentials)))
+        object.__setattr__(self, "routes", MappingProxyType(dict(self.routes)))
+        object.__setattr__(self, "destinations", ExecutionDestinations(self.upstreams, self.routes, self.credentials))
 
 
 @dataclass(frozen=True)
 class _SelectedUpstream:
-    """One immutable transport/metadata choice; contains no credential value.
+    """One immutable destination and finance choice; secret values have no repr.
 
     The same finance candidate is validated and captured in the new attempt's
     existing transaction before this selected transport performs egress.
     """
 
-    upstream: UpstreamConfig
+    destination: ExecutionDestination
     finance: FinanceAccountCandidate | UnavailableFinance
+    destinations: ExecutionDestinations = field(repr=False)
+
+    @property
+    def upstream(self) -> UpstreamConfig:
+        return self.destination.upstream
 
 
 class _NoUpstreamRedirect(urllib.request.HTTPRedirectHandler):
@@ -164,10 +174,15 @@ class _NoUpstreamRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _UPSTREAM_OPENER = urllib.request.build_opener(_NoUpstreamRedirect())
+_LOCAL_UPSTREAM_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoUpstreamRedirect())
 
 
 def _open_upstream(request: urllib.request.Request, *, timeout: int):
     return _UPSTREAM_OPENER.open(request, timeout=timeout)
+
+
+def _open_local_upstream(request: urllib.request.Request, *, timeout: int):
+    return _LOCAL_UPSTREAM_OPENER.open(request, timeout=timeout)
 
 
 class _ProviderRehearsalResponse:
@@ -367,6 +382,8 @@ class GatewayServer(ThreadingHTTPServer):
     request_queue_size = 128
 
     def __init__(self, config: GatewayConfig, *, environ: Mapping[str, str] | None = None):
+        config = replace(config, upstreams=MappingProxyType(dict(config.upstreams)),
+                         model_routes=MappingProxyType(dict(config.model_routes)))
         self.config = config
         # The same copied upstream configuration drives credential resolution
         # and every later transport/reference selection. GatewayConfig is frozen
@@ -476,7 +493,6 @@ class GatewayServer(ThreadingHTTPServer):
                 provider_reliability_requests=self.provider_reliability_store,
             )
             self.policy_engine.policy_runtime.verify_active_policies()
-            work_gateway.initialize(self, environ=environ)
             recovered_attempts = self.store.sweep_stale_request_attempts()
             if recovered_attempts:
                 LOGGER.warning("request_attempts_marked_outcome_unknown count=%d", recovered_attempts)
@@ -492,7 +508,9 @@ class GatewayServer(ThreadingHTTPServer):
                     environ=environ,
                     selection_allowed=self._upstream_credential_selection_allowed,
                 ),
+                routes=config.model_routes,
             )
+            work_gateway.initialize(self, environ=environ)
             protected_values = [
                 ("hormuz_identity_token", identity.token)
                 for identity in config.identities_by_token.values()
@@ -528,6 +546,9 @@ class GatewayServer(ThreadingHTTPServer):
             work_gateway.close(self)
             if self.impact_recorder is not None:
                 self.impact_recorder.close()
+            projection = getattr(self, "custody_runtime_projection", None)
+            if projection is not None:
+                projection.close()
             self._close_postgres_pool()
             raise
         self._accepting_requests.set()
@@ -543,6 +564,10 @@ class GatewayServer(ThreadingHTTPServer):
                 settings.max_waiting,
                 settings.acquire_timeout_seconds,
             )
+
+    @property
+    def destinations(self) -> ExecutionDestinations:
+        return self._egress_configuration.destinations
 
     @property
     def upstream_credentials(self) -> Mapping[str, str]:
@@ -959,6 +984,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         request_body = self._read_json_body()
         if request_body is None:
             return
+        requested_response_storage = request_body.get("store") is True
         requested_model = request_body.get("model")
         if not isinstance(requested_model, str) or not requested_model.strip():
             self._send_protocol_error(protocol, "Request field model must be a non-empty string", HTTPStatus.BAD_REQUEST)
@@ -1141,11 +1167,24 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         policy_action = decision.action
         if redaction.count:
             policy_action = f"{policy_action}+redacted"
+        destination = self.server.destinations.resolve(decision.route)
+        if protocol == "openai" and (
+            (redaction.value.get("store") is True or requested_response_storage
+             and self.server.destinations.uses_metadata(decision.route))
+            and not destination.upstream.allow_response_storage
+            or redaction.value.get("background") is True and not destination.upstream.allow_background
+        ):
+            self._send_protocol_error(
+                protocol, "The selected destination does not permit stored or background work.",
+                HTTPStatus.FORBIDDEN, code="hormuz_destination_policy_denied")
+            return
+        if is_responses_create and not destination.upstream.allow_response_storage:
+            redaction = replace(redaction, value={**redaction.value, "store": False})
         body = self._provider_body(redaction.value, decision.route)
         try:
             self.server.custody_runtime_projection.require_provider_usable(
                 organization_id=identity.organization_id,
-                protocol=protocol,
+                protocol=destination.name,
             )
         except CustodyRuntimeProjectionError as error:
             if error.code in {"custody_provider_credential_disabled", "custody_envelope_retired"}:
@@ -1164,8 +1203,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
         egress = self.server._egress_configuration
-        upstream_key = egress.credentials.get(protocol, "")
-        if not upstream_key:
+        upstream_key = destination.credential
+        if destination.upstream.authentication != "none" and not upstream_key:
             self._send_protocol_error(
                 protocol,
                 "Gateway upstream credential is unavailable",
@@ -1173,9 +1212,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 code="gateway_upstream_not_configured",
             )
             return
-        upstream = egress.upstreams[protocol]
+        upstream = destination.upstream
         selected_upstream = _SelectedUpstream(
-            upstream=upstream,
+            destination=destination,
             finance=select_finance_account(
                 organization_id=identity.organization_id,
                 protocol=protocol,
@@ -1183,6 +1222,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 identity=upstream.finance_identity,
                 bindings=egress.finance_account_bindings,
             ),
+            destinations=egress.destinations,
         )
         if account_usage and work_gateway.cache_hit(self, identity, decision, redaction.value):
             return
@@ -1234,7 +1274,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             redaction_count=redaction.count,
             redaction_rules=redaction.rules,
             attempt=attempt,
-            upstream_key=upstream_key,
             selected_upstream=selected_upstream,
             reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
             failover_decision=failover_decision,
@@ -1257,7 +1296,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         redaction_count: int,
         redaction_rules: tuple[str, ...],
         attempt: RequestAttempt | None,
-        upstream_key: str,
         selected_upstream: _SelectedUpstream,
         reservation_ttl_seconds: int,
         failover_decision: PolicyDecision | None,
@@ -1266,7 +1304,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         route = decision.route
         assert route is not None
         request_url = self._upstream_url(selected_upstream.upstream)
-        headers = self._upstream_headers(protocol, upstream_key)
+        destination = selected_upstream.destinations.resolve(route)
+        headers = self._upstream_headers(destination.protocol, destination.credential)
+        if selected_upstream.upstream.authentication == "none":
+            headers.pop("Authorization", None)
+            headers.pop("X-Api-Key", None)
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
 
         started_ns = time.monotonic_ns()
@@ -1279,7 +1321,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             ):
                 response = _ProviderRehearsalResponse()
             else:
-                response = _open_upstream(request, timeout=self.server.config.upstream_timeout_seconds)
+                open_upstream = _open_local_upstream if destination.locality == "local" else _open_upstream
+                response = open_upstream(request, timeout=self.server.config.upstream_timeout_seconds)
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
@@ -1440,7 +1483,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 redaction_count=redaction_count,
                 redaction_rules=redaction_rules,
                 attempt=failover_attempt,
-                upstream_key=upstream_key,
                 selected_upstream=selected_upstream,
                 reservation_ttl_seconds=reservation_ttl_seconds,
                 failover_decision=None,
@@ -1459,10 +1501,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
-        self.send_header("X-Hormuz-Contract", relay_contract_header())
+        self.send_header("X-Hormuz-Contract", selected_upstream.destinations.contract_header(route))
         self.send_header("X-Hormuz-Policy-Decision", policy_action)
         self.send_header("X-Hormuz-Requested-Model", decision.requested_model)
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
+        for name, value in selected_upstream.destinations.response_headers(route).items():
+            self.send_header(name, value)
         work_gateway.response_headers(self)
         self.send_header(
             "Server-Timing",

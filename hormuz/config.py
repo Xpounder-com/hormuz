@@ -79,6 +79,9 @@ class UpstreamConfig:
     allow_response_storage: bool = False
     allow_background: bool = False
     finance_identity: FinanceIdentity | UnavailableFinance = UnavailableFinance("not_configured")
+    protocol: str | None = None
+    locality: str = "cloud"
+    authentication: str = "api_key"
 
 
 @dataclass(frozen=True)
@@ -324,6 +327,13 @@ class ModelRoute:
     cache_write_cost_per_million: float = 0
     output_cost_per_million: float = 0
     failover_alias: str | None = None
+    destination: str | None = None
+    model_revision: str | None = None
+    capabilities: tuple[str, ...] = ()
+
+    @property
+    def destination_id(self) -> str:
+        return self.destination or self.protocol
 
     def estimate_reservation_cost_microusd(
         self,
@@ -552,6 +562,8 @@ class GatewayConfig:
                 raise ConfigError(
                     f"Model route {alias} failover must use protocol {route.protocol}"
                 )
+            if failover_route.destination_id != route.destination_id:
+                raise ConfigError(f"Model route {alias} failover must use the same destination")
             if failover_route.upstream_model == route.upstream_model:
                 raise ConfigError(
                     f"Model route {alias} failover must use a distinct upstream model"
@@ -673,6 +685,9 @@ class GatewayConfig:
                     "cache_read_cost_per_million": route.cache_read_cost_per_million,
                     "cache_write_cost_per_million": route.cache_write_cost_per_million,
                     "output_cost_per_million": route.output_cost_per_million,
+                    **({"destination": route.destination} if route.destination is not None else {}),
+                    **({"model_revision": route.model_revision} if route.model_revision is not None else {}),
+                    **({"capabilities": list(route.capabilities)} if route.capabilities else {}),
                     **(
                         {"failover_alias": route.failover_alias}
                         if route.failover_alias is not None
@@ -690,6 +705,11 @@ class GatewayConfig:
                 protocol: {
                     "allow_response_storage": upstream.allow_response_storage,
                     "allow_background": upstream.allow_background,
+                    **({"destination": {"protocol": upstream.protocol or protocol,
+                         "base_url": upstream.base_url, "locality": upstream.locality,
+                         "authentication": upstream.authentication}}
+                       if protocol not in {"openai", "anthropic"} or upstream.protocol is not None
+                       or upstream.locality != "cloud" or upstream.authentication != "api_key" else {}),
                 }
                 for protocol, upstream in sorted(self.upstreams.items())
             },

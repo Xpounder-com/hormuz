@@ -85,7 +85,8 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
 _LISTEN_FIELDS = frozenset({"host", "port"})
 _INGRESS_FIELDS = frozenset({"mode", "trusted_proxy_cidrs", "credential_env"})
 _UPSTREAM_FIELDS = frozenset(
-    {"base_url", "api_key_env", "api_key_envelope", "allow_response_storage", "allow_background", "finance_identity"}
+    {"base_url", "api_key_env", "api_key_envelope", "allow_response_storage", "allow_background", "finance_identity",
+     "protocol", "locality", "authentication"}
 )
 _IDENTITY_FIELDS = frozenset(
     {
@@ -131,6 +132,8 @@ _MODEL_ROUTE_FIELDS = frozenset(
         "cache_write_cost_per_million",
         "output_cost_per_million",
         "failover_alias",
+        "destination",
+        "model_revision", "capabilities",
     }
 )
 _EGRESS_CONTROL_FIELDS = frozenset({"secrets"})
@@ -311,10 +314,9 @@ def _reject_deprecated_context_configuration(raw: dict[str, Any]) -> None:
         # These two optional surfaces contain opaque metadata, not capability
         # declarations. Invalid metadata is classified by its domain parser.
         # Whole-file JSON and structural guards have already run.
-        if path == ("finance_account_bindings",) or path in {
-            ("upstreams", "openai", "finance_identity"),
-            ("upstreams", "anthropic", "finance_identity"),
-        }:
+        if path == ("finance_account_bindings",) or (
+            len(path) == 3 and path[0] == "upstreams" and path[2] == "finance_identity"
+        ):
             continue
         if isinstance(value, dict):
             for key, nested in value.items():
@@ -340,9 +342,11 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
     _schema_optional_object(raw, "listen", _LISTEN_FIELDS)
     _schema_optional_object(raw, "ingress", _INGRESS_FIELDS)
 
-    upstreams = _schema_required_object(raw, "upstreams", frozenset({"openai", "anthropic"}))
-    for value in upstreams.values():
+    upstreams = _schema_required_mapping(raw, "upstreams")
+    for name, value in upstreams.items():
         _schema_object(value, _UPSTREAM_FIELDS)
+        if name not in {"openai", "anthropic"} and "protocol" not in value:
+            raise ConfigurationInputError(_CONFIGURATION_UNSUPPORTED_FIELDS)
 
     # Optional finance metadata is classified by its domain parser. Malformed
     # metadata cannot add an inference denial; whole-file JSON/size/depth and

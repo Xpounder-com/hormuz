@@ -90,8 +90,9 @@ def contract_header(schema_id: str, schema_version: int) -> str:
     return f"{schema_id};v={schema_version}"
 
 
-def relay_contract_header() -> str:
-    return contract_header(RELAY_METADATA_SCHEMA_ID, RELAY_METADATA_SCHEMA_VERSION)
+def relay_contract_header(*, destination_metadata: bool = False) -> str:
+    """Version 2 adds opt-in destination metadata; legacy remains version 1."""
+    return contract_header(RELAY_METADATA_SCHEMA_ID, 2 if destination_metadata else RELAY_METADATA_SCHEMA_VERSION)
 
 
 def contract_envelope(schema_id: str, value: Mapping[str, Any]) -> dict[str, Any]:
@@ -469,6 +470,12 @@ def contract_manifest() -> dict[str, object]:
                     "X-Hormuz-Redactions",
                     "X-Hormuz-Error-Code",
                 ],
+            ),
+            _manifest_schema(
+                RELAY_METADATA_SCHEMA_ID, 2, "http-headers", "hormuz",
+                ["X-Hormuz-Contract", "X-Hormuz-Policy-Decision", "X-Hormuz-Requested-Model",
+                 "X-Hormuz-Routed-Model", "X-Hormuz-Redactions", "X-Hormuz-Error-Code",
+                 "X-Hormuz-Destination", "X-Hormuz-Destination-Locality", "X-Hormuz-Destination-Generation"],
             ),
         ],
         "policy_action_semantics": {

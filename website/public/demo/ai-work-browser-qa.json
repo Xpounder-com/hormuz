@@ -1,7 +1,7 @@
 {
   "schema_id": "hormuz.ai-work-browser-validation",
   "schema_version": 1,
-  "generated_at": "2026-10-11T16:57:28.575Z",
+  "generated_at": "2026-10-14T22:58:39.507Z",
   "fixture": "actual gateway with synthetic local identity, provider, Stripe transport and signed GitHub fixture",
   "provider_calls": "3 local simulated provider responses; zero real or paid provider calls",
   "viewports": [
@@ -31,14 +31,16 @@
   "failed_requests": [],
   "horizontal_overflow": false,
   "source_files": {
-    "hormuz/work_runtime.py": "cf559e6ed9dc7e532f8aabb1f4a47d38cd66f992199fef25d6329772deaafe58",
+    "hormuz/execution_destination.py": "00703245e7c1896efdedc0e169824ee9ff77868d657c9d10af6c1df1d91052b9",
+    "hormuz/_config_builder.py": "003db14cc99adf280786e1d8a930dc82bb1ae3ce586ca1063875a53ba6d02aef",
+    "hormuz/work_runtime.py": "5fb33cc2f8c4027436c905c8fe7421e63331f728658b5ff0d1e56fd91169e3cf",
     "hormuz/work_learning.py": "0d69768b43b07e351b184141d2513fc63efc007181522ce22c4ea9b602368f45",
     "hormuz/work_accounting.py": "0d36b1312301da6aaeb41aafa5fd34a1b65bab9e0ea5ff066316ec2f25bd1379",
     "hormuz/work_provider_costs.py": "aa9b4594bbb72157ed98fd0beeb295548d9c2b804a1bc2966589b0870fbdede7",
-    "hormuz/work_gateway.py": "f494cbb9c387ac894c6ae4f11dfd27af5db34a80b69b7450ff2b41d7fb4e092e",
+    "hormuz/work_gateway.py": "a15af35b19a6c664fe860beaee24f14d6878e31b7eb0423fc96b4ff3efad043c",
     "hormuz/work_workflow.py": "0cd9c0b9719f72b81badf9c098706cb0a3e45613f3eb05527fc380065181186d",
     "hormuz/work_workflow_http.py": "f15906f2675b6635cf8115c475ea1043bf6aed0a0c22978aed31c3a1552282d5",
-    "hormuz/work_http.py": "515db882469550a2dccc29d33ccc686e459c4a299f0e82f072ac4886ff1a3aa0",
+    "hormuz/work_http.py": "1e0e3c11ba8b1528d59b58723a8896f8afc89fbe2b974cbbec0937c950c02ca6",
     "hormuz/work_billing.py": "a960f5dd2709e667b0944e7a41d5ff93e2c70f8bfc9540011c5a3e80c275896d",
     "hormuz/work_activation.py": "8f77087426b036042942b60e78f2b0c4c2d5e176114b9531b233a6cfc8e50e3c",
     "hormuz/work_recovery.py": "5708f4add807f6ec801f9ba1735974009b5fe410ca48e685c48daeefa649a5b3",
@@ -46,17 +48,17 @@
     "hormuz/work.css": "20f7fb46ed83848a910800cd8a7b85cfc107a83ab3806f6bd4b7437da9f54072",
     "hormuz/work_client.py": "bc7448150586c4089706876087c75cac289f64cc9d320a39a42286e8b6499eb6",
     "hormuz/commands/work.py": "2945e6d9951c4c68ec3b8360e58ca35e89c27a855b013c69c9869a5ade27cf75",
-    "hormuz/config.py": "8fcaa50f2c45524e153083b1794c80da48680339dbe17df2a2663985657ea438",
-    "hormuz/_config_input.py": "1fc2009b0e74a28bc6090f06a58b8655d1a75c9c1edc802a183e97461255b2a8",
+    "hormuz/config.py": "bf3a39bbfb9694e2ddd33e41f9a2637777e29a8f4c26513072c085aa7b54953f",
+    "hormuz/_config_input.py": "199bb106b197bc1861db34c75aca59a9bbdf115bfd660d2848407a334d8118a8",
     "hormuz/_config_work.py": "f36838ad981dadc25f9cc9ee47f9b6bfaf00df05c74456710c323318184253ec",
-    "hormuz/server.py": "f86db39ec164ce02bbb30af523de3e15c8764cf05ec748056877cff10ed30a55",
+    "hormuz/server.py": "e7b4484eff48c144faa97ee642953a24f248d79681ca40deb926cfbb3b84eaf5",
     "hormuz/usage.py": "6e3afd38de63ff8aaa63d83d93f8864437a3a703f305b52b09886a9be236a437",
     "hormuz/_hosted_server.py": "212656252e536935e95acac68641e62f152fe27a1092b1bca1194d1b62ca4b06",
     "hormuz/_hosted_state.py": "f3b2a29735edefdf0b9709deb2c029611558ec8952aa064b95393015ef9e0254",
     "hormuz/_hosted_config.py": "760f79f5809b5a7e5461a6e53ad1a04eb6ae273ebcac4d4ce09095b2dc23f0ef",
     "hormuz/_hosted_backup.py": "59468f65b37e14dda0235929947a1c269f785081015168f8d22c17e6b44cc1bf",
     "hormuz/hosted.py": "8f7e685fe9ac89c67b012aa90c964ecb1d286debc34cc08f10434598463a4f76",
-    "tools/ai_work_proof.py": "4ba8eefee4174f403b8cdf7cb83a1b611e481b15c1c1fc8fd8a38d829d2fdb62",
+    "tools/ai_work_proof.py": "a547ddbd71da0e01ae74defa0d2ebb94cbae9e6f61099e4229eb783e686b5ba2",
     "tools/ai_work_browser_fixture.py": "2e80a56bf59edfaef69599f8fe32fd4cbc91adf4c619ff2cf1ecf08c987c8c85",
     "website/scripts/ai-work-browser-qa.mjs": "b3e962226fa58fd58f91c81e02a383353918b238149ef082381a16392d01b530"
   },
@@ -82,97 +84,97 @@
     "steps": [
       {
         "name": "Source confirmation",
-        "began_ms": 154,
-        "ended_ms": 1657,
+        "began_ms": 923,
+        "ended_ms": 2426,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Qualification requested",
-        "began_ms": 1913,
-        "ended_ms": 3415,
+        "began_ms": 2672,
+        "ended_ms": 4174,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Qualification accepted",
-        "began_ms": 3613,
-        "ended_ms": 5115,
+        "began_ms": 4371,
+        "ended_ms": 5872,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Synthetic checkout handoff",
-        "began_ms": 5280,
-        "ended_ms": 6783,
+        "began_ms": 6037,
+        "ended_ms": 7540,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Workspace budget and speed priority",
-        "began_ms": 6961,
-        "ended_ms": 8463,
+        "began_ms": 7689,
+        "ended_ms": 9189,
         "presentation_hold_ms": 1500
       },
       {
         "name": "A job with a declared completion condition",
-        "began_ms": 8646,
-        "ended_ms": 10149,
+        "began_ms": 9353,
+        "ended_ms": 10856,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Explicit workflow association",
-        "began_ms": 10313,
-        "ended_ms": 11815,
+        "began_ms": 11021,
+        "ended_ms": 12524,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Route decisions and exact cache reuse",
-        "began_ms": 12062,
-        "ended_ms": 13565,
+        "began_ms": 12788,
+        "ended_ms": 14290,
         "presentation_hold_ms": 1500
       },
       {
         "name": "A correction bypasses cache reuse",
-        "began_ms": 13778,
-        "ended_ms": 15282,
+        "began_ms": 14487,
+        "ended_ms": 15990,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Set a job budget limit",
-        "began_ms": 15444,
-        "ended_ms": 16947,
+        "began_ms": 16122,
+        "ended_ms": 17623,
         "presentation_hold_ms": 1500
       },
       {
         "name": "The budget limit pauses work",
-        "began_ms": 17127,
-        "ended_ms": 18629,
+        "began_ms": 17788,
+        "ended_ms": 19291,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Approve a bounded continuation",
-        "began_ms": 18727,
-        "ended_ms": 20230,
+        "began_ms": 19388,
+        "ended_ms": 20890,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Verified completion and outcome receipt",
-        "began_ms": 20563,
-        "ended_ms": 23565,
+        "began_ms": 21205,
+        "ended_ms": 24207,
         "presentation_hold_ms": 3000
       },
       {
         "name": "Provider account evidence remains unavailable",
-        "began_ms": 23811,
-        "ended_ms": 25313,
+        "began_ms": 24438,
+        "ended_ms": 25941,
         "presentation_hold_ms": 1500
       },
       {
         "name": "Completed job on a mobile viewport",
-        "began_ms": 25711,
-        "ended_ms": 27212,
+        "began_ms": 26338,
+        "ended_ms": 27840,
         "presentation_hold_ms": 1500
       }
     ],
     "video": {
-      "duration_seconds": 27.16,
+      "duration_seconds": 27.2,
       "width": 1440,
       "height": 1000,
       "error": null
