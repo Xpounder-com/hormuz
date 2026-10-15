@@ -74,7 +74,8 @@ def _text_envelope(value, protocol, endpoint):
     """Only self-contained text and inline function tools are qualified here."""
     common = {"model", "stream", "temperature", "top_p", "tools", "tool_choice", "metadata"}
     fields = {
-        "/v1/responses": {"input", "instructions", "max_output_tokens", "text", "store", "parallel_tool_calls", "service_tier"},
+        "/v1/responses": {"input", "instructions", "max_output_tokens", "text", "store", "parallel_tool_calls", "service_tier",
+                          "client_metadata", "prompt_cache_key", "reasoning", "include"},
         "/v1/responses/compact": {"input", "instructions", "max_output_tokens", "store", "service_tier"},
         "/v1/chat/completions": {"messages", "max_tokens", "max_completion_tokens", "response_format", "stop", "stream_options", "service_tier"},
         "/v1/messages": {"messages", "system", "max_tokens", "top_k", "stop_sequences", "service_tier"},
@@ -85,6 +86,27 @@ def _text_envelope(value, protocol, endpoint):
     if value.get("service_tier") not in (None, "default" if protocol == "openai" else "standard_only"):
         return None
     required = {"text"}
+    native_fields = {"client_metadata", "prompt_cache_key", "reasoning", "include"}
+    if native_fields.intersection(value):
+        # The pinned Codex HTTP profile requests optional encrypted reasoning
+        # output but supplies no reasoning state. Nonempty reasoning controls
+        # and actual opaque input remain unsupported, even with this capability.
+        if endpoint != "/v1/responses" or value.get("reasoning", {}) != {}:
+            return None
+        if "include" in value and value["include"] != ["reasoning.encrypted_content"]:
+            return None
+        def bounded_tag(item, limit):
+            return type(item) is str and 0 < len(item) <= limit and all(32 <= ord(c) <= 126 for c in item)
+        if "prompt_cache_key" in value and not bounded_tag(value["prompt_cache_key"], 128):
+            return None
+        if "client_metadata" in value:
+            tags = value["client_metadata"]
+            allowed_tags = {"thread_id", "session_id", "turn_id", "x-codex-window-id",
+                            "x-codex-installation-id", "x-codex-turn-metadata"}
+            if (type(tags) is not dict or not tags or set(tags) - allowed_tags
+                    or any(not bounded_tag(item, 2048) for item in tags.values())):
+                return None
+        required.add("codex_http")
     if value.get("stream"):
         required.add("streaming")
     if request_characteristics(value)["structured_output"]:
