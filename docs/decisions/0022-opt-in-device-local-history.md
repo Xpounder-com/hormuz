@@ -1,4 +1,4 @@
-# ADR 0021: Opt-in encrypted history under the local user's control
+# ADR 0022: Opt-in encrypted history under the local user's control
 
 - Status: Accepted by product owner, October 15, 2026
 - Approval: The owner requested local history and spending insights with

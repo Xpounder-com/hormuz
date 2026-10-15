@@ -1,6 +1,7 @@
 """Local history capture exercised through coding-client and CLI boundaries."""
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -9,6 +10,7 @@ import sys
 import threading
 import unittest
 
+from hormuz.config import GatewayConfig
 from tests import test_execution_destination_workflow as destination_workflow
 
 
@@ -150,6 +152,25 @@ class LocalHistoryCaptureWorkflowTests(unittest.TestCase):
                 self.assertEqual(entry["outcome"], "succeeded")
             self.assertEqual(len(received), 1)
 
+    def test_resolved_ingress_credential_is_filtered_from_retained_text(self):
+        secret = "fixture-resolved-ingress-credential-837912"
+        with streaming_provider(["Echo ", secret]) as (endpoint, received):
+            value = self.cloud_configuration(endpoint)
+            config = GatewayConfig.load(self.path, environ=self.fixture.environment)
+            config = replace(config, ingress=replace(config.ingress, credential=secret))
+            self.history("enable")
+            with self.fixture.connected_client(value, gateway_config=config) as submit:
+                response = submit(request={"model": "cloud-code", "stream": True,
+                                           "input": "Review " + secret})
+                self.assertEqual(response["status"], 200)
+                self.assertIn(secret, response["body"])
+                entries = self.history("list")["entries"]
+                self.assertEqual(len(entries), 1)
+                entry = self.history("show", entries[0]["id"])["entry"]
+                self.assertNotIn(secret, json.dumps(entry))
+                self.assertEqual(entry["response_text"], "Echo [REDACTED:HORMUZ_SECRET]")
+            self.assertIn(secret, received[0]["input"])
+
     def test_provider_model_mismatch_does_not_reuse_the_configured_route_price(self):
         with streaming_provider(["A differently billed model."], reported_model="unexpected-billing-model") as (endpoint, received):
             value = self.cloud_configuration(endpoint)
@@ -167,6 +188,28 @@ class LocalHistoryCaptureWorkflowTests(unittest.TestCase):
                 self.assertIsNone(entry["estimated_cost_microusd"])
                 self.assertEqual(entry["cost_reason"], "provider_model_mismatch")
             self.assertEqual(len(received), 1)
+
+    def test_overloaded_attempt_remains_failed_when_the_fallback_succeeds(self):
+        with streaming_provider(["A successful fallback."],
+                                status=lambda body: 529 if body["model"] == "cloud-model" else 200) as (endpoint, received):
+            value = self.cloud_configuration(endpoint)
+            value["model_routes"]["cloud-code"]["failover_alias"] = "cloud-alternate"
+            value["model_routes"]["cloud-alternate"] = {
+                "protocol": "openai", "upstream_model": "cloud-fallback-model"}
+            value["policies"]["organization"]["allowed_models"].append("cloud-alternate")
+            self.path.write_text(json.dumps(value))
+            self.history("enable")
+            with self.fixture.connected_client(value) as submit:
+                response = submit(request={"model": "cloud-code", "stream": True})
+                self.assertEqual(response["status"], 200, response)
+                entries = self.history("list")["entries"]
+                self.assertEqual(len(entries), 2)
+                original = next(entry for entry in entries if entry["routed_model"] == "cloud-model")
+                self.assertEqual(original["http_status"], 529)
+                self.assertEqual(original["outcome"], "failed")
+                self.assertEqual(self.history("insights")["totals"]["outcome_unknown_requests"], 0)
+            self.assertEqual([body["model"] for body in received],
+                             ["cloud-model", "cloud-fallback-model"])
 
     def test_missing_provider_model_cannot_certify_the_configured_route_price(self):
         with streaming_provider(["A model identity is missing."], reported_model=None) as (endpoint, received):

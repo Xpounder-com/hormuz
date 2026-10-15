@@ -250,9 +250,9 @@ class LocalHistory:
             if not exists:
                 return None
             state = self._state()
-            self._entries(state)
             if not state["enabled"] or state["actor_id"] != actor_id:
                 return None
+            self._entries(state)
             return (state["generation"], actor_id)
 
     def append(self, generation, entry):

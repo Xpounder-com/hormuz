@@ -2,7 +2,7 @@
 
 Status: owner approved encrypted content plus metadata and the public CLI/router
 test boundary on October 15, 2026. Implementation acceptance is verified against
-this plan and [ADR 0021](decisions/0021-opt-in-device-local-history.md).
+this plan and [ADR 0022](decisions/0022-opt-in-device-local-history.md).
 
 ## Outcome
 

@@ -151,6 +151,51 @@ class LocalHistoryWorkflowTests(unittest.TestCase):
             self.assertEqual(self.history("delete", "--all")["deleted"], 1)
             self.assertEqual(self.history("list")["entries"], [])
 
+    def test_nonconsenting_requests_do_not_inspect_retained_content(self):
+        with destination_workflow.provider("RETAINED_PRIVATE_HISTORY") as (endpoint, _received):
+            value = self.fixture.configuration(endpoint, endpoint)
+            value["identities"].append({**value["identities"][0], "actor_id": "other",
+                                        "token_env": "HISTORY_OTHER_TOKEN"})
+            self.fixture.environment["HISTORY_OTHER_TOKEN"] = "fixture-other-actor-credential"
+            self.environment.update(self.fixture.environment)
+            with self.fixture.connected_client(value) as submit:
+                profile = Path(self.history("enable", "--actor", "developer")["storage_path"])
+                self.assertEqual(submit()["status"], 200)
+                entry_id = self.history("list")["entries"][0]["id"]
+                saved = profile / "entries" / (entry_id + ".enc")
+                encrypted = saved.read_bytes()
+                for mode in ("disabled", "other_actor"):
+                    with self.subTest(consent=mode):
+                        if mode == "disabled":
+                            self.history("disable")
+                        else:
+                            self.history("enable", "--actor", "other")
+                        saved.write_bytes(b"unreadable-retained-history-fixture")
+                        try:
+                            with self.assertNoLogs("hormuz", level="WARNING"):
+                                self.assertEqual(submit()["status"], 200)
+                        finally:
+                            saved.write_bytes(encrypted)
+                        self.assertEqual(len(self.history("list")["entries"]), 1)
+
+    def test_router_and_cli_use_the_same_injected_history_environment(self):
+        with destination_workflow.provider("INJECTED_HISTORY_LOCATION") as (endpoint, received):
+            value = self.fixture.configuration(endpoint, endpoint)
+            self.config_path.write_text(json.dumps(value))
+            injected = {**self.fixture.environment,
+                        "HORMUZ_HISTORY_HOME": str(self.root / "injected-history")}
+            self.environment.update(injected)
+            profile = Path(self.history("enable")["storage_path"])
+            with self.fixture.connected_client(value, server_environ=injected) as submit:
+                self.assertEqual(submit()["status"], 200)
+                entries = self.history("list")["entries"]
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(self.history("show", entries[0]["id"])["entry"]["response_text"],
+                                 "INJECTED_HISTORY_LOCATION")
+            self.assertTrue(profile.is_dir())
+            self.assertFalse(self.history_home.exists())
+            self.assertEqual(len(received), 1)
+
     def test_opt_in_requires_unambiguous_actor_and_strict_configuration_input(self):
         self.config_path.write_text('{"identities":[{"actor_id":"developer"}],'
                                     '"identities":[{"actor_id":"other"}]}')

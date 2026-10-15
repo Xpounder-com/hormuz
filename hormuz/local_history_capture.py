@@ -261,6 +261,8 @@ class HistoryCapture:
             if self.sent:
                 if self.entry["http_status"] == 429:
                     self.entry["outcome"] = "rate_limited"
+                elif self.entry["http_status"] == 529:
+                    self.entry["outcome"] = "failed"
                 self.entry["latency_ms"] = int((time.monotonic() - self.started) * 1000)
                 self.history.append(self.generation, self.entry)
         except (OSError, ValueError):

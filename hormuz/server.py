@@ -413,11 +413,12 @@ class GatewayServer(ThreadingHTTPServer):
                 if len(value) >= 8
             )
             self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
-            self.local_history = LocalHistory(config.source_path)
+            self.local_history = LocalHistory(config.source_path, environ=environ)
             self.history_redactor = history_redactor(config.secret_controls, [
                 ("credential", value) for value in (
                     *self.upstream_credentials.values(),
                     *(identity.token for identity in config.identities_by_token.values()),
+                    config.ingress.credential,
                 ) if value
             ])
             super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
