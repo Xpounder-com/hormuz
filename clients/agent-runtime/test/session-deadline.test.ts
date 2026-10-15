@@ -176,18 +176,29 @@ for (const mode of ['accept', 'revise', 'resume'] as const) {
   });
 }
 
-test('the operation deadline also bounds authority revalidation after the adapter has completed its plan', { timeout: 3000 }, async () => {
-  const f = await fixture(), validated = deferred<Connection>(); let calls = 0;
-  f.options.resolveConnection = async () => ++calls === 1 ? connection : await validated.promise;
+test('the operation deadline also bounds authority revalidation after the adapter has completed its plan', { timeout: 3000 }, async t => {
+  const f = await fixture(), validated = deferred<Connection>(), revalidating = deferred<void>(); let calls = 0;
+  f.options.resolveConnection = async () => {
+    if (++calls === 1) return connection;
+    revalidating.resolve(); return await validated.promise;
+  };
+  // Advance the operation deadline at the post-run authority barrier. Real
+  // filesystem setup must not expire it before the adapter under test exists.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   try {
     const session = await f.create();
-    await assert.rejects(f.manager.plan(session.id, 'project', 'Work.'), { code: 'interrupted' });
+    const planning = f.manager.plan(session.id, 'project', 'Work.');
+    const rejected = assert.rejects(planning, { code: 'interrupted' });
+    await revalidating.promise;
+    assert.equal(calls, 2); assert.equal(f.runtimes[1].runs, 1);
+    t.mock.timers.tick(250);
+    await rejected;
     const saved = await f.store.load(session.id, 'profile', 'project');
     assert.equal(saved.phase, 'interrupted'); assert.equal(saved.plan, undefined);
     assert.equal(f.scheduler.activeOwner, null); assert.equal(f.runtimes[1].disposed, true);
     validated.resolve(connection); await new Promise<void>(resolve => setImmediate(resolve));
     assert.equal((await f.store.load(session.id, 'profile', 'project')).plan, undefined);
-  } finally { validated.resolve(connection); await f.cleanup(); }
+  } finally { t.mock.timers.reset(); validated.resolve(connection); await f.cleanup(); }
 });
 
 for (const stage of ['snapshot', 'grant_write'] as const) {
