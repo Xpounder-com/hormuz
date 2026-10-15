@@ -1,6 +1,7 @@
 """One setup owner for CLI and skill callers using existing verified files."""
 from contextlib import contextmanager
 from dataclasses import asdict, replace
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -41,7 +42,46 @@ def _profile(path):
 def _absolute(value):
     if not value or len(value) > 4096 or "\x00" in value:
         raise ConnectedClientError("file_unsafe")
-    return str(Path(value).expanduser().absolute())
+    path = Path(value).expanduser().absolute()
+    # Canonicalize ancestors and '..', retaining the final entry for O_NOFOLLOW.
+    try:
+        return str(path.parent.resolve() / path.name)
+    except (OSError, RuntimeError, ValueError):
+        raise ConnectedClientError("file_unsafe") from None
+
+
+def _stage_prefix(path):
+    return ".hormuz-setup-v1-" + hashlib.sha256(str(path).encode()).hexdigest()[:16] + "-"
+
+
+def _recover_publication(path):
+    """Remove only a matching private staging link; retain final file contents."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if (info.st_nlink != 2 or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid() or info.st_mode & 0o077):
+        return
+    prefix = _stage_prefix(path)
+    with os.scandir(path.parent) as entries:
+        for index, entry in enumerate(entries):
+            if index >= 256:
+                break
+            if not re.fullmatch(re.escape(prefix) + r"[A-Za-z0-9_-]{8,64}", entry.name):
+                continue
+            staged = entry.stat(follow_symlinks=False)
+            if (staged.st_dev, staged.st_ino) != (info.st_dev, info.st_ino):
+                continue
+            if path.lstat() != info or staged != info:
+                raise ConnectedClientError("file_unsafe")
+            os.unlink(entry.path)
+            parent = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
+            return
 
 
 @contextmanager
@@ -72,7 +112,10 @@ def _ports(existing):
         from urllib.parse import urlsplit
         try:
             value = strict_json_loads(existing)
-            ports = value["listen"]["port"], urlsplit(value["upstreams"]["local-llama"]["base_url"]).port
+            endpoint = value["upstreams"]["local-llama"]["base_url"]
+            if type(endpoint) is not str:
+                raise ValueError()
+            ports = value["listen"]["port"], urlsplit(endpoint).port
             if any(type(port) is not int or not 1 <= port <= 65535 for port in ports) or ports[0] == ports[1]:
                 raise ValueError()
             return ports
@@ -117,7 +160,11 @@ def setup_local(lifetime, args):
             or not os.environ.get(args.credential_env)):
         raise ConnectedClientError("authentication_unsupported")
     path = Path(_absolute(args.config))
-    if path in {lifetime.config_path, lifetime.record_path, lifetime.directory / "lock"}:
+    try:
+        canonical = path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        raise ConnectedClientError("file_unsafe") from None
+    if canonical == lifetime.config_path or canonical.is_relative_to(lifetime.directory):
         raise ConnectedClientError("file_unsafe")
     managed = ManagedLlamaProfile(
         route=profile["model"], executable=_absolute(args.llama_executable),
@@ -131,6 +178,7 @@ def setup_local(lifetime, args):
     except ManagedLlamaError as error:
         raise ConnectedClientError(error.reason) from None
     with _configuration_lock(path):
+        _recover_publication(path)
         existing = _read(path, private=True)
         listen_port, runtime_port = _ports(existing)
         managed = replace(managed, port=runtime_port)
@@ -150,7 +198,7 @@ def setup_local(lifetime, args):
                 _directory(state)
             connection = lifetime.connect(path, executable=args.executable, actor_id=args.actor, preview=args.dry_run)
         else:
-            descriptor, temporary = tempfile.mkstemp(prefix=".hormuz-setup-", dir=path.parent)
+            descriptor, temporary = tempfile.mkstemp(prefix=_stage_prefix(path), dir=path.parent)
             try:
                 with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                     os.fchmod(stream.fileno(), 0o600)

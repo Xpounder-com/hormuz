@@ -260,8 +260,8 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertNotIn(self.environment["DESTINATION_WORKFLOW_TOKEN"], raw)
             configuration = json.loads(raw)
             self.assertEqual(set(configuration["upstreams"]), {"local-llama"})
-            self.assertEqual(configuration["managed_llama"]["model_file"], value["managed_llama"]["model_file"])
-            self.assertEqual(configuration["managed_llama"]["runtime_archive"], value["managed_llama"]["runtime_archive"])
+            self.assertTrue(Path(configuration["managed_llama"]["model_file"]).samefile(value["managed_llama"]["model_file"]))
+            self.assertTrue(Path(configuration["managed_llama"]["runtime_archive"]).samefile(value["managed_llama"]["runtime_archive"]))
             self.assertEqual(self.client()["body"]["output"][0]["content"][0]["text"], "MANAGED_LOCAL")
             repeated = json.loads(self.command("setup", *options).stdout)
             self.assertEqual(repeated["configuration"]["operation"], "reuse")
@@ -375,7 +375,7 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             value, _, _ = self.managed_configuration(cloud)
             options = self.local_setup_options(value)
             text = json.dumps({"listen": {"port": 8765}, "upstreams": {"local-llama": {
-                "base_url": {"PRIVATE_CONFIG_SENTINEL": "invalid endpoint"}}}})
+                "base_url": 123, "PRIVATE_CONFIG_SENTINEL": "unrelated private setting"}}})
             self.path.write_text(text)
             self.path.chmod(0o600)
             result = self.command("setup", *options, check=False)
@@ -384,6 +384,80 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertNotIn("PRIVATE_CONFIG_SENTINEL", result.stderr + result.stdout)
             self.assertNotIn("Traceback", result.stderr)
             self.assertEqual(self.path.read_text(), text)
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+            self.assertEqual(requests, [])
+
+    def test_local_setup_blocks_unsupported_profile_and_client_rows_before_publication(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)
+            profile_path = Path(options[1])
+            original = json.loads(profile_path.read_text())
+            for change, code in (
+                ({"schema_version": 2}, "router_configuration_unsupported"),
+                ({"runtime_sha256": "a" * 63}, "router_configuration_unsupported"),
+                ({"system": "unsupported-platform"}, "platform_unsupported"),
+                ({"client_version": "0.0.0"}, "version_unsupported"),
+                ({"capabilities": ["responses", "text", "unqualified"]}, "router_configuration_unsupported"),
+                ({"max_output_tokens": 513}, "router_configuration_unsupported"),
+                ({"extra": "PRIVATE_PROFILE_SENTINEL"}, "router_configuration_unsupported"),
+            ):
+                with self.subTest(change=change):
+                    profile_path.write_text(json.dumps({**original, **change}))
+                    result = self.command("setup", *options, check=False)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertEqual(json.loads(result.stderr)["error"]["code"], "connected_client_" + code)
+                    self.assertNotIn("PRIVATE_PROFILE_SENTINEL", result.stderr + result.stdout)
+                    self.assertFalse(self.path.exists())
+            self.assertFalse((engine / "stopped").exists())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+            self.assertEqual(requests, [])
+
+    def test_local_setup_blocks_aliases_of_client_settings_and_private_lifecycle_state(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)
+            (self.home / "config.toml").unlink()
+            (self.home / "sub").mkdir()
+            (self.root / "home-alias").symlink_to(self.home, target_is_directory=True)
+            for target in (self.home / "sub/../config.toml", self.root / "home-alias/config.toml",
+                           self.home / "sub/../.hormuz-router/connection.json"):
+                with self.subTest(target=target):
+                    self.path = target
+                    result = self.command("setup", *options, check=False)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertEqual(json.loads(result.stderr)["error"]["code"], "connected_client_file_unsafe")
+                    self.assertFalse((self.home / "config.toml").exists())
+                    self.assertFalse((self.home / ".hormuz-router/connection.json").exists())
+            self.assertFalse((engine / "stopped").exists())
+            self.assertEqual(requests, [])
+
+    def test_local_setup_recovers_its_interrupted_publication_and_preserves_foreign_links(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, _ = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)
+            self.addCleanup(lambda: self.command("disconnect", check=False))
+            self.command("setup", *options)
+            self.command("disconnect")
+            raw = self.path.read_text()
+            # External filesystem fixture for the documented v1 publication window.
+            identity = hashlib.sha256(str(self.path.resolve()).encode()).hexdigest()[:16]
+            pending = self.path.parent / (".hormuz-setup-v1-" + identity + "-interrupted")
+            os.link(self.path, pending)
+            result = json.loads(self.command("setup", *options).stdout)
+            self.assertEqual(result["connection"]["phase"], "connected")
+            self.assertEqual(result["configuration"]["operation"], "reuse")
+            self.assertFalse(pending.exists())
+            self.assertEqual(self.path.read_text(), raw)
+            self.assertEqual(self.client()["status"], 200)
+            self.command("disconnect")
+            foreign = self.path.parent / "unrelated-copy.json"
+            os.link(self.path, foreign)
+            failed = self.command("setup", *options, check=False)
+            self.assertEqual(failed.returncode, 2)
+            self.assertEqual(json.loads(failed.stderr)["error"]["code"], "connected_client_file_unsafe")
+            self.assertTrue(foreign.exists())
+            self.assertEqual(foreign.read_text(), raw)
             self.assertEqual(self.client("inspect")["model"], "original-model")
             self.assertEqual(requests, [])
 

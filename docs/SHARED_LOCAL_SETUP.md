@@ -38,7 +38,8 @@ Setup success requires the nested connection receipt to report `connected`,
 `ready`, `installed` and an owned ready local runtime. A preview reports
 proposed changes and starts neither router nor engine. It may create private
 lock directories/files and missing output parents, but leaves the final router
-configuration and Codex settings unchanged.
+configuration contents and Codex settings unchanged. It may complete the
+matching staging-link cleanup described below.
 
 ## Qualification and files
 
@@ -74,6 +75,20 @@ directory with mode 0700 for local usage/work SQLite files. An exclusive,
 bounded setup lock serializes callers targeting the same configuration.
 Configuration publication is atomic and create-only. Preview validates the
 candidate with the same connection owner before publishing it.
+
+Staging names use `.hormuz-setup-v1-<identity>-<nonce>`, where identity is the
+first 16 hexadecimal SHA-256 characters of the canonical absolute output path.
+After interruption between linking the final file and removing its staging
+name, setup can remove that duplicate staging link under its lock. Recovery
+requires exactly two links to the same private, user-owned regular inode, the
+matching versioned namespace, unchanged metadata, and a match within at most
+256 directory entries. Final contents remain intact. Other hard links stay
+untouched and unsafe configurations block. An orphan left before publication
+does not prevent a fresh attempt; it remains available for inspection.
+
+Output paths are canonicalized before the reserved-path check. Codex settings
+and its private lifecycle directory are excluded, including ancestor aliases
+and `..`; final symbolic links remain subject to the no-follow file check.
 
 Repeated identical setup uses the existing configuration, ports and active
 connection generation. After disconnect, it can reconnect with a new
