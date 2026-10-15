@@ -12,6 +12,7 @@ import threading
 
 from . import __version__
 from .commands import client as client_commands
+from .commands import history as history_commands
 from .config import ConfigError, GatewayConfig
 from .contracts import contract_manifest
 from .evidence import EvidenceStorageError
@@ -30,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     contract = commands.add_parser("contract", help="Inspect versioned routing and historical evidence contracts")
     contract.add_subparsers(dest="contract_command", required=True).add_parser("manifest")
     client_commands.add_client_commands(commands)
+    history_commands.add_history_commands(commands)
     return parser
 
 
@@ -44,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "contract":
         print(json.dumps(contract_manifest(), indent=2, sort_keys=True))
         return 0
+    if args.command == "history":
+        return history_commands.run(args)
     if args.command == "auth":
         return client_commands._auth_token(args.env)
     if args.command == "client" and args.client_command != "config":

@@ -3,6 +3,10 @@
 [ADR 0018](0018-customer-local-router-scope.md) records the current owner-approved
 product scope: a local router, CLI and shared skills-only plugin setup.
 
+[ADR 0021](0021-opt-in-device-local-history.md) adds separately consented,
+encrypted device-local history for review, deletion, export and spending
+insights, preserving content-free accounting and the CLI/plugin scope.
+
 Current routing protections are in [ADR 0013](0013-policy-bounded-provider-failover.md),
 [0014](0014-customer-local-ai-work-and-exact-reuse.md),
 [0015](0015-execution-destination-ownership.md), [0016](0016-local-route-admission.md)

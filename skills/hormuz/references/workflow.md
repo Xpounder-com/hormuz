@@ -104,3 +104,32 @@ Externally started engines and unrelated clients remain user-owned.
 
 Disconnect before removing the skill/plugin or router binary. Uninstalling
 instructions alone does not restore a connected client's configuration.
+
+## Device-local history and spending
+
+Use `hormuz --config /path/to/hormuz.json history --help` for the installed
+command surface. History is separate from connection ownership and starts
+disabled. The user must explicitly request enabling capture; connecting a
+client does not grant history consent. Enabling retains future redacted text
+and usage on the device, encrypted with a local key. Select an actor explicitly
+when multiple actors are configured. Capture does not require a reconnect.
+
+Use `history status`, `history list` and `history insights` for metadata-only
+inspection. Report configured-price estimates and unknown costs separately,
+with coverage limited to retained opt-in attempts. Local infrastructure cost
+and provider invoices are outside those estimates.
+
+Use `history show ENTRY_ID` only for requested content review. Keep private
+content out of chat reports unless the user asks to include it. For a requested
+export, use `history export --id ENTRY_ID --output /explicit/local/file.json`
+(repeat `--id`, or omit it for all retained entries). Export writes decrypted
+content with owner-only permissions and refuses overwrite. Obtain a destination
+from the user if none is specified; choose a private local path they control.
+No upload, sync or fine-tuning is part of history management.
+
+Honor requested deletion using `history delete ENTRY_ID` or
+`history delete --all`; `history disable` stops collection and retains existing
+history. Pending captures are invalidated by disable or deletion. Report the
+public result. Deletion does not remove exported copies, filesystem backups or
+separate accounting evidence. Retention defaults to 30 days and cleanup runs
+on use, including review/export; there is no exact idle-time deletion promise.

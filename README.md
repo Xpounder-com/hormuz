@@ -131,6 +131,13 @@ tool and provider state retains destination affinity.
 Codex subscription access is not established by login or these tests. There is
 no automatic fallback to billable API usage. Unknown costs remain unknown.
 
+[Optional local history](docs/LOCAL_HISTORY.md) adds encrypted, redacted text
+review and spending estimates on your device. Collection starts disabled;
+`hormuz --config hormuz.json history enable` opts in for future intercepted
+requests. Use `history list`, `history show`, `history insights`, `history export`,
+`history delete` and `history disable` to control retained data. No training or
+cloud upload is part of this feature; exports are explicitly decrypted files.
+
 The 2.0 development line retires standalone apps, hosted/enterprise front doors,
 billing and PostgreSQL deployment support. [Migration and rollback](docs/MIGRATION_2.md)
 describe the breaking changes. Existing releases, local user data and cloud
