@@ -129,6 +129,7 @@ manifest entry. No second journal or general migration framework is introduced.
 The selected client home and lifetime directory must be owned private directories
 (mode 0700); journals/locks use 0600. Symlinked client homes, linked or unsafe
 files, unsupported setting syntax and documents over 128 KiB are rejected.
+Selected model aliases over 2048 characters are rejected before preview or activation.
 Existing unrelated TOML strings, comments and provider tables are preserved;
 owned top-level settings must have simple string assignments. A missing original
 configuration returns to client defaults (an empty document may remain).

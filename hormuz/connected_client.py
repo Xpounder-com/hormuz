@@ -473,6 +473,8 @@ class ConnectedClientLifetime:
                           and (policy.allowed_models is None or alias in policy.allowed_models)), None)
             if model is None:
                 raise ConnectedClientError("model_unavailable")
+            if len(model) > 2048:
+                raise ConnectedClientError("configuration_shape_unsupported")
             original_text = _read(self.config_path)
             text = original_text or ""
             document = _document(text)

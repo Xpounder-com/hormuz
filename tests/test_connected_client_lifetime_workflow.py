@@ -208,6 +208,40 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                     with self.assertRaises(ContractValidationError):
                         validate_contract(malformed)
 
+    def test_oversized_model_preview_fails_without_activation_and_can_be_repaired(self):
+        with self.configured() as (local_requests, cloud_requests):
+            value = json.loads(self.path.read_text())
+            oversized = "x" * 2049
+            invalid = {**value, "model_routes": {oversized: value["model_routes"]["local-code"]},
+                       "policies": {"organization": {**value["policies"]["organization"],
+                                                     "allowed_models": [oversized]}}}
+            self.path.write_text(json.dumps(invalid))
+            rejected = self.command("connect", "--dry-run", check=False)
+            self.assertEqual(rejected.returncode, 2, rejected.stderr)
+            self.assertEqual(rejected.stdout, "")
+            error = json.loads(rejected.stderr)
+            self.assertEqual(error, {"schema_id": "hormuz.connected-client-error", "schema_version": 1,
+                "error": {"code": "connected_client_configuration_shape_unsupported",
+                          "action": "inspect_status_and_configuration"}})
+            validate_contract(error)
+            before = json.loads(self.command("status").stdout)
+            self.assertEqual((before["phase"], before["router"], self.client("inspect")["provider"]),
+                             ("disconnected", "stopped", "original"))
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+            self.path.write_text(json.dumps(value))
+            connected = json.loads(self.command("connect").stdout)
+            result = self.client()
+            self.assertEqual((result["status"], result["body"]["output"][0]["content"][0]["text"]),
+                             (200, "LOCAL_DESTINATION"))
+            current = json.loads(self.command("status").stdout)
+            self.assertEqual((current["phase"], current["router"], current["generation"]),
+                             ("connected", "ready", connected["generation"]))
+            disconnected = json.loads(self.command("disconnect").stdout)
+            self.assertEqual((disconnected["phase"], disconnected["router"],
+                              self.client("inspect")["provider"]),
+                             ("disconnected", "stopped", "original"))
+            self.assertEqual((len(local_requests), cloud_requests), (1, []))
+
     def test_preview_is_a_discoverable_contract_without_activating_routing(self):
         with self.configured():
             manifest = subprocess.run([sys.executable, "-m", "hormuz", "contract", "manifest"],
