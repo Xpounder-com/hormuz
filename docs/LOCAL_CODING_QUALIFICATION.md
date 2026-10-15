@@ -23,8 +23,12 @@ provider-owned continuation state are not part of the instruction profile hash.
 The minimum battery is four development cases (at least one per family) and
 12 distinct held-out cases (at least three per family): arithmetic/boundaries,
 text normalization, collection behavior, and validation/state. These are a
-conservative engineering acceptance floor, not a statistical accuracy claim or
-permission for arbitrary repository-wide work. Every predeclared case must pass;
+conservative engineering acceptance floor for the declared byte/token/time/tool
+bounded `code_change` policy, not a statistical accuracy claim. The deterministic
+task hint does not establish that a new request shares the cases' complexity;
+this version does not enforce a semantic "small repair" promise or guarantee
+repository-wide success. A narrower task promise requires a separately defined
+trusted caller envelope, not a classifier's confidence. Every predeclared case must pass;
 adding failures or missing observations cannot improve readiness. Keep at most
 64 cases. Development and held-out tasks must have distinct task hashes.
 
@@ -103,7 +107,11 @@ outcomes remain in the planned denominator. The runtime never executes a receipt
 `request_profile_sha256` hashes the canonical mapping of present `instructions`,
 `tools`, `tool_choice`, `temperature`, `top_p`, `reasoning`, `include`, `text`,
 `parallel_tool_calls`, `store`, `service_tier` and `stream`, after privacy
-normalization. Missing `store` becomes false and absent/null `service_tier` becomes
+normalization. Input-carried `system`/`developer` messages are additionally bound
+as `input_instructions`: an ordered list of `{position, message}` entries, using
+the zero-based input position and entire message. Adding, removing, moving or
+changing an instruction message changes the profile; ordinary user and tool
+content remains variable. Missing `store` becomes false and absent/null `service_tier` becomes
 `default`; other present fields retain their exact JSON values. This captures the
 effective agent instructions and tool schema rather than a possibly ignored
 command-line model-catalog flag. Client/plugin activation, hardware support and

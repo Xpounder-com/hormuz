@@ -105,6 +105,15 @@ try:
         request["input"] = [{"type":"function_call_output","call_id":"fixture-call","output":"Fixture tool result"}]
     if "instruction-drift" in sys.argv:
         request["instructions"] = "Different unqualified agent instructions."
+    if "input-developer-pinned" in sys.argv:
+        items = request["input"] if isinstance(request["input"], list) else [{"role":"user","content":request["input"]}]
+        request["input"] = [{"role":"developer","content":"Pinned agent instructions."}, *items]
+    for role in ("system", "developer"):
+        if "input-" + role + "-drift" in sys.argv:
+            items = request["input"] if isinstance(request["input"], list) else [{"role":"user","content":request["input"]}]
+            if items and items[0].get("role") == role:
+                items = items[1:]
+            request["input"] = [{"role":role,"content":"Different unqualified agent instructions."}, *items]
     connection.request("GET" if control else "POST", origin.path.rstrip("/") + ("/router/state" if "router-state" in sys.argv else "/work/state" if control else "/responses"),
                        None if control else json.dumps(request), headers)
     response = connection.getresponse()
@@ -296,7 +305,8 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             qualification["task_types"] = ["code_change", "code_review"]
             evidence = self.coding_evidence(value)
             request_profile = {"store": False, "service_tier": "default", "tools": [
-                {"type": "function", "name": "fixture_tool", "parameters": {"type": "object"}}]}
+                {"type": "function", "name": "fixture_tool", "parameters": {"type": "object"}}],
+                "input_instructions": [{"position": 0, "message": {"role": "developer", "content": "Pinned agent instructions."}}]}
             evidence["plan"]["subject"]["request_profile_sha256"] = hashlib.sha256(json.dumps(
                 request_profile, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
@@ -305,16 +315,24 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.path.write_text(json.dumps(value))
             try:
                 self.command("connect")
-                first = self.client("code-change", "coding-tools", "bound-conversation")
+                first = self.client("code-change", "coding-tools", "bound-conversation", "input-developer-pinned")
                 self.assertEqual(first["status"], 200, first)
-                second = self.client("tool-continuation", "coding-tools", "bound-conversation")
+                second = self.client("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned")
                 self.assertEqual(second["status"], 200, second)
                 self.assertEqual(second["headers"]["x-hormuz-routing-reason"], "session_affinity")
                 for header in ("x-hormuz-work-id", "x-hormuz-destination-generation"):
                     self.assertEqual(second["headers"][header], first["headers"][header])
-                drift = self.client("tool-continuation", "coding-tools", "bound-conversation", "instruction-drift")
+                drift = self.client("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned", "instruction-drift")
                 self.assertEqual(drift["status"], 503, drift)
-                review = self.client("code-review", "coding-tools")
+                for role in ("system", "developer"):
+                    for request_options in (("code-change", "coding-tools", "input-developer-pinned"),
+                                            ("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned")):
+                        with self.subTest(role=role, request=request_options):
+                            altered = self.client(*request_options, "input-" + role + "-drift")
+                            self.assertEqual(altered["status"], 503, altered)
+                missing = self.client("tool-continuation", "coding-tools", "bound-conversation")
+                self.assertEqual(missing["status"], 503, missing)
+                review = self.client("code-review", "coding-tools", "input-developer-pinned")
                 self.assertEqual(review["status"], 503, review)
                 self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1", "1"])
                 self.assertEqual(requests, [])

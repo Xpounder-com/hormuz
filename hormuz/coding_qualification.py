@@ -33,6 +33,13 @@ def request_profile_digest(value):
     fields = {"instructions", "tools", "tool_choice", "temperature", "top_p", "reasoning", "include",
               "text", "parallel_tool_calls", "store", "service_tier", "stream"}
     profile = {key: item for key, item in value.items() if key in fields}
+    items = value.get("input", [])
+    if not isinstance(items, list):
+        items = [items]
+    instructions = [{"position": index, "message": item} for index, item in enumerate(items)
+                    if isinstance(item, dict) and item.get("role") in ("system", "developer")]
+    if instructions:
+        profile["input_instructions"] = instructions
     profile.setdefault("store", False)
     if profile.get("service_tier") is None:
         profile["service_tier"] = "default"
