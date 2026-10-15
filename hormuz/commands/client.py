@@ -23,10 +23,12 @@ def add_client_commands(
     connect = client_subparsers.add_parser("config", help="Print client configuration for this gateway")
     _client_config_arguments(connect)
 
-    for command in ("setup", "connect", "status", "disconnect"):
+    for command in ("setup", "connect", "status", "diagnose", "disconnect"):
         lifecycle = client_subparsers.add_parser(command, help="Manage persistent Codex CLI connection")
         lifecycle.add_argument("client", choices=["codex"])
         lifecycle.add_argument("--client-home", help="Isolated Codex home (default CODEX_HOME or ~/.codex)")
+        if command == "diagnose":
+            lifecycle.add_argument("--executable", help="Optional target executable for a bounded version check")
         if command == "disconnect":
             lifecycle.add_argument("--generation", help="Disconnect only the receipt generation that you own")
         if command in {"connect", "setup"}:
@@ -188,6 +190,9 @@ def run_lifetime(args: argparse.Namespace) -> int:
             result = setup_local(lifetime, args)
         elif args.client_command == "connect":
             result = lifetime.connect(Path(args.config), executable=args.executable, actor_id=args.actor, preview=args.dry_run)
+        elif args.client_command == "diagnose":
+            from ..plugin_diagnostics import diagnose
+            result = diagnose(lifetime, Path(args.config), args.executable)
         elif args.client_command == "status":
             result = lifetime.status()
         else:
@@ -195,5 +200,10 @@ def run_lifetime(args: argparse.Namespace) -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ConnectedClientError, ConfigError, OSError, subprocess.SubprocessError) as error:
+        if args.client_command == "diagnose":
+            print(json.dumps({"schema_id": "hormuz.client-diagnosis", "schema_version": 1,
+                              "error": {"code": "configuration_invalid" if isinstance(error, ConfigError)
+                                        else "diagnosis_unavailable"}}))
+            return 2
         print(json.dumps(lifetime_error(error)), file=sys.stderr)
         return 2

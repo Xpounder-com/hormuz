@@ -84,7 +84,7 @@ class LocalHistoryWorkflowTests(unittest.TestCase):
                 entry = self.history("show", entry_id)["entry"]
                 self.assertEqual(set(entry), set(self.compatibility["entry_fields"]))
                 self.assertIn(entry["schema_id"], self.compatibility["schemas"])
-                self.assertEqual(entry["schema_version"], self.compatibility["schema_version"])
+                self.assertEqual(entry["schema_version"], self.compatibility["entry_schema_version"])
                 self.assertIn(entry["outcome"], self.compatibility["outcomes"])
                 self.assertIn(entry["request_content_status"], self.compatibility["content_statuses"])
                 self.assertIn(entry["response_content_status"], self.compatibility["content_statuses"])
@@ -301,7 +301,7 @@ class LocalHistoryWorkflowTests(unittest.TestCase):
                 (entry_path, entry, entry_id.encode("ascii"), ("show", entry_id), "local_history_data_invalid"),
             ):
                 original = path.read_bytes()
-                for invalid_version in (2, True):
+                for invalid_version in (3, True):
                     with self.subTest(schema=payload["schema_id"], version=invalid_version):
                         malformed = {**payload, "schema_version": invalid_version}
                         nonce = os.urandom(envelope["nonce_bytes"])
