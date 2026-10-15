@@ -1,0 +1,12 @@
+{
+  "schema_id": "hormuz.connected-client-status",
+  "schema_version": 1,
+  "generation": "11111111111111111111111111111111",
+  "client_version": "0.147.0",
+  "scope": "codex_user_defaults",
+  "phase": "disconnected",
+  "router": "stopped",
+  "configuration": "not_owned",
+  "owned_settings": ["model", "model_provider", "web_search"],
+  "retained_settings": []
+}

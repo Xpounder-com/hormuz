@@ -129,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
         return client_commands._auth_token(args.env)
     if args.command in {"login", "logout"} or args.command == "auth" and args.auth_command == "session":
         return session_commands.run(args)
+    if args.command == "client" and args.client_command != "config":
+        return client_commands.run_lifetime(args)
     if args.command == "client" and args.auth_mode == "session":
         return session_commands.client_config(args)
     if args.command == "context":

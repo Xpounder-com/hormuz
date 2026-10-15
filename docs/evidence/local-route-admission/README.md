@@ -1,8 +1,10 @@
 # Local route admission validation
 
-Final reviewed source: `976060881d9caa6e6aee4d52547268b7352998c6`.
+Admission-slice reviewed source: `976060881d9caa6e6aee4d52547268b7352998c6`.
 Merged destination prerequisite: `1b433e9e80a5efa9176b80cbc877907e1c946780`.
-The final review fixes and genuine shared proof regeneration are qualified below.
+The following results are historical evidence at that parent source. Current
+combined qualification, including regenerated receipts, is recorded in
+[connected-client lifetime](../connected-client-lifetime/README.md).
 This is a partial implementation of issue #523. The
 [admission guide](../../LOCAL_ROUTE_ADMISSION.md) states configuration, contracts,
 privacy scope, qualification and rollback.

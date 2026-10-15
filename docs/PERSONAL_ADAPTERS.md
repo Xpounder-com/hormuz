@@ -58,3 +58,5 @@ The current Codex, Claude Code, and Aider adapters all declare
 built-in catalog: there is no supported interception point for replacing a
 hidden model decision, so the reference execution router is not wired into the
 release request path.
+
+Persistent Codex user-default setup is a separate [connected-client lifetime](CONNECTED_CLIENT_LIFETIME.md) workflow. Existing transient launch adapters keep their current restore-by-construction behavior.

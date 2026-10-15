@@ -1,0 +1,8 @@
+{
+  "schema_id": "hormuz.connected-client-error",
+  "schema_version": 1,
+  "error": {
+    "code": "connected_client_version_unsupported",
+    "action": "use_pinned_client_or_disconnect"
+  }
+}

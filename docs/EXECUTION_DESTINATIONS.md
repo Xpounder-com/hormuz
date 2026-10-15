@@ -4,7 +4,8 @@ This is the first implementation slice of [router spec #523](https://github.com/
 It makes an explicitly selected model route reach its own origin with its own
 authentication. [Local route admission](LOCAL_ROUTE_ADMISSION.md) adds automatic
 selection and a hard local-only transport ceiling. Model/runtime acquisition,
-subscription authorization and persistent CLI/plugin setup are later slices.
+subscription authorization and plugin publication remain separate.
+[Persistent CLI setup](CONNECTED_CLIENT_LIFETIME.md) now owns connection and restoration.
 Existing coding apps remain the client; this adds no Hormuz UI.
 
 ## Configuration
