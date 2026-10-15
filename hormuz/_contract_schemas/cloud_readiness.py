@@ -115,8 +115,10 @@ def validate_readiness(value):
                             {"app_authorization_not_implemented", "registration_and_host_id_required"})
             if seen.intersection({"credentials_unverified", "cloud_route_missing", "cloud_models_not_allowed"}):
                 raise ContractValidationError("plan authorization cannot require paid API setup")
-        if not required.issubset(seen):
-            raise ContractValidationError("missing cloud readiness blocker")
+        managed = seen.intersection({"managed_configuration", "managed_configuration_unknown"})
+        optional = managed if identifier == "api_key" else set()
+        if len(optional) > 1 or seen - optional != required:
+            raise ContractValidationError("inconsistent cloud readiness blockers")
     effects = _value_mapping(value, "effects")
     _exact_keys(effects, {"settings_changed", "credentials_read", "provider_requests"})
     if (effects["settings_changed"] is not False or effects["credentials_read"] is not False

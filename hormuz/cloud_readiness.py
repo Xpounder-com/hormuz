@@ -37,7 +37,7 @@ def _configuration(path, actor_id):
             blockers.append("client_not_allowed")
         if not cloud:
             blockers.append("cloud_route_missing")
-        elif not allowed:
+        elif codex_allowed and not allowed:
             blockers.append("cloud_models_not_allowed")
         return facts, blockers
     except (ConnectedClientError, ConfigError, OSError, ValueError, RuntimeError):

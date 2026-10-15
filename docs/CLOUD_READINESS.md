@@ -46,7 +46,10 @@ It does not open the client's auth cache, local credential files or usage
 databases; does not create a home, lock or journal; and does not enter a
 connection transaction. An existing connection and its generation are retained.
 CLI inspection invokes only `--version` using the existing stripped environment,
-three-second deadline, 4 KiB output bound and process cleanup. It starts no
+three-second deadline and 4 KiB output bound. A separate process group bounds
+cleanup of the executable and its descendants, including after the direct
+process exits. Cleanup allows bounded graceful termination before escalation.
+It starts no
 router, model, download, sign-in or registration flow.
 
 ## Contract and rollback

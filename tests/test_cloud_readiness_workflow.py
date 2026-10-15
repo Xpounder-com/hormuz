@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -220,6 +221,9 @@ class CloudReadinessWorkflowTests(unittest.TestCase):
         receipt = self.inspect()
         self.assertEqual(receipt["configuration"]["status"], "available")
         self.assertEqual(receipt["client"]["version_check"], "pinned")
+        self.assertEqual(receipt["paths"][0]["status"], "unverified")
+        self.assertEqual({blocker["code"] for blocker in receipt["paths"][0]["blockers"]},
+                         {"credentials_unverified", "provider_unqualified"})
         self.assertFalse(self.home.exists())
         self.assertFalse((self.root / "usage.sqlite3").exists())
 
@@ -234,6 +238,34 @@ class CloudReadinessWorkflowTests(unittest.TestCase):
         pid = int((self.root / "version-pid").read_text())
         with self.assertRaises(ProcessLookupError):
             os.kill(pid, 0)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "requires POSIX process groups")
+    def test_version_check_timeout_stops_descendants_after_the_parent_exits(self):
+        self.write_configuration(self.configuration("http://127.0.0.1:1", "https://cloud.example.invalid/v1"))
+        self.executable.write_text("#!" + sys.executable + "\nimport os,pathlib,time\n"
+            "child = os.fork()\n"
+            "if child:\n"
+            " pathlib.Path(__file__).with_name('descendant-pid').write_text(str(child))\n"
+            " os._exit(0)\n"
+            "for tick in range(400):\n"
+            " pathlib.Path(__file__).with_name('descendant-heartbeat').write_text(str(tick))\n"
+            " time.sleep(0.05)\n")
+        try:
+            started = time.monotonic()
+            receipt = self.inspect()
+            self.assertLess(time.monotonic() - started, 7)
+            self.assertEqual(receipt["client"]["version_check"], "unsupported")
+            heartbeat = self.root / "descendant-heartbeat"
+            stopped = heartbeat.read_bytes()
+            time.sleep(0.2)
+            self.assertEqual(heartbeat.read_bytes(), stopped, "version-check descendant is still running")
+        finally:
+            pid_file = self.root / "descendant-pid"
+            if pid_file.exists():
+                try:
+                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_missing_cli_and_noisy_version_output_remain_content_free(self):
         self.write_configuration(self.configuration("http://127.0.0.1:1", "https://cloud.example.invalid/v1"))
@@ -297,6 +329,32 @@ class CloudReadinessWorkflowTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["schema_version"], 1)
         self.assertEqual(set(entries[0]["fields"]), set(receipt))
+
+    def test_receipt_rejects_recovery_actions_that_contradict_its_facts(self):
+        receipt = json.loads((Path(__file__).parent / "fixtures/cloud-readiness-v1.json").read_text())
+        for code, action in (
+            ("actor_unavailable", "Choose an actor declared in the router configuration."),
+            ("client_not_allowed", "Review the selected identity and effective Codex policy."),
+            ("client_unavailable", "Install or select the pinned Codex CLI executable."),
+            ("client_version_unsupported", "Use the pinned CLI version; it does not qualify subscription forwarding."),
+            ("desktop_unqualified", "Qualify the actual desktop app and its bundled engine separately."),
+            ("configuration_invalid", "Repair the router configuration before attempting connection."),
+            ("configuration_unavailable", "Supply a readable router configuration; no settings were changed."),
+            ("cloud_models_not_allowed", "Review effective model policy before selecting a cloud route."),
+        ):
+            with self.subTest(code=code):
+                invalid = json.loads(json.dumps(receipt))
+                invalid["paths"][0]["blockers"].append({"code": code, "action": action})
+                with self.assertRaises(ContractValidationError):
+                    validate_contract(invalid)
+        invalid = json.loads(json.dumps(receipt))
+        invalid["configuration"].update(cloud_routes=1, allowed_cloud_routes=1)
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid)
+        invalid = json.loads(json.dumps(receipt))
+        invalid["configuration"]["routing_mode"] = "configured"
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid)
 
 
 if __name__ == "__main__":
