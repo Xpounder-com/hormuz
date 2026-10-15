@@ -9,11 +9,11 @@ import logging
 import sqlite3
 import time
 from dataclasses import replace
-from uuid import uuid4
+from uuid import UUID, uuid4
 from urllib.parse import urlsplit
 
 from .work_runtime import WorkRuntime, WorkRuntimeError
-from .work_learning import REQUEST_KINDS
+from .work_learning import REQUEST_KINDS, contains_provider_state
 from .policy import PolicyEngine
 from .usage import ResponseUsageParser
 
@@ -309,12 +309,11 @@ def close(server):
         lock.__exit__(None, None, None)
 
 
-def prepare(handler, identity, decision, request_value, *, client, protocol, output, output_field=None, account_usage):
+def identify(handler, identity, request_value, *, client, protocol, account_usage):
+    """Resolve existing work before admission; never adopt unknown history."""
     handler._work_id = None
     handler._work_route = None
-    if not hasattr(handler, "_work_started_ns"):
-        handler._work_started_ns = time.monotonic_ns()
-    routing_started_ns = time.monotonic_ns()
+    handler._work_conversation = None
     runtime = handler.server.work_runtime
     headers = handler.headers.get_all(WORK_HEADER, [])
     if len(headers) > 1 or headers and (not headers[0] or len(headers[0]) > 128):
@@ -322,12 +321,63 @@ def prepare(handler, identity, decision, request_value, *, client, protocol, out
     if runtime is None:
         if headers:
             raise WorkRuntimeError("work_not_enabled", 503)
-        return decision
+        return
     if not account_usage:
+        return
+    work = runtime.get_work(identity, headers[0]) if headers else None
+    if client == "codex" and protocol == "openai" and handler.path == "/v1/responses":
+        threads = handler.headers.get_all("thread-id", [])
+        sessions = handler.headers.get_all("session-id", [])
+        if threads or sessions:
+            tags = request_value.get("client_metadata", {})
+            if len(threads) != 1 or len(sessions) != 1 or type(tags) is not dict:
+                raise WorkRuntimeError("invalid_conversation_metadata")
+            try:
+                if any(str(UUID(value)) != value for value in (threads[0], sessions[0])):
+                    raise ValueError()
+            except (ValueError, AttributeError):
+                raise WorkRuntimeError("invalid_conversation_metadata") from None
+            if tags.get("thread_id") != threads[0] or tags.get("session_id") != sessions[0]:
+                raise WorkRuntimeError("invalid_conversation_metadata")
+            if "x-codex-turn-metadata" in tags:
+                from .compaction_formats import strict_json_loads
+                embedded = tags["x-codex-turn-metadata"]
+                try:
+                    if type(embedded) is not str or len(embedded) > 2048:
+                        raise ValueError()
+                    metadata = strict_json_loads(embedded)
+                    if (type(metadata) is not dict or metadata.get("thread_id") != threads[0]
+                            or metadata.get("session_id") != sessions[0]):
+                        raise ValueError()
+                except ValueError:
+                    raise WorkRuntimeError("invalid_conversation_metadata") from None
+            known = runtime.conversation_work(identity, client, threads[0])
+            if work is not None and known is not None and work["work_id"] != known["work_id"]:
+                raise WorkRuntimeError("conversation_work_conflict", 409)
+            if not headers:
+                if known is None and contains_provider_state(request_value):
+                    from .route_admission import RouteAdmissionError
+                    raise RouteAdmissionError("affinity_required", 409)
+                work = known
+            if not headers or known is not None:
+                handler._work_conversation = threads[0]
+    if work is not None:
+        handler._work_id = work["work_id"]
+
+
+def prepare(handler, identity, decision, request_value, *, client, protocol, output, output_field=None, account_usage):
+    if not hasattr(handler, "_work_started_ns"):
+        handler._work_started_ns = time.monotonic_ns()
+    routing_started_ns = time.monotonic_ns()
+    runtime = handler.server.work_runtime
+    if runtime is None or not account_usage:
         return decision
     _prepare_pricing(protocol, request_value)
-    work = runtime.get_work(identity, headers[0]) if headers else runtime.create_work(
-        identity, "unattributed", task_type="unattributed")
+    if handler._work_conversation is not None:
+        work = runtime.conversation_work(identity, client, handler._work_conversation, create=True)
+    else:
+        work = runtime.get_work(identity, handler._work_id) if handler._work_id else runtime.create_work(
+            identity, "unattributed", task_type="unattributed")
     handler._work_id = work["work_id"]
     handler._work_request_context = runtime.bind_request_context(identity, handler._work_id,
         _cache_request(handler, request_value), completion_condition=work["completion_condition"])["context_signature"]
@@ -375,12 +425,13 @@ def prepare(handler, identity, decision, request_value, *, client, protocol, out
                     quotes[alias] = candidate.route.estimate_reservation_cost_microusd(
                         input_tokens=input_bytes, output_tokens=limit)
     try:
+        require_affinity = admitted is not None or handler._work_conversation is not None
         selection = runtime.choose_route(identity, handler._work_id,
             [value.route for value in candidates.values()], decision.route, _cache_request(handler, request_value),
             max_costs=quotes, request_kind=handler._work_request_kind,
-            **({"require_affinity": True} if admitted is not None else {}))
+            require_affinity=require_affinity)
     except WorkRuntimeError as error:
-        if admitted is not None and error.reason == "session_affinity_required":
+        if require_affinity and error.reason == "session_affinity_required":
             from .route_admission import RouteAdmissionError
             raise RouteAdmissionError("affinity_required", 409) from None
         raise

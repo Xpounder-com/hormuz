@@ -65,6 +65,11 @@ CREATE INDEX IF NOT EXISTS ai_work_jobs_owner
  ON ai_work_jobs(organization_id, actor_id, created_at);
 CREATE INDEX IF NOT EXISTS ai_work_jobs_profile
  ON ai_work_jobs(organization_id, repository, task_type, created_at);
+CREATE TABLE IF NOT EXISTS ai_work_conversations (
+ organization_id TEXT NOT NULL, actor_id TEXT NOT NULL, client TEXT NOT NULL,
+ conversation_key TEXT NOT NULL, work_id TEXT NOT NULL REFERENCES ai_work_jobs(work_id),
+ PRIMARY KEY(organization_id,actor_id,client,conversation_key)
+);
 CREATE TABLE IF NOT EXISTS ai_work_attempts (
  organization_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
  work_id TEXT NOT NULL REFERENCES ai_work_jobs(work_id), logical_request_id TEXT,
@@ -263,6 +268,9 @@ class WorkRuntime:
                 connection.execute("UPDATE ai_work_attempts SET state='unknown' WHERE state='pending'")
                 if [row[0] for row in connection.execute("SELECT version FROM ai_work_schema")] != [1]:
                     raise WorkRuntimeError("schema_unavailable", 503)
+                # Bindings belong to this runtime epoch, like destination
+                # generations. Historical jobs and attempts remain readable.
+                connection.execute("DELETE FROM ai_work_conversations")
         except (OSError, sqlite3.Error):
             raise WorkRuntimeError("storage_unavailable", 503) from None
 
@@ -283,6 +291,7 @@ class WorkRuntime:
             "ai_work_schema": ("version",),
             "ai_work_plans": ("organization_id", "scope_type", "scope_id", "version", "budget_microusd", "objective", "exploration_enabled"),
             "ai_work_jobs": ("work_id", "organization_id", "actor_id", "repository", "task_type", "context_revision", "state", "cache_generation", "pinned_model", "context_signature", "completion_condition"),
+            "ai_work_conversations": ("organization_id", "actor_id", "client", "conversation_key", "work_id"),
             "ai_work_attempts": ("organization_id", "actor_id", "request_id", "work_id", "model", "protocol", "route_fingerprint", "request_pattern", "request_shape", "state", "reserved_microusd", "cost_microusd", "gateway_wall_ms", "confirmed_cost_microusd", "response_succeeded", "cache_generation"),
             "ai_work_observations": ("observation_id", "organization_id", "actor_id", "work_id", "status", "source", "completion_condition"),
             "ai_work_repeat_guards": ("organization_id", "actor_id", "work_id", "request_pattern", "context_signature", "observed_at", "last_attempt_rowid"),
@@ -396,6 +405,29 @@ class WorkRuntime:
     def get_work(self, identity, work_id):
         owner, now = _identity(identity), self._now()
         with self._transaction() as connection:
+            return self._work_view(connection, self._work(connection, owner, work_id), now)
+
+    def conversation_work(self, identity, client, thread_id, *, create=False):
+        """Atomically join a caller's thread to work, without storing its ID."""
+        owner, now = _identity(identity), self._now()
+        dimensions = json.dumps([*owner, client, "openai", "/v1/responses", thread_id], separators=(",", ":")).encode()
+        key = hmac.new(self._cache_key, b"codex-conversation-v1:" + dimensions, hashlib.sha256).hexdigest()
+        with self._transaction(write=create) as connection:
+            row = connection.execute(
+                "SELECT work_id FROM ai_work_conversations WHERE organization_id=? AND actor_id=? AND client=? AND conversation_key=?",
+                (*owner, client, key)).fetchone()
+            if row is not None:
+                return self._work_view(connection, self._work(connection, owner, row[0]), now)
+            if not create:
+                return None
+            if connection.execute("SELECT COUNT(*) FROM ai_work_conversations").fetchone()[0] >= 1024:
+                raise WorkRuntimeError("conversation_capacity_reached", 503)
+            work_id = "work-" + uuid4().hex
+            connection.execute(
+                "INSERT INTO ai_work_jobs(work_id,organization_id,actor_id,repository,task_type,state,created_at,updated_at,task_origin,completion_condition) "
+                "VALUES(?,?,?,'unattributed','unattributed','active',?,?,'unknown','workflow.completed.v1')",
+                (work_id, *owner, now, now))
+            connection.execute("INSERT INTO ai_work_conversations VALUES(?,?,?,?,?)", (*owner, client, key, work_id))
             return self._work_view(connection, self._work(connection, owner, work_id), now)
 
     def bind_request_context(self, identity, work_id, sanitized_request, *, completion_condition=None):
