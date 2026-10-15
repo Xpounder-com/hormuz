@@ -38,7 +38,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install .
       - run: python tools/verify_router_scope.py
-      - run: python -m unittest tests.test_execution_destination_workflow tests.test_connected_client_lifetime_workflow -f -q
+      - run: python -m unittest discover -s tests -p 'test_*workflow.py' -f -q
 
   package:
     name: Router installed wheel

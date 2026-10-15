@@ -197,5 +197,9 @@ def build_model_route_domain(
             ),
             destination=destination,
             model_revision=revision, capabilities=tuple(capabilities),
+            explicit_price_fields=frozenset(name for name in (
+                "input_cost_per_million", "output_cost_per_million",
+                "cache_read_cost_per_million", "cache_write_cost_per_million",
+            ) if name in item),
         )
     return model_routes

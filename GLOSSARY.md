@@ -19,3 +19,7 @@
   as the CLI. Plugin installation does not activate routing.
 - **Operational cleanup:** Separate retirement of external resources and bills
   tracked in #494–501; source deletion does not complete it.
+- **Local history:** A user's optional retained record of intercepted requests,
+  responses and usage, kept on their device for review, export and deletion.
+- **Spending estimate:** A calculation from observed usage and configured
+  prices; it is distinct from an invoice or provider-confirmed charge.

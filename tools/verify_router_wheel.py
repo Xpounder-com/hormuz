@@ -33,9 +33,11 @@ def main():
                         'from pathlib import Path; import hormuz; '
                         'assert Path(hormuz.__file__).resolve().is_relative_to(Path("installed").resolve())'],
                        cwd=temporary, env=environment, check=True, timeout=10)
-        subprocess.run([sys.executable, '-m', 'unittest', 'tests.test_execution_destination_workflow',
-                        'tests.test_connected_client_lifetime_workflow', '-f', '-q'],
-                       cwd=temporary, env=environment, check=True, timeout=240)
+        subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
+                        '-p', 'test_*workflow.py', '-f', '-q'],
+                       # Leave a bounded margin for the complete suite within
+                       # the ten-minute packaging job; CI needs about 280s.
+                       cwd=temporary, env=environment, check=True, timeout=360)
     print('Installed-wheel workflow passed outside the source checkout')
 
 

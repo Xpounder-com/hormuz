@@ -1,6 +1,6 @@
 ---
 name: hormuz
-description: Manage Hormuz local routing when the user asks to set it up, check connection status, troubleshoot routing, or disconnect and restore client settings.
+description: Manage Hormuz local routing, connection status, troubleshooting, disconnect, or opt-in device-local history review, spending insights, deletion and export through the shared CLI.
 ---
 
 # Hormuz
@@ -21,6 +21,7 @@ commands. These instructions travel with this skill across agent hosts.
    configuration from existing verified files, or the connect branch for an
    existing configuration. Use status/troubleshooting or disconnect as requested.
    Preserve the user's chosen client home, local-only policy and setup owner.
+   For history, follow its separate consent/review branch in the shared workflow.
 4. Report the operation's public result, the connection/routing scope, any
    prerequisite still missing and the next safe action. A plugin being loaded
    or a router being ready does not establish a completed model task.

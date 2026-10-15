@@ -83,6 +83,8 @@ from .store_router import (
     create_work_budget_request_repository,
 )
 from .usage import ResponseUsageParser
+from .local_history import LocalHistory
+from .local_history_capture import HistoryCapture, history_consent, history_redactor
 
 
 LOGGER = logging.getLogger("hormuz")
@@ -411,6 +413,14 @@ class GatewayServer(ThreadingHTTPServer):
                 if len(value) >= 8
             )
             self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
+            self.local_history = LocalHistory(config.source_path, environ=environ)
+            self.history_redactor = history_redactor(config.secret_controls, [
+                ("credential", value) for value in (
+                    *self.upstream_credentials.values(),
+                    *(identity.token for identity in config.identities_by_token.values()),
+                    config.ingress.credential,
+                ) if value
+            ])
             super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
         except Exception:
             if self.work_runtime is not None:
@@ -656,6 +666,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if identity is None:
             return
         protocol, default_client, account_usage = route
+        self._history_generation = history_consent(self.server.local_history, identity.actor_id)
         try:
             self._proxy_generation(
                 identity=identity,
@@ -991,6 +1002,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def _forward(self, **options) -> None:
         entered = False
+        history_capture = None
         previous_resources = getattr(self, "_provider_response_resources", None)
         previous_headers_pending = getattr(self, "_provider_headers_pending", False)
         self._provider_headers_pending = False
@@ -999,7 +1011,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 entered = True
                 with ExitStack() as resources:
                     self._provider_response_resources = resources
-                    self._forward_admitted(**options)
+                    history_capture = HistoryCapture.begin(self.server.local_history,
+                        identity=options["identity"], client=options["client"], protocol=options["protocol"],
+                        decision=options["decision"],
+                        destination=options["selected_upstream"].destinations.resolve(options["decision"].route),
+                        request_value=options["request_value"], redactor=self.server.history_redactor,
+                        generation=self._history_generation)
+                    self._forward_admitted(**options, history_capture=history_capture)
         except RouteAdmissionError:
             if not entered and options["attempt"] is not None:
                 self.server.store.finalize_request_attempt(attempt=options["attempt"],
@@ -1014,6 +1032,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 work_gateway.settle(self, options["identity"], options["attempt"])
             self.close_connection = True
         finally:
+            if history_capture is not None:
+                history_capture.finish()
             self._provider_response_resources = previous_resources
             self._provider_headers_pending = previous_headers_pending
 
@@ -1037,6 +1057,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         reservation_ttl_seconds: int,
         failover_decision: PolicyDecision | None,
         failover_applied_reason: str | None,
+        history_capture: HistoryCapture | None = None,
     ) -> None:
         route = decision.route
         assert route is not None
@@ -1060,6 +1081,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 work_gateway.settle(self, identity, attempt, cost=0, status="failed", started_ns=started_ns)
             raise
         try:
+            if history_capture is not None:
+                history_capture.sent = True
             if (
                 getattr(self, "_failover_rehearsal_requested", False)
                 and failover_decision is not None
@@ -1107,6 +1130,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         response_headers_us = self._elapsed_us(started_ns)
         self._work_provider_ms = (time.monotonic_ns() - started_ns) / 1_000_000
         status = getattr(response, "status", response.getcode())
+        if history_capture is not None:
+            history_capture.response(status, response.headers.get("Content-Type", "application/json"))
         if 300 <= status < 400:
             close_response()
             if account_usage and attempt is not None:
@@ -1330,6 +1355,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     )
                     refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
                 parser.feed(chunk)
+                if history_capture is not None:
+                    history_capture.feed(chunk)
                 if cache_capture:
                     if len(cache_body) + len(chunk) <= 1_048_576:
                         cache_body.extend(chunk)
@@ -1349,6 +1376,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     first_body_byte_us = self._elapsed_us(started_ns)
                 provider_bytes_read += len(partial)
                 parser.feed(partial)
+                if history_capture is not None:
+                    history_capture.feed(partial)
             downstream_ok = False
             LOGGER.warning(
                 "upstream_stream_failed actor=%s team=%s client=%s protocol=%s requested_model=%s error=%s",
@@ -1383,6 +1412,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
         parsed_usage = parser.finish_with_finance()
         usage = parsed_usage.usage
+        if history_capture is not None:
+            history_capture.observed(parser, parsed_usage, downstream_ok=downstream_ok)
         if account_usage and attempt is not None:
             provider_terminal_failed = parsed_usage.provider_terminal_state in {
                 "failed",

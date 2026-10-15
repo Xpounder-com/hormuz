@@ -183,11 +183,12 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
         }
 
     @contextmanager
-    def connected_client(self, value):
+    def connected_client(self, value, *, server_environ=None, gateway_config=None):
         path = self.root / "gateway.json"
         path.write_text(json.dumps(value))
         with patch.dict(os.environ, self.environment):
-            gateway = GatewayServer(GatewayConfig.load(path), environ=self.environment)
+            gateway = GatewayServer(GatewayConfig.load(path) if gateway_config is None else gateway_config,
+                                    environ=self.environment if server_environ is None else server_environ)
             thread = serve_in_thread(gateway)
             try:
                 setup = subprocess.run([sys.executable, "-m", "hormuz", "--config", str(path),

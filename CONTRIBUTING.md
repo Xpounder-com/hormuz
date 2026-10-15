@@ -10,7 +10,7 @@ Use Python 3.11–3.14. Install the source in a virtual environment, then run:
 
 ```sh
 python tools/verify_router_scope.py
-python -m unittest tests.test_execution_destination_workflow tests.test_connected_client_lifetime_workflow
+python -m unittest discover -s tests -p 'test_*workflow.py'
 python -m build
 python tools/verify_router_wheel.py dist/hormuz-*.whl
 ```

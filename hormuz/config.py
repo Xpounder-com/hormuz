@@ -335,6 +335,8 @@ class ModelRoute:
     destination: str | None = None
     model_revision: str | None = None
     capabilities: tuple[str, ...] = ()
+    # Presence matters to local spending insights: omitted rates are not free.
+    explicit_price_fields: frozenset[str] = field(default_factory=frozenset, repr=False)
 
     @property
     def destination_id(self) -> str:
