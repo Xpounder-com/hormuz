@@ -9,8 +9,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import replace
-from uuid import uuid4
-from uuid import UUID
+from uuid import UUID, uuid4
 from urllib.parse import urlsplit
 
 from .work_runtime import WorkRuntime, WorkRuntimeError
@@ -329,7 +328,7 @@ def identify(handler, identity, request_value, *, client, protocol, account_usag
     if client == "codex" and protocol == "openai" and handler.path == "/v1/responses":
         threads = handler.headers.get_all("thread-id", [])
         sessions = handler.headers.get_all("session-id", [])
-        if threads:
+        if threads or sessions:
             tags = request_value.get("client_metadata", {})
             if len(threads) != 1 or len(sessions) != 1 or type(tags) is not dict:
                 raise WorkRuntimeError("invalid_conversation_metadata")
@@ -340,6 +339,18 @@ def identify(handler, identity, request_value, *, client, protocol, account_usag
                 raise WorkRuntimeError("invalid_conversation_metadata") from None
             if tags.get("thread_id") != threads[0] or tags.get("session_id") != sessions[0]:
                 raise WorkRuntimeError("invalid_conversation_metadata")
+            if "x-codex-turn-metadata" in tags:
+                from .compaction_formats import strict_json_loads
+                embedded = tags["x-codex-turn-metadata"]
+                try:
+                    if type(embedded) is not str or len(embedded) > 2048:
+                        raise ValueError()
+                    metadata = strict_json_loads(embedded)
+                    if (type(metadata) is not dict or metadata.get("thread_id") != threads[0]
+                            or metadata.get("session_id") != sessions[0]):
+                        raise ValueError()
+                except ValueError:
+                    raise WorkRuntimeError("invalid_conversation_metadata") from None
             known = runtime.conversation_work(identity, client, threads[0])
             if work is not None and known is not None and work["work_id"] != known["work_id"]:
                 raise WorkRuntimeError("conversation_work_conflict", 409)

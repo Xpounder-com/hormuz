@@ -121,7 +121,8 @@ ambiguous transport or partial-stream outcomes retain conservative accounting.
 Capacity alternates must be admitted and retain the same destination/protocol;
 there is no local-to-cloud replay.
 
-Continuations require a retained `X-Hormuz-Work-Id`, successful prior response,
+Continuations require an [automatic conversation binding](CONVERSATION_WORK_BINDING.md)
+or retained `X-Hormuz-Work-Id`, a successful prior response,
 eligible pinned route and matching live destination generation. Missing affinity
 blocks with HTTP 409. A known cloud continuation is blocked when local-only is
 requested; it is never translated into a local session. Helpers without this

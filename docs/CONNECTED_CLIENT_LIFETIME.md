@@ -28,6 +28,10 @@ Setup checks the executable version, known local managed-configuration files, ga
 
 Keep the existing coding app. Run the qualified Codex CLI normally after connect. An already-running client may require a restart to reload its user defaults. Trusted project configuration, profiles and command-line overrides can select other settings; this connection does not guarantee that every Codex request traverses Hormuz. Hard local-only applies to the model request paths that actually reach the configured router. Other tools, plugins and app connections retain their own network behavior.
 
+With AI Work enabled, the router can [bind a recognized native conversation](CONVERSATION_WORK_BINDING.md)
+without a per-process work-ID override. The binding belongs to the connected
+router epoch; after disconnect/reconnect, start with fresh conversation state.
+
 ## Status and disconnect
 
 ```sh

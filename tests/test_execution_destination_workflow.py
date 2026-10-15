@@ -38,7 +38,7 @@ try:
         connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
     target = value["path"] if value.get("absolute_path") else origin.path.rstrip("/") + value.get("path", "/responses")
     connection.request(value.get("method", "POST"), target,
-        None if value.get("method") == "GET" else json.dumps(value["request"] if value.get("control") else
+        None if value.get("method") == "GET" else value["raw_body"] if "raw_body" in value else json.dumps(value["request"] if value.get("control") else
                    {"model": config["model"], "input": "Reply with the fixture answer.",
                     "max_output_tokens": 8, **value.get("request", {})}),
         {"Content-Type": "application/json",
@@ -370,13 +370,18 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 {**request, "include": ["web_search_call.action.sources"]},
                 {**request, "client_metadata": {"session_id": {"encrypted_content": "opaque"}}},
                 {**request, "tools": [{"type": "namespace", "name": "multi_agent_v1", "tools": []}]},
-                {**request, "input": [{"type": "reasoning", "encrypted_content": "opaque"}]},
             ]
             with self.connected_client(value) as submit:
                 for body in unsupported:
                     with self.subTest(body_keys=sorted(body)):
                         result = submit(control=True, request=body)
                         self.assertEqual(result["status"], 503, result)
+                # Actual opaque history requires affinity, rather than being
+                # mistaken for fresh work with an unsupported feature.
+                opaque = submit(control=True, request={**request,
+                    "input": [{"type": "reasoning", "encrypted_content": "opaque"}]})
+                self.assertEqual((opaque["status"], opaque["body"]["error"]["code"]),
+                                 (409, "hormuz_route_affinity_required"))
             self.assertEqual((local_requests, cloud_requests), ([], []))
 
     def test_local_only_uses_root_health_for_v1_destination_base(self):
@@ -655,10 +660,8 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual((len(local_requests), cloud_requests), (2, []))
 
     def test_codex_conversation_automatically_retains_work_for_tool_continuation(self):
-        thread_id = "11111111-1111-4111-8111-111111111111"
-        session_id = "22222222-2222-4222-8222-222222222222"
-        tags = {"thread_id": thread_id, "session_id": session_id, "turn_id": "first-turn"}
-        headers = {"thread-id": thread_id, "session-id": session_id}
+        fixture = json.loads((Path(__file__).parent / "fixtures/codex-conversation-request-v1.json").read_text())
+        headers, tags = fixture["headers"], fixture["request"]["client_metadata"]
         with provider("LOCAL_DESTINATION", event_stream=True) as (local, local_requests), \
              provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
             value = self.admission_configuration(local, cloud)
@@ -666,9 +669,7 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
             value["ai_work"] = {"enabled": True, "tool_capable_aliases": ["local-code"],
                                 "database": str(self.root / "work.sqlite3")}
             with self.connected_client(value) as submit:
-                first = submit(headers=headers, request={"input": "Summarize this fixture.", "stream": True,
-                    "client_metadata": tags,
-                    "tools": [{"type": "function", "name": "fixture_tool", "parameters": {"type": "object"}}]})
+                first = submit(control=True, headers=headers, request=fixture["request"])
                 self.assertEqual(first["status"], 200, first)
                 self.assertIn('"call_id": "fixture-call"', first["body"])
                 second = submit(headers=headers, request={"stream": True,
@@ -684,7 +685,7 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                                  ["succeeded", "succeeded"])
                 self.assertEqual(len({attempt["route_fingerprint"] for attempt in work["body"]["attempts"]}), 1)
                 self.assertEqual((work["body"]["state"], work["body"]["outcome_evidence"]), ("active", "unknown"))
-                self.assertNotIn(thread_id, json.dumps(work["body"]))
+                self.assertNotIn(headers["thread-id"], json.dumps(work["body"]))
                 state = submit(method="GET", path="/router/state")
                 self.assertEqual(state["body"]["local_capacity"]["active"], 0)
             self.assertEqual((len(local_requests), cloud_requests), (2, []))
@@ -696,11 +697,16 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
             value = self.configuration(local, cloud)
             value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
             with self.connected_client(value) as submit:
-                result = submit(headers={"thread-id": thread_id, "session-id": thread_id}, request={
-                    "client_metadata": {"thread_id": thread_id, "session_id": thread_id},
-                    "input": [{"type": "function_call_output", "call_id": "unknown-call", "output": "Unowned result"}]})
-                self.assertEqual((result["status"], result["body"].get("error", {}).get("code")),
-                                 (409, "hormuz_route_affinity_required"))
+                for item in (
+                    {"type": "function_call_output", "call_id": "unknown-call", "output": "Unowned result"},
+                    {"type": "reasoning", "encrypted_content": "opaque"},
+                    {"type": "item_reference", "id": "unknown-item"},
+                ):
+                    with self.subTest(kind=item["type"]):
+                        result = submit(headers={"thread-id": thread_id, "session-id": thread_id}, request={
+                            "client_metadata": {"thread_id": thread_id, "session_id": thread_id}, "input": [item]})
+                        self.assertEqual((result["status"], result["body"].get("error", {}).get("code")),
+                                         (409, "hormuz_route_affinity_required"))
             self.assertEqual((local_requests, cloud_requests), ([], []))
 
     def test_bound_codex_conversation_still_requires_a_successful_prior_response(self):
@@ -720,6 +726,169 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual((history["status"], history["body"].get("error", {}).get("code")),
                                  (409, "hormuz_route_affinity_required"))
             self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_ambiguous_codex_identity_is_rejected_before_dispatch(self):
+        thread_id = "11111111-1111-4111-8111-111111111111"
+        other_id = "22222222-2222-4222-8222-222222222222"
+        headers = {"thread-id": thread_id, "session-id": thread_id}
+        tags = {"thread_id": thread_id, "session_id": thread_id}
+        cases = [
+            ({"session-id": thread_id}, tags),
+            ({"thread-id": thread_id}, tags),
+            ({**headers, "Thread-Id": thread_id}, tags),
+            (headers, {**tags, "thread_id": other_id}),
+            (headers, {**tags, "session_id": other_id}),
+            ({**headers, "thread-id": "not-a-uuid"}, {**tags, "thread_id": "not-a-uuid"}),
+            (headers, {**tags, "x-codex-turn-metadata": json.dumps({"thread_id": other_id, "session_id": thread_id})}),
+            (headers, {**tags, "x-codex-turn-metadata": "not-json"}),
+        ]
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.connected_client(value) as submit:
+                for request_headers, metadata in cases:
+                    with self.subTest(headers=sorted(request_headers), metadata=metadata):
+                        result = submit(headers=request_headers, request={"client_metadata": metadata})
+                        self.assertEqual((result["status"], result["body"].get("error", {}).get("code")),
+                                         (400, "hormuz_ai_work_invalid_conversation_metadata"))
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_duplicate_json_identity_cannot_choose_a_conversation(self):
+        thread_id = "11111111-1111-4111-8111-111111111111"
+        other_id = "22222222-2222-4222-8222-222222222222"
+        raw = ('{"model":"local-code","input":"Summarize this fixture.","max_output_tokens":8,'
+               '"client_metadata":{"thread_id":"' + other_id + '","thread_id":"' + thread_id
+               + '","session_id":"' + thread_id + '"}}')
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.connected_client(value) as submit:
+                result = submit(headers={"thread-id": thread_id, "session-id": thread_id}, raw_body=raw)
+                self.assertEqual((result["status"], result["body"].get("error", {}).get("code")),
+                                 (400, "invalid_json"))
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_codex_threads_and_authenticated_actors_have_separate_work(self):
+        thread_id = "11111111-1111-4111-8111-111111111111"
+        other_thread = "22222222-2222-4222-8222-222222222222"
+        session_id = "33333333-3333-4333-8333-333333333333"
+        self.environment["OTHER_WORKFLOW_TOKEN"] = "fixture-other-actor-credential"
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            value["identities"].append({**value["identities"][0], "token_env": "OTHER_WORKFLOW_TOKEN", "actor_id": "other"})
+            with self.connected_client(value) as submit:
+                first = submit(headers={"thread-id": thread_id, "session-id": session_id},
+                    request={"client_metadata": {"thread_id": thread_id, "session_id": session_id}})
+                another_thread = submit(headers={"thread-id": other_thread, "session-id": session_id},
+                    request={"client_metadata": {"thread_id": other_thread, "session_id": session_id}})
+                another_actor = submit(headers={"thread-id": thread_id, "session-id": session_id,
+                    "Authorization": "Bearer fixture-other-actor-credential"},
+                    request={"client_metadata": {"thread_id": thread_id, "session_id": session_id}})
+                results = [first, another_thread, another_actor]
+                self.assertEqual([result["status"] for result in results], [200, 200, 200])
+                self.assertEqual(len({result["headers"]["x-hormuz-work-id"] for result in results}), 3)
+                hidden = submit(method="GET", path="/work/jobs/" + first["headers"]["x-hormuz-work-id"],
+                    headers={"Authorization": "Bearer fixture-other-actor-credential"})
+                self.assertEqual(hidden["status"], 404, hidden)
+            self.assertEqual((len(local_requests), cloud_requests), (3, []))
+
+    def test_concurrent_first_requests_allocate_one_codex_work_item(self):
+        thread_id = "11111111-1111-4111-8111-111111111111"
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.connected_client(value) as submit:
+                with ThreadPoolExecutor(max_workers=2) as callers:
+                    results = list(callers.map(lambda _: submit(
+                        headers={"thread-id": thread_id, "session-id": thread_id},
+                        request={"client_metadata": {"thread_id": thread_id, "session_id": thread_id}}), range(2)))
+                self.assertEqual([result["status"] for result in results], [200, 200])
+                self.assertEqual(len({result["headers"]["x-hormuz-work-id"] for result in results}), 1)
+                jobs = submit(method="GET", path="/work/jobs")
+                self.assertEqual(jobs["status"], 200, jobs)
+                self.assertEqual(len(jobs["body"]["works"]), 1)
+                self.assertEqual(len(jobs["body"]["works"][0]["attempts"]), 2)
+            self.assertEqual((len(local_requests), cloud_requests), (2, []))
+
+    def test_explicit_work_header_cannot_rebind_an_existing_codex_thread(self):
+        thread_id = "11111111-1111-4111-8111-111111111111"
+        headers = {"thread-id": thread_id, "session-id": thread_id}
+        request = {"client_metadata": {"thread_id": thread_id, "session_id": thread_id}}
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.connected_client(value) as submit:
+                first = submit(headers=headers, request=request)
+                self.assertEqual(first["status"], 200, first)
+                work_id = first["headers"]["x-hormuz-work-id"]
+                explicit = submit(control=True, path="/work/jobs", request={"repository": "fixture/explicit"})
+                self.assertEqual(explicit["status"], 201, explicit)
+                conflict = submit(headers={**headers, "X-Hormuz-Work-Id": explicit["body"]["work_id"]}, request=request)
+                self.assertEqual((conflict["status"], conflict["body"]["error"]["code"]),
+                                 (409, "hormuz_ai_work_conversation_work_conflict"))
+                foreign = submit(headers={**headers, "X-Hormuz-Work-Id": "work-" + "f" * 32}, request=request)
+                self.assertEqual(foreign["status"], 404, foreign)
+                matching = submit(headers={**headers, "X-Hormuz-Work-Id": work_id}, request=request)
+                self.assertEqual((matching["status"], matching["headers"]["x-hormuz-work-id"]), (200, work_id))
+                automatic = submit(headers=headers, request=request)
+                self.assertEqual((automatic["status"], automatic["headers"]["x-hormuz-work-id"]), (200, work_id))
+            self.assertEqual((len(local_requests), cloud_requests), (3, []))
+
+    def test_paused_or_stopped_codex_work_is_not_replaced_by_an_automatic_job(self):
+        thread_id = "11111111-1111-4111-8111-111111111111"
+        headers = {"thread-id": thread_id, "session-id": thread_id}
+        request = {"client_metadata": {"thread_id": thread_id, "session_id": thread_id}}
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.connected_client(value) as submit:
+                first = submit(headers=headers, request=request)
+                self.assertEqual(first["status"], 200, first)
+                work_id = first["headers"]["x-hormuz-work-id"]
+                for action in ("pause", "stop"):
+                    self.assertEqual(submit(control=True, path="/work/jobs/" + work_id + "/actions",
+                                            request={"action": action})["status"], 200)
+                    blocked = submit(headers=headers, request=request)
+                    self.assertEqual((blocked["status"], blocked["body"]["error"]["code"]),
+                                     (409, "hormuz_ai_work_work_not_active"))
+                jobs = submit(method="GET", path="/work/jobs")
+                self.assertEqual([work["work_id"] for work in jobs["body"]["works"]], [work_id])
+                self.assertEqual(jobs["body"]["works"][0]["state"], "canceled")
+            self.assertEqual((len(local_requests), cloud_requests), (1, []))
+
+    def test_router_restart_keeps_receipts_but_cannot_adopt_old_codex_history(self):
+        thread_id = "11111111-1111-4111-8111-111111111111"
+        headers = {"thread-id": thread_id, "session-id": thread_id}
+        request = {"input": "Summarize this fixture.",
+                   "client_metadata": {"thread_id": thread_id, "session_id": thread_id}}
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud)
+            value["model_routes"]["local-code"]["capabilities"].append("codex_http")
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.connected_client(value) as submit:
+                first = submit(headers=headers, request=request)
+                self.assertEqual(first["status"], 200, first)
+                old_id = first["headers"]["x-hormuz-work-id"]
+            with self.connected_client(value) as submit:
+                blocked = submit(headers=headers, request={**request,
+                    "input": [{"type": "function_call_output", "call_id": "fixture-call", "output": "Old result"}]})
+                self.assertEqual((blocked["status"], blocked["body"]["error"]["code"]),
+                                 (409, "hormuz_route_affinity_required"))
+                previous = submit(method="GET", path="/work/jobs/" + old_id)
+                self.assertEqual(previous["status"], 200, previous)
+                self.assertEqual(len(previous["body"]["attempts"]), 1)
+                fresh = submit(headers=headers, request=request)
+                self.assertEqual(fresh["status"], 200, fresh)
+                self.assertNotEqual(fresh["headers"]["x-hormuz-work-id"], old_id)
+            self.assertEqual((len(local_requests), cloud_requests), (2, []))
 
     def test_new_work_id_cannot_claim_successful_continuation_affinity(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \

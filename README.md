@@ -20,7 +20,9 @@ optional if a concrete integration needs it.
 A [pinned Codex → llama.cpp profile](docs/qualifications/codex-0147-llama-b11617-qwen3-4b.md)
 now records real local tool execution, incremental streaming, cancellation and
 restoration. Its supplied-script case passed; autonomous repair and strict
-answer formatting failed. It requires explicit per-conversation work binding.
+answer formatting failed. That historical run used manual work binding; the
+router now supports [automatic conversation binding](docs/CONVERSATION_WORK_BINDING.md)
+for the recognized native HTTP envelope.
 
 ## Install in your agent
 

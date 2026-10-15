@@ -1755,8 +1755,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return None
         data = self.rfile.read(content_length)
         try:
-            value = json.loads(data)
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
+            if (self.path == "/v1/responses" and self.server.work_runtime is not None
+                    and (self.headers.get_all("thread-id", []) or self.headers.get_all("session-id", []))):
+                from .compaction_formats import strict_json_loads
+                value = strict_json_loads(data.decode("utf-8"))
+            else:
+                value = json.loads(data)
+        except (ValueError, UnicodeDecodeError, RecursionError):
             self._send_error("invalid_json", "Request body must be valid JSON", HTTPStatus.BAD_REQUEST)
             return None
         if not isinstance(value, dict):
