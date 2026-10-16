@@ -12,6 +12,11 @@ only bounded keyed digests in process memory. This keeps native credentials and
 transcripts out of persistence, at the cost of losing affinity on refresh,
 restart, expiry or eviction. Such changes require a fresh conversation.
 
+Message and tool-result content use a qualified text profile. Active media/file
+and nested provider references remain closed until their ownership path is
+qualified. Assistant text/refusal replay and passive citation metadata remain
+supported; a citation is not an input-file retrieval authority.
+
 Observe native outcomes and strictly validated tokens through a separate
 process-scoped contract with unknown plan cost. Monthly-budget/token-limited
 scopes and explicit work-accounting bindings fail closed until native reservation

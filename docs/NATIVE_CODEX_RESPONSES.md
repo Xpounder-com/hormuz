@@ -35,6 +35,11 @@ Native compaction endpoints and WebSockets remain unsupported. Input items are
 limited to messages, reasoning, compaction, function/custom calls and their
 results. Unqualified computer/MCP/shell/reference or other provider-state types
 are blocked before egress; a role-less object cannot masquerade as fresh text.
+Message content and tool-result lists use a closed text profile: strings or
+typed `input_text`, plus assistant `output_text`/`refusal` replay with validated
+passive citations. Active file/image/media inputs and nested provider reference
+parts remain unsupported until separately qualified. Literal text mentioning
+file IDs is still text; passive citation metadata does not fetch a file.
 
 A configured alias takes precedence over native catalog slugs; aliases owned by
 other destinations are blocked. Without an exact alias, an unambiguous native

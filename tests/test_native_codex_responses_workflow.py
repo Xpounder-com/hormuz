@@ -781,6 +781,74 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                     self.assertEqual(fresh["status"], 200, fresh)
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
 
+    def test_native_messages_only_admit_qualified_text_parts_and_passive_assistant_citations(self):
+        parts = [{"type": "input_file", "file_id": "foreign-file"},
+                 {"type": "input_image", "file_id": "foreign-image", "detail": "auto"},
+                 {"type": "item_reference", "id": "foreign-item"}]
+        message = {"id": "qualified-message", "type": "message", "role": "assistant", "status": "completed",
+            "phase": "final_answer", "content": [{"type": "output_text", "text": "Supported text",
+                "annotations": [{"type": "file_citation", "file_id": "passive-citation", "filename": "fixture.txt", "index": 0}]},
+                {"type": "refusal", "refusal": "A supported refusal"}]}
+        data = ("data: " + json.dumps(completed(output=[message])) + "\n\n").encode()
+        def reply(handler, value, number):
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                for part in parts:
+                    with self.subTest(part=part):
+                        before = len(native_requests)
+                        denied = self.native(submit, request={"input": [{"role": "user", "content": [part]}]})
+                        self.assertEqual(denied["status"], 403, denied)
+                        self.assertEqual(len(native_requests), before)
+                fresh = {"role": "user", "content": [{"type": "input_text", "text": "file_id as literal text is fine",
+                    "prompt_cache_breakpoint": {"mode": "explicit"}}]}
+                self.assertEqual(self.native(submit, request={"input": [fresh]})["body"], data.decode())
+                replay = self.native(submit, request={"input": [fresh, message]})
+                self.assertEqual(replay["status"], 200, replay)
+                self.assertEqual(native_requests[-1]["body"]["input"], [fresh, message])
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
+
+    def test_native_tool_result_lists_only_admit_qualified_plain_text_parts(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for kind in ("function_call", "custom_tool_call"):
+                with self.subTest(kind=kind):
+                    field = "arguments" if kind == "function_call" else "input"
+                    call = {"id": "content-tool", "type": kind, "call_id": "content-call", "name": "fixture_tool", field: "{}"}
+                    data = ("data: " + json.dumps(completed(output=[call])) + "\n\n").encode()
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                            self.assertEqual(self.native(submit)["body"], data.decode())
+                            for part in ({"type": "input_file", "file_id": "foreign-file"},
+                                         {"type": "input_image", "file_id": "foreign-image", "detail": "auto"},
+                                         {"type": "item_reference", "id": "foreign-item"}):
+                                with self.subTest(part=part):
+                                    denied = self.native(submit, request={"input": [call,
+                                        {"type": kind + "_output", "call_id": "content-call", "output": [part]}]})
+                                    self.assertEqual(denied["status"], 403, denied)
+                                    self.assertEqual(len(native_requests), 1)
+                            result = {"type": kind + "_output", "call_id": "content-call",
+                                      "output": [{"type": "input_text", "text": "file_id is plain text here"}]}
+                            accepted = self.native(submit, request={"input": [call, result]})
+                            self.assertEqual(accepted["status"], 200, accepted)
+                            self.assertEqual(native_requests[-1]["body"]["input"], [call, result])
+                        self.assertEqual(len(native_requests), 2)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_native_results_must_match_the_issued_tool_kind_and_execution_context(self):
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):

@@ -7,7 +7,12 @@
     "gateway_credential_header": "X-Gateway-Key",
     "native_credential_headers": ["Authorization", "ChatGPT-Account-ID"],
     "stream": true,
-    "store": false
+    "store": false,
+    "content_profile": "qualified-text-only",
+    "message_text_parts": ["input_text", "output_text", "refusal"],
+    "assistant_only_message_parts": ["output_text", "refusal"],
+    "tool_result_text_parts": ["input_text"],
+    "active_media_or_provider_reference_parts": false
   },
   "status_fields": [
     "schema_id", "schema_version", "scope", "generation", "enabled", "billing", "cost_status", "cost_usd",

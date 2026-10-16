@@ -6,6 +6,7 @@ import json
 import time
 from dataclasses import dataclass
 from ._contract_schemas.native_codex import COUNTERS
+from .native_codex_content import validate_text_content
 
 
 class NativeConversationBusy(Exception):
@@ -60,6 +61,8 @@ def continuation_tags(items):
         if message and (item.get("role") not in {"user", "developer", "system", "assistant"}
                         or type(item.get("content")) not in {str, list}):
             raise ValueError("native_item_invalid")
+        if message:
+            validate_text_content(item["content"], assistant=item["role"] == "assistant")
         if kind in {"reasoning", "compaction"} and "id" not in item:
             raise ValueError("native_item_invalid")
         if kind == "reasoning" and type(item.get("summary")) is not list:
@@ -87,6 +90,7 @@ def continuation_tags(items):
                 if (type(item.get("output")) not in {str, list} or execution[2] is not None
                         or item.get("name") is not None and type(item["name"]) is not str):
                     raise ValueError("native_tool_result_invalid")
+                validate_text_content(item["output"])
                 tags.extend((field, [call_kind, call, value]) for field, value in context if value is not None)
         if kind in {"reasoning", "compaction"}:
             opaque = item.get("encrypted_content")
