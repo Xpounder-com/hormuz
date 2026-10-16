@@ -61,12 +61,12 @@ appointed representative at an online or offline event.
 
 Report abusive, harassing, or otherwise unacceptable behavior through the
 [private repository reporting
-form](https://github.com/Xpounder-com/hormuz/security/advisories/new) with a
+form](https://github.com/mehrdadxzaker/hormuz/security/advisories/new) with a
 title beginning `[Conduct]`. This reuses a private maintainer-only channel; a
 conduct report is not treated as a software vulnerability. If that channel is
 unavailable, open a
 [content-free channel-availability
-issue](https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml)
+issue](https://github.com/mehrdadxzaker/hormuz/issues/new?template=installation.yml)
 without naming people or describing the incident publicly.
 
 All complaints will be reviewed and investigated promptly and fairly. All

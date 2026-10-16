@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "repository": "Xpounder-com/hormuz",
+  "repository": "mehrdadxzaker/hormuz",
   "metadata": {
     "description": "Customer-local model routing for existing coding clients, with CLI and shared plugin setup.",
     "topics": [

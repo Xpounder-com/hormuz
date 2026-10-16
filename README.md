@@ -61,7 +61,7 @@ Installation remains subject to each coding client's plugin support and review.
 ### Codex
 
 ```sh
-codex plugin marketplace add Xpounder-com/hormuz
+codex plugin marketplace add mehrdadxzaker/hormuz
 codex plugin add hormuz@hormuz
 ```
 
@@ -71,7 +71,7 @@ the marketplace, select Hormuz in your client's plugin browser and install it.
 ### Gemini CLI
 
 ```sh
-gemini extensions install https://github.com/Xpounder-com/hormuz
+gemini extensions install https://github.com/mehrdadxzaker/hormuz
 ```
 
 Restart the Gemini CLI session after installation.
@@ -79,14 +79,14 @@ Restart the Gemini CLI session after installation.
 ### GitHub Copilot CLI
 
 ```sh
-copilot plugin marketplace add Xpounder-com/hormuz
+copilot plugin marketplace add mehrdadxzaker/hormuz
 copilot plugin install hormuz@hormuz
 ```
 
 ### Claude Code
 
 ```sh
-claude plugin marketplace add Xpounder-com/hormuz
+claude plugin marketplace add mehrdadxzaker/hormuz
 claude plugin install hormuz@hormuz
 ```
 
@@ -99,7 +99,7 @@ Use the [open Agent Skills installer](https://github.com/vercel-labs/skills)
 (requires Node.js/npm). Choose your agent when prompted:
 
 ```sh
-npx skills add Xpounder-com/hormuz --skill hormuz
+npx skills add mehrdadxzaker/hormuz --skill hormuz
 ```
 
 Or select it explicitly with `--agent cursor` or `--agent opencode`.

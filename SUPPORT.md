@@ -16,10 +16,10 @@ No uptime, support, security certification or broad compatibility SLA is offered
 | Claude | Transport prior art does not establish supported non-Claude main-model substitution or Claude GUI integration |
 | Storage | Customer-local SQLite; no hosted/PostgreSQL deployment product in the 2.0 line |
 
-Use [installation](https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml),
-[bug](https://github.com/Xpounder-com/hormuz/issues/new?template=bug.yml),
-[documentation](https://github.com/Xpounder-com/hormuz/issues/new?template=documentation.yml)
-or [feature](https://github.com/Xpounder-com/hormuz/issues/new?template=feature.yml)
+Use [installation](https://github.com/mehrdadxzaker/hormuz/issues/new?template=installation.yml),
+[bug](https://github.com/mehrdadxzaker/hormuz/issues/new?template=bug.yml),
+[documentation](https://github.com/mehrdadxzaker/hormuz/issues/new?template=documentation.yml)
+or [feature](https://github.com/mehrdadxzaker/hormuz/issues/new?template=feature.yml)
 reports. Include the source/package revision, OS, Python/client versions and a
 small synthetic reproduction. Never submit keys, tokens, prompts, responses,
 private repository names, local user paths or database contents publicly.

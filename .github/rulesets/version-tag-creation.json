@@ -4,8 +4,8 @@
   "enforcement": "active",
   "bypass_actors": [
     {
-      "actor_id": null,
-      "actor_type": "OrganizationAdmin",
+      "actor_id": 157386627,
+      "actor_type": "User",
       "bypass_mode": "always"
     }
   ],

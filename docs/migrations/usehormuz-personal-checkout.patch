@@ -1,0 +1,107 @@
+diff --git a/.github/workflows/website.yml b/.github/workflows/website.yml
+index 2088c0e..b82b2b6 100644
+--- a/.github/workflows/website.yml
++++ b/.github/workflows/website.yml
+@@ -38,7 +38,7 @@ jobs:
+       - name: Check out the exact public product source
+         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+         with:
+-          repository: Xpounder-com/hormuz
++          repository: ${{ steps.source.outputs.repository }}
+           ref: ${{ steps.source.outputs.revision }}
+           path: product
+           persist-credentials: false
+diff --git a/README.md b/README.md
+index 788d19f..ccc0bc2 100644
+--- a/README.md
++++ b/README.md
+@@ -4,10 +4,17 @@ Publication repository for the Hormuz project website at
+ [usehormuz.github.io](https://usehormuz.github.io/).
+ 
+ The authoritative website source, product development, releases, and issue
+-tracker remain in [Xpounder-com/hormuz](https://github.com/Xpounder-com/hormuz).
++tracker are at [mehrdadxzaker/hormuz](https://github.com/mehrdadxzaker/hormuz).
+ This repository contains only the reviewed source pin and website publication
+ configuration. It does not duplicate or transfer the product repository.
+ 
++The build checks out that destination at the existing immutable revision.
++`site-source.json` retains `Xpounder-com/hormuz` as the snapshot's original
++source identity: the snapshot's embedded links and installation examples use
++that name. Keep the old repository redirect available. Do not change the pin
++to current router `main`, which no longer includes the website. This checkout
++mapping is for use after the repository transfer has been separately approved.
++
+ ## Updates and verification
+ 
+ 1. Review the source change and its exact commit's checks in the product repository.
+@@ -44,9 +51,9 @@ live check verifies its contents after deployment. Keep the file published after
+ verification succeeds so ownership remains valid.
+ 
+ The matching workflow and helper templates live in
+-[`website/deployment`](https://github.com/Xpounder-com/hormuz/tree/main/website/deployment)
++[`website/deployment`](https://github.com/mehrdadxzaker/hormuz/tree/46449d2a3f05de09d7d0a18c9688e189a6c3a68e/website/deployment)
+ in the product repository. See its
+-[`website/README.md`](https://github.com/Xpounder-com/hormuz/blob/main/website/README.md)
++[`website/README.md`](https://github.com/mehrdadxzaker/hormuz/blob/46449d2a3f05de09d7d0a18c9688e189a6c3a68e/website/README.md)
+ for compatibility redirects and the initial two-phase migration.
+ This publication repository deliberately adds its existing Search Console
+ ownership file, the corresponding live check, and publication-specific regression
+diff --git a/scripts/verification.test.mjs b/scripts/verification.test.mjs
+index e697ca9..baa7cef 100644
+--- a/scripts/verification.test.mjs
++++ b/scripts/verification.test.mjs
+@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
+ import { readFileSync } from 'node:fs';
+ const SITE_ORIGIN = 'https://usehormuz.github.io';
+ import { LIVE_ORIGIN, LIVE_ROUTES, LIVE_DOWNLOADS, LIVE_VERIFICATION_FILES, LIVE_SOURCE_LINKS, verifyLiveSite } from './verify-live-site.mjs';
+-import { validateSourcePin } from './verify-source-pin.mjs';
++import { sourceCheckoutRepository, validateSourcePin } from './verify-source-pin.mjs';
+ 
+ const pin = { repository: 'Xpounder-com/hormuz', revision: '9af53c79d1671638a57dba9d758482c7d4f88ef8' };
+ 
+@@ -168,13 +168,18 @@ test('missing or altered ownership files cannot satisfy publication verification
+ 
+ test('the public source pin cannot name another repository or mutable reference', () => {
+   assert.equal(validateSourcePin(pin), pin.revision);
+-  for (const invalid of [{...pin, revision:'main'}, {...pin, revision:pin.revision+'\n'}, {...pin, repository:'other/project'}, {...pin, token:'forbidden'}]) assert.throws(() => validateSourcePin(invalid));
++  assert.equal(sourceCheckoutRepository(pin), 'mehrdadxzaker/hormuz');
++  for (const invalid of [{...pin, revision:'main'}, {...pin, revision:pin.revision+'\n'}, {...pin, repository:'other/project'}, {...pin, token:'forbidden'}]) {
++    assert.throws(() => validateSourcePin(invalid));
++    assert.throws(() => sourceCheckoutRepository(invalid));
++  }
+ });
+ 
+ test('the publication build preserves its ownership artifact and isolated main-only deployment', () => {
+   const workflow = readFileSync(new URL('../.github/workflows/website.yml', import.meta.url), 'utf8');
+   assert.ok(workflow.includes('cp verification/' + LIVE_VERIFICATION_FILES[0] + ' product/website/out/'));
+   assert.ok(workflow.includes('run: node --test scripts/verification.test.mjs'));
++  assert.ok(workflow.includes('repository: ${{ steps.source.outputs.repository }}'));
+   assert.ok(workflow.includes("github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"));
+   const build = workflow.slice(workflow.indexOf('  build:'), workflow.indexOf('  deploy:'));
+   assert.doesNotMatch(build, /pages: write|id-token: write|contents: write/);
+diff --git a/scripts/verify-source-pin.mjs b/scripts/verify-source-pin.mjs
+index 89036e8..508d5c1 100644
+--- a/scripts/verify-source-pin.mjs
++++ b/scripts/verify-source-pin.mjs
+@@ -13,9 +13,18 @@ export function validateSourcePin(value) {
+   return value.revision;
+ }
+ 
++// The immutable snapshot was authored under Xpounder. Its embedded links and
++// published provenance keep that name; only the checkout location changes.
++export function sourceCheckoutRepository(value) {
++  validateSourcePin(value);
++  return 'mehrdadxzaker/hormuz';
++}
++
+ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+-  const revision = validateSourcePin(JSON.parse(await readFile('site-source.json', 'utf8')));
++  const pin = JSON.parse(await readFile('site-source.json', 'utf8'));
++  const revision = validateSourcePin(pin);
++  const repository = sourceCheckoutRepository(pin);
+   assert.ok(process.env.GITHUB_OUTPUT, 'This entrypoint runs inside GitHub Actions');
+-  await appendFile(process.env.GITHUB_OUTPUT, `revision=${revision}\n`);
+-  console.log(`Reviewed website source: Xpounder-com/hormuz@${revision}`);
++  await appendFile(process.env.GITHUB_OUTPUT, `repository=${repository}\nrevision=${revision}\n`);
++  console.log(`Reviewed website source: ${repository}@${revision} (authored as ${pin.repository})`);
+ }
