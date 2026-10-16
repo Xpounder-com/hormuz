@@ -48,7 +48,7 @@ def main():
     home, client_home, project = root / 'home', root / 'home/.codex', root / 'project'
     for directory in (home, client_home, project):
         directory.mkdir(mode=0o700)
-    original = 'personality = "none"\n'
+    original = 'personality = "none"\nmodel_reasoning_effort = "xhigh"\n'
     (client_home / 'config.toml').write_text(original)
     (project / 'verify_fixture.py').write_text(
         'def add(a, b):\n    return a + b\n\nassert add(2, 5) == 7\nprint("ROUTING_OK")\n')
@@ -69,6 +69,7 @@ def main():
     result = {'passed': False, 'codex_version': version, 'codex_executable': str(executable),
               'codex_entrypoint_sha256': executable_digest, 'evidence_directory': str(root),
               'native_episodes': 1, 'model_downloads': 0, 'credentials': 'isolated local command helper',
+              'saved_reasoning_effort': 'xhigh', 'launch_reasoning_effort': 'none',
               'scope': 'supplied-script single-agent HTTP; not autonomous coding quality'}
 
     def cli(*arguments, timeout=90):
@@ -111,7 +112,8 @@ def main():
                   'Do not change files. Report the script output. /no_think')
         native_arguments = [str(executable), 'exec', '--skip-git-repo-check', '--ephemeral', '--json',
                             '--sandbox', 'read-only', '-c', 'agents.enabled=false', '--disable', 'multi_agent_v2',
-                            '-c', 'model_reasoning_summary="none"', '-c', 'analytics.enabled=false', '-C', str(project), prompt]
+                            '-c', 'model_reasoning_summary="none"', '-c', 'model_reasoning_effort="none"',
+                            '-c', 'analytics.enabled=false', '-C', str(project), prompt]
         print(json.dumps({'stage': 'native_task_running', 'codex_version': version}), flush=True)
         with (root / 'native.jsonl').open('w') as stdout, (root / 'native.stderr').open('w') as stderr:
             native = subprocess.Popen(native_arguments, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
@@ -162,7 +164,9 @@ def main():
                                *(['--generation', generation] if generation else []), timeout=20)
             result['disconnect'] = disconnected
             restored = tomllib.loads((client_home / 'config.toml').read_text())
-            result['settings_restored'] = all(key not in restored for key in ('model', 'model_provider', 'web_search')) and restored.get('personality') == 'none' and not any(key.startswith('hormuz_') for key in restored.get('model_providers', {}))
+            result['settings_restored'] = (all(key not in restored for key in ('model', 'model_provider', 'web_search'))
+                and restored.get('personality') == 'none' and restored.get('model_reasoning_effort') == 'xhigh'
+                and not any(key.startswith('hormuz_') for key in restored.get('model_providers', {})))
             if disconnected['phase'] != 'disconnected' or disconnected['router'] != 'stopped' or disconnected.get('retained_settings') or not result['settings_restored']:
                 result['passed'] = False
             for port in ports:

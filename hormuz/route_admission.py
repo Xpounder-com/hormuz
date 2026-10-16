@@ -89,11 +89,14 @@ def _text_envelope(value, protocol, endpoint):
     native_fields = {"client_metadata", "prompt_cache_key", "reasoning", "include"}
     if native_fields.intersection(value):
         codex_capability = "codex_http"
-        # The pinned Codex HTTP profile requests optional encrypted reasoning
-        # output but supplies no reasoning state. Nonempty reasoning controls
-        # and actual opaque input remain unsupported, even with this capability.
-        if endpoint != "/v1/responses" or value.get("reasoning", {}) != {}:
+        # The pinned profiles supply no reasoning state. 0.160 may explicitly
+        # disable effort to override a saved setting; every execution control
+        # and actual opaque input remains unsupported.
+        reasoning = value.get("reasoning", {})
+        if endpoint != "/v1/responses" or reasoning not in ({}, {"effort": "none"}):
             return None
+        if reasoning:
+            codex_capability = "codex_http_0160"
         if "include" in value and value["include"] != ["reasoning.encrypted_content"]:
             return None
         def bounded_tag(item, limit):

@@ -136,17 +136,20 @@ no live learned routing or cloud/subscription permission.
 
 The local llama.cpp qualification covers inline function tools over HTTP.
 Launch the selected target with `-c agents.enabled=false --disable multi_agent_v2
--c 'model_reasoning_summary="none"'`, keeping the user's requested command,
+-c 'model_reasoning_summary="none"' -c 'model_reasoning_effort="none"'`, keeping the user's requested command,
 project and sandbox. For example:
 
 ```sh
 codex exec -c agents.enabled=false --disable multi_agent_v2 \
-  -c 'model_reasoning_summary="none"' --sandbox read-only \
+  -c 'model_reasoning_summary="none"' -c 'model_reasoning_effort="none"' \
+  --sandbox read-only \
   "Review this Python function using the supplied verification script."
 ```
 
 Use these flags for the requested local coding task; preserve the host's tools
-and approvals. Namespace/freeform tools, nonempty reasoning controls and opaque
+and approvals. The effort override preserves saved user preferences. The
+qualified request reasoning is empty or explicitly `{"effort":"none"}`.
+Namespace/freeform tools, reasoning execution controls and opaque
 provider state outside the existing affinity rules remain blocked. The profile
 does not establish autonomous coding quality. Read [the version qualification](../../../docs/CODEX_0160.md)
 for native evidence, model-catalog compatibility and rollback.

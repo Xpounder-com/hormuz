@@ -83,6 +83,33 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
             self.assertEqual(set(diagnosis['override_diagnosis']['effective_routing'].values()), {'unobserved'})
             self.assertEqual((self.fixture.home / 'config.toml').read_bytes(), before)
 
+    def test_explicit_no_reasoning_is_qualified_only_for_codex_0160(self):
+        fixture = destination.ExecutionDestinationWorkflowTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        request = json.loads((Path(__file__).parent / 'fixtures/codex-http-request-0.160.json').read_text())
+        request['reasoning'] = {'effort': 'none'}
+        # The reasoning shape itself needs the new qualification, even without
+        # a root-turn tag distinguishing the two clients.
+        request['client_metadata'].pop('root_turn_id')
+        with destination.provider('LOCAL_0160', event_stream=True) as (local, local_requests), \
+             destination.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, cloud_requests):
+            value = fixture.admission_configuration(local, cloud, mode='local_only')
+            value['model_routes']['local-code']['capabilities'] = ['responses', 'text', 'streaming', 'tools', 'codex_http_0160']
+            value['route_admission']['local_routes']['local-code']['task_types'] = ['code_review']
+            with fixture.connected_client(value) as submit:
+                routed = submit(request=request)
+                self.assertEqual(routed['status'], 200, routed)
+                self.assertEqual(local_requests[0]['body']['reasoning'], {'effort': 'none'})
+                for reasoning in ({'effort': 'high'}, {'effort': 'none', 'summary': 'auto'}, {'effort': None}):
+                    self.assertEqual(submit(request={**request, 'reasoning': reasoning})['status'], 503)
+            value['model_routes']['local-code']['capabilities'].remove('codex_http_0160')
+            value['model_routes']['local-code']['capabilities'].append('codex_http')
+            with fixture.connected_client(value) as submit:
+                self.assertEqual(submit(request=request)['status'], 503)
+            self.assertEqual(len(local_requests), 1)
+            self.assertEqual(cloud_requests, [])
+
     def test_models_keeps_openai_data_and_adds_the_qualified_codex_0160_catalog(self):
         fixture = destination.ExecutionDestinationWorkflowTests()
         fixture.setUp()
@@ -104,6 +131,8 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(model['base_instructions'].encode()).hexdigest(),
                                  compatibility['base_instructions_sha256'])
                 self.assertIs(model['supports_reasoning_summary_parameter'], False)
+                self.assertEqual(model['default_reasoning_level'], 'none')
+                self.assertEqual([item['effort'] for item in model['supported_reasoning_levels']], ['none'])
                 self.assertEqual(model['input_modalities'], ['text'])
                 self.assertEqual(model['shell_type'], 'unified_exec')
                 self.assertEqual(local_requests, [])

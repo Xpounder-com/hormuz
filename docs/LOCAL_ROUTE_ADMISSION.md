@@ -85,8 +85,10 @@ remain blocked. Function tools and streaming still require their separate
 capabilities. Declare this capability only for an independently qualified
 client/runtime/model profile; it does not qualify a runtime by itself.
 The separate [`codex_http_0160` profile](CODEX_0160.md) adds the observed bounded
-`root_turn_id` tag. It retains those restrictions and requires a new qualification
-declaration rather than broadening existing 0.147.0 evidence.
+`root_turn_id` tag and an explicit `reasoning={"effort":"none"}` alternative
+to the empty object. Other effort and summary controls remain blocked. It
+requires a new qualification declaration rather than broadening existing
+0.147.0 evidence.
 The [pinned Codex/llama.cpp profile](qualifications/codex-0147-llama-b11617-qwen3-4b.md)
 records real supplied-script, streaming and cancellation evidence, along with
 the model's failed autonomous repair and strict formatting cases.

@@ -19,7 +19,8 @@ function tools and streaming. Its selected launch settings are:
 
 ```sh
 codex exec -c agents.enabled=false --disable multi_agent_v2 \
-  -c 'model_reasoning_summary="none"' --sandbox read-only \
+  -c 'model_reasoning_summary="none"' -c 'model_reasoning_effort="none"' \
+  --sandbox read-only \
   "Review this Python function using the supplied verification script."
 ```
 
@@ -29,7 +30,9 @@ coding client's agent loop; it does not execute tools itself. Namespaced and
 freeform tools remain unsupported by this runtime profile. In particular,
 llama.cpp b11617 skips non-function Responses tool declarations, so Hormuz
 blocks those requests instead of silently losing available tools. Reasoning
-controls other than the qualified empty object remain blocked.
+execution controls remain blocked. The qualified empty object or explicit
+`{"effort":"none"}` disables request reasoning. The launch override takes
+precedence over saved effort preferences without rewriting them.
 
 `--ignore-user-config` skips both base and named profile files, bypasses the
 owned user-default provider and is reported
@@ -42,7 +45,9 @@ The 0.160.0 project denylist also identifies `responses_api_metadata` as ignored
 The opt-in `codex_http_0160` capability admits the bounded `root_turn_id`
 metadata tag observed from the real client. The older `codex_http` capability
 does not admit this additional shape. Each other native field retains the
-existing printable-byte, empty-reasoning and optional-encrypted-output bounds.
+existing printable-byte and optional-encrypted-output bounds. The new capability
+also admits explicit `reasoning.effort="none"`; the old capability still permits
+only empty reasoning. Higher effort, summaries and additional controls block.
 This marker does not admit provider-owned encrypted input or grant a route
 qualification. Existing continuation and conversation-affinity checks apply.
 
@@ -98,7 +103,8 @@ Observed on macOS arm64: Codex 0.160.0 completed a real `exec_command` running
 the supplied Python script, received `ROUTING_OK`, and completed its turn. Two
 model requests settled successfully in one public work record; the second
 used session affinity. There were zero retries/failovers, valid catalog
-metadata, and no retained settings after disconnect. Both owned listeners
+metadata, and no retained settings after disconnect. A saved `xhigh` preference
+was overridden for this launch and preserved after disconnect. Both owned listeners
 stopped. The work record remains active until explicit workflow completion;
 successful model attempts alone do not mark a job complete.
 
