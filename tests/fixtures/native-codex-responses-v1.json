@@ -1,0 +1,20 @@
+{
+  "response_header": "hormuz.native-codex-responses;v=1",
+  "delivery": "incremental-http-sse",
+  "request": {
+    "method": "POST",
+    "path": "/backend-api/codex/responses",
+    "gateway_credential_header": "X-Gateway-Key",
+    "native_credential_headers": ["Authorization", "ChatGPT-Account-ID"],
+    "stream": true,
+    "store": false
+  },
+  "status_fields": [
+    "schema_id", "schema_version", "scope", "generation", "enabled", "billing", "cost_status", "cost_usd",
+    "requests", "active", "succeeded", "failed", "outcome_unknown", "observed_input_tokens",
+    "observed_output_tokens", "observed_usage_requests", "usage_unknown_requests"
+  ],
+  "billing": "chatgpt_plan",
+  "cost_status": "unknown",
+  "real_account_or_client_qualification": false
+}

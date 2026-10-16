@@ -121,7 +121,10 @@ and require their own adapter, native consent and account eligibility.
 
 An administrator-selected [native catalog configuration](../../../docs/NATIVE_CODEX_CATALOG.md)
 provides discovery only. Keep that distinction in diagnosis: a catalog response
-does not establish native inference, account eligibility or a supported host.
+does not enable inference by itself. The separately enabled
+[native Responses transport](../../../docs/NATIVE_CODEX_RESPONSES.md) has its own
+policy, continuation and unknown-cost observation boundary; actual account
+eligibility and a supported host remain unqualified.
 Do not read native login caches, generate native provider settings or reuse a
 gateway/API credential as native auth to clear the remaining blockers.
 

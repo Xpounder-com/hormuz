@@ -93,6 +93,8 @@ USAGE_SUMMARY_SCHEMA_ID = "hormuz.gateway-usage-summary"
 ERROR_SCHEMA_ID = "hormuz.gateway-error"
 NATIVE_CATALOG_SCHEMA_ID = "hormuz.native-codex-catalog"
 NATIVE_CATALOG_SCHEMA_VERSION = 1
+NATIVE_RESPONSES_SCHEMA_ID = "hormuz.native-codex-responses"
+NATIVE_STATUS_SCHEMA_ID = "hormuz.native-codex-status"
 
 ERROR_SCHEMA_VERSION = 3
 
@@ -205,6 +207,7 @@ PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restrict
                               *ROUTE_ADMISSION_ERROR_CODES, *CONNECTED_CLIENT_ERROR_ACTIONS})
 
 _CURRENT_SCHEMA_VERSIONS = {
+    NATIVE_STATUS_SCHEMA_ID: 1,
     "hormuz.local-coding-evidence": 1,
     "hormuz.cloud-readiness": 1,
     LOCAL_SETUP_SCHEMA_ID: 1,
