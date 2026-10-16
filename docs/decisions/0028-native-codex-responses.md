@@ -25,6 +25,11 @@ configured protected literals, including native grants, contained in its
 replacement marker rather than retaining a credential in transformed egress.
 Native inspection also rejects protected member names under redact/deny modes,
 preserving schema semantics without forwarding a credential in a key.
+Fresh assistant text and issued output remain separate shapes. Output replay
+retains its typed provider identity/status and optional phase; phase cannot be
+changed or stripped. Shared content-free security events cover native secret
+inspection and protected-member denials, while priced API accounting remains
+separate. Redaction-aware policy headers use the existing shared semantics.
 Tool declarations and selectors likewise remain limited to host-owned
 function/custom tools and their namespaces, without provider-hosted state.
 

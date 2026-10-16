@@ -206,6 +206,53 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
             self.assertNotIn(secret, result.stderr + result.stdout)
             self.assertEqual((local_requests, cloud_requests, native_requests), ([], [], []))
 
+    def test_native_policy_action_reports_redaction_alongside_the_selected_cap(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                for output, secret, action in ((8, False, "allowed"), (8, True, "allowed+redacted"),
+                        (80, False, "capped"), (80, True, "capped+redacted")):
+                    with self.subTest(output=output, secret=secret):
+                        result = self.native(submit, request={"max_output_tokens": output,
+                            "input": "Protect NATIVE_CHATGPT_SENTINEL" if secret else "A clean prompt"})
+                        self.assertEqual(result["status"], 200, result)
+                        self.assertEqual(result["headers"]["x-hormuz-policy-decision"], action)
+                        self.assertEqual(result["headers"]["x-hormuz-redactions"], str(int(secret)))
+                        self.assertEqual(native_requests[-1]["body"]["max_output_tokens"], 8)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 4))
+
+    def test_native_secret_detections_join_security_totals_without_priced_usage(self):
+        totals = [0, 0, 0]
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            for mode in ("redact", "deny"):
+                value = self.configuration(local, cloud)
+                value["egress_controls"] = {"secrets": {"mode": mode}}
+                with self.fixture.connected_client(value) as submit:
+                    def inspect_totals(stage):
+                        report = submit(method="GET", path="/gateway/usage")["body"]
+                        with self.subTest(mode=mode, stage=stage):
+                            self.assertEqual([report[field] for field in
+                                ("secret_events", "secret_detections", "secret_denied_requests")], totals, report)
+                            self.assertEqual((report["requests"], report["input_tokens"], report["output_tokens"], report["cost_usd"]),
+                                (0, 0, 0, 0), report)
+                            self.assertNotIn("SENTINEL", json.dumps(report))
+                    inspect_totals("before")
+                    response = self.native(submit, request={"input":
+                        "Protect NATIVE_CHATGPT_SENTINEL and fixture-coding-client-credential"})
+                    self.assertEqual(response["status"], 200 if mode == "redact" else 403, response)
+                    totals = [totals[0] + 1, totals[1] + 2, totals[2] + int(mode == "deny")]
+                    inspect_totals("value detections")
+                    blocked = self.native(submit, request={"metadata": {"NATIVE_CHATGPT_SENTINEL": "protected key"}})
+                    self.assertEqual(blocked["status"], 403, blocked)
+                    totals = [totals[0] + 1, totals[1] + 1, totals[2] + 1]
+                    inspect_totals("member guard")
+                    self.assertEqual(self.native(submit, request={"input": "A clean native request"})["status"], 200)
+                    inspect_totals("clean request")
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 3))
+
     def test_native_credentials_contained_in_the_redaction_marker_fail_closed(self):
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
@@ -538,6 +585,79 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                 self.assertEqual(self.native(submit, request={"input": [replay]})["status"], 200)
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 4))
 
+    def test_provider_assistant_output_shapes_require_retained_message_identity(self):
+        message = {"id": "owned-assistant", "type": "message", "role": "assistant", "status": "completed",
+            "content": [{"type": "output_text", "text": "Issued assistant output", "annotations": []}]}
+        data = ("data: " + json.dumps(completed(output=[message])) + "\n\n").encode()
+        def reply(handler, value, number):
+            if number != 1:
+                return stream_reply(handler, value, number)
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                self.assertEqual(self.native(submit)["body"], data.decode())
+                invalid = []
+                for content in (message["content"], [{"type": "refusal", "refusal": "Provider-shaped refusal"}]):
+                    invalid.extend({"type": "message", "role": "assistant", "content": content, **fields}
+                        for fields in ({}, {"status": "completed"}))
+                invalid.extend([{key: value for key, value in message.items() if key != "type"},
+                    {**message, "content": "A fresh shape cannot retain a provider ID"},
+                    {**message, "content": [{"type": "input_text", "text": "Fresh input with a provider ID"}]},
+                    {"role": "assistant", "content": "A fresh shape cannot declare provider status", "status": "completed"}])
+                for item in invalid:
+                    with self.subTest(item=item):
+                        denied = self.native(submit, request={"input": [item]})
+                        self.assertEqual(denied["status"], 403, denied)
+                        self.assertEqual(len(native_requests), 1)
+                fresh = [{"role": "assistant", "content": "Fresh assistant text"},
+                    {"type": "message", "role": "assistant", "phase": "final_answer",
+                        "content": [{"type": "input_text", "text": "Fresh typed assistant text"}]}]
+                for item in [*fresh, message]:
+                    accepted = self.native(submit, request={"input": [item]})
+                    self.assertEqual(accepted["status"], 200, accepted)
+                    self.assertEqual(native_requests[-1]["body"]["input"], [item])
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 4))
+
+    def test_assistant_phase_is_validated_and_preserved_on_provider_replay(self):
+        message = {"id": "phase-message", "type": "message", "role": "assistant", "status": "completed", "phase": "final_answer",
+            "content": [{"type": "output_text", "text": "A final answer", "annotations": []}]}
+        nullable = {**message, "id": "nullable-phase-message", "phase": None}
+        data = ("data: " + json.dumps(completed(output=[message, nullable])) + "\n\n").encode()
+        def reply(handler, value, number):
+            if number != 1:
+                return stream_reply(handler, value, number)
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                self.assertEqual(self.native(submit)["body"], data.decode())
+                invalid = [{**message, "phase": phase} for phase in ("commentary", None, 17, {}, "invalid")]
+                invalid.extend([{key: value for key, value in message.items() if key != "phase"},
+                    {**nullable, "phase": "commentary"}, {"role": "assistant", "content": "Fresh text", "phase": 17}])
+                for item in invalid:
+                    with self.subTest(item=item):
+                        denied = self.native(submit, request={"input": [item]})
+                        self.assertEqual(denied["status"], 403, denied)
+                        self.assertEqual(len(native_requests), 1)
+                valid = [message, nullable, {key: value for key, value in nullable.items() if key != "phase"},
+                    *({"role": "assistant", "content": "Fresh text", "phase": phase} for phase in ("commentary", "final_answer"))]
+                for item in valid:
+                    accepted = self.native(submit, request={"input": [item]})
+                    self.assertEqual(accepted["status"], 200, accepted)
+                    self.assertEqual(native_requests[-1]["body"]["input"], [item])
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 6))
+
     def test_provider_message_and_reasoning_status_cannot_change_or_be_stripped_on_replay(self):
         message = {"id": "status-message", "type": "message", "role": "assistant", "status": "completed",
             "content": [{"type": "output_text", "text": "An issued message", "annotations": []}]}
@@ -766,13 +886,17 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
             ("reasoning_content", {**reasoning, "content": [{"type": "reasoning_text", "text": 17}]}, False),
             ("message_id", {k: v for k, v in message.items() if k != "id"}, False),
             ("message_status", {k: v for k, v in message.items() if k != "status"}, False),
+            ("message_phase_type", {**message, "phase": 17}, False),
+            ("message_phase_value", {**message, "phase": "invalid"}, False),
             ("text_annotations", {**message, "content": [{"type": "output_text", "text": "invalid"}]}, False),
             ("compaction_id", {k: v for k, v in compaction.items() if k != "id"}, False),
             ("compaction_content", {k: v for k, v in compaction.items() if k != "encrypted_content"}, False),
             ("unknown_variant", {"id": "unknown-item", "type": "unsupported_native_variant"}, False),
             ("valid_reasoning", {**reasoning, "summary": [{"type": "summary_text", "text": "summary"}]}, True),
             ("valid_nullable_reasoning", {**reasoning, "encrypted_content": None}, True),
-            ("valid_message", message, True), ("valid_compaction", compaction, True),
+            ("valid_message", message, True),
+            ("valid_message_phase", {**message, "phase": "commentary"}, True),
+            ("valid_compaction", compaction, True),
             ("valid_custom_tool", {"type": "custom_tool_call", "call_id": "custom-call", "name": "custom", "input": "data"}, True)]
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
