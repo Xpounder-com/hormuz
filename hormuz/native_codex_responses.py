@@ -134,7 +134,7 @@ def _dispatch_native_responses(handler, credentials):
         context = single_header(handler.headers, CONTEXT_FORMAT_HEADER, required=False, limit=128)
         redactor = SecretRedactor(server.config.secret_controls,
             server.secret_redactor.protected_values + (("native_chatgpt_credential", authorization[7:]),),
-            max_output_bytes=min(server.config.max_request_bytes, 25 * 1024 * 1024))
+            max_output_bytes=25 * 1024 * 1024)
         redaction = inspect_request(value, protocol="openai", redactor=redactor,
             mode=decision.snapshot.secret_mode, declared_version=context,
             inspection_max_bytes=MAX_COMPACT_INSPECTION_BYTES).redaction

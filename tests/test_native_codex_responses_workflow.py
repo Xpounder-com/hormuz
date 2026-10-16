@@ -238,6 +238,55 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                 self.assertEqual(len(native_requests), 2, "expanded redacted egress exceeded its byte limit")
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
 
+    def test_native_redaction_can_shrink_a_bounded_request_after_model_normalization(self):
+        credential = "z" * 950
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            value = self.configuration(local, cloud)
+            value["max_request_bytes"] = 1024
+            with self.fixture.connected_client(value) as submit:
+                result = self.native(submit, headers={"Authorization": "Bearer " + credential},
+                    raw_body=json.dumps({"model": "native-code", "stream": True, "store": False, "input": credential}))
+                self.assertEqual(result["status"], 200, result)
+                self.assertEqual(native_requests[0]["body"]["input"], "[REDACTED:HORMUZ_SECRET]")
+                self.assertLessEqual(len(json.dumps(native_requests[0]["body"], separators=(",", ":")).encode()), 1024)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
+
+    def test_compact_representation_only_secret_matches_use_the_safe_selected_payload(self):
+        call = {"id": "compact-tool", "type": "function_call", "call_id": "compact-call",
+                "name": "fixture_tool", "arguments": "{}"}
+        lines = ["x" if number % 2 == 0 else "y" for number in range(70)]
+        compact = json.dumps({"format": "hormuz-line-runs-v1", "runs": [[line, 1] for line in lines]},
+                             separators=(",", ":"))
+        payload = {"model": "fixture-cloud-model", "input": [call,
+            {"type": "function_call_output", "call_id": "compact-call", "output": compact}],
+            "stream": True, "store": False, "max_output_tokens": 8}
+        data = ("data: " + json.dumps(completed(output=[call])) + "\n\n").encode()
+        def reply(handler, value, number):
+            if number != 1:
+                return stream_reply(handler, value, number)
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            value = self.configuration(local, cloud)
+            value["max_request_bytes"] = 1024
+            self.fixture.environment["COMPACT_REPRESENTATION_SECRET"] = "line-runs"
+            value["egress_controls"] = {"secrets": {"mode": "redact", "custom_secret_envs": ["COMPACT_REPRESENTATION_SECRET"]}}
+            with self.fixture.connected_client(value) as submit:
+                self.assertEqual(self.native(submit)["body"], data.decode())
+                result = self.native(submit, raw_body=json.dumps(payload, separators=(",", ":")),
+                    headers={"X-Hormuz-Context-Format": "structural-v1"})
+                self.assertEqual(result["status"], 200, result)
+                self.assertEqual(native_requests[1]["body"]["input"][1]["output"], "\n".join(lines))
+                self.assertLessEqual(len(json.dumps(native_requests[1]["body"], separators=(",", ":")).encode()), 1024)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
+
     def test_native_status_counts_completed_execution_and_observed_usage_with_unknown_cost(self):
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \

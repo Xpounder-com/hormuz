@@ -101,9 +101,10 @@ Transport bounds are three seconds for system DNS/TCP/TLS, then 30 seconds for
 provider headers and idle reads, and a whole transport deadline of the smaller
 of `upstream_timeout_seconds` and 600 seconds. The whole deadline wins over
 phase deadlines. Requests are bounded by the smaller of the configured limit
-and 25 MiB, including transformed egress JSON. Secret replacements reserve
-their exact serialized expansion before allocating replacement strings, and
-exceeding that byte limit returns 413 before egress.
+and 25 MiB, including transformed egress JSON. Secret replacements check their
+projected serialized growth before allocating replacement strings. Existing
+bounded input may shrink during redaction; the selected final representation
+must fit the configured egress cap or returns 413 before egress.
 For recognized compacted tool results, reconstructed inspection has its own
 1 MiB request ceiling; the configured egress cap applies to the representation
 selected for forwarding after inspection. Streams are bounded by

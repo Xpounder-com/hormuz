@@ -25,13 +25,19 @@ class _RedactionBudget:
 
     def __init__(self, value: dict[str, Any], limit: int):
         self.limit = limit
-        self.size = 0
-        self.resize(len(json.dumps(value, separators=(",", ":"), allow_nan=False)))
+        self.size = len(json.dumps(value, separators=(",", ":"), allow_nan=False))
+        # Existing bounded input may shrink during redaction. Do not allocate
+        # growth beyond either that existing size or the inspection ceiling.
+        self.ceiling = max(limit, self.size)
 
     def resize(self, delta: int) -> None:
-        if self.size + delta > self.limit:
+        if self.size + delta > self.ceiling:
             raise RedactionLimitError("Redacted request exceeds its byte limit")
         self.size += delta
+
+    def finish(self) -> None:
+        if self.size > self.limit:
+            raise RedactionLimitError("Redacted request exceeds its byte limit")
 
     @staticmethod
     def string_size(value: str) -> int:
@@ -92,8 +98,12 @@ class SecretRedactor:
         limit = self.max_output_bytes if max_output_bytes is None else max_output_bytes
         budget = None if limit is None else _RedactionBudget(value, limit)
         if effective_mode == "off":
+            if budget is not None:
+                budget.finish()
             return RedactionResult(value=value)
         transformed, count, rules = self._transform(value, depth=0, budget=budget)
+        if budget is not None:
+            budget.finish()
         assert isinstance(transformed, dict)
         return RedactionResult(value=transformed, count=count, rules=tuple(sorted(rules)))
 
