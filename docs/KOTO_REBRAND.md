@@ -17,6 +17,24 @@ overrides the local history directory. New default history directories use
 
 ## Existing installations
 
+Use a fresh virtual environment for the source-install example. To reuse an
+environment that already contains the former Python distribution, disconnect
+its active client through the old CLI first and confirm settings are restored.
+Then, with that environment's Python interpreter:
+
+```sh
+python -m pip uninstall hormuz
+python -m pip install /path/to/reviewed-koto-checkout
+python -m koto --help
+```
+
+Remove the former distribution **before** installing `koto-router` into that
+same environment. Both distributions contain the established runtime namespace;
+otherwise a later uninstall of the former package can remove shared files.
+Uninstalling the distribution does not delete the separate configuration or
+history directories. If both distributions are already installed, disconnect,
+remove the former package, and reinstall the reviewed Koto checkout before use.
+
 The legacy `hormuz` executable and `python -m hormuz` remain aliases for the
 same implementation. `HORMUZ_CONFIG` and `HORMUZ_HISTORY_HOME` remain accepted;
 their Koto equivalents take precedence. When no path is specified, an existing

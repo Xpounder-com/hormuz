@@ -127,12 +127,15 @@ are not implemented. See [installation, updates, removal and compatibility](docs
 Use Python 3.11 or later in a virtual environment:
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
+python3 -m venv .venv-koto
+. .venv-koto/bin/activate
 python -m pip install .
 python -m koto --help
 python -m unittest tests.test_execution_destination_workflow tests.test_connected_client_lifetime_workflow
 ```
+
+For an existing installation, follow the [Koto migration notes](docs/KOTO_REBRAND.md)
+before replacing the former Python distribution or plugin.
 
 Installation may download Python dependencies. Tests require loopback access;
 they use temporary files and processes with synthetic credentials. They do not
