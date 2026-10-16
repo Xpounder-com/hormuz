@@ -65,6 +65,9 @@ from ._contract_schemas.cloud_readiness import FIELDS as CLOUD_READINESS_FIELDS,
 from ._contract_schemas.local_setup import (validate_profile as _validate_local_setup_profile,
     validate_setup as _validate_local_setup, validate_setup_v2 as _validate_local_setup_v2,
     validate_setup_v3 as _validate_local_setup_v3)
+from ._contract_schemas.local_acquisition import (CATALOG_FIELDS as ACQUISITION_CATALOG_FIELDS,
+    RECEIPT_FIELDS as ACQUISITION_RECEIPT_FIELDS, validate_catalog as _validate_acquisition_catalog,
+    validate_receipt as _validate_acquisition_receipt, validate_error as _validate_acquisition_error)
 from ._contract_schemas.shadow_routing import (SHADOW_FIELDS,
     validate_shadow as _validate_shadow, validate_attempt_history as _validate_attempt_history)
 from ._contract_schemas.manifest import (
@@ -515,6 +518,9 @@ def contract_manifest() -> dict[str, object]:
                 "client_version", "settings", "changes", "local_runtime"]),
             _manifest_schema(CONNECTED_CLIENT_ERROR_SCHEMA_ID, CONNECTED_CLIENT_ERROR_SCHEMA_VERSION,
                 "cli-output", "hormuz", ["schema_id", "schema_version", "error"]),
+            _manifest_schema("hormuz.local-acquisition-catalog", 1, "durable-evidence", "hormuz", sorted(ACQUISITION_CATALOG_FIELDS)),
+            _manifest_schema("hormuz.local-acquisition", 1, "cli-output", "hormuz", sorted(ACQUISITION_RECEIPT_FIELDS)),
+            _manifest_schema("hormuz.local-acquisition-error", 1, "cli-output", "hormuz", ["schema_id", "schema_version", "error"]),
             _manifest_schema(LOCAL_SETUP_SCHEMA_ID, 1, "cli-output", "hormuz",
                 ["schema_id", "schema_version", "configuration", "connection"]),
             _manifest_schema(LOCAL_SETUP_SCHEMA_ID, 2, "cli-output", "hormuz",
@@ -549,7 +555,7 @@ def contract_manifest() -> dict[str, object]:
             "rate_limited": "The provider returned HTTP 429 after Hormuz allowed and forwarded the request.",
         },
         "error_codes": sorted(PUBLIC_ERROR_CODES),
-        "content_boundary": "No schema in this manifest permits prompts, responses, secret values, matched detector values, filenames, or source content.",
+        "content_boundary": "Routing and audit schemas exclude prompts, responses, secret values, matched detector values, filenames and source content. Local operational receipts may identify installation paths and public pinned artifact sources; they exclude credentials and retained user content.",
     }
     validate_contract_manifest(manifest)
     return manifest
@@ -567,6 +573,9 @@ def validate_contract(value: Mapping[str, Any]) -> None:
     schema_id = _value_string(value, "schema_id")
     schema_version = _value_integer(value, "schema_version")
     validator = {
+        ("hormuz.local-acquisition-catalog", 1): _validate_acquisition_catalog,
+        ("hormuz.local-acquisition", 1): _validate_acquisition_receipt,
+        ("hormuz.local-acquisition-error", 1): _validate_acquisition_error,
         ("hormuz.cloud-readiness", 1): _validate_cloud_readiness,
         (LOCAL_SETUP_SCHEMA_ID, 1): _validate_local_setup,
         (LOCAL_SETUP_SCHEMA_ID, 2): _validate_local_setup_v2,
