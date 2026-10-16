@@ -59,6 +59,15 @@ repository's Apache-2.0 declaration; redistribution must retain upstream notices
 No additional account, token, license acceptance on behalf of the user, or
 moving `latest`/`main` download is introduced.
 
+The pinned model's HTTPS redirect to `us.aws.cdn.hf.co` was confirmed with a
+single HEAD request on October 15, 2026; no model body was downloaded. That exact
+host is declared in the catalog, consistent with the upstream
+[download host documentation](https://huggingface.co/docs/hub/models-downloading).
+This host-list correction changes the canonical catalog digest and selects a
+new generation directory even though artifact revisions, sizes and hashes are
+unchanged. Existing generations are preserved. To reuse an earlier generation,
+explicitly select its original reviewed catalog; markers are never rewritten.
+
 The fresh download is 2,509,437,865 bytes. Preflight reserves remaining bytes,
 1 GiB of maximum extracted runtime data and 64 MiB of margin. The profile's
 platform row is checked before any download. This does not establish RAM
@@ -102,12 +111,27 @@ No source failure starts another model, a paid provider or a background job.
 
 The selected parent is private and user-owned. Each catalog has its own canonical
 SHA-256 generation directory. A nonblocking exclusive lock prevents concurrent
-acquisition of that generation. Owned `.part` files retain bounded progress after
+inspection and acquisition of that generation. Preview and offline reuse open
+an existing lock without creating one; an active writer returns `busy`, including
+during extraction. A fresh lockless preview is a missing-state snapshot and
+does not inspect a generation created concurrently. An existing generation
+with a missing or unsafe lock fails closed for inspection.
+Owned `.part` files retain bounded progress after
 an interrupted transfer. A later explicit download resumes at that byte offset
 only with an exact validated Content-Range and final size/digest. A source that
 ignores Range restarts that owned partial file; mismatching bytes never publish
 a ready installation. The next preview reports retained progress without
 claiming it is already verified.
+
+Each runtime/model checksum read has a finite budget of 60 seconds plus one
+second per started 8 MiB. Exceeding that budget returns `download_unavailable`
+and preserves the owned partial for a later explicit attempt. A completed
+size/digest mismatch still returns `download_invalid` and resets only that
+owned partial. Published artifacts are never truncated. Managed-runtime checks
+use the same checksum policy, and startup owners include verification time in
+their bounded wait. Fresh ready receipts report zero remaining download/required
+space and current free space; earlier version-1 receipts remain readable without
+rewriting their stored preflight figures.
 
 Archive extraction allows at most 256 entries and 1 GiB of expanded data within
 30 seconds, including a separate decompression bound. It rejects traversal,

@@ -36,6 +36,11 @@ This is an additional object, not a complete gateway configuration. Its version
 is exactly `1`; unknown fields and versions fail. Every shown field is required.
 Paths must be absolute and bounded to 4,096 characters; digests are 64 lowercase
 hexadecimal characters. Startup time is an integer from 1 through 60 seconds.
+Before startup, each archive/model checksum gets 60 seconds plus one second per
+started 8 MiB. Archive expansion and extracted-file verification then share a
+separate 30-second bound. Both owning processes include these finite verification
+budgets in their startup wait; the configured engine startup deadline begins
+after verification. File ownership, digest and mutation checks remain required.
 The [version-1 profile fixture](../tests/fixtures/managed-llama-profile-v1.json)
 freezes this shape with synthetic external files rather than redistributing
 model weights or executable binaries.
