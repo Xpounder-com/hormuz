@@ -84,6 +84,23 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                           model["workloads"][0]["target_met"], model["observations"][0]["error"]),
                          (0, 0, False, "incomplete_response"))
 
+    def test_provider_model_identity_must_match_before_scores_or_prices_are_certified(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        for model_name in ("unexpected-model", None):
+            with self.subTest(model=model_name):
+                self.report_path = self.root / f"identity-{model_name}.json"
+                with workflow.provider("7", response_fields={"model": model_name}) as (endpoint, _):
+                    value = self.fixture.admission_configuration(endpoint, endpoint)
+                    value["model_routes"]["local-code"].update(input_cost_per_million=1, output_cost_per_million=1)
+                    with self.fixture.connected_client(value):
+                        report = self.run_benchmark("local-code", suite=suite)
+                model = report["models"][0]
+                self.assertEqual((model["metrics"]["completed"], model["workloads"][0]["target_met"],
+                                  model["observations"][0]["error"], model["metrics"]["mean_cost_microusd"]),
+                                 (0, False, "execution_mismatch", None))
+
     def test_saved_scorecard_can_be_reviewed_offline_without_retaining_task_text(self):
         with workflow.provider("7") as (endpoint, _):
             with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):

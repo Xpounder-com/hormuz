@@ -529,7 +529,8 @@ def measured_usage(value, route):
     if cached:
         required.add("cache_read_cost_per_million")
     observed["cost_microusd"] = None
-    if (not invalid_cache and all(observed[key] is not None for key in ("input_tokens", "output_tokens"))
+    if (value.get("model") == route.upstream_model and not invalid_cache
+            and all(observed[key] is not None for key in ("input_tokens", "output_tokens"))
             and required <= route.explicit_price_fields):
         observed["cost_microusd"] = route.estimate_cost_microusd(
             input_tokens=observed["input_tokens"], output_tokens=observed["output_tokens"],
@@ -678,6 +679,8 @@ def run_benchmark(args):
                     elif (type(value) is not dict or value.get("status") != "completed"
                             or value.get("error") is not None):
                         error = "incomplete_response"
+                    elif value.get("model") != route.upstream_model:
+                        error = "execution_mismatch"
                 except (OSError, http.client.HTTPException, ValueError, RecursionError) as failure:
                     client.close()
                     error = failure.code if isinstance(failure, BenchmarkError) else "timeout" if isinstance(failure, TimeoutError) else "request_failed"

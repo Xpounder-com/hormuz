@@ -133,7 +133,8 @@ failures or local socket exhaustion. Remaining cases are recorded as unstarted.
 Before model work, one authenticated `/v1/router/benchmark-state` snapshot checks
 the actor, full route fingerprint and explicit-price fields against the running
 router. The fingerprint includes the endpoint, revision and capabilities. Every
-model response must match that live destination generation and requested model.
+model response must match that live destination generation and requested model;
+the provider-reported model must also match before scores or prices are certified.
 Benchmark receipts report the forwarded request's byte count and output budget
 after router preparation; recorded byte bounds use these observed values.
 An unexpected live policy cap invalidates the measurement for the requested
