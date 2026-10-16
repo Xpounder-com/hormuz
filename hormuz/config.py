@@ -509,6 +509,13 @@ class GatewayConfig:
         return build_gateway_config(cls, path, environ=environ)
 
     @classmethod
+    def parse_preflight(cls, path: str | Path, text: str) -> "GatewayConfig":
+        """Validate captured configuration without reading credential values."""
+        from ._config_builder import build_preflight_config
+
+        return build_preflight_config(cls, path, text)
+
+    @classmethod
     def load_policy_validation_context(cls, path: str | Path) -> PolicyValidationContext:
         """Load only non-secret facts required for offline policy validation."""
 

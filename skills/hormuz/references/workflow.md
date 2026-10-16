@@ -95,6 +95,34 @@ advice. Preserve the actual route, hard local-only policy and continuing destina
 Keep classification advice separate from real coding outcomes; the option provides
 no live learned routing or cloud/subscription permission.
 
+## Inspect cloud readiness
+
+When the user asks about cloud authorization or readiness, check
+`hormuz client cloud-readiness --help` and use the reviewed source-install path
+above if the command is unavailable. Select the existing router configuration,
+client home and target executable, then run the shared read-only operation:
+
+```sh
+hormuz --config /path/to/hormuz.json client cloud-readiness codex \
+  --executable /path/to/codex --client-home /path/to/codex-home
+```
+
+Preserve a selected `--actor ACTOR`. For the desktop surface add
+`--surface desktop`; terminal version qualification does not qualify that app.
+Report the `hormuz.cloud-readiness` receipt's configuration facts and each path's
+status, billing scope and blocker/action pairs. `scope: configuration_only`
+means the operation changes no settings, resolves no credentials and makes no
+provider requests. The API path's `unverified` status describes declarations;
+credentials, actual request eligibility and provider qualification need a
+separately authorized flow. Both ChatGPT plan paths remain `not_implemented`
+and require their own adapter, native consent and account eligibility.
+
+Keep hard local-only policy and existing settings intact. Finish the preflight
+by reporting unresolved blockers and the next action; preflight does not
+authorize connection or billable fallback. For project/profile/launch conflicts,
+follow [override inspection](capabilities.md#diagnose-and-explain). See
+[the receipt contract and limits](../../../docs/CLOUD_READINESS.md) for detail.
+
 ## Connect an existing configuration
 
 1. Use the user-selected mode. For local-only, verify `route_admission.mode` is

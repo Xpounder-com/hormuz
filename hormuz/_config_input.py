@@ -241,12 +241,24 @@ def load_configuration_input(source_path: Path) -> dict[str, Any]:
     return raw
 
 
+def parse_configuration_input(encoded: bytes) -> dict[str, Any]:
+    """Validate an already captured, bounded configuration snapshot."""
+    raw = _parse_configuration_json(encoded)
+    _reject_deprecated_context_configuration(raw)
+    _validate_configuration_schema(raw)
+    return raw
+
+
 def _load_configuration_json(source_path: Path) -> dict[str, Any]:
     try:
         with source_path.open("rb") as source:
             encoded = source.read(MAX_CONFIGURATION_BYTES + 1)
     except OSError:
         raise ConfigurationInputError(_CONFIGURATION_UNAVAILABLE) from None
+    return _parse_configuration_json(encoded)
+
+
+def _parse_configuration_json(encoded: bytes) -> dict[str, Any]:
     if len(encoded) > MAX_CONFIGURATION_BYTES:
         raise ConfigurationInputError(_CONFIGURATION_TOO_LARGE)
     try:

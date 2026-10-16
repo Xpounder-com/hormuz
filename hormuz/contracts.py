@@ -61,6 +61,7 @@ from ._contract_schemas.connected_client import (
     _validate_preview_v2 as _validate_connected_client_preview_v2,
 )
 from ._contract_schemas.local_coding import EVIDENCE_FIELDS, validate_evidence as _validate_coding_evidence
+from ._contract_schemas.cloud_readiness import FIELDS as CLOUD_READINESS_FIELDS, validate_readiness as _validate_cloud_readiness
 from ._contract_schemas.local_setup import (validate_profile as _validate_local_setup_profile,
     validate_setup as _validate_local_setup, validate_setup_v2 as _validate_local_setup_v2,
     validate_setup_v3 as _validate_local_setup_v3)
@@ -499,6 +500,7 @@ def contract_manifest() -> dict[str, object]:
             *[_manifest_schema(ROUTE_ADMISSION_SCHEMA_ID, version, "response", "hormuz",
                 ["schema_id", "schema_version", "mode", "task_classifier", "local_capacity", "routes"])
               for version in (1, 2)],
+            _manifest_schema("hormuz.cloud-readiness", 1, "cli-output", "hormuz", sorted(CLOUD_READINESS_FIELDS)),
             _manifest_schema(CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_STATUS_SCHEMA_VERSION,
                 "cli-output", "hormuz", ["schema_id", "schema_version", "phase", "router", "scope",
                 "configuration", "retained_settings", "generation", "client_version", "owned_settings"]),
@@ -565,6 +567,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
     schema_id = _value_string(value, "schema_id")
     schema_version = _value_integer(value, "schema_version")
     validator = {
+        ("hormuz.cloud-readiness", 1): _validate_cloud_readiness,
         (LOCAL_SETUP_SCHEMA_ID, 1): _validate_local_setup,
         (LOCAL_SETUP_SCHEMA_ID, 2): _validate_local_setup_v2,
         (LOCAL_SETUP_SCHEMA_ID, 3): _validate_local_setup_v3,
