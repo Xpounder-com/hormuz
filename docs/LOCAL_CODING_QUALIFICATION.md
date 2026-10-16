@@ -138,6 +138,16 @@ Those historical campaigns were not preregistered under `local-repair.v1` and
 must not be relabelled as a qualifying run. There is no newly qualified native
 model in this change.
 
+## Prepared candidate campaign
+
+The [first candidate](CANDIDATE_SETUP.md) pins an experimental Codex 0.160.0 /
+macOS arm64 / llama.cpp b11617 / Qwen3-4B setup. Its
+[version-three campaign](campaigns/local-repair-20261016-v3/README.md) prepares
+the sixteen-case inventory and independent checkers, with no native outcomes or
+admission receipt. Exact native request-profile binding and a reviewed outcome
+collection path precede inference. The existing unqualified-coding denial is
+intentional and remains in force.
+
 ## Contracts, migration and rollback
 
 The version-1 `hormuz.local-coding-evidence` receipt contains a frozen `plan`, its

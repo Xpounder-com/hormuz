@@ -49,6 +49,10 @@ coding admission on a pinned, predeclared campaign of actual edits, independent
 checks and normal completion. The bundled experiment remains unqualified for
 automatic coding. Engine health and shadow advice do not grant that qualification.
 
+The [first candidate setup](docs/CANDIDATE_SETUP.md) pins an experimental
+Codex 0.160.0/macOS arm64 combination and a sixteen-case preparation campaign.
+It has no new native coding outcomes or admission receipt.
+
 [Personal model scorecards](docs/MODEL_SCORECARDS.md) benchmark your own examples
 through the local router. Create a suite with reference checks and targets, compare
 quality, latency, streaming first-token timing, throughput, usage and configured
