@@ -48,6 +48,13 @@ class ScorecardRouting:
                 continue
             if model["route_fingerprint"] != route_fingerprint(candidate.route, upstreams=self.config.upstreams):
                 continue
+            required_prices = {"input_cost_per_million", "output_cost_per_million"}
+            if any(row["usage"]["cache_read_tokens"] for row in model["observations"]):
+                required_prices.add("cache_read_cost_per_million")
+            prices_known = required_prices <= candidate.route.explicit_price_fields
+            if (not prices_known and (report["targets"]["objective"] == "cost"
+                    or report["targets"].get("max_mean_cost_microusd") is not None)):
+                continue
             for workload in model["workloads"]:
                 if (not workload["target_met"] or workload["task_type"] != characteristics["task_hint"]
                         or workload["request_profile_sha256"] != profile or workload["input_size"] != characteristics["input_size"]
@@ -58,7 +65,7 @@ class ScorecardRouting:
                 metrics = workload["metrics"]
                 quality = -metrics["task_success_rate"]
                 latency = metrics["latency_ms"]["p95"]
-                cost = metrics["mean_cost_microusd"]
+                cost = metrics["mean_cost_microusd"] if prices_known else None
                 cost = cost if cost is not None else float("inf")
                 objective = report["targets"]["objective"]
                 rank = (quality, latency, cost) if objective == "quality" else (latency, quality, cost) if objective == "latency" else (cost, quality, latency)

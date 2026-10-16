@@ -271,6 +271,8 @@ def validate_scorecard(report):
                         or not row["completed"] and any(check["passed"] for check in row["checks"])
                         or type(row["usage"]) is not dict or set(row["usage"]) != {"input_tokens", "output_tokens", "cache_read_tokens", "cost_microusd"}
                         or any(item is not None and (type(item) is not int or not 0 <= item <= 10**15) for item in row["usage"].values())
+                        or (row["usage"]["cache_read_tokens"] is not None and row["usage"]["input_tokens"] is not None
+                            and row["usage"]["cache_read_tokens"] > row["usage"]["input_tokens"])
                         or (row["latency_ms"] is None and (row["error"] is None or not row["error"].endswith("_not_run")))
                         or (row["latency_ms"] is not None and not number(row["latency_ms"], 0, 3600000))
                         or any(row[key] is not None and not number(row[key], 0, row["latency_ms"])
@@ -370,7 +372,28 @@ class RouterClient:
     def close(self):
         self.connection.close()
 
-    def request(self, payload, *, timeout=12):
+    def bindings(self, routes, *, timeout):
+        status, _, value, _ = self.request(None, method="GET", path="/v1/router/state", timeout=timeout)
+        if (status != 200 or type(value) is not dict or value.get("schema_id") != "hormuz.route-admission"
+                or type(value.get("schema_version")) is not int or value["schema_version"] != 2
+                or type(value.get("routes")) is not list):
+            raise BenchmarkError("benchmark_execution_unverified")
+        result = {}
+        for route in routes:
+            matches = [item for item in value["routes"]
+                       if type(item) is dict and item.get("model") == route.alias]
+            if len(matches) != 1:
+                raise BenchmarkError("benchmark_execution_mismatch")
+            live = matches[0]
+            expected = {"destination": route.destination_id, "model_revision": route.model_revision,
+                        "capabilities": list(route.capabilities)}
+            if (any(live.get(key) != item for key, item in expected.items())
+                    or not hash_label(live.get("generation"))):
+                raise BenchmarkError("benchmark_execution_mismatch")
+            result[route.alias] = live["generation"]
+        return result
+
+    def request(self, payload, *, timeout=12, method="POST", path="/v1/responses"):
         connection = self.connection
         started = time.monotonic()
         if connection.sock is None:
@@ -389,7 +412,7 @@ class RouterClient:
         timer.daemon = True
         timer.start()
         try:
-            connection.request("POST", "/v1/responses", json.dumps(payload), headers={
+            connection.request(method, path, None if payload is None else json.dumps(payload), headers={
                 "Authorization": "Bearer " + self.token, "Content-Type": "application/json",
                 "User-Agent": "Hormuz codex-benchmark", "X-Hormuz-Routing-Mode": "local_only",
                 "X-Hormuz-Benchmark": "1"})
@@ -470,12 +493,14 @@ def measured_usage(value, route):
     observed = {key: count(key) for key in ("input_tokens", "output_tokens")}
     details = usage.get("input_tokens_details") if type(usage) is dict else None
     cached = details.get("cached_tokens") if type(details) is dict else None
-    observed["cache_read_tokens"] = cached if type(cached) is int and cached >= 0 else None
+    invalid_cache = cached is not None and (type(cached) is not int or not 0 <= cached <= 10**12
+        or observed["input_tokens"] is not None and cached > observed["input_tokens"])
+    observed["cache_read_tokens"] = cached if not invalid_cache else None
     required = {"input_cost_per_million", "output_cost_per_million"}
     if cached:
         required.add("cache_read_cost_per_million")
     observed["cost_microusd"] = None
-    if (all(observed[key] is not None for key in ("input_tokens", "output_tokens"))
+    if (not invalid_cache and all(observed[key] is not None for key in ("input_tokens", "output_tokens"))
             and required <= route.explicit_price_fields):
         observed["cost_microusd"] = route.estimate_cost_microusd(
             input_tokens=observed["input_tokens"], output_tokens=observed["output_tokens"],
@@ -579,6 +604,7 @@ def run_benchmark(args):
     stopped, consecutive_failures = None, 0
     deadline = time.monotonic() + args.deadline_seconds
     try:
+        bindings = client.bindings(routes, timeout=min(args.timeout_seconds, args.deadline_seconds))
         for route in routes:
             observations = []
             for case, repeat in ((case, repeat) for case in suite["cases"] for repeat in range(args.repeats)):
@@ -601,6 +627,8 @@ def run_benchmark(args):
                         if status in (429, 529):
                             stopped = "capacity_rejection_not_run"
                     elif (headers.get("x-hormuz-destination-locality") != "local"
+                            or headers.get("x-hormuz-destination") != route.destination_id
+                            or headers.get("x-hormuz-destination-generation") != bindings[route.alias]
                             or headers.get("x-hormuz-requested-model") != route.alias
                             or headers.get("x-hormuz-routed-model") != route.upstream_model):
                         error = "execution_mismatch"

@@ -105,7 +105,9 @@ one explicitly with `run --actor ACTOR_ID`.
 Model/GPU peak memory, energy and inference-only decode speed are currently
 unobserved. A missing value is not zero. Cost is a configured-rate estimate,
 not an invoice or local electricity measurement. When a provider omits cache
-details, the explicitly labeled estimate prices input as uncached. Timing is
+details, the explicitly labeled estimate prices input as uncached. Inconsistent
+cache counts, including cached tokens exceeding total input,
+leave the cache measurement and estimated cost unknown. Timing is
 affected by caches, model order and other machine activity; no claim of isolated
 hardware benchmarking is made.
 
@@ -124,8 +126,12 @@ speculative calls or background benchmark workers. Default deadlines are 30
 seconds per request and 300 seconds per run; maximums are 120 and 1800 seconds.
 Capacity rejection stops further requests, as do three consecutive request
 failures or local socket exhaustion. Remaining cases are recorded as unstarted.
+Before model work, one authenticated router-status request checks the configured
+alias, revision, destination and capabilities against the running router. Every
+model response must match that live destination generation and requested model.
 Benchmark probes disable operational failover so another model's answer cannot
-be attributed to the selected one. A configuration with `shadow_router` is
+be attributed to the selected one; admission also refuses to substitute another
+alias when the requested route is unready. A configuration with `shadow_router` is
 rejected before execution because its extra helper calls exceed this benchmark's
 controlled request envelope.
 
@@ -166,6 +172,8 @@ generation controls including the exact output-token budget, tool/format schema,
 input-size bucket and tested request bounds. Quality is the held-out pass rate; latency uses p95; cost
 uses the mean estimate. Other metrics break ties deterministically. An explicitly
 enabled scorecard may replace the client's default local alias within that set.
+Cost-based preferences and cost targets require the relevant prices to remain
+explicitly configured; removing a zero rate makes that price unknown.
 
 Inspect `X-Hormuz-Scorecard-Status`, `X-Hormuz-Routing-Reason` and, when selected,
 `X-Hormuz-Scorecard-SHA256`. The selected reason is `benchmark_scorecard`.

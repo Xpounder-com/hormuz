@@ -320,6 +320,33 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                           [request["body"]["model"] for request in received]),
                          (["http_429"], ["fixture-local-model"]))
 
+    def test_unready_benchmark_model_cannot_borrow_another_destinations_result(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7", health_status=503) as (first, first_requests), \
+             workflow.provider("7") as (second, second_requests):
+            value = self.two_local_configuration(first, second)
+            value["model_routes"]["local-better"]["upstream_model"] = "fixture-local-model"
+            with self.fixture.connected_client(value):
+                report = self.run_benchmark("local-code", suite=suite)
+        model = report["models"][0]
+        self.assertEqual((model["metrics"]["completed"], model["workloads"][0]["target_met"],
+                          [row["error"] for row in model["observations"]], first_requests, second_requests),
+                         (0, False, ["http_503"], [], []))
+
+    def test_changed_configuration_cannot_label_an_older_running_model_as_a_new_revision(self):
+        with workflow.provider("7") as (endpoint, received):
+            value = self.fixture.admission_configuration(endpoint, endpoint)
+            with self.fixture.connected_client(value):
+                changed = json.loads(self.config_path.read_text())
+                changed["model_routes"]["local-code"]["model_revision"] = "new-weights-v2"
+                changed["route_admission"]["local_routes"]["local-code"]["model_revision"] = "new-weights-v2"
+                self.config_path.write_text(json.dumps(changed))
+                result = self.run_benchmark("local-code", expected=2)
+        self.assertEqual((result["error"]["code"], received, self.report_path.exists()),
+                         ("benchmark_execution_mismatch", [], False))
+
     def test_stale_missing_and_mismatched_evidence_preserve_the_existing_route(self):
         suite = self.suite()
         suite["cases"] = suite["cases"][:1]
@@ -404,6 +431,39 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 result = submit(request={"input": "Summarize seven boxes as a digit."})
                 self.assertEqual(([model["metrics"]["mean_cost_microusd"] for model in report["models"]],
                                   result["headers"].get("x-hormuz-routed-model")), ([60, 6], "fixture-second-model"))
+
+    def test_impossible_cache_usage_cannot_satisfy_a_cost_target(self):
+        suite = self.suite()
+        suite["targets"] = {"objective": "cost", "min_pass_rate": 0, "min_cases": 2,
+                            "max_mean_cost_microusd": 10}
+        usage = {"input_tokens": 4, "output_tokens": 2, "input_tokens_details": {"cached_tokens": 5}}
+        with workflow.provider("7", response_fields={"usage": usage}) as (endpoint, _):
+            value = self.fixture.admission_configuration(endpoint, endpoint)
+            value["model_routes"]["local-code"].update(input_cost_per_million=10,
+                cache_read_cost_per_million=0, output_cost_per_million=1)
+            with self.fixture.connected_client(value):
+                report = self.run_benchmark("local-code", suite=suite)
+        model = report["models"][0]
+        self.assertEqual((model["metrics"]["cache_read_tokens"], model["metrics"]["mean_cost_microusd"],
+                          model["workloads"][0]["target_met"]), (None, None, False))
+
+    def test_removed_zero_prices_cannot_preserve_a_cost_routing_preference(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"] = {"objective": "cost", "min_pass_rate": 1, "min_cases": 1}
+        with workflow.provider("0") as (first, _), workflow.provider("7") as (second, _):
+            value = self.two_local_configuration(first, second)
+            value["route_admission"]["scorecard"] = str(self.report_path)
+            value["model_routes"]["local-better"].update(input_cost_per_million=0, output_cost_per_million=0)
+            with self.fixture.connected_client(value):
+                self.run_benchmark("local-better", suite=suite)
+            value["model_routes"]["local-better"].pop("input_cost_per_million")
+            value["model_routes"]["local-better"].pop("output_cost_per_million")
+            with self.fixture.connected_client(value) as submit:
+                result = submit(request={"input": "Summarize seven boxes as a digit."})
+        self.assertEqual((result["headers"].get("x-hormuz-routed-model"),
+                          result["headers"].get("x-hormuz-scorecard-status")),
+                         ("fixture-local-model", "no_target_match"))
 
     def test_benchmark_rejects_shadow_helpers_before_starting_any_model_requests(self):
         with workflow.provider("7") as (endpoint, received):

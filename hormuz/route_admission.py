@@ -342,6 +342,11 @@ class RouteAdmission:
                     candidates[alias] = candidate
         if continuation and mode == "auto" and self.destinations.resolve(decision.route).locality == "cloud":
             candidates[decision.resolved_alias] = decision
+        if probes:
+            # A benchmark must observe the requested alias, including its
+            # failures, rather than credit another admitted model's reply.
+            candidates = ({decision.requested_model: candidates[decision.requested_model]}
+                          if decision.requested_model in candidates else {})
         if candidates:
             selection_candidates = candidates
             if not continuation and decision.requested_model in candidates:
