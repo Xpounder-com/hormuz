@@ -316,6 +316,43 @@ class LocalAcquisitionWorkflowTests(unittest.TestCase):
             self.assertFalse(self.client.path.exists())
             self.assertEqual(self.client.client("inspect")["model"], "original-model")
 
+    def test_non_object_catalogs_return_fixed_errors_before_any_effects(self):
+        value, payloads = self.prepare()
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            for value in ([], None, "synthetic-invalid-catalog", 1):
+                with self.subTest(value=value):
+                    (self.root / "catalog.json").write_text(json.dumps(value))
+                    failed = self.acquire("--download", check=False)
+                    self.assertEqual(failed.returncode, 2, failed.stderr)
+                    error = json.loads(failed.stderr)
+                    validate_contract(error)
+                    self.assertEqual(error["error"]["code"], "catalog_invalid")
+                    self.assertEqual(observed, [])
+                    self.assertFalse(self.directory.exists())
+            self.assertFalse(self.client.path.exists())
+            self.assertEqual(self.client.client("inspect")["model"], "original-model")
+
+    def test_non_object_receipts_are_preserved_and_block_reuse_without_network(self):
+        value, payloads = self.prepare()
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            ready = json.loads(self.acquire("--download").stdout)
+            receipt = Path(ready["directory"]) / "receipt.json"
+            for value in ([], None, "synthetic-invalid-receipt", 1):
+                with self.subTest(value=value):
+                    changed = json.dumps(value)
+                    receipt.write_text(changed)
+                    failed = self.acquire("--offline", check=False)
+                    self.assertEqual(failed.returncode, 2, failed.stderr)
+                    error = json.loads(failed.stderr)
+                    validate_contract(error)
+                    self.assertEqual(error["error"]["code"], "installation_changed")
+                    self.assertEqual(receipt.read_text(), changed)
+                    self.assertEqual([path for path, _ in observed], ["/runtime", "/model"])
+            self.assertFalse(self.client.path.exists())
+            self.assertEqual(self.client.client("inspect")["model"], "original-model")
+
     def test_absolute_download_deadline_closes_a_source_that_keeps_headers_incomplete(self):
         value, payloads = self.prepare()
         with artifacts(payloads) as (origin, observed, controls):

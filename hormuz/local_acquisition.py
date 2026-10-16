@@ -89,6 +89,8 @@ def _catalog(path):
     try:
         source = Path(path).expanduser() if path else Path(__file__).with_name(DEFAULT_CATALOG)
         value = strict_json_loads(_safe_file(source, 65536, private=False))
+        if type(value) is not dict:
+            raise ValueError()
         validate_contract(value)
         if value["schema_id"] != "hormuz.local-acquisition-catalog":
             raise ValueError()
@@ -221,6 +223,8 @@ def acquire_local(args):
     setup = []
     if installed.exists() or installed.is_symlink():
         previous = strict_json_loads(_safe_file(installed, 65536))
+        if type(previous) is not dict:
+            raise LocalAcquisitionError("installation_changed")
         validate_contract(previous)
         if previous.get("catalog_sha256") != digest or previous.get("directory") != str(generation):
             raise LocalAcquisitionError("installation_changed")
