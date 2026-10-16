@@ -3,8 +3,7 @@ from pathlib import Path
 import threading
 import time
 
-from .execution_destination import route_fingerprint
-from .model_benchmark import benchmark_profile_digest, digest, machine_facts, read_scorecard
+from .model_benchmark import benchmark_profile_digest, benchmark_route_fingerprint, digest, machine_facts, read_scorecard
 from .work_learning import request_characteristics
 
 
@@ -48,11 +47,13 @@ class ScorecardRouting:
             candidate = candidates.get(model["model_alias"])
             if candidate is None or self.config.upstreams[candidate.route.destination_id].locality != "local":
                 continue
-            if model["route_fingerprint"] != route_fingerprint(candidate.route, upstreams=self.config.upstreams):
+            if model["route_fingerprint"] != benchmark_route_fingerprint(self.config, candidate.route):
                 continue
             required_prices = {"input_cost_per_million", "output_cost_per_million"}
             if any(row["usage"]["cache_read_tokens"] for row in model["observations"]):
                 required_prices.add("cache_read_cost_per_million")
+            if any(row["usage"]["cache_write_tokens"] for row in model["observations"]):
+                required_prices.add("cache_write_cost_per_million")
             prices_known = required_prices <= candidate.route.explicit_price_fields
             if (not prices_known and (report["targets"]["objective"] == "cost"
                     or report["targets"].get("max_mean_cost_microusd") is not None)):

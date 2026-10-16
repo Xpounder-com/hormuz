@@ -8,7 +8,7 @@ FIELDS = {
     "hormuz.benchmark-routing-configuration": ["schema_id", "schema_version", "scorecard_sha256", "output",
                                               "dry_run", "mode", "activation", "changes"],
     "hormuz.benchmark-error": ["schema_id", "schema_version", "error"],
-    "hormuz.benchmark-runtime": ["schema_id", "schema_version", "actor_id", "organization_id", "shadow_router_enabled", "routes"],
+    "hormuz.benchmark-runtime": ["schema_id", "schema_version", "actor_id", "organization_id", "shadow_router_enabled", "policy_content_sha256", "routes"],
 }
 
 

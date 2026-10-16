@@ -105,7 +105,7 @@ configurations are outside the current local-router configuration contract.
 | Header and first-body-byte timing | Separate observed stages of response delivery |
 | First-token timing | First nonempty streamed text delta; unknown for nonstreaming or streams without a delta |
 | Output tokens/second | Observed output tokens divided by full request time; includes input processing and router overhead |
-| Input, output and cached tokens | Provider-reported observations; missing fields remain unknown |
+| Input, output, cache-read and cache-write tokens | Provider-reported observations; missing fields remain unknown |
 | Total and mean estimated cost | Explicit configured prices applied to observed tokens; absent prices remain unknown |
 | Runner CPU time and peak RSS | Benchmark process measurements, separate from the inference process |
 
@@ -114,7 +114,9 @@ unobserved. A missing value is not zero. Cost is a configured-rate estimate,
 not an invoice or local electricity measurement. When a provider omits cache
 details, the explicitly labeled estimate prices input as uncached. Inconsistent
 cache counts, including cached tokens exceeding total input,
-leave the cache measurement and estimated cost unknown. Timing is
+leave the cache measurements and estimated cost unknown. Cache reads and writes
+must fit within reported input tokens; observed writes require an explicit write
+price and use that rate in the estimate. Timing is
 affected by caches, model order and other machine activity; no claim of isolated
 hardware benchmarking is made.
 
@@ -127,6 +129,9 @@ required measurement fails that target. The objective is `quality`, `latency`,
 or `cost`; cost selection requires an observed cost estimate.
 Replies containing provider errors and streams with explicit failure events
 remain failed evidence, even when they also announce completion.
+Responses reporting output usage above the forwarded limit also remain failed
+evidence. JSON reference checks compare parsed values, accepting equivalent
+numbers while keeping booleans distinct from numbers.
 The response's stream mode must match the requested profile before it can earn
 scores or satisfy targets.
 
@@ -139,8 +144,11 @@ HTTP 429/529 stops further requests regardless of the error body's format, as do
 three consecutive request failures or local socket exhaustion. Remaining cases
 are recorded as unstarted. Error bodies are closed without parsing.
 Before model work, one authenticated `/v1/router/benchmark-state` snapshot checks
-the actor, full route fingerprint and explicit-price fields against the running
-router. The fingerprint includes the endpoint, revision and capabilities. Every
+the actor, local policy digest, full route fingerprint and explicit-price fields
+against the running router. The fingerprint includes the endpoint, revision,
+capabilities and the configured managed-runtime identity. Changing a managed
+runtime archive, checksum or launch definition requires new measurements for
+that local setup. Every
 model response must match that live destination generation and requested model;
 the provider-reported model must also match before scores or prices are certified.
 Benchmark receipts report the forwarded request's byte count and output budget
@@ -148,6 +156,8 @@ after router preparation; recorded byte bounds use these observed values.
 An unexpected live policy cap invalidates the measurement for the requested
 generation budget. The running router also rejects benchmark probes while its
 shadow helpers are enabled, even if the configuration file has since changed.
+Requests changed by secret redaction remain failed evidence for the original
+suite profile. Write cases with already sanitized inputs and references.
 Benchmark probes disable operational failover so another model's answer cannot
 be attributed to the selected one; admission also refuses to substitute another
 alias when the requested route is unready. A configuration with `shadow_router` is
@@ -242,6 +252,8 @@ scorecard routing retain existing versions. Reconnect after upgrading the router
 before running probes; an older running process cannot provide the version-1
 runtime snapshot. Existing SQLite and AI Work storage need
 no migration. Re-run into a new report path to retain earlier comparisons.
+Reports from earlier development builds that lack required cache-write or
+runtime-policy facts cannot guide routing; rebenchmark with the current binary.
 
 For rollback, disconnect with the current binary, remove `route_admission.scorecard`
 or select the earlier configuration, and reconnect. Retain or delete the local

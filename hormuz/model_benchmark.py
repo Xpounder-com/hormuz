@@ -5,6 +5,7 @@ import http.client
 import json
 import math
 import os
+from dataclasses import asdict
 from pathlib import Path
 import platform
 import re
@@ -62,6 +63,14 @@ def initialize_suite(path):
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
                                      allow_nan=False).encode()).hexdigest()
+
+
+def benchmark_route_fingerprint(config, route):
+    fingerprint = route_fingerprint(route, upstreams=config.upstreams)
+    if config.managed_llama is None:
+        return fingerprint
+    # Pin the local managed-runtime setup, including aliases sharing its engine.
+    return "destination-v1:" + digest({"route": fingerprint, "managed_runtime": asdict(config.managed_llama)})
 
 
 def benchmark_profile_digest(value):
@@ -178,6 +187,28 @@ def valid_check(check):
     return False
 
 
+def json_values_equal(left, right):
+    pending = [(left, right)]
+    while pending:
+        left, right = pending.pop()
+        if type(left) in (int, float) and type(right) in (int, float):
+            if left != right:
+                return False
+        elif type(left) is not type(right):
+            return False
+        elif type(left) is dict:
+            if left.keys() != right.keys():
+                return False
+            pending.extend((left[key], right[key]) for key in left)
+        elif type(left) is list:
+            if len(left) != len(right):
+                return False
+            pending.extend(zip(left, right))
+        elif left != right:
+            return False
+    return True
+
+
 def check_answer(check, value):
     try:
         text = response_text(value).strip()
@@ -186,11 +217,11 @@ def check_answer(check, value):
         if check["kind"] == "text_contains_all":
             return all(item in text for item in check["value"])
         if check["kind"] == "json_equals":
-            return digest(strict_json_loads(text)) == digest(check["value"])
+            return json_values_equal(strict_json_loads(text), check["value"])
         calls = [item for item in value.get("output", [])
                  if type(item) is dict and item.get("type") == "function_call"]
         return (len(calls) == 1 and calls[0].get("name") == check["value"]["name"]
-                and digest(strict_json_loads(calls[0].get("arguments", ""))) == digest(check["value"]["arguments"]))
+                and json_values_equal(strict_json_loads(calls[0].get("arguments", "")), check["value"]["arguments"]))
     except (ValueError, TypeError, KeyError, RecursionError):
         return False
 
@@ -271,10 +302,12 @@ def validate_scorecard(report):
                         or len({check["metric"] for check in row["checks"]}) != len(row["checks"])
                         or row["passed"] != (row["completed"] and all(check["passed"] for check in row["checks"]))
                         or not row["completed"] and any(check["passed"] for check in row["checks"])
-                        or type(row["usage"]) is not dict or set(row["usage"]) != {"input_tokens", "output_tokens", "cache_read_tokens", "cost_microusd"}
+                        or type(row["usage"]) is not dict or set(row["usage"]) != {"input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_microusd"}
                         or any(item is not None and (type(item) is not int or not 0 <= item <= 10**15) for item in row["usage"].values())
-                        or (row["usage"]["cache_read_tokens"] is not None and row["usage"]["input_tokens"] is not None
-                            and row["usage"]["cache_read_tokens"] > row["usage"]["input_tokens"])
+                        or (row["completed"] and row["usage"]["output_tokens"] is not None
+                            and row["usage"]["output_tokens"] > row["max_output_tokens"])
+                        or (row["usage"]["input_tokens"] is not None
+                            and sum(row["usage"][key] or 0 for key in ("cache_read_tokens", "cache_write_tokens")) > row["usage"]["input_tokens"])
                         or (row["latency_ms"] is None and (row["error"] is None or not row["error"].endswith("_not_run")))
                         or (row["latency_ms"] is not None and not number(row["latency_ms"], 0, 3600000))
                         or any(row[key] is not None and not number(row[key], 0, row["latency_ms"])
@@ -297,10 +330,11 @@ def hash_label(value):
 
 def validate_runtime(value):
     try:
-        if (type(value) is not dict or set(value) != {"schema_id", "schema_version", "actor_id", "organization_id", "shadow_router_enabled", "routes"}
+        if (type(value) is not dict or set(value) != {"schema_id", "schema_version", "actor_id", "organization_id", "shadow_router_enabled", "policy_content_sha256", "routes"}
                 or value["schema_id"] != "hormuz.benchmark-runtime" or type(value["schema_version"]) is not int or value["schema_version"] != 1
                 or any(type(value[key]) is not str or not 1 <= len(value[key]) <= 256 for key in ("actor_id", "organization_id"))
-                or type(value["shadow_router_enabled"]) is not bool or type(value["routes"]) is not list):
+                or type(value["shadow_router_enabled"]) is not bool or not hash_label(value["policy_content_sha256"])
+                or type(value["routes"]) is not list):
             raise ValueError()
         seen = set()
         prices = {"input_cost_per_million", "output_cost_per_million", "cache_read_cost_per_million", "cache_write_cost_per_million"}
@@ -404,7 +438,8 @@ class RouterClient:
         if status != 200:
             raise BenchmarkError("benchmark_execution_unverified")
         validate_runtime(value)
-        if value["actor_id"] != self.identity.actor_id or value["organization_id"] != self.identity.organization_id:
+        if (value["actor_id"] != self.identity.actor_id or value["organization_id"] != self.identity.organization_id
+                or value["policy_content_sha256"] != self.config.policy_content_sha256):
             raise BenchmarkError("benchmark_execution_mismatch")
         if value["shadow_router_enabled"]:
             raise BenchmarkError("benchmark_shadow_router_unsupported")
@@ -415,7 +450,7 @@ class RouterClient:
             if len(matches) != 1:
                 raise BenchmarkError("benchmark_execution_mismatch")
             live = matches[0]
-            if (live["route_fingerprint"] != route_fingerprint(route, upstreams=self.config.upstreams)
+            if (live["route_fingerprint"] != benchmark_route_fingerprint(self.config, route)
                     or live["explicit_price_fields"] != sorted(route.explicit_price_fields)):
                 raise BenchmarkError("benchmark_execution_mismatch")
             result[route.alias] = live["generation"]
@@ -530,19 +565,27 @@ def measured_usage(value, route):
     observed = {key: count(key) for key in ("input_tokens", "output_tokens")}
     details = usage.get("input_tokens_details") if type(usage) is dict else None
     cached = details.get("cached_tokens") if type(details) is dict else None
-    invalid_cache = cached is not None and (type(cached) is not int or not 0 <= cached <= 10**12
-        or observed["input_tokens"] is not None and cached > observed["input_tokens"])
+    written = details.get("cache_write_tokens") if type(details) is dict else None
+    invalid_cache = any(item is not None and (type(item) is not int or not 0 <= item <= 10**12)
+                        for item in (cached, written))
+    if (not invalid_cache and observed["input_tokens"] is not None
+            and (cached or 0) + (written or 0) > observed["input_tokens"]):
+        invalid_cache = True
     observed["cache_read_tokens"] = cached if not invalid_cache else None
+    observed["cache_write_tokens"] = written if not invalid_cache else None
     required = {"input_cost_per_million", "output_cost_per_million"}
     if cached:
         required.add("cache_read_cost_per_million")
+    if written:
+        required.add("cache_write_cost_per_million")
     observed["cost_microusd"] = None
     if (value.get("model") == route.upstream_model and not invalid_cache
             and all(observed[key] is not None for key in ("input_tokens", "output_tokens"))
             and required <= route.explicit_price_fields):
         observed["cost_microusd"] = route.estimate_cost_microusd(
             input_tokens=observed["input_tokens"], output_tokens=observed["output_tokens"],
-            cache_read_tokens=observed["cache_read_tokens"] or 0, cache_write_tokens=0)
+            cache_read_tokens=observed["cache_read_tokens"] or 0,
+            cache_write_tokens=observed["cache_write_tokens"] or 0)
     return observed
 
 
@@ -563,7 +606,7 @@ def summarize(observations):
         for check in row["checks"]:
             checks.setdefault(check["metric"], []).append(check["passed"])
     totals = {}
-    for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cost_microusd"):
+    for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_microusd"):
         values = [row["usage"][key] for row in observations]
         totals[key] = sum(values) if all(value is not None for value in values) else None
     elapsed = sum(row["latency_ms"] or 0 for row in observations)
@@ -682,12 +725,16 @@ def run_benchmark(args):
                             or headers.get("x-hormuz-destination-generation") != bindings[route.alias]
                             or headers.get("x-hormuz-requested-model") != route.alias
                             or headers.get("x-hormuz-routed-model") != route.upstream_model
+                            or headers.get("x-hormuz-redactions", "0") != "0"
                             or observed_bytes is None or observed_limit != payload["max_output_tokens"]):
                         error = "execution_mismatch"
                     elif (type(value) is not dict or value.get("status") != "completed"
                             or value.get("error") is not None):
                         error = "incomplete_response"
                     elif value.get("model") != route.upstream_model:
+                        error = "execution_mismatch"
+                    elif (type(value.get("usage")) is dict and type(value["usage"].get("output_tokens")) is int
+                            and value["usage"]["output_tokens"] > observed_limit):
                         error = "execution_mismatch"
                 except (OSError, http.client.HTTPException, ValueError, RecursionError) as failure:
                     client.close()
@@ -714,7 +761,7 @@ def run_benchmark(args):
             models.append({"model_alias": route.alias,
                 "subject": {"upstream_model": route.upstream_model, "model_revision": route.model_revision,
                             "destination": route.destination_id, "protocol": route.protocol, "locality": "local"},
-                "route_fingerprint": route_fingerprint(route, upstreams=config.upstreams),
+                "route_fingerprint": benchmark_route_fingerprint(config, route),
                 "observations": observations, "metrics": summarize(observations),
                 "workloads": workload_scores(observations, suite["targets"])})
     finally:

@@ -1,13 +1,16 @@
 """Personal benchmarks through the public CLI and connected router workflow."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import threading
 import unittest
 
 from tests import test_execution_destination_workflow as workflow
+from tests import test_connected_client_lifetime_workflow as lifetime_workflow
 from hormuz.contracts import validate_contract
 
 
@@ -101,6 +104,20 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                                   model["observations"][0]["error"], model["metrics"]["mean_cost_microusd"]),
                                  (0, False, "execution_mismatch", None))
 
+    def test_provider_output_over_the_forwarded_budget_is_failed_evidence(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7", response_fields={"usage": {"input_tokens": 4, "output_tokens": 9}}) as (endpoint, received):
+            with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
+                report = self.run_benchmark("local-code", suite=suite)
+        model = report["models"][0]
+        observation = model["observations"][0]
+        self.assertEqual((received[0]["body"]["max_output_tokens"], observation["usage"]["output_tokens"],
+                          model["metrics"]["completed"], model["workloads"][0]["target_met"], observation["error"]),
+                         (8, 9, 0, False, "execution_mismatch"))
+        self.assertEqual(self.command("show", "--scorecard", str(self.report_path)), report)
+
     def test_saved_scorecard_can_be_reviewed_offline_without_retaining_task_text(self):
         with workflow.provider("7") as (endpoint, _):
             with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
@@ -183,6 +200,30 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 report = self.run_benchmark("local-code", suite=suite)
         self.assertEqual(report["models"][0]["metrics"]["check_pass_rates"],
                          {"domain_accuracy": 1, "required_terms": 1, "tool_accuracy": 0})
+
+    def test_json_checks_compare_numeric_values_without_equating_booleans(self):
+        examples = (({"count": 1}, '{"count":1.0}', True),
+                    ({"count": True}, '{"count":1}', False),
+                    ({"items": [1, {"ok": True}]}, '{"items":[1.0,{"ok":true}]}', True))
+        for kind in ("json_equals", "tool_call"):
+            for index, (expected, answer, matches) in enumerate(examples):
+                with self.subTest(kind=kind, example=index):
+                    self.report_path = self.root / f"json-{kind}-{index}.json"
+                    suite = self.suite()
+                    suite["cases"] = suite["cases"][:1]
+                    suite["targets"]["min_cases"] = 1
+                    reference = expected if kind == "json_equals" else {"name": "lookup_count", "arguments": expected}
+                    suite["cases"][0]["checks"] = [{"metric": "json_accuracy", "kind": kind, "value": reference}]
+                    fields = None if kind == "json_equals" else {"output": [{"type": "function_call",
+                        "call_id": "fixture-call", "name": "lookup_count", "arguments": answer}]}
+                    with workflow.provider(answer, response_fields=fields) as (endpoint, _):
+                        value = self.fixture.admission_configuration(endpoint, endpoint)
+                        with self.fixture.connected_client(value):
+                            report = self.run_benchmark("local-code", suite=suite)
+                    model = report["models"][0]
+                    self.assertEqual((model["metrics"]["completed"], model["metrics"]["check_pass_rates"],
+                                      model["workloads"][0]["target_met"]),
+                                     (1, {"json_accuracy": int(matches)}, matches))
 
     def test_user_can_create_an_editable_suite_without_a_router_or_overwriting_work(self):
         suite = self.command("init", "--output", str(self.suite_path))
@@ -466,6 +507,7 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(sorted(report["machine"]), sorted(frozen["machine_required_fields"]))
         self.assertEqual(sorted(report["models"][0]), sorted(frozen["model_required_fields"]))
         self.assertEqual(sorted(report["models"][0]["observations"][0]), sorted(frozen["observation_required_fields"]))
+        self.assertEqual(sorted(report["models"][0]["observations"][0]["usage"]), sorted(frozen["usage_required_fields"]))
         self.assertEqual(sorted(runtime), sorted(frozen["runtime_required_fields"]))
         self.assertEqual(sorted(runtime["routes"][0]), sorted(frozen["runtime_route_required_fields"]))
         manifest = subprocess.run([sys.executable, "-m", "hormuz", "contract", "manifest"],
@@ -553,6 +595,43 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         self.assertEqual((result["error"]["code"], received, self.report_path.exists()),
                          ("benchmark_execution_mismatch", [], False))
 
+    def test_redacted_requests_cannot_certify_the_original_control_profile(self):
+        secret = "fixture-benchmark-protected-instruction"
+        self.fixture.environment["BENCHMARK_POLICY_SECRET"] = secret
+        self.environment["BENCHMARK_POLICY_SECRET"] = secret
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["cases"][0]["request"]["instructions"] = "Use this reference: " + secret
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7") as (endpoint, received):
+            value = self.fixture.admission_configuration(endpoint, endpoint)
+            value["egress_controls"] = {"secrets": {"mode": "redact", "custom_secret_envs": ["BENCHMARK_POLICY_SECRET"]}}
+            with self.fixture.connected_client(value):
+                report = self.run_benchmark("local-code", suite=suite)
+        model = report["models"][0]
+        self.assertNotIn(secret, received[0]["body"]["instructions"])
+        self.assertEqual((model["metrics"]["completed"], model["workloads"][0]["target_met"],
+                          model["observations"][0]["error"]), (0, False, "execution_mismatch"))
+
+    def test_live_policy_must_match_the_configuration_before_any_probes(self):
+        secret = "fixture-benchmark-protected-instruction"
+        self.fixture.environment["BENCHMARK_POLICY_SECRET"] = secret
+        self.environment["BENCHMARK_POLICY_SECRET"] = secret
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["cases"][0]["request"]["instructions"] = "Use this reference: " + secret
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7") as (endpoint, received):
+            value = self.fixture.admission_configuration(endpoint, endpoint)
+            value["egress_controls"] = {"secrets": {"mode": "redact", "custom_secret_envs": ["BENCHMARK_POLICY_SECRET"]}}
+            with self.fixture.connected_client(value):
+                changed = json.loads(self.config_path.read_text())
+                changed["egress_controls"]["secrets"]["mode"] = "off"
+                self.config_path.write_text(json.dumps(changed))
+                result = self.run_benchmark("local-code", suite=suite, expected=2)
+        self.assertEqual((result["error"]["code"], received, self.report_path.exists()),
+                         ("benchmark_execution_mismatch", [], False))
+
     def test_a_changed_endpoint_cannot_receive_an_older_endpoints_benchmark_evidence(self):
         suite = self.suite()
         suite["cases"] = suite["cases"][:1]
@@ -578,12 +657,9 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 changed = json.loads(self.config_path.read_text())
                 changed["policies"]["organization"]["max_output_tokens"] = 16
                 self.config_path.write_text(json.dumps(changed))
-                report = self.run_benchmark("local-code", suite=suite)
-        model = report["models"][0]
-        self.assertEqual((model["metrics"]["completed"], model["workloads"][0]["target_met"],
-                          model["observations"][0]["error"],
-                          [item["body"]["max_output_tokens"] for item in received]),
-                         (0, False, "execution_mismatch", [8]))
+                result = self.run_benchmark("local-code", suite=suite, expected=2)
+        self.assertEqual((result["error"]["code"], received, self.report_path.exists()),
+                         ("benchmark_execution_mismatch", [], False))
 
     def test_stale_missing_and_mismatched_evidence_preserve_the_existing_route(self):
         suite = self.suite()
@@ -670,6 +746,54 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 self.assertEqual(([model["metrics"]["mean_cost_microusd"] for model in report["models"]],
                                   result["headers"].get("x-hormuz-routed-model")), ([60, 6], "fixture-second-model"))
 
+    def test_observed_cache_writes_require_prices_and_use_their_actual_cost(self):
+        for label, writes, rate, expected_writes, expected_cost in (
+                ("unpriced", 2, None, 2, None), ("priced", 2, 4, 2, 12),
+                ("invalid-subset", 4, 4, None, None)):
+            with self.subTest(case=label):
+                self.report_path = self.root / f"cache-write-{label}.json"
+                suite = self.suite()
+                suite["cases"] = suite["cases"][:1]
+                suite["targets"].update(objective="cost", min_cases=1, max_mean_cost_microusd=10)
+                usage = {"input_tokens": 4, "output_tokens": 2,
+                         "input_tokens_details": {"cached_tokens": 1, "cache_write_tokens": writes}}
+                with workflow.provider("7", response_fields={"usage": usage}) as (endpoint, _):
+                    value = self.fixture.admission_configuration(endpoint, endpoint)
+                    route = value["model_routes"]["local-code"]
+                    route.update(input_cost_per_million=1, output_cost_per_million=1, cache_read_cost_per_million=1)
+                    if rate is not None:
+                        route["cache_write_cost_per_million"] = rate
+                    with self.fixture.connected_client(value):
+                        report = self.run_benchmark("local-code", suite=suite)
+                model = report["models"][0]
+                self.assertEqual((model["observations"][0]["usage"].get("cache_write_tokens"),
+                                  model["metrics"].get("cache_write_tokens"), model["metrics"]["mean_cost_microusd"],
+                                  model["workloads"][0]["target_met"]),
+                                 (expected_writes, expected_writes, expected_cost, False))
+
+    def test_removing_a_zero_cache_write_price_invalidates_cost_selection(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"].update(objective="cost", min_cases=1, max_mean_cost_microusd=0)
+        usage = {"input_tokens": 4, "output_tokens": 2, "input_tokens_details": {"cache_write_tokens": 1}}
+        with workflow.provider("0", response_fields={"usage": usage}) as (first, _), \
+             workflow.provider("7", response_fields={"usage": usage}) as (second, _):
+            value = self.two_local_configuration(first, second)
+            value["route_admission"]["scorecard"] = str(self.report_path)
+            value["model_routes"]["local-code"].update(input_cost_per_million=1, output_cost_per_million=1,
+                                                       cache_write_cost_per_million=1)
+            value["model_routes"]["local-better"].update(input_cost_per_million=0, output_cost_per_million=0,
+                                                         cache_write_cost_per_million=0)
+            with self.fixture.connected_client(value):
+                report = self.run_benchmark("local-code", "local-better", suite=suite)
+            self.assertEqual(report["models"][1]["metrics"]["mean_cost_microusd"], 0)
+            value["model_routes"]["local-better"].pop("cache_write_cost_per_million")
+            with self.fixture.connected_client(value) as submit:
+                result = submit(request={"input": "Summarize seven boxes as a digit."})
+        self.assertEqual((result["status"], result["headers"].get("x-hormuz-routed-model"),
+                          result["headers"].get("x-hormuz-scorecard-status")),
+                         (200, "fixture-local-model", "no_target_match"))
+
     def test_impossible_cache_usage_cannot_satisfy_a_cost_target(self):
         suite = self.suite()
         suite["targets"] = {"objective": "cost", "min_pass_rate": 0, "min_cases": 2,
@@ -740,6 +864,45 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 self.assertEqual((result["status"], result["headers"].get("x-hormuz-routed-model"),
                                   result["headers"].get("x-hormuz-scorecard-status")),
                                  (200, "fixture-local-model", "no_target_match"))
+
+    def test_a_changed_verified_managed_runtime_cannot_inherit_old_scores(self):
+        managed = lifetime_workflow.ConnectedClientLifetimeWorkflowTests()
+        managed.setUp()
+        self.addCleanup(managed.doCleanups)
+        self.config_path = managed.path
+        self.environment = {**managed.environment, "HORMUZ_HISTORY_HOME": str(self.root / "history")}
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["cases"][0]["checks"][0]["value"] = "MANAGED_LOCAL"
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("UNUSED") as (cloud, cloud_requests):
+            value, _, engine = managed.managed_configuration(cloud)
+            members = tuple(engine.iterdir())
+            value["route_admission"]["scorecard"] = str(self.report_path)
+            managed.path.write_text(json.dumps(value))
+            try:
+                managed.command("connect")
+                self.run_benchmark("local-code", suite=suite)
+                original = managed.client()
+                self.assertEqual(original["headers"].get("x-hormuz-scorecard-status"), "selected")
+            finally:
+                managed.command("disconnect", check=False)
+            (engine / "libfixture.1.dylib").write_bytes(b"synthetic runtime dependency version two")
+            archive = managed.root / "runtime-v2.tar.gz"
+            with tarfile.open(archive, "w:gz") as bundle:
+                for path in members:
+                    bundle.add(path, arcname=path.name)
+            value["managed_llama"].update(runtime_archive=str(archive),
+                runtime_sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
+            managed.path.write_text(json.dumps(value))
+            try:
+                managed.command("connect")
+                changed = managed.client()
+                self.assertEqual((changed["status"], changed["headers"].get("x-hormuz-scorecard-status")),
+                                 (200, "no_target_match"))
+            finally:
+                managed.command("disconnect", check=False)
+            self.assertEqual(cloud_requests, [])
 
     def test_scorecard_identifies_the_model_revision_and_local_hardware_context(self):
         with workflow.provider("7") as (endpoint, _):

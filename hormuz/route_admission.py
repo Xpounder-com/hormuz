@@ -464,12 +464,13 @@ class RouteAdmission:
                 "task_classifier": "bounded_local_heuristic", "local_capacity": capacity, "routes": routes}
 
     def benchmark_status(self, identity, policy_engine):
-        from .execution_destination import route_fingerprint
+        from .model_benchmark import benchmark_route_fingerprint
         routes = self.status(identity, policy_engine)["routes"]
         return {"schema_id": "hormuz.benchmark-runtime", "schema_version": 1,
                 "actor_id": identity.actor_id, "organization_id": identity.organization_id,
                 "shadow_router_enabled": self.config.shadow_router is not None,
+                "policy_content_sha256": self.config.policy_content_sha256,
                 "routes": [{"model": row["model"], "generation": row["generation"],
-                    "route_fingerprint": route_fingerprint(self.config.model_routes[row["model"]], upstreams=self.config.upstreams),
+                    "route_fingerprint": benchmark_route_fingerprint(self.config, self.config.model_routes[row["model"]]),
                     "explicit_price_fields": sorted(self.config.model_routes[row["model"]].explicit_price_fields)}
                     for row in routes]}
